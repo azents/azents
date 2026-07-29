@@ -11,15 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelConversationScopeKind,
-    ExternalChannelEventEligibilityState,
-    ExternalChannelEventStatus,
     ExternalChannelIngressProfile,
     ExternalChannelProvider,
 )
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
-    ExternalChannelEventCreate,
     ExternalChannelResource,
+    ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
@@ -216,7 +214,7 @@ def _authority(
     )
 
 
-def _slack_event(*, thread_ts: str | None = None) -> ExternalChannelEventCreate:
+def _slack_event(*, thread_ts: str | None = None) -> ExternalChannelTrigger:
     event: dict[str, object] = {
         "type": "app_mention",
         "channel": "C100",
@@ -226,7 +224,7 @@ def _slack_event(*, thread_ts: str | None = None) -> ExternalChannelEventCreate:
     }
     if thread_ts is not None:
         event["thread_ts"] = thread_ts
-    return ExternalChannelEventCreate(
+    return ExternalChannelTrigger(
         connection_id="connection-1",
         provider_event_id="event-1",
         transport_envelope_id=None,
@@ -235,9 +233,7 @@ def _slack_event(*, thread_ts: str | None = None) -> ExternalChannelEventCreate:
         provider_tenant_id="T100",
         provider_enterprise_id=None,
         resource_correlation_key=None,
-        eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
         envelope={"event": event},
-        status=ExternalChannelEventStatus.ACCEPTED,
         provider_occurred_at=None,
         received_at=_NOW,
     )
@@ -249,7 +245,7 @@ def _discord_event(
     thread_id: str | None,
     parent_channel_id: str | None,
     invocation: bool,
-) -> ExternalChannelEventCreate:
+) -> ExternalChannelTrigger:
     message: dict[str, object] = {
         "id": "100",
         "channel_id": channel_id,
@@ -264,7 +260,7 @@ def _discord_event(
             "id": thread_id,
             "parent_id": parent_channel_id,
         }
-    return ExternalChannelEventCreate(
+    return ExternalChannelTrigger(
         connection_id="connection-1",
         provider_event_id="event-1",
         transport_envelope_id="event-1",
@@ -273,9 +269,7 @@ def _discord_event(
         provider_tenant_id="300",
         provider_enterprise_id=None,
         resource_correlation_key=None,
-        eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
         envelope={"message": message},
-        status=ExternalChannelEventStatus.ACCEPTED,
         provider_occurred_at=_NOW,
         received_at=_NOW,
     )

@@ -48,9 +48,6 @@ from azentspublicclient.models.external_channel_access_request_status import (
     ExternalChannelAccessRequestStatus,
 )
 from azentspublicclient.models.external_channel_app_mode import ExternalChannelAppMode
-from azentspublicclient.models.external_channel_binding_activation_status import (
-    ExternalChannelBindingActivationStatus,
-)
 from azentspublicclient.models.external_channel_channel_default_status import (
     ExternalChannelChannelDefaultStatus,
 )
@@ -113,10 +110,6 @@ _DISCORD_BOT_USER_ID = "300000000000000001"
 _DISCORD_CHANNEL_ID = "400000000000000001"
 _DISCORD_BOT_TOKEN = "discord-e2e-private"
 _EXTERNAL_CHANNEL_LARGE_FILE_BYTES = 6 * 1024 * 1024
-
-
-class _ProviderControlDrainPending(RuntimeError):
-    """Identify the exact provider-control boundary assigned to PR 7."""
 
 
 def _create_agent(
@@ -805,28 +798,24 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert repeated.status is ExternalChannelAccessRequestStatus.ALLOWED
     assert decided.agent_session_id
 
-    def active_binding_projection() -> object | None:
+    def binding_projection() -> object | None:
         projection = external_api.external_channel_v1_list_session_channels(
             agent_id=agent_id,
             session_id=cast(str, decided.agent_session_id),
             handle=handle,
             _headers=headers,
         )
-        if (
-            len(projection.items) == 1
-            and projection.items[0].activation_status
-            is ExternalChannelBindingActivationStatus.ACTIVE
-        ):
+        if len(projection.items) == 1:
             return projection
         return None
 
     bindings = cast(
         Any,
         wait_until(
-            active_binding_projection,
+            binding_projection,
             timeout=10,
             interval=0.2,
-            message="Approved External Channel binding was not activated",
+            message="Approved External Channel binding was not available",
         ),
     )
     assert len(bindings.items) == 1
@@ -1456,7 +1445,7 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
 
     chat_api = ChatV1Api(public_api_client)
 
-    def active_selected_binding() -> tuple[Any, Any] | None:
+    def find_selected_binding() -> tuple[Any, Any] | None:
         sessions = chat_api.chat_v1_list_agent_sessions(
             agent_id=agent_ids[1],
             _headers=headers,
@@ -1468,18 +1457,14 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
                 handle=handle,
                 _headers=headers,
             )
-            if (
-                len(projection.items) == 1
-                and projection.items[0].activation_status
-                is ExternalChannelBindingActivationStatus.ACTIVE
-            ):
+            if len(projection.items) == 1:
                 return session, projection.items[0]
         return None
 
     selected_session, selected_binding = cast(
         tuple[Any, Any],
         wait_until(
-            active_selected_binding,
+            find_selected_binding,
             timeout=10,
             interval=0.2,
             message="Selected open-access Multi App route did not bind once",
@@ -1497,11 +1482,6 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
 
 
 @pytest.mark.runtime_provider
-@pytest.mark.xfail(
-    strict=True,
-    raises=_ProviderControlDrainPending,
-    reason="PR 7 owns post-cutover provider-control drain and recovery.",
-)
 def test_provider_native_channel_work_progress_journey(
     request: pytest.FixtureRequest,
     public_api_client: azentspublicclient.ApiClient,
@@ -1641,29 +1621,24 @@ def test_provider_native_channel_work_progress_journey(
     assert decided.agent_session_id is not None
     session_id = decided.agent_session_id
 
-    def active_management_projection() -> object | None:
+    def management_projection() -> object | None:
         projection = external_api.external_channel_v1_list_session_channels(
             agent_id=agent_id,
             session_id=session_id,
             handle=handle,
             _headers=headers,
         )
-        if (
-            len(projection.items) == 1
-            and projection.items[0].activation_status
-            is ExternalChannelBindingActivationStatus.ACTIVE
-            and projection.items[0].work is not None
-        ):
+        if len(projection.items) == 1 and projection.items[0].work is not None:
             return projection
         return None
 
     active_projection = cast(
         Any,
         wait_until(
-            active_management_projection,
+            management_projection,
             timeout=15,
             interval=0.2,
-            message="Approved Channel Work binding was not activated",
+            message="Approved Channel Work binding was not available",
         ),
     )
     binding_id = active_projection.items[0].id
@@ -1755,20 +1730,15 @@ def test_provider_native_channel_work_progress_journey(
     assert _BOT_TOKEN not in str(provider_state)
     assert _SIGNING_SECRET not in str(provider_state)
 
-    try:
-        plan_delivery = cast(
-            dict[str, object],
-            wait_until(
-                lambda: _plan_delivery(slack_provider_fake_url),
-                timeout=20,
-                interval=0.2,
-                message="Slack Plan update was not delivered",
-            ),
-        )
-    except TimeoutError as error:
-        raise _ProviderControlDrainPending(
-            "The initial Slack progress-create intent has no post-cutover owner."
-        ) from error
+    plan_delivery = cast(
+        dict[str, object],
+        wait_until(
+            lambda: _plan_delivery(slack_provider_fake_url),
+            timeout=20,
+            interval=0.2,
+            message="Slack Plan update was not delivered",
+        ),
+    )
     expected_fallback = (
         "Investigating error logs…\n"
         "In progress: Inspect recent failures\n"
@@ -1835,8 +1805,8 @@ def test_provider_native_channel_work_progress_journey(
 
     provider_state = _provider_state(slack_provider_fake_url)
     request_counts = cast(dict[str, int], provider_state["request_counts"])
-    assert request_counts["users.info"] >= 4
-    assert request_counts["conversations.info"] >= 3
+    assert request_counts["users.info"] == 2
+    assert request_counts["conversations.info"] == 2
     assert _BOT_TOKEN not in str(provider_state)
     assert _SIGNING_SECRET not in str(provider_state)
 
@@ -2034,26 +2004,22 @@ def test_external_channel_file_transfer_journey(
     assert decided.agent_session_id is not None
     session_id = decided.agent_session_id
 
-    def active_binding_id() -> str:
+    def binding_id_projection() -> str:
         projection = external_api.external_channel_v1_list_session_channels(
             agent_id=agent_id,
             session_id=session_id,
             handle=handle,
             _headers=headers,
         )
-        if (
-            len(projection.items) == 1
-            and projection.items[0].activation_status
-            is ExternalChannelBindingActivationStatus.ACTIVE
-        ):
+        if len(projection.items) == 1:
             return projection.items[0].id
         return ""
 
     binding_id = wait_until(
-        active_binding_id,
+        binding_id_projection,
         timeout=20,
         interval=0.2,
-        message="Approved file-transfer binding was not activated",
+        message="Approved file-transfer binding was not available",
     )
 
     def initial_file_model_request() -> list[dict[str, object]]:
@@ -2683,7 +2649,7 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
     )
     chat_api = ChatV1Api(public_api_client)
 
-    def active_gateway_binding() -> tuple[Any, Any] | None:
+    def gateway_binding() -> tuple[Any, Any] | None:
         sessions = chat_api.chat_v1_list_agent_sessions(
             agent_id=agent_id,
             _headers=headers,
@@ -2697,8 +2663,6 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
             )
             if (
                 len(projection.items) == 1
-                and projection.items[0].activation_status
-                is ExternalChannelBindingActivationStatus.ACTIVE
                 and projection.items[0].provider.value == "discord"
             ):
                 return session, projection.items[0]
@@ -2723,7 +2687,7 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
         session, binding = cast(
             tuple[Any, Any],
             wait_until(
-                active_gateway_binding,
+                gateway_binding,
                 timeout=30,
                 interval=0.2,
                 message="Discord Gateway create did not activate one Session binding",

@@ -1126,8 +1126,6 @@
         "cancel": "Annuler",
         "connectedAt": "Connexion",
         "latestActivity": "Dernière activité",
-        "retainedContext": "Troncature du contexte en attente",
-        "truncationSummary": "{messages} messages · {bytes} octets supprimés",
         "disconnectReason": "Motif de déconnexion",
         "channelWork": "Channel Work",
         "noWork": "Aucun Channel Work n’est associé à cette liaison.",
@@ -1158,11 +1156,6 @@
         "bindingStatus": {
           "active": "Active",
           "disconnected": "Déconnectée"
-        },
-        "activationStatus": {
-          "waiting_hydration": "En attente de l’historique",
-          "wake_pending": "Démarrage de l’invocation",
-          "active": "Invocation active"
         },
         "workStatus": {
           "active": "Travail actif",

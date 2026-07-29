@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     ExternalChannelConversationAdmissionStatus,
     ExternalChannelConversationScopeKind,
+    ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
     ExternalChannelIngressProfile,
     ExternalChannelMessageLifecycle,
@@ -263,6 +264,7 @@ def _store(
     return ExternalChannelDatabaseIngestionStore(
         session_manager=cast(Any, _SessionManager(session)),
         repository=cast(Any, repository),
+        work_repository=cast(Any, SimpleNamespace()),
         agent_repository=cast(Any, SimpleNamespace()),
         agent_session_repository=cast(Any, SimpleNamespace()),
         root_agent_session_creation_service=cast(Any, SimpleNamespace()),
@@ -566,7 +568,7 @@ async def test_prepare_rejects_replay_resource_owner_mismatch() -> None:
 
 
 async def test_replay_after_shared_position_accepts_without_cursor_rollback() -> None:
-    """A retained trigger batch activates its binding without moving position back."""
+    """A retained trigger batch accepts without moving the shared position back."""
     session = MagicMock(spec=AsyncSession)
     session.commit = AsyncMock()
     request = _replay_request()
@@ -603,6 +605,10 @@ async def test_replay_after_shared_position_accepts_without_cursor_rollback() ->
         provider_position=request.locator.trigger_position,
     )
     batch = SimpleNamespace(id="batch-1")
+    work = SimpleNamespace(
+        id="work-1",
+        desired_progress_revision=1,
+    )
     repository = SimpleNamespace(
         lock_conversation_position=AsyncMock(return_value=position),
         create_message_idempotent=AsyncMock(return_value=source_message),
@@ -612,15 +618,19 @@ async def test_replay_after_shared_position_accepts_without_cursor_rollback() ->
         get_invocation_batch=AsyncMock(return_value=None),
         create_invocation_batch_idempotent=AsyncMock(return_value=batch),
         create_invocation_batch_item_idempotent=AsyncMock(),
-        ensure_active_work=AsyncMock(),
-        mark_resource_history_ready=AsyncMock(),
+        ensure_active_work=AsyncMock(return_value=work),
+        create_delivery_attempt_idempotent=AsyncMock(
+            return_value=SimpleNamespace(
+                id="delivery-1",
+                status=ExternalChannelDeliveryStatus.PENDING,
+            )
+        ),
         lock_invocation_batch=AsyncMock(
             return_value=SimpleNamespace(
                 id="batch-1",
                 mailbox_item_id="mailbox-1",
             )
         ),
-        mark_binding_activated=AsyncMock(return_value=SimpleNamespace(id="binding-1")),
         advance_conversation_position_if_current=AsyncMock(),
     )
     store = _store(
@@ -669,19 +679,13 @@ async def test_replay_after_shared_position_accepts_without_cursor_rollback() ->
 
     assert result.status == "accepted"
     assert result.batch_id == "batch-1"
+    assert result.control_delivery_attempt_id == "delivery-1"
+    assert result.connection_id == "connection-1"
+    delivery = repository.create_delivery_attempt_idempotent.await_args.args[1]
+    assert delivery.origin_id == "work-1"
+    assert delivery.binding_id == "binding-1"
+    assert delivery.operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE
+    assert delivery.request_payload["work_id"] == "work-1"
+    assert delivery.request_payload["thread_ts"] == "thread-1"
     repository.advance_conversation_position_if_current.assert_not_awaited()
-    repository.mark_resource_history_ready.assert_awaited_once_with(
-        cast(AsyncSession, session),
-        resource_id="resource-1",
-        through_provider_position="00000000000000000009",
-        completed_at=repository.mark_resource_history_ready.await_args.kwargs[
-            "completed_at"
-        ],
-    )
-    repository.mark_binding_activated.assert_awaited_once_with(
-        cast(AsyncSession, session),
-        binding_id="binding-1",
-        now=repository.mark_binding_activated.await_args.kwargs["now"],
-        projected_through_position=request.locator.trigger_position,
-    )
     session.commit.assert_awaited_once()

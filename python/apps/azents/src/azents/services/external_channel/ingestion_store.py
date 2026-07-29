@@ -14,7 +14,6 @@ from azents.core.enums import (
     AgentSessionStartReason,
     ExternalChannelAccessRequestStatus,
     ExternalChannelAppMode,
-    ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
     ExternalChannelConversationAdmissionOrigin,
     ExternalChannelConversationAdmissionStatus,
@@ -22,7 +21,6 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
-    ExternalChannelHydrationStatus,
     ExternalChannelIngressProfile,
     ExternalChannelInvocationWakeDispatchStatus,
     ExternalChannelMessageLifecycle,
@@ -34,6 +32,7 @@ from azents.core.enums import (
     MailboxSchedulingMode,
 )
 from azents.core.external_channel_progress import checking_progress
+from azents.core.slack_external_channel_progress import render_slack_progress
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -58,8 +57,10 @@ from azents.repos.external_channel.data import (
     ExternalChannelPrincipalCreate,
     ExternalChannelResource,
     ExternalChannelResourceCreate,
+    ExternalChannelWork,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.services.external_channel.conversation import ExternalChannelHistoryRange
 from azents.services.external_channel.discord_selector_scope import (
     build_discord_selector_custom_id,
@@ -135,6 +136,10 @@ class ExternalChannelDatabaseIngestionStore:
     repository: Annotated[
         ExternalChannelRepository,
         Depends(ExternalChannelRepository),
+    ]
+    work_repository: Annotated[
+        ExternalChannelWorkRepository,
+        Depends(ExternalChannelWorkRepository),
     ]
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     agent_session_repository: Annotated[
@@ -522,8 +527,6 @@ class ExternalChannelDatabaseIngestionStore:
                             ExternalChannelInvocationWakeDispatchStatus.PENDING
                         ),
                         wake_dispatch_claimed_at=None,
-                        truncation_message_count=0,
-                        truncation_size=0,
                         mailbox_item_id=None,
                         connection_id=connection.id,
                     ),
@@ -540,20 +543,17 @@ class ExternalChannelDatabaseIngestionStore:
                     )
             else:
                 batch = existing
-            await self.repository.ensure_active_work(
+            work = await self.repository.ensure_active_work(
                 session,
                 binding_id=binding.id,
                 desired_progress_payload=checking_progress().model_dump(mode="json"),
             )
-            resource_history_position = history.trigger_position
-            if replay_after_position:
-                assert position.read_through_position is not None
-                resource_history_position = position.read_through_position
-            await self.repository.mark_resource_history_ready(
+            control_delivery_attempt_id = await self._create_initial_progress_intent(
                 session,
-                resource_id=routing.resource.id,
-                through_provider_position=resource_history_position,
-                completed_at=now,
+                request=request,
+                resource=routing.resource,
+                binding=binding,
+                work=work,
             )
             locked_batch = await self.repository.lock_invocation_batch(
                 session,
@@ -593,14 +593,6 @@ class ExternalChannelDatabaseIngestionStore:
                 session,
                 binding.agent_session_id,
             )
-            activated = await self.repository.mark_binding_activated(
-                session,
-                binding_id=binding.id,
-                now=now,
-                projected_through_position=history.trigger_position,
-            )
-            if activated is None:
-                raise RuntimeError("External Channel binding activation failed.")
             if not replay_after_position:
                 advanced = (
                     await self.repository.advance_conversation_position_if_current(
@@ -638,9 +630,65 @@ class ExternalChannelDatabaseIngestionStore:
                 ),
                 batch_id=batch.id,
                 session_id=binding.agent_session_id,
-                control_delivery_attempt_id=None,
-                connection_id=None,
+                control_delivery_attempt_id=control_delivery_attempt_id,
+                connection_id=(
+                    connection.id if control_delivery_attempt_id is not None else None
+                ),
             )
+
+    async def _create_initial_progress_intent(
+        self,
+        session: AsyncSession,
+        *,
+        request: ExternalChannelIngestionRequest,
+        resource: ExternalChannelResource,
+        binding: ExternalChannelBinding,
+        work: ExternalChannelWork,
+    ) -> str | None:
+        """Create or reuse the initial Activity Tracker before acceptance commits."""
+        if request.locator.provider is ExternalChannelProvider.DISCORD:
+            return await self.work_repository.ensure_initial_discord_progress(
+                session,
+                work_id=work.id,
+                binding_id=binding.id,
+                labels=resource.labels,
+            )
+        presentation = render_slack_progress(
+            checking_progress(),
+            work_id=work.id,
+            desired_progress_revision=work.desired_progress_revision,
+        )
+        delivery_thread_key = request.locator.delivery_thread_key
+        if delivery_thread_key is None:
+            raise RuntimeError("External Channel Slack delivery thread is unavailable.")
+        attempt = await self.repository.create_delivery_attempt_idempotent(
+            session,
+            ExternalChannelDeliveryAttemptCreate(
+                origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                origin_id=work.id,
+                channel_action_id=None,
+                binding_id=binding.id,
+                operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                request_payload={
+                    "tenant_id": request.locator.provider_tenant_id,
+                    "channel_id": request.locator.provider_channel_id,
+                    "thread_ts": delivery_thread_key,
+                    "work_id": work.id,
+                    "text": presentation.text,
+                    "blocks": presentation.blocks,
+                    "desired_progress_revision": work.desired_progress_revision,
+                },
+                status=ExternalChannelDeliveryStatus.PENDING,
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+                attempted_at=None,
+                completed_at=None,
+            ),
+        )
+        if attempt.status is ExternalChannelDeliveryStatus.PENDING:
+            return attempt.id
+        return None
 
     async def _prepare_position(
         self,
@@ -725,15 +773,6 @@ class ExternalChannelDatabaseIngestionStore:
                 provider_resource_key=request.locator.provider_resource_key,
                 labels=_resource_labels(request),
                 status=ExternalChannelResourceStatus.ACTIVE,
-                hydration_status=ExternalChannelHydrationStatus.PENDING,
-                hydration_cursor=None,
-                hydration_high_watermark_position=None,
-                reconciliation_boundary_received_at=None,
-                reconciliation_boundary_event_id=None,
-                hydration_error_kind=None,
-                hydration_error_summary=None,
-                hydration_started_at=None,
-                hydration_completed_at=None,
                 latest_activity_at=None,
                 unavailable_at=None,
                 deleted_at=None,
@@ -977,13 +1016,6 @@ class ExternalChannelDatabaseIngestionStore:
                 route_id=routing.route.id,
                 agent_session_id=root.agent_session.id,
                 status=ExternalChannelBindingStatus.ACTIVE,
-                activation_status=ExternalChannelBindingActivationStatus.ACTIVE,
-                activation_trigger_message_id=source_message.id,
-                activated_at=now,
-                activation_wake_claimed_at=None,
-                projected_through_position=source_message.provider_position,
-                truncated_message_count=0,
-                truncated_size=0,
                 disconnected_at=None,
                 disconnect_reason=None,
             ),
@@ -1229,7 +1261,6 @@ class ExternalChannelDatabaseIngestionStore:
                 normalized_body=message.normalized_body,
                 attachment_metadata=message.attachment_metadata,
                 reference_mappings=message.reference_mappings,
-                source_event_id=None,
                 provider_occurred_at=(
                     message.provider_updated_at or message.provider_created_at
                 ),

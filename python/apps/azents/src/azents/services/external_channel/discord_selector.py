@@ -12,16 +12,15 @@ from azents.core.deps import get_config
 from azents.services.external_channel.discord_selector_scope import (
     build_discord_selector_custom_id,
 )
-from azents.services.external_channel.event_processor import (
-    ExternalChannelEventProcessorService,
-)
 from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionOutcomeKind,
 )
 from azents.services.external_channel.ingestion_replay import (
     ExternalChannelIngestionReplayService,
-    admission_uses_typed_replay,
     external_channel_replay_deadline,
+)
+from azents.services.external_channel.provider_control import (
+    ExternalChannelProviderControlService,
 )
 from azents.services.external_channel.selector import (
     ExternalChannelSelectorCatalog,
@@ -63,9 +62,9 @@ class DiscordSelectorResponseService:
         Depends(ExternalChannelSelectorService),
     ]
     config: Annotated[Config, Depends(get_config)]
-    event_processor: Annotated[
-        ExternalChannelEventProcessorService,
-        Depends(ExternalChannelEventProcessorService),
+    provider_control: Annotated[
+        ExternalChannelProviderControlService,
+        Depends(ExternalChannelProviderControlService),
     ]
     ingestion_replay_service: Annotated[
         ExternalChannelIngestionReplayService,
@@ -196,50 +195,34 @@ class DiscordSelectorResponseService:
             control_delivery_attempt_id = None
             connection_id = None
         else:
-            if admission_uses_typed_replay(selection.admission):
-                outcome = await self.ingestion_replay_service.replay_selected_admission(
-                    admission_id=selection.admission.id,
-                    principal_id=principal_id,
-                    deadline=external_channel_replay_deadline(now=now),
-                )
-                match outcome.kind:
-                    case (
-                        ExternalChannelIngestionOutcomeKind.ACCEPTED
-                        | ExternalChannelIngestionOutcomeKind.DUPLICATE
-                    ):
-                        awaiting_access = False
-                        control_delivery_attempt_id = None
-                        connection_id = None
-                    case ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS:
-                        awaiting_access = True
-                        control_delivery_attempt_id = (
-                            outcome.control_delivery_attempt_id
-                        )
-                        connection_id = outcome.connection_id
-                    case (
-                        ExternalChannelIngestionOutcomeKind.AWAITING_SELECTION
-                        | ExternalChannelIngestionOutcomeKind.IGNORED
-                        | ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE
-                        | ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION
-                    ):
-                        raise RuntimeError(
-                            "Discord selector ingestion could not be completed."
-                        )
-                    case _ as unreachable:
-                        assert_never(unreachable)
-            else:
-                continuation = await self.event_processor.continue_selected_admission(
-                    admission_id=selection.admission.id,
-                    principal_id=principal_id,
-                    now=now,
-                )
-                awaiting_access = continuation.status == "awaiting_access"
-                control_delivery_attempt_id = continuation.control_delivery_attempt_id
-                connection_id = (
-                    selection.admission.connection_id
-                    if control_delivery_attempt_id is not None
-                    else None
-                )
+            outcome = await self.ingestion_replay_service.replay_selected_admission(
+                admission_id=selection.admission.id,
+                principal_id=principal_id,
+                deadline=external_channel_replay_deadline(now=now),
+            )
+            match outcome.kind:
+                case (
+                    ExternalChannelIngestionOutcomeKind.ACCEPTED
+                    | ExternalChannelIngestionOutcomeKind.DUPLICATE
+                ):
+                    awaiting_access = False
+                    control_delivery_attempt_id = None
+                    connection_id = None
+                case ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS:
+                    awaiting_access = True
+                    control_delivery_attempt_id = outcome.control_delivery_attempt_id
+                    connection_id = outcome.connection_id
+                case (
+                    ExternalChannelIngestionOutcomeKind.AWAITING_SELECTION
+                    | ExternalChannelIngestionOutcomeKind.IGNORED
+                    | ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE
+                    | ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION
+                ):
+                    raise RuntimeError(
+                        "Discord selector ingestion could not be completed."
+                    )
+                case _ as unreachable:
+                    assert_never(unreachable)
             content = (
                 "Access approval is required before this Agent can continue."
                 if awaiting_access
@@ -271,10 +254,8 @@ class DiscordSelectorResponseService:
         delivery_attempt_id: str,
     ) -> None:
         """Attempt one committed access control only after the interaction response."""
-        await self.event_processor.attempt_selected_admission_control_delivery(
-            connection_id=connection_id,
-            delivery_attempt_id=delivery_attempt_id,
-        )
+        del connection_id
+        await self.provider_control.attempt_delivery(delivery_attempt_id)
 
 
 def parse_discord_selector_custom_id(

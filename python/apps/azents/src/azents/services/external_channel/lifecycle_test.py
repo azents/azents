@@ -90,7 +90,6 @@ class _RepositoryDouble(ExternalChannelLifecycleRepository):
         return ExternalChannelArchiveTermination(
             disconnected_binding_count=1,
             finished_work_count=1,
-            deleted_pending_context_count=1,
             created_progress_delete_intent_count=1,
             progress_delete_intent_ids=("delivery-1",),
         )
@@ -270,11 +269,10 @@ async def test_archive_selects_only_active_work_for_progress_cleanup() -> None:
     assert active_work.desired_progress_revision == 4
     assert progress_insert["id"]
     assert progress_insert["origin_id"] == "binding-1"
-    pending_delete = str(session.execute_statements[2])
-    assert (
-        "external_channel_pending_contexts.route_id, "
-        "external_channel_pending_contexts.resource_id"
-    ) in pending_delete
+    assert all(
+        "external_channel_pending_contexts" not in str(statement)
+        for statement in session.execute_statements
+    )
 
 
 @pytest.mark.asyncio

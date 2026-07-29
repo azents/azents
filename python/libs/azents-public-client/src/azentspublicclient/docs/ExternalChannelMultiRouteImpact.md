@@ -13,7 +13,6 @@ Name | Type | Description | Notes
 **bound_resource_count** | **int** |  | 
 **open_admission_count** | **int** |  | 
 **pending_access_request_count** | **int** |  | 
-**pending_context_count** | **int** |  | 
 **affected_defaults** | [**List[ExternalChannelMultiImpactDefault]**](ExternalChannelMultiImpactDefault.md) |  | 
 **affected_bindings** | [**List[ExternalChannelMultiImpactBinding]**](ExternalChannelMultiImpactBinding.md) |  | 
 

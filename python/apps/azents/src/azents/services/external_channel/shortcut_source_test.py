@@ -11,14 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAppMode,
-    ExternalChannelEventEligibilityState,
-    ExternalChannelEventStatus,
     ExternalChannelInteractionType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
 )
 from azents.rdb.session import SessionManager
-from azents.repos.external_channel.data import ExternalChannelEventCreate
+from azents.repos.external_channel.data import ExternalChannelTrigger
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
@@ -42,31 +40,18 @@ class _Repository:
         self.calls: list[str] = []
         self.admission: object | None = None
         self.provider = ExternalChannelProvider.SLACK
-        self.event: object | None = None
         self.resource_creates: list[object] = []
+        self.position_creates: list[object] = []
 
-    async def get_event_by_provider_identity(
-        self, *args: object, **kwargs: object
+    async def create_conversation_position_idempotent(
+        self, session: object, create: object
     ) -> object:
-        del args, kwargs
-        self.calls.append("event")
-        if self.event is not None:
-            return self.event
+        del session
+        self.calls.append("position")
+        self.position_creates.append(create)
         return SimpleNamespace(
-            id="event-1",
-            connection_id="connection-1",
-            event_type="app_mention",
-            provider_tenant_id="T-1",
-            envelope={
-                "event": {
-                    "type": "app_mention",
-                    "channel": "C-1",
-                    "user": "U-source",
-                    "ts": "100.0001",
-                    "thread_ts": "100.0001",
-                    "text": "source text",
-                }
-            },
+            id="position-1",
+            read_through_position=None,
         )
 
     async def lock_interaction(self, *args: object, **kwargs: object) -> object:
@@ -140,7 +125,7 @@ class _Repository:
     ) -> object:
         del session
         self.calls.append("revision")
-        assert cast(Any, create).source_event_id == "event-1"
+        assert cast(Any, create).normalized_body == "source text"
         return SimpleNamespace(id="revision-1")
 
     async def apply_message_revision(self, *args: object, **kwargs: object) -> object:
@@ -160,8 +145,8 @@ class _Repository:
         return self.admission
 
 
-def _source_event() -> ExternalChannelEventCreate:
-    return ExternalChannelEventCreate(
+def _source_event() -> ExternalChannelTrigger:
+    return ExternalChannelTrigger(
         connection_id="connection-1",
         provider_event_id="shortcut-http-1",
         transport_envelope_id=None,
@@ -170,16 +155,23 @@ def _source_event() -> ExternalChannelEventCreate:
         provider_tenant_id="T-1",
         provider_enterprise_id=None,
         resource_correlation_key="C-1:100.0001",
-        eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
-        envelope={},
-        status=ExternalChannelEventStatus.ACCEPTED,
+        envelope={
+            "event": {
+                "type": "app_mention",
+                "channel": "C-1",
+                "user": "U-source",
+                "ts": "100.0001",
+                "thread_ts": "100.0001",
+                "text": "source text",
+            }
+        },
         provider_occurred_at=_NOW,
         received_at=_NOW,
     )
 
 
-def _discord_source_event() -> ExternalChannelEventCreate:
-    return ExternalChannelEventCreate(
+def _discord_source_event() -> ExternalChannelTrigger:
+    return ExternalChannelTrigger(
         connection_id="connection-1",
         provider_event_id="discord-interaction-source:interaction-1:100",
         transport_envelope_id=None,
@@ -188,9 +180,15 @@ def _discord_source_event() -> ExternalChannelEventCreate:
         provider_tenant_id="guild-1",
         provider_enterprise_id=None,
         resource_correlation_key="guild-1:channel-1",
-        eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
-        envelope={},
-        status=ExternalChannelEventStatus.ACCEPTED,
+        envelope={
+            "message": {
+                "id": "100",
+                "channel_id": "channel-1",
+                "guild_id": "guild-1",
+                "content": "source text",
+                "author": {"id": "user-source"},
+            }
+        },
         provider_occurred_at=_NOW,
         received_at=_NOW,
     )
@@ -224,9 +222,9 @@ async def test_shortcut_source_is_committed_route_neutral_before_modal_claim() -
     assert result.admission.id == "admission-1"
     assert session.commit_count == 1
     assert repository.calls == [
-        "event",
         "interaction",
         "connection",
+        "position",
         "resource_create",
         "resource_lock",
         "binding",
@@ -276,21 +274,6 @@ async def test_discord_message_command_source_preserves_thread_identity() -> Non
     session = _Session()
     repository = _Repository()
     repository.provider = ExternalChannelProvider.DISCORD
-    repository.event = SimpleNamespace(
-        id="event-1",
-        connection_id="connection-1",
-        event_type="discord_message_create",
-        provider_tenant_id="guild-1",
-        envelope={
-            "message": {
-                "id": "100",
-                "channel_id": "channel-1",
-                "guild_id": "guild-1",
-                "content": "source text",
-                "author": {"id": "user-source"},
-            }
-        },
-    )
 
     result = await _service(session, repository).ensure(
         shortcut_source_event=_discord_source_event(),
@@ -311,3 +294,6 @@ async def test_discord_message_command_source_preserves_thread_identity() -> Non
         "parent_channel_id": "channel-1",
         "root_message_id": "100",
     }
+    position = cast(Any, repository.position_creates[0])
+    assert position.provider_channel_id == "channel-1"
+    assert position.provider_thread_key is None

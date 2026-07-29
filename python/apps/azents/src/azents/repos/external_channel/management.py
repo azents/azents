@@ -19,7 +19,6 @@ from azents.core.enums import (
     ExternalChannelDeliveryStatus,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
-    ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelTransport,
@@ -42,7 +41,6 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelInteraction,
     RDBExternalChannelMessage,
     RDBExternalChannelMessageRevision,
-    RDBExternalChannelPendingContext,
     RDBExternalChannelPrincipal,
     RDBExternalChannelResource,
     RDBExternalChannelWork,
@@ -150,24 +148,6 @@ class ExternalChannelManagementRepository:
         if row is None:
             return None
         connection, route = row
-        if route.allow_bot_messages and not allow_bot_messages:
-            await session.execute(
-                sa.delete(RDBExternalChannelPendingContext).where(
-                    RDBExternalChannelPendingContext.route_id == route.id,
-                    RDBExternalChannelPendingContext.message_revision_id.in_(
-                        sa.select(RDBExternalChannelMessageRevision.id)
-                        .join(
-                            RDBExternalChannelMessage,
-                            RDBExternalChannelMessage.id
-                            == RDBExternalChannelMessageRevision.message_id,
-                        )
-                        .where(
-                            RDBExternalChannelMessage.author_type
-                            == ExternalChannelPrincipalAuthorType.BOT
-                        )
-                    ),
-                )
-            )
         route.open_access_enabled = open_access_enabled
         route.allow_bot_messages = allow_bot_messages
         await session.flush()
@@ -1100,9 +1080,6 @@ class ExternalChannelManagementRepository:
                     resource_type=resource.resource_type.value,
                     resource_label=_resource_label(resource.labels, binding.id),
                     status=binding.status,
-                    activation_status=binding.activation_status,
-                    truncated_message_count=binding.truncated_message_count,
-                    truncated_size=binding.truncated_size,
                     connected_at=binding.connected_at,
                     disconnected_at=binding.disconnected_at,
                     disconnect_reason=binding.disconnect_reason,
@@ -1594,12 +1571,6 @@ class ExternalChannelManagementRepository:
             )
             session.add(attempt)
             await session.flush()
-        await session.execute(
-            sa.delete(RDBExternalChannelPendingContext).where(
-                RDBExternalChannelPendingContext.route_id == binding.route_id,
-                RDBExternalChannelPendingContext.resource_id == binding.resource_id,
-            )
-        )
         await session.flush()
         return await self._pending_progress_delete_intent_ids(
             session,

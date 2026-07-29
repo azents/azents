@@ -18,9 +18,8 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.external_channel_binding_activation_status import ExternalChannelBindingActivationStatus
 from azentspublicclient.models.external_channel_binding_status import ExternalChannelBindingStatus
 from azentspublicclient.models.external_channel_provider import ExternalChannelProvider
 from azentspublicclient.models.managed_delivery import ManagedDelivery
@@ -38,9 +37,6 @@ class ManagedBinding(BaseModel):
     resource_type: StrictStr
     resource_label: StrictStr
     status: ExternalChannelBindingStatus
-    activation_status: ExternalChannelBindingActivationStatus
-    truncated_message_count: StrictInt
-    truncated_size: StrictInt
     connected_at: datetime
     disconnected_at: Optional[datetime]
     disconnect_reason: Optional[StrictStr]
@@ -48,7 +44,7 @@ class ManagedBinding(BaseModel):
     work: Optional[ManagedWork]
     deliveries: List[ManagedDelivery]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "agent_session_id", "provider", "resource_type", "resource_label", "status", "activation_status", "truncated_message_count", "truncated_size", "connected_at", "disconnected_at", "disconnect_reason", "latest_activity_at", "work", "deliveries"]
+    __properties: ClassVar[List[str]] = ["id", "agent_session_id", "provider", "resource_type", "resource_label", "status", "connected_at", "disconnected_at", "disconnect_reason", "latest_activity_at", "work", "deliveries"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -144,9 +140,6 @@ class ManagedBinding(BaseModel):
             "resource_type": obj.get("resource_type"),
             "resource_label": obj.get("resource_label"),
             "status": obj.get("status"),
-            "activation_status": obj.get("activation_status"),
-            "truncated_message_count": obj.get("truncated_message_count"),
-            "truncated_size": obj.get("truncated_size"),
             "connected_at": obj.get("connected_at"),
             "disconnected_at": obj.get("disconnected_at"),
             "disconnect_reason": obj.get("disconnect_reason"),

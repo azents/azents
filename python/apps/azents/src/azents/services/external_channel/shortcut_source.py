@@ -11,7 +11,7 @@ from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConversationAdmissionOrigin,
     ExternalChannelConversationAdmissionStatus,
-    ExternalChannelHydrationStatus,
+    ExternalChannelConversationScopeKind,
     ExternalChannelInteractionType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
@@ -22,11 +22,12 @@ from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConversationAdmission,
     ExternalChannelConversationAdmissionCreate,
-    ExternalChannelEventCreate,
+    ExternalChannelConversationPositionCreate,
     ExternalChannelMessageCreate,
     ExternalChannelMessageRevisionCreate,
     ExternalChannelPrincipalCreate,
     ExternalChannelResourceCreate,
+    ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.discord_events import (
@@ -64,34 +65,28 @@ class ExternalChannelShortcutSourceService:
     async def ensure(
         self,
         *,
-        shortcut_source_event: ExternalChannelEventCreate,
+        shortcut_source_event: ExternalChannelTrigger,
         interaction_id: str,
         now: datetime.datetime,
     ) -> ExternalChannelShortcutSourceMaterialization:
         """Commit one canonical route-neutral source before claiming modal work."""
         async with self.session_manager() as session:
-            event = await self.repository.get_event_by_provider_identity(
-                session,
-                connection_id=shortcut_source_event.connection_id,
-                provider_event_id=shortcut_source_event.provider_event_id,
-            )
             interaction = await self.repository.lock_interaction(
                 session,
                 interaction_id=interaction_id,
             )
             if (
-                event is None
-                or interaction is None
+                interaction is None
                 or interaction.connection_id != shortcut_source_event.connection_id
                 or interaction.interaction_type
                 is not ExternalChannelInteractionType.SHORTCUT
                 or interaction.principal_id is None
-                or event.provider_tenant_id is None
+                or shortcut_source_event.provider_tenant_id is None
             ):
                 raise ValueError("Slack shortcut source is unavailable.")
             connection = await self.repository.lock_connection_for_routing(
                 session,
-                connection_id=event.connection_id,
+                connection_id=shortcut_source_event.connection_id,
             )
             if (
                 connection is None
@@ -100,13 +95,23 @@ class ExternalChannelShortcutSourceService:
                 raise SlackEventExcluded("Slack shortcut selection is unavailable.")
             if connection.provider is ExternalChannelProvider.SLACK:
                 normalized = normalize_projected_slack_event(
-                    event_type=event.event_type,
-                    tenant_id=event.provider_tenant_id,
-                    envelope=event.envelope,
+                    event_type=shortcut_source_event.event_type,
+                    tenant_id=shortcut_source_event.provider_tenant_id,
+                    envelope=shortcut_source_event.envelope,
                 )
                 if isinstance(normalized, SlackConnectionRevocation):
                     raise ValueError("Slack shortcut source is unavailable.")
                 provider_resource_key = normalized.provider_resource_key
+                thread_scope = normalized.root_thread_ts != normalized.message_ts
+                position_scope_kind = (
+                    ExternalChannelConversationScopeKind.THREAD
+                    if thread_scope
+                    else ExternalChannelConversationScopeKind.PARENT_CHANNEL
+                )
+                position_provider_channel_id = normalized.channel_id
+                position_provider_thread_key = (
+                    normalized.root_thread_ts if thread_scope else None
+                )
                 labels = {
                     "provider": "slack",
                     "tenant_id": normalized.tenant_id,
@@ -115,9 +120,9 @@ class ExternalChannelShortcutSourceService:
                 }
             elif connection.provider is ExternalChannelProvider.DISCORD:
                 normalized = normalize_projected_discord_event(
-                    event_type=event.event_type,
-                    tenant_id=event.provider_tenant_id,
-                    envelope=event.envelope,
+                    event_type=shortcut_source_event.event_type,
+                    tenant_id=shortcut_source_event.provider_tenant_id,
+                    envelope=shortcut_source_event.envelope,
                     connected_bot_user_id=None,
                 )
                 thread_id = normalized.thread_id or normalized.message_id
@@ -125,6 +130,16 @@ class ExternalChannelShortcutSourceService:
                     normalized.parent_channel_id or normalized.channel_id
                 )
                 provider_resource_key = f"discord:{normalized.tenant_id}:{thread_id}"
+                if normalized.thread_id is None:
+                    position_scope_kind = (
+                        ExternalChannelConversationScopeKind.PARENT_CHANNEL
+                    )
+                    position_provider_channel_id = normalized.channel_id
+                    position_provider_thread_key = None
+                else:
+                    position_scope_kind = ExternalChannelConversationScopeKind.THREAD
+                    position_provider_channel_id = normalized.thread_id
+                    position_provider_thread_key = normalized.thread_id
                 labels = {
                     "provider": "discord",
                     "guild_id": normalized.tenant_id,
@@ -146,6 +161,16 @@ class ExternalChannelShortcutSourceService:
                 }
             else:
                 raise ValueError("External Channel shortcut provider is unavailable.")
+            position = await self.repository.create_conversation_position_idempotent(
+                session,
+                ExternalChannelConversationPositionCreate(
+                    connection_id=connection.id,
+                    scope_kind=position_scope_kind,
+                    provider_channel_id=position_provider_channel_id,
+                    provider_thread_key=position_provider_thread_key,
+                    read_through_position=None,
+                ),
+            )
             resource = await self.repository.create_resource_idempotent(
                 session,
                 ExternalChannelResourceCreate(
@@ -154,15 +179,6 @@ class ExternalChannelShortcutSourceService:
                     provider_resource_key=provider_resource_key,
                     labels=labels,
                     status=ExternalChannelResourceStatus.ACTIVE,
-                    hydration_status=ExternalChannelHydrationStatus.PENDING,
-                    hydration_cursor=None,
-                    hydration_high_watermark_position=None,
-                    reconciliation_boundary_received_at=None,
-                    reconciliation_boundary_event_id=None,
-                    hydration_error_kind=None,
-                    hydration_error_summary=None,
-                    hydration_started_at=None,
-                    hydration_completed_at=None,
                     latest_activity_at=normalized.provider_created_at,
                     unavailable_at=None,
                     deleted_at=None,
@@ -229,7 +245,6 @@ class ExternalChannelShortcutSourceService:
                     normalized_body=normalized.normalized_body,
                     attachment_metadata=normalized.attachment_metadata,
                     reference_mappings=None,
-                    source_event_id=event.id,
                     provider_occurred_at=(
                         normalized.provider_updated_at or normalized.provider_created_at
                     ),
@@ -259,6 +274,9 @@ class ExternalChannelShortcutSourceService:
                     status=ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
                     selected_route_id=None,
                     interaction_id=interaction.id,
+                    conversation_position_id=position.id,
+                    range_start_position=position.read_through_position,
+                    trigger_position=normalized.provider_position,
                     expires_at=now + _SHORTCUT_ADMISSION_AGE,
                 )
                 admission = (

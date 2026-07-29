@@ -8,8 +8,6 @@ from dataclasses import dataclass
 import discord
 
 from azents.core.enums import (
-    ExternalChannelEventEligibilityState,
-    ExternalChannelEventStatus,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
@@ -21,7 +19,7 @@ from azents.core.external_channel_file import (
     ExternalChannelFileMetadata,
     ExternalChannelFileUnsupportedReason,
 )
-from azents.repos.external_channel.data import ExternalChannelEventCreate
+from azents.repos.external_channel.data import ExternalChannelTrigger
 from azents.services.external_channel.discord_gateway import DiscordGatewayMessageEvent
 
 _MAX_DISCORD_MESSAGE_CONTENT_BYTES = 64 * 1024
@@ -78,7 +76,7 @@ def project_discord_gateway_event(
     target_guild_id: str,
     event: DiscordGatewayMessageEvent,
     received_at: datetime.datetime,
-) -> ExternalChannelEventCreate | None:
+) -> ExternalChannelTrigger | None:
     """Build a canonical event exclusively from typed discord.py objects."""
     event_type = _MESSAGE_EVENT_TYPES[event.event_type]
     guild_id = str(event.channel.guild.id)
@@ -90,7 +88,7 @@ def project_discord_gateway_event(
         event_type=event_type,
         projection=projection,
     )
-    return ExternalChannelEventCreate(
+    return ExternalChannelTrigger(
         connection_id=connection_id,
         provider_event_id=provider_event_id,
         transport_envelope_id=provider_event_id,
@@ -99,9 +97,7 @@ def project_discord_gateway_event(
         provider_tenant_id=guild_id,
         provider_enterprise_id=None,
         resource_correlation_key=f"{guild_id}:{channel_id}",
-        eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
         envelope={"message": projection},
-        status=ExternalChannelEventStatus.ACCEPTED,
         provider_occurred_at=_discord_timestamp(projection.get("timestamp")),
         received_at=received_at,
     )
@@ -224,12 +220,12 @@ def project_discord_message_command_source_event(
     guild_id: str,
     source_message: dict[str, object],
     received_at: datetime.datetime,
-) -> ExternalChannelEventCreate:
+) -> ExternalChannelTrigger:
     """Project one selected Message Command source without raw interaction data."""
     projection = project_discord_message(message=source_message, guild_id=guild_id)
     message_id = _required_string(projection, "id")
     channel_id = _required_string(projection, "channel_id")
-    return ExternalChannelEventCreate(
+    return ExternalChannelTrigger(
         connection_id=connection_id,
         provider_event_id=(
             f"discord-interaction-source:{provider_interaction_id}:{message_id}"
@@ -240,9 +236,7 @@ def project_discord_message_command_source_event(
         provider_tenant_id=guild_id,
         provider_enterprise_id=None,
         resource_correlation_key=f"{guild_id}:{channel_id}",
-        eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
         envelope={"message": projection},
-        status=ExternalChannelEventStatus.ACCEPTED,
         provider_occurred_at=_discord_timestamp(source_message.get("timestamp")),
         received_at=received_at,
     )

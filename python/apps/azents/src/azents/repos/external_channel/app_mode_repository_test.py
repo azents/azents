@@ -15,13 +15,12 @@ from azents.core.enums import (
     AgentLifecycleStatus,
     ExternalChannelAccessRequestStatus,
     ExternalChannelAppMode,
-    ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelConversationAdmissionOrigin,
     ExternalChannelConversationAdmissionStatus,
-    ExternalChannelHydrationStatus,
+    ExternalChannelConversationScopeKind,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
     ExternalChannelMessageLifecycle,
@@ -60,6 +59,7 @@ from .data import (
     ExternalChannelChannelDefaultCreate,
     ExternalChannelConnectionCreate,
     ExternalChannelConversationAdmissionCreate,
+    ExternalChannelConversationPositionCreate,
     ExternalChannelInteractionCreate,
     ExternalChannelMessage,
     ExternalChannelMessageCreate,
@@ -185,15 +185,6 @@ async def _resource(
             provider_resource_key=key,
             labels=None,
             status=ExternalChannelResourceStatus.ACTIVE,
-            hydration_status=ExternalChannelHydrationStatus.PENDING,
-            hydration_cursor=None,
-            hydration_high_watermark_position=None,
-            reconciliation_boundary_received_at=None,
-            reconciliation_boundary_event_id=None,
-            hydration_error_kind=None,
-            hydration_error_summary=None,
-            hydration_started_at=None,
-            hydration_completed_at=None,
             latest_activity_at=None,
             unavailable_at=None,
             deleted_at=None,
@@ -257,6 +248,7 @@ def _admission_create(
     connection_id: str,
     resource_id: str,
     source_message_id: str,
+    conversation_position_id: str,
     initiating_principal_id: str | None = None,
     selected_route_id: str | None = None,
     interaction_id: str | None = None,
@@ -274,6 +266,9 @@ def _admission_create(
         status=status,
         selected_route_id=selected_route_id,
         interaction_id=interaction_id,
+        conversation_position_id=conversation_position_id,
+        range_start_position="00000000000000000000",
+        trigger_position="00000000000000000001",
         expires_at=_at(20),
     )
 
@@ -520,6 +515,16 @@ async def test_conversation_admission_preserves_retries_and_ownership_boundaries
         rdb_session,
         _connection_create(workspace_id, provider_app_id="A2", provider_tenant_id="T2"),
     )
+    first_position = await repo.create_conversation_position_idempotent(
+        rdb_session,
+        ExternalChannelConversationPositionCreate(
+            connection_id=first_connection.id,
+            scope_kind=ExternalChannelConversationScopeKind.THREAD,
+            provider_channel_id="C1",
+            provider_thread_key="1.000001",
+            read_through_position=None,
+        ),
+    )
     first_route = await repo.create_agent_route(
         rdb_session,
         _route_create(
@@ -576,6 +581,7 @@ async def test_conversation_admission_preserves_retries_and_ownership_boundaries
         connection_id=first_connection.id,
         resource_id=first_resource.id,
         source_message_id=first_message.id,
+        conversation_position_id=first_position.id,
         initiating_principal_id=first_principal.id,
         selected_route_id=first_route.id,
     )
@@ -598,28 +604,33 @@ async def test_conversation_admission_preserves_retries_and_ownership_boundaries
             connection_id=first_connection.id,
             resource_id=second_resource.id,
             source_message_id=second_message.id,
+            conversation_position_id=first_position.id,
         ),
         _admission_create(
             connection_id=first_connection.id,
             resource_id=first_resource.id,
             source_message_id=second_message.id,
+            conversation_position_id=first_position.id,
         ),
         _admission_create(
             connection_id=first_connection.id,
             resource_id=first_resource.id,
             source_message_id=first_message.id,
+            conversation_position_id=first_position.id,
             selected_route_id=second_route.id,
         ),
         _admission_create(
             connection_id=first_connection.id,
             resource_id=first_resource.id,
             source_message_id=first_message.id,
+            conversation_position_id=first_position.id,
             interaction_id=second_interaction.interaction.id,
         ),
         _admission_create(
             connection_id=first_connection.id,
             resource_id=first_resource.id,
             source_message_id=first_message.id,
+            conversation_position_id=first_position.id,
             initiating_principal_id=foreign_principal.id,
             selected_route_id=first_route.id,
         ),
@@ -656,6 +667,7 @@ async def test_conversation_admission_preserves_retries_and_ownership_boundaries
             connection_id=first_connection.id,
             resource_id=resource.id,
             source_message_id=message.id,
+            conversation_position_id=first_position.id,
             initiating_principal_id=first_principal.id,
             status=status,
         )
@@ -674,6 +686,9 @@ async def test_conversation_admission_preserves_retries_and_ownership_boundaries
                         status=status,
                         selected_route_id=None,
                         interaction_id=None,
+                        conversation_position_id=first_position.id,
+                        range_start_position="00000000000000000000",
+                        trigger_position="00000000000000000001",
                         expires_at=_at(20 + offset),
                     )
                 )
@@ -884,12 +899,6 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
             route_id=first_route.id,
             agent_session_id=first_session.id,
             status=ExternalChannelBindingStatus.ACTIVE,
-            activation_status=ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
-            activation_trigger_message_id=None,
-            activated_at=None,
-            projected_through_position=None,
-            truncated_message_count=0,
-            truncated_size=0,
             disconnected_at=None,
             disconnect_reason=None,
         ),
@@ -904,12 +913,6 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
                 route_id=second_route.id,
                 agent_session_id=second_session.id,
                 status=ExternalChannelBindingStatus.ACTIVE,
-                activation_status=ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
-                activation_trigger_message_id=None,
-                activated_at=None,
-                projected_through_position=None,
-                truncated_message_count=0,
-                truncated_size=0,
                 disconnected_at=None,
                 disconnect_reason=None,
             ),
@@ -932,14 +935,6 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
                 route_id=first_route.id,
                 agent_session_id=duplicate_first_session.id,
                 status=ExternalChannelBindingStatus.ACTIVE,
-                activation_status=(
-                    ExternalChannelBindingActivationStatus.WAITING_HYDRATION
-                ),
-                activation_trigger_message_id=None,
-                activated_at=None,
-                projected_through_position=None,
-                truncated_message_count=0,
-                truncated_size=0,
                 disconnected_at=None,
                 disconnect_reason=None,
             ),
@@ -1148,14 +1143,6 @@ async def test_binding_creation_serializes_on_resource_lock(
             route_id=route.id,
             agent_session_id=agent_session.id,
             status=ExternalChannelBindingStatus.ACTIVE,
-            activation_status=(
-                ExternalChannelBindingActivationStatus.WAITING_HYDRATION
-            ),
-            activation_trigger_message_id=None,
-            activated_at=None,
-            projected_through_position=None,
-            truncated_message_count=0,
-            truncated_size=0,
             disconnected_at=None,
             disconnect_reason=None,
         )
@@ -1341,7 +1328,6 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
         route_id=first_route.id,
         agent_session_id=first_session.id,
         status=ExternalChannelBindingStatus.ACTIVE,
-        activation_status=ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
     )
     rdb_session.add(first)
     await rdb_session.flush()
@@ -1356,9 +1342,6 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
                     route_id=second_route.id,
                     agent_session_id=second_session.id,
                     status=ExternalChannelBindingStatus.ACTIVE,
-                    activation_status=(
-                        ExternalChannelBindingActivationStatus.WAITING_HYDRATION
-                    ),
                 )
             )
             await rdb_session.flush()
@@ -1373,12 +1356,6 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
             route_id=second_route.id,
             agent_session_id=second_session.id,
             status=ExternalChannelBindingStatus.ACTIVE,
-            activation_status=ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
-            activation_trigger_message_id=None,
-            activated_at=None,
-            projected_through_position=None,
-            truncated_message_count=0,
-            truncated_size=0,
             disconnected_at=None,
             disconnect_reason=None,
         ),
@@ -1662,6 +1639,16 @@ async def test_multi_route_removal_preserves_route_identity_and_other_routes(
     )
     rdb_session.add(connection)
     await rdb_session.flush()
+    position = await repo.create_conversation_position_idempotent(
+        rdb_session,
+        ExternalChannelConversationPositionCreate(
+            connection_id=connection.id,
+            scope_kind=ExternalChannelConversationScopeKind.THREAD,
+            provider_channel_id="C-removal",
+            provider_thread_key="123.456",
+            read_through_position=None,
+        ),
+    )
     first_route = await repo.create_agent_route(
         rdb_session,
         _route_create(connection.id, first_agent.id, mode=ExternalChannelAppMode.MULTI),
@@ -1714,14 +1701,6 @@ async def test_multi_route_removal_preserves_route_identity_and_other_routes(
             route_id=first_route.id,
             agent_session_id=agent_session.id,
             status=ExternalChannelBindingStatus.ACTIVE,
-            activation_status=(
-                ExternalChannelBindingActivationStatus.WAITING_HYDRATION
-            ),
-            activation_trigger_message_id=None,
-            activated_at=None,
-            projected_through_position=None,
-            truncated_message_count=0,
-            truncated_size=0,
             disconnected_at=None,
             disconnect_reason=None,
         ),
@@ -1740,6 +1719,7 @@ async def test_multi_route_removal_preserves_route_identity_and_other_routes(
             connection_id=connection.id,
             resource_id=resource.id,
             source_message_id=message.id,
+            conversation_position_id=position.id,
             selected_route_id=first_route.id,
             status=ExternalChannelConversationAdmissionStatus.SELECTED,
         ),
@@ -1766,6 +1746,10 @@ async def test_multi_route_removal_preserves_route_identity_and_other_routes(
             agent_session_id=None,
             status=ExternalChannelAccessRequestStatus.PENDING,
             decision_policy_snapshot={},
+            connection_id=connection.id,
+            conversation_position_id=position.id,
+            range_start_position="00000000000000000000",
+            trigger_position="00000000000000000001",
             decided_by_user_id=None,
             decision_summary=None,
             expires_at=_at(50),

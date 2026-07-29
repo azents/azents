@@ -175,4 +175,56 @@ tags: [external-channel, contraction, api, frontend, migration]
 
 ## Phase 5 Checkpoint
 
-Pending implementation.
+- Migration revision: `f1a13c6dc46d`, following `acd4e70d9c19`.
+  The upgrade aborts before destructive DDL when any aggregate guard is nonzero:
+  undrained events, unactivated bindings, incomplete hydration, pending context,
+  open conversation admission, pending access request, in-flight resource provisioning,
+  missing active-binding delivery target, Session, route, accepted batch, or thread
+  position, and ambiguous thread position. The downgrade restores the retired structural
+  schema with empty event and pending-context tables and does not reconstruct discarded
+  runtime data.
+- Contracted state: `external_channel_events`,
+  `external_channel_pending_contexts`, event/hydration/activation enums, resource
+  hydration fields, binding activation/projection/truncation fields, invocation-batch
+  truncation fields, and revision `source_event_id` were removed with their repository,
+  lifecycle, processor, composition, CLI preflight, and dead-test ownership.
+- Retained authorities: provider history remains canonical for content; PostgreSQL
+  conversation positions, immutable invocation batches/items, mailbox input, bindings,
+  Channel Work, delivery attempts, interactions, access state, and Sessions remain
+  durable product state. Redis and memory coordination semantics were not changed.
+- Provider control: acceptance creates or reuses the initial progress intent in the same
+  durable transaction as Session input. The Worker owns a bounded drain that commits
+  stale-claim recovery and pending selection before using the existing delivery fence.
+  Provider I/O occurs after the claim commit, and settlement re-locks and revalidates the
+  attempt and current authority. Interrupted provider writes become `unknown` instead of
+  being replayed as definitely absent.
+- PR #1020 disposition: the historical finished-Discord activation recovery query,
+  reconciliation branch, stale-mailbox cleanup, and dedicated fixtures were removed.
+- Public surfaces: `ManagedBinding`, OpenAPI, generated Python and TypeScript clients,
+  E2E consumers, Session Channels, stories, and all four locales no longer expose
+  activation or truncation state. Existing connection, activity, Channel Work, delivery,
+  grant, disconnect, archive, and responsive-layout behavior remains.
+- Validation:
+  - backend Ruff, formatting, and whole-project Pyright passed;
+  - full backend pytest: `3752 passed`;
+  - focused external-channel and contraction pytest: `573 passed`;
+  - migration/provider-control independent-review pytest: `5 passed`;
+  - generated Python public client pytest: `621 passed`;
+  - public OpenAPI regeneration produced an identical document hash;
+  - TypeScript format, lint, typecheck, and production builds completed successfully;
+  - azents-web unit tests: `146 passed`;
+  - azents-web Storybook production build completed successfully;
+  - E2E Ruff, formatting, and whole-project Pyright passed;
+  - deterministic External Channel E2E: `9 passed`;
+  - runtime-provider progress E2E without xfail: `1 passed`;
+  - documentation index check and its `14` unit tests passed;
+  - retired-symbol static searches and `git diff --check` passed.
+- Independent review: `/root/channel-responsive-reviewer` reported
+  `Critical 0 / Warning 0` after reviewing the complete tracked diff and all four
+  untracked migration/provider-control files.
+- Operational checkpoint: this PR does not claim that the external production cutover
+  checkpoint occurred. It remains merge- and deployment-ineligible until that checkpoint
+  is explicitly completed.
+- Remaining stack scope: PR 8 owns final validation evidence and any resulting fixes;
+  PR 9 promotes the living specs and marks the snapshot implemented; PR 10 removes the
+  temporary implementation plans.

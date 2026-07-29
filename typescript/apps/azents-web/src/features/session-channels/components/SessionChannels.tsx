@@ -298,14 +298,6 @@ function BindingPanel({
               <Badge color={active ? "green" : "gray"} variant="light">
                 {t(`bindingStatus.${binding.status}`)}
               </Badge>
-              <Badge
-                color={
-                  binding.activation_status === "active" ? "blue" : "yellow"
-                }
-                variant="outline"
-              >
-                {t(`activationStatus.${binding.activation_status}`)}
-              </Badge>
             </Group>
             <Text size="sm" c="dimmed" mt={4}>
               {binding.provider} · {binding.resource_type}
@@ -324,7 +316,7 @@ function BindingPanel({
           </Button>
         </Group>
 
-        <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
+        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
           <Box>
             <Text size="xs" c="dimmed" fw={700} tt="uppercase">
               {t("connectedAt")}
@@ -336,17 +328,6 @@ function BindingPanel({
               {t("latestActivity")}
             </Text>
             <Text size="sm">{formatDate(binding.latest_activity_at)}</Text>
-          </Box>
-          <Box>
-            <Text size="xs" c="dimmed" fw={700} tt="uppercase">
-              {t("retainedContext")}
-            </Text>
-            <Text size="sm">
-              {t("truncationSummary", {
-                messages: binding.truncated_message_count,
-                bytes: binding.truncated_size,
-              })}
-            </Text>
           </Box>
         </SimpleGrid>
 

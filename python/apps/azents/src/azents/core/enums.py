@@ -871,35 +871,6 @@ class ExternalChannelResourceStatus(enum.StrEnum):
     DELETED = "deleted"
 
 
-class ExternalChannelHydrationStatus(enum.StrEnum):
-    """Initial provider-history hydration state for one external resource."""
-
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETE = "complete"
-    BOUNDED = "bounded"
-    INCOMPLETE = "incomplete"
-
-
-class ExternalChannelEventEligibilityState(enum.StrEnum):
-    """Classification state for one admitted provider event."""
-
-    UNCLASSIFIED = "unclassified"
-    TRACKED = "tracked"
-    IGNORED = "ignored"
-    PROCESSED = "processed"
-
-
-class ExternalChannelEventStatus(enum.StrEnum):
-    """Asynchronous processing status for one admitted provider event."""
-
-    ACCEPTED = "accepted"
-    IGNORED_UNLINKED = "ignored_unlinked"
-    PROCESSING = "processing"
-    PROCESSED = "processed"
-    FAILED = "failed"
-
-
 class ExternalChannelPrincipalAuthorType(enum.StrEnum):
     """External principal author category."""
 
@@ -930,14 +901,6 @@ class ExternalChannelBindingStatus(enum.StrEnum):
 
     ACTIVE = "active"
     DISCONNECTED = "disconnected"
-
-
-class ExternalChannelBindingActivationStatus(enum.StrEnum):
-    """Initial invocation activation state for one active binding."""
-
-    WAITING_HYDRATION = "waiting_hydration"
-    WAKE_PENDING = "wake_pending"
-    ACTIVE = "active"
 
 
 class ExternalChannelInvocationWakeDispatchStatus(enum.StrEnum):

@@ -24,7 +24,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
-    ExternalChannelEventCreate,
+    ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
@@ -186,7 +186,7 @@ class SlackSocketManagerService:
             web_client = create_slack_web_client()
             web_api_client = SlackSocketWebAPIClient(web_client)
 
-            async def admit_owned(event: ExternalChannelEventCreate) -> object:
+            async def admit_owned(event: ExternalChannelTrigger) -> object:
                 return await self._handle_owned_event(
                     connection_id=connection_id,
                     configuration=configuration,
@@ -195,7 +195,7 @@ class SlackSocketManagerService:
 
             async def admit_owned_interaction(
                 callback: SlackInteractionCallback,
-                shortcut_source_event: ExternalChannelEventCreate | None,
+                shortcut_source_event: ExternalChannelTrigger | None,
             ) -> ExternalChannelInteractionHandoff | None:
                 if (
                     callback.app_id != configuration.provider_app_id
@@ -217,7 +217,6 @@ class SlackSocketManagerService:
                         transport=configuration.transport,
                     ),
                     principal=callback.principal_create(),
-                    shortcut_source_event=shortcut_source_event,
                 )
                 if shortcut_source_event is not None:
                     await self.shortcut_source_service.ensure(
@@ -362,7 +361,7 @@ class SlackSocketManagerService:
         *,
         connection_id: str,
         configuration: ExternalChannelConnectionConfiguration,
-        event: ExternalChannelEventCreate,
+        event: ExternalChannelTrigger,
     ) -> object:
         """Complete one normal or revocation event under the current lease."""
         if (
@@ -413,7 +412,7 @@ class SlackSocketManagerService:
 
     def _message_ingress_quiesced(
         self,
-        event: ExternalChannelEventCreate,
+        event: ExternalChannelTrigger,
     ) -> bool:
         """Return whether normal Socket message admission is temporarily blocked."""
         return (

@@ -11,9 +11,6 @@ Name | Type | Description | Notes
 **resource_type** | **str** |  | 
 **resource_label** | **str** |  | 
 **status** | [**ExternalChannelBindingStatus**](ExternalChannelBindingStatus.md) |  | 
-**activation_status** | [**ExternalChannelBindingActivationStatus**](ExternalChannelBindingActivationStatus.md) |  | 
-**truncated_message_count** | **int** |  | 
-**truncated_size** | **int** |  | 
 **connected_at** | **datetime** |  | 
 **disconnected_at** | **datetime** |  | 
 **disconnect_reason** | **str** |  | 

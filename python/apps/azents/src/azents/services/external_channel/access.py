@@ -7,24 +7,18 @@ from typing import Annotated, Literal, assert_never
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.broker.types import SessionWakeUp
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionStartReason,
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
-    ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
     ExternalChannelConversationAdmissionStatus,
     ExternalChannelResourceStatus,
-    MailboxItemKind,
-    MailboxSchedulingMode,
 )
-from azents.core.external_channel_progress import checking_progress
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
-from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.external_channel.data import (
     ExternalChannelAccessGrant,
@@ -34,8 +28,6 @@ from azents.repos.external_channel.data import (
     ExternalChannelBindingCreate,
     ExternalChannelBlock,
     ExternalChannelBlockCreate,
-    ExternalChannelInvocationBatchCreate,
-    ExternalChannelInvocationBatchItemCreate,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.ingestion import (
@@ -43,13 +35,7 @@ from azents.services.external_channel.ingestion import (
 )
 from azents.services.external_channel.ingestion_replay import (
     ExternalChannelIngestionReplayService,
-    access_request_uses_typed_replay,
     external_channel_replay_deadline,
-)
-from azents.services.mailbox import (
-    MailboxEnqueue,
-    MailboxService,
-    build_external_channel_mailbox_payload,
 )
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
@@ -57,7 +43,6 @@ from azents.services.root_agent_session_creation import (
 from azents.services.root_agent_session_creation.data import (
     AgentDefaultRootWorkspaceIntent,
 )
-from azents.worker.session.lifecycle import SessionLifecycleService
 
 
 class ExternalChannelAccessDecisionError(ValueError):
@@ -116,25 +101,13 @@ class ExternalChannelAccessService:
         AgentRepository,
         Depends(AgentRepository),
     ]
-    agent_session_repository: Annotated[
-        AgentSessionRepository,
-        Depends(AgentSessionRepository),
-    ]
     root_agent_session_creation_service: Annotated[
         RootAgentSessionCreationService,
         Depends(RootAgentSessionCreationService),
     ]
-    mailbox_item_service: Annotated[
-        MailboxService,
-        Depends(MailboxService),
-    ]
     ingestion_replay_service: Annotated[
         ExternalChannelIngestionReplayService,
         Depends(ExternalChannelIngestionReplayService),
-    ]
-    session_lifecycle: Annotated[
-        SessionLifecycleService,
-        Depends(SessionLifecycleService),
     ]
 
     async def allow(
@@ -147,9 +120,6 @@ class ExternalChannelAccessService:
         now: datetime.datetime,
     ) -> ExternalChannelAllowedAccess:
         """Allow one participant and create its Session binding atomically."""
-        wake_required = False
-        wake_session_id: str | None = None
-        wake_agent_id: str | None = None
         async with self.session_manager() as session:
             request_snapshot = await self.repository.get_access_request(
                 session,
@@ -211,7 +181,6 @@ class ExternalChannelAccessService:
                 session,
                 access_request_id=access_request_id,
             )
-            typed_replay = access_request_uses_typed_replay(request)
             if request.status is ExternalChannelAccessRequestStatus.ALLOWED:
                 grant = await self.repository.get_active_access_grant(
                     session,
@@ -222,17 +191,6 @@ class ExternalChannelAccessService:
                 if binding is None or grant is None or grant.scope is not scope:
                     raise ExternalChannelAccessDecisionError(
                         "The prior Allow decision no longer has its active state."
-                    )
-                if (
-                    binding.activation_status
-                    is ExternalChannelBindingActivationStatus.ACTIVE
-                    and not typed_replay
-                ):
-                    wake_required = await self._release_allowed_request(
-                        session,
-                        binding=binding,
-                        trigger_message_id=request.source_message_id,
-                        now=now,
                     )
                 if admission is not None:
                     await self.repository.transition_conversation_admission(
@@ -248,16 +206,10 @@ class ExternalChannelAccessService:
                     )
                 )
                 await session.commit()
-                if typed_replay:
-                    await self._replay_allowed_request(
-                        access_request_id=request.id,
-                        now=now,
-                    )
-                elif wake_required:
-                    await self._send_session_wake_up(
-                        agent_id=active_agent_id,
-                        session_id=binding.agent_session_id,
-                    )
+                await self._replay_allowed_request(
+                    access_request_id=request.id,
+                    now=now,
+                )
                 return ExternalChannelAllowedAccess(
                     request=request,
                     binding=binding,
@@ -312,14 +264,6 @@ class ExternalChannelAccessService:
                     )
                 )
                 agent_session_id = root_session.agent_session.id
-            snapshot_count = request.decision_policy_snapshot.get(
-                "pending_truncation_message_count",
-                0,
-            )
-            snapshot_size = request.decision_policy_snapshot.get(
-                "pending_truncation_size",
-                0,
-            )
             binding = await self.repository.create_binding_idempotent(
                 session,
                 ExternalChannelBindingCreate(
@@ -327,16 +271,6 @@ class ExternalChannelAccessService:
                     route_id=request.route_id,
                     agent_session_id=agent_session_id,
                     status=ExternalChannelBindingStatus.ACTIVE,
-                    activation_status=ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
-                    activation_trigger_message_id=request.source_message_id,
-                    activated_at=None,
-                    projected_through_position=None,
-                    truncated_message_count=(
-                        snapshot_count if isinstance(snapshot_count, int) else 0
-                    ),
-                    truncated_size=(
-                        snapshot_size if isinstance(snapshot_size, int) else 0
-                    ),
                     disconnected_at=None,
                     disconnect_reason=None,
                 ),
@@ -378,26 +312,6 @@ class ExternalChannelAccessService:
                     status=ExternalChannelConversationAdmissionStatus.BOUND,
                     selected_route_id=route.id,
                 )
-            if (
-                binding.activation_status
-                is ExternalChannelBindingActivationStatus.ACTIVE
-            ):
-                await self.repository.ensure_active_work(
-                    session,
-                    binding_id=binding.id,
-                    desired_progress_payload=checking_progress().model_dump(
-                        mode="json"
-                    ),
-                )
-                if not typed_replay:
-                    wake_required = await self._release_allowed_request(
-                        session,
-                        binding=binding,
-                        trigger_message_id=request.source_message_id,
-                        now=now,
-                    )
-                    wake_session_id = binding.agent_session_id
-                    wake_agent_id = active_agent_id
             delete_intent = (
                 await self.repository.create_access_request_control_delete_intent(
                     session,
@@ -405,20 +319,10 @@ class ExternalChannelAccessService:
                 )
             )
             await session.commit()
-            if typed_replay:
-                await self._replay_allowed_request(
-                    access_request_id=decided.id,
-                    now=now,
-                )
-            elif (
-                wake_required
-                and wake_session_id is not None
-                and wake_agent_id is not None
-            ):
-                await self._send_session_wake_up(
-                    agent_id=wake_agent_id,
-                    session_id=wake_session_id,
-                )
+            await self._replay_allowed_request(
+                access_request_id=decided.id,
+                now=now,
+            )
             return ExternalChannelAllowedAccess(
                 request=decided,
                 binding=binding,
@@ -457,137 +361,6 @@ class ExternalChannelAccessService:
                 )
             case _ as unreachable:
                 assert_never(unreachable)
-
-    async def _release_allowed_request(
-        self,
-        session: AsyncSession,
-        *,
-        binding: ExternalChannelBinding,
-        trigger_message_id: str,
-        now: datetime.datetime,
-    ) -> bool:
-        """Create the approved invocation on an already-active binding."""
-        existing = await self.repository.get_invocation_batch(
-            session,
-            binding_id=binding.id,
-            trigger_message_id=trigger_message_id,
-        )
-        if existing is not None and existing.mailbox_item_id is not None:
-            return True
-        trigger = await self.repository.get_message(
-            session,
-            message_id=trigger_message_id,
-        )
-        if trigger is None or trigger.current_revision_id is None:
-            raise ExternalChannelAccessDecisionError(
-                "The approved external message is unavailable."
-            )
-        pending = await self.repository.list_pending_context(
-            session,
-            route_id=binding.route_id,
-            resource_id=binding.resource_id,
-            now=now,
-            through_provider_position=trigger.provider_position,
-        )
-        items = [(item.message_revision_id, item.provider_position) for item in pending]
-        if all(revision_id != trigger.current_revision_id for revision_id, _ in items):
-            items.append((trigger.current_revision_id, trigger.provider_position))
-        items.sort(key=lambda item: item[1])
-        if existing is None:
-            batch = await self.repository.create_invocation_batch_idempotent(
-                session,
-                ExternalChannelInvocationBatchCreate(
-                    binding_id=binding.id,
-                    trigger_message_id=trigger_message_id,
-                    first_provider_position=items[0][1],
-                    last_provider_position=items[-1][1],
-                    truncation_message_count=binding.truncated_message_count,
-                    truncation_size=binding.truncated_size,
-                    mailbox_item_id=None,
-                ),
-            )
-            for sequence, (revision_id, provider_position) in enumerate(items):
-                await self.repository.create_invocation_batch_item_idempotent(
-                    session,
-                    ExternalChannelInvocationBatchItemCreate(
-                        batch_id=batch.id,
-                        message_revision_id=revision_id,
-                        sequence=sequence,
-                        provider_position=provider_position,
-                    ),
-                )
-            released_pending = pending
-        else:
-            batch = existing
-            batch_revision_ids = set(
-                await self.repository.list_invocation_batch_revision_ids(
-                    session,
-                    batch_id=batch.id,
-                )
-            )
-            released_pending = [
-                item
-                for item in pending
-                if item.message_revision_id in batch_revision_ids
-            ]
-        locked_batch = await self.repository.lock_invocation_batch(
-            session,
-            batch_id=batch.id,
-        )
-        if locked_batch is None:
-            raise ExternalChannelAccessDecisionError(
-                "The invocation batch disappeared during activation."
-            )
-        if locked_batch.mailbox_item_id is None:
-            projection_items = await self.repository.list_invocation_projection_items(
-                session,
-                batch_id=batch.id,
-            )
-            enqueue = await self.mailbox_item_service.enqueue(
-                session,
-                MailboxEnqueue(
-                    session_id=binding.agent_session_id,
-                    kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
-                    scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
-                    requested_model_target_label=None,
-                    requested_reasoning_effort=None,
-                    sender_user_id=None,
-                    content="",
-                    idempotency_key=f"external-channel-invocation:{batch.id}",
-                    metadata={},
-                    attachments=[],
-                    file_parts=[],
-                    action=None,
-                    payload=build_external_channel_mailbox_payload(projection_items),
-                ),
-            )
-            await self.repository.link_invocation_batch_mailbox_item(
-                session,
-                batch_id=batch.id,
-                mailbox_item_id=enqueue.mailbox_item.id,
-            )
-        await self.repository.delete_pending_context_ids(
-            session,
-            pending_context_ids=[item.id for item in released_pending],
-        )
-        await self.repository.advance_binding_projection(
-            session,
-            binding_id=binding.id,
-            projected_through_position=batch.last_provider_position,
-        )
-        return True
-
-    async def _send_session_wake_up(
-        self,
-        *,
-        agent_id: str,
-        session_id: str,
-    ) -> None:
-        """Send an idempotent post-commit wake for one released invocation."""
-        await self.session_lifecycle.mark_session_running_for_input_wakeup(session_id)
-        await self.session_lifecycle.send_session_wake_up(
-            SessionWakeUp(session_id=session_id)
-        )
 
     async def deny(
         self,

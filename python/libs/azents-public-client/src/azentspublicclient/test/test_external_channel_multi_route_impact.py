@@ -42,7 +42,6 @@ class TestExternalChannelMultiRouteImpact(unittest.TestCase):
                 bound_resource_count = 56,
                 open_admission_count = 56,
                 pending_access_request_count = 56,
-                pending_context_count = 56,
                 affected_defaults = [
                     azentspublicclient.models.external_channel_multi_impact_default.ExternalChannelMultiImpactDefault(
                         id = '', 
@@ -70,7 +69,6 @@ class TestExternalChannelMultiRouteImpact(unittest.TestCase):
                 bound_resource_count = 56,
                 open_admission_count = 56,
                 pending_access_request_count = 56,
-                pending_context_count = 56,
                 affected_defaults = [
                     azentspublicclient.models.external_channel_multi_impact_default.ExternalChannelMultiImpactDefault(
                         id = '', 

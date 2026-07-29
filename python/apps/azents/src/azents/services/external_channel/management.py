@@ -1404,7 +1404,6 @@ def _managed_multi_disconnect(
         expired_access_request_count=disconnected.expired_access_request_count,
         unavailable_resource_count=disconnected.unavailable_resource_count,
         disconnected_binding_count=disconnected.disconnected_binding_count,
-        deleted_pending_context_count=disconnected.deleted_pending_context_count,
     )
 
 

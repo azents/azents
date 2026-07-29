@@ -16,7 +16,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from azents.core.enums import ExternalChannelInteractionType
-from azents.repos.external_channel.data import ExternalChannelEventCreate
+from azents.repos.external_channel.data import ExternalChannelTrigger
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
 )
@@ -86,13 +86,11 @@ class SlackSocketConnectionResult:
     admitted_event_count: int
 
 
-type SlackSocketEventAdmission = Callable[
-    [ExternalChannelEventCreate], Awaitable[object]
-]
+type SlackSocketEventAdmission = Callable[[ExternalChannelTrigger], Awaitable[object]]
 type SlackSocketInteractionAdmission = Callable[
     [
         SlackInteractionCallback,
-        ExternalChannelEventCreate | None,
+        ExternalChannelTrigger | None,
     ],
     Awaitable[ExternalChannelInteractionHandoff | None],
 ]

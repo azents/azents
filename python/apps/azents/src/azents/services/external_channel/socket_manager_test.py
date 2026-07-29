@@ -16,15 +16,13 @@ from azents.core.config import Config
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
-    ExternalChannelEventEligibilityState,
-    ExternalChannelEventStatus,
     ExternalChannelIngressProfile,
     ExternalChannelTransport,
 )
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
-    ExternalChannelEventCreate,
+    ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
@@ -138,12 +136,12 @@ def _event(
     event_type: str,
     *,
     subtype: str | None = None,
-) -> ExternalChannelEventCreate:
+) -> ExternalChannelTrigger:
     """Build one bounded Socket event for quiesce classification."""
     event: dict[str, object] = {"type": event_type}
     if subtype is not None:
         event["subtype"] = subtype
-    return ExternalChannelEventCreate(
+    return ExternalChannelTrigger(
         connection_id="connection-1",
         provider_event_id=f"event-{event_type}-{subtype}",
         transport_envelope_id=None,
@@ -152,9 +150,7 @@ def _event(
         provider_tenant_id="tenant-1",
         provider_enterprise_id=None,
         resource_correlation_key=None,
-        eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
         envelope={"event": event},
-        status=ExternalChannelEventStatus.ACCEPTED,
         provider_occurred_at=None,
         received_at=datetime.datetime(2026, 7, 29, tzinfo=datetime.UTC),
     )

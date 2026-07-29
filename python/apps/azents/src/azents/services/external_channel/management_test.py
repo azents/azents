@@ -692,7 +692,6 @@ async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -
         expired_access_request_count=0,
         unavailable_resource_count=0,
         disconnected_binding_count=1,
-        deleted_pending_context_count=0,
         progress_delete_intent_ids=("cleanup-1",),
     )
     repository = AsyncMock()
