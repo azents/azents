@@ -608,9 +608,11 @@ def test_http_admission_unknown_participant_and_approval_journey(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
+    azents_engine_worker_container: Container,
     slack_provider_fake_url: str,
 ) -> None:
     """Exercise connection setup, signed admission, dedupe, and idempotent approval."""
+    del azents_engine_worker_container
     requests.post(
         f"{slack_provider_fake_url}/__testenv/reset",
         timeout=5,
@@ -844,7 +846,26 @@ def test_http_admission_unknown_participant_and_approval_journey(
         f"https://example.slack.com/archives/{_CHANNEL_ID}/p"
         f"{root_timestamp.replace('.', '')}"
     )
-    provider_state = _provider_state(slack_provider_fake_url)
+
+    def settled_provider_controls() -> dict[str, object] | None:
+        state = _provider_state(slack_provider_fake_url)
+        counts = state.get("request_counts")
+        if not isinstance(counts, dict):
+            return None
+        typed = cast(dict[str, Any], counts)
+        if typed.get("chat.postMessage") == 2 and typed.get("chat.delete") == 1:
+            return state
+        return None
+
+    provider_state = cast(
+        dict[str, object],
+        wait_until(
+            settled_provider_controls,
+            timeout=10,
+            interval=0.2,
+            message="Slack approval and initial progress controls did not settle",
+        ),
+    )
     request_counts = provider_state.get("request_counts")
     assert isinstance(request_counts, dict)
     typed_counts = cast(dict[str, Any], request_counts)
@@ -853,7 +874,9 @@ def test_http_admission_unknown_participant_and_approval_journey(
     # the canonical provider-history boundary before converging on one binding.
     assert typed_counts["conversations.history"] == 3
     assert typed_counts["chat.getPermalink"] == 3
-    assert typed_counts["chat.postMessage"] == 1
+    # One access-review control is deleted after approval, while durable acceptance
+    # creates the initial provider-native work progress through the Worker drain.
+    assert typed_counts["chat.postMessage"] == 2
     assert typed_counts["chat.delete"] == 1
     rendered_state = str(provider_state)
     assert _BOT_TOKEN not in rendered_state
