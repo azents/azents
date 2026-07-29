@@ -4,17 +4,14 @@
 
 import json
 import logging
-from pathlib import Path
 
 import pytest
 from pytest import MonkeyPatch
 
-import azents_runtime_runner.main as runner_main
 from azents_runtime_runner.main import (
     RunnerLimitConfig,
     StructuredLogFormatter,
     _execution_policy_evidence_from_env,
-    _protected_staging_directory_from_env,
     run_runtime_runner,
     runner_limit_config_from_env,
 )
@@ -87,35 +84,6 @@ async def test_runner_requires_explicit_transfer_endpoint(
 
     with pytest.raises(SystemExit, match="AZ_RUNTIME_TRANSFER_ENDPOINT"):
         await run_runtime_runner()
-
-
-def test_protected_staging_requires_provider_created_directory(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    staging = tmp_path / "missing-staging"
-    monkeypatch.setenv("AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY", str(staging))
-    monkeypatch.setattr(runner_main.os, "geteuid", lambda: 0)
-
-    with pytest.raises(SystemExit, match="AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY"):
-        _protected_staging_directory_from_env()
-
-    assert not staging.exists()
-
-
-def test_protected_staging_rejects_symlink(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    target = tmp_path / "target"
-    target.mkdir()
-    staging = tmp_path / "staging"
-    staging.symlink_to(target, target_is_directory=True)
-    monkeypatch.setenv("AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY", str(staging))
-    monkeypatch.setattr(runner_main.os, "geteuid", lambda: 0)
-
-    with pytest.raises(SystemExit, match="AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY"):
-        _protected_staging_directory_from_env()
 
 
 _LIMIT_ENV_NAMES = (

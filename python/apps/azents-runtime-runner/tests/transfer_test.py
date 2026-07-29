@@ -5,10 +5,8 @@ import dataclasses
 import errno
 import hashlib
 import os
-import shutil
-import tempfile
 import threading
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -38,25 +36,9 @@ from azents_runtime_runner.transfer import RunnerTransferManager
 
 
 @pytest.fixture
-def tmpfs_path() -> Iterator[Path]:
-    """Provide an O_TMPFILE-capable parent filesystem for transfer tests."""
-    path = Path(tempfile.mkdtemp(dir="/dev/shm"))
-    try:
-        yield path
-    finally:
-        shutil.rmtree(path)
-
-
-@pytest.fixture
-def protected_tmpfs_staging(tmpfs_path: Path) -> Path:
-    """Provide the root-only staging boundary required by overwrite publication."""
-    if os.geteuid() != 0:
-        pytest.skip("requires root to verify workload identity denial")
-    staging = tmpfs_path / "transfer-staging"
-    staging.mkdir(mode=0o700)
-    os.chown(staging, 0, 0)
-    staging.chmod(0o700)
-    return staging
+def tmpfs_path(tmp_path: Path) -> Path:
+    """Provide an ordinary writable parent filesystem for transfer tests."""
+    return tmp_path
 
 
 class _Control:
@@ -252,10 +234,10 @@ async def test_upload_local_io_failure_emits_valid_integrity_result(
 
 
 @pytest.mark.asyncio
-async def test_download_fails_closed_without_replacing_existing_destination(
+async def test_download_atomically_replaces_existing_destination(
     tmpfs_path: Path,
 ) -> None:
-    """Same-UID staging never replaces an existing destination by pathname."""
+    """Verified content replaces an existing destination without privileged staging."""
     destination = tmpfs_path / "destination.bin"
     destination.write_bytes(b"old")
     data = b"new verified content"
@@ -271,39 +253,6 @@ async def test_download_fails_closed_without_replacing_existing_destination(
             )
         ),
         accepted_generation=lambda: 1,
-    )
-
-    await manager.handle_intent(_intent(destination, data=data))
-
-    result = await _result(control)
-    assert result.outcome is RunnerTransferOutcome.FAILED
-    assert result.failure is RunnerTransferFailure.DESTINATION_FAILED
-    assert destination.read_bytes() == b"old"
-    await manager.close()
-
-
-@pytest.mark.asyncio
-async def test_protected_staging_atomically_replaces_and_cleans_attempt(
-    tmpfs_path: Path,
-    protected_tmpfs_staging: Path,
-) -> None:
-    """Verified overwrite keeps the prior file visible until atomic replacement."""
-    destination = tmpfs_path / "destination.bin"
-    destination.write_bytes(b"old")
-    data = b"new verified content"
-    control = _Control()
-    manager = RunnerTransferManager(
-        control=control,
-        transfer=_Transfer(
-            (
-                RunnerDownloadChunk(offset=0, data=data),
-                RunnerDownloadComplete(
-                    actual_size=len(data), sha256=hashlib.sha256(data).hexdigest()
-                ),
-            )
-        ),
-        accepted_generation=lambda: 1,
-        protected_staging_directory=protected_tmpfs_staging,
     )
 
     await manager.handle_intent(_intent(destination, data=data))
@@ -312,172 +261,15 @@ async def test_protected_staging_atomically_replaces_and_cleans_attempt(
     assert result.outcome is RunnerTransferOutcome.SUCCEEDED
     assert result.destination_committed is True
     assert destination.read_bytes() == data
-    assert list(protected_tmpfs_staging.iterdir()) == []
+    assert not list(tmpfs_path.glob(".azents-transfer-*"))
     await manager.close()
-
-
-@pytest.mark.asyncio
-async def test_protected_staging_creates_workload_accessible_nested_destination(
-    tmpfs_path: Path,
-    protected_tmpfs_staging: Path,
-) -> None:
-    """Nested destination parents remain traversable after root publication."""
-    os.chown(tmpfs_path, 0, 0)
-    tmpfs_path.chmod(0o755)
-    workspace = tmpfs_path / "workspace"
-    workspace.mkdir(mode=0o755)
-    os.chown(workspace, 1000, 1000)
-    destination = workspace / "nested" / "destination.bin"
-    data = b"workload-readable"
-    control = _Control()
-    manager = RunnerTransferManager(
-        control=control,
-        transfer=_Transfer(
-            (
-                RunnerDownloadChunk(offset=0, data=data),
-                RunnerDownloadComplete(
-                    actual_size=len(data), sha256=hashlib.sha256(data).hexdigest()
-                ),
-            )
-        ),
-        accepted_generation=lambda: 1,
-        protected_staging_directory=protected_tmpfs_staging,
-    )
-
-    await manager.handle_intent(_intent(destination, data=data))
-
-    result = await _result(control)
-    parent_metadata = destination.parent.stat()
-    assert result.outcome is RunnerTransferOutcome.SUCCEEDED
-    assert parent_metadata.st_uid == 1000
-    assert parent_metadata.st_gid == 1000
-    assert parent_metadata.st_mode & 0o777 == 0o755
-
-    read_fd, write_fd = os.pipe()
-    process_id = os.fork()
-    if process_id == 0:
-        os.close(read_fd)
-        os.setgroups(())
-        os.setgid(1000)
-        os.setuid(1000)
-        try:
-            descriptor = os.open(destination, os.O_RDONLY)
-            try:
-                received = os.read(descriptor, len(data))
-            finally:
-                os.close(descriptor)
-            os.write(write_fd, received)
-        finally:
-            os.close(write_fd)
-        os._exit(0)
-    os.close(write_fd)
-    received = os.read(read_fd, len(data))
-    _, status = os.waitpid(process_id, 0)
-    os.close(read_fd)
-
-    assert os.waitstatus_to_exitcode(status) == 0
-    assert received == data
-    await manager.close()
-
-
-@pytest.mark.asyncio
-async def test_cross_device_protected_staging_fails_without_replacing_destination(
-    tmpfs_path: Path,
-    tmp_path: Path,
-) -> None:
-    """Overwrite refuses a protected staging boundary on another filesystem."""
-    if os.geteuid() != 0:
-        pytest.skip("requires root to prepare protected staging")
-    staging = tmp_path / "transfer-staging"
-    staging.mkdir(mode=0o700)
-    os.chown(staging, 0, 0)
-    staging.chmod(0o700)
-    if staging.stat().st_dev == tmpfs_path.stat().st_dev:
-        pytest.skip("test paths are on the same filesystem")
-    destination = tmpfs_path / "destination.bin"
-    destination.write_bytes(b"old")
-    data = b"new verified content"
-    control = _Control()
-    manager = RunnerTransferManager(
-        control=control,
-        transfer=_Transfer(
-            (
-                RunnerDownloadChunk(offset=0, data=data),
-                RunnerDownloadComplete(
-                    actual_size=len(data), sha256=hashlib.sha256(data).hexdigest()
-                ),
-            )
-        ),
-        accepted_generation=lambda: 1,
-        protected_staging_directory=staging,
-    )
-
-    await manager.handle_intent(_intent(destination, data=data))
-
-    result = await _result(control)
-    assert result.outcome is RunnerTransferOutcome.FAILED
-    assert result.failure is RunnerTransferFailure.DESTINATION_FAILED
-    assert destination.read_bytes() == b"old"
-    assert list(staging.iterdir()) == []
-    await manager.close()
-
-
-def test_workload_identity_cannot_access_protected_staging(
-    tmpfs_path: Path,
-    protected_tmpfs_staging: Path,
-) -> None:
-    """UID/GID 1000 cannot read, link, rename, delete, or precreate staging entries."""
-    workspace = tmpfs_path / "workspace"
-    workspace.mkdir(mode=0o755)
-    os.chown(workspace, 1000, 1000)
-    protected_file = protected_tmpfs_staging / "protected.bin"
-    protected_file.write_bytes(b"protected")
-    protected_file.chmod(0o600)
-    read_fd, write_fd = os.pipe()
-    process_id = os.fork()
-    if process_id == 0:
-        os.close(read_fd)
-        os.setgroups(())
-        os.setgid(1000)
-        os.setuid(1000)
-        outcomes: list[bool] = []
-        for operation in (
-            lambda: os.open(protected_file, os.O_RDONLY),
-            lambda: os.link(protected_file, workspace / "linked.bin"),
-            lambda: os.replace(protected_file, workspace / "renamed.bin"),
-            lambda: os.unlink(protected_file),
-            lambda: os.open(
-                protected_tmpfs_staging / "attacker.bin",
-                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
-                0o600,
-            ),
-        ):
-            try:
-                descriptor = operation()
-            except PermissionError:
-                outcomes.append(True)
-            else:
-                outcomes.append(False)
-                if isinstance(descriptor, int):
-                    os.close(descriptor)
-        os.write(write_fd, bytes(outcomes))
-        os.close(write_fd)
-        os._exit(0)
-    os.close(write_fd)
-    serialized_outcomes = os.read(read_fd, 5)
-    _, status = os.waitpid(process_id, 0)
-    os.close(read_fd)
-
-    assert os.waitstatus_to_exitcode(status) == 0
-    assert serialized_outcomes == bytes((True, True, True, True, True))
-    assert protected_file.read_bytes() == b"protected"
 
 
 @pytest.mark.asyncio
 async def test_untrusted_transfer_identifiers_cannot_escape_staging_directory(
     tmpfs_path: Path,
 ) -> None:
-    """Opaque unnamed staging ignores untrusted transfer identifiers."""
+    """Random staging names ignore untrusted transfer identifiers."""
     destination = tmpfs_path / "destination.bin"
     data = b"staged safely"
     control = _Control()
@@ -545,7 +337,7 @@ async def test_exact_duplicate_intent_reuses_one_completed_result(
 async def test_exact_cancel_emits_cancelled_result_without_publication(
     tmpfs_path: Path,
 ) -> None:
-    """Cancellation targets the matching active task without a staging pathname."""
+    """Cancellation targets the matching active task and cleans its staging file."""
     data = b"pending"
     started = asyncio.Event()
     release = asyncio.Event()
@@ -718,7 +510,7 @@ async def test_upload_snapshot_keeps_control_work_and_cancellation_responsive(
 async def test_successful_upload_leaves_no_mutable_snapshot_path(
     tmpfs_path: Path,
 ) -> None:
-    """A completed upload releases its unnamed snapshot when its fd closes."""
+    """A completed upload removes its same-directory snapshot."""
     source = tmpfs_path / "source.bin"
     data = b"upload bytes"
     source.write_bytes(data)
@@ -776,10 +568,10 @@ async def test_upload_rejects_fifo_without_blocking_control(tmpfs_path: Path) ->
 
 
 @pytest.mark.asyncio
-async def test_download_uses_unnamed_stage_and_leaves_no_reclaimable_path(
+async def test_download_cleans_same_directory_stage_after_cancellation(
     tmpfs_path: Path,
 ) -> None:
-    """An interrupted download owns no mutable staging or journal pathname."""
+    """An interrupted download removes its randomly named staging file."""
     started = asyncio.Event()
     release = asyncio.Event()
     data = b"pending"
@@ -810,8 +602,7 @@ async def test_download_uses_unnamed_stage_and_leaves_no_reclaimable_path(
     await manager.handle_intent(intent)
     await asyncio.wait_for(started.wait(), timeout=1)
 
-    assert not list(tmpfs_path.glob(".azents-transfer-*"))
-    assert not list(tmpfs_path.glob(".azents-transfer-orphans"))
+    assert len(list(tmpfs_path.glob(".azents-transfer-*"))) == 1
     await manager.handle_cancel(
         RunnerTransferCancel(
             identity=intent.identity,
@@ -821,16 +612,17 @@ async def test_download_uses_unnamed_stage_and_leaves_no_reclaimable_path(
         )
     )
     assert (await _result(control)).outcome is RunnerTransferOutcome.CANCELLED
+    assert not list(tmpfs_path.glob(".azents-transfer-*"))
     release.set()
     await manager.close()
 
 
 @pytest.mark.asyncio
-async def test_download_fails_closed_when_parent_lacks_unnamed_temporary_file_support(
+async def test_download_fails_closed_when_staging_file_cannot_be_created(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An unsupported O_TMPFILE capability cannot trigger a mutable-name fallback."""
+    """A staging allocation failure leaves the destination unchanged."""
     destination = tmp_path / "destination.bin"
     data = b"safe"
     control = _Control()
@@ -843,13 +635,13 @@ async def test_download_fails_closed_when_parent_lacks_unnamed_temporary_file_su
         )
     )
 
-    def unsupported_unnamed_temporary_file(parent_fd: int) -> int:
+    def fail_temporary_file_creation(parent_fd: int) -> tuple[int, str]:
         del parent_fd
         raise OSError(errno.EOPNOTSUPP, "Operation not supported")
 
     monkeypatch.setattr(
-        "azents_runtime_runner.transfer._open_unnamed_temporary_file",
-        unsupported_unnamed_temporary_file,
+        "azents_runtime_runner.transfer._open_temporary_file",
+        fail_temporary_file_creation,
     )
     manager = RunnerTransferManager(
         control=control,

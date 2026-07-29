@@ -29,8 +29,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
-last_verified_at: 2026-07-28
-spec_version: 41
+last_verified_at: 2026-07-29
+spec_version: 42
 ---
 
 # Agent Runtime Control
@@ -104,13 +104,15 @@ terminal state are checked at the Control boundary. A malformed, stale, duplicat
 cross-attempt frame fails that attempt without exposing another object. Ordinary Runner
 control operations remain independently available while a transfer stream is active.
 
-For downloads, the Runner writes through protected same-filesystem staging and commits
-the requested destination only after complete verification. An existing destination is
-left unchanged unless an admitted overwrite can use that protected staging path; an
-unsafe overwrite configuration fails closed. For uploads, the Runner snapshots one
-authorized source before opening the transfer and reports its independently calculated
-manifest. A terminal transfer result is accepted only for the current dispatch and
-cannot be replaced by a late result.
+For downloads, the Runner writes to a randomly named temporary file in the destination
+directory and commits the requested destination only after complete verification. An
+admitted overwrite atomically replaces the destination; failed and cancelled attempts
+remove their temporary file and leave the prior destination unchanged. This transfer
+integrity does not require root, fixed Linux identities, Provider-created staging, or
+elevated Runner capabilities. For
+uploads, the Runner snapshots one authorized source before opening the transfer and
+reports its independently calculated manifest. A terminal transfer result is accepted
+only for the current dispatch and cannot be replaced by a late result.
 
 Verified objects are claimed by trusted consumers through short leases. A consumer
 receives an opaque handle and bounded async stream, acknowledges only after its
@@ -383,6 +385,10 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-29** (spec_version 42) — Removed root-owned transfer staging, Runner
+  identity switching, and the Kubernetes staging init container. Docker and
+  Kubernetes Providers run the Runner as UID/GID 1000 while verified downloads retain
+  same-filesystem atomic publication, including overwrite.
 - **2026-07-28** (spec_version 41) — Added state-independent bounded transfer-prefix
   object and multipart orphan cleanup, kept one-hour access authority in Runtime
   Control, and clarified empty memory/Redis recovery.
