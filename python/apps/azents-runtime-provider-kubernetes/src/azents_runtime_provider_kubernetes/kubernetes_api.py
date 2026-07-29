@@ -42,7 +42,6 @@ class VolumeMount:
     name: str
     mount_path: str
     read_only: bool
-    sub_path: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -161,7 +160,6 @@ class PodSpec:
     tolerations: Sequence[Toleration]
     containers: Sequence[ContainerSpec]
     volumes: Sequence[PodVolume]
-    init_containers: Sequence[ContainerSpec] = ()
 
 
 @dataclasses.dataclass(frozen=True)

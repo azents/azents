@@ -3,7 +3,6 @@
 import asyncio
 import base64
 import contextlib
-import ctypes
 import fnmatch
 import hashlib
 import logging
@@ -67,19 +66,6 @@ _PROCESS_CLOSE_TIMEOUT_SECONDS = 5.0
 _MAX_MISSING_PROCESS_RECORDS = 128
 _MANAGED_WORKTREE_ROOT = ".azents/worktrees"
 _MAX_MANAGED_WORKTREE_DISCOVERY_ENTRIES = 512
-_WORKLOAD_UID = 1000
-_WORKLOAD_GID = 1000
-_LIBC = ctypes.CDLL(None, use_errno=True)
-try:
-    _setfsuid = _LIBC.setfsuid
-    _setfsuid.argtypes = (ctypes.c_uint,)
-    _setfsuid.restype = ctypes.c_uint
-    _setfsgid = _LIBC.setfsgid
-    _setfsgid.argtypes = (ctypes.c_uint,)
-    _setfsgid.restype = ctypes.c_uint
-except AttributeError:
-    _setfsuid = None
-    _setfsgid = None
 
 _T = TypeVar("_T")
 
@@ -447,10 +433,7 @@ class RunnerOperations:
 
         def run() -> _T:
             started_at.append(time.perf_counter())
-            with _workload_filesystem_identity(
-                required=self._workspace.has_blocked_paths
-            ):
-                return func(cancellation)
+            return func(cancellation)
 
         future = asyncio.get_running_loop().run_in_executor(
             self._file_operation_executor,
@@ -531,7 +514,6 @@ class RunnerOperations:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=True,
-            preexec_fn=_drop_to_workload_identity,
         )
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -626,22 +608,6 @@ class RunnerOperations:
                 ),
             )
             return
-        try:
-            base_path = str(self._workspace.resolve(base_path))
-        except ValueError as exc:
-            await self._file_apply_patch_error(
-                operation,
-                ApplyPatchFailure(
-                    phase="preflight",
-                    reason="base_path_reserved",
-                    message=str(exc),
-                    applied=(),
-                    failed=None,
-                    not_attempted=(),
-                    exact=True,
-                ),
-            )
-            return
         patch = b"".join(chunk.data for chunk in operation.body_chunks)
         declared_patch_bytes = _int_payload(
             operation.payload,
@@ -710,19 +676,16 @@ class RunnerOperations:
 
         def run() -> ApplyPatchResult:
             started_at.append(time.perf_counter())
-            with _workload_filesystem_identity(
-                required=self._workspace.has_blocked_paths
-            ):
-                return execute_apply_patch(
-                    base_path=base_path,
-                    patch=patch,
-                    declared_patch_bytes=declared_patch_bytes,
-                    schema_version=schema_version,
-                    cancellation=cancellation,
-                    deadline_at=operation.deadline_at,
-                    limits=self._apply_patch_limits,
-                    fault_injector=self._apply_patch_fault_injector,
-                )
+            return execute_apply_patch(
+                base_path=base_path,
+                patch=patch,
+                declared_patch_bytes=declared_patch_bytes,
+                schema_version=schema_version,
+                cancellation=cancellation,
+                deadline_at=operation.deadline_at,
+                limits=self._apply_patch_limits,
+                fault_injector=self._apply_patch_fault_injector,
+            )
 
         future = asyncio.get_running_loop().run_in_executor(
             self._file_operation_executor,
@@ -1593,7 +1556,6 @@ class RunnerOperations:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 start_new_session=True,
-                preexec_fn=_drop_to_workload_identity,
             )
         except OSError as exc:
             await self._final_error(operation, "PROCESS_START_FAILED", str(exc))
@@ -2364,7 +2326,6 @@ class RunnerOperations:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 start_new_session=True,
-                preexec_fn=_drop_to_workload_identity,
             )
         except OSError as exc:
             await self._final_error(operation, "git_command_failed", str(exc))
@@ -2544,33 +2505,6 @@ def _remaining_timeout_seconds(deadline_at: datetime | None) -> float | None:
     if deadline_at is None:
         return None
     return max((deadline_at - datetime.now(UTC)).total_seconds(), 0.001)
-
-
-def _drop_to_workload_identity() -> None:
-    """Drop privileged Runner subprocesses to the untrusted workload identity."""
-    if os.geteuid() == 0:
-        os.setgroups(())
-        os.setgid(_WORKLOAD_GID)
-        os.setuid(_WORKLOAD_UID)
-
-
-@contextlib.contextmanager
-def _workload_filesystem_identity(*, required: bool) -> Iterator[None]:
-    """Constrain native file workers to the untrusted workload filesystem identity."""
-    if not required or os.geteuid() != 0:
-        yield
-        return
-    if _setfsuid is None or _setfsgid is None:
-        raise RuntimeError(
-            "protected Runtime transfer staging requires Linux filesystem identities"
-        )
-    prior_gid = _setfsgid(_WORKLOAD_GID)
-    prior_uid = _setfsuid(_WORKLOAD_UID)
-    try:
-        yield
-    finally:
-        _setfsuid(prior_uid)
-        _setfsgid(prior_gid)
 
 
 def _git_command_error_message(result: _GitCommandResult) -> str:
@@ -3559,7 +3493,12 @@ def _excluded(
 
 def _resolve_lexical_path(raw_path: object, *, workspace: Workspace) -> Path:
     """Build an absolute path without following symlink targets."""
-    return workspace.resolve_lexical(raw_path)
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise ValueError("path is required")
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = workspace.root / path
+    return Path(os.path.normpath(str(path)))
 
 
 def _lexical_relative_path(path: Path, base: Path) -> str:

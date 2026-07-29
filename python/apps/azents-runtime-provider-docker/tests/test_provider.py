@@ -1,7 +1,6 @@
 """Docker Runtime Provider lifecycle tests."""
 
 import dataclasses
-import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import cast
@@ -30,7 +29,6 @@ from azents_runtime_control.provider import (
     RuntimeProviderObservedState as ControlRuntimeProviderObservedState,
 )
 
-import azents_runtime_provider_docker.provider as docker_provider
 from azents_runtime_provider_docker.docker_api import (
     DockerApi,
     DockerContainerInfo,
@@ -51,27 +49,8 @@ from azents_runtime_provider_docker.provider import (
     DockerRuntimeProviderConfig,
     InvalidResetFinalDesiredState,
     InvalidWorkspacePath,
-    _ensure_protected_staging_dir,  # pyright: ignore[reportPrivateUsage] -- Verify the Provider fails closed without root ownership authority.
 )
 from azents_runtime_provider_docker.runtime_control import DockerRuntimeControlAdapter
-
-
-@pytest.fixture(autouse=True)
-def _fake_docker_lifecycle_staging(  # pyright: ignore[reportUnusedFunction] -- Pytest discovers autouse fixtures.
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Keep Docker API lifecycle tests independent from host root ownership."""
-    if os.geteuid() == 0:
-        return
-
-    def create_staging_for_fake_docker(path: Path) -> None:
-        path.mkdir(parents=True, exist_ok=True)
-
-    monkeypatch.setattr(
-        docker_provider,
-        "_ensure_protected_staging_dir",
-        create_staging_for_fake_docker,
-    )
 
 
 @dataclasses.dataclass
@@ -236,20 +215,13 @@ async def test_start_creates_container_with_workspace_bind(tmp_path: Path) -> No
     assert result.report.observed_state is RuntimeProviderObservedState.RUNNING
     assert result.report.workspace_path == "/workspace/agent"
     container = docker.containers["azents-runtime-runtime-1"]
-    assert container.spec.user == "0:0"
+    assert container.spec.user == "1000:1000"
     assert container.spec.working_dir == "/workspace/agent"
     assert any(
         bind.container_path == "/workspace/agent" for bind in container.spec.binds
     )
     assert container.spec.env["AZ_RUNTIME_TRANSFER_ENDPOINT"] == "runtime-transfer:8030"
-    assert (
-        container.spec.env["AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY"]
-        == "/workspace/agent/.azents-transfer-staging"
-    )
-    assert all(
-        bind.container_path != "/workspace/agent/.azents-transfer-staging"
-        for bind in container.spec.binds
-    )
+    assert "AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY" not in container.spec.env
     assert container.spec.env["AZ_RUNTIME_RUNNER_AUTH_TOKEN"] == "runner-token-1"
     assert (
         container.spec.env["AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"]
@@ -258,30 +230,7 @@ async def test_start_creates_container_with_workspace_bind(tmp_path: Path) -> No
     workspace_path = tmp_path / "agent-runtimes" / "runtime-1" / "workspace"
     assert workspace_path.exists()
     workspace_stat = workspace_path.stat()
-    if os.geteuid() == 0:
-        assert workspace_stat.st_uid == 0
-        assert workspace_stat.st_gid == 0
-        assert workspace_stat.st_mode & 0o7777 == 0o1777
-        staging_stat = (workspace_path / ".azents-transfer-staging").stat()
-        assert staging_stat.st_uid == 0
-        assert staging_stat.st_gid == 0
-        assert staging_stat.st_mode & 0o777 == 0o700
-    else:
-        assert workspace_stat.st_mode & 0o777 == 0o777
-
-
-def test_protected_staging_requires_root_provider(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A non-root Provider cannot accidentally expose a writable staging directory."""
-    staging = tmp_path / "transfer-staging"
-    monkeypatch.setattr(os, "geteuid", lambda: 1000)
-
-    with pytest.raises(PermissionError, match="requires a root Docker provider"):
-        _ensure_protected_staging_dir(staging)
-
-    assert not staging.exists()
+    assert workspace_stat.st_mode & 0o777 in {0o755, 0o777}
 
 
 @pytest.mark.asyncio

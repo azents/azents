@@ -413,10 +413,6 @@ def pod_manifest(pod: PodResource) -> JsonObject:
         ],
         "volumes": [_volume_manifest(volume) for volume in pod.spec.volumes],
     }
-    if pod.spec.init_containers:
-        spec["initContainers"] = [
-            _container_manifest(container) for container in pod.spec.init_containers
-        ]
     if pod.spec.service_account_name is not None:
         spec["serviceAccountName"] = pod.spec.service_account_name
     if pod.spec.image_pull_secrets:
@@ -469,14 +465,9 @@ def _container_manifest(container: ContainerSpec) -> JsonObject:
         "env": [{"name": item.name, "value": item.value} for item in container.env],
         "volumeMounts": [
             {
-                key: value
-                for key, value in {
-                    "name": item.name,
-                    "mountPath": item.mount_path,
-                    "readOnly": item.read_only,
-                    "subPath": item.sub_path,
-                }.items()
-                if value is not None
+                "name": item.name,
+                "mountPath": item.mount_path,
+                "readOnly": item.read_only,
             }
             for item in container.volume_mounts
         ],
@@ -740,9 +731,6 @@ def pod_resource(data: JsonObject) -> PodResource:
             ),
             containers=tuple(_container(item) for item in spec.get("containers", [])),
             volumes=tuple(_volume(item) for item in spec.get("volumes", [])),
-            init_containers=tuple(
-                _container(item) for item in spec.get("initContainers", [])
-            ),
         ),
         status=None if status is None else _pod_status(status),
     )
@@ -773,9 +761,6 @@ def _container(data: JsonObject) -> ContainerSpec:
                 name=str(item["name"]),
                 mount_path=str(item["mountPath"]),
                 read_only=bool(item.get("readOnly", False)),
-                sub_path=(
-                    None if item.get("subPath") is None else str(item["subPath"])
-                ),
             )
             for item in data.get("volumeMounts", [])
         ),

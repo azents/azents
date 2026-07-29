@@ -47,7 +47,6 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     PodStatus,
     PodWatchEvent,
     Toleration,
-    VolumeMount,
 )
 from azents_runtime_provider_kubernetes.models import (
     RuntimeContainerAuth,
@@ -341,7 +340,7 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     env = {item.name: item.value for item in container.env}
     assert container.image == _RUNNER_IMAGE
     assert env["AZ_RUNTIME_TRANSFER_ENDPOINT"] == "runtime-transfer:8030"
-    assert env["AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY"] == "/var/run/azents-transfer"
+    assert "AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY" not in env
     assert container.working_dir == "/workspace/agent"
     assert container.resources == ContainerResources(
         requests={"cpu": "500m", "memory": "1Gi"},
@@ -368,36 +367,15 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     assert isinstance(workspace_volume, PersistentVolumeClaimVolume)
     assert workspace_volume.claim_name == pvc.metadata.name
     assert [volume.name for volume in pod.spec.volumes] == ["agent-workspace"]
-    assert [mount.name for mount in container.volume_mounts] == [
-        "agent-workspace",
-        "agent-workspace",
-    ]
-    assert (
-        VolumeMount(
-            name="agent-workspace",
-            mount_path="/var/run/azents-transfer",
-            read_only=False,
-            sub_path="transfer-staging",
-        )
-        in container.volume_mounts
-    )
-    assert (
-        VolumeMount(
-            name="agent-workspace",
-            mount_path="/workspace/agent",
-            read_only=False,
-            sub_path="workspace",
-        )
-        in container.volume_mounts
-    )
-    initializer = pod.spec.init_containers[0]
-    assert initializer.name == "initialize-transfer-staging"
-    assert initializer.image == _RUNNER_IMAGE
-    assert initializer.command is not None
-    assert "transfer-staging" in initializer.command[-1]
-    assert initializer.security_context.capabilities_add == ("CHOWN", "FOWNER")
-    assert initializer.security_context.capabilities_drop == ("ALL",)
-    assert container.security_context.capabilities_add == ("SETGID", "SETUID")
+    assert len(container.volume_mounts) == 1
+    assert container.volume_mounts[0].name == "agent-workspace"
+    assert container.volume_mounts[0].mount_path == "/workspace/agent"
+    assert container.volume_mounts[0].read_only is False
+    assert container.security_context.run_as_non_root is True
+    assert container.security_context.run_as_user == 1000
+    assert container.security_context.run_as_group == 1000
+    assert container.security_context.capabilities_add == ()
+    assert container.security_context.capabilities_drop == ("ALL",)
     assert pvc.spec.storage_class_name == "gp3"
     assert pvc.spec.storage_request == "20Gi"
     assert "azents/workspace-path" not in pod.metadata.labels
@@ -1426,6 +1404,11 @@ async def test_docker_policy_exposes_private_dind_socket_directly() -> None:
         "container-engine",
     ]
     assert runner.security_context.privileged is False
+    assert runner.security_context.run_as_non_root is True
+    assert runner.security_context.run_as_user == 1000
+    assert runner.security_context.run_as_group == 1000
+    assert runner.security_context.capabilities_add == ()
+    assert runner.security_context.capabilities_drop == ("ALL",)
     assert engine.resources == ContainerResources(
         requests={
             "cpu": "500m",
@@ -1473,10 +1456,8 @@ async def test_docker_policy_exposes_private_dind_socket_directly() -> None:
     runner_mounts = {mount.mount_path: mount for mount in runner.volume_mounts}
     engine_mounts = {mount.name: mount for mount in engine.volume_mounts}
     assert runner_mounts["/workspace/agent"].name == "agent-workspace"
-    assert runner_mounts["/var/run/azents-transfer"].name == "agent-workspace"
     assert engine_mounts["agent-workspace"].mount_path == "/workspace/agent"
     assert runner_mounts["/workspace/agent"].read_only is False
-    assert runner_mounts["/var/run/azents-transfer"].read_only is False
     assert engine_mounts["agent-workspace"].read_only is False
     assert runner_mounts["/tmp"].name == "runtime-shared-tmp"
     assert engine_mounts["runtime-shared-tmp"].mount_path == "/tmp"

@@ -39,12 +39,11 @@ _IMAGE_GENERATION = "agent-runtime-docker-v1"
 _RUNTIME_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _RUNNER_UID = 1000
 _RUNNER_GID = 1000
-_RUNNER_USER = "0:0"
+_RUNNER_USER = f"{_RUNNER_UID}:{_RUNNER_GID}"
 _WORKSPACE_DIR_MODE = 0o755
 _NON_ROOT_WORKSPACE_DIR_MODE = 0o777
 _CONTROL_HOST_ALIAS = "host.docker.internal:host-gateway"
 _LOGGER = logging.getLogger(__name__)
-_TRANSFER_STAGING_DIRECTORY_NAME = ".azents-transfer-staging"
 
 _LABEL_MANAGED_BY = "azents/managed-by"
 _LABEL_PROVIDER_ID = "azents/runtime-provider-id"
@@ -78,7 +77,6 @@ _ENV_POLICY_DIGEST = "AZ_RUNTIME_EXECUTION_POLICY_DIGEST"
 _ENV_POLICY_DESIRED_GENERATION = "AZ_RUNTIME_EXECUTION_POLICY_DESIRED_GENERATION"
 _ENV_POLICY_MODULE_VERSIONS = "AZ_RUNTIME_EXECUTION_POLICY_MODULE_VERSIONS"
 _ENV_POLICY_SOURCE_VERSIONS = "AZ_RUNTIME_EXECUTION_POLICY_SOURCE_VERSIONS"
-_ENV_TRANSFER_STAGING_DIRECTORY = "AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY"
 RUNNER_LIMIT_ENV_NAMES = (
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION",
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS",
@@ -410,10 +408,6 @@ class DockerRuntimeProvider:
             _ENV_WORKSPACE_ID: identity.workspace_id,
             _ENV_PROVIDER_ID: self._config.provider_id,
             _ENV_WORKSPACE_PATH: self._workspace_mount_path,
-            _ENV_TRANSFER_STAGING_DIRECTORY: str(
-                PurePosixPath(self._workspace_mount_path)
-                / _TRANSFER_STAGING_DIRECTORY_NAME
-            ),
         }
         if command.auth.control_tls_ca_pem is not None:
             env[_ENV_CONTROL_TLS_CA_PEM] = command.auth.control_tls_ca_pem
@@ -524,13 +518,9 @@ class DockerRuntimeProvider:
     def _tmp_host_dir(self, runtime_id: str) -> Path:
         return self._runtime_root(runtime_id) / "tmp-agent"
 
-    def _transfer_staging_host_dir(self, runtime_id: str) -> Path:
-        return self._workspace_host_dir(runtime_id) / _TRANSFER_STAGING_DIRECTORY_NAME
-
     def _ensure_workspace_dirs(self, runtime_id: str) -> None:
-        _ensure_workspace_dir(self._workspace_host_dir(runtime_id))
+        _ensure_writable_dir(self._workspace_host_dir(runtime_id))
         _ensure_writable_dir(self._tmp_host_dir(runtime_id))
-        _ensure_protected_staging_dir(self._transfer_staging_host_dir(runtime_id))
 
     def _delete_runtime_root(self, runtime_id: str) -> None:
         runtime_root = self._runtime_root(runtime_id)
@@ -561,44 +551,6 @@ def _ensure_writable_dir(path: Path) -> None:
     current_mode = stat.S_IMODE(path.stat().st_mode)
     if current_mode != expected_mode:
         path.chmod(expected_mode)  # noqa: S103
-
-
-def _ensure_workspace_dir(path: Path) -> None:
-    """Prepare a sticky workspace that protects its root-owned staging child."""
-    path.mkdir(parents=True, exist_ok=True)
-    if os.geteuid() == 0:
-        os.chown(path, 0, 0)
-        expected_mode = 0o1777
-    else:
-        expected_mode = _NON_ROOT_WORKSPACE_DIR_MODE
-    current_mode = stat.S_IMODE(path.stat().st_mode)
-    if current_mode != expected_mode:
-        path.chmod(expected_mode)  # noqa: S103
-
-
-def _ensure_protected_staging_dir(path: Path) -> None:
-    if os.geteuid() != 0:
-        raise PermissionError(
-            "protected Runtime transfer staging requires a root Docker provider"
-        )
-    try:
-        path.mkdir(parents=True)
-    except FileExistsError:
-        pass
-    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    try:
-        metadata = os.fstat(descriptor)
-        if not stat.S_ISDIR(metadata.st_mode):
-            raise OSError("transfer staging path is not a directory")
-        os.fchown(descriptor, 0, 0)
-        os.fchmod(descriptor, 0o700)
-        metadata = os.fstat(descriptor)
-        if metadata.st_uid != 0 or stat.S_IMODE(metadata.st_mode) != 0o700:
-            raise PermissionError(
-                "transfer staging directory protection was not applied"
-            )
-    finally:
-        os.close(descriptor)
 
 
 def _observed_state(
