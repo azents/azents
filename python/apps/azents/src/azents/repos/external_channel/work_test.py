@@ -1169,25 +1169,30 @@ async def test_initial_discord_delivery_is_authorized_before_binding_activation(
         )
     )
     assert work is not None
+    work.desired_progress_revision = 1
+    work.desired_progress_payload = {
+        "schema_version": 2,
+        "state": "checking",
+        "title": None,
+        "tasks": [],
+    }
+    progress_id = await repository.ensure_initial_discord_progress(
+        rdb_session,
+        work_id=work.id,
+        binding_id=binding_id,
+        labels={"guild_id": "111", "thread_id": "333"},
+    )
+    assert progress_id is not None
+    progress = await rdb_session.get(
+        RDBExternalChannelDeliveryAttempt,
+        progress_id,
+    )
+    assert progress is not None
     session_link = RDBExternalChannelDeliveryAttempt(
         origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
         origin_id=binding_id,
         operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
         request_payload={"text": "Open Session"},
-        status=ExternalChannelDeliveryStatus.PENDING,
-        channel_action_id=None,
-        binding_id=binding_id,
-        provider_message_key=None,
-        error_kind=None,
-        error_summary=None,
-        attempted_at=None,
-        completed_at=None,
-    )
-    progress = RDBExternalChannelDeliveryAttempt(
-        origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-        origin_id=work.id,
-        operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-        request_payload={"work_id": work.id, "text": "Checking…"},
         status=ExternalChannelDeliveryStatus.PENDING,
         channel_action_id=None,
         binding_id=binding_id,
@@ -1211,7 +1216,7 @@ async def test_initial_discord_delivery_is_authorized_before_binding_activation(
         attempted_at=None,
         completed_at=None,
     )
-    rdb_session.add_all((session_link, progress, unrelated_control))
+    rdb_session.add_all((session_link, unrelated_control))
     await rdb_session.flush()
 
     for attempt in (session_link, progress):
@@ -1234,6 +1239,178 @@ async def test_initial_discord_delivery_is_authorized_before_binding_activation(
     )
     assert unrelated_control.status is ExternalChannelDeliveryStatus.NOT_ATTEMPTED
     assert unrelated_control.error_kind == "delivery_authority_revoked"
+
+
+async def test_initial_discord_progress_update_is_authorized_before_activation(
+    rdb_session: AsyncSession,
+) -> None:
+    """The current catch-up update may finish initial Discord presentation."""
+    _agent_id, binding_id = await _setup_binding(rdb_session)
+    await _as_discord_binding(rdb_session, binding_id=binding_id)
+    binding = await rdb_session.get(RDBExternalChannelBinding, binding_id)
+    assert binding is not None
+    binding.activation_status = ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+    repository = ExternalChannelWorkRepository()
+    await repository.ensure_active_work(rdb_session, binding_id=binding_id)
+    work = await rdb_session.scalar(
+        sa.select(RDBExternalChannelWork).where(
+            RDBExternalChannelWork.binding_id == binding_id,
+            RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
+        )
+    )
+    assert work is not None
+    work.desired_progress_revision = 1
+    work.desired_progress_payload = {
+        "schema_version": 2,
+        "state": "checking",
+        "title": None,
+        "tasks": [],
+    }
+    create_id = await repository.ensure_initial_discord_progress(
+        rdb_session,
+        work_id=work.id,
+        binding_id=binding_id,
+        labels={"guild_id": "111", "thread_id": "333"},
+    )
+    assert create_id is not None
+    assert await repository.start_delivery(
+        rdb_session,
+        delivery_attempt_id=create_id,
+        now=_at(2),
+    )
+    work.desired_progress_revision = 2
+    work.desired_progress_payload = {
+        "schema_version": 2,
+        "state": "working",
+        "title": "Investigating…",
+        "tasks": [
+            {
+                "id": "investigate",
+                "title": "Investigate",
+                "status": "in_progress",
+                "details": None,
+                "output": None,
+                "sources": [],
+            }
+        ],
+    }
+    update_id = await repository.finish_delivery(
+        rdb_session,
+        delivery_attempt_id=create_id,
+        status=ExternalChannelDeliveryStatus.DELIVERED,
+        provider_message_key="discord:111:500",
+        error_kind=None,
+        error_summary=None,
+        now=_at(3),
+    )
+    assert update_id is not None
+
+    target = await repository.start_delivery(
+        rdb_session,
+        delivery_attempt_id=update_id,
+        now=_at(4),
+    )
+
+    assert target is not None
+    assert target.operation is ExternalChannelDeliveryOperation.PROGRESS_UPDATE
+    assert target.request_payload["provider_message_key"] == "discord:111:500"
+
+
+async def test_restore_only_exact_revoked_initial_discord_progress_update(
+    rdb_session: AsyncSession,
+) -> None:
+    """Reconciliation restores only the current pre-provider catch-up lineage."""
+    _agent_id, binding_id = await _setup_binding(rdb_session)
+    await _as_discord_binding(rdb_session, binding_id=binding_id)
+    binding = await rdb_session.get(RDBExternalChannelBinding, binding_id)
+    assert binding is not None
+    binding.activation_status = ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+    repository = ExternalChannelWorkRepository()
+    await repository.ensure_active_work(rdb_session, binding_id=binding_id)
+    work = await rdb_session.scalar(
+        sa.select(RDBExternalChannelWork).where(
+            RDBExternalChannelWork.binding_id == binding_id,
+            RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
+        )
+    )
+    assert work is not None
+    work.desired_progress_revision = 1
+    work.desired_progress_payload = {
+        "schema_version": 2,
+        "state": "checking",
+        "title": None,
+        "tasks": [],
+    }
+    create_id = await repository.ensure_initial_discord_progress(
+        rdb_session,
+        work_id=work.id,
+        binding_id=binding_id,
+        labels={"guild_id": "111", "thread_id": "333"},
+    )
+    assert create_id is not None
+    assert await repository.start_delivery(
+        rdb_session,
+        delivery_attempt_id=create_id,
+        now=_at(2),
+    )
+    work.desired_progress_revision = 2
+    work.desired_progress_payload = {
+        "schema_version": 2,
+        "state": "working",
+        "title": "Investigating…",
+        "tasks": [
+            {
+                "id": "investigate",
+                "title": "Investigate",
+                "status": "in_progress",
+                "details": None,
+                "output": None,
+                "sources": [],
+            }
+        ],
+    }
+    update_id = await repository.finish_delivery(
+        rdb_session,
+        delivery_attempt_id=create_id,
+        status=ExternalChannelDeliveryStatus.DELIVERED,
+        provider_message_key="discord:111:500",
+        error_kind=None,
+        error_summary=None,
+        now=_at(3),
+    )
+    assert update_id is not None
+    update = await rdb_session.get(RDBExternalChannelDeliveryAttempt, update_id)
+    assert update is not None
+    update.status = ExternalChannelDeliveryStatus.NOT_ATTEMPTED
+    update.error_kind = "delivery_authority_revoked"
+    update.error_summary = "The current binding delivery authority was revoked."
+    update.completed_at = _at(4)
+    update.origin_id = "unrelated-manager-operation"
+    await rdb_session.flush()
+
+    assert (
+        await repository.restore_initial_discord_progress_updates(
+            rdb_session,
+            binding_id=binding_id,
+        )
+        == 0
+    )
+    assert update.status is ExternalChannelDeliveryStatus.NOT_ATTEMPTED
+
+    update.origin_id = create_id
+    await rdb_session.flush()
+
+    assert (
+        await repository.restore_initial_discord_progress_updates(
+            rdb_session,
+            binding_id=binding_id,
+        )
+        == 1
+    )
+    assert update.status is ExternalChannelDeliveryStatus.PENDING
+    assert update.error_kind is None
+    assert update.error_summary is None
+    assert update.completed_at is None
 
 
 async def test_active_work_snapshot_fences_session_and_agent_lifecycle(

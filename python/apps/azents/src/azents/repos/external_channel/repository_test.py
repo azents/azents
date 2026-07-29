@@ -147,6 +147,9 @@ async def test_list_initial_delivery_attempts_scopes_session_link_and_work_parts
                     origin_id="work-1",
                     operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
                     status=ExternalChannelDeliveryStatus.DELIVERED,
+                    channel_action_id=None,
+                    request_payload={"work_id": "work-1"},
+                    provider_message_key=None,
                 ),
                 SimpleNamespace(
                     id="part-2",
@@ -155,6 +158,9 @@ async def test_list_initial_delivery_attempts_scopes_session_link_and_work_parts
                     origin_id="work-1",
                     operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
                     status=ExternalChannelDeliveryStatus.UNKNOWN,
+                    channel_action_id=None,
+                    request_payload={"work_id": "work-1"},
+                    provider_message_key=None,
                 ),
             ],
         ]
