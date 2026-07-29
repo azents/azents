@@ -5,7 +5,6 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import cast
 
-import httpx
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -107,7 +106,6 @@ def _service(
         admission_service=cast(ExternalChannelAdmissionService, object()),
         interaction_processor=cast(ExternalChannelInteractionProcessor, object()),
         shortcut_source_service=cast(ExternalChannelShortcutSourceService, object()),
-        http_client=cast(httpx.AsyncClient, object()),
         manager_id="manager-1",
     )
 

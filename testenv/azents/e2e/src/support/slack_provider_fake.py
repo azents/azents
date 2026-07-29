@@ -1141,8 +1141,16 @@ def _read_http_headers(connection: socket.socket) -> dict[str, str]:
 
 
 def _send_websocket_text(connection: socket.socket, text: str) -> None:
-    payload = text.encode()
-    header = bytearray([0x81])
+    _send_websocket_frame(connection, opcode=0x1, payload=text.encode())
+
+
+def _send_websocket_frame(
+    connection: socket.socket,
+    *,
+    opcode: int,
+    payload: bytes,
+) -> None:
+    header = bytearray([0x80 | opcode])
     if len(payload) < 126:
         header.append(len(payload))
     elif len(payload) < 65_536:
@@ -1155,22 +1163,30 @@ def _send_websocket_text(connection: socket.socket, text: str) -> None:
 
 
 def _receive_websocket_text(connection: socket.socket) -> str:
-    first, second = _receive_exact(connection, 2)
-    opcode = first & 0x0F
-    if opcode == 0x8:
-        return ""
-    masked = second & 0x80
-    length = second & 0x7F
-    if length == 126:
-        length = struct.unpack("!H", _receive_exact(connection, 2))[0]
-    elif length == 127:
-        length = struct.unpack("!Q", _receive_exact(connection, 8))[0]
-    mask = _receive_exact(connection, 4) if masked else b""
-    payload = bytearray(_receive_exact(connection, length))
-    if mask:
-        for index in range(len(payload)):
-            payload[index] ^= mask[index % 4]
-    return payload.decode()
+    while True:
+        first, second = _receive_exact(connection, 2)
+        opcode = first & 0x0F
+        masked = second & 0x80
+        length = second & 0x7F
+        if length == 126:
+            length = struct.unpack("!H", _receive_exact(connection, 2))[0]
+        elif length == 127:
+            length = struct.unpack("!Q", _receive_exact(connection, 8))[0]
+        mask = _receive_exact(connection, 4) if masked else b""
+        payload = bytearray(_receive_exact(connection, length))
+        if mask:
+            for index in range(len(payload)):
+                payload[index] ^= mask[index % 4]
+        if opcode == 0x8:
+            return ""
+        if opcode == 0x9:
+            _send_websocket_frame(connection, opcode=0xA, payload=bytes(payload))
+            continue
+        if opcode == 0xA:
+            continue
+        if opcode == 0x1:
+            return payload.decode()
+        raise ConnectionError("Unsupported WebSocket frame.")
 
 
 def _receive_exact(connection: socket.socket, size: int) -> bytes:

@@ -4,10 +4,14 @@ import datetime
 import hashlib
 import hmac
 import json
+from typing import Any
 from urllib.parse import parse_qs, urlencode
 
+import aiohttp
 import httpx
 import pytest
+from slack_sdk.web.async_client import AsyncWebClient
+from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from azents.core.enums import ExternalChannelTransport
 from azents.services.external_channel.slack_endpoint import (
@@ -34,6 +38,89 @@ from azents.services.external_channel.slack_http import (
 
 _NOW = datetime.datetime(2026, 7, 22, 1, 0, tzinfo=datetime.UTC)
 _SECRET = "signing-secret"
+
+
+def _encoded_sdk_params(
+    params: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Mirror the SDK's safe top-level query normalization for HTTP scenarios."""
+    return {
+        key: (
+            "1"
+            if value is True
+            else "0"
+            if value is False
+            else json.dumps(value, separators=(",", ":"))
+            if isinstance(value, dict | list)
+            else value
+        )
+        for key, value in (params or {}).items()
+        if value is not None
+    }
+
+
+class _MockSlackWebClient(AsyncWebClient):
+    """Route public SDK calls through one deterministic HTTPX transport."""
+
+    def __init__(self, http_client: httpx.AsyncClient) -> None:
+        super().__init__(retry_handlers=[])
+        self.http_client = http_client
+
+    async def api_call(
+        self,
+        api_method: str,
+        *,
+        http_verb: str = "POST",
+        files: dict[str, Any] | None = None,
+        data: dict[str, Any] | aiohttp.FormData | None = None,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        auth: dict[str, str] | None = None,
+    ) -> AsyncSlackResponse:
+        del files, auth
+        request_headers = dict(headers or {})
+        request_params = _encoded_sdk_params(params)
+        request_json = dict(json or {}) if json is not None else None
+        if isinstance(data, aiohttp.FormData):
+            raise AssertionError("Slack test double does not support multipart forms.")
+        request_data = dict(data) if isinstance(data, dict) else None
+        token = request_params.pop("token", None)
+        if request_json is not None:
+            token = request_json.pop("token", token)
+        if isinstance(request_data, dict):
+            token = request_data.pop("token", token)
+        if isinstance(token, str):
+            request_headers["Authorization"] = f"Bearer {token}"
+        try:
+            response = await self.http_client.request(
+                http_verb,
+                f"{slack_api_base_url()}/{api_method}",
+                params=request_params or None,
+                json=request_json,
+                data=request_data,
+                headers=request_headers,
+            )
+        except httpx.RequestError as error:
+            raise aiohttp.ClientError("Slack test transport failed.") from error
+        try:
+            payload: object = response.json()
+        except ValueError:
+            payload = {}
+        sdk_response = AsyncSlackResponse(
+            client=self,
+            http_verb=http_verb,
+            api_url=str(response.request.url),
+            req_args={},
+            data=payload if isinstance(payload, dict | bytes) else {},
+            headers=dict(response.headers),
+            status_code=response.status_code,
+        )
+        return sdk_response.validate()
+
+
+def _validation_client(http_client: httpx.AsyncClient) -> SlackWebAPIClient:
+    return SlackWebAPIClient(_MockSlackWebClient(http_client))
 
 
 def test_testenv_endpoint_overrides_are_explicit(
@@ -508,7 +595,7 @@ async def test_auth_test_returns_sanitized_identity() -> None:
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await SlackWebAPIClient(client).validate_connection(
+        result = await _validation_client(client).validate_connection(
             bot_token="xoxb-secret",
             app_id="A-1",
             transport=ExternalChannelTransport.HTTP,
@@ -568,7 +655,7 @@ async def test_auth_test_derives_optional_internal_capabilities_independently(
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await SlackWebAPIClient(client).validate_connection(
+        result = await _validation_client(client).validate_connection(
             bot_token="xoxb-secret",
             app_id="A-1",
             transport=ExternalChannelTransport.HTTP,
@@ -602,7 +689,7 @@ async def test_app_id_must_own_the_configured_bot_token() -> None:
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await SlackWebAPIClient(client).validate_connection(
+        result = await _validation_client(client).validate_connection(
             bot_token="xoxb-secret",
             app_id="A-WRONG",
             transport=ExternalChannelTransport.HTTP,
@@ -636,7 +723,7 @@ async def test_auth_test_rejects_missing_required_bot_scopes() -> None:
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        result = await SlackWebAPIClient(client).validate_connection(
+        result = await _validation_client(client).validate_connection(
             bot_token="xoxb-secret",
             app_id="A-1",
             transport=ExternalChannelTransport.HTTP,
@@ -661,7 +748,7 @@ async def test_auth_test_distinguishes_invalid_and_unavailable() -> None:
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(invalid_handler)
     ) as client:
-        invalid = await SlackWebAPIClient(client).validate_connection(
+        invalid = await _validation_client(client).validate_connection(
             bot_token="xoxb-invalid",
             app_id="A-1",
             transport=ExternalChannelTransport.HTTP,
@@ -674,7 +761,7 @@ async def test_auth_test_distinguishes_invalid_and_unavailable() -> None:
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(unavailable_handler)
     ) as client:
-        unavailable = await SlackWebAPIClient(client).validate_connection(
+        unavailable = await _validation_client(client).validate_connection(
             bot_token="xoxb-secret",
             app_id="A-1",
             transport=ExternalChannelTransport.HTTP,

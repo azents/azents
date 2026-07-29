@@ -2,11 +2,9 @@
 
 import datetime
 import logging
-from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Annotated, assert_never
 
-import httpx
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,6 +42,7 @@ from azents.services.external_channel.slack_http import (
     SlackConnectionValidation,
     SlackWebAPIClient,
 )
+from azents.services.external_channel.slack_sdk_client import create_slack_web_client
 
 logger = logging.getLogger(__name__)
 
@@ -63,20 +62,9 @@ class ExternalChannelConnectionSetup:
     connection: ExternalChannelConnection
 
 
-async def get_slack_validation_http_client() -> AsyncIterator[httpx.AsyncClient]:
-    """Provide a bounded HTTP client for Slack connection validation."""
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        yield client
-
-
-def get_slack_web_api_client(
-    http_client: Annotated[
-        httpx.AsyncClient,
-        Depends(get_slack_validation_http_client),
-    ],
-) -> SlackWebAPIClient:
+def get_slack_web_api_client() -> SlackWebAPIClient:
     """Provide the Slack Web API adapter."""
-    return SlackWebAPIClient(http_client)
+    return SlackWebAPIClient(create_slack_web_client())
 
 
 def get_external_channel_credentials_codec(

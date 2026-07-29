@@ -77,6 +77,7 @@ from azents.services.external_channel.slack_events import (
     SlackProviderRequestRejected,
     SlackProviderTemporaryError,
 )
+from azents.services.external_channel.slack_sdk_client import create_slack_web_client
 from azents.services.file_storage import FileStorage, RangedFileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_resource_authority import SessionResourceAuthority
@@ -154,7 +155,10 @@ def get_slack_file_client(
     ],
 ) -> SlackConversationClient:
     """Provide the Slack file-read adapter."""
-    return SlackConversationClient(http_client)
+    return SlackConversationClient(
+        web_client=create_slack_web_client(),
+        http_client=http_client,
+    )
 
 
 async def get_discord_file_http_client() -> AsyncIterator[httpx.AsyncClient]:

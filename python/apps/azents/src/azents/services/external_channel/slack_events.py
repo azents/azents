@@ -10,9 +10,12 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from typing import Literal
-from urllib.parse import parse_qs
 
+import aiohttp
 import httpx
+from slack_sdk.errors import SlackApiError
+from slack_sdk.web.async_client import AsyncWebClient
+from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from azents.core.enums import (
     ExternalChannelMessageLifecycle,
@@ -30,10 +33,7 @@ from azents.services.external_channel.slack_blocks import (
     projected_slack_blocks_text,
     slack_blocks_text,
 )
-from azents.services.external_channel.slack_endpoint import (
-    slack_api_base_url,
-    slack_file_url_allowed,
-)
+from azents.services.external_channel.slack_endpoint import slack_file_url_allowed
 
 _MAX_NORMALIZED_TEXT_BYTES = 64 * 1024
 _MAX_ATTACHMENT_TYPES = 32
@@ -430,7 +430,13 @@ def slack_provider_position(timestamp: str) -> str:
 class SlackConversationClient:
     """Bounded Slack Web API adapter for inbound hydration and access control."""
 
-    def __init__(self, http_client: httpx.AsyncClient) -> None:
+    def __init__(
+        self,
+        *,
+        web_client: AsyncWebClient,
+        http_client: httpx.AsyncClient,
+    ) -> None:
+        self.web_client = web_client
         self.http_client = http_client
 
     async def fetch_conversation_access(
@@ -440,13 +446,15 @@ class SlackConversationClient:
         channel_id: str,
     ) -> SlackConversationAccess:
         """Validate App membership and unsupported Slack Connect state."""
-        response = await self._request(
-            "GET",
-            "/conversations.info",
-            bot_token=bot_token,
-            params={"channel": channel_id, "include_num_members": "false"},
+        payload = await self._call_api(
+            api_method="conversations.info",
+            argument_names=("channel", "include_num_members"),
+            request=self.web_client.conversations_info(
+                channel=channel_id,
+                include_num_members=False,
+                token=bot_token,
+            ),
         )
-        payload = self._success_payload(response)
         channel = payload.get("channel")
         if not isinstance(channel, dict):
             raise SlackProviderTemporaryError(
@@ -473,13 +481,15 @@ class SlackConversationClient:
         channel_id: str,
     ) -> str | None:
         """Resolve one Slack channel ID to a display label."""
-        response = await self._request(
-            "GET",
-            "/conversations.info",
-            bot_token=bot_token,
-            params={"channel": channel_id, "include_num_members": "false"},
+        payload = await self._call_api(
+            api_method="conversations.info",
+            argument_names=("channel", "include_num_members"),
+            request=self.web_client.conversations_info(
+                channel=channel_id,
+                include_num_members=False,
+                token=bot_token,
+            ),
         )
-        payload = self._success_payload(response)
         channel = payload.get("channel")
         if not isinstance(channel, dict):
             raise SlackProviderTemporaryError(
@@ -495,13 +505,14 @@ class SlackConversationClient:
     ) -> str | None:
         """Resolve one Slack user or bot identity to a human-readable name."""
         if provider_user_id.startswith("bot:"):
-            response = await self._request(
-                "GET",
-                "/bots.info",
-                bot_token=bot_token,
-                params={"bot": provider_user_id.removeprefix("bot:")},
+            payload = await self._call_api(
+                api_method="bots.info",
+                argument_names=("bot",),
+                request=self.web_client.bots_info(
+                    bot=provider_user_id.removeprefix("bot:"),
+                    token=bot_token,
+                ),
             )
-            payload = self._success_payload(response)
             bot = payload.get("bot")
             if not isinstance(bot, dict):
                 raise SlackProviderTemporaryError("Slack bot response is malformed.")
@@ -509,13 +520,14 @@ class SlackConversationClient:
             return name if isinstance(name, str) and name else None
         if provider_user_id.startswith("app:"):
             return None
-        response = await self._request(
-            "GET",
-            "/users.info",
-            bot_token=bot_token,
-            params={"user": provider_user_id},
+        payload = await self._call_api(
+            api_method="users.info",
+            argument_names=("user",),
+            request=self.web_client.users_info(
+                user=provider_user_id,
+                token=bot_token,
+            ),
         )
-        payload = self._success_payload(response)
         user = payload.get("user")
         if not isinstance(user, dict):
             raise SlackProviderTemporaryError("Slack user response is malformed.")
@@ -542,21 +554,18 @@ class SlackConversationClient:
         limit: int,
     ) -> SlackThreadPage:
         """Fetch one cursor page of accessible thread history."""
-        params: dict[str, str | int] = {
-            "channel": channel_id,
-            "ts": root_thread_ts,
-            "limit": limit,
-            "inclusive": "true",
-        }
-        if cursor is not None:
-            params["cursor"] = cursor
-        response = await self._request(
-            "GET",
-            "/conversations.replies",
-            bot_token=bot_token,
-            params=params,
+        payload = await self._call_api(
+            api_method="conversations.replies",
+            argument_names=("channel", "cursor", "inclusive", "limit", "ts"),
+            request=self.web_client.conversations_replies(
+                channel=channel_id,
+                ts=root_thread_ts,
+                cursor=cursor,
+                inclusive=True,
+                limit=limit,
+                token=bot_token,
+            ),
         )
-        payload = self._success_payload(response)
         raw_messages = payload.get("messages")
         if not isinstance(raw_messages, list):
             raise SlackProviderTemporaryError(
@@ -591,13 +600,15 @@ class SlackConversationClient:
         message_ts: str,
     ) -> str | None:
         """Resolve a provider-validated permalink for one Slack message."""
-        response = await self._request(
-            "GET",
-            "/chat.getPermalink",
-            bot_token=bot_token,
-            params={"channel": channel_id, "message_ts": message_ts},
+        payload = await self._call_api(
+            api_method="chat.getPermalink",
+            argument_names=("channel", "message_ts"),
+            request=self.web_client.chat_getPermalink(
+                channel=channel_id,
+                message_ts=message_ts,
+                token=bot_token,
+            ),
         )
-        payload = self._success_payload(response)
         permalink = payload.get("permalink")
         if not isinstance(permalink, str) or not permalink.startswith("https://"):
             return None
@@ -610,13 +621,14 @@ class SlackConversationClient:
         provider_file_id: str,
     ) -> SlackFileDownloadInfo:
         """Fetch current metadata and a server-only private download URL."""
-        response = await self._request(
-            "GET",
-            "/files.info",
-            bot_token=bot_token,
-            params={"file": provider_file_id},
+        payload = await self._call_api(
+            api_method="files.info",
+            argument_names=("file",),
+            request=self.web_client.files_info(
+                file=provider_file_id,
+                token=bot_token,
+            ),
         )
-        payload = self._success_payload(response)
         raw_file = payload.get("file")
         if not isinstance(raw_file, dict):
             raise SlackProviderTemporaryError("Slack file response is malformed.")
@@ -773,19 +785,37 @@ class SlackConversationClient:
                     },
                     *blocks,
                 ]
+        text = message.get("text")
+        blocks = message.get("blocks")
+        if not isinstance(text, str) or not isinstance(blocks, list):
+            raise ValueError("Slack approval message projection is invalid.")
+
+        async def request(include_icon: bool) -> AsyncSlackResponse:
+            return await self.web_client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=thread_ts,
+                text=text,
+                blocks=blocks,
+                icon_url=icon_url if include_icon else None,
+                unfurl_links=False,
+                unfurl_media=False,
+                token=bot_token,
+            )
+
         return await self._attempt_message_operation(
-            bot_token=bot_token,
             tenant_id=tenant_id,
             channel_id=channel_id,
-            path="/chat.postMessage",
-            json_body={
-                "channel": channel_id,
-                "thread_ts": thread_ts,
-                **message,
-                **({"icon_url": icon_url} if icon_url is not None else {}),
-                "unfurl_links": False,
-                "unfurl_media": False,
-            },
+            api_method="chat.postMessage",
+            argument_names=(
+                "blocks",
+                "channel",
+                "icon_url",
+                "text",
+                "thread_ts",
+                "unfurl_links",
+                "unfurl_media",
+            ),
+            request=request,
             expected_message_ts=None,
             allow_icon_fallback=icon_url is not None,
         )
@@ -808,19 +838,31 @@ class SlackConversationClient:
                 error_kind="provider_payload_invalid",
                 error_summary="Slack Markdown text exceeds the supported limit.",
             )
+
+        async def request(include_icon: bool) -> AsyncSlackResponse:
+            return await self.web_client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=thread_ts,
+                markdown_text=markdown_text,
+                icon_url=icon_url if include_icon else None,
+                unfurl_links=False,
+                unfurl_media=False,
+                token=bot_token,
+            )
+
         return await self._attempt_message_operation(
-            bot_token=bot_token,
             tenant_id=tenant_id,
             channel_id=channel_id,
-            path="/chat.postMessage",
-            json_body={
-                "channel": channel_id,
-                "thread_ts": thread_ts,
-                "markdown_text": markdown_text,
-                **({"icon_url": icon_url} if icon_url is not None else {}),
-                "unfurl_links": False,
-                "unfurl_media": False,
-            },
+            api_method="chat.postMessage",
+            argument_names=(
+                "channel",
+                "icon_url",
+                "markdown_text",
+                "thread_ts",
+                "unfurl_links",
+                "unfurl_media",
+            ),
+            request=request,
             expected_message_ts=None,
             allow_icon_fallback=icon_url is not None,
         )
@@ -841,12 +883,13 @@ class SlackConversationClient:
                 error_summary="Slack interaction trigger is unavailable.",
             )
         return await self._attempt_interaction_view_mutation(
-            path="/views.open",
-            bot_token=bot_token,
-            json_body={
-                "trigger_id": trigger_id,
-                "view": self._interaction_view_payload(view),
-            },
+            api_method="views.open",
+            argument_names=("trigger_id", "view"),
+            request=self.web_client.views_open(
+                trigger_id=trigger_id,
+                view=self._interaction_view_payload(view),
+                token=bot_token,
+            ),
             success_status="opened",
         )
 
@@ -873,13 +916,14 @@ class SlackConversationClient:
                 error_summary="Slack interaction view revision is unavailable.",
             )
         return await self._attempt_interaction_view_mutation(
-            path="/views.update",
-            bot_token=bot_token,
-            json_body={
-                "view_id": view_id,
-                **({"hash": view_hash} if view_hash is not None else {}),
-                "view": self._interaction_view_payload(view),
-            },
+            api_method="views.update",
+            argument_names=("hash", "view", "view_id"),
+            request=self.web_client.views_update(
+                view_id=view_id,
+                hash=view_hash,
+                view=self._interaction_view_payload(view),
+                token=bot_token,
+            ),
             success_status="updated",
         )
 
@@ -940,22 +984,19 @@ class SlackConversationClient:
                 error_kind="provider_payload_invalid",
                 error_summary="Slack file reply payload is invalid.",
             )
-        uploaded_files: list[dict[str, str]] = []
+        uploaded_files: list[dict[str, str | None]] = []
         try:
             for file in files:
                 if before_provider_request is not None:
                     await before_provider_request()
-                upload_target = self._success_payload(
-                    await self._request(
-                        "POST",
-                        "/files.getUploadURLExternal",
-                        bot_token=bot_token,
-                        form_data={
-                            "filename": file.filename,
-                            "length": str(file.length),
-                        },
-                        timeout=self._delivery_timeout(deadline_at),
-                    )
+                upload_target = await self._call_api(
+                    api_method="files.getUploadURLExternal",
+                    argument_names=("filename", "length"),
+                    request=self.web_client.files_getUploadURLExternal(
+                        filename=file.filename,
+                        length=file.length,
+                        token=bot_token,
+                    ),
                 )
                 upload_url = upload_target.get("upload_url")
                 file_id = upload_target.get("file_id")
@@ -1029,29 +1070,28 @@ class SlackConversationClient:
                             status="failed",
                             provider_message_key=None,
                             error_kind="provider_rejected",
-                            error_summary=("Slack rejected the external file upload."),
+                            error_summary="Slack rejected the external file upload.",
                         )
                     uploaded_files.append({"id": file_id, "title": file.filename})
                 finally:
                     await upload_response.aclose()
             if before_provider_request is not None:
                 await before_provider_request()
-            self._success_payload(
-                await self._request(
-                    "POST",
-                    "/files.completeUploadExternal",
-                    bot_token=bot_token,
-                    form_data={
-                        "files": json.dumps(
-                            uploaded_files,
-                            separators=(",", ":"),
-                        ),
-                        "channel_id": channel_id,
-                        "thread_ts": thread_ts,
-                        "initial_comment": markdown_text,
-                    },
-                    timeout=self._delivery_timeout(deadline_at),
-                )
+            await self._call_api(
+                api_method="files.completeUploadExternal",
+                argument_names=(
+                    "channel_id",
+                    "files",
+                    "initial_comment",
+                    "thread_ts",
+                ),
+                request=self.web_client.files_completeUploadExternal(
+                    files=uploaded_files,
+                    channel_id=channel_id,
+                    thread_ts=thread_ts,
+                    initial_comment=markdown_text,
+                    token=bot_token,
+                ),
             )
         except SlackProviderPermissionDenied as error:
             _log_slack_provider_failure(error, operation="file_reply")
@@ -1139,19 +1179,24 @@ class SlackConversationClient:
         blocks: list[dict[str, object]] | None = None,
     ) -> SlackControlMessageResult:
         """Attempt one message update without retry."""
+
+        async def request(_: bool) -> AsyncSlackResponse:
+            return await self.web_client.chat_update(
+                channel=channel_id,
+                ts=message_ts,
+                text=text,
+                blocks=blocks,
+                parse="none",
+                link_names=False,
+                token=bot_token,
+            )
+
         return await self._attempt_message_operation(
-            bot_token=bot_token,
             tenant_id=tenant_id,
             channel_id=channel_id,
-            path="/chat.update",
-            json_body={
-                "channel": channel_id,
-                "ts": message_ts,
-                "text": text,
-                **({"blocks": blocks} if blocks is not None else {}),
-                "parse": "none",
-                "link_names": False,
-            },
+            api_method="chat.update",
+            argument_names=("blocks", "channel", "link_names", "parse", "text", "ts"),
+            request=request,
             expected_message_ts=message_ts,
             allow_icon_fallback=False,
         )
@@ -1168,23 +1213,39 @@ class SlackConversationClient:
         icon_url: str | None,
     ) -> SlackControlMessageResult:
         """Post one operational Block Kit message without retry."""
+
+        async def request(include_icon: bool) -> AsyncSlackResponse:
+            return await self.web_client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=thread_ts,
+                text=text,
+                blocks=blocks,
+                icon_url=icon_url if include_icon else None,
+                mrkdwn=False,
+                parse="none",
+                link_names=False,
+                unfurl_links=False,
+                unfurl_media=False,
+                token=bot_token,
+            )
+
         return await self._attempt_message_operation(
-            bot_token=bot_token,
             tenant_id=tenant_id,
             channel_id=channel_id,
-            path="/chat.postMessage",
-            json_body={
-                "channel": channel_id,
-                "thread_ts": thread_ts,
-                "text": text,
-                "blocks": blocks,
-                **({"icon_url": icon_url} if icon_url is not None else {}),
-                "mrkdwn": False,
-                "parse": "none",
-                "link_names": False,
-                "unfurl_links": False,
-                "unfurl_media": False,
-            },
+            api_method="chat.postMessage",
+            argument_names=(
+                "blocks",
+                "channel",
+                "icon_url",
+                "link_names",
+                "mrkdwn",
+                "parse",
+                "text",
+                "thread_ts",
+                "unfurl_links",
+                "unfurl_media",
+            ),
+            request=request,
             expected_message_ts=None,
             allow_icon_fallback=icon_url is not None,
         )
@@ -1198,12 +1259,20 @@ class SlackConversationClient:
         message_ts: str,
     ) -> SlackControlMessageResult:
         """Attempt one message delete without retry."""
+
+        async def request(_: bool) -> AsyncSlackResponse:
+            return await self.web_client.chat_delete(
+                channel=channel_id,
+                ts=message_ts,
+                token=bot_token,
+            )
+
         return await self._attempt_message_operation(
-            bot_token=bot_token,
             tenant_id=tenant_id,
             channel_id=channel_id,
-            path="/chat.delete",
-            json_body={"channel": channel_id, "ts": message_ts},
+            api_method="chat.delete",
+            argument_names=("channel", "ts"),
+            request=request,
             expected_message_ts=message_ts,
             allow_icon_fallback=False,
         )
@@ -1266,20 +1335,17 @@ class SlackConversationClient:
     async def _attempt_interaction_view_mutation(
         self,
         *,
-        path: str,
-        bot_token: str,
-        json_body: dict[str, object],
+        api_method: str,
+        argument_names: tuple[str, ...],
+        request: Awaitable[AsyncSlackResponse],
         success_status: Literal["opened", "updated"],
     ) -> SlackInteractionViewResult:
         """Map one view mutation to a sanitized one-attempt provider outcome."""
         try:
-            self._success_payload(
-                await self._request(
-                    "POST",
-                    path,
-                    bot_token=bot_token,
-                    json_body=json_body,
-                )
+            await self._call_api(
+                api_method=api_method,
+                argument_names=argument_names,
+                request=request,
             )
         except SlackProviderRequestRejected as error:
             if error.error_code == "trigger_expired":
@@ -1326,35 +1392,29 @@ class SlackConversationClient:
     async def _attempt_message_operation(
         self,
         *,
-        bot_token: str,
         tenant_id: str,
         channel_id: str,
-        path: str,
-        json_body: dict[str, object],
+        api_method: str,
+        argument_names: tuple[str, ...],
+        request: Callable[[bool], Awaitable[AsyncSlackResponse]],
         expected_message_ts: str | None,
         allow_icon_fallback: bool,
     ) -> SlackControlMessageResult:
         """Map one Slack mutation into a sanitized at-most-once outcome."""
         try:
-            response = await self._request(
-                "POST",
-                path,
-                bot_token=bot_token,
-                json_body=json_body,
+            payload = await self._call_api(
+                api_method=api_method,
+                argument_names=argument_names,
+                request=request(allow_icon_fallback),
             )
-            payload = self._success_payload(response)
         except SlackProviderPermissionDenied:
             if allow_icon_fallback:
                 return await self._attempt_message_operation(
-                    bot_token=bot_token,
                     tenant_id=tenant_id,
                     channel_id=channel_id,
-                    path=path,
-                    json_body={
-                        key: value
-                        for key, value in json_body.items()
-                        if key != "icon_url"
-                    },
+                    api_method=api_method,
+                    argument_names=argument_names,
+                    request=request,
                     expected_message_ts=expected_message_ts,
                     allow_icon_fallback=False,
                 )
@@ -1395,15 +1455,11 @@ class SlackConversationClient:
         except SlackProviderRequestRejected as error:
             if allow_icon_fallback:
                 return await self._attempt_message_operation(
-                    bot_token=bot_token,
                     tenant_id=tenant_id,
                     channel_id=channel_id,
-                    path=path,
-                    json_body={
-                        key: value
-                        for key, value in json_body.items()
-                        if key != "icon_url"
-                    },
+                    api_method=api_method,
+                    argument_names=argument_names,
+                    request=request,
                     expected_message_ts=expected_message_ts,
                     allow_icon_fallback=False,
                 )
@@ -1439,137 +1495,41 @@ class SlackConversationClient:
             error_summary=None,
         )
 
-    async def _request(
+    async def _call_api(
         self,
-        method: str,
-        path: str,
         *,
-        bot_token: str,
-        params: dict[str, str | int] | None = None,
-        json_body: dict[str, object] | None = None,
-        form_data: dict[str, str] | None = None,
-        timeout: float | None = None,
-    ) -> httpx.Response:
-        if json_body is not None and form_data is not None:
-            raise ValueError(
-                "Slack request cannot contain JSON and form bodies together."
-            )
+        api_method: str,
+        argument_names: tuple[str, ...],
+        request: Awaitable[AsyncSlackResponse],
+    ) -> dict[str, object]:
+        """Await one public Slack SDK operation and map controlled failures."""
         try:
-            if json_body is not None:
-                response = await self.http_client.request(
-                    method,
-                    f"{slack_api_base_url()}{path}",
-                    headers={"Authorization": f"Bearer {bot_token}"},
-                    params=params,
-                    json=json_body,
-                    timeout=timeout,
-                )
-            elif form_data is not None:
-                response = await self.http_client.request(
-                    method,
-                    f"{slack_api_base_url()}{path}",
-                    headers={"Authorization": f"Bearer {bot_token}"},
-                    params=params,
-                    data=form_data,
-                    timeout=timeout,
-                )
-            else:
-                response = await self.http_client.request(
-                    method,
-                    f"{slack_api_base_url()}{path}",
-                    headers={"Authorization": f"Bearer {bot_token}"},
-                    params=params,
-                    timeout=timeout,
-                )
-        except httpx.RequestError as error:
+            response = await request
+        except SlackApiError as error:
+            raise _slack_provider_error(
+                error,
+                api_method=api_method,
+                argument_names=argument_names,
+            ) from None
+        except (aiohttp.ClientError, TimeoutError) as error:
             raise SlackProviderTemporaryError(
                 "Slack request did not produce a response.",
                 diagnostics={
-                    "slack_api_path": path,
-                    "slack_api_method": method,
+                    "slack_api_method": api_method,
+                    "slack_request_field_names": list(argument_names),
                 },
             ) from error
-        if response.status_code == 429:
-            retry_after = response.headers.get("Retry-After", "1")
-            try:
-                retry_after_seconds = int(retry_after)
-            except ValueError:
-                retry_after_seconds = 1
-            raise SlackProviderRateLimited(
-                retry_after_seconds,
-                diagnostics=_slack_response_diagnostics(response),
-            )
-        if response.status_code >= 500:
-            raise SlackProviderTemporaryError(
-                "Slack is temporarily unavailable.",
-                diagnostics=_slack_response_diagnostics(response),
-            )
-        return response
-
-    @staticmethod
-    def _success_payload(response: httpx.Response) -> dict[str, object]:
-        try:
-            payload: object = response.json()
-        except ValueError as error:
-            raise SlackProviderTemporaryError(
-                "Slack response body is not valid JSON.",
-                diagnostics=_slack_response_diagnostics(response),
-            ) from error
+        payload = response.data
         if not isinstance(payload, dict):
             raise SlackProviderTemporaryError(
                 "Slack response body is malformed.",
-                diagnostics=_slack_response_diagnostics(response),
+                diagnostics=_slack_sdk_response_diagnostics(
+                    response,
+                    api_method=api_method,
+                    argument_names=argument_names,
+                ),
             )
-        if response.status_code < 400 and payload.get("ok") is True:
-            return payload
-        error_code = payload.get("error")
-        diagnostics = _slack_response_diagnostics(response, payload)
-        if error_code == "missing_scope":
-            raise SlackProviderPermissionDenied(
-                "Slack App permissions are incomplete.",
-                diagnostics=diagnostics,
-            )
-        if error_code in {
-            "account_inactive",
-            "invalid_auth",
-            "not_authed",
-            "not_allowed_token_type",
-            "token_revoked",
-        }:
-            raise SlackProviderCredentialsInvalid(
-                "Slack rejected the configured credential.",
-                diagnostics=diagnostics,
-            )
-        if error_code in {
-            "channel_not_found",
-            "is_archived",
-            "not_in_channel",
-            "thread_not_found",
-        }:
-            raise SlackProviderResourceUnavailable(
-                "Slack conversation is unavailable to the App.",
-                diagnostics=diagnostics,
-            )
-        if error_code == "message_not_found":
-            raise SlackProviderMessageNotFound(
-                "Slack no longer contains the requested message.",
-                diagnostics=diagnostics,
-            )
-        if error_code in {"file_deleted", "file_not_found"}:
-            raise SlackProviderFileNotFound(
-                "Slack no longer exposes the requested file.",
-                diagnostics=diagnostics,
-            )
-        normalized_error_code = (
-            error_code
-            if isinstance(error_code, str)
-            and re.fullmatch(r"[a-z0-9_]{1,80}", error_code)
-            else "unknown_error"
-        )
-        raise SlackProviderRequestRejected(
-            normalized_error_code,
-            diagnostics=diagnostics,
-        )
+        return payload
 
 
 def _log_slack_provider_failure(
@@ -1587,65 +1547,128 @@ def _log_slack_provider_failure(
     )
 
 
-def _slack_response_diagnostics(
-    response: httpx.Response,
-    payload: dict[str, object] | None = None,
-) -> dict[str, object]:
-    """Return safe Slack API diagnostics without user or credential data."""
-    request = _response_request(response)
-    request_content_type = (
-        request.headers.get("content-type") if request is not None else None
+def _slack_provider_error(
+    error: SlackApiError,
+    *,
+    api_method: str,
+    argument_names: tuple[str, ...],
+) -> SlackProviderError:
+    """Map one SDK API rejection without retaining provider payload data."""
+    response = error.response
+    if not isinstance(response, AsyncSlackResponse):
+        return SlackProviderTemporaryError(
+            "Slack response body is unavailable.",
+            diagnostics={
+                "slack_api_method": api_method,
+                "slack_request_field_names": list(argument_names),
+            },
+        )
+    payload = response.data if isinstance(response.data, dict) else {}
+    diagnostics = _slack_sdk_response_diagnostics(
+        response,
+        api_method=api_method,
+        argument_names=argument_names,
     )
-    request_field_names = _request_field_names(request, request_content_type)
-    response_metadata = payload.get("response_metadata") if payload else None
-    diagnostic_argument_names = _diagnostic_argument_names(response_metadata)
+    if response.status_code == 429:
+        retry_after = _slack_sdk_response_header(response, "retry-after") or "1"
+        try:
+            retry_after_seconds = int(retry_after)
+        except ValueError:
+            retry_after_seconds = 1
+        return SlackProviderRateLimited(
+            retry_after_seconds,
+            diagnostics=diagnostics,
+        )
+    if response.status_code >= 500:
+        return SlackProviderTemporaryError(
+            "Slack is temporarily unavailable.",
+            diagnostics=diagnostics,
+        )
+    error_code = payload.get("error")
+    if error_code == "missing_scope":
+        return SlackProviderPermissionDenied(
+            "Slack App permissions are incomplete.",
+            diagnostics=diagnostics,
+        )
+    if error_code in {
+        "account_inactive",
+        "invalid_auth",
+        "not_authed",
+        "not_allowed_token_type",
+        "token_revoked",
+    }:
+        return SlackProviderCredentialsInvalid(
+            "Slack rejected the configured credential.",
+            diagnostics=diagnostics,
+        )
+    if error_code in {
+        "channel_not_found",
+        "is_archived",
+        "not_in_channel",
+        "thread_not_found",
+    }:
+        return SlackProviderResourceUnavailable(
+            "Slack conversation is unavailable to the App.",
+            diagnostics=diagnostics,
+        )
+    if error_code == "message_not_found":
+        return SlackProviderMessageNotFound(
+            "Slack no longer contains the requested message.",
+            diagnostics=diagnostics,
+        )
+    if error_code in {"file_deleted", "file_not_found"}:
+        return SlackProviderFileNotFound(
+            "Slack no longer exposes the requested file.",
+            diagnostics=diagnostics,
+        )
+    normalized_error_code = (
+        error_code
+        if isinstance(error_code, str) and re.fullmatch(r"[a-z0-9_]{1,80}", error_code)
+        else "unknown_error"
+    )
+    return SlackProviderRequestRejected(
+        normalized_error_code,
+        diagnostics=diagnostics,
+    )
+
+
+def _slack_sdk_response_diagnostics(
+    response: AsyncSlackResponse,
+    *,
+    api_method: str,
+    argument_names: tuple[str, ...],
+) -> dict[str, object]:
+    """Return safe SDK response diagnostics without provider content."""
+    payload = response.data if isinstance(response.data, dict) else {}
+    response_metadata = payload.get("response_metadata")
     return {
-        "slack_api_path": request.url.path if request is not None else None,
-        "slack_api_method": request.method if request is not None else None,
+        "slack_api_method": api_method,
         "slack_http_status_code": response.status_code,
-        "slack_request_id": response.headers.get("x-slack-req-id"),
-        "slack_request_content_type": request_content_type,
-        "slack_request_field_names": request_field_names,
-        "slack_response_error_code": (
-            _normalized_slack_log_value(payload.get("error")) if payload else None
+        "slack_request_id": _slack_sdk_response_header(
+            response,
+            "x-slack-req-id",
         ),
-        "slack_response_warning_code": (
-            _normalized_slack_log_value(payload.get("warning")) if payload else None
+        "slack_request_field_names": list(argument_names),
+        "slack_response_error_code": _normalized_slack_log_value(payload.get("error")),
+        "slack_response_warning_code": _normalized_slack_log_value(
+            payload.get("warning")
         ),
-        "slack_response_diagnostic_argument_names": diagnostic_argument_names,
+        "slack_response_diagnostic_argument_names": _diagnostic_argument_names(
+            response_metadata
+        ),
     }
 
 
-def _response_request(response: httpx.Response) -> httpx.Request | None:
-    try:
-        return response.request
-    except RuntimeError:
-        return None
-
-
-def _request_field_names(
-    request: httpx.Request | None,
-    content_type: str | None,
-) -> list[str]:
-    """Capture only request field names, never values such as text or tokens."""
-    if request is None:
-        return []
-    try:
-        body = request.content
-    except httpx.RequestNotRead:
-        return []
-    if content_type is None:
-        return []
-    if content_type.startswith("application/x-www-form-urlencoded"):
-        return sorted(parse_qs(body.decode("utf-8"), keep_blank_values=True))
-    if content_type.startswith("application/json"):
-        try:
-            payload = json.loads(body)
-        except UnicodeDecodeError, ValueError:
-            return []
-        if isinstance(payload, dict):
-            return sorted(key for key in payload if isinstance(key, str))
-    return []
+def _slack_sdk_response_header(
+    response: AsyncSlackResponse,
+    name: str,
+) -> str | None:
+    """Read one SDK response header without relying on provider casing."""
+    normalized_name = name.lower()
+    for header_name, value in response.headers.items():
+        if header_name.lower() == normalized_name and isinstance(value, str):
+            return value
+    return None
 
 
 def _diagnostic_argument_names(response_metadata: object) -> list[str]:

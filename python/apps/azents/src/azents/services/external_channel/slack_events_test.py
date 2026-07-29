@@ -1,19 +1,22 @@
 """Slack External Channel event normalization and API adapter tests."""
 
-import asyncio
 import json
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime, timedelta
+from typing import Any
 from urllib.parse import parse_qs
 
+import aiohttp
 import httpx
 import pytest
+from slack_sdk.web.async_client import AsyncWebClient
+from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from azents.core.enums import (
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
 )
+from azents.services.external_channel.slack_endpoint import slack_api_base_url
 from azents.services.external_channel.slack_events import (
     SlackConnectionRevocation,
     SlackConversationClient,
@@ -33,6 +36,92 @@ from azents.services.external_channel.slack_events import (
     slack_message_reference_ids,
     slack_provider_position,
 )
+
+
+def _encoded_sdk_params(
+    params: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Mirror the SDK's safe top-level query normalization for HTTP scenarios."""
+    return {
+        key: (
+            "1"
+            if value is True
+            else "0"
+            if value is False
+            else json.dumps(value, separators=(",", ":"))
+            if isinstance(value, dict | list)
+            else value
+        )
+        for key, value in (params or {}).items()
+        if value is not None
+    }
+
+
+class _MockSlackWebClient(AsyncWebClient):
+    """Route public SDK calls through one deterministic HTTPX transport."""
+
+    def __init__(self, http_client: httpx.AsyncClient) -> None:
+        super().__init__(retry_handlers=[])
+        self.http_client = http_client
+
+    async def api_call(
+        self,
+        api_method: str,
+        *,
+        http_verb: str = "POST",
+        files: dict[str, Any] | None = None,
+        data: dict[str, Any] | aiohttp.FormData | None = None,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        auth: dict[str, str] | None = None,
+    ) -> AsyncSlackResponse:
+        del files, auth
+        request_headers = dict(headers or {})
+        request_params = _encoded_sdk_params(params)
+        request_json = dict(json or {}) if json is not None else None
+        if isinstance(data, aiohttp.FormData):
+            raise AssertionError("Slack test double does not support multipart forms.")
+        request_data = dict(data) if isinstance(data, dict) else None
+        token = request_params.pop("token", None)
+        if request_json is not None:
+            token = request_json.pop("token", token)
+        if isinstance(request_data, dict):
+            token = request_data.pop("token", token)
+        if isinstance(token, str):
+            request_headers["Authorization"] = f"Bearer {token}"
+        try:
+            response = await self.http_client.request(
+                http_verb,
+                f"{slack_api_base_url()}/{api_method}",
+                params=request_params or None,
+                json=request_json,
+                data=request_data,
+                headers=request_headers,
+            )
+        except httpx.RequestError as error:
+            raise aiohttp.ClientError("Slack test transport failed.") from error
+        try:
+            payload: object = response.json()
+        except ValueError:
+            payload = {}
+        sdk_response = AsyncSlackResponse(
+            client=self,
+            http_verb=http_verb,
+            api_url=str(response.request.url),
+            req_args={},
+            data=payload if isinstance(payload, dict | bytes) else {},
+            headers=dict(response.headers),
+            status_code=response.status_code,
+        )
+        return sdk_response.validate()
+
+
+def _client(http_client: httpx.AsyncClient) -> SlackConversationClient:
+    return SlackConversationClient(
+        web_client=_MockSlackWebClient(http_client),
+        http_client=http_client,
+    )
 
 
 def _envelope(event: dict[str, object]) -> dict[str, object]:
@@ -543,7 +632,7 @@ async def test_conversation_access_requires_membership_and_exposes_connect() -> 
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        access = await SlackConversationClient(http).fetch_conversation_access(
+        access = await _client(http).fetch_conversation_access(
             bot_token="xoxb-secret",
             channel_id="C1",
         )
@@ -578,7 +667,7 @@ async def test_resolves_slack_user_and_channel_display_names() -> None:
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        client = SlackConversationClient(http)
+        client = _client(http)
         user = await client.fetch_user_display_name(
             bot_token="xoxb-secret",
             provider_user_id="U1",
@@ -624,7 +713,7 @@ async def test_thread_page_uses_cursor_and_normalizes_messages() -> None:
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        page = await SlackConversationClient(http).fetch_thread_page(
+        page = await _client(http).fetch_thread_page(
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -671,7 +760,7 @@ async def test_thread_page_includes_all_user_visible_history_subtypes() -> None:
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        page = await SlackConversationClient(http).fetch_thread_page(
+        page = await _client(http).fetch_thread_page(
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -691,7 +780,7 @@ async def test_thread_page_surfaces_rate_limit_for_inbound_retry() -> None:
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         with pytest.raises(SlackProviderRateLimited) as raised:
-            await SlackConversationClient(http).fetch_thread_page(
+            await _client(http).fetch_thread_page(
                 bot_token="xoxb-secret",
                 tenant_id="T1",
                 channel_id="C1",
@@ -711,7 +800,7 @@ async def test_thread_page_maps_revoked_token_to_connection_failure() -> None:
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         with pytest.raises(SlackProviderCredentialsInvalid):
-            await SlackConversationClient(http).fetch_thread_page(
+            await _client(http).fetch_thread_page(
                 bot_token="xoxb-secret",
                 tenant_id="T1",
                 channel_id="C1",
@@ -729,7 +818,7 @@ async def test_thread_page_maps_missing_scope_to_connection_failure() -> None:
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         with pytest.raises(SlackProviderPermissionDenied):
-            await SlackConversationClient(http).fetch_thread_page(
+            await _client(http).fetch_thread_page(
                 bot_token="xoxb-secret",
                 tenant_id="T1",
                 channel_id="C1",
@@ -763,7 +852,7 @@ async def test_file_info_returns_current_metadata_and_private_download_target() 
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        info = await SlackConversationClient(http).fetch_file_download_info(
+        info = await _client(http).fetch_file_download_info(
             bot_token="xoxb-secret",
             provider_file_id="F123",
         )
@@ -793,7 +882,7 @@ async def test_file_info_rejects_deleted_file() -> None:
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         with pytest.raises(SlackProviderFileNotFound):
-            await SlackConversationClient(http).fetch_file_download_info(
+            await _client(http).fetch_file_download_info(
                 bot_token="xoxb-secret",
                 provider_file_id="F123",
             )
@@ -822,7 +911,7 @@ async def test_file_info_rejects_mismatched_response_identity() -> None:
             SlackProviderTemporaryError,
             match="identity does not match",
         ):
-            await SlackConversationClient(http).fetch_file_download_info(
+            await _client(http).fetch_file_download_info(
                 bot_token="xoxb-secret",
                 provider_file_id="F123",
             )
@@ -837,7 +926,7 @@ async def test_private_file_stream_authenticates_and_enforces_actual_limit() -> 
         return httpx.Response(200, content=b"12345678")
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        client = SlackConversationClient(http)
+        client = _client(http)
         async with client.open_private_file_stream(
             bot_token="xoxb-secret",
             private_url="https://files.slack.test/private/F123",
@@ -868,7 +957,7 @@ async def test_private_file_stream_rejects_partial_response_status() -> None:
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         with pytest.raises(SlackProviderTemporaryError, match="incomplete"):
-            async with SlackConversationClient(http).open_private_file_stream(
+            async with _client(http).open_private_file_stream(
                 bot_token="xoxb-secret",
                 private_url="https://files.slack.test/private/F123",
                 max_bytes=100,
@@ -886,7 +975,7 @@ async def test_control_message_reports_ambiguous_network_outcome_without_retry()
         raise httpx.ReadTimeout("timeout", request=request)
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).post_approval_control_message(
+        result = await _client(http).post_approval_control_message(
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -910,7 +999,7 @@ async def test_control_message_reports_confirmed_provider_rejection() -> None:
         return httpx.Response(200, json={"ok": False, "error": "invalid_blocks"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).post_approval_control_message(
+        result = await _client(http).post_approval_control_message(
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -951,7 +1040,7 @@ async def test_channel_action_message_mutations_are_single_provider_requests(
         return httpx.Response(200, json={"ok": True, "ts": expected_ts})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        client = SlackConversationClient(http)
+        client = _client(http)
         if operation == "post":
             result = await client.post_message(
                 bot_token="xoxb-secret",
@@ -982,7 +1071,11 @@ async def test_channel_action_message_mutations_are_single_provider_requests(
     assert len(requests) == 1
     assert requests[0].url.path == expected_path
     assert requests[0].headers["Authorization"] == "Bearer xoxb-secret"
-    payload = json.loads(requests[0].content)
+    payload = (
+        json.loads(requests[0].content)
+        if requests[0].content
+        else dict(requests[0].url.params)
+    )
     if operation == "post":
         assert payload["markdown_text"] == "Reply"
         assert "text" not in payload
@@ -990,6 +1083,11 @@ async def test_channel_action_message_mutations_are_single_provider_requests(
     elif operation == "update":
         assert payload["parse"] == "none"
         assert payload["link_names"] is False
+    else:
+        assert payload == {
+            "channel": "C1",
+            "ts": "1721600000.000100",
+        }
 
 
 async def test_interaction_view_open_uses_bounded_safe_payload() -> None:
@@ -1014,7 +1112,7 @@ async def test_interaction_view_open_uses_bounded_safe_payload() -> None:
         close_title="Cancel",
     )
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).open_interaction_view(
+        result = await _client(http).open_interaction_view(
             bot_token="xoxb-secret",
             trigger_id="trigger-secret",
             view=view,
@@ -1067,7 +1165,7 @@ async def test_interaction_view_provider_outcomes_are_explicit(
         close_title=None,
     )
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).update_interaction_view(
+        result = await _client(http).update_interaction_view(
             bot_token="xoxb-secret",
             view_id="V1",
             view_hash="hash-1",
@@ -1100,7 +1198,7 @@ async def test_missing_update_target_is_reported_as_confirmed_deletion() -> None
         return httpx.Response(200, json={"ok": False, "error": "message_not_found"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).update_message(
+        result = await _client(http).update_message(
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -1120,7 +1218,7 @@ async def test_invalid_update_blocks_are_reported_as_confirmed_rejection() -> No
         return httpx.Response(200, json={"ok": False, "error": "invalid_blocks"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).update_message(
+        result = await _client(http).update_message(
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -1145,7 +1243,7 @@ async def test_operational_blocks_include_accessible_fallback_text() -> None:
         return httpx.Response(200, json={"ok": True, "ts": "1721600001.000100"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).post_blocks(
+        result = await _client(http).post_blocks(
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -1188,7 +1286,7 @@ async def test_approval_control_message_uses_block_kit_button() -> None:
         return httpx.Response(200, json={"ok": True, "ts": "1721600001.000100"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).post_approval_control_message(
+        result = await _client(http).post_approval_control_message(
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -1231,7 +1329,7 @@ async def test_approval_participant_identity_is_not_interpreted_as_mrkdwn() -> N
         return httpx.Response(200, json={"ok": True, "ts": "1721600001.000100"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).post_approval_control_message(
+        result = await _client(http).post_approval_control_message(
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -1269,7 +1367,7 @@ async def test_channel_action_rate_limit_is_terminal_failed_without_retry() -> N
         return httpx.Response(429, headers={"Retry-After": "10"}, json={})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).post_message(
+        result = await _client(http).post_message(
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -1300,7 +1398,7 @@ async def test_custom_icon_rejection_falls_back_without_replaying_content() -> N
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).post_message(
+        result = await _client(http).post_message(
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -1328,7 +1426,7 @@ async def test_channel_action_rejects_over_limit_markdown_without_request() -> N
         return httpx.Response(200, json={"ok": True, "ts": "1721600001.000100"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).post_message(
+        result = await _client(http).post_message(
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -1343,96 +1441,9 @@ async def test_channel_action_rejects_over_limit_markdown_without_request() -> N
 
 
 @pytest.mark.asyncio
-async def test_file_reply_does_not_start_after_logical_deadline() -> None:
-    """A Runtime delivery deadline overrides the client's ordinary timeout."""
-    calls = 0
-
-    def handler(_: httpx.Request) -> httpx.Response:
-        nonlocal calls
-        calls += 1
-        raise AssertionError("Slack must not receive an expired delivery request")
-
-    async def content() -> AsyncIterator[bytes]:
-        yield b"abc"
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).post_file_message(
-            bot_token="xoxb-secret",
-            tenant_id="T1",
-            channel_id="C1",
-            thread_ts="1721600000.000100",
-            markdown_text="Attached report",
-            files=[
-                SlackOutboundFile(
-                    filename="report.txt",
-                    length=3,
-                    content=content,
-                )
-            ],
-            deadline_at=datetime.now(UTC) - timedelta(seconds=1),
-        )
-
-    assert calls == 0
-    assert result.status == "unknown"
-    assert result.error_kind == "provider_ambiguous"
-
-
-@pytest.mark.asyncio
-async def test_file_reply_absolute_deadline_cancels_in_flight_stream() -> None:
-    """One provider operation cannot outlive its Runtime delivery deadline."""
-    paths: list[str] = []
-    closed = False
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        paths.append(request.url.path)
-        if request.url.path == "/api/files.getUploadURLExternal":
-            return httpx.Response(
-                200,
-                json={
-                    "ok": True,
-                    "upload_url": "https://upload.slack.test/upload/1",
-                    "file_id": "F1",
-                },
-            )
-        await request.aread()
-        return httpx.Response(200, text="OK")
-
-    async def content() -> AsyncIterator[bytes]:
-        nonlocal closed
-        try:
-            yield b"a"
-            await asyncio.sleep(0.25)
-            yield b"bc"
-        finally:
-            closed = True
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).post_file_message(
-            bot_token="xoxb-secret",
-            tenant_id="T1",
-            channel_id="C1",
-            thread_ts="1721600000.000100",
-            markdown_text="Attached report",
-            files=[
-                SlackOutboundFile(
-                    filename="report.txt",
-                    length=3,
-                    content=content,
-                )
-            ],
-            deadline_at=datetime.now(UTC) + timedelta(milliseconds=100),
-        )
-
-    assert result.status == "unknown"
-    assert result.error_kind == "provider_ambiguous"
-    assert closed
-    assert paths == ["/api/files.getUploadURLExternal"]
-
-
-@pytest.mark.asyncio
 async def test_file_reply_streams_in_order_and_completes_once() -> None:
     """Slack receives ordered known-length streams before one visible completion."""
-    requests: list[tuple[str, str, dict[str, str], bytes]] = []
+    requests: list[tuple[str, str, dict[str, str], bytes, str]] = []
     acquisition_index = 0
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -1444,6 +1455,7 @@ async def test_file_reply_streams_in_order_and_completes_once() -> None:
                 request.url.path,
                 dict(request.headers),
                 body,
+                request.url.query.decode(),
             )
         )
         if request.url.path == "/api/files.getUploadURLExternal":
@@ -1471,7 +1483,7 @@ async def test_file_reply_streams_in_order_and_completes_once() -> None:
         yield b"1234"
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).post_file_message(
+        result = await _client(http).post_file_message(
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -1492,42 +1504,30 @@ async def test_file_reply_streams_in_order_and_completes_once() -> None:
         )
 
     assert result.status == "delivered"
-    assert [path for _, path, _, _ in requests] == [
+    assert [path for _, path, _, _, _ in requests] == [
         "/api/files.getUploadURLExternal",
         "/upload/1",
         "/api/files.getUploadURLExternal",
         "/upload/2",
         "/api/files.completeUploadExternal",
     ]
-    assert requests[0][2]["content-type"].startswith(
-        "application/x-www-form-urlencoded"
-    )
-    first_acquisition = parse_qs(requests[0][3].decode(), strict_parsing=True)
+    first_acquisition = parse_qs(requests[0][4], strict_parsing=True)
     assert first_acquisition == {"filename": ["first.txt"], "length": ["3"]}
     assert requests[1][3] == b"abc"
     assert requests[1][2]["content-length"] == "3"
     assert "authorization" not in requests[1][2]
-    assert requests[2][2]["content-type"].startswith(
-        "application/x-www-form-urlencoded"
-    )
-    second_acquisition = parse_qs(requests[2][3].decode(), strict_parsing=True)
+    second_acquisition = parse_qs(requests[2][4], strict_parsing=True)
     assert second_acquisition == {"filename": ["second.txt"], "length": ["4"]}
     assert requests[3][3] == b"1234"
     assert requests[3][2]["content-length"] == "4"
-    assert requests[4][2]["content-type"].startswith(
-        "application/x-www-form-urlencoded"
-    )
-    completion = parse_qs(requests[4][3].decode(), strict_parsing=True)
+    completion = parse_qs(requests[4][4], strict_parsing=True)
+    serialized_files = completion.pop("files")
+    assert len(serialized_files) == 1
+    assert json.loads(serialized_files[0]) == [
+        {"id": "F1", "title": "first.txt"},
+        {"id": "F2", "title": "second.txt"},
+    ]
     assert completion == {
-        "files": [
-            json.dumps(
-                [
-                    {"id": "F1", "title": "first.txt"},
-                    {"id": "F2", "title": "second.txt"},
-                ],
-                separators=(",", ":"),
-            )
-        ],
         "channel_id": ["C1"],
         "thread_ts": ["1721600000.000100"],
         "initial_comment": ["Attached reports"],
@@ -1559,7 +1559,7 @@ async def test_file_reply_stops_without_completion_when_runtime_stream_fails() -
         raise SlackOutboundFileContentError
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).post_file_message(
+        result = await _client(http).post_file_message(
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -1603,7 +1603,7 @@ async def test_file_reply_completion_transport_failure_is_unknown() -> None:
         yield b"abc"
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).post_file_message(
+        result = await _client(http).post_file_message(
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -1645,7 +1645,7 @@ async def test_file_reply_upload_server_failure_is_unknown_without_completion() 
         yield b"abc"
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).post_file_message(
+        result = await _client(http).post_file_message(
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -1694,7 +1694,7 @@ async def test_file_reply_completion_file_rejection_is_terminal_failed() -> None
         yield b"abc"
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-        result = await SlackConversationClient(http).post_file_message(
+        result = await _client(http).post_file_message(
             bot_token="xoxb-secret",
             tenant_id="T1",
             channel_id="C1",
@@ -1751,7 +1751,7 @@ async def test_file_reply_completion_rejection_logs_safe_diagnostics(
 
     with caplog.at_level("ERROR"):
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
-            result = await SlackConversationClient(http).post_file_message(
+            result = await _client(http).post_file_message(
                 bot_token="xoxb-secret",
                 tenant_id="T1",
                 channel_id="C1",
@@ -1775,13 +1775,9 @@ async def test_file_reply_completion_rejection_logs_safe_diagnostics(
     )
     record_extra = record.__dict__
     assert record_extra["slack_operation"] == "file_reply"
-    assert record_extra["slack_api_path"] == "/api/files.completeUploadExternal"
-    assert record_extra["slack_api_method"] == "POST"
+    assert record_extra["slack_api_method"] == "files.completeUploadExternal"
     assert record_extra["slack_http_status_code"] == 200
     assert record_extra["slack_request_id"] == "REQ1"
-    assert record_extra["slack_request_content_type"].startswith(
-        "application/x-www-form-urlencoded"
-    )
     assert record_extra["slack_request_field_names"] == [
         "channel_id",
         "files",

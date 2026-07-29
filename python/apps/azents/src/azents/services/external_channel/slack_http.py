@@ -8,7 +8,10 @@ from dataclasses import dataclass, field
 from typing import Literal
 from urllib.parse import parse_qsl
 
-import httpx
+import aiohttp
+from slack_sdk.errors import SlackApiError
+from slack_sdk.web.async_client import AsyncWebClient
+from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from azents.core.enums import (
     ExternalChannelEventEligibilityState,
@@ -33,7 +36,6 @@ from azents.services.external_channel.data import (
     ExternalChannelProviderIdentity,
 )
 from azents.services.external_channel.slack_blocks import projected_slack_blocks
-from azents.services.external_channel.slack_endpoint import slack_api_base_url
 
 MAX_SLACK_HTTP_BODY_BYTES = 256 * 1024
 MAX_SLACK_URL_VERIFICATION_CHALLENGE_BYTES = 4 * 1024
@@ -531,8 +533,8 @@ def _parse_payload(raw_body: bytes) -> dict[str, object]:
 class SlackWebAPIClient:
     """Bounded Slack Web API client used for connection identity validation."""
 
-    def __init__(self, http_client: httpx.AsyncClient) -> None:
-        self.http_client = http_client
+    def __init__(self, web_client: AsyncWebClient) -> None:
+        self.web_client = web_client
 
     async def validate_connection(
         self,
@@ -543,17 +545,14 @@ class SlackWebAPIClient:
     ) -> SlackConnectionValidation:
         """Validate a bot token and return only sanitized identity state."""
         try:
-            response = await self.http_client.post(
-                f"{slack_api_base_url()}/auth.test",
-                headers={"Authorization": f"Bearer {bot_token}"},
-            )
-        except httpx.RequestError:
-            return self._unavailable()
-        if response.status_code == 429 or response.status_code >= 500:
-            return self._unavailable()
-        payload = self._json_object(response)
-        if response.status_code >= 400 or payload.get("ok") is not True:
-            error_code = payload.get("error")
+            response = await self.web_client.auth_test(token=bot_token)
+        except SlackApiError as error:
+            response = error.response
+            if isinstance(response, AsyncSlackResponse) and (
+                response.status_code == 429 or response.status_code >= 500
+            ):
+                return self._unavailable()
+            error_code = _slack_api_error_code(error)
             if error_code in {
                 "account_inactive",
                 "invalid_auth",
@@ -571,8 +570,16 @@ class SlackWebAPIClient:
                     capabilities=None,
                 )
             return self._unavailable(code="slack_auth_test_unavailable")
+        except aiohttp.ClientError, TimeoutError:
+            return self._unavailable()
+        payload = _slack_response_payload(response)
+        if payload is None:
+            return self._unavailable(code="slack_auth_test_response_invalid")
 
-        granted_scopes_header = response.headers.get("x-oauth-scopes")
+        granted_scopes_header = _slack_response_header(
+            response,
+            "x-oauth-scopes",
+        )
         granted_scopes: set[str] | None = None
         if granted_scopes_header:
             granted_scopes = {
@@ -612,18 +619,17 @@ class SlackWebAPIClient:
         if not isinstance(bot_id, str) or not bot_id:
             return self._unavailable(code="slack_auth_test_response_invalid")
         try:
-            bot_response = await self.http_client.get(
-                f"{slack_api_base_url()}/bots.info",
-                headers={"Authorization": f"Bearer {bot_token}"},
-                params={"bot": bot_id},
+            bot_response = await self.web_client.bots_info(
+                bot=bot_id,
+                token=bot_token,
             )
-        except httpx.RequestError:
-            return self._unavailable()
-        if bot_response.status_code == 429 or bot_response.status_code >= 500:
-            return self._unavailable()
-        bot_payload = self._json_object(bot_response)
-        if bot_response.status_code >= 400 or bot_payload.get("ok") is not True:
-            error_code = bot_payload.get("error")
+        except SlackApiError as error:
+            response = error.response
+            if isinstance(response, AsyncSlackResponse) and (
+                response.status_code == 429 or response.status_code >= 500
+            ):
+                return self._unavailable()
+            error_code = _slack_api_error_code(error)
             if error_code in {
                 "account_inactive",
                 "invalid_auth",
@@ -656,6 +662,11 @@ class SlackWebAPIClient:
                     capabilities=None,
                 )
             return self._unavailable(code="slack_bot_identity_unavailable")
+        except aiohttp.ClientError, TimeoutError:
+            return self._unavailable()
+        bot_payload = _slack_response_payload(bot_response)
+        if bot_payload is None:
+            return self._unavailable(code="slack_bot_identity_response_invalid")
         bot = bot_payload.get("bot")
         if not isinstance(bot, dict):
             return self._unavailable(code="slack_bot_identity_response_invalid")
@@ -705,14 +716,6 @@ class SlackWebAPIClient:
         )
 
     @staticmethod
-    def _json_object(response: httpx.Response) -> dict[str, object]:
-        try:
-            payload: object = response.json()
-        except ValueError:
-            return {}
-        return payload if isinstance(payload, dict) else {}
-
-    @staticmethod
     def _unavailable(
         *,
         code: str = "slack_unavailable",
@@ -725,6 +728,34 @@ class SlackWebAPIClient:
             identity=None,
             capabilities=None,
         )
+
+
+def _slack_response_payload(
+    response: AsyncSlackResponse,
+) -> dict[str, object] | None:
+    data = response.data
+    return data if isinstance(data, dict) else None
+
+
+def _slack_api_error_code(error: SlackApiError) -> str | None:
+    response = error.response
+    if not isinstance(response, AsyncSlackResponse):
+        return None
+    payload = _slack_response_payload(response)
+    error_code = payload.get("error") if payload is not None else None
+    return error_code if isinstance(error_code, str) else None
+
+
+def _slack_response_header(
+    response: AsyncSlackResponse,
+    name: str,
+) -> str | None:
+    """Read one SDK response header without relying on provider casing."""
+    normalized_name = name.lower()
+    for header_name, value in response.headers.items():
+        if header_name.lower() == normalized_name and isinstance(value, str):
+            return value
+    return None
 
 
 def _required_string(payload: dict[str, object], key: str) -> str:

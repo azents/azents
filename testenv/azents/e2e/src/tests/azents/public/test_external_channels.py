@@ -2168,6 +2168,9 @@ def test_socket_mode_acknowledges_and_preserves_route_for_disabled_link(
     reconnect_payload = cast(Any, reconnect_required)
     assert reconnect_payload.socket_gap_reason == "link_disabled"
     provider_state = _provider_state(slack_provider_fake_url)
+    socket_state = provider_state["socket"]
+    assert isinstance(socket_state, dict)
+    assert socket_state["connections"] == 1
     assert "xapp-e2e-private" not in str(provider_state)
 
 

@@ -85,7 +85,6 @@ from azents.services.external_channel.channel_action import (
 )
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
-    get_slack_validation_http_client,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.discord_events import (
@@ -129,6 +128,7 @@ from azents.services.external_channel.slack_events import (
     normalize_projected_slack_event,
     slack_message_reference_ids,
 )
+from azents.services.external_channel.slack_sdk_client import create_slack_web_client
 from azents.services.mailbox import (
     MailboxEnqueue,
     MailboxService,
@@ -159,8 +159,8 @@ _MAX_RETRY_SECONDS = 300
 
 
 async def get_slack_processing_http_client() -> AsyncIterator[httpx.AsyncClient]:
-    """Provide bounded Slack processing HTTP transport."""
-    async for client in get_slack_validation_http_client():
+    """Provide bounded Slack private-file HTTP transport."""
+    async with httpx.AsyncClient(timeout=20.0) as client:
         yield client
 
 
@@ -171,7 +171,10 @@ def get_slack_conversation_client(
     ],
 ) -> SlackConversationClient:
     """Provide the Slack conversation adapter."""
-    return SlackConversationClient(http_client)
+    return SlackConversationClient(
+        web_client=create_slack_web_client(),
+        http_client=http_client,
+    )
 
 
 async def get_discord_history_http_client() -> AsyncIterator[httpx.AsyncClient]:
