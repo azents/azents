@@ -3526,6 +3526,23 @@ class ExternalChannelRepository:
         )
         return ExternalChannelInvocationBatchItem.model_validate(rdb)
 
+    async def list_invocation_batch_revision_ids(
+        self,
+        session: AsyncSession,
+        *,
+        batch_id: str,
+    ) -> list[str]:
+        """List the immutable revision membership of one invocation batch."""
+        rows = await session.scalars(
+            sa.select(RDBExternalChannelInvocationBatchItem.message_revision_id)
+            .where(RDBExternalChannelInvocationBatchItem.batch_id == batch_id)
+            .order_by(
+                RDBExternalChannelInvocationBatchItem.sequence,
+                RDBExternalChannelInvocationBatchItem.id,
+            )
+        )
+        return list(rows)
+
     async def list_invocation_projection_items(
         self,
         session: AsyncSession,

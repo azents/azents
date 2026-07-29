@@ -438,28 +438,43 @@ class ExternalChannelAccessService:
         if all(revision_id != trigger.current_revision_id for revision_id, _ in items):
             items.append((trigger.current_revision_id, trigger.provider_position))
         items.sort(key=lambda item: item[1])
-        batch = await self.repository.create_invocation_batch_idempotent(
-            session,
-            ExternalChannelInvocationBatchCreate(
-                binding_id=binding.id,
-                trigger_message_id=trigger_message_id,
-                first_provider_position=items[0][1],
-                last_provider_position=items[-1][1],
-                truncation_message_count=binding.truncated_message_count,
-                truncation_size=binding.truncated_size,
-                mailbox_item_id=None,
-            ),
-        )
-        for sequence, (revision_id, provider_position) in enumerate(items):
-            await self.repository.create_invocation_batch_item_idempotent(
+        if existing is None:
+            batch = await self.repository.create_invocation_batch_idempotent(
                 session,
-                ExternalChannelInvocationBatchItemCreate(
-                    batch_id=batch.id,
-                    message_revision_id=revision_id,
-                    sequence=sequence,
-                    provider_position=provider_position,
+                ExternalChannelInvocationBatchCreate(
+                    binding_id=binding.id,
+                    trigger_message_id=trigger_message_id,
+                    first_provider_position=items[0][1],
+                    last_provider_position=items[-1][1],
+                    truncation_message_count=binding.truncated_message_count,
+                    truncation_size=binding.truncated_size,
+                    mailbox_item_id=None,
                 ),
             )
+            for sequence, (revision_id, provider_position) in enumerate(items):
+                await self.repository.create_invocation_batch_item_idempotent(
+                    session,
+                    ExternalChannelInvocationBatchItemCreate(
+                        batch_id=batch.id,
+                        message_revision_id=revision_id,
+                        sequence=sequence,
+                        provider_position=provider_position,
+                    ),
+                )
+            released_pending = pending
+        else:
+            batch = existing
+            batch_revision_ids = set(
+                await self.repository.list_invocation_batch_revision_ids(
+                    session,
+                    batch_id=batch.id,
+                )
+            )
+            released_pending = [
+                item
+                for item in pending
+                if item.message_revision_id in batch_revision_ids
+            ]
         locked_batch = await self.repository.lock_invocation_batch(
             session,
             batch_id=batch.id,
@@ -498,12 +513,12 @@ class ExternalChannelAccessService:
             )
         await self.repository.delete_pending_context_ids(
             session,
-            pending_context_ids=[item.id for item in pending],
+            pending_context_ids=[item.id for item in released_pending],
         )
         await self.repository.advance_binding_projection(
             session,
             binding_id=binding.id,
-            projected_through_position=items[-1][1],
+            projected_through_position=batch.last_provider_position,
         )
         return True
 
