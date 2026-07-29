@@ -53,8 +53,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-07-28
-spec_version: 23
+last_verified_at: 2026-07-29
+spec_version: 24
 ---
 
 # External Channel
@@ -122,11 +122,13 @@ contain multiple independent bindings.
   Direct HTTP is limited to authenticated private-file streaming and presigned upload
   bodies. Dedicated non-propagating SDK loggers prevent provider request and response
   content from entering application diagnostics.
-- Slack Socket Mode mints endpoints through the same high-level SDK client, but Azents
-  retains WebSocket connection, ping, admission, acknowledgement ordering, reconnect,
-  and lease ownership. SDK Socket Mode request and response types validate envelopes
-  and construct acknowledgements; Azents does not delegate transport lifecycle or
-  reconnect authority to an SDK Socket client.
+- Slack Socket Mode mints endpoints through the same high-level SDK client. The public
+  aiohttp `SocketModeClient` owns WebSocket connection mechanics, Ping/Pong, frame
+  receipt, and acknowledgement transmission with SDK automatic reconnect disabled.
+  Azents owns the fenced lease, endpoint-scoped connect/close policy, durable admission,
+  acknowledgement ordering, normalized reconnect decision, and gap persistence. Public
+  SDK Socket Mode request and response types validate envelopes and construct
+  acknowledgements.
 - An unbound resource resolves only through an existing binding, the Single App's
   sole route, a valid Multi App channel default, or explicit selector completion, in
   that order. It never chooses an arbitrary candidate. A resource has at most one
@@ -290,6 +292,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-29** (spec_version 24) — Delegated Slack Socket Mode WebSocket transport
+  mechanics to the public aiohttp SDK client while retaining Azents-owned lease,
+  admission-before-acknowledgement, endpoint lifecycle policy, and reconnect decisions.
 - **2026-07-28** (spec_version 23) — Aligned the provider boundary with high-level
   Slack Web API methods and SDK typed Socket envelopes while retaining Azents-owned
   Socket lifecycle, documented the single-message compact Discord Tracker, and made

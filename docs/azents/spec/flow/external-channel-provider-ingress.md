@@ -39,8 +39,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-07-28
-spec_version: 16
+last_verified_at: 2026-07-29
+spec_version: 17
 ---
 
 # External Channel Provider Ingress
@@ -130,11 +130,14 @@ and one admission can select at most once.
 A connection-selected Socket worker acquires a fenced lease before opening `apps.connections.open` with the app-level token. The WebSocket client admits Events API envelopes through the same durable admission service and sends the exact envelope acknowledgement only after admission returns. Failed admission remains unacknowledged.
 
 Endpoint minting uses the public high-level `AsyncWebClient.apps_connections_open`
-method with SDK retries disabled. Azents then owns the direct WebSocket connection,
-ping configuration, receive loop, durable admission, acknowledgement ordering, and
-reconnect decisions. Public SDK `SocketModeRequest` and `SocketModeResponse` types
-validate received envelope structure and construct acknowledgements; no SDK Socket
-client owns or reconnects the transport.
+method with SDK retries disabled. Each minted endpoint is assigned to a public aiohttp
+`SocketModeClient` with SDK automatic reconnect disabled. The SDK client owns the
+WebSocket handshake, Ping/Pong, frame receive loop, and response transmission. Its
+public message callback passes bounded text envelopes to Azents, where public
+`SocketModeRequest` and `SocketModeResponse` types validate structure and construct the
+acknowledgement. Azents owns durable admission, admission-before-acknowledgement
+ordering, lease-fenced connect/close policy, normalized reconnect decisions, and gap
+persistence.
 
 Socket refresh/reconnect reasons are normalized. Invalid authentication moves the
 connection to `reconnect_required` without changing its route catalog. Socket-only gap
@@ -287,6 +290,10 @@ into application logs.
 
 ## Changelog
 
+- **2026-07-29** (spec_version 17) — Replaced the custom Slack WebSocket transport
+  with the public aiohttp SDK Socket Mode client while preserving Azents-owned lease,
+  durable admission-before-acknowledgement, reconnect decisions, and sanitized
+  deterministic evidence.
 - **2026-07-28** (spec_version 16) — Moved Slack Web API operations and Socket endpoint
   minting to public high-level SDK methods with retries disabled, retained
   Azents-owned WebSocket lifecycle with SDK typed envelopes and acknowledgements, and
