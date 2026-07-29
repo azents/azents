@@ -43,7 +43,7 @@ from azents.services.external_channel.slack_socket import (
     SlackSocketConnectionResult,
     SlackSocketError,
     SlackSocketInvalidEnvelope,
-    SlackSocketModeClient,
+    SlackSocketModeRunner,
     SlackSocketReconnectRequired,
     SlackSocketWebAPIClient,
 )
@@ -157,7 +157,8 @@ class SlackSocketManagerService:
                 raise SlackSocketCredentialError
             if credentials.app_token is None:
                 raise SlackSocketCredentialError
-            web_api_client = SlackSocketWebAPIClient(create_slack_web_client())
+            web_client = create_slack_web_client()
+            web_api_client = SlackSocketWebAPIClient(web_client)
 
             async def admit_owned(event: ExternalChannelEventCreate) -> object:
                 if (
@@ -246,12 +247,11 @@ class SlackSocketManagerService:
                 )
                 task.add_done_callback(_log_interaction_task_failure)
 
-            client = SlackSocketModeClient(
-                web_api_client=web_api_client,
+            client = SlackSocketModeRunner(
+                web_client=web_client,
                 admit_event=admit_owned,
                 admit_interaction=admit_owned_interaction,
                 schedule_interaction=schedule_owned_interaction,
-                reconnect_delay_seconds=self.reconnect_delay.total_seconds(),
             )
             while not shutdown_event.is_set():
                 opened = await web_api_client.open_connection(
@@ -262,6 +262,7 @@ class SlackSocketManagerService:
                 result = await self._run_connection_with_lease(
                     client=client,
                     connection_id=connection_id,
+                    app_token=credentials.app_token,
                     endpoint_url=opened.url,
                     shutdown_event=shutdown_event,
                 )
@@ -328,14 +329,16 @@ class SlackSocketManagerService:
     async def _run_connection_with_lease(
         self,
         *,
-        client: SlackSocketModeClient,
+        client: SlackSocketModeRunner,
         connection_id: str,
+        app_token: str,
         endpoint_url: str,
         shutdown_event: asyncio.Event,
     ) -> SlackSocketConnectionResult | None:
         connection_task = asyncio.create_task(
             client.run_connection(
                 connection_id=connection_id,
+                app_token=app_token,
                 endpoint_url=endpoint_url,
             )
         )

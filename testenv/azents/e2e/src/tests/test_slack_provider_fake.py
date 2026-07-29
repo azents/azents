@@ -689,7 +689,9 @@ def test_slack_fake_websocket_captures_acknowledgement_after_envelope() -> None:
             assert isinstance(envelope, str)
             assert '"type": "hello"' in hello
             assert '"envelope_id":"Env-1"' in envelope
+            pong_received = connection.ping(b"sdk-ping-pong:test")
             connection.send('{"envelope_id":"Env-1"}')
+            assert pong_received.wait(timeout=5)
             disconnect = connection.recv()
             assert isinstance(disconnect, str)
             assert "link_disabled" in disconnect
