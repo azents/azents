@@ -319,6 +319,7 @@ class ExternalChannelRepository:
         provider_bot_user_id: str | None,
         interaction_public_key: str,
         message_command_id: str,
+        capabilities: dict[str, object],
         callback_selector_hash: str,
         checked_at: datetime.datetime,
     ) -> ExternalChannelConnection | None:
@@ -382,6 +383,7 @@ class ExternalChannelRepository:
         connection.provider_bot_user_id = provider_bot_user_id
         connection.http_callback_selector_hash = callback_selector_hash
         connection.capabilities = {
+            **capabilities,
             "interaction_public_key": interaction_public_key,
             "message_command_id": message_command_id,
         }

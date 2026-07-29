@@ -13,17 +13,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.deps import get_config
-from azents.core.enums import ExternalChannelConnectionStatus
+from azents.core.enums import (
+    ExternalChannelConnectionStatus,
+    ExternalChannelProvider,
+    ExternalChannelTransport,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import ExternalChannelConnectionConfiguration
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.connection import (
+    external_channel_capabilities_from_storage,
     get_external_channel_credentials_codec,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import (
     DiscordConnectionCredentials,
+    ExternalChannelCapabilitySnapshot,
     ExternalChannelConnectionStatusSnapshot,
     ExternalChannelCredentialSnapshot,
     ExternalChannelProviderIdentity,
@@ -51,6 +57,21 @@ type DiscordActivationFailureCode = Literal[
     "discord_application_id_mismatch",
     "discord_authority_changed",
 ]
+
+
+def _discord_capabilities() -> ExternalChannelCapabilitySnapshot:
+    """Return the capabilities supported by an active Discord connection."""
+    return ExternalChannelCapabilitySnapshot(
+        provider=ExternalChannelProvider.DISCORD,
+        transport=ExternalChannelTransport.HTTP,
+        inbound_events=True,
+        thread_history=True,
+        post_messages=True,
+        update_messages=True,
+        delete_messages=True,
+        download_files=True,
+        upload_files=True,
+    )
 
 
 class DiscordActivationConfigurationError(ValueError):
@@ -244,6 +265,7 @@ class DiscordConnectionActivationService:
                 error=error,
             )
         async with self.session_manager() as session:
+            capabilities = _discord_capabilities()
             activated = await self.repository.activate_discord_connection(
                 session,
                 connection_id=connection_id,
@@ -254,6 +276,7 @@ class DiscordConnectionActivationService:
                 provider_bot_user_id=bot_user_id,
                 interaction_public_key=metadata.verify_key,
                 message_command_id=command.command_id,
+                capabilities=capabilities.model_dump(mode="json"),
                 callback_selector_hash=selector_hash,
                 checked_at=datetime.datetime.now(datetime.UTC),
             )
@@ -288,7 +311,7 @@ class DiscordConnectionActivationService:
                 bot_user_id=bot_user_id,
             ),
             credentials=self.credentials_codec.snapshot(credentials),
-            capabilities=None,
+            capabilities=external_channel_capabilities_from_storage(activated),
         )
 
     async def _record_failure(

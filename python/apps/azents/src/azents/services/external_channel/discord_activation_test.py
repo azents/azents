@@ -26,7 +26,10 @@ from azents.repos.external_channel.data import (
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
-from azents.services.external_channel.data import DiscordConnectionCredentials
+from azents.services.external_channel.data import (
+    DiscordConnectionCredentials,
+    ExternalChannelCapabilitySnapshot,
+)
 from azents.services.external_channel.discord_activation import (
     DiscordConnectionActivationService,
 )
@@ -226,6 +229,17 @@ def _configuration(
 def _active_connection(
     configuration: ExternalChannelConnectionConfiguration,
 ) -> ExternalChannelConnection:
+    capabilities = ExternalChannelCapabilitySnapshot(
+        provider=ExternalChannelProvider.DISCORD,
+        transport=ExternalChannelTransport.HTTP,
+        inbound_events=True,
+        thread_history=True,
+        post_messages=True,
+        update_messages=True,
+        delete_messages=True,
+        download_files=True,
+        upload_files=True,
+    )
     return ExternalChannelConnection.model_validate(
         configuration.model_dump()
         | {
@@ -233,7 +247,11 @@ def _active_connection(
             "provider_tenant_id": "guild-1",
             "provider_bot_user_id": "bot-1",
             "http_callback_selector_hash": "selector-hash",
-            "capabilities": {"interaction_public_key": "ab" * 32},
+            "capabilities": capabilities.model_dump(mode="json")
+            | {
+                "interaction_public_key": "ab" * 32,
+                "message_command_id": "command-1",
+            },
             "last_verified_at": _NOW,
             "last_health_at": _NOW,
         }
@@ -347,6 +365,20 @@ async def test_activation_prepares_callback_before_provider_validation(
     assert repository.activation_kwargs is not None
     assert repository.activation_kwargs["provider_bot_user_id"] == "bot-1"
     assert repository.activation_kwargs["message_command_id"] == "command-1"
+    assert repository.activation_kwargs["capabilities"] == {
+        "provider": ExternalChannelProvider.DISCORD.value,
+        "transport": ExternalChannelTransport.HTTP.value,
+        "inbound_events": True,
+        "thread_history": True,
+        "post_messages": True,
+        "update_messages": True,
+        "delete_messages": True,
+        "download_files": True,
+        "upload_files": True,
+    }
+    assert snapshot.capabilities is not None
+    assert snapshot.capabilities.download_files is True
+    assert snapshot.capabilities.upload_files is True
     selector_hash = repository.activation_kwargs["callback_selector_hash"]
     assert isinstance(selector_hash, str)
     assert len(selector_hash) == 64
