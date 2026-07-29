@@ -291,6 +291,70 @@ export const KnownGrepVerticalFields = {
   },
 } satisfies Story;
 
+export const KnownTodoChecklistExpanded = {
+  args: {
+    toolCall: {
+      id: "known-todo-checklist-story",
+      callId: "known-todo-checklist-story",
+      name: "update_todo",
+      arguments: JSON.stringify({
+        operation: "replace",
+        items: [
+          {
+            content: "Inspect the latest main branch and failed CI logs",
+            status: "completed",
+          },
+          {
+            content: "Reproduce and isolate the Backend and E2E failures",
+            status: "in_progress",
+          },
+          {
+            content: "Fix the failures and validate locally",
+            status: "pending",
+          },
+          {
+            content: "Push the branch and create the PR",
+            status: "pending",
+          },
+          {
+            content: "Verify the PR CI result",
+            status: "pending",
+          },
+        ],
+      }),
+      result: "Done",
+      status: "completed",
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(
+      canvas.getByRole("button", { name: /^Updated Todo/ }),
+    );
+
+    const completedText = canvas.getByText(
+      "Inspect the latest main branch and failed CI logs",
+    );
+    const activeText = canvas.getByText(
+      "Reproduce and isolate the Backend and E2E failures",
+    );
+    const activeRow = activeText.closest("[data-todo-status]");
+    if (!(activeRow instanceof HTMLElement)) {
+      throw new Error("Expected an active Todo checklist row");
+    }
+
+    await expect(activeRow).toHaveAttribute("data-todo-status", "in_progress");
+    await expect(getComputedStyle(activeRow).backgroundColor).not.toBe(
+      "rgba(0, 0, 0, 0)",
+    );
+    await expect(getComputedStyle(completedText).textDecorationLine).toContain(
+      "line-through",
+    );
+    await expect(canvas.queryByText("replace")).toBeNull();
+    await expect(canvas.queryByText("in_progress")).toBeNull();
+  },
+} satisfies Story;
+
 export const Interrupted = {
   args: {
     toolCall: interruptedToolCall,

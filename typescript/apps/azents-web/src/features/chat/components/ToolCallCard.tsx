@@ -23,6 +23,7 @@ import {
   IconPhoto,
   IconRobot,
   IconSearch,
+  IconSquare,
   IconSquareCheck,
   IconTargetArrow,
   IconTerminal2,
@@ -45,6 +46,7 @@ import { ToolCallStatusIcon } from "./ToolCallStatusIcon";
 import type {
   KnownToolDetailLabel,
   KnownToolPresentation,
+  TodoDetail,
 } from "../knownToolPresentation";
 import type { ActiveToolCall } from "../types";
 import type {
@@ -501,6 +503,128 @@ function PatchFile({ file }: { file: V4APatchFile }): ReactElement {
   );
 }
 
+function todoStatusLabel(
+  status: TodoDetail["items"][number]["status"],
+  t: ToolCallTranslations,
+): string {
+  switch (status) {
+    case "pending":
+      return t("todoStatus.pending");
+    case "in_progress":
+      return t("todoStatus.inProgress");
+    case "completed":
+      return t("todoStatus.completed");
+  }
+}
+
+function TodoChecklistStatusIcon({
+  status,
+}: {
+  status: TodoDetail["items"][number]["status"];
+}): ReactElement {
+  if (status === "completed") {
+    return (
+      <IconSquareCheck
+        aria-hidden="true"
+        size={17}
+        stroke={1.8}
+        color="var(--mantine-color-dimmed)"
+      />
+    );
+  }
+  if (status === "in_progress") {
+    return (
+      <Box
+        aria-hidden="true"
+        w={rem(15)}
+        h={rem(15)}
+        style={{
+          border: `${rem(1.5)} solid var(--mantine-color-blue-5)`,
+          borderTopColor: "transparent",
+          borderRadius: "50%",
+          flexShrink: 0,
+          transform: "rotate(35deg)",
+        }}
+      />
+    );
+  }
+  return (
+    <IconSquare
+      aria-hidden="true"
+      size={17}
+      stroke={1.6}
+      color="var(--mantine-color-dimmed)"
+    />
+  );
+}
+
+function TodoChecklistDetail({
+  detail,
+  t,
+}: {
+  detail: TodoDetail;
+  t: ToolCallTranslations;
+}): ReactElement {
+  return (
+    <Stack gap={0} role="list">
+      {detail.items.map((item, index) => {
+        const active = item.status === "in_progress";
+        return (
+          <Group
+            key={`${item.status}:${item.content}:${index}`}
+            gap="xs"
+            wrap="nowrap"
+            px={active ? "xs" : 0}
+            py={rem(7)}
+            mih={rem(36)}
+            aria-label={`${todoStatusLabel(item.status, t)} · ${item.content}`}
+            data-todo-status={item.status}
+            role="listitem"
+            style={{
+              ...(active
+                ? {
+                    background: "var(--mantine-color-blue-light)",
+                    borderRadius: "var(--mantine-radius-sm)",
+                  }
+                : {}),
+            }}
+          >
+            <Box
+              w={rem(18)}
+              h={rem(20)}
+              style={{
+                alignItems: "center",
+                display: "flex",
+                flexShrink: 0,
+                justifyContent: "center",
+              }}
+            >
+              <TodoChecklistStatusIcon status={item.status} />
+            </Box>
+            <Text
+              size="sm"
+              c={
+                item.status === "completed"
+                  ? "dimmed"
+                  : "var(--mantine-color-text)"
+              }
+              fw={active ? 500 : 400}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                textDecoration:
+                  item.status === "completed" ? "line-through" : "none",
+              }}
+            >
+              {item.content}
+            </Text>
+          </Group>
+        );
+      })}
+    </Stack>
+  );
+}
+
 function presentationDetail(
   presentation: KnownToolPresentation,
   t: ToolCallTranslations,
@@ -625,6 +749,8 @@ function presentationDetail(
           ) : null}
         </Stack>
       );
+    case "todo":
+      return <TodoChecklistDetail detail={presentation.detail} t={t} />;
     case "skill":
       return <SkillContentPanel content={presentation.detail.content} />;
   }

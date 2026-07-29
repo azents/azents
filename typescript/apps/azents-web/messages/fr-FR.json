@@ -2139,6 +2139,11 @@
       "filesChanged": "{count} fichier(s) modifié(s)",
       "exitCode": "code de sortie {code}",
       "outputTruncated": "La sortie a été tronquée.",
+      "todoStatus": {
+        "pending": "En attente",
+        "inProgress": "En cours",
+        "completed": "Terminée"
+      },
       "action": {
         "read": "Lecture du fichier",
         "search": "Recherche de fichiers",
