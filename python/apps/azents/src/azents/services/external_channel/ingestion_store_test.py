@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelConversationScopeKind,
+    ExternalChannelDeliveryStatus,
     ExternalChannelIngressProfile,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
@@ -36,6 +37,7 @@ from azents.services.external_channel.ingestion import (
 )
 from azents.services.external_channel.ingestion_store import (
     ExternalChannelDatabaseIngestionStore,
+    _resource_labels,  # pyright: ignore[reportPrivateUsage]
 )
 
 
@@ -64,6 +66,7 @@ def _request() -> ExternalChannelIngestionRequest:
         provider=ExternalChannelProvider.SLACK,
         provider_tenant_id="tenant-1",
         provider_channel_id="channel-1",
+        provider_parent_channel_id=None,
         provider_thread_key="thread-1",
         delivery_thread_key="thread-1",
         provider_resource_key="resource-1",
@@ -144,6 +147,113 @@ def _replay_request() -> ExternalChannelIngestionRequest:
     )
 
 
+def _discord_request(
+    *,
+    scope_kind: ExternalChannelConversationScopeKind,
+) -> ExternalChannelIngestionRequest:
+    thread_id = (
+        "201" if scope_kind is ExternalChannelConversationScopeKind.THREAD else None
+    )
+    locator = ExternalChannelTriggerLocator(
+        connection_id="connection-1",
+        provider=ExternalChannelProvider.DISCORD,
+        provider_tenant_id="300",
+        provider_channel_id="201" if thread_id is not None else "200",
+        provider_parent_channel_id="200" if thread_id is not None else None,
+        provider_thread_key=thread_id,
+        delivery_thread_key="201",
+        provider_resource_key=(
+            "discord:300:201" if thread_id is not None else "discord:300:100"
+        ),
+        trigger_provider_message_key="discord:300:100",
+        trigger_provider_message_id="100",
+        trigger_position="00000000000000000100",
+        provider_user_id="400",
+        invocation=True,
+    )
+    return ExternalChannelIngestionRequest(
+        locator=locator,
+        scope=ExternalChannelConversationScope(
+            connection_id=locator.connection_id,
+            kind=scope_kind,
+            provider_channel_id=locator.provider_channel_id,
+            provider_thread_key=locator.provider_thread_key,
+        ),
+        authority=ExternalChannelIngressAuthority(
+            kind=ExternalChannelIngressAuthorityKind.LEASE,
+            ingress_profile=ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
+            configuration_generation=2,
+            lease_owner="manager-1",
+            lease_generation=3,
+        ),
+        deadline=ExternalChannelOperationDeadline(
+            datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
+        ),
+        operation=ExternalChannelIngestionOperation.CURRENT_TRIGGER,
+        selected_route_id=None,
+        replay_boundary=None,
+    )
+
+
+def test_discord_manual_thread_labels_keep_thread_root_identity() -> None:
+    labels = _resource_labels(
+        _discord_request(scope_kind=ExternalChannelConversationScopeKind.THREAD)
+    )
+
+    assert labels["source_channel_id"] == "201"
+    assert labels["parent_channel_id"] == "200"
+    assert labels["root_message_id"] == "201"
+    assert labels["delivery_channel_id"] == "201"
+
+
+def test_discord_parent_labels_keep_trigger_root_and_confirmed_delivery() -> None:
+    labels = _resource_labels(
+        _discord_request(scope_kind=ExternalChannelConversationScopeKind.PARENT_CHANNEL)
+    )
+
+    assert labels["source_channel_id"] == "200"
+    assert labels["parent_channel_id"] == "200"
+    assert labels["root_message_id"] == "100"
+    assert labels["delivery_channel_id"] == "201"
+
+
+@pytest.mark.asyncio
+async def test_discord_access_control_uses_confirmed_thread_without_lazy_fields() -> (
+    None
+):
+    session = MagicMock(spec=AsyncSession)
+    repository = SimpleNamespace(
+        create_delivery_attempt_idempotent=AsyncMock(
+            return_value=SimpleNamespace(
+                id="attempt-1",
+                status=ExternalChannelDeliveryStatus.PENDING,
+            )
+        )
+    )
+    store = _store(
+        session=cast(AsyncSession, session),
+        repository=repository,
+    )
+
+    attempt_id = await store._create_access_control_intent(  # pyright: ignore[reportPrivateUsage]
+        cast(AsyncSession, session),
+        request_id="request-1",
+        request=_discord_request(
+            scope_kind=ExternalChannelConversationScopeKind.PARENT_CHANNEL
+        ),
+        routing=cast(Any, SimpleNamespace(binding=None)),
+        principal_provider_user_id="400",
+        participant_label="Participant",
+        now=datetime.datetime.now(datetime.UTC),
+    )
+
+    assert attempt_id == "attempt-1"
+    create = repository.create_delivery_attempt_idempotent.await_args.args[1]
+    assert create.request_payload["channel_id"] == "201"
+    assert "thread_parent_channel_id" not in create.request_payload
+    assert "thread_root_message_id" not in create.request_payload
+
+
 def _store(
     *,
     session: AsyncSession,
@@ -202,7 +312,7 @@ async def test_final_authority_lock_rejects_invalid_kind_profile_combination(
     object.__setattr__(
         invalid_authority,
         "lease_generation",
-        1 if kind is ExternalChannelIngressAuthorityKind.LEASE else None,
+        None,
     )
     request = dataclasses.replace(_request(), authority=invalid_authority)
     store = _store(

@@ -1,4 +1,4 @@
-"""Slack Socket Mode primitives for durable External Channel event admission."""
+"""Slack Socket Mode primitives for synchronous External Channel handoff."""
 
 import asyncio
 import dataclasses
@@ -55,6 +55,10 @@ class SlackSocketReconnectRequired(SlackSocketError):
 
 class SlackSocketInvalidEnvelope(SlackSocketError):
     """A Socket Mode message is malformed or cannot be admitted."""
+
+
+class SlackSocketRetryableIngestion(SlackSocketError):
+    """A message envelope must remain unacknowledged for provider redelivery."""
 
 
 @dataclass(frozen=True)
@@ -209,7 +213,7 @@ class SlackSocketWebAPIClient:
 
 
 class SlackSocketModeRunner:
-    """Admit Socket Mode callbacks durably before acknowledging their envelopes."""
+    """Complete Socket Mode callbacks before acknowledging their envelopes."""
 
     def __init__(
         self,

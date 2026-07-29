@@ -114,13 +114,14 @@ async def receive_slack_event(
     ] = None,
 ) -> Response:
     """Authenticate and durably admit one Slack Events API callback."""
+    received_at = datetime.datetime.now(datetime.UTC)
     try:
         raw_body = await _read_bounded_body(request)
         result = await service.handle(
             raw_body=raw_body,
             timestamp_header=x_slack_request_timestamp,
             signature_header=x_slack_signature,
-            received_at=datetime.datetime.now(datetime.UTC),
+            received_at=received_at,
         )
     except SlackHTTPUnauthorized as error:
         raise HTTPException(

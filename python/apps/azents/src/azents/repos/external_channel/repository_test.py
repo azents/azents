@@ -598,6 +598,7 @@ class TestExternalChannelRepository:
             status=ExternalChannelConnectionStatus.DISCONNECTED,
             reason="app_uninstalled",
             now=_at(4),
+            required_configuration_generation=None,
             required_socket_lease_owner=None,
             defer_provider_state_purge=False,
         )
@@ -641,6 +642,7 @@ class TestExternalChannelRepository:
             status=ExternalChannelConnectionStatus.DISCONNECTED,
             reason="app_uninstalled",
             now=_at(4),
+            required_configuration_generation=None,
             required_socket_lease_owner=None,
             defer_provider_state_purge=True,
         )
@@ -667,6 +669,50 @@ class TestExternalChannelRepository:
         assert purged is not None
         assert purged.encrypted_credentials is None
         assert purged.provider_tenant_id is None
+
+    async def test_provider_lifecycle_rejects_stale_configuration_generation(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A replaced configuration wins over an in-flight provider callback."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "external-channel-stale-provider-lifecycle",
+        )
+        repo = ExternalChannelRepository()
+        connection = await repo.create_connection(
+            rdb_session,
+            _connection_create(workspace_id),
+        )
+        stale_generation = connection.configuration_generation + 1
+
+        terminated = await repo.terminate_connection_for_provider_event(
+            rdb_session,
+            connection_id=connection.id,
+            status=ExternalChannelConnectionStatus.DISCONNECTED,
+            reason="app_uninstalled",
+            now=_at(4),
+            required_configuration_generation=stale_generation,
+            required_socket_lease_owner=None,
+            defer_provider_state_purge=True,
+        )
+        reconnect_required = await repo.mark_connection_reconnect_required(
+            rdb_session,
+            connection_id=connection.id,
+            reason="tokens_revoked",
+            now=_at(4),
+            required_configuration_generation=stale_generation,
+            required_socket_lease_owner=None,
+        )
+        retained = await repo.get_connection_configuration(
+            rdb_session,
+            connection_id=connection.id,
+        )
+
+        assert terminated is None
+        assert reconnect_required is False
+        assert retained is not None
+        assert retained.status is ExternalChannelConnectionStatus.ACTIVE
 
     async def test_connection_health_update_returns_refreshed_projection(
         self,

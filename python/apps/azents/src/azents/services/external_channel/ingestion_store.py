@@ -962,14 +962,6 @@ class ExternalChannelDatabaseIngestionStore:
                     else None
                 ),
             }
-            parent_channel_id = request.locator.provider_channel_id
-            root_message_id = request.locator.trigger_provider_message_id
-            if (
-                request.scope.kind
-                is ExternalChannelConversationScopeKind.PARENT_CHANNEL
-            ):
-                payload["thread_parent_channel_id"] = parent_channel_id
-                payload["thread_root_message_id"] = root_message_id
         else:
             raise RuntimeError("External Channel provider is not supported.")
         attempt = await self.repository.create_delivery_attempt_idempotent(
@@ -1219,6 +1211,7 @@ class ExternalChannelDatabaseIngestionStore:
         ):
             if (
                 request.authority.lease_owner is None
+                or request.authority.lease_generation is not None
                 or connection.socket_lease_owner != request.authority.lease_owner
                 or connection.socket_lease_until is None
                 or connection.socket_lease_until < now
@@ -1261,8 +1254,14 @@ def _resource_labels(request: ExternalChannelIngestionRequest) -> dict[str, obje
         "provider": "discord",
         "guild_id": request.locator.provider_tenant_id,
         "source_channel_id": request.locator.provider_channel_id,
-        "parent_channel_id": request.locator.provider_channel_id,
-        "root_message_id": request.locator.trigger_provider_message_key,
+        "parent_channel_id": (
+            request.locator.provider_parent_channel_id
+            or request.locator.provider_channel_id
+        ),
+        "root_message_id": (
+            request.locator.provider_thread_key
+            or request.locator.trigger_provider_message_id
+        ),
         **(
             {"thread_channel_id": delivery, "delivery_channel_id": delivery}
             if delivery

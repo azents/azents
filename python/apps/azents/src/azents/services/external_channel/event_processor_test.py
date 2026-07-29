@@ -4256,6 +4256,7 @@ async def test_credential_failure_preserves_agent_route(
             connection_id=connection_id,
             reason="missing_scope",
             now=_at(2),
+            required_configuration_generation=None,
             required_socket_lease_owner=None,
         )
         await session.commit()
@@ -4609,6 +4610,7 @@ async def test_provider_failure_does_not_revive_disconnected_connection(
             connection_id=connection_id,
             reason="credentials_invalid",
             now=_at(2),
+            required_configuration_generation=None,
             required_socket_lease_owner=None,
         )
         await session.commit()
@@ -4636,6 +4638,7 @@ async def test_app_uninstall_preserves_detached_agent_route(
             status=ExternalChannelConnectionStatus.DISCONNECTED,
             reason="app_uninstalled",
             now=_at(2),
+            required_configuration_generation=None,
             required_socket_lease_owner=None,
             defer_provider_state_purge=False,
         )
