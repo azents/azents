@@ -62,6 +62,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelEvent,
     RDBExternalChannelInvocationBatch,
+    RDBExternalChannelInvocationBatchItem,
     RDBExternalChannelPendingContext,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -92,8 +93,10 @@ from azents.repos.external_channel.data import (
     ExternalChannelDeliveryAttempt,
     ExternalChannelEvent,
     ExternalChannelEventCreate,
+    ExternalChannelInvocationBatch,
     ExternalChannelMessage,
     ExternalChannelMessageCreate,
+    ExternalChannelPendingContext,
     ExternalChannelPendingContextTrim,
     ExternalChannelPrincipalCreate,
     ExternalChannelResource,
@@ -555,6 +558,26 @@ class _TestEventProcessorService(ExternalChannelEventProcessorService):
             resource=resource,
             trigger_message=trigger_message,
             expected_admission_id=expected_admission_id,
+        )
+
+
+class _TestAccessService(ExternalChannelAccessService):
+    """Expose access release only to focused idempotency tests."""
+
+    async def release_allowed_request_for_test(
+        self,
+        session: AsyncSession,
+        *,
+        binding: ExternalChannelBinding,
+        trigger_message_id: str,
+        now: datetime.datetime,
+    ) -> bool:
+        """Expose immutable approved-batch recovery."""
+        return await self._release_allowed_request(
+            session,
+            binding=binding,
+            trigger_message_id=trigger_message_id,
+            now=now,
         )
 
 
@@ -1056,6 +1079,83 @@ def _access_service(
         ),
         mailbox_item_service=cast(MailboxService, MagicMock()),
         session_lifecycle=cast(SessionLifecycleService, MagicMock()),
+    )
+
+
+@pytest.mark.asyncio
+async def test_access_release_reuses_immutable_batch_for_late_revision() -> None:
+    """Approved release never appends a late revision to an existing batch."""
+    repository = MagicMock(spec=ExternalChannelRepository)
+    existing = ExternalChannelInvocationBatch.model_construct(
+        id="batch-1",
+        mailbox_item_id=None,
+        last_provider_position="position-1",
+    )
+    locked = ExternalChannelInvocationBatch.model_construct(
+        id="batch-1",
+        mailbox_item_id="mailbox-1",
+        last_provider_position="position-1",
+    )
+    trigger = ExternalChannelMessage.model_construct(
+        current_revision_id="revision-late",
+        provider_position="position-1",
+    )
+    pending = ExternalChannelPendingContext.model_construct(
+        id="pending-late",
+        message_revision_id="revision-late",
+        provider_position="position-1",
+    )
+    repository.get_invocation_batch = AsyncMock(return_value=existing)
+    repository.get_message = AsyncMock(return_value=trigger)
+    repository.list_pending_context = AsyncMock(return_value=[pending])
+    repository.list_invocation_batch_revision_ids = AsyncMock(
+        return_value=["revision-original"]
+    )
+    repository.lock_invocation_batch = AsyncMock(return_value=locked)
+    repository.delete_pending_context_ids = AsyncMock(return_value=0)
+    repository.advance_binding_projection = AsyncMock()
+    repository.create_invocation_batch_idempotent = AsyncMock()
+    repository.create_invocation_batch_item_idempotent = AsyncMock()
+    session = cast(AsyncSession, MagicMock(spec=AsyncSession))
+    service = _TestAccessService(
+        session_manager=cast(SessionManager[AsyncSession], MagicMock()),
+        repository=repository,
+        agent_repository=cast(AgentRepository, MagicMock()),
+        agent_session_repository=cast(AgentSessionRepository, MagicMock()),
+        root_agent_session_creation_service=cast(
+            RootAgentSessionCreationService,
+            MagicMock(),
+        ),
+        mailbox_item_service=cast(MailboxService, MagicMock()),
+        session_lifecycle=cast(SessionLifecycleService, MagicMock()),
+    )
+    binding = ExternalChannelBinding.model_construct(
+        id="binding-1",
+        route_id="route-1",
+        resource_id="resource-1",
+        agent_session_id="session-1",
+        truncated_message_count=0,
+        truncated_size=0,
+    )
+
+    released = await service.release_allowed_request_for_test(
+        session,
+        binding=binding,
+        trigger_message_id="message-1",
+        now=_at(5),
+    )
+
+    assert released is True
+    repository.create_invocation_batch_idempotent.assert_not_awaited()
+    repository.create_invocation_batch_item_idempotent.assert_not_awaited()
+    repository.delete_pending_context_ids.assert_awaited_once_with(
+        session,
+        pending_context_ids=[],
+    )
+    repository.advance_binding_projection.assert_awaited_once_with(
+        session,
+        binding_id="binding-1",
+        projected_through_position="position-1",
     )
 
 
@@ -2628,10 +2728,10 @@ async def test_multi_channel_default_projects_only_selected_route(
     assert [request.route_id for request in requests] == [routes[1].id]
 
 
-async def test_initial_binding_release_creates_one_session_link_and_tracker(
+async def test_initial_binding_release_preserves_batch_for_late_edit(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """Initial activation separates one Session link from the work-cycle Tracker."""
+    """Initial activation keeps a linked batch immutable when an edit arrives late."""
     async with rdb_session_manager() as session:
         connection_id, route_id, agent_id, repository = await _setup_route(session)
         route = await repository.get_agent_route(session, route_id=route_id)
@@ -2745,16 +2845,58 @@ async def test_initial_binding_release_creates_one_session_link_and_tracker(
             binding_id=binding.id,
         )
         assert locked_binding is not None
+        late_edit = normalize_slack_event(
+            event_type="message",
+            tenant_id="T1",
+            envelope={
+                "event": {
+                    "type": "message",
+                    "subtype": "message_changed",
+                    "channel": "C1",
+                    "channel_type": "channel",
+                    "event_ts": "1784678401.000100",
+                    "message": {
+                        "user": "U1",
+                        "ts": "1784678400.000100",
+                        "text": "<@B1> investigate the correction",
+                        "edited": {"ts": "1784678401.000000"},
+                    },
+                }
+            },
+        )
+        assert isinstance(late_edit, SlackNormalizedMessage)
+        persisted_edit = await service.persist_normalized_message_for_test(
+            session,
+            route=route,
+            resource=resource,
+            message=late_edit,
+            now=_at(4),
+        )
         repeated = await service.release_pending_context_for_test(
             session,
             binding=locked_binding,
             trigger_message_id=persisted.message.id,
-            now=_at(4),
+            now=_at(5),
             initial_activation=True,
             workspace_id=agent.workspace_id,
             agent_id=agent_id,
         )
         await session.commit()
+        batch_items = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelInvocationBatchItem).where(
+                    RDBExternalChannelInvocationBatchItem.batch_id == released.batch.id
+                )
+            )
+        )
+        pending = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelPendingContext).where(
+                    RDBExternalChannelPendingContext.route_id == route.id,
+                    RDBExternalChannelPendingContext.resource_id == resource.id,
+                )
+            )
+        )
 
     assert session_link is not None
     assert session_link.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
@@ -2792,6 +2934,10 @@ async def test_initial_binding_release_creates_one_session_link_and_tracker(
     assert repeated is not None
     assert repeated.session_link_delivery_attempt_id == session_link.id
     assert repeated.activity_delivery_attempt_id == activity.id
+    assert len(batch_items) == 1
+    assert [item.message_revision_id for item in pending] == [
+        persisted_edit.message.current_revision_id
+    ]
 
 
 async def _prepare_discord_reconcile_fixture(

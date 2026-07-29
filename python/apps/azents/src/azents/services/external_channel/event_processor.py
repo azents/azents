@@ -3967,28 +3967,43 @@ class ExternalChannelEventProcessorService:
                     activity_delivery_attempt_id=activity_delivery_attempt_id,
                 )
             )
-        batch = await self.repository.create_invocation_batch_idempotent(
-            session,
-            ExternalChannelInvocationBatchCreate(
-                binding_id=binding.id,
-                trigger_message_id=trigger_message_id,
-                first_provider_position=pending[0].provider_position,
-                last_provider_position=pending[-1].provider_position,
-                truncation_message_count=binding.truncated_message_count,
-                truncation_size=binding.truncated_size,
-                mailbox_item_id=None,
-            ),
-        )
-        for sequence, item in enumerate(pending):
-            await self.repository.create_invocation_batch_item_idempotent(
+        if existing is None:
+            batch = await self.repository.create_invocation_batch_idempotent(
                 session,
-                ExternalChannelInvocationBatchItemCreate(
-                    batch_id=batch.id,
-                    message_revision_id=item.message_revision_id,
-                    sequence=sequence,
-                    provider_position=item.provider_position,
+                ExternalChannelInvocationBatchCreate(
+                    binding_id=binding.id,
+                    trigger_message_id=trigger_message_id,
+                    first_provider_position=pending[0].provider_position,
+                    last_provider_position=pending[-1].provider_position,
+                    truncation_message_count=binding.truncated_message_count,
+                    truncation_size=binding.truncated_size,
+                    mailbox_item_id=None,
                 ),
             )
+            for sequence, item in enumerate(pending):
+                await self.repository.create_invocation_batch_item_idempotent(
+                    session,
+                    ExternalChannelInvocationBatchItemCreate(
+                        batch_id=batch.id,
+                        message_revision_id=item.message_revision_id,
+                        sequence=sequence,
+                        provider_position=item.provider_position,
+                    ),
+                )
+            released_pending = pending
+        else:
+            batch = existing
+            batch_revision_ids = set(
+                await self.repository.list_invocation_batch_revision_ids(
+                    session,
+                    batch_id=batch.id,
+                )
+            )
+            released_pending = [
+                item
+                for item in pending
+                if item.message_revision_id in batch_revision_ids
+            ]
         batch, _ = await self._ensure_invocation_mailbox_item(
             session,
             binding=binding,
@@ -4093,13 +4108,13 @@ class ExternalChannelEventProcessorService:
             )
         await self.repository.delete_pending_context_ids(
             session,
-            pending_context_ids=[item.id for item in pending],
+            pending_context_ids=[item.id for item in released_pending],
         )
         if not initial_activation:
             await self.repository.advance_binding_projection(
                 session,
                 binding_id=binding.id,
-                projected_through_position=pending[-1].provider_position,
+                projected_through_position=batch.last_provider_position,
             )
         return ExternalChannelReleasedInvocation(
             batch=batch,
