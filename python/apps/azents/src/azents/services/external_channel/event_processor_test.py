@@ -18,6 +18,7 @@ from azents.core.config import Config
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionStartReason,
+    EventKind,
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
     ExternalChannelAppMode,
@@ -42,6 +43,7 @@ from azents.core.enums import (
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
     ExternalChannelTransport,
+    ExternalChannelWorkStatus,
     LLMProvider,
 )
 from azents.rdb.models.agent import RDBAgent
@@ -52,6 +54,7 @@ from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
 from azents.rdb.models.agent_session import RDBAgentSession
+from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessGrant,
     RDBExternalChannelAccessRequest,
@@ -67,6 +70,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelWork,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.rdb.models.session_agent import RDBSessionAgent
 from azents.rdb.models.session_agent_context import (
     RDBSessionAgentContext,
@@ -3149,6 +3153,234 @@ async def _prepare_discord_reconcile_fixture(
         )
         await session.commit()
     return service, repository, binding.id, resource.id
+
+
+@dataclasses.dataclass(frozen=True)
+class _FinishedDiscordActivationRecoveryFixture:
+    """State needed to exercise historical Discord activation recovery."""
+
+    service: _TestEventProcessorService
+    repository: ExternalChannelRepository
+    binding_id: str
+    resource_id: str
+    mailbox_item_id: str
+
+
+async def _prepare_finished_discord_activation_recovery_fixture(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> _FinishedDiscordActivationRecoveryFixture:
+    """Create one historically completed Discord invocation awaiting activation."""
+    (
+        service,
+        repository,
+        binding_id,
+        resource_id,
+    ) = await _prepare_discord_reconcile_fixture(rdb_session_manager)
+
+    async def deliver(attempt_id: str) -> None:
+        async with rdb_session_manager() as session:
+            await repository.start_delivery_attempt(
+                session,
+                delivery_attempt_id=attempt_id,
+                attempted_at=_at(5),
+            )
+            await repository.finish_delivery_attempt(
+                session,
+                delivery_attempt_id=attempt_id,
+                status=ExternalChannelDeliveryStatus.DELIVERED,
+                provider_message_key=f"discord:test:{attempt_id}",
+                error_kind=None,
+                error_summary=None,
+                completed_at=_at(5),
+            )
+            await session.commit()
+
+    service.action_service.attempt_delivery = AsyncMock(side_effect=deliver)
+    cast(Any, service.session_lifecycle).send_session_wake_up = AsyncMock(
+        side_effect=RuntimeError("injected historical wake failure")
+    )
+    with pytest.raises(RuntimeError, match="injected historical wake failure"):
+        await service.reconcile_binding(binding_id=binding_id)
+
+    async with rdb_session_manager() as session:
+        binding = await session.get(RDBExternalChannelBinding, binding_id)
+        assert binding is not None
+        assert binding.activation_trigger_message_id is not None
+        batch = await session.scalar(
+            sa.select(RDBExternalChannelInvocationBatch).where(
+                RDBExternalChannelInvocationBatch.binding_id == binding_id,
+                RDBExternalChannelInvocationBatch.trigger_message_id
+                == binding.activation_trigger_message_id,
+            )
+        )
+        assert batch is not None
+        assert batch.mailbox_item_id is not None
+        items = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelInvocationBatchItem)
+                .where(RDBExternalChannelInvocationBatchItem.batch_id == batch.id)
+                .order_by(RDBExternalChannelInvocationBatchItem.sequence)
+            )
+        )
+        assert items
+        for item in items:
+            session.add(
+                RDBEvent(
+                    session_id=binding.agent_session_id,
+                    kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
+                    payload={
+                        "binding_id": binding.id,
+                        "invocation_batch_id": batch.id,
+                        "revision_id": item.message_revision_id,
+                    },
+                    model_order=1000 + item.sequence,
+                    external_id=f"recovery:{batch.id}:{item.message_revision_id}",
+                    adapter=None,
+                    provider=None,
+                    model=None,
+                    native_format=None,
+                    schema_version="1",
+                )
+            )
+        works = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelWork).where(
+                    RDBExternalChannelWork.binding_id == binding_id
+                )
+            )
+        )
+        assert len(works) == 1
+        works[0].status = ExternalChannelWorkStatus.FINISHED
+        works[0].finished_at = _at(6)
+        works[0].desired_progress_payload = None
+        binding.activation_status = (
+            ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+        )
+        binding.activation_wake_claimed_at = None
+        binding.projected_through_position = None
+        await session.commit()
+        mailbox_item_id = batch.mailbox_item_id
+
+    service.action_service.attempt_delivery = AsyncMock()
+    cast(Any, service.session_lifecycle).send_session_wake_up = AsyncMock()
+    return _FinishedDiscordActivationRecoveryFixture(
+        service=service,
+        repository=repository,
+        binding_id=binding_id,
+        resource_id=resource_id,
+        mailbox_item_id=mailbox_item_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconcile_recovers_finished_discord_activation_without_replay(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A completed historical invocation activates after stale mailbox cleanup."""
+    fixture = await _prepare_finished_discord_activation_recovery_fixture(
+        rdb_session_manager
+    )
+
+    assert (
+        await fixture.service.reconcile_binding(binding_id=fixture.binding_id) is True
+    )
+    cast(Any, fixture.service.action_service.attempt_delivery).assert_not_awaited()
+    cast(
+        Any, fixture.service.session_lifecycle
+    ).send_session_wake_up.assert_not_awaited()
+
+    async with rdb_session_manager() as session:
+        binding = await session.get(RDBExternalChannelBinding, fixture.binding_id)
+        batch = await session.scalar(
+            sa.select(RDBExternalChannelInvocationBatch).where(
+                RDBExternalChannelInvocationBatch.binding_id == fixture.binding_id
+            )
+        )
+        mailbox_item = await session.get(RDBMailboxItem, fixture.mailbox_item_id)
+    assert binding is not None
+    assert binding.activation_status is ExternalChannelBindingActivationStatus.ACTIVE
+    assert binding.projected_through_position == "100"
+    assert batch is not None
+    assert batch.mailbox_item_id is None
+    assert mailbox_item is None
+
+
+@pytest.mark.asyncio
+async def test_reconcile_finished_discord_requires_complete_transcript_evidence(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Missing promoted batch evidence preserves the waiting state and mailbox."""
+    fixture = await _prepare_finished_discord_activation_recovery_fixture(
+        rdb_session_manager
+    )
+    async with rdb_session_manager() as session:
+        binding = await session.get(RDBExternalChannelBinding, fixture.binding_id)
+        assert binding is not None
+        event = await session.scalar(
+            sa.select(RDBEvent).where(
+                RDBEvent.session_id == binding.agent_session_id,
+                RDBEvent.kind == EventKind.EXTERNAL_CHANNEL_MESSAGE,
+            )
+        )
+        assert event is not None
+        await session.delete(event)
+        await session.commit()
+
+    assert (
+        await fixture.service.reconcile_binding(binding_id=fixture.binding_id) is False
+    )
+    cast(Any, fixture.service.action_service.attempt_delivery).assert_not_awaited()
+    cast(
+        Any, fixture.service.session_lifecycle
+    ).send_session_wake_up.assert_not_awaited()
+    async with rdb_session_manager() as session:
+        binding = await session.get(RDBExternalChannelBinding, fixture.binding_id)
+        mailbox_item = await session.get(RDBMailboxItem, fixture.mailbox_item_id)
+    assert binding is not None
+    assert binding.activation_status is (
+        ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+    )
+    assert mailbox_item is not None
+
+
+@pytest.mark.asyncio
+async def test_reconcile_finished_discord_requires_delivered_initial_attempts(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A non-delivered initial intent preserves normal waiting recovery behavior."""
+    fixture = await _prepare_finished_discord_activation_recovery_fixture(
+        rdb_session_manager
+    )
+    async with rdb_session_manager() as session:
+        control_attempt = await session.scalar(
+            sa.select(RDBExternalChannelDeliveryAttempt).where(
+                RDBExternalChannelDeliveryAttempt.binding_id == fixture.binding_id,
+                RDBExternalChannelDeliveryAttempt.origin_id == fixture.binding_id,
+                RDBExternalChannelDeliveryAttempt.operation
+                == ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            )
+        )
+        assert control_attempt is not None
+        control_attempt.status = ExternalChannelDeliveryStatus.FAILED
+        control_attempt.error_kind = "provider_failure"
+        control_attempt.error_summary = "safe test failure"
+        await session.commit()
+
+    assert (
+        await fixture.service.reconcile_binding(binding_id=fixture.binding_id) is False
+    )
+    cast(Any, fixture.service.action_service.attempt_delivery).assert_not_awaited()
+    cast(
+        Any, fixture.service.session_lifecycle
+    ).send_session_wake_up.assert_not_awaited()
+    async with rdb_session_manager() as session:
+        binding = await session.get(RDBExternalChannelBinding, fixture.binding_id)
+        mailbox_item = await session.get(RDBMailboxItem, fixture.mailbox_item_id)
+    assert binding is not None
+    assert binding.activation_status is (
+        ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+    )
+    assert mailbox_item is not None
 
 
 @pytest.mark.asyncio
