@@ -177,6 +177,7 @@ def _make_runtime_repo(
     repo.get_by_agent_id.return_value = SimpleNamespace(
         id=runtime_id,
         desired_state=desired_state,
+        desired_generation=7,
         provider_connection_state=provider_connection_state,
         provider_observed_state=provider_observed_state,
         runner_state=runner_state,
@@ -638,6 +639,7 @@ def _make_toolkit(
     agent_runtime_repo.get_by_agent_id.return_value = SimpleNamespace(
         id="runtime-1",
         desired_state=desired_state,
+        desired_generation=7,
         provider_connection_state=provider_connection_state,
         provider_observed_state=provider_observed_state,
         runner_state=runner_state,
@@ -887,7 +889,7 @@ class TestRuntimeToolkitUpdateContext:
         assert capability is not None
         assert capability.service is transfer_service
         assert capability.target.runtime_id == "runtime-1"
-        assert capability.target.desired_generation == 1
+        assert capability.target.desired_generation == 7
 
     @pytest.mark.asyncio
     async def test_update_context_exposes_publication_capability_without_storage(
@@ -908,12 +910,34 @@ class TestRuntimeToolkitUpdateContext:
         capability = instruction_context.publication_capability
         assert capability is not None
         assert capability.target.runtime_id == "runtime-1"
-        assert capability.target.desired_generation == 1
+        assert capability.target.desired_generation == 7
         assert callable(capability.publish)
         assert set(vars(capability)) == {"_service", "target"}
         assert not hasattr(capability, "resolver")
         assert not hasattr(capability, "bucket")
         assert not hasattr(capability, "key")
+
+    @pytest.mark.asyncio
+    async def test_update_context_exposes_provider_delivery_for_desired_generation(
+        self,
+    ) -> None:
+        """Provider delivery carries the Runtime lifecycle generation."""
+        delivery_service = AsyncMock()
+        toolkit = _make_toolkit(
+            runtime_to_provider_delivery_service=cast(
+                RuntimeToProviderDeliveryExecutor,
+                delivery_service,
+            ),
+        )
+
+        await toolkit.update_context(_make_context())
+
+        instruction_context = cast(Any, toolkit)._agents_context
+        capability = instruction_context.provider_delivery_capability
+        assert capability is not None
+        assert capability.service is delivery_service
+        assert capability.target.runtime_id == "runtime-1"
+        assert capability.target.desired_generation == 7
 
     @pytest.mark.asyncio
     async def test_update_context_withholds_publication_until_runtime_is_ready(
