@@ -26,6 +26,7 @@ from azents.core.enums import (
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelConversationAdmissionStatus,
+    ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
@@ -34,6 +35,7 @@ from azents.core.enums import (
     ExternalChannelHydrationStatus,
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
+    ExternalChannelInvocationWakeDispatchStatus,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
@@ -61,6 +63,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelChannelDefault,
     RDBExternalChannelConnection,
     RDBExternalChannelConversationAdmission,
+    RDBExternalChannelConversationPosition,
     RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelEvent,
     RDBExternalChannelIngressLease,
@@ -72,6 +75,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelPendingContext,
     RDBExternalChannelPrincipal,
     RDBExternalChannelResource,
+    RDBExternalChannelResourceProvisioning,
     RDBExternalChannelWork,
     RDBExternalChannelWorkProjectionPart,
 )
@@ -98,6 +102,9 @@ from .data import (
     ExternalChannelConnectionCreate,
     ExternalChannelConversationAdmission,
     ExternalChannelConversationAdmissionCreate,
+    ExternalChannelConversationPosition,
+    ExternalChannelConversationPositionCreate,
+    ExternalChannelCutoverPreflightCounts,
     ExternalChannelDeliveryAttempt,
     ExternalChannelDeliveryAttemptCreate,
     ExternalChannelEvent,
@@ -162,6 +169,116 @@ _INTERACTION_OPAQUE_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/=@+-]
 
 class ExternalChannelRepository:
     """Provider-generic SQLAlchemy repository for External Channel state."""
+
+    async def create_conversation_position_idempotent(
+        self,
+        session: AsyncSession,
+        create: ExternalChannelConversationPositionCreate,
+    ) -> ExternalChannelConversationPosition:
+        """Create or return one connection-scoped conversation position."""
+        if (
+            create.scope_kind is ExternalChannelConversationScopeKind.PARENT_CHANNEL
+            and create.provider_thread_key is not None
+        ) or (
+            create.scope_kind is ExternalChannelConversationScopeKind.THREAD
+            and not create.provider_thread_key
+        ):
+            raise ValueError("Conversation position scope identity is invalid.")
+        rdb = await self._insert_or_lookup(
+            session,
+            RDBExternalChannelConversationPosition,
+            create,
+            lambda: session.scalar(
+                sa.select(RDBExternalChannelConversationPosition).where(
+                    RDBExternalChannelConversationPosition.connection_id
+                    == create.connection_id,
+                    RDBExternalChannelConversationPosition.scope_kind
+                    == create.scope_kind,
+                    RDBExternalChannelConversationPosition.provider_channel_id
+                    == create.provider_channel_id,
+                    RDBExternalChannelConversationPosition.provider_thread_key
+                    == create.provider_thread_key,
+                )
+            ),
+        )
+        return ExternalChannelConversationPosition.model_validate(rdb)
+
+    async def get_conversation_position(
+        self,
+        session: AsyncSession,
+        *,
+        position_id: str,
+    ) -> ExternalChannelConversationPosition | None:
+        """Fetch one durable conversation position."""
+        return self._as(
+            ExternalChannelConversationPosition,
+            await session.get(RDBExternalChannelConversationPosition, position_id),
+        )
+
+    async def get_conversation_position_by_scope(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        scope_kind: ExternalChannelConversationScopeKind,
+        provider_channel_id: str,
+        provider_thread_key: str | None,
+    ) -> ExternalChannelConversationPosition | None:
+        """Fetch a durable position by its canonical provider scope."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelConversationPosition).where(
+                RDBExternalChannelConversationPosition.connection_id == connection_id,
+                RDBExternalChannelConversationPosition.scope_kind == scope_kind,
+                RDBExternalChannelConversationPosition.provider_channel_id
+                == provider_channel_id,
+                RDBExternalChannelConversationPosition.provider_thread_key
+                == provider_thread_key,
+            )
+        )
+        return self._as(ExternalChannelConversationPosition, rdb)
+
+    async def lock_conversation_position(
+        self,
+        session: AsyncSession,
+        *,
+        position_id: str,
+    ) -> ExternalChannelConversationPosition | None:
+        """Lock one durable conversation position for compare-and-set."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelConversationPosition)
+            .where(RDBExternalChannelConversationPosition.id == position_id)
+            .with_for_update()
+        )
+        return self._as(ExternalChannelConversationPosition, rdb)
+
+    async def advance_conversation_position_if_current(
+        self,
+        session: AsyncSession,
+        *,
+        position_id: str,
+        expected_read_through_position: str | None,
+        read_through_position: str,
+    ) -> bool:
+        """Advance a position only when its prior value still matches."""
+        if not read_through_position:
+            raise ValueError("Conversation read-through position must not be blank.")
+        expected_predicate = (
+            RDBExternalChannelConversationPosition.read_through_position.is_(None)
+            if expected_read_through_position is None
+            else RDBExternalChannelConversationPosition.read_through_position
+            == expected_read_through_position
+        )
+        result = await session.execute(
+            sa.update(RDBExternalChannelConversationPosition)
+            .where(
+                RDBExternalChannelConversationPosition.id == position_id,
+                expected_predicate,
+            )
+            .values(read_through_position=read_through_position)
+            .returning(RDBExternalChannelConversationPosition.id)
+        )
+        await session.flush()
+        return result.scalar_one_or_none() is not None
 
     async def create_connection(
         self,
@@ -3613,6 +3730,17 @@ class ExternalChannelRepository:
         create: ExternalChannelInvocationBatchCreate,
     ) -> ExternalChannelInvocationBatch:
         """Create or return a binding-scoped trigger invocation batch."""
+        if create.connection_id is None:
+            connection_id = await session.scalar(
+                sa.select(RDBExternalChannelResource.connection_id)
+                .join(
+                    RDBExternalChannelBinding,
+                    RDBExternalChannelBinding.resource_id
+                    == RDBExternalChannelResource.id,
+                )
+                .where(RDBExternalChannelBinding.id == create.binding_id)
+            )
+            create = create.model_copy(update={"connection_id": connection_id})
         rdb = await self._insert_or_lookup(
             session,
             RDBExternalChannelInvocationBatch,
@@ -3657,6 +3785,92 @@ class ExternalChannelRepository:
             .with_for_update()
         )
         return self._as(ExternalChannelInvocationBatch, rdb)
+
+    async def claim_invocation_wake_dispatch(
+        self,
+        session: AsyncSession,
+        *,
+        batch_id: str,
+        now: datetime.datetime,
+        lease: datetime.timedelta = datetime.timedelta(minutes=1),
+    ) -> tuple[ExternalChannelInvocationBatch | None, bool]:
+        """Claim a pending or stale invocation wake dispatch."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelInvocationBatch)
+            .where(RDBExternalChannelInvocationBatch.id == batch_id)
+            .with_for_update()
+        )
+        if rdb is None:
+            return None, False
+        if (
+            rdb.wake_dispatch_status
+            is ExternalChannelInvocationWakeDispatchStatus.DISPATCHED
+        ):
+            return ExternalChannelInvocationBatch.model_validate(rdb), False
+        if (
+            rdb.wake_dispatch_status
+            is ExternalChannelInvocationWakeDispatchStatus.CLAIMED
+            and rdb.wake_dispatch_claimed_at is not None
+            and rdb.wake_dispatch_claimed_at > now - lease
+        ):
+            return ExternalChannelInvocationBatch.model_validate(rdb), False
+        rdb.wake_dispatch_status = ExternalChannelInvocationWakeDispatchStatus.CLAIMED
+        rdb.wake_dispatch_claimed_at = now
+        await session.flush()
+        return ExternalChannelInvocationBatch.model_validate(rdb), True
+
+    async def mark_invocation_wake_dispatched(
+        self,
+        session: AsyncSession,
+        *,
+        batch_id: str,
+        dispatched_at: datetime.datetime,
+    ) -> ExternalChannelInvocationBatch | None:
+        """Mark one claimed invocation wake as durably dispatched."""
+        del dispatched_at
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelInvocationBatch)
+            .where(RDBExternalChannelInvocationBatch.id == batch_id)
+            .with_for_update()
+        )
+        if rdb is None:
+            return None
+        if (
+            rdb.wake_dispatch_status
+            is ExternalChannelInvocationWakeDispatchStatus.DISPATCHED
+        ):
+            return ExternalChannelInvocationBatch.model_validate(rdb)
+        rdb.wake_dispatch_status = (
+            ExternalChannelInvocationWakeDispatchStatus.DISPATCHED
+        )
+        rdb.wake_dispatch_claimed_at = None
+        await session.flush()
+        return ExternalChannelInvocationBatch.model_validate(rdb)
+
+    async def reset_invocation_wake_dispatch(
+        self,
+        session: AsyncSession,
+        *,
+        batch_id: str,
+    ) -> ExternalChannelInvocationBatch | None:
+        """Return a claimed invocation wake to the pending state for retry."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelInvocationBatch)
+            .where(RDBExternalChannelInvocationBatch.id == batch_id)
+            .with_for_update()
+        )
+        if rdb is None:
+            return None
+        if (
+            rdb.wake_dispatch_status
+            is not ExternalChannelInvocationWakeDispatchStatus.DISPATCHED
+        ):
+            rdb.wake_dispatch_status = (
+                ExternalChannelInvocationWakeDispatchStatus.PENDING
+            )
+            rdb.wake_dispatch_claimed_at = None
+            await session.flush()
+        return ExternalChannelInvocationBatch.model_validate(rdb)
 
     async def link_invocation_batch_mailbox_item(
         self,
@@ -3830,6 +4044,13 @@ class ExternalChannelRepository:
         create: ExternalChannelAccessRequestCreate,
     ) -> ExternalChannelAccessRequest:
         """Create or return an access request for a source message."""
+        if create.connection_id is None:
+            connection_id = await session.scalar(
+                sa.select(RDBExternalChannelResource.connection_id).where(
+                    RDBExternalChannelResource.id == create.resource_id
+                )
+            )
+            create = create.model_copy(update={"connection_id": connection_id})
         rdb = await self._insert_or_lookup(
             session,
             RDBExternalChannelAccessRequest,
@@ -4496,6 +4717,186 @@ class ExternalChannelRepository:
         rdb = result.scalar_one_or_none()
         return self._as(ExternalChannelDeliveryAttempt, rdb)
 
+    async def get_cutover_preflight_counts(
+        self,
+        session: AsyncSession,
+    ) -> ExternalChannelCutoverPreflightCounts:
+        """Return content-free aggregate counts for legacy cutover safety."""
+
+        async def count(
+            model: type[RDBModel],
+            *predicates: sa.ColumnElement[bool],
+        ) -> int:
+            value = await session.scalar(
+                sa.select(sa.func.count()).select_from(model).where(*predicates)
+            )
+            return int(value or 0)
+
+        undrained_events = await count(
+            RDBExternalChannelEvent,
+            RDBExternalChannelEvent.status.in_(
+                (
+                    ExternalChannelEventStatus.ACCEPTED,
+                    ExternalChannelEventStatus.PROCESSING,
+                    ExternalChannelEventStatus.FAILED,
+                )
+            ),
+        )
+        unactivated_bindings = await count(
+            RDBExternalChannelBinding,
+            RDBExternalChannelBinding.status == ExternalChannelBindingStatus.ACTIVE,
+            RDBExternalChannelBinding.activation_status.in_(
+                (
+                    ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
+                    ExternalChannelBindingActivationStatus.WAKE_PENDING,
+                )
+            ),
+        )
+        incomplete_hydrations = await count(
+            RDBExternalChannelResource,
+            RDBExternalChannelResource.hydration_status.in_(
+                (
+                    ExternalChannelHydrationStatus.PENDING,
+                    ExternalChannelHydrationStatus.RUNNING,
+                    ExternalChannelHydrationStatus.INCOMPLETE,
+                )
+            ),
+        )
+        pending_contexts = await count(RDBExternalChannelPendingContext)
+        open_conversation_admissions = await count(
+            RDBExternalChannelConversationAdmission,
+            RDBExternalChannelConversationAdmission.status.in_(
+                (
+                    "pending_selection",
+                    "selected",
+                    "awaiting_access",
+                )
+            ),
+        )
+        pending_access_requests = await count(
+            RDBExternalChannelAccessRequest,
+            RDBExternalChannelAccessRequest.status
+            == ExternalChannelAccessRequestStatus.PENDING,
+        )
+        inflight_resource_provisionings = await count(
+            RDBExternalChannelResourceProvisioning,
+            RDBExternalChannelResourceProvisioning.status.in_(
+                ("pending", "attempting")
+            ),
+        )
+
+        active_bindings = list(
+            (
+                await session.execute(
+                    sa.select(
+                        RDBExternalChannelBinding,
+                        RDBExternalChannelResource,
+                        RDBExternalChannelAgentRoute,
+                        RDBAgentSession,
+                    )
+                    .join(
+                        RDBExternalChannelResource,
+                        RDBExternalChannelResource.id
+                        == RDBExternalChannelBinding.resource_id,
+                    )
+                    .outerjoin(
+                        RDBExternalChannelAgentRoute,
+                        RDBExternalChannelAgentRoute.id
+                        == RDBExternalChannelBinding.route_id,
+                    )
+                    .outerjoin(
+                        RDBAgentSession,
+                        RDBAgentSession.id
+                        == RDBExternalChannelBinding.agent_session_id,
+                    )
+                    .where(
+                        RDBExternalChannelBinding.status
+                        == ExternalChannelBindingStatus.ACTIVE
+                    )
+                    .order_by(RDBExternalChannelBinding.id)
+                )
+            ).tuples()
+        )
+        binding_ids = [binding.id for binding, _, _, _ in active_bindings]
+        latest_batch_ids = (
+            set(
+                await session.scalars(
+                    sa.select(RDBExternalChannelInvocationBatch.binding_id)
+                    .where(
+                        RDBExternalChannelInvocationBatch.binding_id.in_(binding_ids)
+                    )
+                    .distinct()
+                )
+            )
+            if binding_ids
+            else set()
+        )
+
+        without_delivery_target = 0
+        without_session = 0
+        without_route = 0
+        without_latest_batch = 0
+        without_thread_position = 0
+        ambiguous_thread_position = 0
+        for binding, resource, route, agent_session in active_bindings:
+            if cast(object, agent_session) is None:
+                without_session += 1
+            if cast(object, route) is None:
+                without_route += 1
+            scope = _thread_position_scope_for_resource(resource)
+            if scope is None:
+                if resource.provider_resource_key.startswith("discord:"):
+                    without_delivery_target += 1
+                ambiguous_thread_position += 1
+            else:
+                if resource.provider_resource_key.startswith(
+                    "discord:"
+                ) and not _discord_delivery_target(resource.labels):
+                    without_delivery_target += 1
+                matching_positions = list(
+                    (
+                        await session.execute(
+                            sa.select(
+                                RDBExternalChannelConversationPosition.id,
+                                RDBExternalChannelConversationPosition.read_through_position,
+                            ).where(
+                                RDBExternalChannelConversationPosition.connection_id
+                                == resource.connection_id,
+                                RDBExternalChannelConversationPosition.scope_kind
+                                == ExternalChannelConversationScopeKind.THREAD,
+                                RDBExternalChannelConversationPosition.provider_channel_id
+                                == scope[0],
+                                RDBExternalChannelConversationPosition.provider_thread_key
+                                == scope[1],
+                            )
+                        )
+                    ).tuples()
+                )
+                if not matching_positions:
+                    without_thread_position += 1
+                elif len(matching_positions) > 1:
+                    ambiguous_thread_position += 1
+                elif matching_positions[0][1] is None:
+                    without_thread_position += 1
+            if binding.id not in latest_batch_ids:
+                without_latest_batch += 1
+
+        return ExternalChannelCutoverPreflightCounts(
+            undrained_events=undrained_events,
+            unactivated_bindings=unactivated_bindings,
+            incomplete_hydrations=incomplete_hydrations,
+            pending_contexts=pending_contexts,
+            open_conversation_admissions=open_conversation_admissions,
+            pending_access_requests=pending_access_requests,
+            inflight_resource_provisionings=inflight_resource_provisionings,
+            active_bindings_without_delivery_target=without_delivery_target,
+            active_bindings_without_session=without_session,
+            active_bindings_without_route=without_route,
+            active_bindings_without_latest_batch=without_latest_batch,
+            active_bindings_without_thread_position=without_thread_position,
+            active_bindings_with_ambiguous_thread_position=ambiguous_thread_position,
+        )
+
     async def _create(
         self,
         session: AsyncSession,
@@ -4537,6 +4938,31 @@ class ExternalChannelRepository:
         if rdb is None:
             return None
         return model.model_validate(rdb)
+
+
+def _discord_delivery_target(labels: dict[str, Any] | None) -> str | None:
+    """Return a sanitized Discord delivery-channel label when present."""
+    if labels is None:
+        return None
+    for key in ("delivery_channel_id", "thread_channel_id", "thread_id"):
+        value = labels.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _thread_position_scope_for_resource(
+    resource: RDBExternalChannelResource,
+) -> tuple[str, str] | None:
+    """Derive the canonical thread scope from retained resource metadata."""
+    parts = resource.provider_resource_key.split(":")
+    if resource.provider_resource_key.startswith("slack:") and len(parts) == 4:
+        return parts[2], parts[3]
+    if resource.provider_resource_key.startswith("discord:") and len(parts) == 3:
+        thread_id = _discord_delivery_target(resource.labels)
+        if thread_id:
+            return thread_id, thread_id
+    return None
 
 
 def _is_initial_discord_progress_attempt(

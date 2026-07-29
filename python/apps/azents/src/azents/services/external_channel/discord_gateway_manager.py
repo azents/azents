@@ -12,6 +12,8 @@ from fastapi import Depends
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
+from azents.core.deps import get_config
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
@@ -82,6 +84,7 @@ class DiscordGatewayManagerService:
     lease_duration: datetime.timedelta = _LEASE_DURATION
     renew_interval: datetime.timedelta = _RENEW_INTERVAL
     reconnect_delay: datetime.timedelta = _RECONNECT_DELAY
+    config: Annotated[Config | None, Depends(get_config)] = None
 
     async def run(self, shutdown_event: asyncio.Event) -> None:
         """Continuously claim configured Discord connections until shutdown."""
@@ -379,6 +382,14 @@ class DiscordGatewayManagerService:
         event: DiscordGatewayMessageEvent,
     ) -> None:
         """Durably admit one typed high-level discord.py message event."""
+        if (
+            self.config is not None
+            and self.config.external_channel_conversation.quiesce.discord_gateway
+            and event.event_type == "message_create"
+        ):
+            raise DiscordGatewayError(
+                "Discord message ingress is temporarily quiesced."
+            )
         create = project_discord_gateway_event(
             connection_id=connection_id,
             provider_app_id=provider_app_id,

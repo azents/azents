@@ -1,6 +1,7 @@
 """Provider-generic External Channel repository data records."""
 
 import datetime
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -16,6 +17,7 @@ from azents.core.enums import (
     ExternalChannelConnectionStatus,
     ExternalChannelConversationAdmissionOrigin,
     ExternalChannelConversationAdmissionStatus,
+    ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
@@ -25,6 +27,7 @@ from azents.core.enums import (
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
+    ExternalChannelInvocationWakeDispatchStatus,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
@@ -45,6 +48,30 @@ class _Record(BaseModel):
     """Immutable repository data base with ORM attribute support."""
 
     model_config = ConfigDict(frozen=True, from_attributes=True)
+
+
+@dataclass(frozen=True)
+class ExternalChannelCutoverPreflightCounts:
+    """Content-free aggregate counts required before legacy cutover."""
+
+    undrained_events: int
+    unactivated_bindings: int
+    incomplete_hydrations: int
+    pending_contexts: int
+    open_conversation_admissions: int
+    pending_access_requests: int
+    inflight_resource_provisionings: int
+    active_bindings_without_delivery_target: int
+    active_bindings_without_session: int
+    active_bindings_without_route: int
+    active_bindings_without_latest_batch: int
+    active_bindings_without_thread_position: int
+    active_bindings_with_ambiguous_thread_position: int
+
+    def __post_init__(self) -> None:
+        """Reject invalid negative aggregate counts."""
+        if any(value < 0 for value in self.__dict__.values()):
+            raise ValueError("Cutover preflight counts must be non-negative.")
 
 
 class ExternalChannelConnection(_Record):
@@ -140,6 +167,29 @@ class ExternalChannelConnectionConfiguration(_Record):
     socket_gap_reason: str | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
+
+
+class ExternalChannelConversationPosition(_Record):
+    """Durable provider-history read position for one conversation scope."""
+
+    id: str
+    connection_id: str
+    scope_kind: ExternalChannelConversationScopeKind
+    provider_channel_id: str
+    provider_thread_key: str | None
+    read_through_position: str | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class ExternalChannelConversationPositionCreate(_Record):
+    """Conversation-position creation payload."""
+
+    connection_id: str
+    scope_kind: ExternalChannelConversationScopeKind
+    provider_channel_id: str
+    provider_thread_key: str | None
+    read_through_position: str | None
 
 
 class ExternalChannelAgentRoute(_Record):
@@ -349,6 +399,9 @@ class ExternalChannelConversationAdmission(_Record):
     status: ExternalChannelConversationAdmissionStatus
     selected_route_id: str | None
     interaction_id: str | None
+    conversation_position_id: str | None = None
+    range_start_position: str | None = None
+    trigger_position: str | None = None
     expires_at: datetime.datetime
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -365,6 +418,9 @@ class ExternalChannelConversationAdmissionCreate(_Record):
     status: ExternalChannelConversationAdmissionStatus
     selected_route_id: str | None
     interaction_id: str | None
+    conversation_position_id: str | None = None
+    range_start_position: str | None = None
+    trigger_position: str | None = None
     expires_at: datetime.datetime
 
 
@@ -577,9 +633,18 @@ class ExternalChannelInvocationBatch(_Record):
     trigger_message_id: str
     first_provider_position: str
     last_provider_position: str
+    conversation_position_id: str | None = None
+    range_start_position: str | None = None
+    trigger_position: str | None = None
+    context_omitted: bool = False
+    wake_dispatch_status: ExternalChannelInvocationWakeDispatchStatus = (
+        ExternalChannelInvocationWakeDispatchStatus.DISPATCHED
+    )
+    wake_dispatch_claimed_at: datetime.datetime | None = None
     truncation_message_count: int
     truncation_size: int
     mailbox_item_id: str | None
+    connection_id: str | None = None
     created_at: datetime.datetime
 
 
@@ -590,9 +655,18 @@ class ExternalChannelInvocationBatchCreate(_Record):
     trigger_message_id: str
     first_provider_position: str
     last_provider_position: str
+    conversation_position_id: str | None = None
+    range_start_position: str | None = None
+    trigger_position: str | None = None
+    context_omitted: bool = False
+    wake_dispatch_status: ExternalChannelInvocationWakeDispatchStatus = (
+        ExternalChannelInvocationWakeDispatchStatus.DISPATCHED
+    )
+    wake_dispatch_claimed_at: datetime.datetime | None = None
     truncation_message_count: int
     truncation_size: int
     mailbox_item_id: str | None
+    connection_id: str | None = None
 
 
 class ExternalChannelInvocationBatchItem(_Record):
@@ -666,6 +740,10 @@ class ExternalChannelAccessRequest(_Record):
     decided_at: datetime.datetime | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    connection_id: str | None = None
+    conversation_position_id: str | None = None
+    range_start_position: str | None = None
+    trigger_position: str | None = None
 
 
 class ExternalChannelAccessRequestCreate(_Record):
@@ -682,6 +760,10 @@ class ExternalChannelAccessRequestCreate(_Record):
     decision_summary: str | None
     expires_at: datetime.datetime
     decided_at: datetime.datetime | None
+    connection_id: str | None = None
+    conversation_position_id: str | None = None
+    range_start_position: str | None = None
+    trigger_position: str | None = None
 
 
 class ExternalChannelAccessGrant(_Record):

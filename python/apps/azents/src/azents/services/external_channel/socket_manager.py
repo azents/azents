@@ -12,6 +12,8 @@ from fastapi import Depends
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
+from azents.core.deps import get_config
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
@@ -37,7 +39,10 @@ from azents.services.external_channel.interaction import (
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
 )
-from azents.services.external_channel.slack_http import SlackInteractionCallback
+from azents.services.external_channel.slack_http import (
+    SlackInteractionCallback,
+    slack_event_is_normal_message_ingress,
+)
 from azents.services.external_channel.slack_sdk_client import create_slack_web_client
 from azents.services.external_channel.slack_socket import (
     SlackSocketConnectionResult,
@@ -92,6 +97,7 @@ class SlackSocketManagerService:
     lease_duration: datetime.timedelta = _DEFAULT_LEASE_DURATION
     renew_interval: datetime.timedelta = _DEFAULT_RENEW_INTERVAL
     reconnect_delay: datetime.timedelta = _DEFAULT_RECONNECT_DELAY
+    config: Annotated[Config | None, Depends(get_config)] = None
 
     async def run(self, shutdown_event: asyncio.Event) -> None:
         """Continuously own all claimable Socket Mode connections until shutdown."""
@@ -168,6 +174,10 @@ class SlackSocketManagerService:
                 ):
                     raise SlackSocketInvalidEnvelope(
                         "Slack Socket connection is no longer authorized."
+                    )
+                if self._message_ingress_quiesced(event):
+                    raise SlackSocketInvalidEnvelope(
+                        "Slack message ingress is temporarily quiesced."
                     )
                 return await self.admission_service.admit(event)
 
@@ -325,6 +335,17 @@ class SlackSocketManagerService:
                 now=_utc_now(),
             )
             return connection is not None
+
+    def _message_ingress_quiesced(
+        self,
+        event: ExternalChannelEventCreate,
+    ) -> bool:
+        """Return whether normal Socket message admission is temporarily blocked."""
+        return (
+            self.config is not None
+            and self.config.external_channel_conversation.quiesce.slack_socket
+            and slack_event_is_normal_message_ingress(event)
+        )
 
     async def _run_connection_with_lease(
         self,

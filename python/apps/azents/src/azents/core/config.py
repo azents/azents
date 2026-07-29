@@ -11,8 +11,12 @@ from typing import Literal, Self
 
 from azcommon.logging import RuntimeEnvironment
 from mypy_boto3_rds import RDSClient
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from azents.core.enums import (
+    ExternalChannelConversationLockBackend as ConversationLockBackend,
+)
 
 RegistrationMode = Literal["closed", "signup_token", "open"]
 
@@ -85,6 +89,16 @@ class Settings(BaseSettings):
     external_channel_discord_callback_url: str | None = None
     # Rollout gate: enable only after every API and worker is mode-aware.
     external_channel_multi_app_enabled: bool = False
+    # External conversation coordination is independent from the Session broker.
+    external_channel_conversation_lock_backend: ConversationLockBackend = Field(
+        default=ConversationLockBackend.REDIS
+    )
+    external_channel_conversation_lock_lease_ttl_seconds: float = 30.0
+    external_channel_conversation_lock_renewal_interval_seconds: float = 10.0
+    # Temporary cutover controls; all message ingress remains enabled by default.
+    external_channel_slack_http_message_ingress_quiesced: bool = False
+    external_channel_slack_socket_message_ingress_quiesced: bool = False
+    external_channel_discord_gateway_message_ingress_quiesced: bool = False
 
     # LLM credential encryption key; Fernet key, base64-encoded 32 bytes
     credential_encryption_key: str
@@ -344,6 +358,39 @@ class ModelStreamTimeoutConfig(BaseModel):
     close_grace_seconds: float = Field(gt=0, allow_inf_nan=False)
 
 
+class ExternalChannelConversationLockConfig(BaseModel):
+    """Validated external-conversation coordination settings."""
+
+    backend: ConversationLockBackend
+    lease_ttl_seconds: float = Field(gt=0, allow_inf_nan=False)
+    renewal_interval_seconds: float = Field(gt=0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _validate_renewal_interval(self) -> "ExternalChannelConversationLockConfig":
+        """Require renewal to happen before the owned lease expires."""
+        if self.renewal_interval_seconds >= self.lease_ttl_seconds:
+            raise ValueError(
+                "External Channel conversation lock renewal must be shorter than "
+                "the lease TTL."
+            )
+        return self
+
+
+class ExternalChannelIngressQuiesceConfig(BaseModel):
+    """Temporary message-ingress cutover controls."""
+
+    slack_http: bool
+    slack_socket: bool
+    discord_gateway: bool
+
+
+class ExternalChannelConversationConfig(BaseModel):
+    """External conversation ingestion foundation settings."""
+
+    lock: ExternalChannelConversationLockConfig
+    quiesce: ExternalChannelIngressQuiesceConfig
+
+
 class FileLifecycleConfig(BaseModel):
     """File lifecycle retention settings."""
 
@@ -407,6 +454,20 @@ class Config(BaseModel):
     external_channel_slack_callback_url: str = ""
     external_channel_discord_callback_url: str = ""
     external_channel_multi_app_enabled: bool = False
+    external_channel_conversation: ExternalChannelConversationConfig = Field(
+        default_factory=lambda: ExternalChannelConversationConfig(
+            lock=ExternalChannelConversationLockConfig(
+                backend=ConversationLockBackend.REDIS,
+                lease_ttl_seconds=30.0,
+                renewal_interval_seconds=10.0,
+            ),
+            quiesce=ExternalChannelIngressQuiesceConfig(
+                slack_http=False,
+                slack_socket=False,
+                discord_gateway=False,
+            ),
+        )
+    )
     oauth_secret_key: str = ""
     mcp_proxy_url: str | None = None
     workspace_s3: WorkspaceS3Config
@@ -510,6 +571,28 @@ class Config(BaseModel):
             ),
             external_channel_multi_app_enabled=(
                 settings.external_channel_multi_app_enabled
+            ),
+            external_channel_conversation=ExternalChannelConversationConfig(
+                lock=ExternalChannelConversationLockConfig(
+                    backend=settings.external_channel_conversation_lock_backend,
+                    lease_ttl_seconds=(
+                        settings.external_channel_conversation_lock_lease_ttl_seconds
+                    ),
+                    renewal_interval_seconds=(
+                        settings.external_channel_conversation_lock_renewal_interval_seconds
+                    ),
+                ),
+                quiesce=ExternalChannelIngressQuiesceConfig(
+                    slack_http=(
+                        settings.external_channel_slack_http_message_ingress_quiesced
+                    ),
+                    slack_socket=(
+                        settings.external_channel_slack_socket_message_ingress_quiesced
+                    ),
+                    discord_gateway=(
+                        settings.external_channel_discord_gateway_message_ingress_quiesced
+                    ),
+                ),
             ),
             oauth_secret_key=settings.oauth_secret_key,
             mcp_proxy_url=settings.mcp_proxy_url,

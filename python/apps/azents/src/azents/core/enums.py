@@ -763,6 +763,20 @@ class ExternalChannelIngressProfile(enum.StrEnum):
     DISCORD_GATEWAY_HTTP = "discord_gateway_http"
 
 
+class ExternalChannelConversationScopeKind(enum.StrEnum):
+    """Canonical provider conversation scope."""
+
+    PARENT_CHANNEL = "parent_channel"
+    THREAD = "thread"
+
+
+class ExternalChannelConversationLockBackend(enum.StrEnum):
+    """Ephemeral coordination backend for one external conversation."""
+
+    REDIS = "redis"
+    MEMORY = "memory"
+
+
 class ExternalChannelConnectionStatus(enum.StrEnum):
     """External connection lifecycle status."""
 
@@ -924,6 +938,14 @@ class ExternalChannelBindingActivationStatus(enum.StrEnum):
     WAITING_HYDRATION = "waiting_hydration"
     WAKE_PENDING = "wake_pending"
     ACTIVE = "active"
+
+
+class ExternalChannelInvocationWakeDispatchStatus(enum.StrEnum):
+    """Durable broker wake-dispatch state for one invocation batch."""
+
+    PENDING = "pending"
+    CLAIMED = "claimed"
+    DISPATCHED = "dispatched"
 
 
 class ExternalChannelAccessRequestStatus(enum.StrEnum):

@@ -23,6 +23,7 @@ from azents.core.enums import (
     ExternalChannelEventEligibilityState,
     ExternalChannelEventStatus,
     ExternalChannelIngressProfile,
+    ExternalChannelInvocationWakeDispatchStatus,
     ExternalChannelProvider,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
@@ -40,8 +41,10 @@ from azents.repos.external_channel.data import (
     ExternalChannelAgentRouteCreate,
     ExternalChannelBinding,
     ExternalChannelConnectionCreate,
+    ExternalChannelConversationPosition,
     ExternalChannelDeliveryAttempt,
     ExternalChannelEventCreate,
+    ExternalChannelInvocationBatch,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.workspace import WorkspaceRepository
@@ -251,6 +254,150 @@ async def test_claim_binding_wake_has_one_winner_and_reclaims_stale_claim(
     assert claimed is binding
     assert should_wake is True
     assert binding.activation_wake_claimed_at == now
+
+
+@pytest.mark.asyncio
+async def test_conversation_position_lock_and_compare_and_set_are_fenced(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The durable position row is locked and advances only from its expected value."""
+    repository = ExternalChannelRepository()
+    position = SimpleNamespace(id="position-1", read_through_position=None)
+    session = MagicMock(spec=AsyncSession)
+    session.scalar = AsyncMock(return_value=position)
+    first_update = MagicMock()
+    first_update.scalar_one_or_none.return_value = "position-1"
+    stale_update = MagicMock()
+    stale_update.scalar_one_or_none.return_value = None
+    session.execute = AsyncMock(side_effect=[first_update, stale_update])
+    session.flush = AsyncMock()
+    monkeypatch.setattr(
+        ExternalChannelConversationPosition,
+        "model_validate",
+        classmethod(lambda cls, value: value),
+    )
+
+    locked = await repository.lock_conversation_position(
+        session,
+        position_id="position-1",
+    )
+    advanced = await repository.advance_conversation_position_if_current(
+        session,
+        position_id="position-1",
+        expected_read_through_position=None,
+        read_through_position="0000000002",
+    )
+    stale = await repository.advance_conversation_position_if_current(
+        session,
+        position_id="position-1",
+        expected_read_through_position="0000000001",
+        read_through_position="0000000003",
+    )
+
+    assert locked is position
+    assert advanced is True
+    assert stale is False
+    lock_statement = session.scalar.await_args.args[0]
+    assert "FOR UPDATE" in str(lock_statement.compile(dialect=postgresql.dialect()))
+    assert session.flush.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_invocation_wake_dispatch_claim_transitions_are_recoverable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fresh claims fence dispatchers; stale claims recover; dispatch is terminal."""
+    repository = ExternalChannelRepository()
+    batch = SimpleNamespace(
+        id="batch-1",
+        wake_dispatch_status=ExternalChannelInvocationWakeDispatchStatus.PENDING,
+        wake_dispatch_claimed_at=None,
+    )
+    session = MagicMock(spec=AsyncSession)
+    session.scalar = AsyncMock(return_value=batch)
+    session.flush = AsyncMock()
+    monkeypatch.setattr(
+        ExternalChannelInvocationBatch,
+        "model_validate",
+        classmethod(lambda cls, value: value),
+    )
+    now = _at(10)
+
+    claimed, should_dispatch = await repository.claim_invocation_wake_dispatch(
+        session,
+        batch_id=batch.id,
+        now=now,
+    )
+    assert claimed is batch
+    assert should_dispatch is True
+    assert (
+        batch.wake_dispatch_status
+        is ExternalChannelInvocationWakeDispatchStatus.CLAIMED
+    )
+
+    claimed, should_dispatch = await repository.claim_invocation_wake_dispatch(
+        session,
+        batch_id=batch.id,
+        now=now + datetime.timedelta(seconds=1),
+    )
+    assert claimed is batch
+    assert should_dispatch is False
+
+    batch.wake_dispatch_claimed_at = now - datetime.timedelta(minutes=2)
+    claimed, should_dispatch = await repository.claim_invocation_wake_dispatch(
+        session,
+        batch_id=batch.id,
+        now=now,
+    )
+    assert claimed is batch
+    assert should_dispatch is True
+
+    dispatched = await repository.mark_invocation_wake_dispatched(
+        session,
+        batch_id=batch.id,
+        dispatched_at=now,
+    )
+    assert dispatched is batch
+    assert (
+        batch.wake_dispatch_status
+        is ExternalChannelInvocationWakeDispatchStatus.DISPATCHED
+    )
+    assert batch.wake_dispatch_claimed_at is None
+
+    claimed, should_dispatch = await repository.claim_invocation_wake_dispatch(
+        session,
+        batch_id=batch.id,
+        now=now + datetime.timedelta(minutes=2),
+    )
+    assert claimed is batch
+    assert should_dispatch is False
+
+
+@pytest.mark.asyncio
+async def test_cutover_preflight_counts_preserve_aggregate_counter_values() -> None:
+    """Preflight returns the repository's content-free aggregate counters unchanged."""
+    repository = ExternalChannelRepository()
+    session = MagicMock(spec=AsyncSession)
+    session.scalar = AsyncMock(side_effect=range(1, 8))
+    active_bindings = MagicMock()
+    active_bindings.tuples.return_value = []
+    session.execute = AsyncMock(return_value=active_bindings)
+
+    counts = await repository.get_cutover_preflight_counts(session)
+
+    assert counts.undrained_events == 1
+    assert counts.unactivated_bindings == 2
+    assert counts.incomplete_hydrations == 3
+    assert counts.pending_contexts == 4
+    assert counts.open_conversation_admissions == 5
+    assert counts.pending_access_requests == 6
+    assert counts.inflight_resource_provisionings == 7
+    assert counts.active_bindings_without_delivery_target == 0
+    assert counts.active_bindings_without_session == 0
+    assert counts.active_bindings_without_route == 0
+    assert counts.active_bindings_without_latest_batch == 0
+    assert counts.active_bindings_without_thread_position == 0
+    assert counts.active_bindings_with_ambiguous_thread_position == 0
 
 
 async def test_invocation_projection_query_preserves_inner_revision_from() -> None:

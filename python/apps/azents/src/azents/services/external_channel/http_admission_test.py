@@ -8,13 +8,14 @@ from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlencode
 
 import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
     ExternalChannelAppMode,
@@ -35,7 +36,10 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import SlackConnectionCredentials
-from azents.services.external_channel.http_admission import SlackHTTPAdmissionService
+from azents.services.external_channel.http_admission import (
+    SlackHTTPAdmissionService,
+    SlackHTTPMessageIngressQuiesced,
+)
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
     ExternalChannelInteractionProcessor,
@@ -210,6 +214,7 @@ def _service(
     codec: ExternalChannelCredentialsCodec,
     admission: _AdmissionDouble,
     interaction_processor: ExternalChannelInteractionProcessor | None = None,
+    config: Config | None = None,
 ) -> tuple[SlackHTTPAdmissionService, _RepositoryDouble]:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
@@ -231,6 +236,7 @@ def _service(
                 ExternalChannelShortcutSourceService,
                 AsyncMock(),
             ),
+            config=config,
         ),
         repository,
     )
@@ -243,7 +249,22 @@ def _signed(body: bytes) -> tuple[str, str]:
     return timestamp, signature
 
 
-def _event_body(*, app_id: str = "A-1", tenant_id: str = "T-1") -> bytes:
+def _event_body(
+    *,
+    app_id: str = "A-1",
+    tenant_id: str = "T-1",
+    event_type: str = "app_mention",
+    subtype: str | None = None,
+) -> bytes:
+    event: dict[str, object] = {
+        "type": event_type,
+        "channel": "C-1",
+        "user": "U-1",
+        "text": "Run the agent",
+        "ts": "100.1",
+    }
+    if subtype is not None:
+        event["subtype"] = subtype
     return json.dumps(
         {
             "type": "event_callback",
@@ -251,13 +272,7 @@ def _event_body(*, app_id: str = "A-1", tenant_id: str = "T-1") -> bytes:
             "event_time": int(_NOW.timestamp()),
             "api_app_id": app_id,
             "team_id": tenant_id,
-            "event": {
-                "type": "app_mention",
-                "channel": "C-1",
-                "user": "U-1",
-                "text": "Run the agent",
-                "ts": "100.1",
-            },
+            "event": event,
         }
     ).encode()
 
@@ -353,6 +368,103 @@ async def test_matching_active_event_is_admitted_before_return(
     assert result.event_id == "event-row-1"
     assert result.created is True
     assert [event.provider_event_id for event in admission.events] == ["Ev-1"]
+
+
+@pytest.mark.asyncio
+async def test_quiesced_http_blocks_normal_message_event(
+    codec: ExternalChannelCredentialsCodec,
+) -> None:
+    """HTTP quiesce rejects normal message ingress before legacy admission."""
+    admission = _AdmissionDouble()
+    config = MagicMock()
+    config.external_channel_conversation.quiesce.slack_http = True
+    service, _ = _service(
+        configuration=_configuration(
+            codec,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+        ),
+        codec=codec,
+        admission=admission,
+        config=config,
+    )
+    body = _event_body()
+    timestamp, signature = _signed(body)
+
+    with pytest.raises(SlackHTTPMessageIngressQuiesced):
+        await service.handle(
+            raw_body=body,
+            timestamp_header=timestamp,
+            signature_header=signature,
+            received_at=_NOW,
+        )
+
+    assert admission.events == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_type", ["app_uninstalled", "tokens_revoked"])
+async def test_quiesced_http_keeps_slack_revocation_events_available(
+    codec: ExternalChannelCredentialsCodec,
+    event_type: str,
+) -> None:
+    """Connection lifecycle revocation remains available while messages drain."""
+    admission = _AdmissionDouble()
+    config = MagicMock()
+    config.external_channel_conversation.quiesce.slack_http = True
+    service, _ = _service(
+        configuration=_configuration(
+            codec,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+        ),
+        codec=codec,
+        admission=admission,
+        config=config,
+    )
+    body = _event_body(event_type=event_type)
+    timestamp, signature = _signed(body)
+
+    result = await service.handle(
+        raw_body=body,
+        timestamp_header=timestamp,
+        signature_header=signature,
+        received_at=_NOW,
+    )
+
+    assert result.event_id == "event-row-1"
+    assert len(admission.events) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("subtype", ["message_changed", "message_deleted"])
+async def test_quiesced_http_keeps_message_lifecycle_events_available(
+    codec: ExternalChannelCredentialsCodec,
+    subtype: str,
+) -> None:
+    """Message updates and deletions remain available while messages drain."""
+    admission = _AdmissionDouble()
+    config = MagicMock()
+    config.external_channel_conversation.quiesce.slack_http = True
+    service, _ = _service(
+        configuration=_configuration(
+            codec,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+        ),
+        codec=codec,
+        admission=admission,
+        config=config,
+    )
+    body = _event_body(event_type="message", subtype=subtype)
+    timestamp, signature = _signed(body)
+
+    result = await service.handle(
+        raw_body=body,
+        timestamp_header=timestamp,
+        signature_header=signature,
+        received_at=_NOW,
+    )
+
+    assert result.event_id == "event-row-1"
+    assert len(admission.events) == 1
 
 
 @pytest.mark.asyncio

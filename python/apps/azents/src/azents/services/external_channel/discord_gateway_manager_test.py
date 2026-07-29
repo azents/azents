@@ -4,6 +4,7 @@ import asyncio
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
@@ -11,6 +12,8 @@ import pytest
 from azcommon.di import Container
 from cryptography.fernet import InvalidToken
 
+from azents.core.config import Config
+from azents.core.deps import get_config
 from azents.rdb.deps import get_session_manager
 from azents.repos.external_channel.data import (
     ExternalChannelEventCreate,
@@ -24,6 +27,7 @@ from azents.services.external_channel.connection import (
 from azents.services.external_channel.data import DiscordConnectionCredentials
 from azents.services.external_channel.discord_gateway import (
     DiscordGatewayConnectionResult,
+    DiscordGatewayError,
     DiscordGatewayEventHandler,
     DiscordGatewayIntentsError,
     DiscordGatewayMessageEvent,
@@ -170,7 +174,13 @@ def _lease() -> ExternalChannelIngressLease:
     )
 
 
-def _event(*, guild_id: int = 300) -> DiscordGatewayMessageEvent:
+def _event(
+    *,
+    guild_id: int = 300,
+    event_type: Literal["message_create", "message_update", "message_delete"] = (
+        "message_create"
+    ),
+) -> DiscordGatewayMessageEvent:
     guild = MagicMock(spec=discord.Guild)
     guild.id = guild_id
     channel = MagicMock(spec=discord.TextChannel)
@@ -194,7 +204,7 @@ def _event(*, guild_id: int = 300) -> DiscordGatewayMessageEvent:
     message.mentions = []
     message.attachments = []
     return DiscordGatewayMessageEvent(
-        event_type="message_create",
+        event_type=event_type,
         channel=channel,
         message=message,
     )
@@ -206,6 +216,7 @@ def _service(
     sessions: _SessionManager,
     gateway_client: object | None = None,
     credentials_codec: object | None = None,
+    config: Config | None = None,
 ) -> DiscordGatewayManagerService:
     return DiscordGatewayManagerService(
         session_manager=sessions,
@@ -215,6 +226,7 @@ def _service(
         ),
         manager_id="manager-1",
         gateway_client=(gateway_client if gateway_client is not None else MagicMock()),
+        config=config,
     )
 
 
@@ -229,8 +241,11 @@ def _test_session_manager() -> _SessionManager:
 @pytest.mark.asyncio
 async def test_gateway_manager_dependency_graph_is_resolvable() -> None:
     """The worker resolves the discord.py-backed manager through DI."""
+    config = MagicMock()
+    config.external_channel_conversation.quiesce.discord_gateway = False
     overrides = {
         get_session_manager: _test_session_manager,
+        get_config: lambda: config,
         ExternalChannelRepository: _mock_dependency,
         get_external_channel_credentials_codec: _mock_dependency,
     }
@@ -264,6 +279,50 @@ async def test_admits_typed_event_under_current_lease() -> None:
     assert isinstance(create, ExternalChannelEventCreate)
     assert create.provider_event_id == "discord:discord_message_create:300:200:100"
     sessions.session.commit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_quiesced_gateway_rejects_message_create_before_legacy_admission() -> (
+    None
+):
+    """Quiesce blocks normal message ingress without changing the legacy owner."""
+    sessions = _SessionManager()
+    repository = _Repository(admission=object())
+    config = MagicMock()
+    config.external_channel_conversation.quiesce.discord_gateway = True
+    service = _service(repository=repository, sessions=sessions, config=config)
+
+    with pytest.raises(DiscordGatewayError, match="temporarily quiesced"):
+        await service._admit_gateway_event(  # pyright: ignore[reportPrivateUsage]
+            connection_id="connection-1",
+            lease=_lease(),
+            provider_app_id="app-1",
+            target_guild_id="300",
+            event=_event(),
+        )
+
+    assert repository.admission_calls == []
+    sessions.session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_quiesced_gateway_keeps_message_update_lifecycle_available() -> None:
+    """Quiesce does not disable lifecycle callbacks owned by the legacy path."""
+    sessions = _SessionManager()
+    repository = _Repository(admission=object())
+    config = MagicMock()
+    config.external_channel_conversation.quiesce.discord_gateway = True
+    service = _service(repository=repository, sessions=sessions, config=config)
+
+    await service._admit_gateway_event(  # pyright: ignore[reportPrivateUsage]
+        connection_id="connection-1",
+        lease=_lease(),
+        provider_app_id="app-1",
+        target_guild_id="300",
+        event=_event(event_type="message_update"),
+    )
+
+    assert len(repository.admission_calls) == 1
 
 
 @pytest.mark.asyncio

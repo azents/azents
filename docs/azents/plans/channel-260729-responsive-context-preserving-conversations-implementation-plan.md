@@ -181,7 +181,7 @@ Primary areas:
 
 - external-channel RDB models, repository DTOs, repository operations, and lifecycle
   integration;
-- Alembic revisions and migration tests;
+- Alembic revisions, revision-graph validation, and migration-owned schema contract checks;
 - conversation position lock/CAS and invocation wake state;
 - mailbox external invocation payload and Session wake transaction support.
 

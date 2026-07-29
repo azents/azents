@@ -7,6 +7,8 @@ from typing import Annotated, assert_never
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
+from azents.core.deps import get_config
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
@@ -40,6 +42,7 @@ from azents.services.external_channel.slack_http import (
     parse_slack_callback,
     parse_slack_callback_route,
     project_slack_shortcut_source_event_from_callback_body,
+    slack_event_is_normal_message_ingress,
     verify_slack_signature,
 )
 
@@ -56,6 +59,10 @@ class SlackHTTPAdmissionResult:
         default=None,
         repr=False,
     )
+
+
+class SlackHTTPMessageIngressQuiesced(RuntimeError):
+    """Normal Slack message ingress is temporarily quiesced."""
 
 
 @dataclass
@@ -86,6 +93,7 @@ class SlackHTTPAdmissionService:
         ExternalChannelShortcutSourceService,
         Depends(ExternalChannelShortcutSourceService),
     ]
+    config: Annotated[Config | None, Depends(get_config)] = None
 
     async def handle(
         self,
@@ -160,6 +168,14 @@ class SlackHTTPAdmissionService:
                 ):
                     raise SlackHTTPUnauthorized(
                         "Slack callback could not be authenticated."
+                    )
+                if (
+                    self.config is not None
+                    and self.config.external_channel_conversation.quiesce.slack_http
+                    and slack_event_is_normal_message_ingress(event)
+                ):
+                    raise SlackHTTPMessageIngressQuiesced(
+                        "Slack message ingress is temporarily quiesced."
                     )
                 admission = await self.admission_service.admit(event)
                 return SlackHTTPAdmissionResult(

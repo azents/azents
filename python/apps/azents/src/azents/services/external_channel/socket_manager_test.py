@@ -4,12 +4,19 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import ExternalChannelConnectionStatus
+from azents.core.config import Config
+from azents.core.enums import (
+    ExternalChannelConnectionStatus,
+    ExternalChannelEventEligibilityState,
+    ExternalChannelEventStatus,
+)
 from azents.rdb.session import SessionManager
+from azents.repos.external_channel.data import ExternalChannelEventCreate
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
 from azents.services.external_channel.credentials import (
@@ -89,9 +96,36 @@ class _RepositoryDouble:
         return True
 
 
+def _event(
+    event_type: str,
+    *,
+    subtype: str | None = None,
+) -> ExternalChannelEventCreate:
+    """Build one bounded Socket event for quiesce classification."""
+    event: dict[str, object] = {"type": event_type}
+    if subtype is not None:
+        event["subtype"] = subtype
+    return ExternalChannelEventCreate(
+        connection_id="connection-1",
+        provider_event_id=f"event-{event_type}-{subtype}",
+        transport_envelope_id=None,
+        event_type=event_type,
+        provider_app_id="app-1",
+        provider_tenant_id="tenant-1",
+        provider_enterprise_id=None,
+        resource_correlation_key=None,
+        eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
+        envelope={"event": event},
+        status=ExternalChannelEventStatus.ACCEPTED,
+        provider_occurred_at=None,
+        received_at=datetime.datetime(2026, 7, 29, tzinfo=datetime.UTC),
+    )
+
+
 def _service(
     session: _SessionDouble,
     repository: _RepositoryDouble,
+    config: Config | None = None,
 ) -> SlackSocketManagerService:
     """Build a manager around lifecycle-only doubles."""
 
@@ -107,6 +141,7 @@ def _service(
         interaction_processor=cast(ExternalChannelInteractionProcessor, object()),
         shortcut_source_service=cast(ExternalChannelShortcutSourceService, object()),
         manager_id="manager-1",
+        config=config,
     )
 
 
@@ -153,3 +188,28 @@ async def test_degraded_socket_release_preserves_connection_lifecycle() -> None:
     assert release_call["lease_owner"] == "manager-1"
     assert release_call["gap_reason"] == "socket_transport_unavailable"
     assert release_call["gap_status"] is ExternalChannelConnectionStatus.DEGRADED
+
+
+def test_quiesced_socket_blocks_normal_messages_but_keeps_revocations() -> None:
+    """Socket quiesce is limited to normal message ingress."""
+    config = MagicMock()
+    config.external_channel_conversation.quiesce.slack_socket = True
+    service = _service(_SessionDouble(), _RepositoryDouble(), config=config)
+
+    assert service._message_ingress_quiesced(_event("app_mention"))  # pyright: ignore[reportPrivateUsage]
+    assert service._message_ingress_quiesced(_event("message"))  # pyright: ignore[reportPrivateUsage]
+    assert not service._message_ingress_quiesced(  # pyright: ignore[reportPrivateUsage]
+        _event("message", subtype="message_changed")
+    )
+    assert not service._message_ingress_quiesced(  # pyright: ignore[reportPrivateUsage]
+        _event("message", subtype="message_deleted")
+    )
+    assert not service._message_ingress_quiesced(_event("app_uninstalled"))  # pyright: ignore[reportPrivateUsage]
+    assert not service._message_ingress_quiesced(_event("tokens_revoked"))  # pyright: ignore[reportPrivateUsage]
+
+
+def test_socket_quiesce_is_disabled_by_default() -> None:
+    """The default configuration preserves legacy Socket admission."""
+    service = _service(_SessionDouble(), _RepositoryDouble())
+
+    assert not service._message_ingress_quiesced(_event("app_mention"))  # pyright: ignore[reportPrivateUsage]
