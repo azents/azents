@@ -2,7 +2,7 @@
 
 import datetime
 from dataclasses import dataclass
-from typing import Annotated, Literal
+from typing import Annotated, Literal, assert_never
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +38,14 @@ from azents.repos.external_channel.data import (
     ExternalChannelInvocationBatchItemCreate,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.services.external_channel.ingestion import (
+    ExternalChannelIngestionOutcomeKind,
+)
+from azents.services.external_channel.ingestion_replay import (
+    ExternalChannelIngestionReplayService,
+    access_request_uses_typed_replay,
+    external_channel_replay_deadline,
+)
 from azents.services.mailbox import (
     MailboxEnqueue,
     MailboxService,
@@ -120,6 +128,10 @@ class ExternalChannelAccessService:
         MailboxService,
         Depends(MailboxService),
     ]
+    ingestion_replay_service: Annotated[
+        ExternalChannelIngestionReplayService,
+        Depends(ExternalChannelIngestionReplayService),
+    ]
     session_lifecycle: Annotated[
         SessionLifecycleService,
         Depends(SessionLifecycleService),
@@ -199,6 +211,7 @@ class ExternalChannelAccessService:
                 session,
                 access_request_id=access_request_id,
             )
+            typed_replay = access_request_uses_typed_replay(request)
             if request.status is ExternalChannelAccessRequestStatus.ALLOWED:
                 grant = await self.repository.get_active_access_grant(
                     session,
@@ -213,6 +226,7 @@ class ExternalChannelAccessService:
                 if (
                     binding.activation_status
                     is ExternalChannelBindingActivationStatus.ACTIVE
+                    and not typed_replay
                 ):
                     wake_required = await self._release_allowed_request(
                         session,
@@ -234,7 +248,12 @@ class ExternalChannelAccessService:
                     )
                 )
                 await session.commit()
-                if wake_required:
+                if typed_replay:
+                    await self._replay_allowed_request(
+                        access_request_id=request.id,
+                        now=now,
+                    )
+                elif wake_required:
                     await self._send_session_wake_up(
                         agent_id=active_agent_id,
                         session_id=binding.agent_session_id,
@@ -370,14 +389,15 @@ class ExternalChannelAccessService:
                         mode="json"
                     ),
                 )
-                wake_required = await self._release_allowed_request(
-                    session,
-                    binding=binding,
-                    trigger_message_id=request.source_message_id,
-                    now=now,
-                )
-                wake_session_id = binding.agent_session_id
-                wake_agent_id = active_agent_id
+                if not typed_replay:
+                    wake_required = await self._release_allowed_request(
+                        session,
+                        binding=binding,
+                        trigger_message_id=request.source_message_id,
+                        now=now,
+                    )
+                    wake_session_id = binding.agent_session_id
+                    wake_agent_id = active_agent_id
             delete_intent = (
                 await self.repository.create_access_request_control_delete_intent(
                     session,
@@ -385,7 +405,12 @@ class ExternalChannelAccessService:
                 )
             )
             await session.commit()
-            if (
+            if typed_replay:
+                await self._replay_allowed_request(
+                    access_request_id=decided.id,
+                    now=now,
+                )
+            elif (
                 wake_required
                 and wake_session_id is not None
                 and wake_agent_id is not None
@@ -402,6 +427,36 @@ class ExternalChannelAccessService:
                     None if delete_intent is None else delete_intent.id
                 ),
             )
+
+    async def _replay_allowed_request(
+        self,
+        *,
+        access_request_id: str,
+        now: datetime.datetime,
+    ) -> None:
+        """Resume one committed typed Allow without reverting its decision."""
+        outcome = await self.ingestion_replay_service.replay_access_allow(
+            access_request_id=access_request_id,
+            deadline=external_channel_replay_deadline(now=now),
+        )
+        match outcome.kind:
+            case (
+                ExternalChannelIngestionOutcomeKind.ACCEPTED
+                | ExternalChannelIngestionOutcomeKind.DUPLICATE
+            ):
+                return
+            case (
+                ExternalChannelIngestionOutcomeKind.AWAITING_SELECTION
+                | ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS
+                | ExternalChannelIngestionOutcomeKind.IGNORED
+                | ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE
+                | ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION
+            ):
+                raise ExternalChannelAccessDecisionError(
+                    "The allowed External Channel invocation could not be resumed."
+                )
+            case _ as unreachable:
+                assert_never(unreachable)
 
     async def _release_allowed_request(
         self,

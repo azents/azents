@@ -695,6 +695,7 @@ class ExternalChannelInvocationProjectionItem(_Record):
     batch_id: str
     binding_id: str
     trigger_message_id: str
+    context_omitted: bool
     truncation_message_count: int
     truncation_size: int
     sequence: int

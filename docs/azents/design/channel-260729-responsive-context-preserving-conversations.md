@@ -379,9 +379,12 @@ Allow acquires the same conversation lock and reads the current position:
   current position unchanged; and
 - when the original invocation batch already exists, it only reasserts the Session wake.
 
-The grant, decision, binding or Session creation, history projection, batch, mailbox,
-and normal position advancement commit in one transaction. Provider history is read
-before that transaction, and every locked owner is revalidated before acceptance.
+The authenticated Allow decision and grant commit before provider I/O so a retryable
+history or broker failure never revokes the participant's durable authorization. A retry
+reconstructs the same typed boundary from the committed request. After provider history
+is read, binding or Session creation, history projection, batch, mailbox, and normal
+position advancement commit in one acceptance transaction, and every locked owner is
+revalidated before acceptance.
 
 ### Selector and interaction continuation
 
@@ -394,6 +397,10 @@ shared ingestion service with the admission boundary.
 provider-control lifecycle, not a deferred message-content inbox. `shortcut_source.py`,
 `discord_selector.py`, and interaction services stop calling the event processor and
 use the trigger/boundary service instead.
+
+The authenticated route selection commits before replay. A retryable replay failure
+preserves that selection and retries the same typed admission boundary without retaining
+provider content.
 
 ### Append-only provider revision behavior
 

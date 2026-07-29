@@ -28,6 +28,7 @@ from azents.core.enums import (
     ExternalChannelConnectionStatus,
     ExternalChannelConversationAdmissionOrigin,
     ExternalChannelConversationAdmissionStatus,
+    ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
@@ -95,6 +96,7 @@ from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelConnectionCreate,
     ExternalChannelConversationAdmissionCreate,
+    ExternalChannelConversationPositionCreate,
     ExternalChannelDeliveryAttempt,
     ExternalChannelEvent,
     ExternalChannelEventCreate,
@@ -141,6 +143,14 @@ from azents.services.external_channel.event_processor import (
     _provider_thread_target,  # pyright: ignore[reportPrivateUsage]
     _session_link_payload,  # pyright: ignore[reportPrivateUsage]
     connection_authored,
+)
+from azents.services.external_channel.ingestion import (
+    ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
+)
+from azents.services.external_channel.ingestion_replay import (
+    ExternalChannelIngestionReplayService,
 )
 from azents.services.external_channel.slack_events import (
     SlackControlMessageResult,
@@ -1003,6 +1013,7 @@ async def _prepare_allow_request(
     session: AsyncSession,
     *,
     policy_paths: tuple[str, ...] | None = None,
+    typed_replay: bool = False,
 ) -> tuple[str, str, str, ExternalChannelRepository, str, str]:
     """Prepare one pending access request and approver for Allow tests."""
     connection_id, route_id, agent_id, repository = await _setup_route(
@@ -1020,6 +1031,20 @@ async def _prepare_allow_request(
         resource_id=resource.id,
     )
     assert message.principal_id is not None
+    position = (
+        await repository.create_conversation_position_idempotent(
+            session,
+            ExternalChannelConversationPositionCreate(
+                connection_id=connection_id,
+                scope_kind=ExternalChannelConversationScopeKind.THREAD,
+                provider_channel_id="C1",
+                provider_thread_key="1784678400.000100",
+                read_through_position=None,
+            ),
+        )
+        if typed_replay
+        else None
+    )
     request = await repository.create_access_request_idempotent(
         session,
         ExternalChannelAccessRequestCreate(
@@ -1034,6 +1059,10 @@ async def _prepare_allow_request(
             decision_summary=None,
             expires_at=_at(10),
             decided_at=None,
+            connection_id=connection_id if typed_replay else None,
+            conversation_position_id=None if position is None else position.id,
+            range_start_position=None,
+            trigger_position=message.provider_position if typed_replay else None,
         ),
     )
     await repository.create_conversation_admission_idempotent(
@@ -1047,6 +1076,9 @@ async def _prepare_allow_request(
             status=ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
             selected_route_id=route_id,
             interaction_id=None,
+            conversation_position_id=None if position is None else position.id,
+            range_start_position=None,
+            trigger_position=message.provider_position if typed_replay else None,
             expires_at=_at(10),
         ),
     )
@@ -1070,6 +1102,7 @@ def _access_service(
     repository: ExternalChannelRepository,
     *,
     root_service: RootAgentSessionCreationService | MagicMock | None = None,
+    replay_service: ExternalChannelIngestionReplayService | MagicMock | None = None,
 ) -> ExternalChannelAccessService:
     """Build an access service for focused transaction tests."""
     return ExternalChannelAccessService(
@@ -1083,6 +1116,10 @@ def _access_service(
             else cast(RootAgentSessionCreationService, root_service)
         ),
         mailbox_item_service=cast(MailboxService, MagicMock()),
+        ingestion_replay_service=cast(
+            ExternalChannelIngestionReplayService,
+            MagicMock() if replay_service is None else replay_service,
+        ),
         session_lifecycle=cast(SessionLifecycleService, MagicMock()),
     )
 
@@ -1132,6 +1169,10 @@ async def test_access_release_reuses_immutable_batch_for_late_revision() -> None
             MagicMock(),
         ),
         mailbox_item_service=cast(MailboxService, MagicMock()),
+        ingestion_replay_service=cast(
+            ExternalChannelIngestionReplayService,
+            MagicMock(),
+        ),
         session_lifecycle=cast(SessionLifecycleService, MagicMock()),
     )
     binding = ExternalChannelBinding.model_construct(
@@ -2137,6 +2178,79 @@ async def test_allow_transitions_matching_admission_to_bound(
     assert admission.selected_route_id == route_id
 
 
+async def test_typed_allow_commits_before_retryable_replay_and_recovers(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A retryable replay preserves Allow and resumes from the retained boundary."""
+    async with rdb_session_manager() as session:
+        (
+            _,
+            _,
+            _,
+            repository,
+            request_id,
+            approver_id,
+        ) = await _prepare_allow_request(session, typed_replay=True)
+    replay = MagicMock(spec=ExternalChannelIngestionReplayService)
+    replay.replay_access_allow = AsyncMock(
+        side_effect=[
+            ExternalChannelIngestionOutcome(
+                kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
+                reason=ExternalChannelIngestionReason.HISTORY_UNAVAILABLE,
+                batch_id=None,
+                control_delivery_attempt_id=None,
+                connection_id=None,
+            ),
+            ExternalChannelIngestionOutcome(
+                kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
+                reason=ExternalChannelIngestionReason.ACCEPTED,
+                batch_id=None,
+                control_delivery_attempt_id=None,
+                connection_id=None,
+            ),
+        ]
+    )
+    service = _access_service(
+        rdb_session_manager,
+        repository,
+        replay_service=replay,
+    )
+
+    with pytest.raises(
+        ExternalChannelAccessDecisionError,
+        match="could not be resumed",
+    ):
+        await service.allow(
+            access_request_id=request_id,
+            scope=ExternalChannelAccessGrantScope.SESSION,
+            decided_by_user_id=approver_id,
+            decision_summary="Allow typed replay.",
+            now=_at(2),
+        )
+
+    async with rdb_session_manager() as session:
+        persisted = await session.get(RDBExternalChannelAccessRequest, request_id)
+        binding = await session.scalar(sa.select(RDBExternalChannelBinding))
+    assert persisted is not None
+    assert persisted.status is ExternalChannelAccessRequestStatus.ALLOWED
+    assert binding is not None
+    assert (
+        binding.activation_status
+        is ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+    )
+
+    recovered = await service.allow(
+        access_request_id=request_id,
+        scope=ExternalChannelAccessGrantScope.SESSION,
+        decided_by_user_id=approver_id,
+        decision_summary="Retry typed replay.",
+        now=_at(3),
+    )
+
+    assert recovered.request.status is ExternalChannelAccessRequestStatus.ALLOWED
+    assert replay.replay_access_allow.await_count == 2
+
+
 def test_route_resolution_log_contains_only_safe_categorical_fields() -> None:
     """Routing observability never serializes provider content or credentials."""
     with patch("azents.services.external_channel.event_processor.logger.info") as info:
@@ -2360,6 +2474,10 @@ async def test_unknown_human_mention_creates_request_without_session_or_wake(
             action_execution_repository=ActionExecutionRepository(),
             vfs_projection_service=None,
             external_channel_repository=repository,
+        ),
+        ingestion_replay_service=cast(
+            ExternalChannelIngestionReplayService,
+            MagicMock(),
         ),
         session_lifecycle=cast(
             SessionLifecycleService,
@@ -4336,6 +4454,10 @@ async def test_pending_allow_requires_routable_connection(
         agent_session_repository=AgentSessionRepository(),
         root_agent_session_creation_service=_root_session_creation_service(),
         mailbox_item_service=cast(MailboxService, MagicMock()),
+        ingestion_replay_service=cast(
+            ExternalChannelIngestionReplayService,
+            MagicMock(),
+        ),
         session_lifecycle=cast(SessionLifecycleService, MagicMock()),
     )
     with pytest.raises(

@@ -22,8 +22,10 @@ from azents.core.enums import (
     ExternalChannelDeliveryStatus,
     ExternalChannelEventEligibilityState,
     ExternalChannelEventStatus,
+    ExternalChannelHydrationStatus,
     ExternalChannelIngressProfile,
     ExternalChannelInvocationWakeDispatchStatus,
+    ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
@@ -45,6 +47,8 @@ from azents.repos.external_channel.data import (
     ExternalChannelDeliveryAttempt,
     ExternalChannelEventCreate,
     ExternalChannelInvocationBatch,
+    ExternalChannelMessage,
+    ExternalChannelResource,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.workspace import WorkspaceRepository
@@ -300,6 +304,95 @@ async def test_conversation_position_lock_and_compare_and_set_are_fenced(
     lock_statement = session.scalar.await_args.args[0]
     assert "FOR UPDATE" in str(lock_statement.compile(dialect=postgresql.dialect()))
     assert session.flush.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_message_identity_metadata_does_not_create_content_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Approval preparation updates identity metadata without retaining content."""
+    repository = ExternalChannelRepository()
+    message = SimpleNamespace(
+        id="message-1",
+        principal_id=None,
+        author_type=ExternalChannelPrincipalAuthorType.SYSTEM,
+        provider_created_at=None,
+        provider_updated_at=None,
+        current_revision_id=None,
+    )
+    session = MagicMock(spec=AsyncSession)
+    session.scalar = AsyncMock(return_value=message)
+    session.flush = AsyncMock()
+    monkeypatch.setattr(
+        ExternalChannelMessage,
+        "model_validate",
+        classmethod(lambda cls, value: value),
+    )
+
+    updated = await repository.update_message_identity_metadata(
+        session,
+        message_id=message.id,
+        principal_id="principal-1",
+        author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+        provider_created_at=_at(4),
+        provider_updated_at=_at(5),
+    )
+
+    assert updated is message
+    assert message.principal_id == "principal-1"
+    assert message.author_type is ExternalChannelPrincipalAuthorType.HUMAN
+    assert message.provider_created_at == _at(4)
+    assert message.provider_updated_at == _at(5)
+    assert message.current_revision_id is None
+    statement = session.scalar.await_args.args[0]
+    assert "FOR UPDATE" in str(statement.compile(dialect=postgresql.dialect()))
+    session.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_synchronous_history_marks_resource_bounded_without_event_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Synchronous provider history records a bounded terminal resource state."""
+    repository = ExternalChannelRepository()
+    resource = SimpleNamespace(
+        id="resource-1",
+        hydration_status=ExternalChannelHydrationStatus.PENDING,
+        hydration_cursor=None,
+        hydration_high_watermark_position=None,
+        hydration_error_kind="legacy_error",
+        hydration_error_summary="legacy summary",
+        hydration_started_at=None,
+        hydration_completed_at=None,
+        updated_at=_at(1),
+    )
+    session = MagicMock(spec=AsyncSession)
+    session.scalar = AsyncMock(return_value=resource)
+    session.flush = AsyncMock()
+    session.refresh = AsyncMock()
+    monkeypatch.setattr(
+        ExternalChannelResource,
+        "model_validate",
+        classmethod(lambda cls, value: value),
+    )
+
+    updated = await repository.mark_resource_history_ready(
+        session,
+        resource_id=resource.id,
+        through_provider_position="0000000005",
+        completed_at=_at(5),
+    )
+
+    assert updated is resource
+    assert resource.hydration_status is ExternalChannelHydrationStatus.BOUNDED
+    assert resource.hydration_cursor == "0000000005"
+    assert resource.hydration_high_watermark_position == "0000000005"
+    assert resource.hydration_error_kind is None
+    assert resource.hydration_error_summary is None
+    assert resource.hydration_started_at == _at(5)
+    assert resource.hydration_completed_at == _at(5)
+    statement = session.scalar.await_args.args[0]
+    assert "FOR UPDATE" in str(statement.compile(dialect=postgresql.dialect()))
 
 
 @pytest.mark.asyncio
