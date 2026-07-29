@@ -1131,6 +1131,91 @@ async def test_runtime_authority_revocation_after_provider_start_is_unknown(
     assert attempt.error_kind == "delivery_authority_revoked"
 
 
+async def test_initial_discord_delivery_is_authorized_before_binding_activation(
+    rdb_session: AsyncSession,
+) -> None:
+    """Exact initial Discord intents may precede the wake/activation boundary."""
+    _agent_id, binding_id = await _setup_binding(rdb_session)
+    await _as_discord_binding(rdb_session, binding_id=binding_id)
+    binding = await rdb_session.get(RDBExternalChannelBinding, binding_id)
+    assert binding is not None
+    binding.activation_status = ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+    repository = ExternalChannelWorkRepository()
+    await repository.ensure_active_work(rdb_session, binding_id=binding_id)
+    work = await rdb_session.scalar(
+        sa.select(RDBExternalChannelWork).where(
+            RDBExternalChannelWork.binding_id == binding_id,
+            RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
+        )
+    )
+    assert work is not None
+    session_link = RDBExternalChannelDeliveryAttempt(
+        origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+        origin_id=binding_id,
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+        request_payload={"text": "Open Session"},
+        status=ExternalChannelDeliveryStatus.PENDING,
+        channel_action_id=None,
+        binding_id=binding_id,
+        provider_message_key=None,
+        error_kind=None,
+        error_summary=None,
+        attempted_at=None,
+        completed_at=None,
+    )
+    progress = RDBExternalChannelDeliveryAttempt(
+        origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+        origin_id=work.id,
+        operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+        request_payload={"work_id": work.id, "text": "Checking…"},
+        status=ExternalChannelDeliveryStatus.PENDING,
+        channel_action_id=None,
+        binding_id=binding_id,
+        provider_message_key=None,
+        error_kind=None,
+        error_summary=None,
+        attempted_at=None,
+        completed_at=None,
+    )
+    unrelated_control = RDBExternalChannelDeliveryAttempt(
+        origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+        origin_id="unrelated-manager-operation",
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+        request_payload={"text": "Not an initial Session link"},
+        status=ExternalChannelDeliveryStatus.PENDING,
+        channel_action_id=None,
+        binding_id=binding_id,
+        provider_message_key=None,
+        error_kind=None,
+        error_summary=None,
+        attempted_at=None,
+        completed_at=None,
+    )
+    rdb_session.add_all((session_link, progress, unrelated_control))
+    await rdb_session.flush()
+
+    for attempt in (session_link, progress):
+        target = await repository.start_delivery(
+            rdb_session,
+            delivery_attempt_id=attempt.id,
+            now=_at(3),
+        )
+        assert target is not None
+        assert target.provider is ExternalChannelProvider.DISCORD
+        assert attempt.status is ExternalChannelDeliveryStatus.ATTEMPTING
+
+    assert (
+        await repository.start_delivery(
+            rdb_session,
+            delivery_attempt_id=unrelated_control.id,
+            now=_at(3),
+        )
+        is None
+    )
+    assert unrelated_control.status is ExternalChannelDeliveryStatus.NOT_ATTEMPTED
+    assert unrelated_control.error_kind == "delivery_authority_revoked"
+
+
 async def test_active_work_snapshot_fences_session_and_agent_lifecycle(
     rdb_session: AsyncSession,
 ) -> None:
