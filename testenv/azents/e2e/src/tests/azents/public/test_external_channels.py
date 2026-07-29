@@ -2051,9 +2051,7 @@ def test_external_channel_file_transfer_journey(
             item.get("binding") == binding_id
             and item.get("marker_present") is True
             and item.get("locator_count") == 2
-            and item.get("download_tool_available") is True
-            and item.get("process_tool_available") is True
-            and item.get("channel_action_tool_available") is True
+            and item.get("search_tool_available") is True
             and item.get("stage") == "initial"
             for item in evidence
         ), evidence
@@ -2075,6 +2073,7 @@ def test_external_channel_file_transfer_journey(
         stages = [item.get("stage") for item in evidence]
         expected_stages = [
             "initial",
+            "after_search",
             "after_download",
             "after_process",
         ]
@@ -2084,6 +2083,10 @@ def test_external_channel_file_transfer_journey(
             index = stages.index(stage)
             assert index > previous_index, evidence
             previous_index = index
+        after_search = evidence[stages.index("after_search")]
+        assert after_search.get("download_tool_available") is True, evidence
+        assert after_search.get("process_tool_available") is True, evidence
+        assert after_search.get("channel_action_tool_available") is True, evidence
         for item in evidence:
             tool_outputs = cast(
                 dict[str, dict[str, object]],

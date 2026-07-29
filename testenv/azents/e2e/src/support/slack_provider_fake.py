@@ -374,8 +374,16 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             file_id = urlparse(self.path).path.removeprefix("/upload/")
             self._file_upload(file_id)
             return
-        operation = urlparse(self.path).path.removeprefix("/api/")
-        body = self._json_body()
+        parsed_path = urlparse(self.path)
+        operation = parsed_path.path.removeprefix("/api/")
+        query = {
+            key: _form_value(key, values)
+            for key, values in parse_qs(
+                parsed_path.query,
+                keep_blank_values=True,
+            ).items()
+        }
+        body = {**query, **self._json_body()}
         self.state.record_request(
             operation,
             method="POST",

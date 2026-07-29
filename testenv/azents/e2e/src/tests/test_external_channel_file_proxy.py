@@ -58,12 +58,38 @@ def test_file_proxy_recognizes_two_locators_and_required_tools() -> None:
         "external-file:v1:slack:binding-file-123:F2",
     ]
     assert proxy.external_channel_file_evidence(request) == {
+        "matched": True,
         "binding": "binding-file-123",
         "marker_present": True,
         "locator_count": 2,
+        "search_tool_available": False,
         "download_tool_available": True,
         "process_tool_available": True,
         "channel_action_tool_available": True,
+    }
+
+
+def test_file_proxy_recognizes_initial_tool_search_surface() -> None:
+    """The deterministic journey can activate deferred file and publish tools."""
+    request = _request()
+    request["tools"] = [
+        {
+            "type": "function",
+            "name": "tool_search",
+            "parameters": {"type": "object"},
+        }
+    ]
+
+    assert proxy.is_external_channel_file_request(request) is True
+    assert proxy.external_channel_file_evidence(request) == {
+        "matched": True,
+        "binding": "binding-file-123",
+        "marker_present": True,
+        "locator_count": 2,
+        "search_tool_available": True,
+        "download_tool_available": False,
+        "process_tool_available": False,
+        "channel_action_tool_available": False,
     }
 
 
@@ -74,6 +100,11 @@ def test_file_proxy_tracks_each_tool_output_stage() -> None:
     assert isinstance(initial_input, list)
     request["input"] = [
         *initial_input,
+        {
+            "type": "function_call_output",
+            "call_id": "call_external_channel_file_tool_search",
+            "output": "{}",
+        },
         {
             "type": "function_call_output",
             "call_id": "call_external_channel_file_download",
@@ -91,6 +122,10 @@ def test_file_proxy_tracks_each_tool_output_stage() -> None:
         },
     ]
 
+    assert proxy.request_has_tool_output(
+        request,
+        "call_external_channel_file_tool_search",
+    )
     assert proxy.request_has_tool_output(
         request,
         "call_external_channel_file_download",
