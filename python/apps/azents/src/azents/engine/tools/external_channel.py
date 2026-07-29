@@ -1,9 +1,9 @@
 """Root-only External Channel Action toolkit."""
 
 import json
-from typing import Annotated, Literal
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from azents.core.enums import (
     ExternalChannelActionMode,
@@ -124,41 +124,16 @@ class ChannelActionTaskInput(BaseModel):
     )
 
 
-class FinishChannelActionInput(BaseModel):
-    """Finish one binding's current work with its final provider reply."""
+class ChannelActionInput(BaseModel):
+    """Publish or continue one binding through a provider-compatible object."""
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    mode: Literal["finish"]
-    binding: str = Field(
-        min_length=1,
-        max_length=80,
+    mode: Literal["finish", "continue"] = Field(
         description=(
-            "Binding handle provided by the External Channel turn or continuation "
-            "context. Pass it unchanged."
-        ),
+            "Use finish for the final reply, or continue when additional work remains."
+        )
     )
-    message: str = Field(
-        min_length=1,
-        max_length=SLACK_MARKDOWN_TEXT_MAX_LENGTH,
-    )
-    files: list[str] | None = Field(
-        default=None,
-        min_length=1,
-        max_length=MAX_EXTERNAL_CHANNEL_FILES,
-        description=(
-            "One or more absolute Runtime file paths or authorized exchange:// file "
-            "URIs. Relative paths and artifact:// or azents:// URIs are unsupported."
-        ),
-    )
-
-
-class ContinueChannelActionInput(BaseModel):
-    """Continue one binding with an explicit reply or ordered task update."""
-
-    model_config = ConfigDict(str_strip_whitespace=True)
-
-    mode: Literal["continue"]
     binding: str = Field(
         min_length=1,
         max_length=80,
@@ -171,6 +146,7 @@ class ContinueChannelActionInput(BaseModel):
         default=None,
         min_length=1,
         max_length=SLACK_MARKDOWN_TEXT_MAX_LENGTH,
+        description="Required for finish and whenever files are published.",
     )
     title: str | None = Field(
         default=None,
@@ -202,8 +178,12 @@ class ContinueChannelActionInput(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_update(self) -> "ContinueChannelActionInput":
-        """Require a meaningful update and at least one unfinished task."""
+    def validate_action(self) -> "ChannelActionInput":
+        """Validate the fields that apply to the selected action mode."""
+        if self.mode == "finish":
+            if self.message is None:
+                raise ValueError("Finish requires a message.")
+            return self
         if (
             self.message is None
             and self.title is None
@@ -233,20 +213,6 @@ class ContinueChannelActionInput(BaseModel):
             if len(task_ids) != len(set(task_ids)):
                 raise ValueError("Channel Work task IDs must be unique.")
         return self
-
-
-type ChannelActionVariant = FinishChannelActionInput | ContinueChannelActionInput
-
-
-class ChannelActionInput(
-    RootModel[
-        Annotated[
-            ChannelActionVariant,
-            Field(discriminator="mode"),
-        ]
-    ]
-):
-    """Closed Channel Action input union."""
 
 
 class DownloadExternalFileInput(BaseModel):
@@ -400,11 +366,10 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
         async def channel_action(args: ChannelActionInput) -> str:
             """Commit Channel Work and explicitly publish to one external binding."""
             execution = get_client_tool_execution_context()
-            value = args.root
+            value = args
             tasks = (
                 None
-                if isinstance(value, FinishChannelActionInput)
-                or value.todo_update is None
+                if value.mode == "finish" or value.todo_update is None
                 else [
                     ChannelWorkTask(
                         id=task.id,
@@ -467,11 +432,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                     binding_id=value.binding,
                     mode=ExternalChannelActionMode(value.mode),
                     message=value.message,
-                    title=(
-                        None
-                        if isinstance(value, FinishChannelActionInput)
-                        else value.title
-                    ),
+                    title=None if value.mode == "finish" else value.title,
                     tasks=tasks,
                     files=manifests,
                     file_storage=(
@@ -653,7 +614,7 @@ def _result_payload(result: ChannelActionCommit) -> dict[str, object]:
 def _validate_existing_tool_request(
     request_payload: dict[str, object],
     *,
-    value: ChannelActionVariant,
+    value: ChannelActionInput,
     tasks: list[ChannelWorkTask] | None,
 ) -> None:
     expected: dict[str, object] = {
@@ -661,7 +622,7 @@ def _validate_existing_tool_request(
         "mode": value.mode,
         "message": value.message,
     }
-    if isinstance(value, ContinueChannelActionInput):
+    if value.mode == "continue":
         if value.title is not None:
             expected["title"] = value.title
         if tasks is not None:

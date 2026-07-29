@@ -24,7 +24,7 @@ from azents.engine.run.emit import PublishedEvent
 from azents.engine.run.types import FunctionToolError
 from azents.engine.tooling.execution_context import client_tool_execution_context
 from azents.engine.tools.external_channel import (
-    ContinueChannelActionInput,
+    ChannelActionInput,
     ExternalChannelToolkit,
 )
 from azents.engine.tools.runtime_instruction_context import (
@@ -452,10 +452,21 @@ async def test_continue_requires_unfinished_work() -> None:
             )
 
 
+def test_finish_requires_message() -> None:
+    """Finish retains its mode-specific final reply requirement."""
+    with pytest.raises(ValueError, match="Finish requires a message"):
+        ChannelActionInput.model_validate(
+            {
+                "mode": "finish",
+                "binding": "binding-1",
+            }
+        )
+
+
 def test_continue_limits_todos_to_available_activity_blocks() -> None:
     """One status card leaves 49 Slack message blocks for Todo cards."""
     with pytest.raises(ValueError, match="at most 49"):
-        ContinueChannelActionInput.model_validate(
+        ChannelActionInput.model_validate(
             {
                 "mode": "continue",
                 "binding": "binding-1",
@@ -475,7 +486,7 @@ def test_continue_limits_todos_to_available_activity_blocks() -> None:
 def test_channel_action_rejects_empty_file_lists() -> None:
     """An explicit file publication contains at least one Runtime path."""
     with pytest.raises(ValueError, match="at least 1 item"):
-        ContinueChannelActionInput.model_validate(
+        ChannelActionInput.model_validate(
             {
                 "mode": "continue",
                 "binding": "binding-1",
@@ -561,5 +572,8 @@ async def test_channel_tool_descriptions_own_post_discovery_guidance() -> None:
     assert "opaque locator" in download_external_file.spec.description
 
     schema_text = json.dumps(channel_action.spec.input_schema)
+    assert channel_action.spec.input_schema["type"] == "object"
+    assert "oneOf" not in channel_action.spec.input_schema
+    assert "anyOf" not in channel_action.spec.input_schema
     assert "Pass it unchanged" in schema_text
     assert "independent from the session-scoped update_todo list" in schema_text
