@@ -3075,24 +3075,27 @@ async def test_reconcile_discord_delivered_attempts_wakes_then_activates(
     """Persisted initial attempts gate one wake and ACTIVE boundary advancement."""
     (
         service,
-        repository,
+        _repository,
         binding_id,
         _resource_id,
     ) = await _prepare_discord_reconcile_fixture(rdb_session_manager)
 
     async def deliver(attempt_id: str) -> None:
         async with rdb_session_manager() as session:
-            await repository.start_delivery_attempt(
-                session, delivery_attempt_id=attempt_id, attempted_at=_at(5)
+            target = await service.work_repository.start_delivery(
+                session,
+                delivery_attempt_id=attempt_id,
+                now=_at(5),
             )
-            await repository.finish_delivery_attempt(
+            assert target is not None
+            await service.work_repository.finish_delivery(
                 session,
                 delivery_attempt_id=attempt_id,
                 status=ExternalChannelDeliveryStatus.DELIVERED,
                 provider_message_key=f"discord:test:{attempt_id}",
                 error_kind=None,
                 error_summary=None,
-                completed_at=_at(5),
+                now=_at(5),
             )
             await session.commit()
 

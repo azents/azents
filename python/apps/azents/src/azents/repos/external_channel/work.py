@@ -1111,10 +1111,15 @@ class ExternalChannelWorkRepository:
                 error_summary="The current External Channel authority is unavailable.",
                 now=now,
             )
+        activation_authorized = await self._binding_activation_authorizes_delivery(
+            session,
+            attempt=attempt,
+            binding=binding,
+            provider=connection.provider,
+        )
         if (
             binding.status is not ExternalChannelBindingStatus.ACTIVE
-            or binding.activation_status
-            is not ExternalChannelBindingActivationStatus.ACTIVE
+            or not activation_authorized
             or agent_session.status is not AgentSessionStatus.ACTIVE
             or agent_session.stop_requested_at is not None
             or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
@@ -1245,6 +1250,44 @@ class ExternalChannelWorkRepository:
             agent_avatar=agent.avatar,
             request_payload=dict(attempt.request_payload),
         )
+
+    async def _binding_activation_authorizes_delivery(
+        self,
+        session: AsyncSession,
+        *,
+        attempt: RDBExternalChannelDeliveryAttempt,
+        binding: RDBExternalChannelBinding,
+        provider: ExternalChannelProvider,
+    ) -> bool:
+        """Allow only exact initial Discord intents before binding activation."""
+        if binding.activation_status is ExternalChannelBindingActivationStatus.ACTIVE:
+            return True
+        if (
+            provider is not ExternalChannelProvider.DISCORD
+            or binding.activation_status
+            is not ExternalChannelBindingActivationStatus.WAITING_HYDRATION
+            or attempt.origin_type
+            is not ExternalChannelDeliveryOriginType.MANAGER_OPERATION
+            or attempt.channel_action_id is not None
+        ):
+            return False
+        if attempt.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE:
+            return attempt.origin_id == binding.id
+        if attempt.operation is not ExternalChannelDeliveryOperation.PROGRESS_CREATE:
+            return False
+        raw_work_id = attempt.request_payload.get("work_id")
+        if not isinstance(raw_work_id, str) or attempt.origin_id != raw_work_id:
+            return False
+        work_exists = await session.scalar(
+            sa.select(
+                sa.exists().where(
+                    RDBExternalChannelWork.id == raw_work_id,
+                    RDBExternalChannelWork.binding_id == binding.id,
+                    RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
+                )
+            )
+        )
+        return bool(work_exists)
 
     async def _reject_delivery_start(
         self,
