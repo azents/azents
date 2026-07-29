@@ -496,6 +496,62 @@ void test("specializes present_file with the first presented file", () => {
   });
 });
 
+void test("renders update_todo replacement as checklist detail", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "update_todo",
+      arguments: JSON.stringify({
+        operation: "replace",
+        items: [
+          { content: "Inspect CI", status: "completed" },
+          { content: "Fix failures", status: "in_progress" },
+          { content: "Create PR", status: "pending" },
+        ],
+      }),
+      result: "Done",
+      status: "completed",
+    }),
+  );
+
+  assert.deepEqual(result, {
+    type: "specialized",
+    presentation: {
+      action: "updateTodo",
+      subject: null,
+      qualifier: "3",
+      detail: {
+        type: "todo",
+        items: [
+          { content: "Inspect CI", status: "completed" },
+          { content: "Fix failures", status: "in_progress" },
+          { content: "Create PR", status: "pending" },
+        ],
+      },
+    },
+  });
+});
+
+void test("renders update_todo clear without empty detail", () => {
+  const result = knownToolPresentation(
+    toolCall({
+      name: "update_todo",
+      arguments: '{"operation":"clear"}',
+      result: "Done",
+      status: "completed",
+    }),
+  );
+
+  assert.deepEqual(result, {
+    type: "specialized",
+    presentation: {
+      action: "updateTodo",
+      subject: null,
+      qualifier: "clear",
+      detail: null,
+    },
+  });
+});
+
 void test("covers every remaining source-less builtin with a validated adapter", () => {
   const cases: Array<{
     action: string;

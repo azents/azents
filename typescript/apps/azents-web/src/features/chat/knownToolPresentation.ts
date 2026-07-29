@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { fileCodeLanguage } from "./fileCodeLanguage.ts";
 import { parseV4APatch } from "./v4aPatchPresentation.ts";
-import type { ActiveToolCall } from "./types";
+import type { ActiveToolCall, TodoStatus } from "./types";
 import type { V4APatchFile } from "./v4aPatchPresentation.ts";
 
 export type KnownToolPresentationReason =
@@ -118,6 +118,16 @@ export interface SemanticDetail {
   items: SemanticItem[];
 }
 
+export interface TodoPresentationItem {
+  content: string;
+  status: TodoStatus;
+}
+
+export interface TodoDetail {
+  type: "todo";
+  items: TodoPresentationItem[];
+}
+
 export interface SkillDetail {
   type: "skill";
   content: string;
@@ -129,6 +139,7 @@ export type KnownToolDetail =
   | PatchDetail
   | ProcessDetail
   | SemanticDetail
+  | TodoDetail
   | SkillDetail
   | null;
 
@@ -942,14 +953,12 @@ export function knownToolPresentation(
           "updateTodo",
           null,
           input.data.operation === "clear" ? "clear" : String(items.length),
-          semanticDetail({
-            fields: [{ label: "operation", value: input.data.operation }],
-            items: items.map((item) => ({
-              title: item.content,
-              subtitle: item.status,
-              content: null,
-            })),
-          }),
+          input.data.operation === "clear" || items.length === 0
+            ? null
+            : {
+                type: "todo",
+                items,
+              },
         );
       }
       case "load_skill": {

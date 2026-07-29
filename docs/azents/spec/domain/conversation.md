@@ -108,8 +108,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-26
-spec_version: 133
+last_verified_at: 2026-07-29
+spec_version: 134
 ---
 
 # Conversation & Events
@@ -742,6 +742,13 @@ file URIs, and search patterns remain expanded-only or Raw-only according to the
 show only the canonical tool name and lifecycle status in the collapsed summary, without filler copy, and
 retain raw arguments and output as their primary expanded content.
 
+An expanded non-empty `update_todo` replacement renders its ordered items as one compact read-only checklist
+instead of generic semantic fields and per-item cards. Completed items use a dimmed checked icon and
+struck-through text, every `in_progress` item uses the blue progress ring and light-blue row
+background, and pending items use the neutral empty checkbox. The visible detail omits the raw
+operation and status strings; those values remain available in Raw data. A `clear` operation has no
+empty expanded detail.
+
 Provider `web_search` rows use a globe identity and the canonical search query. Their expanded semantic
 detail renders the provider summary plus validated result title, source host, URL, excerpt, and external
 link. Provider calls without valid rich detail still retain the same Tool row and Raw data action. The
@@ -1075,6 +1082,7 @@ participant.
 - **2026-07-20** — v119. Swapped the context-window and subscription-usage affordance locations, restored automatic context-detail scrolling, and kept subagent pickers context-only.
 - **2026-07-20** — v118. Moved context-window usage details from the session header into the model picker, made subscription usage an independent composer popover, and removed model/effort picker exposure from read-only subagent composers.
 - **2026-07-26** — v133. Added dynamic per-Agent automatic archive TTLs, monotonic Session activity, root pin protection, the automatic archive scheduler path, and the public pin mutation/UI.
+- **2026-07-29** — v134. Replaced expanded `update_todo` semantic cards with a compact ordered checklist that highlights active work and keeps raw operation/status values in Raw data.
 - **2026-07-20** — v117. Replaced policy-aware archive confirmation with concise delete-style session-removal copy while preserving archive-backed retention behavior.
 - **2026-07-19** — v115. Added explicit input scheduling intent, queue-only terminal `agent_result` delivery with durable Run idempotency, and promotion-time direct-parent observation acknowledgment.
 - **2026-07-19** — v114. Added root-session archive and restore, immutable retention snapshots, scheduled durable purge state, archived-session listing, and public archived-session UI behavior.

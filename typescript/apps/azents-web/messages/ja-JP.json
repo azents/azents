@@ -2139,6 +2139,11 @@
       "filesChanged": "{count} 件のファイルを変更",
       "exitCode": "終了コード {code}",
       "outputTruncated": "出力は省略されました。",
+      "todoStatus": {
+        "pending": "保留中",
+        "inProgress": "進行中",
+        "completed": "完了"
+      },
       "action": {
         "read": "ファイルを読み取り",
         "search": "ファイルを検索",

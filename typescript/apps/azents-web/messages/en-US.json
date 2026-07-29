@@ -2139,6 +2139,11 @@
       "filesChanged": "{count} file(s) changed",
       "exitCode": "exit {code}",
       "outputTruncated": "Output was truncated.",
+      "todoStatus": {
+        "pending": "Pending",
+        "inProgress": "In progress",
+        "completed": "Completed"
+      },
       "action": {
         "read": "Read",
         "search": "Searched files",

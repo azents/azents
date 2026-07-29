@@ -2139,6 +2139,11 @@
       "filesChanged": "파일 {count}개 변경",
       "exitCode": "종료 {code}",
       "outputTruncated": "출력이 잘렸습니다.",
+      "todoStatus": {
+        "pending": "대기 중",
+        "inProgress": "진행 중",
+        "completed": "완료"
+      },
       "action": {
         "read": "파일 읽음",
         "search": "파일 검색",
