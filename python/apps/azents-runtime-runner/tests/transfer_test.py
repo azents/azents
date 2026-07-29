@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import grpc
 import pytest
 from azents_runtime_control.grpc_runner_transfer_client import (
     RunnerDownloadChunk,
@@ -171,6 +172,91 @@ async def test_invalid_intent_does_not_block_control_receiver() -> None:
     assert transfer.download_calls == 0
     control.release.set()
     assert (await _result(control)).failure is RunnerTransferFailure.PROTOCOL_VIOLATION
+    await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_invalid_intent_logs_bounded_validation_reason(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Intent rejection identifies the failed check without logging its path."""
+    control = _Control()
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=_Transfer(),
+        accepted_generation=lambda: 2,
+    )
+    intent = _intent(Path("/workspace/agent/private-name.txt"))
+
+    await manager.handle_intent(intent)
+
+    assert (await _result(control)).failure is RunnerTransferFailure.PROTOCOL_VIOLATION
+    failure = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "Runtime Runner transfer failed"
+    )
+    assert failure.__dict__["failure_source"] == "intent_admission"
+    assert failure.__dict__["failure_reason"] == "runner_generation_mismatch"
+    assert failure.__dict__["grpc_status"] is None
+    assert "private-name.txt" not in str(failure.__dict__)
+    await manager.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("grpc_detail", ["Transfer is unavailable", "Upload failed"])
+async def test_upload_logs_server_grpc_rejection_reason(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    grpc_detail: str,
+) -> None:
+    """Data-RPC rejection logs the server-owned reason and status."""
+    source = tmp_path / "source.bin"
+    data = b"upload bytes"
+    source.write_bytes(data)
+
+    class _RejectedTransfer(_Transfer):
+        async def upload(
+            self,
+            identity: RunnerTransferIdentity,
+            frames: AsyncIterator[RunnerDownloadChunk | RunnerUploadComplete],
+            *,
+            timeout: float,
+        ) -> RunnerUploadResult:
+            del identity, frames, timeout
+            metadata = grpc.aio.Metadata()
+            raise grpc.aio.AioRpcError(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                metadata,
+                metadata,
+                grpc_detail,
+                None,
+            )
+
+    control = _Control()
+    manager = RunnerTransferManager(
+        control=control,
+        transfer=_RejectedTransfer(),
+        accepted_generation=lambda: 1,
+    )
+
+    await manager.handle_intent(
+        _intent(
+            source,
+            direction=RunnerTransferDirection.UPLOAD,
+            data=data,
+        )
+    )
+
+    assert (await _result(control)).failure is RunnerTransferFailure.PROTOCOL_VIOLATION
+    failure = next(
+        record
+        for record in caplog.records
+        if record.getMessage() == "Runtime Runner transfer failed"
+    )
+    assert failure.__dict__["failure_source"] == "grpc"
+    assert failure.__dict__["failure_reason"] == grpc_detail
+    assert failure.__dict__["grpc_status"] == "FAILED_PRECONDITION"
     await manager.close()
 
 

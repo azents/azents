@@ -138,8 +138,12 @@ class RunnerTransferManager:
         """Validate and admit one intent without awaiting its transfer task."""
         key = _key(intent)
         identity_key = _identity_key(intent)
-        invalid = _validate_intent(intent, self._accepted_generation())
+        invalid_reason = _validate_intent_reason(
+            intent,
+            self._accepted_generation(),
+        )
         result: RunnerTransferResult | None = None
+        failure_reason: str | None = None
         async with self._lock:
             active_key = self._active_by_identity.get(identity_key)
             completed_key = self._completed_by_identity.get(identity_key)
@@ -147,17 +151,25 @@ class RunnerTransferManager:
                 active = self._active[active_key]
                 if active_key != key or active.intent != intent:
                     result = _failed(intent, RunnerTransferFailure.PROTOCOL_VIOLATION)
+                    failure_reason = "active_identity_conflict"
             elif completed_key is not None:
                 prior = self._tombstones[completed_key]
                 if completed_key == key and prior.intent == intent:
                     result = prior.result
                 else:
                     result = _failed(intent, RunnerTransferFailure.PROTOCOL_VIOLATION)
-            elif invalid is not None:
-                result = _failed(intent, invalid)
+                    failure_reason = "completed_identity_conflict"
+            elif invalid_reason is not None:
+                result = _failed(intent, RunnerTransferFailure.PROTOCOL_VIOLATION)
+                failure_reason = invalid_reason
                 self._remember(intent, result)
             elif self._closed or len(self._active) >= self._max_active_transfers:
                 result = _failed(intent, RunnerTransferFailure.RESOURCE_EXHAUSTED)
+                failure_reason = (
+                    "transfer_manager_closed"
+                    if self._closed
+                    else "active_transfer_capacity_exhausted"
+                )
                 self._remember(intent, result)
             else:
                 cancelled = asyncio.Event()
@@ -166,6 +178,14 @@ class RunnerTransferManager:
                 self._active_by_identity[identity_key] = key
                 task.add_done_callback(lambda _: asyncio.create_task(self._reap(key)))
         if result is not None:
+            if failure_reason is not None:
+                _log_failure(
+                    intent,
+                    result,
+                    source="intent_admission",
+                    reason=failure_reason,
+                    grpc_status=None,
+                )
             await self._enqueue_result(result)
 
     async def handle_cancel(self, cancel: RunnerTransferCancel) -> None:
@@ -218,12 +238,40 @@ class RunnerTransferManager:
                     result = await self._upload(intent, cancelled)
             except grpc.aio.AioRpcError as exc:
                 result = _failed(intent, runner_transfer_failure_from_grpc(exc))
+                _log_failure(
+                    intent,
+                    result,
+                    source="grpc",
+                    reason=exc.details() or "gRPC error without details",
+                    grpc_status=exc.code().name,
+                )
             except _TransferFailure as exc:
                 result = _failed(intent, exc.failure)
+                _log_failure(
+                    intent,
+                    result,
+                    source="runner",
+                    reason=exc.reason,
+                    grpc_status=None,
+                )
             except OSError:
                 result = _failed(intent, _local_io_failure(intent))
+                _log_failure(
+                    intent,
+                    result,
+                    source="local_io",
+                    reason="os_error",
+                    grpc_status=None,
+                )
             except ValueError:
                 result = _failed(intent, RunnerTransferFailure.PROTOCOL_VIOLATION)
+                _log_failure(
+                    intent,
+                    result,
+                    source="runner",
+                    reason="unexpected_value_error",
+                    grpc_status=None,
+                )
             self._remember(intent, result)
             await self._enqueue_terminal_result(result)
         except asyncio.CancelledError:
@@ -243,7 +291,10 @@ class RunnerTransferManager:
         overwrite = intent.overwrite
         expected_size = intent.expected_size
         if expected_sha256 is None or overwrite is None or expected_size is None:
-            raise _TransferFailure(RunnerTransferFailure.PROTOCOL_VIOLATION)
+            raise _TransferFailure(
+                RunnerTransferFailure.PROTOCOL_VIOLATION,
+                reason="download_manifest_missing",
+            )
         parent_fd, destination_name = _open_parent(intent.runtime_path, create=True)
         stage_fd: int | None = None
         stage_name: str | None = None
@@ -259,7 +310,10 @@ class RunnerTransferManager:
                 _check_stop(intent, cancelled)
                 if isinstance(frame, RunnerDownloadComplete):
                     if complete is not None:
-                        raise _TransferFailure(RunnerTransferFailure.PROTOCOL_VIOLATION)
+                        raise _TransferFailure(
+                            RunnerTransferFailure.PROTOCOL_VIOLATION,
+                            reason="download_duplicate_completion",
+                        )
                     complete = frame
                     continue
                 if (
@@ -267,9 +321,15 @@ class RunnerTransferManager:
                     or not frame.data
                     or len(frame.data) > _BUFFER_BYTES
                 ):
-                    raise _TransferFailure(RunnerTransferFailure.PROTOCOL_VIOLATION)
+                    raise _TransferFailure(
+                        RunnerTransferFailure.PROTOCOL_VIOLATION,
+                        reason="download_chunk_invalid",
+                    )
                 if frame.offset != offset or offset + len(frame.data) > expected_size:
-                    raise _TransferFailure(RunnerTransferFailure.INTEGRITY_FAILED)
+                    raise _TransferFailure(
+                        RunnerTransferFailure.INTEGRITY_FAILED,
+                        reason="download_chunk_integrity_mismatch",
+                    )
                 await asyncio.to_thread(_write_all, stage_fd, frame.data)
                 digest.update(frame.data)
                 offset += len(frame.data)
@@ -280,7 +340,10 @@ class RunnerTransferManager:
                 or complete.sha256 != digest.hexdigest()
                 or digest.hexdigest() != expected_sha256
             ):
-                raise _TransferFailure(RunnerTransferFailure.INTEGRITY_FAILED)
+                raise _TransferFailure(
+                    RunnerTransferFailure.INTEGRITY_FAILED,
+                    reason="download_manifest_mismatch",
+                )
             await asyncio.to_thread(os.fsync, stage_fd)
             assert stage_fd is not None
             async with self._commit_lock:
@@ -332,7 +395,10 @@ class RunnerTransferManager:
     ) -> RunnerTransferResult:
         expected_size = intent.expected_size
         if expected_size is None:
-            raise _TransferFailure(RunnerTransferFailure.PROTOCOL_VIOLATION)
+            raise _TransferFailure(
+                RunnerTransferFailure.PROTOCOL_VIOLATION,
+                reason="upload_expected_size_missing",
+            )
         parent_fd, source_name = _open_parent(intent.runtime_path, create=False)
         source_fd: int | None = None
         snapshot_fd: int | None = None
@@ -345,7 +411,10 @@ class RunnerTransferManager:
             )
             before = _regular_identity(os.fstat(source_fd))
             if before.size != expected_size:
-                raise _TransferFailure(RunnerTransferFailure.INTEGRITY_FAILED)
+                raise _TransferFailure(
+                    RunnerTransferFailure.INTEGRITY_FAILED,
+                    reason="upload_source_size_mismatch",
+                )
             snapshot_fd, snapshot_name = _open_temporary_file(parent_fd)
             digest = hashlib.sha256()
             copied = 0
@@ -356,7 +425,10 @@ class RunnerTransferManager:
                     break
                 copied += len(chunk)
                 if copied > expected_size:
-                    raise _TransferFailure(RunnerTransferFailure.INTEGRITY_FAILED)
+                    raise _TransferFailure(
+                        RunnerTransferFailure.INTEGRITY_FAILED,
+                        reason="upload_source_exceeds_expected_size",
+                    )
                 await asyncio.to_thread(_write_all, snapshot_fd, chunk)
                 digest.update(chunk)
             await asyncio.to_thread(os.fsync, snapshot_fd)
@@ -365,13 +437,19 @@ class RunnerTransferManager:
                 os.stat(source_name, dir_fd=parent_fd, follow_symlinks=False)
             )
             if before != after_fd or before != after_path or copied != expected_size:
-                raise _TransferFailure(RunnerTransferFailure.INTEGRITY_FAILED)
+                raise _TransferFailure(
+                    RunnerTransferFailure.INTEGRITY_FAILED,
+                    reason="upload_source_changed",
+                )
             actual_sha256 = digest.hexdigest()
             if (
                 intent.expected_sha256 is not None
                 and actual_sha256 != intent.expected_sha256
             ):
-                raise _TransferFailure(RunnerTransferFailure.INTEGRITY_FAILED)
+                raise _TransferFailure(
+                    RunnerTransferFailure.INTEGRITY_FAILED,
+                    reason="upload_source_digest_mismatch",
+                )
             assert snapshot_fd is not None
 
             async def frames() -> AsyncIterator[
@@ -405,7 +483,10 @@ class RunnerTransferManager:
                 authoritative.actual_size != copied
                 or authoritative.sha256 != actual_sha256
             ):
-                raise _TransferFailure(RunnerTransferFailure.INTEGRITY_FAILED)
+                raise _TransferFailure(
+                    RunnerTransferFailure.INTEGRITY_FAILED,
+                    reason="upload_authoritative_manifest_mismatch",
+                )
             return RunnerTransferResult(
                 identity=intent.identity,
                 operation_id=intent.operation_id,
@@ -510,8 +591,9 @@ class _TransferIdentityKey:
 
 
 class _TransferFailure(Exception):
-    def __init__(self, failure: RunnerTransferFailure) -> None:
+    def __init__(self, failure: RunnerTransferFailure, *, reason: str) -> None:
         self.failure = failure
+        self.reason = reason
 
 
 def _key(intent: RunnerTransferIntent) -> _TransferKey:
@@ -544,36 +626,42 @@ def _identity_key_from_key(key: _TransferKey) -> _TransferIdentityKey:
     )
 
 
-def _validate_intent(
+def _validate_intent_reason(
     intent: RunnerTransferIntent,
     accepted_generation: int | None,
-) -> RunnerTransferFailure | None:
-    if (
-        accepted_generation != intent.identity.runner_generation
-        or intent.protocol_version != RUNNER_TRANSFER_PROTOCOL_VERSION
-        or intent.capability != RUNNER_TRANSFER_CAPABILITY
-        or intent.overwrite is None
-        or intent.expected_size is None
-        or intent.expected_size < 0
-        or intent.deadline_at <= datetime.now(UTC)
-        or not PurePath(intent.runtime_path).is_absolute()
-        or not all(
-            _valid_identifier(value)
-            for value in (
-                intent.identity.transfer_id,
-                intent.identity.attempt_id,
-                intent.identity.runtime_id,
-                intent.operation_id,
-                intent.dispatch_id,
-            )
+) -> str | None:
+    if accepted_generation != intent.identity.runner_generation:
+        return "runner_generation_mismatch"
+    if intent.protocol_version != RUNNER_TRANSFER_PROTOCOL_VERSION:
+        return "protocol_version_mismatch"
+    if intent.capability != RUNNER_TRANSFER_CAPABILITY:
+        return "capability_mismatch"
+    if intent.overwrite is None:
+        return "overwrite_missing"
+    if intent.expected_size is None:
+        return "expected_size_missing"
+    if intent.expected_size < 0:
+        return "expected_size_negative"
+    if intent.deadline_at <= datetime.now(UTC):
+        return "deadline_expired"
+    if not PurePath(intent.runtime_path).is_absolute():
+        return "runtime_path_not_absolute"
+    if not all(
+        _valid_identifier(value)
+        for value in (
+            intent.identity.transfer_id,
+            intent.identity.attempt_id,
+            intent.identity.runtime_id,
+            intent.operation_id,
+            intent.dispatch_id,
         )
     ):
-        return RunnerTransferFailure.PROTOCOL_VIOLATION
+        return "identifier_invalid"
     if (
         intent.direction is RunnerTransferDirection.DOWNLOAD
         and intent.expected_sha256 is None
     ):
-        return RunnerTransferFailure.PROTOCOL_VIOLATION
+        return "download_sha256_missing"
     return None
 
 
@@ -619,15 +707,24 @@ def _cancelled(intent: RunnerTransferIntent) -> RunnerTransferResult:
 
 def _check_stop(intent: RunnerTransferIntent, cancelled: asyncio.Event) -> None:
     if cancelled.is_set():
-        raise _TransferFailure(RunnerTransferFailure.CANCELLED)
+        raise _TransferFailure(
+            RunnerTransferFailure.CANCELLED,
+            reason="cancellation_requested",
+        )
     if datetime.now(UTC) >= intent.deadline_at:
-        raise _TransferFailure(RunnerTransferFailure.DEADLINE_EXCEEDED)
+        raise _TransferFailure(
+            RunnerTransferFailure.DEADLINE_EXCEEDED,
+            reason="deadline_exceeded",
+        )
 
 
 def _remaining_timeout(intent: RunnerTransferIntent) -> float:
     remaining = (intent.deadline_at - datetime.now(UTC)).total_seconds()
     if remaining <= 0:
-        raise _TransferFailure(RunnerTransferFailure.DEADLINE_EXCEEDED)
+        raise _TransferFailure(
+            RunnerTransferFailure.DEADLINE_EXCEEDED,
+            reason="deadline_exceeded",
+        )
     return remaining
 
 
@@ -638,13 +735,19 @@ def _open_parent(path: str, *, create: bool) -> tuple[int, str]:
         or not candidate.name
         or candidate.name in {".", ".."}
     ):
-        raise _TransferFailure(RunnerTransferFailure.PROTOCOL_VIOLATION)
+        raise _TransferFailure(
+            RunnerTransferFailure.PROTOCOL_VIOLATION,
+            reason="runtime_path_invalid",
+        )
     parent_fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
     try:
         components = candidate.parts[1:-1]
         for component in components:
             if component in {".", ".."}:
-                raise _TransferFailure(RunnerTransferFailure.PROTOCOL_VIOLATION)
+                raise _TransferFailure(
+                    RunnerTransferFailure.PROTOCOL_VIOLATION,
+                    reason="runtime_path_traversal",
+                )
             try:
                 next_fd = os.open(
                     component,
@@ -676,12 +779,18 @@ def _assert_empty_destination(parent_fd: int, name: str) -> None:
         os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
     except FileNotFoundError:
         return
-    raise _TransferFailure(RunnerTransferFailure.DESTINATION_FAILED)
+    raise _TransferFailure(
+        RunnerTransferFailure.DESTINATION_FAILED,
+        reason="download_destination_exists",
+    )
 
 
 def _regular_identity(value: os.stat_result) -> _FileIdentity:
     if not stat.S_ISREG(value.st_mode):
-        raise _TransferFailure(RunnerTransferFailure.PROTOCOL_VIOLATION)
+        raise _TransferFailure(
+            RunnerTransferFailure.PROTOCOL_VIOLATION,
+            reason="upload_source_not_regular",
+        )
     return _FileIdentity(
         value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns
     )
@@ -714,3 +823,32 @@ def _local_io_failure(intent: RunnerTransferIntent) -> RunnerTransferFailure:
     if intent.direction is RunnerTransferDirection.DOWNLOAD:
         return RunnerTransferFailure.DESTINATION_FAILED
     return RunnerTransferFailure.INTEGRITY_FAILED
+
+
+def _log_failure(
+    intent: RunnerTransferIntent,
+    result: RunnerTransferResult,
+    *,
+    source: str,
+    reason: str,
+    grpc_status: str | None,
+) -> None:
+    _LOGGER.warning(
+        "Runtime Runner transfer failed",
+        extra={
+            "transfer_id": intent.identity.transfer_id,
+            "attempt_id": intent.identity.attempt_id,
+            "runtime_id": intent.identity.runtime_id,
+            "runner_generation": intent.identity.runner_generation,
+            "operation_id": intent.operation_id,
+            "dispatch_id": intent.dispatch_id,
+            "direction": intent.direction.value,
+            "runner_outcome": result.outcome.value,
+            "runner_failure": (
+                None if result.failure is None else result.failure.value
+            ),
+            "failure_source": source,
+            "failure_reason": reason,
+            "grpc_status": grpc_status,
+        },
+    )
