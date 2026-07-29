@@ -8,14 +8,17 @@ from support import image_generation_openai_proxy as proxy
 def _request() -> dict[str, object]:
     return {
         "instructions": (
-            "### External Channel Work\n\n"
-            "### Binding `binding-file-123`\n"
-            "- Current work title: Not declared yet"
+            "For a current input explicitly marked as an External Channel turn, "
+            "invoke `channel_action`."
         ),
         "input": [
             {
                 "role": "user",
                 "content": (
+                    "Message Type: EXTERNAL_CHANNEL_TURN\n"
+                    "Provider: slack\n"
+                    "Resource: #files\n"
+                    "Binding: binding-file-123\n\n"
                     "External Channel file transfer E2E.\n"
                     "Files:\n"
                     "1. Name: first.txt\n"

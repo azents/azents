@@ -2060,12 +2060,12 @@
         "sequenceIndex": 0
       },
       "response": {
-        "content": "FAILED_WATCHDOG_PREFIX_MUST_DISAPPEAR abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz"
+        "content": "FAILED_WATCHDOG_PREFIX_MUST_DISAPPEAR abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz abcdefghijklmnopqrstuvwxyz"
       },
-      "chunkSize": 4,
+      "chunkSize": 40,
       "streamingProfile": {
         "ttft": 0,
-        "tps": 20,
+        "tps": 10,
         "jitter": 0
       }
     },
