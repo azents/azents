@@ -179,6 +179,14 @@ tags: [external-channel, e2e, qualification, slack, discord]
     `291 passed, 6 skipped, 24 deselected`;
   - backend and E2E Ruff/format/Pyright, documentation index checks, documentation unit
     tests, and `git diff --check`: passed.
+- A targeted post-cutover Runtime Provider diagnostic,
+  `test_provider_native_channel_work_progress_journey`, reaches the resolved-reference
+  model request, commits the Channel Action, and updates canonical Channel Work, then
+  times out waiting for the Slack Plan mutation. The initial Slack progress-create intent
+  remains pending because its legacy Event Processor owner was intentionally removed by
+  transport cutover. Restoring that owner would violate the cutover boundary; PR 7 owns
+  the replacement provider-control drain and recovery path before this diagnostic becomes
+  a required passing validation entry.
 - Independent review found no remaining Phase 4 Critical or Warning finding after the
   Multi App selector correction. The retained outbound-control model has no global drain
   for a provider control intent that remains `PENDING` when the HTTP process stops before

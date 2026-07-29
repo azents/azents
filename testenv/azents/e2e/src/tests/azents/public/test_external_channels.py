@@ -566,10 +566,25 @@ def _matching_progress_request_evidence(
         "stage": "after_search",
     }
     evidence = _progress_request_evidence(openai_proxy_url)
+    observed = sorted(
+        {
+            "user={user},channel={channel},search={search},progress={progress},"
+            "matched={matched},stage={stage}".format(
+                user=item.get("resolved_user_reference"),
+                channel=item.get("resolved_channel_reference"),
+                search=item.get("search_tool_available"),
+                progress=item.get("progress_tool_available"),
+                matched=item.get("matched"),
+                stage=item.get("stage"),
+            )
+            for item in evidence
+            if item.get("binding") == binding_id
+        }
+    )
     assert any(
         all(item.get(key) == value for key, value in expected.items())
         for item in evidence
-    ), evidence
+    ), f"expected after_search with both tools; observed={observed!r}"
     return evidence
 
 

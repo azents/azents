@@ -2,7 +2,7 @@
 
 import asyncio
 import dataclasses
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -40,13 +40,12 @@ from azents.services.external_channel.slack_events import (
     SlackConversationClient,
     SlackConversationHistoryTrigger,
     SlackNormalizedMessage,
-    SlackProviderCredentialsInvalid,
-    SlackProviderPermissionDenied,
-    SlackProviderRateLimited,
-    SlackProviderResourceUnavailable,
-    SlackProviderTemporaryError,
+    SlackProviderError,
+    slack_message_reference_ids,
 )
 from azents.services.external_channel.slack_sdk_client import create_slack_web_client
+
+_MAX_SLACK_REFERENCE_IDS = 20
 
 
 async def get_ingestion_slack_http_client() -> AsyncIterator[httpx.AsyncClient]:
@@ -152,8 +151,23 @@ class ExternalChannelProviderHistoryReader:
                 exclusive_start_position=exclusive_start_position,
                 deadline=deadline,
             )
-            messages = tuple(_canonical_slack(message) for message in history.messages)
-            trigger = _canonical_slack(history.trigger)
+            reference_cache = await _optional_slack_reference_cache(
+                client=self.slack_client,
+                bot_token=credentials.bot_token,
+                messages=history.messages,
+                deadline=deadline,
+            )
+            messages = tuple(
+                _canonical_slack(
+                    message,
+                    reference_cache=reference_cache,
+                )
+                for message in history.messages
+            )
+            trigger = _canonical_slack(
+                history.trigger,
+                reference_cache=reference_cache,
+            )
             original_url = await _optional_slack_permalink(
                 client=self.slack_client,
                 bot_token=credentials.bot_token,
@@ -224,21 +238,88 @@ async def _optional_slack_permalink(
             )
     except asyncio.CancelledError:
         raise
-    except (
-        TimeoutError,
-        SlackProviderCredentialsInvalid,
-        SlackProviderPermissionDenied,
-        SlackProviderRateLimited,
-        SlackProviderResourceUnavailable,
-        SlackProviderTemporaryError,
-    ):
+    except TimeoutError, SlackProviderError:
+        return None
+
+
+async def _optional_slack_reference_cache(
+    *,
+    client: SlackConversationClient,
+    bot_token: str,
+    messages: tuple[SlackNormalizedMessage, ...],
+    deadline: ExternalChannelOperationDeadline,
+) -> dict[str, dict[str, str]]:
+    """Resolve bounded provider-history references without blocking admission."""
+    user_ids: set[str] = set()
+    channel_ids: set[str] = set()
+    for message in messages:
+        message_user_ids, message_channel_ids = slack_message_reference_ids(
+            message.normalized_body
+        )
+        user_ids.update(message_user_ids)
+        channel_ids.update(message_channel_ids)
+
+    cache: dict[str, dict[str, str]] = {"users": {}, "channels": {}}
+    for user_id in sorted(user_ids)[:_MAX_SLACK_REFERENCE_IDS]:
+        display_name = await _optional_slack_display_name(
+            client.fetch_user_display_name(
+                bot_token=bot_token,
+                provider_user_id=user_id,
+            ),
+            deadline=deadline,
+        )
+        if display_name is not None:
+            cache["users"][user_id] = display_name
+    for channel_id in sorted(channel_ids)[:_MAX_SLACK_REFERENCE_IDS]:
+        display_name = await _optional_slack_display_name(
+            client.fetch_channel_display_name(
+                bot_token=bot_token,
+                channel_id=channel_id,
+            ),
+            deadline=deadline,
+        )
+        if display_name is not None:
+            cache["channels"][channel_id] = display_name
+    return cache
+
+
+async def _optional_slack_display_name(
+    request: Awaitable[str | None],
+    *,
+    deadline: ExternalChannelOperationDeadline,
+) -> str | None:
+    """Await one optional Slack identity lookup inside the ingress deadline."""
+    try:
+        async with asyncio.timeout(deadline.remaining_seconds()):
+            return await request
+    except asyncio.CancelledError:
+        raise
+    except TimeoutError, SlackProviderError:
         return None
 
 
 def _canonical_slack(
     message: SlackNormalizedMessage,
+    *,
+    reference_cache: dict[str, dict[str, str]],
 ) -> ExternalChannelCanonicalHistoryMessage:
     """Convert one normalized Slack history item without a raw event dependency."""
+    user_ids, channel_ids = slack_message_reference_ids(message.normalized_body)
+    reference_mappings: dict[str, object] = {}
+    users = {
+        user_id: reference_cache["users"][user_id]
+        for user_id in sorted(user_ids)
+        if user_id in reference_cache["users"]
+    }
+    channels = {
+        channel_id: reference_cache["channels"][channel_id]
+        for channel_id in sorted(channel_ids)
+        if channel_id in reference_cache["channels"]
+    }
+    if users:
+        reference_mappings["users"] = users
+    if channels:
+        reference_mappings["channels"] = channels
     return ExternalChannelCanonicalHistoryMessage(
         provider_message_key=message.provider_message_key,
         provider_position=message.provider_position,
@@ -250,7 +331,7 @@ def _canonical_slack(
         sender_display_name=None,
         normalized_body=message.normalized_body,
         attachment_metadata=message.attachment_metadata,
-        reference_mappings=None,
+        reference_mappings=reference_mappings or None,
         normalized_size=message.normalized_size,
         provider_created_at=message.provider_created_at,
         provider_updated_at=message.provider_updated_at,
