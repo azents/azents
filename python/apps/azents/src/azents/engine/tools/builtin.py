@@ -895,7 +895,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             service=service,
             target=ServerToRuntimeTarget(
                 runtime_id=runtime.id,
-                desired_generation=runtime.runner_generation,
+                desired_generation=runtime.desired_generation,
             ),
         )
 
@@ -923,7 +923,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             service=service,
             target=ServerToRuntimeTarget(
                 runtime_id=runtime.id,
-                desired_generation=runtime.runner_generation,
+                desired_generation=runtime.desired_generation,
             ),
         )
 
@@ -951,7 +951,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             service=service,
             target=ServerToRuntimeTarget(
                 runtime_id=runtime.id,
-                desired_generation=runtime.runner_generation,
+                desired_generation=runtime.desired_generation,
             ),
             agent_id=self._agent_id,
             session_id=self._runtime_session_id,
