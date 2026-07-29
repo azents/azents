@@ -30,7 +30,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-28
-spec_version: 19
+spec_version: 20
 ---
 
 # External Channel Delivery and Channel Work
@@ -160,14 +160,18 @@ not automatically replay the transfer or provider mutation. Exchange-only replie
 retain their authority-resolved bounded stream path, and ordinary Agent output is never
 uploaded without the explicit Channel action.
 
-Discord lowers a reply or Channel Work snapshot into stable ordered message pages. Each
-page is bounded to the provider message limit, preserves balanced fenced Markdown where
-possible, and is delivered through durable per-part intents. Discord file-bearing
-messages stream a bounded multipart body from the already-authorized Runtime or
-Exchange source manifest. The multipart request includes the same durable-attempt
-nonce, validates each emitted byte count against preflight size, and is bounded by the
-provider request limit. The durable records retain source manifests and delivery
-evidence, never file bytes.
+Discord splits oversized replies into stable ordered message parts. Each part is
+bounded to the provider message limit, preserves balanced fenced Markdown where
+possible, and is delivered through a durable per-part intent. A Channel Work snapshot
+instead becomes one retained compact text Tracker with no Embed cards. Its header
+contains the bounded work title and completion/failure counts; every ordered task
+retains a status marker and bounded title. Remaining message space is assigned to
+status-prioritized details or output and then labeled sources without dropping a task.
+Discord file-bearing messages stream a bounded multipart body from the
+already-authorized Runtime or Exchange source manifest. The multipart request includes
+the same durable-attempt nonce, validates each emitted byte count against preflight
+size, and is bounded by the provider request limit. The durable records retain source
+manifests and delivery evidence, never file bytes.
 
 For a Discord root-message resource, the first route-resolved outbound intent ensures
 one provider thread and records its returned channel ID on the resource under a lock.
@@ -199,9 +203,11 @@ delivery outcome and never causes an unsafe replay.
   not-attempted replies leave deletion `not_attempted`.
 - A later work cycle creates a new Tracker rather than reusing the deleted cycle's
   provider identity.
-- Discord creates one Session-link control and initial checking page set through the
-  same durable activation release. Its ordered projection parts update, delete, and
-  recover independently while preserving final-reply cleanup gating.
+- Discord creates one Session-link control and an initial compact
+  `◉ Agent is checking your message` Tracker through the same durable activation
+  release. Later complete snapshots update that retained text message and explicitly
+  clear legacy Embed cards. Update, delete, replacement, recovery, and final-reply
+  cleanup use the same durable Tracker identity and gating.
 
 The work cycle stores its title, complete provider-neutral version-2 desired
 snapshot, desired revision, and retained provider identity. A matching Slack
@@ -274,6 +280,9 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-07-28** (spec_version 20) — Replaced Discord's multi-page Embed Activity
+  Tracker with one bounded retained text message that keeps every ordered task visible,
+  prioritizes useful task context and sources, and clears legacy Embed cards.
 - **2026-07-28** (spec_version 19) — Limited visible Slack and Discord Agent-name prefixes to multi-app connections; single-app delivery now relies on the dedicated App identity.
 - **2026-07-28** (spec_version 18) — Replaced dynamic Channel Work prompt injection with a minimal capability-aware static publication boundary, deferred Channel tools through Tool Search, and kept only unfinished-work continuity in compaction.
 
