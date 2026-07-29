@@ -466,10 +466,11 @@ def _matching_progress_request_evidence(
         "marker_present": True,
         "resolved_user_reference": True,
         "resolved_channel_reference": True,
+        "search_tool_available": True,
         "progress_tool_available": True,
         "path": "/v1/responses",
         "matched": True,
-        "stage": "initial",
+        "stage": "after_search",
     }
     evidence = _progress_request_evidence(openai_proxy_url)
     assert any(
@@ -1592,17 +1593,9 @@ def test_provider_native_channel_work_progress_journey(
         "Pending: Summarize the incident"
     )
     blocks = cast(list[dict[str, object]], plan_delivery["blocks"])
-    assert len(blocks) == 2
-    identity = blocks[0]
-    assert identity["type"] == "section"
-    identity_text = cast(dict[str, object], identity["text"])
-    assert identity_text["type"] == "mrkdwn"
-    agent_markdown = cast(str, identity_text["text"])
-    assert agent_markdown.startswith("*External Channel Agent 1 ")
-    assert agent_markdown.endswith("*")
-    agent_name = agent_markdown[1:-1]
-    assert plan_delivery["text"] == f"{agent_name}\n{expected_fallback}"
-    plan = blocks[1]
+    assert len(blocks) == 1
+    assert plan_delivery["text"] == expected_fallback
+    plan = blocks[0]
     assert plan["type"] == "plan"
     assert plan["title"] == "Investigating error logs…"
     assert "plan_id" not in plan

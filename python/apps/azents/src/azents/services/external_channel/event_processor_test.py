@@ -3,7 +3,7 @@
 import asyncio
 import dataclasses
 import datetime
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any, cast
@@ -151,6 +151,17 @@ from azents.worker.session.lifecycle import SessionLifecycleService
 
 def _at(second: int) -> datetime.datetime:
     return datetime.datetime(2026, 7, 22, 0, 0, second, tzinfo=datetime.UTC)
+
+
+@pytest.fixture(autouse=True)
+def _freeze_event_processor_clock(  # pyright: ignore[reportUnusedFunction]
+) -> Generator[None, None, None]:
+    """Keep fixed-date retention and activation fixtures deterministic."""
+    with patch(
+        "azents.services.external_channel.event_processor._now",
+        return_value=_at(5),
+    ):
+        yield
 
 
 def testconnection_authored_slack_messages_are_excluded_from_ingress() -> None:

@@ -6,14 +6,17 @@ from support import image_generation_openai_proxy as proxy
 def _request() -> dict[str, object]:
     return {
         "instructions": (
-            "### External Channel Work\n\n"
-            "### Binding `binding-dynamic-123`\n"
-            "- Current work title: Not declared yet"
+            "For a current input explicitly marked as an External Channel turn, "
+            "invoke `channel_action`."
         ),
         "input": [
             {
                 "role": "user",
                 "content": (
+                    "Message Type: EXTERNAL_CHANNEL_TURN\n"
+                    "Provider: slack\n"
+                    "Resource: #e2e\n"
+                    "Binding: binding-dynamic-123\n\n"
                     "Provider-native Channel Work progress E2E. "
                     "Ask @User UREVIEWER in #e2e."
                 ),
@@ -22,9 +25,14 @@ def _request() -> dict[str, object]:
         "tools": [
             {
                 "type": "function",
-                "name": "channel_action",
+                "name": "tool_search",
                 "parameters": {"type": "object"},
-            }
+            },
+            {
+                "type": "function",
+                "name": "unrelated_active_tool",
+                "parameters": {"type": "object"},
+            },
         ],
     }
 
@@ -40,8 +48,26 @@ def test_progress_proxy_recognizes_resolved_external_turn_and_dynamic_binding() 
         "marker_present": True,
         "resolved_user_reference": True,
         "resolved_channel_reference": True,
-        "progress_tool_available": True,
+        "search_tool_available": True,
+        "progress_tool_available": False,
     }
+
+
+def test_progress_proxy_extracts_binding_from_compacted_channel_work() -> None:
+    """A continuation can recover its handle from compacted Channel Work."""
+    request = _request()
+    request["input"] = [
+        {
+            "role": "user",
+            "content": (
+                "## Channel Work Snapshot\n\n"
+                "### Binding `binding-compacted-456`\n"
+                "- Current work title: Continue"
+            ),
+        }
+    ]
+
+    assert proxy.external_channel_binding(request) == "binding-compacted-456"
 
 
 def test_progress_proxy_distinguishes_continue_and_finish_tool_outputs() -> None:
@@ -111,6 +137,8 @@ def test_progress_proxy_records_unresolved_provider_references() -> None:
         {
             "role": "user",
             "content": (
+                "Message Type: EXTERNAL_CHANNEL_TURN\n"
+                "Binding: binding-dynamic-123\n\n"
                 "Provider-native Channel Work progress E2E. "
                 "Ask <@UREVIEWER> in <#CRELATED>."
             ),
@@ -123,5 +151,6 @@ def test_progress_proxy_records_unresolved_provider_references() -> None:
         "marker_present": True,
         "resolved_user_reference": False,
         "resolved_channel_reference": False,
-        "progress_tool_available": True,
+        "search_tool_available": True,
+        "progress_tool_available": False,
     }

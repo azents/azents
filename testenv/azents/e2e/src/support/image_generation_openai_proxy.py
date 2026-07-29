@@ -103,9 +103,11 @@ _CAPTURED_MODEL_PROMPTS = {
     "xAI image generation disabled",
 }
 _EXTERNAL_CHANNEL_PROGRESS_MARKER = "Provider-native Channel Work progress E2E"
+_EXTERNAL_CHANNEL_SEARCH_CALL_ID = "call_external_channel_tool_search"
 _EXTERNAL_CHANNEL_PROGRESS_CALL_ID = "call_external_channel_progress"
 _EXTERNAL_CHANNEL_FINISH_CALL_ID = "call_external_channel_finish"
-_EXTERNAL_CHANNEL_BINDING = re.compile(r"### Binding `([^`]+)`")
+_EXTERNAL_CHANNEL_TURN_BINDING = re.compile(r"Binding: ([A-Za-z0-9_-]+)")
+_EXTERNAL_CHANNEL_COMPACTION_BINDING = re.compile(r"### Binding `([^`]+)`")
 _EXTERNAL_CHANNEL_FILE_MARKER = "External Channel file transfer E2E"
 _EXTERNAL_CHANNEL_FILE_LOCATOR = re.compile(r"File: (external-file:v1:[^\\\s\"']+)")
 _EXTERNAL_CHANNEL_FILE_DOWNLOAD_CALL_ID = "call_external_channel_file_download"
@@ -234,10 +236,13 @@ def external_channel_file_tool_output_evidence(
 
 
 def external_channel_binding(request: dict[str, object]) -> str | None:
-    """Extract the dynamic binding handle from the Channel Work prompt."""
+    """Extract the binding handle from an external turn or compacted work."""
     serialized = json.dumps(request, ensure_ascii=False)
-    match = _EXTERNAL_CHANNEL_BINDING.search(serialized)
-    return None if match is None else match.group(1)
+    turn_match = _EXTERNAL_CHANNEL_TURN_BINDING.search(serialized)
+    if turn_match is not None:
+        return turn_match.group(1)
+    compaction_match = _EXTERNAL_CHANNEL_COMPACTION_BINDING.search(serialized)
+    return None if compaction_match is None else compaction_match.group(1)
 
 
 def is_external_channel_progress_request(request: dict[str, object]) -> bool:
@@ -246,7 +251,10 @@ def is_external_channel_progress_request(request: dict[str, object]) -> bool:
     return (
         _EXTERNAL_CHANNEL_PROGRESS_MARKER in serialized
         and external_channel_binding(request) is not None
-        and _request_has_named_tool(request, "channel_action")
+        and (
+            _request_has_named_tool(request, "tool_search")
+            or _request_has_named_tool(request, "channel_action")
+        )
     )
 
 
@@ -260,6 +268,10 @@ def external_channel_progress_evidence(
         "marker_present": _EXTERNAL_CHANNEL_PROGRESS_MARKER in serialized,
         "resolved_user_reference": "@User UREVIEWER" in serialized,
         "resolved_channel_reference": "#e2e" in serialized,
+        "search_tool_available": _request_has_named_tool(
+            request,
+            "tool_search",
+        ),
         "progress_tool_available": _request_has_named_tool(
             request,
             "channel_action",
@@ -463,7 +475,14 @@ class _Handler(BaseHTTPRequestHandler):
                         request,
                         _EXTERNAL_CHANNEL_PROGRESS_CALL_ID,
                     )
-                    else "initial"
+                    else (
+                        "after_search"
+                        if request_has_tool_output(
+                            request,
+                            _EXTERNAL_CHANNEL_SEARCH_CALL_ID,
+                        )
+                        else "initial"
+                    )
                 )
             )
             with _State.lock:
@@ -539,6 +558,24 @@ class _Handler(BaseHTTPRequestHandler):
         ):
             binding = external_channel_binding(request)
             if binding is not None:
+                if (
+                    _request_has_named_tool(request, "tool_search")
+                    and not request_has_tool_output(
+                        request,
+                        _EXTERNAL_CHANNEL_SEARCH_CALL_ID,
+                    )
+                    and not _request_has_named_tool(request, "channel_action")
+                ):
+                    self._write_function_call_response(
+                        request,
+                        call_id=_EXTERNAL_CHANNEL_SEARCH_CALL_ID,
+                        name="tool_search",
+                        arguments={
+                            "query": "external channel publish progress",
+                            "limit": 5,
+                        },
+                    )
+                    return
                 if request_has_tool_output(
                     request,
                     _EXTERNAL_CHANNEL_FINISH_CALL_ID,
