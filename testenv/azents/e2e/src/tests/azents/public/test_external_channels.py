@@ -115,6 +115,10 @@ _DISCORD_BOT_TOKEN = "discord-e2e-private"
 _EXTERNAL_CHANNEL_LARGE_FILE_BYTES = 6 * 1024 * 1024
 
 
+class _ProviderControlDrainPending(RuntimeError):
+    """Identify the exact provider-control boundary assigned to PR 7."""
+
+
 def _create_agent(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
@@ -1495,8 +1499,8 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
 @pytest.mark.runtime_provider
 @pytest.mark.xfail(
     strict=True,
-    raises=_ProviderProgressQualificationPending,
-    reason="PR 6 owns deterministic provider-progress qualification.",
+    raises=_ProviderControlDrainPending,
+    reason="PR 7 owns post-cutover provider-control drain and recovery.",
 )
 def test_provider_native_channel_work_progress_journey(
     request: pytest.FixtureRequest,
@@ -1664,20 +1668,15 @@ def test_provider_native_channel_work_progress_journey(
     )
     binding_id = active_projection.items[0].id
 
-    try:
-        wait_until(
-            lambda: _matching_progress_request_evidence(
-                openai_proxy_url,
-                binding_id,
-            ),
-            timeout=90,
-            interval=0.2,
-            message="Channel Work model request did not reach the expected proxy stage",
-        )
-    except TimeoutError as error:
-        raise _ProviderProgressQualificationPending(
-            "The cutover progress journey has no qualified provider fixture."
-        ) from error
+    wait_until(
+        lambda: _matching_progress_request_evidence(
+            openai_proxy_url,
+            binding_id,
+        ),
+        timeout=90,
+        interval=0.2,
+        message="Channel Work model request did not reach the expected proxy stage",
+    )
 
     def completed_channel_action() -> list[dict[str, object]]:
         evidence = _channel_action_tool_evidence(
@@ -1739,16 +1738,37 @@ def test_provider_native_channel_work_progress_journey(
     )
     work = projection.items[0].work
     assert work is not None
+    assert [task.status for task in work.tasks] == [
+        ExternalChannelWorkTaskStatus.IN_PROGRESS,
+        ExternalChannelWorkTaskStatus.COMPLETED,
+        ExternalChannelWorkTaskStatus.FAILED,
+        ExternalChannelWorkTaskStatus.PENDING,
+    ]
+    assert work.tasks[0].details == "Comparing recent application errors."
+    assert work.tasks[0].sources[0].label == "Error log dashboard"
+    assert work.tasks[1].output == "Release 2026.07.23 contains the regression."
 
-    plan_delivery = cast(
-        dict[str, object],
-        wait_until(
-            lambda: _plan_delivery(slack_provider_fake_url),
-            timeout=20,
-            interval=0.2,
-            message="Slack Plan update was not delivered",
-        ),
-    )
+    provider_state = _provider_state(slack_provider_fake_url)
+    request_counts = cast(dict[str, int], provider_state["request_counts"])
+    assert request_counts["users.info"] >= 2
+    assert request_counts["conversations.info"] >= 2
+    assert _BOT_TOKEN not in str(provider_state)
+    assert _SIGNING_SECRET not in str(provider_state)
+
+    try:
+        plan_delivery = cast(
+            dict[str, object],
+            wait_until(
+                lambda: _plan_delivery(slack_provider_fake_url),
+                timeout=20,
+                interval=0.2,
+                message="Slack Plan update was not delivered",
+            ),
+        )
+    except TimeoutError as error:
+        raise _ProviderControlDrainPending(
+            "The initial Slack progress-create intent has no post-cutover owner."
+        ) from error
     expected_fallback = (
         "Investigating error logs…\n"
         "In progress: Inspect recent failures\n"
@@ -1812,16 +1832,6 @@ def test_provider_native_channel_work_progress_journey(
             }
         ],
     }
-
-    assert [task.status for task in work.tasks] == [
-        ExternalChannelWorkTaskStatus.IN_PROGRESS,
-        ExternalChannelWorkTaskStatus.COMPLETED,
-        ExternalChannelWorkTaskStatus.FAILED,
-        ExternalChannelWorkTaskStatus.PENDING,
-    ]
-    assert work.tasks[0].details == "Comparing recent application errors."
-    assert work.tasks[0].sources[0].label == "Error log dashboard"
-    assert work.tasks[1].output == "Release 2026.07.23 contains the regression."
 
     provider_state = _provider_state(slack_provider_fake_url)
     request_counts = cast(dict[str, int], provider_state["request_counts"])
