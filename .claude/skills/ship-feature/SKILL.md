@@ -132,8 +132,8 @@ unless it exposes a product decision that requires requester confirmation.
 
 ### Execution boundaries
 
-- The primary agent owns orchestration, shared decisions, reviewer assignment,
-  phase progression, and final integration.
+- The primary agent owns orchestration, shared decisions, implementation work
+  assigned to it, reviewer assignment, phase progression, and final integration.
 - Implementation owners work only within their phase-plan paths and interfaces.
 - Every implementation owner runs focused checks and directly requests the
   assigned reviewer.
