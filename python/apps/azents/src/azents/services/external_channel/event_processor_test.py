@@ -3111,69 +3111,6 @@ async def test_reconcile_discord_delivered_attempts_wakes_then_activates(
 
 
 @pytest.mark.asyncio
-async def test_reconcile_discord_restores_unattempted_authority_revocations(
-    rdb_session_manager: SessionManager[AsyncSession],
-) -> None:
-    """A definitely unattempted initial delivery recovers and activates."""
-    (
-        service,
-        repository,
-        binding_id,
-        _resource_id,
-    ) = await _prepare_discord_reconcile_fixture(rdb_session_manager)
-    service.action_service.attempt_delivery = AsyncMock()
-
-    assert await service.reconcile_binding(binding_id=binding_id) is False
-    async with rdb_session_manager() as session:
-        attempts = await repository.list_initial_delivery_attempts(
-            session,
-            binding_id=binding_id,
-        )
-        assert attempts
-        for attempt_snapshot in attempts:
-            attempt = await session.get(
-                RDBExternalChannelDeliveryAttempt,
-                attempt_snapshot.id,
-            )
-            assert attempt is not None
-            attempt.status = ExternalChannelDeliveryStatus.NOT_ATTEMPTED
-            attempt.error_kind = "delivery_authority_revoked"
-            attempt.error_summary = "The binding was not active."
-            attempt.attempted_at = None
-            attempt.completed_at = _at(5)
-            attempt.created_at = _at(5)
-        await session.commit()
-
-    async def deliver(attempt_id: str) -> None:
-        async with rdb_session_manager() as session:
-            target = await service.work_repository.start_delivery(
-                session,
-                delivery_attempt_id=attempt_id,
-                now=_at(6),
-            )
-            assert target is not None
-            await service.work_repository.finish_delivery(
-                session,
-                delivery_attempt_id=attempt_id,
-                status=ExternalChannelDeliveryStatus.DELIVERED,
-                provider_message_key=f"discord:test:{attempt_id}",
-                error_kind=None,
-                error_summary=None,
-                now=_at(6),
-            )
-            await session.commit()
-
-    service.action_service.attempt_delivery = AsyncMock(side_effect=deliver)
-
-    assert await service.reconcile_binding(binding_id=binding_id) is True
-    cast(Any, service.session_lifecycle).send_session_wake_up.assert_awaited_once()
-    async with rdb_session_manager() as session:
-        binding = await session.get(RDBExternalChannelBinding, binding_id)
-    assert binding is not None
-    assert binding.activation_status is ExternalChannelBindingActivationStatus.ACTIVE
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "terminal_status",
     [

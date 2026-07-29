@@ -825,11 +825,6 @@ class ExternalChannelEventProcessorService:
             )
             if released is None:
                 return False
-            if configuration.provider is ExternalChannelProvider.DISCORD:
-                await self.work_repository.restore_initial_discord_deliveries(
-                    session,
-                    binding_id=binding.id,
-                )
             await session.commit()
             if configuration.provider is ExternalChannelProvider.DISCORD:
                 await self._attempt_discord_initial_deliveries(
