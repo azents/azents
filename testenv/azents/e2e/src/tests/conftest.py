@@ -60,6 +60,7 @@ _DISCORD_PROVIDER_FAKE = (
     REPOSITORY_ROOT / "testenv/azents/e2e/src/support/discord_provider_fake.py"
 )
 _DISCORD_PROVIDER_INTERNAL_API_URL = "http://discord-fake:8085/api/v10"
+_DISCORD_PROVIDER_INTERNAL_GATEWAY_URL = "ws://discord-fake:8086"
 _DOCKER_CLIENT_TIMEOUT_SECONDS = 300
 _RUNTIME_PROVIDER_ID = "system-docker"
 _RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_KEY = "e2e/system-docker"
@@ -689,6 +690,10 @@ def _configure_azents_server_container(
         .with_env(
             "AZ_TESTENV_DISCORD_API_BASE_URL",
             _DISCORD_PROVIDER_INTERNAL_API_URL,
+        )
+        .with_env(
+            "AZ_TESTENV_DISCORD_GATEWAY_URL",
+            _DISCORD_PROVIDER_INTERNAL_GATEWAY_URL,
         )
         .with_env("AZ_TESTENV_RUNTIME_HOOK_QA_ENABLED", "true")
         .with_env("AZ_TOOL_INTERNAL_ERROR_DETAILS", "true")

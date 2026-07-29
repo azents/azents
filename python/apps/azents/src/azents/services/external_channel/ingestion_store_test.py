@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    ExternalChannelConversationAdmissionStatus,
     ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryStatus,
     ExternalChannelIngressProfile,
@@ -374,6 +375,121 @@ async def test_position_mismatch_rolls_back_before_routing_or_content_writes() -
     repository.create_invocation_batch_idempotent.assert_not_awaited()
 
 
+async def test_pending_selector_persists_trigger_before_control_delivery() -> None:
+    """A route-less Multi App invocation returns one committed selector intent."""
+    session = MagicMock(spec=AsyncSession)
+    session.commit = AsyncMock()
+    position = SimpleNamespace(
+        id="position-1",
+        connection_id="connection-1",
+        read_through_position=None,
+    )
+    resource = SimpleNamespace(id="resource-1")
+    admission = SimpleNamespace(
+        id="admission-1",
+        status=ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
+    )
+    repository = SimpleNamespace(
+        lock_conversation_position=AsyncMock(return_value=position),
+    )
+    store = _store(
+        session=cast(AsyncSession, session),
+        repository=repository,
+    )
+    store._lock_authority = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=SimpleNamespace(id="connection-1")
+    )
+    store._lock_pending_selection = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=SimpleNamespace(
+            resource=resource,
+            admission=admission,
+        )
+    )
+    store._persist_history_message = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=SimpleNamespace(
+            message=SimpleNamespace(id="message-2"),
+            revision_id="revision-1",
+        )
+    )
+    store._create_selector_control_intent = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value="delivery-1"
+    )
+    request = _request()
+    history = _history()
+
+    result = await store.accept(
+        request=request,
+        preparation=ExternalChannelIngestionPreparation(
+            position_id=position.id,
+            exclusive_start_position=None,
+            immediate_outcome=None,
+            wake_batch_id=None,
+            wake_session_id=None,
+        ),
+        history=history,
+    )
+
+    assert result.status == "awaiting_selection"
+    assert result.reason is ExternalChannelIngestionReason.SELECTION_REQUIRED
+    assert result.control_delivery_attempt_id == "delivery-1"
+    assert result.connection_id == "connection-1"
+    store._persist_history_message.assert_awaited_once_with(  # pyright: ignore[reportPrivateUsage]
+        cast(AsyncSession, session),
+        request=request,
+        resource=resource,
+        message=history.trigger,
+    )
+    store._create_selector_control_intent.assert_awaited_once_with(  # pyright: ignore[reportPrivateUsage]
+        cast(AsyncSession, session),
+        request=request,
+        admission=admission,
+    )
+    session.commit.assert_awaited_once()
+
+
+async def test_new_selector_admission_reads_history_before_duplicate_shortcut() -> None:
+    """A newly created selector boundary must reach canonical history acceptance."""
+    session = MagicMock(spec=AsyncSession)
+    session.commit = AsyncMock()
+    position = SimpleNamespace(
+        id="position-1",
+        read_through_position=None,
+    )
+    resource = SimpleNamespace(id="resource-1")
+    repository = SimpleNamespace(
+        get_resource_by_provider_key=AsyncMock(return_value=None),
+        get_active_binding_by_resource=AsyncMock(return_value=None),
+        get_open_conversation_admission=AsyncMock(
+            return_value=SimpleNamespace(
+                status=ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
+            )
+        ),
+    )
+    store = _store(
+        session=cast(AsyncSession, session),
+        repository=repository,
+    )
+    store._lock_authority = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=SimpleNamespace(id="connection-1")
+    )
+    store._prepare_position = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=position
+    )
+    store._create_metadata_source = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=resource
+    )
+    store._existing_batch = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=None
+    )
+
+    preparation = await store.prepare(request=_request())
+
+    assert preparation.position_id == position.id
+    assert preparation.immediate_outcome is None
+    assert preparation.exclusive_start_position is None
+    session.commit.assert_awaited_once()
+
+
 async def test_prepare_rejects_replay_position_outside_request_scope() -> None:
     """A retained position must still belong to the exact replay conversation."""
     session = MagicMock(spec=AsyncSession)
@@ -482,6 +598,7 @@ async def test_replay_after_shared_position_accepts_without_cursor_rollback() ->
     )
     persisted_trigger = SimpleNamespace(
         id="message-2",
+        principal_id="principal-1",
         provider_message_key="message-2",
         provider_position=request.locator.trigger_position,
     )

@@ -76,12 +76,12 @@ def _slack_message() -> SlackNormalizedMessage:
 
 def _discord_message() -> DiscordNormalizedMessage:
     return DiscordNormalizedMessage(
-        tenant_id="guild-1",
-        channel_id="thread-1",
-        thread_id="thread-1",
-        parent_channel_id="channel-1",
+        tenant_id="100",
+        channel_id="300",
+        thread_id="300",
+        parent_channel_id="200",
         message_id="2",
-        provider_message_key="discord:guild-1:thread-1:2",
+        provider_message_key="discord:100:2",
         provider_position="00000000000000000002",
         revision_key="2:original",
         revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
@@ -116,7 +116,10 @@ async def test_slack_history_uses_native_trigger_and_returns_canonical_messages(
                 scanned_message_count=1,
                 elapsed_seconds=0,
             )
-        )
+        ),
+        get_permalink=AsyncMock(
+            return_value="https://example.slack.com/archives/channel-1/p2000000"
+        ),
     )
     repository = SimpleNamespace(
         get_connection_configuration=AsyncMock(
@@ -171,6 +174,16 @@ async def test_slack_history_uses_native_trigger_and_returns_canonical_messages(
     assert call["bot_token"] == "secret-bot-token"
     assert history.trigger.normalized_body == "Slack history body"
     assert history.trigger.provider_message_key == message.provider_message_key
+    assert (
+        history.trigger.original_url
+        == "https://example.slack.com/archives/channel-1/p2000000"
+    )
+    assert history.messages[0].original_url == history.trigger.original_url
+    slack_client.get_permalink.assert_awaited_once_with(
+        bot_token="secret-bot-token",
+        channel_id="channel-1",
+        message_ts="2.000000",
+    )
 
 
 async def test_discord_history_preserves_reference_mappings() -> None:
@@ -193,7 +206,7 @@ async def test_discord_history_preserves_reference_mappings() -> None:
         get_connection_configuration=AsyncMock(
             return_value=SimpleNamespace(
                 provider=ExternalChannelProvider.DISCORD,
-                provider_tenant_id="guild-1",
+                provider_tenant_id="100",
                 provider_bot_user_id="connected-bot",
                 provider_app_id="connected-app",
                 encrypted_credentials="ciphertext",
@@ -217,12 +230,12 @@ async def test_discord_history_preserves_reference_mappings() -> None:
     locator = ExternalChannelTriggerLocator(
         connection_id="connection-1",
         provider=ExternalChannelProvider.DISCORD,
-        provider_tenant_id="guild-1",
-        provider_channel_id="channel-1",
-        provider_parent_channel_id="parent-1",
-        provider_thread_key="thread-1",
-        delivery_thread_key="thread-1",
-        provider_resource_key="discord:guild-1:thread-1",
+        provider_tenant_id="100",
+        provider_channel_id="200",
+        provider_parent_channel_id="200",
+        provider_thread_key="300",
+        delivery_thread_key="300",
+        provider_resource_key="discord:100:300",
         trigger_provider_message_key=message.provider_message_key,
         trigger_provider_message_id="2",
         trigger_position=message.provider_position,
@@ -237,9 +250,10 @@ async def test_discord_history_preserves_reference_mappings() -> None:
     )
 
     call = discord_client.read_range.await_args.kwargs
-    assert call["trigger"].conversation_channel_id == "thread-1"
+    assert call["trigger"].conversation_channel_id == "300"
     assert call["trigger"].trigger_message_id == "2"
     assert history.context_omitted is True
     assert history.trigger.reference_mappings == {
         "users": {"participant-1": "Participant"}
     }
+    assert history.trigger.original_url == "https://discord.com/channels/100/300/2"

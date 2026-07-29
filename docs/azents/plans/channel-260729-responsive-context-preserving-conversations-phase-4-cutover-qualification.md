@@ -142,3 +142,53 @@ tags: [external-channel, e2e, qualification, slack, discord]
   results, independent review disposition, discovered fixes, remaining PR 7/8 scope, and
   why the additive legacy schema is no longer a runtime correctness dependency before
   opening PR 6.
+
+## Qualification Checkpoint
+
+- Qualified transports:
+  - Slack HTTP admission persists canonical provider history and the durable selection or
+    access boundary before acknowledgement. Duplicate callbacks converge on one logical
+    selector, approval, binding, invocation batch, and public Session input.
+  - Slack Socket Mode preserves route ownership while a disabled connection remains
+    processable for lifecycle events and exposes no normal-message acknowledgement before
+    the synchronous ingestion boundary closes.
+  - Discord Gateway uses the configured deterministic REST and Gateway origins, eagerly
+    provisions or reuses the delivery thread, and completes message-create only after the
+    canonical binding and Session input are durable.
+- Public evidence reads logical External Channel input from the Session `/live` mailbox
+  projection and `/history` events. It deduplicates the same canonical revision across the
+  pending-to-consumed race without direct product database access.
+- Provider fakes expose bounded operation, acknowledgement, connection, dispatch, and
+  delivery categories only. Their state excludes callback content, canonical message
+  bodies, credentials, signatures, authorization headers, and source URLs.
+- Discovered defects fixed in this phase:
+  - Slack approval persistence now uses provider-authoritative history text and permalink
+    data before access replay.
+  - Discord SDK REST and Gateway endpoints honor explicit deterministic test origins.
+  - Discord canonical history preserves validated source-message URLs.
+  - New Multi App selector admissions continue through canonical history before duplicate
+    callbacks use the pending-selection shortcut.
+  - Full-suite Discord Gateway evidence tolerates other active connection tasks while the
+    unique public binding and canonical message assertions retain scenario specificity.
+- Contract validation:
+  - affected lock, ingestion, replay, preflight, CLI, API, repository, and Gateway tests:
+    `113 passed`;
+  - provider-fake tests: `43 passed`;
+  - final backend suite: `3822 passed`;
+  - final deterministic E2E lane:
+    `291 passed, 6 skipped, 24 deselected`;
+  - backend and E2E Ruff/format/Pyright, documentation index checks, documentation unit
+    tests, and `git diff --check`: passed.
+- Independent review found no remaining Phase 4 Critical or Warning finding after the
+  Multi App selector correction. The retained outbound-control model has no global drain
+  for a provider control intent that remains `PENDING` when the HTTP process stops before
+  provider I/O. This is not an inbound acceptance or wake correctness dependency and is a
+  PR 7 contraction follow-up: extract control delivery from the legacy Event Processor,
+  preserve sole-attempt fencing and provider failure settlement, and add bounded recovery
+  for pending or interrupted control attempts before removing the processor.
+- Remaining scope:
+  - PR 7 owns legacy event/hydration/activation contraction, PR #1020 cleanup, UI and
+    generated-client work, and the provider-control extraction and recovery above.
+  - PR 8 owns the post-contraction validation matrix and final evidence report.
+  - PR 9 promotes current specs and the implemented snapshot; PR 10 removes the temporary
+    implementation plans.

@@ -1,5 +1,7 @@
 """Provider-backed canonical history reader for synchronous ingestion."""
 
+import asyncio
+import dataclasses
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Annotated
@@ -38,6 +40,11 @@ from azents.services.external_channel.slack_events import (
     SlackConversationClient,
     SlackConversationHistoryTrigger,
     SlackNormalizedMessage,
+    SlackProviderCredentialsInvalid,
+    SlackProviderPermissionDenied,
+    SlackProviderRateLimited,
+    SlackProviderResourceUnavailable,
+    SlackProviderTemporaryError,
 )
 from azents.services.external_channel.slack_sdk_client import create_slack_web_client
 
@@ -147,6 +154,23 @@ class ExternalChannelProviderHistoryReader:
             )
             messages = tuple(_canonical_slack(message) for message in history.messages)
             trigger = _canonical_slack(history.trigger)
+            original_url = await _optional_slack_permalink(
+                client=self.slack_client,
+                bot_token=credentials.bot_token,
+                channel_id=locator.provider_channel_id,
+                message_ts=locator.trigger_provider_message_id,
+                deadline=deadline,
+            )
+            if original_url is not None:
+                trigger = dataclasses.replace(trigger, original_url=original_url)
+                messages = tuple(
+                    (
+                        trigger
+                        if message.provider_message_key == trigger.provider_message_key
+                        else message
+                    )
+                    for message in messages
+                )
         else:
             if not isinstance(credentials, DiscordConnectionCredentials):
                 raise ExternalChannelHistoryCredentialsInvalid(
@@ -180,6 +204,35 @@ class ExternalChannelProviderHistoryReader:
             scanned_message_count=history.scanned_message_count,
             elapsed_seconds=history.elapsed_seconds,
         )
+
+
+async def _optional_slack_permalink(
+    *,
+    client: SlackConversationClient,
+    bot_token: str,
+    channel_id: str,
+    message_ts: str,
+    deadline: ExternalChannelOperationDeadline,
+) -> str | None:
+    """Resolve optional canonical source navigation inside the ingress deadline."""
+    try:
+        async with asyncio.timeout(deadline.remaining_seconds()):
+            return await client.get_permalink(
+                bot_token=bot_token,
+                channel_id=channel_id,
+                message_ts=message_ts,
+            )
+    except asyncio.CancelledError:
+        raise
+    except (
+        TimeoutError,
+        SlackProviderCredentialsInvalid,
+        SlackProviderPermissionDenied,
+        SlackProviderRateLimited,
+        SlackProviderResourceUnavailable,
+        SlackProviderTemporaryError,
+    ):
+        return None
 
 
 def _canonical_slack(
@@ -227,5 +280,17 @@ def _canonical_discord(
         normalized_size=message.normalized_size,
         provider_created_at=message.provider_created_at,
         provider_updated_at=message.provider_updated_at,
-        original_url=None,
+        original_url=_discord_original_url(message),
     )
+
+
+def _discord_original_url(message: DiscordNormalizedMessage) -> str | None:
+    """Return one canonical Discord message URL from validated snowflakes."""
+    identifiers = (
+        message.tenant_id,
+        message.channel_id,
+        message.message_id,
+    )
+    if not all(identifier.isdigit() for identifier in identifiers):
+        return None
+    return f"https://discord.com/channels/{'/'.join(identifiers)}"

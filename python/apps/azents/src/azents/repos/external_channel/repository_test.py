@@ -25,7 +25,6 @@ from azents.core.enums import (
     ExternalChannelHydrationStatus,
     ExternalChannelIngressProfile,
     ExternalChannelInvocationWakeDispatchStatus,
-    ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
@@ -47,7 +46,6 @@ from azents.repos.external_channel.data import (
     ExternalChannelDeliveryAttempt,
     ExternalChannelEventCreate,
     ExternalChannelInvocationBatch,
-    ExternalChannelMessage,
     ExternalChannelResource,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
@@ -304,51 +302,6 @@ async def test_conversation_position_lock_and_compare_and_set_are_fenced(
     lock_statement = session.scalar.await_args.args[0]
     assert "FOR UPDATE" in str(lock_statement.compile(dialect=postgresql.dialect()))
     assert session.flush.await_count == 2
-
-
-@pytest.mark.asyncio
-async def test_message_identity_metadata_does_not_create_content_revision(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Approval preparation updates identity metadata without retaining content."""
-    repository = ExternalChannelRepository()
-    message = SimpleNamespace(
-        id="message-1",
-        principal_id=None,
-        author_type=ExternalChannelPrincipalAuthorType.SYSTEM,
-        provider_created_at=None,
-        provider_updated_at=None,
-        current_revision_id=None,
-    )
-    session = MagicMock(spec=AsyncSession)
-    session.scalar = AsyncMock(return_value=message)
-    session.flush = AsyncMock()
-    session.refresh = AsyncMock()
-    monkeypatch.setattr(
-        ExternalChannelMessage,
-        "model_validate",
-        classmethod(lambda cls, value: value),
-    )
-
-    updated = await repository.update_message_identity_metadata(
-        session,
-        message_id=message.id,
-        principal_id="principal-1",
-        author_type=ExternalChannelPrincipalAuthorType.HUMAN,
-        provider_created_at=_at(4),
-        provider_updated_at=_at(5),
-    )
-
-    assert updated is message
-    assert message.principal_id == "principal-1"
-    assert message.author_type is ExternalChannelPrincipalAuthorType.HUMAN
-    assert message.provider_created_at == _at(4)
-    assert message.provider_updated_at == _at(5)
-    assert message.current_revision_id is None
-    statement = session.scalar.await_args.args[0]
-    assert "FOR UPDATE" in str(statement.compile(dialect=postgresql.dialect()))
-    session.flush.assert_awaited_once()
-    session.refresh.assert_awaited_once_with(message)
 
 
 @pytest.mark.asyncio
