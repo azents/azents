@@ -3289,7 +3289,7 @@ class ExternalChannelRepository:
         *,
         binding_id: str,
     ) -> tuple[ExternalChannelDeliveryAttempt, ...]:
-        """List all immutable initial Discord delivery attempts for one binding."""
+        """List the Session link and active initial Discord progress attempts."""
         work_id = await session.scalar(
             sa.select(RDBExternalChannelWork.id)
             .where(
@@ -3366,10 +3366,9 @@ class ExternalChannelRepository:
             )
             or (
                 attempt.id in part_attempt_ids
-                and (
-                    attempt.origin_id != work_id
-                    or attempt.operation
-                    is not ExternalChannelDeliveryOperation.PROGRESS_CREATE
+                and not _is_initial_discord_progress_attempt(
+                    attempt,
+                    work_id=work_id,
                 )
             )
             for attempt in attempts
@@ -4363,6 +4362,30 @@ class ExternalChannelRepository:
         if rdb is None:
             return None
         return model.model_validate(rdb)
+
+
+def _is_initial_discord_progress_attempt(
+    attempt: ExternalChannelDeliveryAttempt,
+    *,
+    work_id: str,
+) -> bool:
+    """Validate one current initial Discord create or manager catch-up update."""
+    if (
+        attempt.channel_action_id is not None
+        or attempt.request_payload.get("work_id") != work_id
+    ):
+        return False
+    if attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE:
+        return attempt.origin_id == work_id
+    if attempt.operation is not ExternalChannelDeliveryOperation.PROGRESS_UPDATE:
+        return False
+    target_key = attempt.request_payload.get("provider_message_key")
+    return (
+        attempt.origin_id != work_id
+        and isinstance(target_key, str)
+        and bool(target_key)
+        and attempt.provider_message_key == target_key
+    )
 
 
 def _message_lifecycle_rank(

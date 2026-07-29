@@ -64,6 +64,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelInvocationBatch,
     RDBExternalChannelInvocationBatchItem,
     RDBExternalChannelPendingContext,
+    RDBExternalChannelWork,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.session_agent import RDBSessionAgent
@@ -1553,6 +1554,88 @@ async def test_unlinked_message_defers_across_session_context(
     assert deferred.error_kind == "awaiting_thread_mention"
     assert deferred.error_summary == (
         "Waiting for a correlated Slack mention or binding."
+    )
+
+
+@pytest.mark.asyncio
+async def test_discord_create_reuses_resource_admitted_by_earlier_update() -> None:
+    """A late create resolves the provisional root admitted by its update."""
+    repository = MagicMock(spec=ExternalChannelRepository)
+    connection = ExternalChannelConnection.model_construct(
+        id="connection-1",
+        app_mode=ExternalChannelAppMode.SINGLE,
+    )
+    resource = ExternalChannelResource.model_construct(
+        id="resource-1",
+        status=ExternalChannelResourceStatus.ACTIVE,
+    )
+    repository.lock_connection_for_routing = AsyncMock(return_value=connection)
+    repository.get_resource_by_provider_key = AsyncMock(side_effect=[None, resource])
+    repository.get_discord_resource_by_delivery_channel = AsyncMock(return_value=None)
+    service = _service(
+        cast(SessionManager[AsyncSession], MagicMock()),
+        cast(ExternalChannelRepository, repository),
+    )
+    session = AsyncMock(spec=AsyncSession)
+    service_any = cast(Any, service)
+    service_any.session_manager = lambda: _AsyncSessionContext(session)
+    service_any._persist_discord_message_event = AsyncMock(
+        return_value=ExternalChannelPersistedMessage(
+            resource_id=resource.id,
+            hydration_required=False,
+            control_delivery_attempt_id=None,
+            activity_delivery_attempt_id=None,
+            wake_up=None,
+        )
+    )
+    service_any._complete_event = AsyncMock()
+    event = ExternalChannelEvent.model_construct(
+        id="event-1",
+        connection_id=connection.id,
+        event_type="discord_message_create",
+        envelope={
+            "message": {
+                "id": "100",
+                "channel_id": "200",
+                "guild_id": "G1",
+                "content": "Please investigate",
+                "timestamp": "2026-07-29T04:13:31+00:00",
+                "author": {"id": "U1", "username": "Participant"},
+                "mentions": [],
+            }
+        },
+        received_at=_at(1),
+        attempt_count=1,
+    )
+    configuration = ExternalChannelConnectionConfiguration.model_construct(
+        provider_tenant_id="G1",
+        provider_bot_user_id="B1",
+    )
+
+    await service_any._process_discord_claimed_event(
+        event=event,
+        configuration=configuration,
+    )
+
+    assert [
+        call.kwargs["provider_resource_key"]
+        for call in repository.get_resource_by_provider_key.await_args_list
+    ] == ["discord:G1:200", "discord:G1:100"]
+    repository.get_discord_resource_by_delivery_channel.assert_awaited_once_with(
+        session,
+        connection_id=connection.id,
+        guild_id="G1",
+        delivery_channel_id="200",
+    )
+    service_any._persist_discord_message_event.assert_awaited_once()
+    persisted_call = service_any._persist_discord_message_event.await_args
+    assert persisted_call is not None
+    assert persisted_call.kwargs["resource"] is resource
+    service_any._complete_event.assert_awaited_once_with(
+        event,
+        eligibility_state=ExternalChannelEventEligibilityState.PROCESSED,
+        status=ExternalChannelEventStatus.PROCESSED,
+        purge_envelope=False,
     )
 
 
@@ -3108,6 +3191,108 @@ async def test_reconcile_discord_delivered_attempts_wakes_then_activates(
     assert binding is not None
     assert binding.activation_status is ExternalChannelBindingActivationStatus.ACTIVE
     assert binding.projected_through_position == "100"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_restores_revoked_initial_discord_progress_update(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A historical pre-provider rejection resumes through normal activation."""
+    (
+        service,
+        _repository,
+        binding_id,
+        _resource_id,
+    ) = await _prepare_discord_reconcile_fixture(rdb_session_manager)
+
+    async def deliver_initial(attempt_id: str) -> None:
+        async with rdb_session_manager() as session:
+            target = await service.work_repository.start_delivery(
+                session,
+                delivery_attempt_id=attempt_id,
+                now=_at(5),
+            )
+            assert target is not None
+            if target.operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE:
+                work_id = target.request_payload["work_id"]
+                assert isinstance(work_id, str)
+                work = await session.get(RDBExternalChannelWork, work_id)
+                assert work is not None
+                work.desired_progress_revision += 1
+                work.desired_progress_payload = {
+                    "schema_version": 2,
+                    "state": "working",
+                    "title": "Investigating…",
+                    "tasks": [
+                        {
+                            "id": "investigate",
+                            "title": "Investigate",
+                            "status": "in_progress",
+                            "details": None,
+                            "output": None,
+                            "sources": [],
+                        }
+                    ],
+                }
+            recovery_id = await service.work_repository.finish_delivery(
+                session,
+                delivery_attempt_id=attempt_id,
+                status=ExternalChannelDeliveryStatus.DELIVERED,
+                provider_message_key=f"discord:test:{attempt_id}",
+                error_kind=None,
+                error_summary=None,
+                now=_at(6),
+            )
+            if recovery_id is not None:
+                recovery = await session.get(
+                    RDBExternalChannelDeliveryAttempt,
+                    recovery_id,
+                )
+                assert recovery is not None
+                recovery.status = ExternalChannelDeliveryStatus.NOT_ATTEMPTED
+                recovery.error_kind = "delivery_authority_revoked"
+                recovery.error_summary = (
+                    "The current binding delivery authority was revoked."
+                )
+                recovery.completed_at = _at(7)
+            await session.commit()
+
+    service.action_service.attempt_delivery = AsyncMock(side_effect=deliver_initial)
+
+    assert await service.reconcile_binding(binding_id=binding_id) is False
+    cast(Any, service.session_lifecycle).send_session_wake_up.assert_not_awaited()
+
+    async def deliver_restored(attempt_id: str) -> None:
+        async with rdb_session_manager() as session:
+            target = await service.work_repository.start_delivery(
+                session,
+                delivery_attempt_id=attempt_id,
+                now=_at(8),
+            )
+            assert target is not None
+            assert target.operation is ExternalChannelDeliveryOperation.PROGRESS_UPDATE
+            provider_message_key = target.request_payload["provider_message_key"]
+            assert isinstance(provider_message_key, str)
+            await service.work_repository.finish_delivery(
+                session,
+                delivery_attempt_id=attempt_id,
+                status=ExternalChannelDeliveryStatus.DELIVERED,
+                provider_message_key=provider_message_key,
+                error_kind=None,
+                error_summary=None,
+                now=_at(9),
+            )
+            await session.commit()
+
+    service.action_service.attempt_delivery = AsyncMock(side_effect=deliver_restored)
+
+    assert await service.reconcile_binding(binding_id=binding_id) is True
+    service.action_service.attempt_delivery.assert_awaited_once()
+    cast(Any, service.session_lifecycle).send_session_wake_up.assert_awaited_once()
+    async with rdb_session_manager() as session:
+        binding = await session.get(RDBExternalChannelBinding, binding_id)
+    assert binding is not None
+    assert binding.activation_status is ExternalChannelBindingActivationStatus.ACTIVE
 
 
 @pytest.mark.asyncio

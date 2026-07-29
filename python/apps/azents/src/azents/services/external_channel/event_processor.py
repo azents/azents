@@ -825,6 +825,11 @@ class ExternalChannelEventProcessorService:
             )
             if released is None:
                 return False
+            if configuration.provider is ExternalChannelProvider.DISCORD:
+                await self.work_repository.restore_initial_discord_progress_updates(
+                    session,
+                    binding_id=binding.id,
+                )
             await session.commit()
             if configuration.provider is ExternalChannelProvider.DISCORD:
                 await self._attempt_discord_initial_deliveries(
@@ -1199,6 +1204,16 @@ class ExternalChannelEventProcessorService:
                         ),
                     )
                 )
+            provisional_resource_key = _discord_resource_key(
+                tenant_id=tenant_id,
+                thread_id=normalized.thread_id or normalized.message_id,
+            )
+            if resource is None and provisional_resource_key != existing_resource_key:
+                resource = await self.repository.get_resource_by_provider_key(
+                    session,
+                    connection_id=event.connection_id,
+                    provider_resource_key=provisional_resource_key,
+                )
             if resource is None:
                 if not normalized.invocation:
                     if now - event.received_at < _UNLINKED_EVENT_WAIT:
@@ -1212,16 +1227,7 @@ class ExternalChannelEventProcessorService:
                     raise DiscordEventExcluded(
                         "Discord message is not linked to a tracked conversation."
                     )
-                resource_key = _discord_resource_key(
-                    tenant_id=tenant_id,
-                    thread_id=normalized.thread_id or normalized.message_id,
-                )
-                if resource_key != existing_resource_key:
-                    resource = await self.repository.get_resource_by_provider_key(
-                        session,
-                        connection_id=event.connection_id,
-                        provider_resource_key=resource_key,
-                    )
+                resource_key = provisional_resource_key
                 if resource is None:
                     source_channel_id = normalized.channel_id
                     thread_channel_id = normalized.thread_id
