@@ -345,7 +345,7 @@ def test_revision_pointer_and_backfills_are_present() -> None:
     )
     docker_v1_values = _migration_values(_DOCKER_V1_MIGRATION)
 
-    assert revision_file.read_text().strip() == "785dfb44ef23"
+    assert revision_file.read_text().strip() == "cb091fe69575"
     assert resource_values["down_revision"] == "e0615474dc27"
     assert route_access_policy_values["down_revision"] == "c1d4e7f2a9b0"
     assert checkpoint_session_values["down_revision"] == "f17b4c8d6a21"
