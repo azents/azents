@@ -2,6 +2,7 @@
 
 import datetime
 import json
+import logging
 from dataclasses import dataclass, field
 
 import pytest
@@ -283,6 +284,46 @@ async def test_present_file_reports_terminal_upload_failure_and_continues() -> N
     assert f"Failed to present file: {failed_path}" in _output_text(result)
     assert _output_item(result, 1)["name"] == "result.txt"
     assert storage.get_calls == []
+
+
+@pytest.mark.asyncio
+async def test_present_file_logs_bounded_publication_failure_context(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Log safe correlation fields without storage paths or object identities."""
+    failed_path = "/workspace/agent/private-output.txt"
+    storage = _NoBodyReadStorage({failed_path: b"failed"})
+    service = _PublicationService(
+        failures={
+            failed_path: RuntimeToServerTransferError("Runtime upload terminated")
+        }
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await _invoke(
+            _tool(storage, _capability(service)),
+            paths=[failed_path],
+            call_id="call-observability",
+        )
+
+    records = [
+        record
+        for record in caplog.records
+        if record.message == "Present file publication failed"
+    ]
+    assert len(records) == 1
+    record = records[0]
+    assert record.__dict__["agent_id"] == "agent-1"
+    assert record.__dict__["session_id"] == "session-1"
+    assert record.__dict__["run_id"] == "run-1"
+    assert record.__dict__["call_id"] == "call-observability"
+    assert record.__dict__["runtime_id"] == "runtime-1"
+    assert record.__dict__["runtime_generation"] == 3
+    assert record.__dict__["failure_stage"] == "runtime_transfer"
+    assert record.__dict__["failure_type"] == "RuntimeToServerTransferError"
+    assert isinstance(record.__dict__["publication_id"], str)
+    assert "path" not in record.__dict__
+    assert "object_handle" not in record.__dict__
 
 
 @pytest.mark.asyncio
