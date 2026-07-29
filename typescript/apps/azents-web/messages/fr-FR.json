@@ -779,6 +779,8 @@
           "archivedTitle": "Archivées",
           "archivedEmpty": "Aucune session archivée.",
           "archivedAt": "Archivée le {date}",
+          "autoArchiveDueSoonBadge": "Bientôt archivée",
+          "autoArchiveScheduled": "Archivage automatique prévu le {date}",
           "retentionSnapshotUnlimited": "Conservation illimitée",
           "retentionSnapshotDays": "Conservation de {days, plural, =0 {0 jour} one {# jour} other {# jours}}",
           "purgeScheduled": "Suppression le {date}",

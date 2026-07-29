@@ -779,6 +779,8 @@
           "archivedTitle": "アーカイブ済み",
           "archivedEmpty": "アーカイブ済みのセッションはありません。",
           "archivedAt": "{date}にアーカイブ",
+          "autoArchiveDueSoonBadge": "まもなくアーカイブ",
+          "autoArchiveScheduled": "{date}に自動アーカイブ予定",
           "retentionSnapshotUnlimited": "無期限保持",
           "retentionSnapshotDays": "保持期間{days}日",
           "purgeScheduled": "{date}に削除予定",

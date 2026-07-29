@@ -59,6 +59,7 @@ import { useCallback, useState } from "react";
 import { formatLocalizedDate } from "@/shared/lib/date-format";
 import { useColorMode } from "@/shared/providers/color-mode";
 import { useLocale } from "@/shared/providers/locale";
+import { isAutoArchiveDueSoon } from "../auto-archive-urgency";
 import { AgentAvatar } from "./AgentAvatar";
 import styles from "./AgentFocusedShell.module.css";
 import type { ColorModePreference } from "@/shared/lib/color-mode";
@@ -98,6 +99,7 @@ interface AgentFocusedSidebarProps {
   onSetSessionPinned?: (sessionId: string, pinned: boolean) => void;
   onRestoreSession?: (sessionId: string) => void;
   onNavigate?: () => void;
+  nowMs?: number;
 }
 
 function formatTimestamp(value: string, locale: SupportedLocale): string {
@@ -217,6 +219,7 @@ export function AgentFocusedSidebar({
   onSetSessionPinned,
   onRestoreSession,
   onNavigate,
+  nowMs = Date.now(),
 }: AgentFocusedSidebarProps): React.ReactElement {
   const t = useTranslations("workspace.agents.detail");
   const tAppBar = useTranslations("appBar");
@@ -513,6 +516,11 @@ export function AgentFocusedSidebar({
               const running = session.run_state === "running";
               const showUnreadIndicator =
                 !running && session.unread_terminal_run_id !== null;
+              const autoArchiveDueSoon = isAutoArchiveDueSoon(
+                session.auto_archive_after,
+                agent.auto_archive_ttl_days,
+                nowMs,
+              );
               const archiving = archivingSessionId === session.id;
               const pinning = pinningSessionId === session.id;
               const showActions =
@@ -530,6 +538,20 @@ export function AgentFocusedSidebar({
                       <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
                         {getSessionDisplayTitle(session, t)}
                       </Text>
+                      {autoArchiveDueSoon && session.auto_archive_after && (
+                        <Tooltip
+                          label={t("sessions.autoArchiveScheduled", {
+                            date: formatTimestamp(
+                              session.auto_archive_after,
+                              locale,
+                            ),
+                          })}
+                        >
+                          <Badge size="xs" variant="light" color="orange">
+                            {t("sessions.autoArchiveDueSoonBadge")}
+                          </Badge>
+                        </Tooltip>
+                      )}
                       {showUnreadIndicator && (
                         <Box
                           component="span"

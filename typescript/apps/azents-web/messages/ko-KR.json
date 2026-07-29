@@ -779,6 +779,8 @@
           "archivedTitle": "보관됨",
           "archivedEmpty": "보관된 세션이 없습니다.",
           "archivedAt": "{date}에 보관",
+          "autoArchiveDueSoonBadge": "곧 보관",
+          "autoArchiveScheduled": "{date}에 자동 보관 예정",
           "retentionSnapshotUnlimited": "무기한 보관",
           "retentionSnapshotDays": "{days}일 보관",
           "purgeScheduled": "{date}에 삭제 예정",

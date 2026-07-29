@@ -13962,6 +13962,19 @@
             "title": "Unread Terminal Run Id",
             "description": "Shared terminal AgentRun boundary awaiting review, or null"
           },
+          "auto_archive_after": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Archive After",
+            "description": "Projected automatic archive deadline for eligible active list items, or null when unavailable or excluded"
+          },
           "archived_at": {
             "anyOf": [
               {
@@ -14025,6 +14038,7 @@
           "run_state",
           "pinned",
           "unread_terminal_run_id",
+          "auto_archive_after",
           "archived_at",
           "purge_after",
           "archive_retention_days_snapshot",

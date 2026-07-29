@@ -108,8 +108,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-26
-spec_version: 133
+last_verified_at: 2026-07-29
+spec_version: 134
 ---
 
 # Conversation & Events
@@ -304,6 +304,13 @@ eligible only when its maximum activity is at least the configured TTL in the pa
 the same archive lifecycle as manual archive, including retention snapshot, lifecycle participants,
 external-channel cleanup, and post-commit worktree cleanup. Pinning is preserved through archive and
 restore and only excludes automatic archive; it never changes manual archive eligibility.
+
+The active Agent-session list projects `auto_archive_after` from the maximum `last_activity_at`
+across each complete root tree plus the Agent's current TTL. Team-primary and pinned roots project
+null because automatic archive does not apply to them. The Agent rail shows an Archives soon badge
+when the projected deadline is within `min(floor(auto_archive_ttl_days / 2), 5)` whole days. A
+zero-day result disables the badge, so a one-day TTL has no warning badge. Active Sessions whose
+deadline has already passed remain marked until the asynchronous archive transition completes.
 
 `PATCH /chat/v1/agents/{agent_id}/sessions/{session_id}/pin` accepts `{ "pinned": boolean }` for an
 accessible active non-primary root Session and returns the updated Session projection. Subagent
