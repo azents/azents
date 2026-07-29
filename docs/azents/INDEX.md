@@ -86,6 +86,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Complete Specialized Presentation Coverage for Builtin Tools Historical Requirements Reconstruction](requirements/builtin-260721-builtin-presentations.md) | builtin-260721 | 2026-07-21 | - |
 | [Run-Scoped Azents Virtual Filesystem for Managed Skills and Resources Historical Requirements Reconstruction](requirements/bundled-260719-bundled-and-backed-skill-sources.md) | bundled-260719 | 2026-07-19 | - |
 | [Model Catalog Projection and Sync Historical Requirements Reconstruction](requirements/catalog-260620-catalog-projection-sync.md) | catalog-260620 | 2026-06-20 | - |
+| [Responsive Context-Preserving External Conversations Requirements](requirements/channel-260729-responsive-context-preserving-conversations.md) | channel-260729 | 2026-07-29 | - |
 | [Split Chat Input Buffer into Separate RDB Table Historical Requirements Reconstruction](requirements/chat-260519-chat-input-buffer.md) | chat-260519 | 2026-05-19 | - |
 | [Chat Protocol Uses Canonical Event History/Live API Historical Requirements Reconstruction](requirements/chat-260604-chat-protocol-history-live.md) | chat-260604 | 2026-06-04 | 2026-06-04 |
 | [Chat Session Resync Converges to History/Live State After Subscribe Ack Historical Requirements Reconstruction](requirements/chat-260609-chat-resync-scroll.md) | chat-260609 | 2026-06-09 | - |
@@ -430,6 +431,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Complete Specialized Presentation Coverage for Builtin Tools](adr/builtin-260721-builtin-presentations.md)
 - [Run-Scoped Azents Virtual Filesystem for Managed Skills and Resources](adr/bundled-260719-bundled-and-backed-skill-sources.md)
 - [Model Catalog Projection and Sync](adr/catalog-260620-catalog-projection-sync.md)
+- [Responsive Context-Preserving External Conversations](adr/channel-260729-responsive-context-preserving-conversations.md)
 - [Split Chat Input Buffer into Separate RDB Table](adr/chat-260519-chat-input-buffer.md)
 - [Chat Protocol Uses Canonical Event History/Live API](adr/chat-260604-chat-protocol-history-live.md)
 - [Chat Session Resync Converges to History/Live State After Subscribe Ack](adr/chat-260609-chat-resync-scroll.md)
