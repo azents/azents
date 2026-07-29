@@ -136,6 +136,11 @@ def make_present_file_tool(
 
             media_type = guess_media_type(abs_path)
             file_name = abs_path.rsplit("/", 1)[-1]
+            publication_id = _publication_id(
+                run_id=authority.run_id,
+                call_id=execution.call_id,
+                runtime_path=abs_path,
+            )
             try:
                 created = await publication_capability.publish(
                     runtime_path=abs_path,
@@ -143,16 +148,36 @@ def make_present_file_tool(
                     media_type=media_type,
                     expected_size=expected_size,
                     authority=authority,
-                    publication_id=_publication_id(
-                        run_id=authority.run_id,
-                        call_id=execution.call_id,
-                        runtime_path=abs_path,
-                    ),
+                    publication_id=publication_id,
                 )
             except PresentFilePublicationAccessDenied:
                 errors.append("Session resource access denied while presenting file.")
                 continue
-            except PresentFilePublicationError, RuntimeToServerTransferError:
+            except (
+                PresentFilePublicationError,
+                RuntimeToServerTransferError,
+            ) as exc:
+                logger.warning(
+                    "Present file publication failed",
+                    exc_info=True,
+                    extra={
+                        "agent_id": authority.agent_id,
+                        "session_id": authority.session_id,
+                        "run_id": authority.run_id,
+                        "call_id": execution.call_id,
+                        "runtime_id": publication_capability.target.runtime_id,
+                        "runtime_generation": (
+                            publication_capability.target.desired_generation
+                        ),
+                        "publication_id": publication_id,
+                        "failure_stage": (
+                            "exchange_publication"
+                            if isinstance(exc, PresentFilePublicationError)
+                            else "runtime_transfer"
+                        ),
+                        "failure_type": type(exc).__name__,
+                    },
+                )
                 errors.append(f"Failed to present file: {abs_path}")
                 continue
             except RuntimeStorageError as exc:

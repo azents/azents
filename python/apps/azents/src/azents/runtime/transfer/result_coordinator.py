@@ -1,5 +1,6 @@
 """Trusted settlement of Runner transfer result metadata."""
 
+import logging
 from collections.abc import Callable
 from datetime import datetime
 from typing import Protocol
@@ -29,6 +30,8 @@ from azents.runtime.transfer.data import (
     cancellation_settlement,
 )
 from azents.runtime.transfer.store import RuntimeTransferStateStore
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class RuntimeRunnerTransferResultSink(Protocol):
@@ -113,7 +116,12 @@ class RuntimeRunnerTransferResultCoordinator:
         if result.outcome is RunnerTransferOutcome.SUCCEEDED:
             await self._handle_success(record, operation, result)
             return
-        await self._handle_failure(record, operation, result)
+        await self._handle_failure(
+            record,
+            operation,
+            result,
+            request_id=request_id,
+        )
 
     async def _handle_success(
         self,
@@ -184,6 +192,8 @@ class RuntimeRunnerTransferResultCoordinator:
         record: RuntimeTransferRecord,
         operation: RuntimeOperationMetadata,
         result: RunnerTransferResult,
+        *,
+        request_id: str,
     ) -> None:
         if record.runner_result_confirmed_at is not None:
             return
@@ -227,8 +237,32 @@ class RuntimeRunnerTransferResultCoordinator:
             failure=failure,
             cleanup_completed=False,
         )
-        if settled is not None:
+        if settled is None:
             return
+        _LOGGER.warning(
+            "Runtime transfer Runner failure settled",
+            extra={
+                "transfer_id": settled.admission.transfer_id,
+                "attempt_id": settled.admission.attempt_id,
+                "runtime_id": settled.admission.runtime_id,
+                "operation_id": settled.admission.operation_id,
+                "dispatch_id": settled.dispatch_id,
+                "direction": settled.admission.direction.value,
+                "runner_outcome": result.outcome.value,
+                "runner_failure": (
+                    None if result.failure is None else result.failure.value
+                ),
+                "terminal_outcome": (
+                    None
+                    if settled.terminal_outcome is None
+                    else settled.terminal_outcome.value
+                ),
+                "terminal_failure": (
+                    None if settled.failure is None else settled.failure.value
+                ),
+                "request_id": request_id,
+            },
+        )
 
     async def handle_failure(
         self,
@@ -280,7 +314,27 @@ class RuntimeRunnerTransferResultCoordinator:
         )
         if settled is None:
             return
-        return
+        _LOGGER.warning(
+            "Runtime transfer Runner result rejected and settled",
+            extra={
+                "transfer_id": settled.admission.transfer_id,
+                "attempt_id": settled.admission.attempt_id,
+                "runtime_id": settled.admission.runtime_id,
+                "operation_id": settled.admission.operation_id,
+                "dispatch_id": settled.dispatch_id,
+                "direction": settled.admission.direction.value,
+                "terminal_outcome": (
+                    None
+                    if settled.terminal_outcome is None
+                    else settled.terminal_outcome.value
+                ),
+                "terminal_failure": (
+                    None if settled.failure is None else settled.failure.value
+                ),
+                "request_id": request_id,
+                "error_code": error_code,
+            },
+        )
 
     async def _append_final(
         self,

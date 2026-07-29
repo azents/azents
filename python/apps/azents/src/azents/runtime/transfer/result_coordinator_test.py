@@ -1,5 +1,6 @@
 """Trusted Runner transfer result coordinator tests."""
 
+import logging
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -228,22 +229,24 @@ async def test_upload_failure_preserves_completed_object_cleanup_and_reason(
     runner_failure: RunnerTransferFailure,
     expected_outcome: RuntimeTransferOutcome,
     expected_failure: StateTransferFailure,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Completed upload failures retain exact delete retry and deadline evidence."""
     harness = await _harness(RuntimeTransferDirection.UPLOAD)
     await _publish_upload_available(harness, commit_response=False)
 
-    await harness.coordinator.handle(
-        _result(
-            direction=RunnerTransferDirection.UPLOAD,
-            outcome=RunnerTransferOutcome.FAILED,
-            committed=False,
-            failure=runner_failure,
-            size=None,
-            sha256=None,
-        ),
-        request_id=f"runner-failure:{runner_failure.value}",
-    )
+    with caplog.at_level(logging.WARNING):
+        await harness.coordinator.handle(
+            _result(
+                direction=RunnerTransferDirection.UPLOAD,
+                outcome=RunnerTransferOutcome.FAILED,
+                committed=False,
+                failure=runner_failure,
+                size=None,
+                sha256=None,
+            ),
+            request_id=f"runner-failure:{runner_failure.value}",
+        )
 
     current = await harness.state.get("transfer-1")
     assert current is not None
@@ -251,6 +254,26 @@ async def test_upload_failure_preserves_completed_object_cleanup_and_reason(
     assert current.failure is expected_failure
     assert current.completed_object_cleanup_required is True
     assert current.multipart_cleanup_handle is None
+    records = [
+        record
+        for record in caplog.records
+        if record.message == "Runtime transfer Runner failure settled"
+    ]
+    assert len(records) == 1
+    record = records[0]
+    assert record.__dict__["transfer_id"] == "transfer-1"
+    assert record.__dict__["attempt_id"] == "attempt-1"
+    assert record.__dict__["runtime_id"] == "runtime-1"
+    assert record.__dict__["operation_id"] == "operation-1"
+    assert record.__dict__["dispatch_id"] == "dispatch-1"
+    assert record.__dict__["direction"] == "upload"
+    assert record.__dict__["runner_outcome"] == "failed"
+    assert record.__dict__["runner_failure"] == runner_failure.value
+    assert record.__dict__["terminal_outcome"] == expected_outcome.value
+    assert record.__dict__["terminal_failure"] == expected_failure.value
+    assert record.__dict__["request_id"] == f"runner-failure:{runner_failure.value}"
+    assert "runtime_path" not in record.__dict__
+    assert "object" not in record.__dict__
 
 
 @pytest.mark.asyncio
