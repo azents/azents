@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import codecs
 import contextlib
 import fnmatch
 import hashlib
@@ -46,6 +47,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_BASH_TIMEOUT_SECONDS = 120
 _MAX_FILE_READ_BYTES = 8 * 1024 * 1024
+_MAX_TEXT_READ_BYTES = 64 * 1024
 _DEFAULT_MAX_FILE_OPERATION_WORKERS = 8
 _DEFAULT_MAX_GREP_SEARCHED_FILES = 10_000
 _DEFAULT_MAX_GREP_SCANNED_BYTES = 128 * 1024 * 1024
@@ -257,6 +259,9 @@ class RunnerOperations:
                 return
             if operation.operation_type in {"file.read", "file.download"}:
                 await self._file_read(operation)
+                return
+            if operation.operation_type == "file.read_text":
+                await self._file_read_text(operation)
                 return
             if operation.operation_type in {"file.write", "file.upload"}:
                 await self._file_write(operation)
@@ -573,6 +578,50 @@ class RunnerOperations:
             RuntimeRunnerEventType.FILE_CHUNK,
             {"data_base64": base64.b64encode(data).decode()},
         )
+        await self._final_success(operation, {"bytes_read": len(data)})
+
+    async def _file_read_text(self, operation: RunnerOperationEnvelope) -> None:
+        """Read a bounded decoded text range without a Base64 file event."""
+        try:
+            path = self._workspace.resolve(operation.payload.get("path"))
+        except ValueError as exc:
+            await self._final_error(operation, "INVALID_PATH", str(exc))
+            return
+        offset = _int_payload(operation.payload, "offset", default=0)
+        requested = _optional_int_payload(operation.payload, "max_bytes")
+        max_bytes = min(
+            requested if requested is not None else _MAX_TEXT_READ_BYTES,
+            _MAX_TEXT_READ_BYTES,
+        )
+        encoding = _optional_str_payload(operation.payload, "encoding") or "utf-8"
+        try:
+            codecs.lookup(encoding)
+        except LookupError:
+            await self._final_error(
+                operation,
+                "FILE_READ_TEXT_UNSUPPORTED_ENCODING",
+                f"Unsupported text encoding: {encoding}",
+            )
+            return
+        try:
+            data = await self._run_file_operation(
+                operation,
+                lambda cancellation: _read_file_range_bytes(
+                    path,
+                    offset=offset,
+                    max_bytes=max_bytes,
+                    cancellation=cancellation,
+                ),
+            )
+            text = data.decode(encoding)
+        except UnicodeDecodeError:
+            await self._final_error(
+                operation,
+                "FILE_READ_TEXT_DECODE_ERROR",
+                f"File range cannot be decoded as {encoding}",
+            )
+            return
+        await self._event(operation, RuntimeRunnerEventType.STDOUT, {"text": text})
         await self._final_success(operation, {"bytes_read": len(data)})
 
     async def _file_write(self, operation: RunnerOperationEnvelope) -> None:
@@ -2938,6 +2987,21 @@ def _read_file_bytes(
     if cancellation.is_set():
         return b""
     return path.read_bytes()[offset : offset + max_bytes]
+
+
+def _read_file_range_bytes(
+    path: Path,
+    *,
+    offset: int,
+    max_bytes: int,
+    cancellation: threading.Event,
+) -> bytes:
+    """Read one bounded byte range without reading the complete file."""
+    if cancellation.is_set():
+        return b""
+    with path.open("rb") as source:
+        source.seek(offset)
+        return source.read(max_bytes)
 
 
 def _write_file_bytes(

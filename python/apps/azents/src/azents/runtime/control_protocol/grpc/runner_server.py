@@ -988,12 +988,14 @@ def _copy_operation_payload(
                 }
             )
         return
-    if operation_type in {"file.read", "file.download"}:
+    if operation_type in {"file.read", "file.download", "file.read_text"}:
         message.file_read.path = _str_payload(payload, "path")
         message.file_read.offset = _int_payload(payload, "offset")
         max_bytes = _optional_int_payload(payload, "max_bytes")
         if max_bytes is not None:
             message.file_read.max_bytes = max_bytes
+        if operation_type == "file.read_text":
+            message.file_read.encoding = _str_payload(payload, "encoding")
         return
     if operation_type in {"file.write", "file.upload"}:
         message.file_write.path = _str_payload(payload, "path")

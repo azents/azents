@@ -29,8 +29,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
-last_verified_at: 2026-07-29
-spec_version: 42
+last_verified_at: 2026-07-30
+spec_version: 43
 ---
 
 # Agent Runtime Control
@@ -254,6 +254,8 @@ Runner is operation-only. It handles operations inside an already provisioned Ru
 
 `file.grep` accepts a workspace file path or directory path plus a regex pattern. The Runner performs file discovery, text decoding, regex matching, line limiting, file limiting, exclude filtering, searched-file limiting, and scanned-byte limiting inside the Runtime workspace, then returns a structured final payload of matched files, line matches, truncation status, and truncation reason. Callers should not implement grep by issuing `file.list` plus one `file.read` operation per file.
 
+`file.read_text` accepts a path, byte offset, bounded byte count, and text encoding. The encoding defaults to UTF-8 when omitted. Runner strictly decodes only the requested range and returns direct text in a Control text event; it never emits a Base64 `file_chunk` for this operation. Unknown encodings and invalid byte sequences return stable errors rather than replacement-decoded content.
+
 `file.apply_patch` accepts one bounded UTF-8 V4A document plus an absolute Runtime `base_path`. The grammar requires `*** Begin Patch` and `*** End Patch`, supports only Add File, Update File, and Delete File operations, and permits each relative path at most once. Update hunks use exact unique logical-line context with optional anchors and an end-of-file assertion. The parser rejects malformed envelopes, unsupported operations, ambiguous or missing context, overlapping hunks, duplicate paths, invalid encodings, and mixed patch newlines before mutation.
 
 Every patch path is confined below the canonical base directory. The Runner rejects absolute paths, lexical parent traversal, escaping or symlink parents, final symlinks, unsupported file kinds, invalid UTF-8 or binary source, mixed source newlines, existing Add destinations, missing Update/Delete targets, and destructive precondition drift. Bounded limits cover patch bytes, operation and hunk counts, path length, per-file and aggregate bytes, and the end-to-end deadline. LF and CRLF sources retain their newline style and final-newline state.
@@ -385,6 +387,7 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-30** (spec_version 43) — Added typed bounded `file.read_text` encoding selection with strict decode errors and direct text events, while moving Workspace complete downloads to the verified Runtime transfer object path instead of Runner Control file chunks.
 - **2026-07-29** (spec_version 42) — Removed root-owned transfer staging, Runner
   identity switching, and the Kubernetes staging init container. Docker and
   Kubernetes Providers run the Runner as UID/GID 1000 while verified downloads retain

@@ -17,6 +17,7 @@ from azents.engine.tools.runtime_io import (
     RuntimeFilePatchOperation,
     RuntimeFileReadResult,
     RuntimeFileStatResult,
+    RuntimeFileTextReadResult,
     RuntimeFileWriteResult,
     RuntimeGrepFileMatch,
     RuntimeGrepLineMatch,
@@ -181,6 +182,36 @@ class RuntimeRunnerOperationAdapter:
             )
         )
         return RuntimeFileReadResult(data=result.data, final_cursor=result.final_cursor)
+
+    async def read_text_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        offset: int,
+        max_bytes: int,
+        encoding: str,
+        deadline_at: datetime,
+    ) -> RuntimeFileTextReadResult:
+        """Run bounded decoded file read operation and convert to engine result."""
+        result = await _translate_runtime_errors(
+            self._client.read_text_file(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                owner_session_id=owner_session_id,
+                path=path,
+                offset=offset,
+                max_bytes=max_bytes,
+                encoding=encoding,
+                deadline_at=deadline_at,
+            )
+        )
+        return RuntimeFileTextReadResult(
+            text=result.text,
+            final_cursor=result.final_cursor,
+        )
 
     async def write_file(
         self,
@@ -439,7 +470,10 @@ async def _translate_runtime_errors(awaitable: Awaitable[_T]) -> _T:
     except control_runner_operations.RuntimeRunnerOperationGenerationError as exc:
         raise engine_runtime_io.RuntimeRunnerOperationGenerationError(str(exc)) from exc
     except control_runner_operations.RuntimeRunnerOperationFailedError as exc:
-        raise engine_runtime_io.RuntimeRunnerOperationFailedError(str(exc)) from exc
+        raise engine_runtime_io.RuntimeRunnerOperationFailedError(
+            str(exc),
+            code=exc.code,
+        ) from exc
 
 
 def _patch_failure(

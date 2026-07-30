@@ -2,9 +2,10 @@
 
 import datetime
 import json
+from dataclasses import dataclass, field
+from typing import cast
 
 import pytest
-from azcommon.result import Failure, Result, Success
 
 from azents.core.enums import ModelFileStatus
 from azents.engine.run.types import (
@@ -15,11 +16,14 @@ from azents.engine.run.types import (
 from azents.engine.tools.read_image import make_read_image_tool
 from azents.engine.tools.testing import FakeSharedStorage
 from azents.repos.model_file.data import ModelFile
-from azents.services.model_file import (
-    ModelFileCreateError,
-    ModelFileOversized,
-    ModelFileService,
+from azents.runtime.transfer.runtime_image_read import (
+    RuntimeImageReadError,
+    RuntimeImageReadModelFileOversized,
+    RuntimeImageReadRequest,
+    RuntimeImageReadService,
 )
+from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
+from azents.services.model_file import ModelFileOversized, ModelFileService
 from azents.services.session_resource_authority import SessionResourceAuthority
 
 _MODEL_FILE = ModelFile(
@@ -43,33 +47,20 @@ _MODEL_FILE = ModelFile(
 )
 
 
-class _FakeModelFileService(ModelFileService):
-    """ModelFileService for tests."""
+@dataclass
+class _FakeRuntimeImageReadService:
+    """Record Runtime-transfer image read requests."""
 
-    def __init__(self, result: Result[ModelFile, ModelFileCreateError]) -> None:
-        self.result = result
-        self.calls: list[dict[str, object]] = []
+    result: ModelFile | RuntimeImageReadError = field(
+        default_factory=lambda: _MODEL_FILE
+    )
+    calls: list[RuntimeImageReadRequest] = field(default_factory=list)
 
-    async def create(
-        self,
-        *,
-        authority: SessionResourceAuthority,
-        filename: str | None,
-        media_type: str,
-        body: bytes,
-        metadata: dict[str, object] | None = None,
-    ) -> Success[ModelFile] | Failure[ModelFileCreateError]:
-        """Record creation input and return specified result."""
-        self.calls.append(
-            {
-                "authority": authority,
-                "created_run_index": authority.run_index,
-                "filename": filename,
-                "media_type": media_type,
-                "body": body,
-                "metadata": metadata,
-            }
-        )
+    async def read(self, request: RuntimeImageReadRequest) -> ModelFile:
+        """Return the configured materialization result."""
+        self.calls.append(request)
+        if isinstance(self.result, RuntimeImageReadError):
+            raise self.result
         return self.result
 
 
@@ -81,16 +72,25 @@ class _FakeModelFileService(ModelFileService):
 def _make_tool(
     *,
     files: dict[str, bytes] | None = None,
-) -> tuple[FunctionTool, FakeSharedStorage, _FakeModelFileService]:
+) -> tuple[FunctionTool, FakeSharedStorage, _FakeRuntimeImageReadService]:
     """Create read_image tool and fake storage for tests."""
     storage = FakeSharedStorage(files)
-    model_file_service = _FakeModelFileService(Success(_MODEL_FILE))
+    runtime_image_read_service = _FakeRuntimeImageReadService()
     tool = make_read_image_tool(
         session_storage=storage,
-        model_file_service=model_file_service,
+        model_file_service=cast(ModelFileService, object()),
         authority=_authority(),
+        runtime_image_read_service=cast(
+            RuntimeImageReadService, runtime_image_read_service
+        ),
+        resolve_runtime_target=_target,
     )
-    return tool, storage, model_file_service
+    return tool, storage, runtime_image_read_service
+
+
+async def _target() -> ServerToRuntimeTarget:
+    """Return the Runtime target expected by the transfer consumer."""
+    return ServerToRuntimeTarget(runtime_id="runtime-1", desired_generation=3)
 
 
 # ---------------------------------------------------------------------------
@@ -116,10 +116,11 @@ class TestReadImageFromSessionData:
         assert result.output[0]["type"] == "text"
         assert result.output[1]["type"] == "file"
         assert result.output[1]["model_file_id"] == "m" * 32
-        assert service.calls[0]["filename"] == "photo.png"
-        assert service.calls[0]["created_run_index"] == 7
-        assert service.calls[0]["media_type"] == "image/png"
-        assert service.calls[0]["body"] == png_data
+        assert service.calls[0].filename == "photo.png"
+        assert service.calls[0].authority.run_index == 7
+        assert service.calls[0].media_type == "image/png"
+        assert service.calls[0].expected_size == len(png_data)
+        assert service.calls[0].runtime_path == "/workspace/agent/photo.png"
 
     async def test_read_jpeg(self) -> None:
         """Read JPEG image from agent/photo.jpg URI."""
@@ -146,7 +147,7 @@ class TestReadImageFromSessionData:
 
         # Then: WebP MIME type
         assert isinstance(result, FunctionToolResult)
-        assert service.calls[0]["media_type"] == "image/webp"
+        assert service.calls[0].media_type == "image/webp"
 
 
 # ---------------------------------------------------------------------------
@@ -193,14 +194,18 @@ class TestReadImageErrors:
 
     async def test_model_file_oversized_returns_text_placeholder(self) -> None:
         """ModelFile size cap exceedance becomes text placeholder without file part."""
-        failure: Failure[ModelFileCreateError] = Failure(
-            ModelFileOversized(max_bytes=1_000_000, actual_bytes=1_000_001)
-        )
         storage = FakeSharedStorage({"/workspace/agent/photo.png": b"small"})
+        transfer = _FakeRuntimeImageReadService(
+            RuntimeImageReadModelFileOversized(
+                ModelFileOversized(max_bytes=1_000_000, actual_bytes=1_000_001)
+            )
+        )
         tool = make_read_image_tool(
             session_storage=storage,
-            model_file_service=_FakeModelFileService(failure),
+            model_file_service=cast(ModelFileService, object()),
             authority=_authority(),
+            runtime_image_read_service=cast(RuntimeImageReadService, transfer),
+            resolve_runtime_target=_target,
         )
 
         result = await tool.handler(json.dumps({"path": "/workspace/agent/photo.png"}))
@@ -230,12 +235,7 @@ class TestReadImageRuntimeStorage:
     async def test_reads_from_session_storage(self) -> None:
         """read_image reads image from runtime session_storage."""
         png_data = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
-        session_ss = FakeSharedStorage(files={"/workspace/agent/photo.png": png_data})
-        tool = make_read_image_tool(
-            session_storage=session_ss,
-            model_file_service=_FakeModelFileService(Success(_MODEL_FILE)),
-            authority=_authority(),
-        )
+        tool, _, _ = _make_tool(files={"/workspace/agent/photo.png": png_data})
 
         # When: call read_image
         result = await tool.handler(json.dumps({"path": "/workspace/agent/photo.png"}))

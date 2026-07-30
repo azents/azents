@@ -3,6 +3,8 @@
 import contextlib
 import datetime
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
+from typing import cast
 
 import pytest
 from azcommon.result import Failure, Success
@@ -31,7 +33,13 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeFileMoveResult,
     RuntimeFileReadResult,
     RuntimeFileStatResult,
+    RuntimeFileTextReadResult,
     RuntimeRunnerOperationFailedError,
+)
+from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
+from azents.runtime.transfer.workspace_download import (
+    RuntimeWorkspaceDownloadService,
+    WorkspaceDownloadRequest,
 )
 from azents.services.chat.workspace import (
     AGENT_WORKSPACE_ROOT,
@@ -108,6 +116,7 @@ class _FakeRunnerOperations:
         self.directories = {AGENT_WORKSPACE_ROOT.as_posix()}
         self.list_calls: list[tuple[str, int, str]] = []
         self.read_calls: list[tuple[str, int, str]] = []
+        self.text_read_calls: list[tuple[str, int, int, str]] = []
         self.stat_calls: list[tuple[str, int, str]] = []
         self.delete_calls: list[tuple[str, int, str, bool]] = []
         self.mkdir_calls: list[tuple[str, int, str, bool]] = []
@@ -211,6 +220,26 @@ class _FakeRunnerOperations:
             data[offset:] if max_bytes is None else data[offset : offset + max_bytes]
         )
         return RuntimeFileReadResult(data=chunk, final_cursor="0-1")
+
+    async def read_text_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None = None,
+        path: str,
+        offset: int,
+        max_bytes: int,
+        encoding: str,
+        deadline_at: datetime.datetime,
+    ) -> RuntimeFileTextReadResult:
+        """Return one bounded decoded preview range."""
+        del runtime_id, runner_generation, owner_session_id, deadline_at
+        self.text_read_calls.append((path, offset, max_bytes, encoding))
+        return RuntimeFileTextReadResult(
+            text=self.files[path][offset : offset + max_bytes].decode(encoding),
+            final_cursor="0-1",
+        )
 
     async def stat_file(
         self,
@@ -331,6 +360,19 @@ class _FakeRunnerOperations:
             destination_path=destination_path,
             final_cursor="0-1",
         )
+
+
+@dataclass
+class _FakeRuntimeWorkspaceDownloadService:
+    """Record authorized Workspace download transfer requests."""
+
+    body: bytes = b"workspace download"
+    calls: list[WorkspaceDownloadRequest] = field(default_factory=list)
+
+    async def download(self, request: WorkspaceDownloadRequest) -> bytes:
+        """Return configured verified transfer bytes."""
+        self.calls.append(request)
+        return self.body
 
 
 @contextlib.asynccontextmanager
@@ -507,9 +549,51 @@ async def test_read_path_uses_stat_to_return_file_preview() -> None:
     assert result.value.path == file_path
     assert result.value.media_type == "text/markdown"
     assert result.value.text == "# Workspace\n"
+    assert runner_operations.read_calls == []
+    assert runner_operations.text_read_calls == [(file_path, 0, 64 * 1024, "utf-8")]
     assert runner_operations.stat_calls == [("runtime-1", 1, file_path)]
-    assert runner_operations.read_calls == [("runtime-1", 1, file_path)]
     assert runner_operations.list_calls == []
+
+
+@pytest.mark.asyncio
+async def test_download_uses_verified_transfer_not_runner_file_read() -> None:
+    """Complete Workspace downloads avoid the Runner Control file body path."""
+    runtime = _make_agent_runtime()
+    runner_operations = _FakeRunnerOperations()
+    transfer = _FakeRuntimeWorkspaceDownloadService()
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runtime_repository=_FakeRuntimeRepository(runtime),
+        session_manager=_session_manager,
+        runtime_workspace_download_service=cast(
+            RuntimeWorkspaceDownloadService,
+            transfer,
+        ),
+    )
+    file_path = (AGENT_WORKSPACE_ROOT / "test-file.txt").as_posix()
+
+    result = await service.download_file("agent-1", "user-1", file_path)
+
+    assert isinstance(result, Success)
+    assert result.value == (
+        AGENT_WORKSPACE_ROOT / "test-file.txt",
+        b"workspace download",
+        "text/plain",
+    )
+    assert runner_operations.read_calls == []
+    assert transfer.calls == [
+        WorkspaceDownloadRequest(
+            agent_id="agent-1",
+            runtime_path=file_path,
+            expected_size=5,
+            target=ServerToRuntimeTarget(
+                runtime_id="runtime-1",
+                desired_generation=1,
+            ),
+        )
+    ]
 
 
 @pytest.mark.asyncio

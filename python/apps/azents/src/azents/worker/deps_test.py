@@ -11,6 +11,7 @@ from azents_runtime_control.grpc_transfer_coordinator_client import (
 from azents.core.config import Config
 from azents.runtime.transfer.runtime_to_server import RuntimeToServerTransferService
 from azents.services.exchange_file import ExchangeFileService
+from azents.services.model_file import ModelFileService
 from azents.worker.deps import (
     create_worker_external_channel_inbound_staging_configuration,
     create_worker_transfer_services,
@@ -40,6 +41,7 @@ def test_worker_transfer_services_remain_absent_without_coordinator() -> None:
         coordinator=None,
         s3_service=cast(S3Service, object()),
         exchange_file_service=cast(ExchangeFileService, object()),
+        model_file_service=cast(ModelFileService, object()),
     )
 
     assert services.server_to_runtime is None
@@ -56,6 +58,7 @@ def test_worker_transfer_services_share_only_the_injected_coordinator() -> None:
         coordinator=coordinator,
         s3_service=cast(S3Service, object()),
         exchange_file_service=cast(ExchangeFileService, object()),
+        model_file_service=cast(ModelFileService, object()),
     )
 
     assert services.server_to_runtime is not None
@@ -106,6 +109,7 @@ def test_worker_transfer_services_use_the_configured_transfer_object_prefix() ->
         coordinator=cast(GrpcRuntimeTransferCoordinatorClient, object()),
         s3_service=cast(S3Service, object()),
         exchange_file_service=cast(ExchangeFileService, object()),
+        model_file_service=cast(ModelFileService, object()),
     )
 
     assert services.import_staging is not None

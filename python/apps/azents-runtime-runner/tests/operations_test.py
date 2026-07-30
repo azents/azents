@@ -178,6 +178,62 @@ async def test_file_write_read_and_list_stay_in_workspace(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_file_read_text_uses_requested_encoding_without_base64(
+    tmp_path: Path,
+) -> None:
+    """Decoded text reads emit text events instead of file chunks."""
+    path = tmp_path / "latin.txt"
+    path.write_bytes("café".encode("latin-1"))
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="file.read_text",
+            payload={
+                "path": "latin.txt",
+                "offset": 0,
+                "max_bytes": 16,
+                "encoding": "latin-1",
+            },
+        )
+    )
+
+    assert [event.event_type for event in client.events] == [
+        RuntimeRunnerEventType.ACCEPTED,
+        RuntimeRunnerEventType.STDOUT,
+        RuntimeRunnerEventType.FINAL_SUCCESS,
+    ]
+    assert client.events[1].payload == {"text": "café"}
+    assert all(
+        event.event_type is not RuntimeRunnerEventType.FILE_CHUNK
+        for event in client.events
+    )
+
+
+@pytest.mark.asyncio
+async def test_file_read_text_reports_binary_decode_error(tmp_path: Path) -> None:
+    """Binary input fails explicitly under the default UTF-8 decoder."""
+    path = tmp_path / "binary.dat"
+    path.write_bytes(b"\xff\xfe\x00")
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="file.read_text",
+            payload={"path": "binary.dat", "offset": 0, "max_bytes": 16},
+        )
+    )
+
+    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_ERROR
+    assert client.events[-1].payload == {
+        "error_code": "FILE_READ_TEXT_DECODE_ERROR",
+        "error_message": "File range cannot be decoded as utf-8",
+    }
+
+
+@pytest.mark.asyncio
 async def test_file_edit_replaces_text_in_one_native_operation(tmp_path: Path) -> None:
     """file.edit validates, replaces, and atomically saves one regular file."""
     path = tmp_path / "note.txt"

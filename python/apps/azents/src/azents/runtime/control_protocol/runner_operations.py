@@ -80,6 +80,14 @@ class RuntimeFileReadResult:
 
 
 @dataclasses.dataclass(frozen=True)
+class RuntimeFileTextReadResult:
+    """Completed bounded UTF-8 file read operation result."""
+
+    text: str
+    final_cursor: str
+
+
+@dataclasses.dataclass(frozen=True)
 class RuntimeFileListEntry:
     """Runner file list entry."""
 
@@ -511,6 +519,45 @@ class RuntimeRunnerOperationClient:
             )
         )
         return await self.resume_file_read(
+            reply_stream_id=dispatch.reply_stream_id,
+            after_cursor=None,
+            request_id=dispatch.request_id,
+            operation_id=dispatch.operation_id,
+            runtime_id=runtime_id,
+            generation=runner_generation,
+            deadline_at=deadline_at,
+        )
+
+    async def read_text_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        offset: int,
+        max_bytes: int,
+        encoding: str,
+        deadline_at: datetime,
+    ) -> RuntimeFileTextReadResult:
+        """Read one bounded decoded file range without Base64 file events."""
+        dispatch = await self._dispatch_runner_operation(
+            RuntimeRunnerOperation(
+                runtime_id=runtime_id,
+                runner_generation=runner_generation,
+                operation_type="file.read_text",
+                owner_session_id=owner_session_id,
+                payload={
+                    "path": path,
+                    "offset": offset,
+                    "max_bytes": max_bytes,
+                    "encoding": encoding,
+                },
+                deadline_at=deadline_at,
+                body_stream_id=None,
+            )
+        )
+        return await self.resume_file_text_read(
             reply_stream_id=dispatch.reply_stream_id,
             after_cursor=None,
             request_id=dispatch.request_id,
@@ -1416,6 +1463,33 @@ class RuntimeRunnerOperationClient:
         )
         return RuntimeFileReadResult(
             data=b"".join(folder.file_chunks),
+            final_cursor=final.cursor,
+        )
+
+    async def resume_file_text_read(
+        self,
+        *,
+        reply_stream_id: str,
+        after_cursor: str | None,
+        request_id: str | None = None,
+        operation_id: str | None = None,
+        runtime_id: str | None = None,
+        generation: int | None = None,
+        deadline_at: datetime,
+    ) -> RuntimeFileTextReadResult:
+        """Resume one bounded UTF-8 file read reply stream."""
+        folder = _ReplyFolder(after_cursor=after_cursor)
+        final = await self._read_until_final(
+            reply_stream_id,
+            folder,
+            request_id=request_id,
+            operation_id=operation_id,
+            runtime_id=runtime_id,
+            generation=generation,
+            deadline_at=deadline_at,
+        )
+        return RuntimeFileTextReadResult(
+            text="".join(folder.stdout),
             final_cursor=final.cursor,
         )
 

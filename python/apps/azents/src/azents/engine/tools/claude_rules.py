@@ -614,17 +614,25 @@ async def _read_rule_file_with_counts(
         if not _is_under_root(real_path, root.owner_root):
             return _ClaudeRuleReadResult(rule=None, stat_count=1, read_count=0)
         read_count = 1
-        content = await file_storage.get(path, agent_id=agent_id)
+        content = await file_storage.get_text(
+            path,
+            agent_id=agent_id,
+            offset=0,
+            max_bytes=MAX_CLAUDE_RULE_BYTES,
+            encoding="utf-8",
+        )
     except FileNotFoundError:
         return _ClaudeRuleReadResult(
             rule=None,
             stat_count=1,
             read_count=read_count,
         )
-    try:
-        rendered = truncate_claude_rule_content(content)
     except UnicodeDecodeError:
         return _ClaudeRuleReadResult(rule=None, stat_count=1, read_count=1)
+    rendered = truncate_claude_rule_content(
+        content,
+        truncated=_metadata_size(metadata) > MAX_CLAUDE_RULE_BYTES,
+    )
     return _ClaudeRuleReadResult(
         rule=ClaudeRuleFile(path=path, real_path=real_path, content=rendered),
         stat_count=1,
@@ -639,14 +647,19 @@ def _metadata_real_path(metadata: dict[str, object], path: str) -> str:
     return posixpath.normpath(path)
 
 
-def truncate_claude_rule_content(content: bytes) -> str:
+def _metadata_size(metadata: dict[str, object]) -> int:
+    """Return a non-negative byte size from Runtime file metadata."""
+    value = metadata.get("size")
+    if isinstance(value, int) and value >= 0:
+        return value
+    return 0
+
+
+def truncate_claude_rule_content(content: str, *, truncated: bool) -> str:
     """Limit Claude rule content to prompt-safe size."""
-    content.decode("utf-8")
-    data = content[:MAX_CLAUDE_RULE_BYTES]
-    text = data.decode("utf-8", errors="replace")
-    if len(content) > MAX_CLAUDE_RULE_BYTES:
-        text += "\n\n... (Claude rule truncated)"
-    return text
+    if truncated:
+        return f"{content}\n\n... (Claude rule truncated)"
+    return content
 
 
 def rule_matches_target(

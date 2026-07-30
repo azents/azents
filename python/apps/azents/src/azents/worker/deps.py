@@ -69,6 +69,7 @@ from azents.runtime.transfer.present_file_publication import (
     PresentFilePublicationService,
     RuntimeTransferObjectResolver,
 )
+from azents.runtime.transfer.runtime_image_read import RuntimeImageReadService
 from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderBatchService,
     RuntimeToProviderDeliveryService,
@@ -222,6 +223,7 @@ def get_builtin_toolkit_provider(
         coordinator=coordinator,
         s3_service=s3_service,
         exchange_file_service=exchange_file_service,
+        model_file_service=model_file_service,
     )
     return BuiltinToolkitProvider(
         exchange_file_service=exchange_file_service,
@@ -238,6 +240,7 @@ def get_builtin_toolkit_provider(
         runner_operations=runner_operations,
         project_repo=SessionWorkspaceProjectRepository(),
         server_to_runtime_transfer_service=transfer.server_to_runtime,
+        runtime_image_read_service=transfer.runtime_image_read,
         runtime_to_server_publication_service=transfer.present_file_publication,
         runtime_to_provider_delivery_service=transfer.provider_delivery,
         import_file_staging_configuration=transfer.import_staging,
@@ -313,11 +316,13 @@ class _WorkerTransferServices:
         self,
         *,
         server_to_runtime: ServerToRuntimeTransferService | None,
+        runtime_image_read: RuntimeImageReadService | None,
         present_file_publication: PresentFilePublicationService | None,
         provider_delivery: RuntimeToProviderDeliveryService | None,
         import_staging: ImportFileStagingConfiguration | None,
     ) -> None:
         self.server_to_runtime = server_to_runtime
+        self.runtime_image_read = runtime_image_read
         self.present_file_publication = present_file_publication
         self.provider_delivery = provider_delivery
         self.import_staging = import_staging
@@ -329,11 +334,13 @@ def create_worker_transfer_services(
     coordinator: GrpcRuntimeTransferCoordinatorClient | None,
     s3_service: S3Service,
     exchange_file_service: ExchangeFileService,
+    model_file_service: ModelFileService,
 ) -> _WorkerTransferServices:
     """Compose feature consumers without constructing transfer state locally."""
     if coordinator is None:
         return _WorkerTransferServices(
             server_to_runtime=None,
+            runtime_image_read=None,
             present_file_publication=None,
             provider_delivery=None,
             import_staging=None,
@@ -374,6 +381,14 @@ def create_worker_transfer_services(
     )
     return _WorkerTransferServices(
         server_to_runtime=server_to_runtime,
+        runtime_image_read=RuntimeImageReadService(
+            transfer_service=runtime_to_server,
+            resolver=resolver,
+            s3_service=s3_service,
+            model_file_service=model_file_service,
+            product_maximum_size=_TRANSFER_MAXIMUM_FILE_BYTES,
+            deadline=_TRANSFER_DEADLINE,
+        ),
         present_file_publication=PresentFilePublicationService(
             transfer_service=runtime_to_server,
             resolver=resolver,

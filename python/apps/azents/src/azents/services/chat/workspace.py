@@ -7,15 +7,22 @@ from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Literal, TypeVar, assert_never
 
+from azcommon.infra.s3.service import S3Service
 from azcommon.result import Failure, Result, Success
+from azents_runtime_control.grpc_transfer_coordinator_client import (
+    GrpcRuntimeTransferCoordinatorClient,
+)
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
+from azents.core.deps import get_config
 from azents.core.enums import (
     RuntimeDesiredState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
 )
+from azents.core.s3.deps import get_s3_service
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -32,7 +39,23 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeRunnerOperationGenerationError,
     RuntimeRunnerOperationUnavailable,
 )
-from azents.runtime.deps import get_runtime_runner_operation_client
+from azents.runtime.deps import (
+    get_api_runtime_transfer_coordinator_client,
+    get_runtime_runner_operation_client,
+)
+from azents.runtime.transfer.present_file_publication import (
+    RuntimeTransferObjectResolver,
+)
+from azents.runtime.transfer.runtime_to_server import (
+    RuntimeToServerTransferError,
+    RuntimeToServerTransferService,
+)
+from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
+from azents.runtime.transfer.workspace_download import (
+    RuntimeWorkspaceDownloadService,
+    WorkspaceDownloadError,
+    WorkspaceDownloadRequest,
+)
 
 from .data import (
     AgentNotFound,
@@ -44,13 +67,74 @@ from .data import (
 AGENT_WORKSPACE_ROOT = PurePosixPath("/workspace/agent")
 _DEFAULT_TEXT_PREVIEW_LIMIT = 64 * 1024
 _DEFAULT_MEDIA_TYPE = "application/octet-stream"
+_CONFIG_DEP = Depends(get_config)
+_S3_SERVICE_DEP = Depends(get_s3_service)
+_API_RUNTIME_TRANSFER_COORDINATOR_DEP = Depends(
+    get_api_runtime_transfer_coordinator_client
+)
 _AGENT_REPOSITORY_DEP = Depends(AgentRepository)
 _WORKSPACE_USER_REPOSITORY_DEP = Depends(WorkspaceUserRepository)
 _RUNNER_OPERATION_CLIENT_DEP = Depends(get_runtime_runner_operation_client)
 _RUNTIME_REPOSITORY_DEP = Depends(AgentRuntimeRepository)
 _SESSION_MANAGER_DEP = Depends(get_session_manager)
 _RUNNER_FILE_OPERATION_TIMEOUT_SECONDS = 120
+_WORKSPACE_DOWNLOAD_MAXIMUM_FILE_BYTES = 64 * 1024 * 1024
+_WORKSPACE_DOWNLOAD_DEADLINE = timedelta(minutes=5)
+_WORKSPACE_DOWNLOAD_STATUS_POLL_INTERVAL = timedelta(milliseconds=250)
+_WORKSPACE_DOWNLOAD_CONSUMER_RENEW_INTERVAL = timedelta(seconds=10)
 _T = TypeVar("_T")
+
+
+def get_runtime_workspace_download_service(
+    config: Config = _CONFIG_DEP,
+    s3_service: S3Service = _S3_SERVICE_DEP,
+    coordinator: GrpcRuntimeTransferCoordinatorClient | None = (
+        _API_RUNTIME_TRANSFER_COORDINATOR_DEP
+    ),
+) -> RuntimeWorkspaceDownloadService | None:
+    """Create the API-owned verified Workspace download consumer."""
+    if coordinator is None:
+        return None
+    bucket = config.workspace_s3.bucket
+    if not bucket:
+        raise ValueError("Runtime transfer requires a workspace S3 bucket")
+    return RuntimeWorkspaceDownloadService(
+        transfer_service=RuntimeToServerTransferService(
+            coordinator=coordinator,
+            clock=_utc_now,
+            status_poll_interval=_WORKSPACE_DOWNLOAD_STATUS_POLL_INTERVAL,
+            consumer_lease_renew_interval=_WORKSPACE_DOWNLOAD_CONSUMER_RENEW_INTERVAL,
+        ),
+        resolver=RuntimeTransferObjectResolver(
+            bucket=bucket,
+            object_prefix=_transfer_object_prefix(config),
+        ),
+        s3_service=s3_service,
+        product_maximum_size=_WORKSPACE_DOWNLOAD_MAXIMUM_FILE_BYTES,
+        deadline=_WORKSPACE_DOWNLOAD_DEADLINE,
+    )
+
+
+def _utc_now() -> datetime:
+    """Return the current timezone-aware UTC timestamp."""
+    return datetime.now(UTC)
+
+
+def _transfer_object_prefix(config: Config) -> str:
+    """Return the Runtime transfer object namespace for this deployment."""
+    return "/".join(
+        part.strip("/")
+        for part in (
+            config.workspace_s3.prefix,
+            config.runtime_transfer_coordinator.object_prefix,
+        )
+        if part.strip("/")
+    )
+
+
+_RUNTIME_WORKSPACE_DOWNLOAD_SERVICE_DEP = Depends(
+    get_runtime_workspace_download_service
+)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -426,12 +510,16 @@ class AgentWorkspaceFileService:
         runner_operations: RuntimeRunnerOperationClient = _RUNNER_OPERATION_CLIENT_DEP,
         runtime_repository: AgentRuntimeRepository = _RUNTIME_REPOSITORY_DEP,
         session_manager: SessionManager[AsyncSession] = _SESSION_MANAGER_DEP,
+        runtime_workspace_download_service: RuntimeWorkspaceDownloadService | None = (
+            _RUNTIME_WORKSPACE_DOWNLOAD_SERVICE_DEP
+        ),
     ) -> None:
         self._agent_repository = agent_repository
         self._workspace_user_repository = workspace_user_repository
         self._runner_operations = runner_operations
         self._runtime_repository = runtime_repository
         self._session_manager = session_manager
+        self._runtime_workspace_download_service = runtime_workspace_download_service
 
     async def get_workspace(
         self,
@@ -699,7 +787,12 @@ class AgentWorkspaceFileService:
                     case _:
                         assert_never(entries_result)
             case "file":
-                read_result = await self._read_file(runtime, path, limit=limit)
+                read_result = await self._read_file(
+                    runtime,
+                    path,
+                    size_bytes=stat.size_bytes,
+                    limit=limit,
+                )
                 match read_result:
                     case Success(file):
                         return Success(file)
@@ -1034,14 +1127,44 @@ class AgentWorkspaceFileService:
         except AgentWorkspacePathDenied as error:
             return Failure(error)
 
-        read_result = await self._runner_read_file(runtime, path, max_bytes=None)
-        match read_result:
-            case Success(data):
+        stat_result = await self._stat_path(runtime, path)
+        match stat_result:
+            case Success(stat):
                 pass
             case Failure(error):
                 return Failure(error)
             case _:
-                assert_never(read_result)
+                assert_never(stat_result)
+        target_kind = stat.resolved_kind if stat.kind == "symlink" else stat.kind
+        if target_kind == "missing":
+            return Failure(AgentWorkspaceFileNotFound())
+        if target_kind != "file" or stat.size_bytes is None:
+            return Failure(
+                AgentWorkspaceInvalidOperation(
+                    detail="Agent Workspace download requires a regular file."
+                )
+            )
+        service = self._runtime_workspace_download_service
+        if service is None:
+            return Failure(
+                AgentWorkspaceFileReadError(
+                    detail="Runtime Workspace transfer is unavailable."
+                )
+            )
+        try:
+            data = await service.download(
+                WorkspaceDownloadRequest(
+                    agent_id=agent_id,
+                    runtime_path=path.as_posix(),
+                    expected_size=stat.size_bytes,
+                    target=ServerToRuntimeTarget(
+                        runtime_id=runtime.id,
+                        desired_generation=runtime.runner_generation,
+                    ),
+                )
+            )
+        except (RuntimeToServerTransferError, WorkspaceDownloadError) as error:
+            return Failure(AgentWorkspaceFileReadError(detail=str(error)))
         return Success((path, data, _guess_media_type(path)))
 
     async def _prepare_workspace_path(
@@ -1181,33 +1304,42 @@ class AgentWorkspaceFileService:
         self,
         runtime: AgentRuntime,
         path: PurePosixPath,
+        *,
+        size_bytes: int | None,
         limit: int,
     ) -> Result[AgentWorkspaceFileResult, AgentWorkspaceError]:
         """Create Agent Workspace file preview."""
-        data_result = await self._runner_read_file(runtime, path, max_bytes=limit + 1)
-        match data_result:
-            case Success(data):
-                pass
-            case Failure(error):
-                return Failure(error)
-            case _:
-                assert_never(data_result)
-
-        size = len(data)
-        if size > limit:
-            return Failure(AgentWorkspaceFileTooLarge(size=len(data), limit=limit))
-        preview_bytes = data[:limit]
-        text: str | None
-        try:
-            text = preview_bytes.decode("utf-8")
-        except UnicodeDecodeError:
+        if size_bytes is None:
+            return Failure(
+                AgentWorkspaceFileReadError(
+                    detail="Runtime file metadata did not include a file size."
+                )
+            )
+        if size_bytes > limit:
+            return Failure(AgentWorkspaceFileTooLarge(size=size_bytes, limit=limit))
+        media_type = _guess_media_type(path)
+        if _is_text_preview_candidate(media_type):
+            text_result = await self._runner_read_text_file(
+                runtime,
+                path,
+                max_bytes=limit,
+                encoding="utf-8",
+            )
+            match text_result:
+                case Success(text):
+                    pass
+                case Failure(error):
+                    return Failure(error)
+                case _:
+                    assert_never(text_result)
+        else:
             text = None
         return Success(
             AgentWorkspaceFile(
                 type="FILE",
                 path=path.as_posix(),
-                media_type=_guess_media_type(path),
-                size=size,
+                media_type=media_type,
+                size=size_bytes,
                 text=text,
                 truncated=False,
             )
@@ -1258,25 +1390,27 @@ class AgentWorkspaceFileService:
         except RuntimeRunnerOperationFailedError as error:
             return _runner_file_error(error)
 
-    async def _runner_read_file(
+    async def _runner_read_text_file(
         self,
         runtime: AgentRuntime,
         path: PurePosixPath,
         *,
-        max_bytes: int | None,
-    ) -> Result[bytes, AgentWorkspaceError]:
-        """Read a file through the active Runtime Runner."""
+        max_bytes: int,
+        encoding: str,
+    ) -> Result[str, AgentWorkspaceError]:
+        """Read bounded decoded preview text through the active Runtime Runner."""
         try:
-            result = await self._runner_operations.read_file(
+            result = await self._runner_operations.read_text_file(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 owner_session_id=None,
                 path=path.as_posix(),
                 offset=0,
                 max_bytes=max_bytes,
+                encoding=encoding,
                 deadline_at=_runner_file_operation_deadline(),
             )
-            return Success(result.data)
+            return Success(result.text)
         except RuntimeRunnerOperationUnavailable as error:
             return Failure(AgentWorkspaceFileReadError(detail=str(error)))
         except RuntimeRunnerOperationGenerationError as error:
@@ -1307,6 +1441,15 @@ def _runner_file_error(
 def _runner_file_operation_deadline() -> datetime:
     """Return Agent Workspace file operation round trip deadline."""
     return datetime.now(UTC) + timedelta(seconds=_RUNNER_FILE_OPERATION_TIMEOUT_SECONDS)
+
+
+def _is_text_preview_candidate(media_type: str) -> bool:
+    """Return whether a media type should use bounded UTF-8 preview reads."""
+    return media_type.startswith("text/") or media_type in {
+        "application/json",
+        "application/xml",
+        "application/yaml",
+    }
 
 
 def _is_runner_unavailable_detail(detail: str) -> bool:

@@ -123,25 +123,28 @@ class _CountingStorage(FakeSharedStorage):
         self.stat_calls.append(path)
         return await super().stat(path, agent_id=agent_id, user_id=user_id)
 
-    async def get(
+    async def get_text(
         self,
         path: str,
         *,
         agent_id: str = "",
         user_id: str = "",
-        limit: int = 0,
-    ) -> bytes:
+        offset: int,
+        max_bytes: int,
+        encoding: str,
+    ) -> str:
         """Count and optionally block candidate content reads."""
         self.get_calls.append(path)
         if self.get_started_event is not None:
             self.get_started_event.set()
         if self.get_continue_event is not None:
             await self.get_continue_event.wait()
-        return await super().get(
+        return await super().get_text(
             path,
             agent_id=agent_id,
-            user_id=user_id,
-            limit=limit,
+            offset=offset,
+            max_bytes=max_bytes,
+            encoding=encoding,
         )
 
 
@@ -710,7 +713,7 @@ class TestClaudeRulesToolkit:
 
 def test_truncate_claude_rule_content_uses_claude_rule_marker() -> None:
     """Truncation uses the Claude-rule-specific marker."""
-    content = truncate_claude_rule_content(("a" * 70_000).encode())
+    content = truncate_claude_rule_content("a" * 65_536, truncated=True)
 
     assert content.endswith("\n\n... (Claude rule truncated)")
 

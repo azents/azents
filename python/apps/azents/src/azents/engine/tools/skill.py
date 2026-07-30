@@ -463,26 +463,23 @@ class SkillProjectionService:
     ) -> SkillProjectionItem | None:
         """Read and parse one SKILL.md file."""
         try:
-            result = await runner_operations.read_file(
+            result = await runner_operations.read_text_file(
                 runtime_id=runtime_id,
                 runner_generation=runner_generation,
                 owner_session_id=owner_session_id,
                 path=skill_path,
                 offset=0,
                 max_bytes=_SKILL_READ_MAX_BYTES,
+                encoding="utf-8",
                 deadline_at=_runner_file_operation_deadline(),
             )
         except (
             RuntimeRunnerOperationUnavailable,
             RuntimeRunnerOperationGenerationError,
             RuntimeRunnerOperationFailedError,
-            UnicodeDecodeError,
         ):
             return None
-        try:
-            body = result.data.decode("utf-8")
-        except UnicodeDecodeError:
-            return None
+        body = result.text
         skill_dir_path = posixpath.dirname(skill_path)
         slug = posixpath.basename(skill_dir_path)
         metadata = _parse_frontmatter(body)

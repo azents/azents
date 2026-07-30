@@ -46,7 +46,7 @@ class TestReadTextFromSessionData:
         # Then: full content is included
         assert isinstance(result, str)
         assert "Hello, world!" in result
-        assert "chars 0-13 of 13" in result
+        assert "bytes 0-13" in result
 
     async def test_read_with_offset(self) -> None:
         """Read from the middle with offset."""
@@ -61,7 +61,7 @@ class TestReadTextFromSessionData:
 
         # Then: read from 50th character
         assert isinstance(result, str)
-        assert "chars 50-100 of 100" in result
+        assert "bytes 50-100" in result
 
     async def test_read_with_limit(self) -> None:
         """Read only beginning with limit."""
@@ -76,7 +76,7 @@ class TestReadTextFromSessionData:
 
         # Then: return only 5000 chars and include guidance to read more
         assert isinstance(result, str)
-        assert "chars 0-5000 of 20000" in result
+        assert "bytes 0-5000" in result
         assert "Use offset=5000 to read more" in result
 
     async def test_read_with_offset_and_limit(self) -> None:
@@ -94,7 +94,7 @@ class TestReadTextFromSessionData:
 
         # Then: return range 100-300
         assert isinstance(result, str)
-        assert "chars 100-300 of 500" in result
+        assert "bytes 100-300" in result
 
     async def test_offset_beyond_file_length(self) -> None:
         """Return empty content when offset exceeds file length."""
@@ -108,7 +108,7 @@ class TestReadTextFromSessionData:
 
         # Then: empty content, range display
         assert isinstance(result, str)
-        assert "chars 2-2 of 2" in result
+        assert "bytes 100-100" in result
 
     async def test_no_more_hint_when_fully_read(self) -> None:
         """No 'Use offset' guidance when entire file is read."""
@@ -121,6 +121,24 @@ class TestReadTextFromSessionData:
         # Then: no guidance to read more
         assert isinstance(result, str)
         assert "Use offset" not in result
+
+    async def test_read_uses_explicit_encoding(self) -> None:
+        """Decode a text file with the caller-selected encoding."""
+        tool, _ = _make_tool(
+            files={"/workspace/agent/latin.txt": "café".encode("latin-1")}
+        )
+
+        result = await tool.handler(
+            json.dumps(
+                {
+                    "path": "/workspace/agent/latin.txt",
+                    "encoding": "latin-1",
+                }
+            )
+        )
+
+        assert isinstance(result, str)
+        assert "café" in result
 
 
 # ---------------------------------------------------------------------------
@@ -148,10 +166,10 @@ class TestReadTextErrors:
         assert "present_file" not in message
 
     async def test_binary_file_utf8_decode_error(self) -> None:
-        """Non-UTF-8 binary file raises FunctionToolError."""
+        """Binary data raises a deterministic decode error."""
         # Given: binary data
         tool, _ = _make_tool(files={"/workspace/agent/binary.dat": b"\xff\xfe\x00\x01"})
 
         # When/Then: FunctionToolError
-        with pytest.raises(FunctionToolError, match="not valid UTF-8"):
+        with pytest.raises(FunctionToolError, match="cannot be decoded as utf-8"):
             await tool.handler(json.dumps({"path": "/workspace/agent/binary.dat"}))
