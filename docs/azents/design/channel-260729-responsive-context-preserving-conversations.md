@@ -2,6 +2,7 @@
 title: "Responsive Context-Preserving External Conversations Design"
 created: 2026-07-29
 updated: 2026-07-29
+implemented: 2026-07-30
 tags: [external-channel, slack, discord, backend, reliability, testing]
 document_role: primary
 document_type: design
