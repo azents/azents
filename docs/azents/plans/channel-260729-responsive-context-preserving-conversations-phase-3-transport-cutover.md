@@ -214,17 +214,20 @@ tags: [external-channel, ingress, slack, discord, cutover]
     required by the cutover reader and verifies that credentials and provider bodies are
     absent from evidence. Test cleanup uses API finalizers, and Socket Mode uses unique
     App/Team identities so one failed journey cannot contaminate a later claim.
-  - Two `strict=True` custom-exception xfails mark only the remaining Phase 4
+  - Three `strict=True` custom-exception xfails mark only the remaining Phase 4
     qualification boundaries: canonical provider-history revision/permalink persistence
     after an approval control is delivered, and new selector-control ownership after the
-    callback is durably accepted. HTTP 500, missing acknowledgement, missing approval
-    control, unexpected timeout, teardown failure, or any other exception remains a
-    normal failure. Phase 4 removes both markers and requires both journeys to pass.
+    callback is durably accepted, plus deterministic provider-progress fixture
+    qualification after the binding becomes active. HTTP 500, missing acknowledgement,
+    missing approval control, a timeout outside those exact qualification boundaries,
+    teardown failure, or any other exception remains a normal failure. Phase 4 removes
+    all three markers and requires all three journeys to pass.
   - Final validation on the remediated integrated diff: Ruff format/check passed; backend
     and E2E Pyright each reported `0 errors`; focused route/admission/repository and Slack
     fake tests passed; the complete backend suite reported `3820 passed, 17 warnings`;
-    deterministic E2E reported `288 passed, 6 skipped, 24 deselected, 2 xfailed`; and
-    `git diff --check` passed.
+    deterministic E2E reported `288 passed, 6 skipped, 24 deselected, 2 xfailed`;
+    the focused runtime-provider progress journey reached the exact Phase 4 boundary and
+    reported `1 xfailed`; and `git diff --check` passed.
   - Remaining Phase 4 scope is deterministic provider-fake and E2E cutover qualification,
     acknowledgement timing evidence, concurrency/duplicate proof across lock backends,
     and the qualification report. This PR does not contract legacy schema/code, alter
