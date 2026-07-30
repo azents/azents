@@ -2920,34 +2920,6 @@ class ExternalChannelRepository:
         )
         return self._as(ExternalChannelMessage, rdb)
 
-    async def update_message_identity_metadata(
-        self,
-        session: AsyncSession,
-        *,
-        message_id: str,
-        principal_id: str | None,
-        author_type: ExternalChannelPrincipalAuthorType,
-        provider_created_at: datetime.datetime | None,
-        provider_updated_at: datetime.datetime | None,
-    ) -> ExternalChannelMessage | None:
-        """Apply provider-history identity metadata without retaining content."""
-        rdb = await session.scalar(
-            sa.select(RDBExternalChannelMessage)
-            .where(RDBExternalChannelMessage.id == message_id)
-            .with_for_update()
-        )
-        if rdb is None:
-            return None
-        rdb.principal_id = principal_id
-        rdb.author_type = author_type
-        if provider_created_at is not None:
-            rdb.provider_created_at = provider_created_at
-        if provider_updated_at is not None:
-            rdb.provider_updated_at = provider_updated_at
-        await session.flush()
-        await session.refresh(rdb)
-        return ExternalChannelMessage.model_validate(rdb)
-
     async def create_message_revision_idempotent(
         self,
         session: AsyncSession,

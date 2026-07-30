@@ -61,6 +61,9 @@ from azents.repos.external_channel.data import (
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.conversation import ExternalChannelHistoryRange
+from azents.services.external_channel.discord_selector_scope import (
+    build_discord_selector_custom_id,
+)
 from azents.services.external_channel.ingestion import (
     ExternalChannelCanonicalHistoryMessage,
     ExternalChannelIngestionAcceptance,
@@ -95,6 +98,14 @@ class _ResolvedRouting:
     route: ExternalChannelAgentRoute
     binding: ExternalChannelBinding | None
     admission: ExternalChannelConversationAdmission | None
+
+
+@dataclasses.dataclass(frozen=True)
+class _PendingSelection:
+    """Locked route-selection state for one unbound conversation."""
+
+    resource: ExternalChannelResource
+    admission: ExternalChannelConversationAdmission
 
 
 @dataclasses.dataclass(frozen=True)
@@ -162,6 +173,7 @@ class ExternalChannelDatabaseIngestionStore:
                 connection_id=request.locator.connection_id,
                 provider_resource_key=request.locator.provider_resource_key,
             )
+            metadata_source_created = resource is None
             if request.replay_boundary is not None and (
                 resource is None
                 or not await self._replay_source_matches(
@@ -237,6 +249,7 @@ class ExternalChannelDatabaseIngestionStore:
                 and admission.status
                 is ExternalChannelConversationAdmissionStatus.PENDING_SELECTION
                 and request.selected_route_id is None
+                and not metadata_source_created
             ):
                 await session.commit()
                 return _immediate(
@@ -296,6 +309,56 @@ class ExternalChannelDatabaseIngestionStore:
             ):
                 await session.rollback()
                 return _position_mismatch()
+            trigger = history.trigger
+            if (
+                trigger.provider_message_key
+                != request.locator.trigger_provider_message_key
+                or trigger.provider_position != request.locator.trigger_position
+            ):
+                return _rejected(ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY)
+            pending_selection = await self._lock_pending_selection(
+                session,
+                request=request,
+                position=position,
+            )
+            if pending_selection is not None:
+                if (
+                    trigger.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
+                    or trigger.provider_user_id is None
+                ):
+                    return await self._commit_ignored_position(
+                        session,
+                        request=request,
+                        position=position,
+                        replay_after_position=replay_after_position,
+                        reason=ExternalChannelIngestionReason.AUTHOR_NOT_ELIGIBLE,
+                    )
+                await self._persist_history_message(
+                    session,
+                    request=request,
+                    resource=pending_selection.resource,
+                    message=trigger,
+                )
+                control_delivery_attempt_id = (
+                    await self._create_selector_control_intent(
+                        session,
+                        request=request,
+                        admission=pending_selection.admission,
+                    )
+                )
+                await session.commit()
+                return ExternalChannelIngestionAcceptance(
+                    status="awaiting_selection",
+                    reason=ExternalChannelIngestionReason.SELECTION_REQUIRED,
+                    batch_id=None,
+                    session_id=None,
+                    control_delivery_attempt_id=control_delivery_attempt_id,
+                    connection_id=(
+                        connection.id
+                        if control_delivery_attempt_id is not None
+                        else None
+                    ),
+                )
             routing = await self._lock_routing(
                 session,
                 request=request,
@@ -304,13 +367,6 @@ class ExternalChannelDatabaseIngestionStore:
                 return _rejected(
                     ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
                 )
-            trigger = history.trigger
-            if (
-                trigger.provider_message_key
-                != request.locator.trigger_provider_message_key
-                or trigger.provider_position != request.locator.trigger_position
-            ):
-                return _rejected(ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY)
             if (
                 trigger.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
                 or trigger.provider_user_id is None
@@ -330,37 +386,16 @@ class ExternalChannelDatabaseIngestionStore:
                     replay_after_position=replay_after_position,
                     reason=ExternalChannelIngestionReason.NOT_AN_INVOCATION,
                 )
-            trigger_principal_id = await self._persist_principal(
+            persisted_source = await self._persist_history_message(
                 session,
                 request=request,
+                resource=routing.resource,
                 message=trigger,
             )
-            source_message = await self.repository.create_message_idempotent(
-                session,
-                ExternalChannelMessageCreate(
-                    resource_id=routing.resource.id,
-                    provider_message_key=trigger.provider_message_key,
-                    provider_position=trigger.provider_position,
-                    principal_id=trigger_principal_id,
-                    author_type=trigger.author_type,
-                    current_revision_id=None,
-                    original_url=None,
-                    lifecycle=trigger.lifecycle,
-                    pending_size=0,
-                    provider_created_at=trigger.provider_created_at,
-                    provider_updated_at=trigger.provider_updated_at,
-                ),
-            )
-            source_message = await self.repository.update_message_identity_metadata(
-                session,
-                message_id=source_message.id,
-                principal_id=trigger_principal_id,
-                author_type=trigger.author_type,
-                provider_created_at=trigger.provider_created_at,
-                provider_updated_at=trigger.provider_updated_at,
-            )
-            if source_message is None:
-                raise RuntimeError("External Channel source message disappeared.")
+            source_message = persisted_source.message
+            trigger_principal_id = source_message.principal_id
+            if trigger_principal_id is None:
+                raise RuntimeError("External Channel trigger principal disappeared.")
             agent_id = routing.route.require_active_agent_id()
             if (
                 await self.repository.get_active_block(
@@ -859,6 +894,60 @@ class ExternalChannelDatabaseIngestionStore:
             admission=admission,
         )
 
+    async def _lock_pending_selection(
+        self,
+        session: AsyncSession,
+        *,
+        request: ExternalChannelIngestionRequest,
+        position: ExternalChannelConversationPosition,
+    ) -> _PendingSelection | None:
+        """Lock one still-unbound selector admission after provider history I/O."""
+        if request.selected_route_id is not None:
+            return None
+        resource = await self.repository.get_resource_by_provider_key(
+            session,
+            connection_id=request.locator.connection_id,
+            provider_resource_key=request.locator.provider_resource_key,
+        )
+        if resource is None:
+            return None
+        resource = await self.repository.lock_resource(
+            session,
+            resource_id=resource.id,
+        )
+        if (
+            resource is None
+            or resource.status is not ExternalChannelResourceStatus.ACTIVE
+            or not await self._replay_source_matches(
+                session,
+                request=request,
+                resource=resource,
+            )
+        ):
+            return None
+        if (
+            await self.repository.lock_active_binding_by_resource(
+                session,
+                resource_id=resource.id,
+            )
+            is not None
+        ):
+            return None
+        admission = await self.repository.lock_open_conversation_admission(
+            session,
+            resource_id=resource.id,
+        )
+        if (
+            admission is None
+            or admission.status
+            is not ExternalChannelConversationAdmissionStatus.PENDING_SELECTION
+            or admission.selected_route_id is not None
+            or admission.conversation_position_id != position.id
+            or admission.trigger_position != request.locator.trigger_position
+        ):
+            return None
+        return _PendingSelection(resource=resource, admission=admission)
+
     async def _create_binding(
         self,
         session: AsyncSession,
@@ -989,6 +1078,86 @@ class ExternalChannelDatabaseIngestionStore:
                 ),
                 attempted_at=None,
                 completed_at=None if approval_url is not None else now,
+            ),
+        )
+        if attempt.status is ExternalChannelDeliveryStatus.PENDING:
+            return attempt.id
+        return None
+
+    async def _create_selector_control_intent(
+        self,
+        session: AsyncSession,
+        *,
+        request: ExternalChannelIngestionRequest,
+        admission: ExternalChannelConversationAdmission,
+    ) -> str | None:
+        """Create or reuse one durable provider-native Agent selector control."""
+        delivery_channel_id = request.locator.delivery_thread_key
+        if delivery_channel_id is None:
+            raise RuntimeError(
+                "External Channel selector delivery target is unavailable."
+            )
+        if request.locator.provider is ExternalChannelProvider.SLACK:
+            payload: dict[str, object] = {
+                "provider": "slack",
+                "control_kind": "agent_selector",
+                "tenant_id": request.locator.provider_tenant_id,
+                "channel_id": request.locator.provider_channel_id,
+                "thread_ts": delivery_channel_id,
+                "conversation_admission_id": admission.id,
+            }
+        elif request.locator.provider is ExternalChannelProvider.DISCORD:
+            payload = {
+                "provider": "discord",
+                "control_kind": "agent_selector",
+                "guild_id": request.locator.provider_tenant_id,
+                "channel_id": delivery_channel_id,
+                "conversation_admission_id": admission.id,
+                "text": "Select an Agent to continue this conversation.",
+                "embeds": [
+                    {
+                        "title": "Select an Agent",
+                        "description": (
+                            "Choose the Agent that should continue this conversation."
+                        ),
+                        "color": 0x5865F2,
+                    }
+                ],
+                "components": [
+                    {
+                        "type": 1,
+                        "components": [
+                            {
+                                "type": 2,
+                                "style": 1,
+                                "label": "Select Agent",
+                                "custom_id": build_discord_selector_custom_id(
+                                    secret=self.config.auth.jwt.secret_key,
+                                    admission_id=admission.id,
+                                    action="open",
+                                ),
+                            }
+                        ],
+                    }
+                ],
+            }
+        else:
+            raise RuntimeError("External Channel provider is not supported.")
+        attempt = await self.repository.create_delivery_attempt_idempotent(
+            session,
+            ExternalChannelDeliveryAttemptCreate(
+                origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                origin_id=admission.id,
+                channel_action_id=None,
+                binding_id=None,
+                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                request_payload=payload,
+                status=ExternalChannelDeliveryStatus.PENDING,
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+                attempted_at=None,
+                completed_at=None,
             ),
         )
         if attempt.status is ExternalChannelDeliveryStatus.PENDING:
