@@ -31,7 +31,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-30
-spec_version: 22
+spec_version: 23
 ---
 
 # External Channel Delivery and Channel Work
@@ -187,6 +187,8 @@ manifests and delivery evidence, never file bytes.
 
 For a Discord root-message resource, the first route-resolved outbound intent ensures
 one provider thread and records its returned channel ID on the resource under a lock.
+New provider threads explicitly use Discord's minimum supported 60-minute automatic
+archive duration instead of inheriting the parent channel default.
 All later newly planned approval, Session navigation, reply, file, progress, recovery,
 and cleanup intents use that retained delivery channel. Existing threads already use
 their retained delivery channel. A failed or ambiguous thread creation is a terminal
