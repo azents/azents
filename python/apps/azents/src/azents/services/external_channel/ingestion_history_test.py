@@ -5,7 +5,7 @@ import datetime
 from contextlib import AbstractAsyncContextManager
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, call
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -125,7 +125,12 @@ async def test_slack_history_uses_native_trigger_and_returns_canonical_messages(
         get_permalink=AsyncMock(
             return_value="https://example.slack.com/archives/channel-1/p2000000"
         ),
-        fetch_user_display_name=AsyncMock(return_value="Reviewer"),
+        fetch_user_display_name=AsyncMock(
+            side_effect=lambda *, bot_token, provider_user_id: {
+                "participant-1": "Participant",
+                "UREVIEWER": "Reviewer",
+            }[provider_user_id]
+        ),
         fetch_channel_display_name=AsyncMock(return_value="#related"),
     )
     repository = SimpleNamespace(
@@ -175,19 +180,24 @@ async def test_slack_history_uses_native_trigger_and_returns_canonical_messages(
         deadline=_deadline(),
     )
 
-    call = slack_client.read_range.await_args.kwargs
-    assert call["trigger"].trigger_message_ts == "2.000000"
-    assert call["trigger"].root_thread_ts == "1.000000"
-    assert call["bot_token"] == "secret-bot-token"
+    read_range_call = slack_client.read_range.await_args.kwargs
+    assert read_range_call["trigger"].trigger_message_ts == "2.000000"
+    assert read_range_call["trigger"].root_thread_ts == "1.000000"
+    assert read_range_call["bot_token"] == "secret-bot-token"
     assert history.trigger.normalized_body == (
         "Slack history body for <@UREVIEWER> in <#CRELATED>"
     )
     assert history.trigger.provider_message_key == message.provider_message_key
     assert history.trigger.reference_mappings == {
-        "users": {"UREVIEWER": "Reviewer"},
+        "users": {
+            "UREVIEWER": "Reviewer",
+            "participant-1": "Participant",
+        },
         "channels": {"CRELATED": "#related"},
     }
     assert history.messages[0].reference_mappings == history.trigger.reference_mappings
+    assert history.trigger.sender_display_name == "Participant"
+    assert history.messages[0].sender_display_name == "Participant"
     assert (
         history.trigger.original_url
         == "https://example.slack.com/archives/channel-1/p2000000"
@@ -198,9 +208,18 @@ async def test_slack_history_uses_native_trigger_and_returns_canonical_messages(
         channel_id="channel-1",
         message_ts="2.000000",
     )
-    slack_client.fetch_user_display_name.assert_awaited_once_with(
-        bot_token="secret-bot-token",
-        provider_user_id="UREVIEWER",
+    slack_client.fetch_user_display_name.assert_has_awaits(
+        [
+            call(
+                bot_token="secret-bot-token",
+                provider_user_id="UREVIEWER",
+            ),
+            call(
+                bot_token="secret-bot-token",
+                provider_user_id="participant-1",
+            ),
+        ],
+        any_order=True,
     )
     slack_client.fetch_channel_display_name.assert_awaited_once_with(
         bot_token="secret-bot-token",
@@ -271,9 +290,9 @@ async def test_discord_history_preserves_reference_mappings() -> None:
         deadline=_deadline(),
     )
 
-    call = discord_client.read_range.await_args.kwargs
-    assert call["trigger"].conversation_channel_id == "300"
-    assert call["trigger"].trigger_message_id == "2"
+    read_range_call = discord_client.read_range.await_args.kwargs
+    assert read_range_call["trigger"].conversation_channel_id == "300"
+    assert read_range_call["trigger"].trigger_message_id == "2"
     assert history.context_omitted is True
     assert history.trigger.reference_mappings == {
         "users": {"participant-1": "Participant"}

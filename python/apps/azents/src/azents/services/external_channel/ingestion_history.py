@@ -249,10 +249,12 @@ async def _optional_slack_reference_cache(
     messages: tuple[SlackNormalizedMessage, ...],
     deadline: ExternalChannelOperationDeadline,
 ) -> dict[str, dict[str, str]]:
-    """Resolve bounded provider-history references without blocking admission."""
+    """Resolve bounded Slack senders and references without blocking admission."""
     user_ids: set[str] = set()
     channel_ids: set[str] = set()
     for message in messages:
+        if message.provider_user_id is not None:
+            user_ids.add(message.provider_user_id)
         message_user_ids, message_channel_ids = slack_message_reference_ids(
             message.normalized_body
         )
@@ -305,6 +307,8 @@ def _canonical_slack(
 ) -> ExternalChannelCanonicalHistoryMessage:
     """Convert one normalized Slack history item without a raw event dependency."""
     user_ids, channel_ids = slack_message_reference_ids(message.normalized_body)
+    if message.provider_user_id is not None:
+        user_ids.add(message.provider_user_id)
     reference_mappings: dict[str, object] = {}
     users = {
         user_id: reference_cache["users"][user_id]
@@ -328,7 +332,11 @@ def _canonical_slack(
         lifecycle=message.lifecycle,
         author_type=message.author_type,
         provider_user_id=message.provider_user_id,
-        sender_display_name=None,
+        sender_display_name=(
+            None
+            if message.provider_user_id is None
+            else reference_cache["users"].get(message.provider_user_id)
+        ),
         normalized_body=message.normalized_body,
         attachment_metadata=message.attachment_metadata,
         reference_mappings=reference_mappings or None,

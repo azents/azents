@@ -54,7 +54,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-30
-spec_version: 26
+spec_version: 27
 ---
 
 # External Channel
@@ -100,7 +100,7 @@ contain multiple independent bindings.
 | Resource | One provider conversation: a Slack thread or Discord root/thread, with provider labels, availability, latest activity, and any provisioned delivery-thread identity. Discord labels separately retain source channel, parent channel, root message, existing thread, and provisioned delivery thread identities. |
 | Conversation position | Durable read-through position for one connection-scoped parent channel or thread. PostgreSQL position compare-and-set is the ordering authority across retries and replicas. |
 | Principal | Provider tenant/user identity and author category. It is not an Azents User or WorkspaceUser. |
-| Message and revision | Canonical provider-history snapshot plus immutable accepted revisions. Slack messages prefer non-blank fallback text and otherwise derive bounded readable text from supported Block Kit content. Discord messages are normalized only after target-Guild, author, content, and message eligibility checks. Raw callback payloads are never canonical content authority. Revisions retain optional bounded provider identity mappings and up to 20 metadata-only file entries. Supported entries expose binding-scoped opaque locators; private URLs and file bodies are never persisted or rendered. |
+| Message and revision | Canonical provider-history snapshot plus immutable accepted revisions. Slack messages prefer non-blank fallback text and otherwise derive bounded readable text from supported Block Kit content. Slack identity mappings include each retained message sender as well as bounded body references. Discord messages are normalized only after target-Guild, author, content, and message eligibility checks. Raw callback payloads are never canonical content authority. Revisions retain optional bounded provider identity mappings and up to 20 metadata-only file entries. Supported entries expose binding-scoped opaque locators; private URLs and file bodies are never persisted or rendered. |
 | Binding | Active or disconnected link from one route/resource to one AgentSession. A new authorized conversation creates an active binding in the final synchronous acceptance transaction. |
 | Invocation batch | Immutable ordered revision membership released through one authorized trigger, linked to its conversation position and mailbox item, and carrying recoverable wake-dispatch state. |
 | Access request/grant/block | Opaque approval request, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
@@ -288,6 +288,8 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-30** (spec_version 27) — Slack history identity enrichment now resolves
+  retained message senders even when their IDs do not appear in the message body.
 - **2026-07-30** (spec_version 26) — Replaced durable provider events,
   hydration/pending-context activation, and truncation projections with typed
   synchronous ingestion, parent/thread conversation positions, immutable invocation
