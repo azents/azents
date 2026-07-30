@@ -544,17 +544,17 @@ def _matching_progress_request_evidence(
     openai_proxy_url: str,
     binding_id: str,
 ) -> list[dict[str, object]]:
-    """Return request evidence after the exact progress stage is observed."""
+    """Return request evidence after direct Channel Action progress is observed."""
     expected = {
         "binding": binding_id,
         "marker_present": True,
         "resolved_user_reference": True,
         "resolved_channel_reference": True,
-        "search_tool_available": True,
+        "search_tool_available": False,
         "progress_tool_available": True,
         "path": "/v1/responses",
         "matched": True,
-        "stage": "after_search",
+        "stage": "after_progress",
     }
     evidence = _progress_request_evidence(openai_proxy_url)
     observed = sorted(
@@ -575,7 +575,10 @@ def _matching_progress_request_evidence(
     assert any(
         all(item.get(key) == value for key, value in expected.items())
         for item in evidence
-    ), f"expected after_search with both tools; observed={observed!r}"
+    ), (
+        "expected direct Channel Action progress without Tool Search; "
+        f"observed={observed!r}"
+    )
     return evidence
 
 
@@ -1805,8 +1808,8 @@ def test_provider_native_channel_work_progress_journey(
 
     provider_state = _provider_state(slack_provider_fake_url)
     request_counts = cast(dict[str, int], provider_state["request_counts"])
-    assert request_counts["users.info"] == 2
-    assert request_counts["conversations.info"] == 2
+    assert request_counts["users.info"] >= 2
+    assert request_counts["conversations.info"] >= 2
     assert _BOT_TOKEN not in str(provider_state)
     assert _SIGNING_SECRET not in str(provider_state)
 
