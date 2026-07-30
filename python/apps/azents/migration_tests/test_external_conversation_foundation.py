@@ -206,7 +206,7 @@ def test_backfill_prefers_projected_boundary(
         alembic_runner,
         alembic_engine,
         projected="1.000010",
-        batch=False,
+        batch=True,
     )
     alembic_runner.migrate_up_to(_REVISION)
 
@@ -247,28 +247,76 @@ def test_backfill_uses_latest_invocation_boundary(
         )
 
 
-def test_backfill_aborts_without_identifiers(
+def test_cleanup_discards_unrecoverable_legacy_state(
     alembic_runner: MigrationContext,
     alembic_engine: Engine,
 ) -> None:
-    """Abort with aggregate-only diagnostics when no boundary is recoverable."""
+    """Discard a binding and legacy backlog when no boundary is recoverable."""
     _prepare_parent(
         alembic_runner,
         alembic_engine,
         projected=None,
         batch=False,
     )
+    with alembic_engine.begin() as connection:
+        connection.execute(
+            sa.text(
+                """
+                UPDATE external_channel_resources
+                SET hydration_status = 'incomplete'
+                WHERE id = 'resource'
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO external_channel_events (
+                    id, connection_id, provider_event_id, event_type, envelope,
+                    eligibility_state, status
+                )
+                VALUES (
+                    'event', 'c', 'event', 'message', '{}'::jsonb,
+                    'tracked', 'accepted'
+                )
+                """
+            )
+        )
 
-    try:
-        alembic_runner.migrate_up_to(_REVISION)
-    except RuntimeError as error:
-        message = str(error)
-    else:
-        raise AssertionError("Foundation migration unexpectedly accepted no boundary.")
+    alembic_runner.migrate_up_to(_REVISION)
 
-    assert "unrecoverable_active_position_count=1" in message
-    assert "binding" not in message
-    assert "resource" not in message
+    with alembic_engine.connect() as connection:
+        binding = connection.execute(
+            sa.text(
+                """
+                SELECT status, disconnect_reason
+                FROM external_channel_bindings
+                WHERE id = 'binding'
+                """
+            )
+        ).one()
+        assert binding == (
+            "disconnected",
+            "cutover_unrecoverable_state",
+        )
+        assert (
+            connection.execute(
+                sa.text("SELECT hydration_status FROM external_channel_resources")
+            ).scalar_one()
+            == "bounded"
+        )
+        assert (
+            connection.execute(
+                sa.text("SELECT count(*) FROM external_channel_events")
+            ).scalar_one()
+            == 0
+        )
+        assert (
+            connection.execute(
+                sa.text("SELECT count(*) FROM external_channel_conversation_positions")
+            ).scalar_one()
+            == 0
+        )
 
 
 def test_foundation_ddl_contract(
