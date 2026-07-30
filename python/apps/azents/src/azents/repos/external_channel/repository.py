@@ -1189,6 +1189,7 @@ class ExternalChannelRepository:
         status: ExternalChannelConnectionStatus,
         reason: str,
         now: datetime.datetime,
+        required_configuration_generation: int | None,
         required_socket_lease_owner: str | None,
         defer_provider_state_purge: bool,
     ) -> tuple[str, ...] | None:
@@ -1198,6 +1199,11 @@ class ExternalChannelRepository:
         statement = sa.select(RDBExternalChannelConnection).where(
             RDBExternalChannelConnection.id == connection_id
         )
+        if required_configuration_generation is not None:
+            statement = statement.where(
+                RDBExternalChannelConnection.configuration_generation
+                == required_configuration_generation
+            )
         if required_socket_lease_owner is not None:
             statement = statement.where(
                 RDBExternalChannelConnection.transport
@@ -1433,6 +1439,7 @@ class ExternalChannelRepository:
         connection_id: str,
         reason: str,
         now: datetime.datetime,
+        required_configuration_generation: int | None,
         required_socket_lease_owner: str | None,
     ) -> bool:
         """Record provider credential health without mutating Agent routing."""
@@ -1452,6 +1459,11 @@ class ExternalChannelRepository:
             RDBExternalChannelConnection.id == connection_id,
             RDBExternalChannelConnection.status.in_(eligible_statuses),
         )
+        if required_configuration_generation is not None:
+            statement = statement.where(
+                RDBExternalChannelConnection.configuration_generation
+                == required_configuration_generation
+            )
         if required_socket_lease_owner is not None:
             statement = statement.where(
                 RDBExternalChannelConnection.transport
@@ -2933,6 +2945,7 @@ class ExternalChannelRepository:
         if provider_updated_at is not None:
             rdb.provider_updated_at = provider_updated_at
         await session.flush()
+        await session.refresh(rdb)
         return ExternalChannelMessage.model_validate(rdb)
 
     async def create_message_revision_idempotent(

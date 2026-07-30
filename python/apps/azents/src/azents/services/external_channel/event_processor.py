@@ -3123,6 +3123,7 @@ class ExternalChannelEventProcessorService:
                     connection_id=configuration.id,
                     reason=error_kind,
                     now=_now(),
+                    required_configuration_generation=None,
                     required_socket_lease_owner=None,
                 )
             await session.commit()
@@ -3214,6 +3215,7 @@ class ExternalChannelEventProcessorService:
                     connection_id=configuration.id,
                     reason=error_kind,
                     now=_now(),
+                    required_configuration_generation=None,
                     required_socket_lease_owner=None,
                 )
             await session.commit()
@@ -3387,6 +3389,7 @@ class ExternalChannelEventProcessorService:
                     connection_id=configuration.id,
                     reason=error_kind,
                     now=_now(),
+                    required_configuration_generation=None,
                     required_socket_lease_owner=None,
                 )
             await session.commit()
@@ -3476,6 +3479,7 @@ class ExternalChannelEventProcessorService:
                     connection_id=configuration.id,
                     reason=error_kind,
                     now=_now(),
+                    required_configuration_generation=None,
                     required_socket_lease_owner=None,
                 )
             await session.commit()
@@ -4224,6 +4228,7 @@ class ExternalChannelEventProcessorService:
                         status=ExternalChannelConnectionStatus.DISCONNECTED,
                         reason=revocation.kind,
                         now=_now(),
+                        required_configuration_generation=None,
                         required_socket_lease_owner=None,
                         defer_provider_state_purge=True,
                     )
@@ -4251,6 +4256,7 @@ class ExternalChannelEventProcessorService:
                     connection_id=event.connection_id,
                     reason=revocation.kind,
                     now=_now(),
+                    required_configuration_generation=None,
                     required_socket_lease_owner=None,
                 )
             await session.commit()
@@ -4270,6 +4276,7 @@ class ExternalChannelEventProcessorService:
                 connection_id=connection_id,
                 reason=reason,
                 now=_now(),
+                required_configuration_generation=None,
                 required_socket_lease_owner=None,
             )
             await session.commit()

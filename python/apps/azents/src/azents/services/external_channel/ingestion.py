@@ -92,6 +92,7 @@ class ExternalChannelTriggerLocator:
     provider: ExternalChannelProvider
     provider_tenant_id: str
     provider_channel_id: str
+    provider_parent_channel_id: str | None
     provider_thread_key: str | None
     delivery_thread_key: str | None
     provider_resource_key: str
@@ -124,6 +125,7 @@ class ExternalChannelTriggerLocator:
                 self.provider.value,
                 self.provider_tenant_id,
                 self.provider_channel_id,
+                self.provider_parent_channel_id or "",
                 self.provider_thread_key or "",
                 self.delivery_thread_key or "",
                 self.provider_resource_key,
@@ -157,16 +159,13 @@ class ExternalChannelIngressAuthority:
         """Validate generation and lease identity shapes."""
         if self.configuration_generation < 1:
             raise ValueError("External Channel configuration generation is invalid.")
-        if (self.lease_owner is None) != (self.lease_generation is None):
-            raise ValueError("External Channel lease authority is incomplete.")
         if self.lease_generation is not None and self.lease_generation < 1:
             raise ValueError("External Channel lease generation is invalid.")
-        if self.kind is ExternalChannelIngressAuthorityKind.LEASE:
-            if self.lease_owner is None:
-                raise ValueError("External Channel lease authority is required.")
-        elif self.lease_owner is not None:
+        if self.kind is not ExternalChannelIngressAuthorityKind.LEASE and (
+            self.lease_owner is not None or self.lease_generation is not None
+        ):
             raise ValueError(
-                "External Channel non-lease authority cannot carry a lease owner."
+                "External Channel non-lease authority cannot carry lease identity."
             )
         if (
             self.kind is ExternalChannelIngressAuthorityKind.CONFIGURATION
@@ -184,6 +183,24 @@ class ExternalChannelIngressAuthority:
         ):
             raise ValueError(
                 "External Channel lease authority requires socket or gateway ingress."
+            )
+        if (
+            self.kind is ExternalChannelIngressAuthorityKind.LEASE
+            and self.ingress_profile is ExternalChannelIngressProfile.SLACK_SOCKET
+            and (self.lease_owner is None or self.lease_generation is not None)
+        ):
+            raise ValueError(
+                "External Channel Slack Socket authority requires only a lease owner."
+            )
+        if (
+            self.kind is ExternalChannelIngressAuthorityKind.LEASE
+            and self.ingress_profile
+            is ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP
+            and (self.lease_owner is None or self.lease_generation is None)
+        ):
+            raise ValueError(
+                "External Channel Discord Gateway authority requires a lease "
+                "generation."
             )
 
     def __repr__(self) -> str:

@@ -221,6 +221,7 @@ def _request(
         provider=ExternalChannelProvider.SLACK,
         provider_tenant_id="tenant-1",
         provider_channel_id="channel-1",
+        provider_parent_channel_id=None,
         provider_thread_key="thread-1",
         delivery_thread_key="thread-1",
         provider_resource_key="resource-key-1",
@@ -295,7 +296,11 @@ def test_ingress_authority_rejects_invalid_kind_profile_combinations(
                 "owner-1" if kind is ExternalChannelIngressAuthorityKind.LEASE else None
             ),
             lease_generation=(
-                1 if kind is ExternalChannelIngressAuthorityKind.LEASE else None
+                None
+                if profile is ExternalChannelIngressProfile.SLACK_SOCKET
+                else 1
+                if kind is ExternalChannelIngressAuthorityKind.LEASE
+                else None
             ),
         )
 

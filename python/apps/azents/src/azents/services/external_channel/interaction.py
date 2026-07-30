@@ -301,7 +301,7 @@ class ExternalChannelInteractionProcessor:
                 case ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS:
                     if outcome.control_delivery_attempt_id is not None:
                         assert outcome.connection_id is not None
-                        await self._attempt_control_delivery(
+                        await self.attempt_control_delivery(
                             connection_id=outcome.connection_id,
                             delivery_attempt_id=outcome.control_delivery_attempt_id,
                         )
@@ -328,13 +328,13 @@ class ExternalChannelInteractionProcessor:
                 delivery_attempt_id=continuation.control_delivery_attempt_id,
             )
 
-    async def _attempt_control_delivery(
+    async def attempt_control_delivery(
         self,
         *,
         connection_id: str,
         delivery_attempt_id: str,
     ) -> None:
-        """Attempt one committed access control through the legacy delivery adapter."""
+        """Attempt one committed access control through the provider adapter."""
         await self.event_processor.attempt_selected_admission_control_delivery(
             connection_id=connection_id,
             delivery_attempt_id=delivery_attempt_id,

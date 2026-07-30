@@ -1,4 +1,4 @@
-"""Dependency composition for dark synchronous conversation ingestion."""
+"""Dependency composition for synchronous conversation ingestion."""
 
 from typing import Annotated
 
@@ -40,7 +40,7 @@ def get_external_channel_conversation_ingestion_service(
         Depends(ExternalChannelInvocationWakeDispatcher),
     ],
 ) -> ExternalChannelConversationIngestionService:
-    """Compose the shared ingestion service without activating transport callers."""
+    """Compose the shared ingestion service for transport and replay callers."""
     return ExternalChannelConversationIngestionService(
         conversation_lock=conversation_lock,
         history_reader=history_reader,

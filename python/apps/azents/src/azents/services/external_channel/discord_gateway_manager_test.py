@@ -33,8 +33,17 @@ from azents.services.external_channel.discord_gateway import (
     DiscordGatewayMessageEvent,
 )
 from azents.services.external_channel.discord_gateway_manager import (
-    DiscordGatewayLeaseLost,
+    DiscordGatewayIngestionRetryable,
     DiscordGatewayManagerService,
+)
+from azents.services.external_channel.ingestion import (
+    ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
+    ExternalChannelIngressAuthority,
+)
+from azents.services.external_channel.transport_ingestion import (
+    ExternalChannelTransportIngestionService,
 )
 
 
@@ -61,13 +70,26 @@ class _Repository:
         self.release_calls: list[dict[str, object]] = []
         self.renew_calls: list[dict[str, object]] = []
 
-    async def admit_discord_gateway_event(
+    async def ingest_discord_event(
         self,
-        _session: object,
         **kwargs: object,
-    ) -> object | None:
+    ) -> ExternalChannelIngestionOutcome:
         self.admission_calls.append(kwargs)
-        return self.admission
+        return ExternalChannelIngestionOutcome(
+            kind=(
+                ExternalChannelIngestionOutcomeKind.ACCEPTED
+                if self.admission is not None
+                else ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE
+            ),
+            reason=(
+                ExternalChannelIngestionReason.ACCEPTED
+                if self.admission is not None
+                else ExternalChannelIngestionReason.HISTORY_UNAVAILABLE
+            ),
+            batch_id="batch-1" if self.admission is not None else None,
+            control_delivery_attempt_id=None,
+            connection_id=None,
+        )
 
     async def mark_discord_gateway_reconnect_required(
         self,
@@ -121,6 +143,7 @@ class _OwnedRepository(_Repository):
             encrypted_credentials="ciphertext",
             provider_app_id="app-1",
             provider_tenant_id="300",
+            configuration_generation=2,
         )
 
 
@@ -224,6 +247,7 @@ def _service(
         credentials_codec=(
             credentials_codec if credentials_codec is not None else MagicMock()
         ),
+        transport_ingestion_service=repository,  # type: ignore[arg-type]
         manager_id="manager-1",
         gateway_client=(gateway_client if gateway_client is not None else MagicMock()),
         config=config,
@@ -248,6 +272,7 @@ async def test_gateway_manager_dependency_graph_is_resolvable() -> None:
         get_config: lambda: config,
         ExternalChannelRepository: _mock_dependency,
         get_external_channel_credentials_codec: _mock_dependency,
+        ExternalChannelTransportIngestionService: _mock_dependency,
     }
     async with Container(dependency_overrides=overrides) as container:
         service = await container.solve(DiscordGatewayManagerService)
@@ -267,18 +292,21 @@ async def test_admits_typed_event_under_current_lease() -> None:
         lease=_lease(),
         provider_app_id="app-1",
         target_guild_id="300",
+        configuration_generation=2,
         event=_event(),
     )
 
     call = repository.admission_calls[0]
-    assert call["connection_id"] == "connection-1"
-    assert call["lease_generation"] == 3
+    authority = call["authority"]
+    assert isinstance(authority, ExternalChannelIngressAuthority)
+    assert authority.lease_generation == 3
     assert "sequence" not in call
     assert "encrypted_checkpoint" not in call
-    create = call["create"]
+    create = call["event"]
     assert isinstance(create, ExternalChannelEventCreate)
+    assert create.connection_id == "connection-1"
     assert create.provider_event_id == "discord:discord_message_create:300:200:100"
-    sessions.session.commit.assert_awaited_once()
+    sessions.session.commit.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -298,6 +326,7 @@ async def test_quiesced_gateway_rejects_message_create_before_legacy_admission()
             lease=_lease(),
             provider_app_id="app-1",
             target_guild_id="300",
+            configuration_generation=2,
             event=_event(),
         )
 
@@ -319,10 +348,11 @@ async def test_quiesced_gateway_keeps_message_update_lifecycle_available() -> No
         lease=_lease(),
         provider_app_id="app-1",
         target_guild_id="300",
+        configuration_generation=2,
         event=_event(event_type="message_update"),
     )
 
-    assert len(repository.admission_calls) == 1
+    assert repository.admission_calls == []
 
 
 @pytest.mark.asyncio
@@ -336,6 +366,7 @@ async def test_cross_guild_event_is_not_admitted() -> None:
         lease=_lease(),
         provider_app_id="app-1",
         target_guild_id="300",
+        configuration_generation=2,
         event=_event(guild_id=301),
     )
 
@@ -348,12 +379,13 @@ async def test_stale_lease_stops_typed_event_admission() -> None:
     repository = _Repository(admission=None)
     service = _service(repository=repository, sessions=sessions)
 
-    with pytest.raises(DiscordGatewayLeaseLost):
+    with pytest.raises(DiscordGatewayIngestionRetryable):
         await service._admit_gateway_event(  # pyright: ignore[reportPrivateUsage]
             connection_id="connection-1",
             lease=_lease(),
             provider_app_id="app-1",
             target_guild_id="300",
+            configuration_generation=2,
             event=_event(),
         )
 
@@ -422,6 +454,7 @@ async def test_manager_passes_typed_handler_and_target_guild_to_sdk() -> None:
         bot_token="test-token",
         provider_app_id="app-1",
         target_guild_id="300",
+        configuration_generation=2,
         shutdown_event=asyncio.Event(),
     )
 

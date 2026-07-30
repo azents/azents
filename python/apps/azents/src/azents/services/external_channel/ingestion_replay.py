@@ -280,6 +280,10 @@ def _build_request(
         provider=configuration.provider,
         provider_tenant_id=tenant_id,
         provider_channel_id=source.position.provider_channel_id,
+        provider_parent_channel_id=_provider_parent_channel_id(
+            provider=configuration.provider,
+            labels=labels,
+        ),
         provider_thread_key=source.position.provider_thread_key,
         delivery_thread_key=delivery_thread_key,
         provider_resource_key=source.resource.provider_resource_key,
@@ -365,3 +369,14 @@ def _delivery_thread_key(
     if isinstance(value, str) and value:
         return value
     return position.provider_thread_key
+
+
+def _provider_parent_channel_id(
+    *,
+    provider: ExternalChannelProvider,
+    labels: dict[str, object],
+) -> str | None:
+    if provider is ExternalChannelProvider.SLACK:
+        return None
+    value = labels.get("parent_channel_id")
+    return value if isinstance(value, str) and value else None

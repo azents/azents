@@ -149,6 +149,34 @@ def test_url_verification_returns_challenge() -> None:
     assert call["raw_body"] == b'{"type":"url_verification"}'
 
 
+def test_slack_control_delivery_runs_after_committed_admission() -> None:
+    """Attempt one durable approval control after returning provider success."""
+    service = AsyncMock(spec=SlackHTTPAdmissionService)
+    service.handle.return_value = SlackHTTPAdmissionResult(
+        challenge=None,
+        event_id="event-1",
+        interaction_id=None,
+        created=False,
+        control_delivery_attempt_id="delivery-1",
+        control_delivery_connection_id="connection-1",
+    )
+
+    response = _client(service).post(
+        "/external-channel/v1/slack/events",
+        content=b'{"type":"event_callback"}',
+        headers={
+            "X-Slack-Request-Timestamp": "1784682000",
+            "X-Slack-Signature": "v0=signature",
+        },
+    )
+
+    assert response.status_code == 200
+    service.attempt_control_delivery.assert_awaited_once_with(
+        connection_id="connection-1",
+        delivery_attempt_id="delivery-1",
+    )
+
+
 def test_authentication_failure_uses_one_safe_response() -> None:
     """Do not distinguish unknown identities from invalid Slack signatures."""
     service = AsyncMock(spec=SlackHTTPAdmissionService)
