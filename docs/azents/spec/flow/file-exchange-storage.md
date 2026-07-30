@@ -52,7 +52,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-30
-spec_version: 34
+spec_version: 35
 ---
 
 # File Exchange Storage
@@ -157,7 +157,7 @@ Event transcript keeps only artifact metadata and `artifact://...` URI. Lowerer 
 
 ### Explicit FilePart for model rich input
 
-Attachment and Artifact are not generally converted to ModelFile/FilePart. The user-input promotion boundary is the explicit exception for claimed upload attachments: it resolves the Exchange bytes and creates a FilePart before the user event enters model input. Tool implementations that directly have bytes may also create normalized blobs in ModelFileStore and return FilePart; `read_image` is the runtime-file example. A separate FilePart creation tool exposed to the model is not current contract. FilePart references ModelFile entity by `model_file_id`, not URI. ModelFile itself does not create URI.
+Attachment and Artifact are not generally converted to ModelFile/FilePart. The user-input promotion boundary is the explicit exception for claimed upload attachments: it resolves the Exchange bytes and creates a FilePart before the user event enters model input. Tool implementations that directly have bytes may also create normalized blobs in ModelFileStore and return FilePart. `read_image` first obtains its bytes by claiming a verified Runtime transfer object; Runner Control never carries the image body or Base64 image data. A separate FilePart creation tool exposed to the model is not current contract. FilePart references ModelFile entity by `model_file_id`, not URI. ModelFile itself does not create URI.
 
 ModelFileStore is model input blob store, not original preservation store. Image ModelFile is normalized to JPEG at creation. Non-image ModelFile is not normalized and only size cap applies. ModelFile has current lifecycle status `available` or `deleted`; persistent run-age degradation and `unreachable` stages are not part of the current lifecycle. Scheduler-owned GC deletes unpinned ModelFiles after their single durable FilePart event falls behind the AgentSession model-input head cursor.
 If original non-image payload exceeds size cap, ModelFile is not created and is replaced with user-visible size cap message.
@@ -266,6 +266,7 @@ lifetime. Object existence alone never creates Exchange publication authority.
 - **2026-07-30** — v34. Reverified the External Channel locator, authority
   revalidation, verified Runtime transfer, provider settlement, and no-durable-body
   boundaries after synchronous ingress contraction; no semantic change.
+- **2026-07-30** — v35. Moved Runtime image materialization and Agent Workspace complete downloads onto verified Runtime-to-server transfer objects; bounded text reads use direct strict-decoded Control text rather than Base64 chunks.
 - **2026-07-28** — v33. Clarified `present_file` recovery after empty volatile transfer
   state and state-independent one-hour orphan cleanup without reviving S3 objects.
 - **2026-07-28** — v32. Promoted the common Runtime File Transfer behavior for

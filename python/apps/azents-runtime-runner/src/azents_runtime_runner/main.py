@@ -36,6 +36,7 @@ _PROTOCOL_VERSION = RUNNER_TRANSFER_PROTOCOL_VERSION
 _CAPABILITIES = (
     "bash",
     "file.read",
+    "file.read_text",
     "file.write",
     "file.upload",
     "file.download",

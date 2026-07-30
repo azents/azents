@@ -17,7 +17,7 @@ from azents.engine.run.types import FunctionToolError
 from azents.engine.tools.runtime_io import (
     RuntimeFileListEntry,
     RuntimeFileListResult,
-    RuntimeFileReadResult,
+    RuntimeFileTextReadResult,
     RuntimeRunnerOperationClient,
 )
 from azents.engine.tools.skill import (
@@ -125,7 +125,7 @@ class _SkillScanRunner:
         )
         return RuntimeFileListResult(entries=entries, final_cursor="cursor-list")
 
-    async def read_file(
+    async def read_text_file(
         self,
         *,
         runtime_id: str,
@@ -133,17 +133,19 @@ class _SkillScanRunner:
         owner_session_id: str | None,
         path: str,
         offset: int,
-        max_bytes: int | None,
+        max_bytes: int,
+        encoding: str,
         deadline_at: datetime,
-    ) -> RuntimeFileReadResult:
+    ) -> RuntimeFileTextReadResult:
         """Return configured Skill content and record reads."""
         del runtime_id, runner_generation, owner_session_id, deadline_at
         self.read_calls.append(path)
         data = self.files[path]
-        chunk = (
-            data[offset:] if max_bytes is None else data[offset : offset + max_bytes]
+        chunk = data[offset : offset + max_bytes]
+        return RuntimeFileTextReadResult(
+            text=chunk.decode(encoding),
+            final_cursor="cursor-read",
         )
-        return RuntimeFileReadResult(data=chunk, final_cursor="cursor-read")
 
 
 class _TestableSkillProjectionService(SkillProjectionService):

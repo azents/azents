@@ -39,6 +39,18 @@ class FileStorage(Protocol):
 
     async def get(self, path: str, *, agent_id: str) -> bytes: ...
 
+    async def get_text(
+        self,
+        path: str,
+        *,
+        agent_id: str,
+        offset: int,
+        max_bytes: int,
+        encoding: str,
+    ) -> str:
+        """Read one bounded range with the requested text encoding."""
+        ...
+
     async def stat(
         self,
         path: str,

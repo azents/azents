@@ -16,6 +16,7 @@ from azents.services.file_storage import FileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
 
 logger = logging.getLogger(__name__)
+_MAX_TEXT_READ_BYTES = 64 * 1024
 
 
 class ReadTextInput(BaseModel):
@@ -33,6 +34,12 @@ class ReadTextInput(BaseModel):
         default=10_000,
         gt=0,
         description="Maximum number of characters to read (default 10000)",
+    )
+    encoding: str = Field(
+        default="utf-8",
+        min_length=1,
+        max_length=64,
+        description="Text encoding to use for decoding (default utf-8)",
     )
 
 
@@ -52,11 +59,14 @@ def make_read_text_tool(
         """Read text file and return content in specified range."""
         abs_path = input.path
 
-        # Read file
+        max_bytes = min(input.limit * 4, _MAX_TEXT_READ_BYTES)
         try:
-            data = await session_storage.get(
+            text = await session_storage.get_text(
                 abs_path,
                 agent_id=agent_id,
+                offset=input.offset,
+                max_bytes=max_bytes,
+                encoding=input.encoding,
             )
         except FileNotFoundError:
             raise FunctionToolError(
@@ -64,6 +74,10 @@ def make_read_text_tool(
             ) from None
         except RuntimeStorageError as exc:
             raise FunctionToolError(f"Failed to read file: {exc.detail}") from None
+        except UnicodeDecodeError:
+            raise FunctionToolError(
+                f"File cannot be decoded as {input.encoding}: {abs_path}"
+            ) from None
         except ValueError, OSError:
             logger.exception(
                 "Failed to read text file from storage",
@@ -73,32 +87,17 @@ def make_read_text_tool(
                 f"Failed to read file: {abs_path}. {RUNTIME_ACCESSIBLE_PATHS_MSG}"
             ) from None
 
-        # UTF-8 decode
-        try:
-            text = data.decode("utf-8")
-        except UnicodeDecodeError:
-            raise FunctionToolError(
-                f"File is not valid UTF-8 text: {abs_path}"
-            ) from None
-
-        total_chars = len(text)
-        start = min(input.offset, total_chars)
-        end = min(start + input.limit, total_chars)
-        chunk = text[start:end]
-
-        # Format result
+        chunk = text[: input.limit]
+        end = input.offset + len(chunk.encode(input.encoding))
         parts = [
-            f"Content of {abs_path} (chars {start}-{end} of {total_chars}):",
+            f"Content of {abs_path} (bytes {input.offset}-{end}):",
             "",
             chunk,
         ]
 
-        if end < total_chars:
+        if len(chunk) < len(text):
             parts.append("")
-            parts.append(
-                f"... ({end} of {total_chars} chars shown."
-                f" Use offset={end} to read more.)"
-            )
+            parts.append(f"... (Use offset={end} to read more.)")
 
         return "\n".join(parts)
 
@@ -109,6 +108,7 @@ def make_read_text_tool(
             "Read a text file from storage. "
             "Provide an absolute path like /workspace/agent/notes.txt. "
             f"{RUNTIME_ACCESSIBLE_PATHS_MSG} "
-            "Supports offset and limit for reading large files in chunks."
+            "Supports byte offset, character limit, and explicit text encoding "
+            "(default utf-8) for reading large files in chunks."
         ),
     )

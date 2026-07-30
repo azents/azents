@@ -52,6 +52,20 @@ class FakeSharedStorage:
             return text.encode("utf-8")
         return data
 
+    async def get_text(
+        self,
+        path: str,
+        *,
+        agent_id: str = "",
+        offset: int,
+        max_bytes: int,
+        encoding: str,
+    ) -> str:
+        """Return one bounded decoded byte range."""
+        if path not in self._files:
+            raise FileNotFoundError(f"File not found: {path}")
+        return self._files[path][offset : offset + max_bytes].decode(encoding)
+
     async def put(
         self,
         path: str,

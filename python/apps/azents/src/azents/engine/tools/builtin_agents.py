@@ -215,13 +215,19 @@ def agents_candidates_for_path(
     return candidates
 
 
-def truncate_agents_content(content: bytes) -> str:
+def truncate_agents_content(content: str, *, truncated: bool) -> str:
     """Limit AGENTS.md content to prompt-safe size."""
-    data = content[:MAX_AGENTS_BYTES]
-    text = data.decode("utf-8", errors="replace")
-    if len(content) > MAX_AGENTS_BYTES:
-        text += "\n\n... (truncated)"
-    return text
+    if truncated:
+        return f"{content}\n\n... (truncated)"
+    return content
+
+
+def _metadata_size(metadata: dict[str, object]) -> int:
+    """Return a non-negative byte size from Runtime file metadata."""
+    value = metadata.get("size")
+    if isinstance(value, int) and value >= 0:
+        return value
+    return 0
 
 
 class AgentsAppendixMixin:
@@ -427,7 +433,13 @@ class AgentsAppendixMixin:
                     cache_miss_count=1,
                 )
             read_count = 1
-            content = await file_storage.get(path, agent_id=self._runtime_agent_id)
+            content = await file_storage.get_text(
+                path,
+                agent_id=self._runtime_agent_id,
+                offset=0,
+                max_bytes=MAX_AGENTS_BYTES,
+                encoding="utf-8",
+            )
         except FileNotFoundError:
             self._agents_missing_cache[path] = now + AGENTS_MISSING_CACHE_TTL_SECONDS
             return _AgentsFileReadResult(
@@ -437,8 +449,19 @@ class AgentsAppendixMixin:
                 cache_hit_count=0,
                 cache_miss_count=1,
             )
+        except UnicodeDecodeError:
+            return _AgentsFileReadResult(
+                content=None,
+                stat_count=1,
+                read_count=read_count,
+                cache_hit_count=0,
+                cache_miss_count=1,
+            )
         return _AgentsFileReadResult(
-            content=truncate_agents_content(content),
+            content=truncate_agents_content(
+                content,
+                truncated=_metadata_size(metadata) > MAX_AGENTS_BYTES,
+            ),
             stat_count=1,
             read_count=1,
             cache_hit_count=0,

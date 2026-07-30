@@ -590,6 +590,8 @@ def _operation_payload(
         result = {"path": payload.path, "offset": payload.offset}
         if payload.HasField("max_bytes"):
             result["max_bytes"] = payload.max_bytes
+        if payload.encoding:
+            result["encoding"] = payload.encoding
         return result
     if payload_kind == "file_write":
         return {

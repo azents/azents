@@ -101,6 +101,7 @@ from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import MemorySummary
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
+from azents.runtime.transfer.runtime_image_read import RuntimeImageReadService
 from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderDeliveryCapability,
     RuntimeToProviderDeliveryExecutor,
@@ -574,6 +575,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         execution_policy_application_service: RuntimeExecutionPolicyApplicationService,
         project_repo: SessionWorkspaceProjectRepository,
         server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor | None,
+        runtime_image_read_service: RuntimeImageReadService | None,
         runtime_to_server_publication_service: PresentFilePublicationExecutor | None,
         runtime_to_provider_delivery_service: RuntimeToProviderDeliveryExecutor | None,
         import_file_staging_configuration: ImportFileStagingConfiguration | None,
@@ -596,6 +598,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self.project_repo = project_repo
         self.agents_store = agents_store
         self.server_to_runtime_transfer_service = server_to_runtime_transfer_service
+        self.runtime_image_read_service = runtime_image_read_service
         self.runtime_to_server_publication_service = (
             runtime_to_server_publication_service
         )
@@ -711,6 +714,20 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 runner_generation=runtime.runner_generation,
             )
 
+        async def resolve_image_target() -> ServerToRuntimeTarget:
+            runtime = await _ready_runtime_for_agent(
+                agent_runtime_repo=self.agent_runtime_repo,
+                execution_policy_application_service=(
+                    self.execution_policy_application_service
+                ),
+                session_manager=self.session_manager,
+                agent_id=runtime_agent_id,
+            )
+            return ServerToRuntimeTarget(
+                runtime_id=runtime.id,
+                desired_generation=runtime.runner_generation,
+            )
+
         async def resolve_edit_target() -> RuntimeEditTarget:
             runtime = await _ready_runtime_for_agent(
                 agent_runtime_repo=self.agent_runtime_repo,
@@ -781,6 +798,8 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                         session_storage=file_ss,
                         model_file_service=self.model_file_service,
                         authority=authority,
+                        runtime_image_read_service=self.runtime_image_read_service,
+                        resolve_runtime_target=resolve_image_target,
                     ),
                 ]
             )
@@ -1054,6 +1073,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         runner_operations: RuntimeRunnerOperationClient,
         project_repo: SessionWorkspaceProjectRepository,
         server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor | None,
+        runtime_image_read_service: RuntimeImageReadService | None,
         runtime_to_server_publication_service: PresentFilePublicationExecutor | None,
         runtime_to_provider_delivery_service: RuntimeToProviderDeliveryExecutor | None,
         import_file_staging_configuration: ImportFileStagingConfiguration | None,
@@ -1070,6 +1090,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         self.project_repo = project_repo
         self.agents_store = agents_store
         self.server_to_runtime_transfer_service = server_to_runtime_transfer_service
+        self.runtime_image_read_service = runtime_image_read_service
         self.runtime_to_server_publication_service = (
             runtime_to_server_publication_service
         )
@@ -1107,6 +1128,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
             project_repo=self.project_repo,
             agents_store=self.agents_store,
             server_to_runtime_transfer_service=self.server_to_runtime_transfer_service,
+            runtime_image_read_service=self.runtime_image_read_service,
             runtime_to_server_publication_service=(
                 self.runtime_to_server_publication_service
             ),
@@ -1321,6 +1343,41 @@ class RuntimeRunnerFileStorage:
             )
             return result.data
         except RuntimeRunnerOperationFailedError as exc:
+            _raise_storage_error(exc)
+
+    async def get_text(
+        self,
+        path: str,
+        *,
+        agent_id: str,
+        offset: int,
+        max_bytes: int,
+        encoding: str,
+    ) -> str:
+        """Read one bounded decoded range through the Runtime Runner."""
+        runtime = await self._ready_runtime(agent_id)
+        try:
+            self._count_runtime_operation()
+            result = await self.runner_operations.read_text_file(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                owner_session_id=self.owner_session_id,
+                path=path,
+                offset=offset,
+                max_bytes=max_bytes,
+                encoding=encoding,
+                deadline_at=_runtime_file_operation_deadline(),
+            )
+            return result.text
+        except RuntimeRunnerOperationFailedError as exc:
+            if exc.code == "FILE_READ_TEXT_DECODE_ERROR":
+                raise UnicodeDecodeError(
+                    encoding,
+                    b"",
+                    0,
+                    0,
+                    "Runtime file range cannot be decoded",
+                ) from exc
             _raise_storage_error(exc)
 
     async def read_range(

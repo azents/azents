@@ -78,8 +78,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-27
-spec_version: 51
+last_verified_at: 2026-07-30
+spec_version: 52
 ---
 
 # Workspace & Membership
@@ -217,7 +217,7 @@ UI renders server-calculated summary/actions. It does not recompute availability
 
 File list/read/write/upload/download APIs work only when Runtime is `RUNNING`, Provider reported Agent Workspace path, and Runner operation path is ready. If Provider path is missing, return unavailable/failure based on `PROVIDER_WORKSPACE_PATH_MISSING` and do not create `/home/sandbox` or `/workspace/agent` fallback.
 
-Agent Workspace path preview first uses Runner `file.stat` to classify the path. File paths return `FILE` preview content, including markdown text when readable. Directory paths return `DIRECTORY` listing data for tree navigation; azents-web opens directories in the file tree instead of rendering a separate directory preview page.
+Agent Workspace path preview first uses Runner `file.stat` to classify the path. Text-preview candidates use bounded `file.read_text` with UTF-8 strict decoding; binary preview candidates return no text body and do not use Control file chunks. Complete Workspace downloads authorize the requester before Runtime access, stat the regular file, and consume one verified Runtime transfer object in the API response adapter. Neither surface reconstructs a complete file body from Runner Control Base64 events. Directory paths return `DIRECTORY` listing data for tree navigation; azents-web opens directories in the file tree instead of rendering a separate directory preview page.
 
 Lifecycle API is desired-state declaration. `start`/`stop`/`restart`/`recover`/reconcile do not delete Agent Workspace data. Only `reset` may delete Agent Workspace.
 
@@ -561,6 +561,7 @@ stateDiagram-v2
 - **2026-07-26 (spec_version=49)** — Added the manual orphan Git-worktree cleanup TurnAction,
   Runtime/path claim coordination with Project attachment and allocation, active-root protection,
   force removal with branch preservation, and bounded durable candidate results.
+- **2026-07-30 (spec_version=52)** — Moved Agent Workspace text previews to bounded strict UTF-8 Runner reads and complete downloads to verified Runtime-transfer objects after requester authorization.
 - **2026-07-26 (spec_version=48)** — Added Workspace Owner/Manager authority for
   zero-or-more-Agent Slack Multi Apps, many-to-many catalogs, channel defaults,
   generation-fenced lifecycle, and authenticated Slack management handoffs.

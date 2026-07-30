@@ -22,6 +22,11 @@ class RuntimeRunnerOperationGenerationError(RuntimeError):
 class RuntimeRunnerOperationFailedError(RuntimeError):
     """Runtime Runner returned operation final error."""
 
+    def __init__(self, message: str, *, code: str | None = None) -> None:
+        """Initialize the failure with its stable semantic code."""
+        super().__init__(message)
+        self.code = code
+
 
 @dataclasses.dataclass(frozen=True)
 class RuntimeBashResult:
@@ -74,6 +79,14 @@ class RuntimeFileReadResult:
     """Completed file read operation result."""
 
     data: bytes
+    final_cursor: str
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeFileTextReadResult:
+    """Completed bounded UTF-8 file read operation result."""
+
+    text: str
     final_cursor: str
 
 
@@ -284,6 +297,21 @@ class RuntimeRunnerOperationClient(Protocol):
         deadline_at: datetime,
     ) -> RuntimeFileReadResult:
         """Run file read operation and return result."""
+        ...
+
+    async def read_text_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        offset: int,
+        max_bytes: int,
+        encoding: str,
+        deadline_at: datetime,
+    ) -> RuntimeFileTextReadResult:
+        """Run bounded decoded file read operation and return result."""
         ...
 
     async def write_file(

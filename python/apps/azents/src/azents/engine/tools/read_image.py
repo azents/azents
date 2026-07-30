@@ -4,8 +4,8 @@ Return image file in session data storage as ModelFile-backed FilePart.
 """
 
 import logging
+from collections.abc import Awaitable, Callable
 
-from azcommon.result import Failure
 from pydantic import BaseModel, Field
 
 from azents.engine.events.model_file_parts import file_output_part_from_model_file
@@ -16,15 +16,15 @@ from azents.engine.run.types import (
 )
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.path_policy import RUNTIME_ACCESSIBLE_PATHS_MSG
-from azents.services.file_storage import FileStorage
-from azents.services.model_file import (
-    ModelFileAccessDenied,
-    ModelFileInvalidImage,
-    ModelFileOversized,
-    ModelFileService,
-    ModelFileSessionNotFound,
-    model_file_size_limit_message,
+from azents.runtime.transfer.runtime_image_read import (
+    RuntimeImageReadError,
+    RuntimeImageReadModelFileOversized,
+    RuntimeImageReadRequest,
+    RuntimeImageReadService,
 )
+from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
+from azents.services.file_storage import FileStorage
+from azents.services.model_file import ModelFileService, model_file_size_limit_message
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_resource_authority import SessionResourceAuthority
 
@@ -58,6 +58,9 @@ def make_read_image_tool(
     session_storage: FileStorage,
     model_file_service: ModelFileService,
     authority: SessionResourceAuthority,
+    runtime_image_read_service: RuntimeImageReadService | None = None,
+    resolve_runtime_target: Callable[[], Awaitable[ServerToRuntimeTarget]]
+    | None = None,
 ) -> FunctionTool:
     """Create read_image tool.
 
@@ -85,9 +88,10 @@ def make_read_image_tool(
                 f"Supported formats: {supported}"
             )
 
-        # Read file (prefer file_storage)
+        if runtime_image_read_service is None or resolve_runtime_target is None:
+            raise FunctionToolError("Runtime image transfer is unavailable.")
         try:
-            data = await session_storage.get(
+            metadata = await session_storage.stat(
                 abs_path,
                 agent_id=authority.agent_id,
             )
@@ -96,7 +100,7 @@ def make_read_image_tool(
                 f"File not found: {abs_path}. {RUNTIME_ACCESSIBLE_PATHS_MSG}"
             ) from None
         except RuntimeStorageError as exc:
-            raise FunctionToolError(f"Failed to read image: {exc.detail}") from None
+            raise FunctionToolError(f"Failed to inspect image: {exc.detail}") from None
         except ValueError, OSError:
             logger.exception(
                 "Failed to read image from storage",
@@ -106,29 +110,37 @@ def make_read_image_tool(
                 f"Failed to read file: {abs_path}. {RUNTIME_ACCESSIBLE_PATHS_MSG}"
             ) from None
 
-        # Size validation
-        if len(data) > _MAX_IMAGE_SIZE:
-            size_mb = len(data) / (1024 * 1024)
+        expected_size = metadata.get("size")
+        if not isinstance(expected_size, int) or isinstance(expected_size, bool):
+            raise FunctionToolError(f"Image is not a regular file: {abs_path}")
+        if expected_size > _MAX_IMAGE_SIZE:
+            size_mb = expected_size / (1024 * 1024)
             raise FunctionToolError(
                 f"Image too large: {size_mb:.1f}MB. "
                 f"Maximum allowed size is {_MAX_IMAGE_SIZE // (1024 * 1024)}MB."
             )
-
-        model_file_result = await model_file_service.create(
-            authority=authority,
-            filename=_filename_from_path(abs_path),
-            media_type=media_type,
-            body=data,
-            metadata={
-                "source_kind": "runtime_path",
-                "source_path": abs_path,
-                "tool": "read_image",
-            },
-        )
-        if isinstance(model_file_result, Failure):
-            return _model_file_create_failure(model_file_result.error)
-
-        model_file = model_file_result.value
+        try:
+            model_file = await runtime_image_read_service.read(
+                RuntimeImageReadRequest(
+                    runtime_path=abs_path,
+                    filename=_filename_from_path(abs_path),
+                    media_type=media_type,
+                    expected_size=expected_size,
+                    authority=authority,
+                    target=await resolve_runtime_target(),
+                )
+            )
+        except RuntimeImageReadError as exc:
+            if isinstance(exc, RuntimeImageReadModelFileOversized):
+                return FunctionToolResult(
+                    output=[
+                        {
+                            "type": "text",
+                            "text": model_file_size_limit_message(exc.error),
+                        }
+                    ]
+                )
+            raise FunctionToolError(f"Failed to read image: {exc}") from None
         file_part = file_output_part_from_model_file(
             model_file,
             metadata={
@@ -141,7 +153,7 @@ def make_read_image_tool(
             "Image loaded as model file",
             extra={
                 "path": abs_path,
-                "size": len(data),
+                "size": expected_size,
                 "media_type": media_type,
                 "model_file_id": model_file.id,
             },
@@ -175,28 +187,3 @@ def _filename_from_path(path: str) -> str:
     """Return display file name from path."""
     name = path.rsplit("/", maxsplit=1)[-1]
     return name or "image"
-
-
-def _model_file_create_failure(
-    error: (
-        ModelFileSessionNotFound
-        | ModelFileAccessDenied
-        | ModelFileOversized
-        | ModelFileInvalidImage
-    ),
-) -> FunctionToolResult:
-    """Convert ModelFile creation failure to tool result or tool error."""
-    if isinstance(error, ModelFileOversized):
-        return FunctionToolResult(
-            output=[
-                {
-                    "type": "text",
-                    "text": model_file_size_limit_message(error),
-                }
-            ]
-        )
-    if isinstance(error, ModelFileInvalidImage):
-        raise FunctionToolError("Invalid image file") from None
-    if isinstance(error, ModelFileSessionNotFound):
-        raise FunctionToolError("Session was not found") from None
-    raise FunctionToolError("Access denied for model file input") from None

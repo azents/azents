@@ -111,7 +111,7 @@ class RuntimeToServerTransferRequest:
 
     target: ServerToRuntimeTarget
     agent_id: str
-    session_id: str
+    session_id: str | None
     operation_id: str
     runtime_path: str
     expected_size: int
