@@ -7,7 +7,10 @@ owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
 code_paths:
   - python/apps/azents/src/azents/services/external_channel/access.py
-  - python/apps/azents/src/azents/services/external_channel/event_processor.py
+  - python/apps/azents/src/azents/services/external_channel/ingestion.py
+  - python/apps/azents/src/azents/services/external_channel/ingestion_replay.py
+  - python/apps/azents/src/azents/services/external_channel/ingestion_store.py
+  - python/apps/azents/src/azents/services/external_channel/transport_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/interaction.py
   - python/apps/azents/src/azents/services/external_channel/selector.py
   - python/apps/azents/src/azents/services/external_channel/shortcut_source.py
@@ -20,7 +23,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/repository.py
   - python/apps/azents/src/azents/repos/external_channel/management.py
   - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
-  - python/apps/azents/src/azents/services/input_buffer.py
+  - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/worker/session/execution_snapshot.py
   - typescript/apps/azents-web/src/app/(app)/external-channel/access/**
@@ -29,8 +32,8 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-07-28
-spec_version: 10
+last_verified_at: 2026-07-30
+spec_version: 11
 ---
 
 # External Channel Authorization
@@ -49,13 +52,19 @@ Every dedicated route has two independent author-admission settings:
   when this setting is enabled; it is then eligible without a per-principal grant
   unless an active block applies.
 
-The connected Azents provider bot is excluded before canonical message persistence
+The connected Azents provider bot is excluded from provider-history projection
 regardless of either setting, preventing output loops. App and system authors are not
-route-eligible. Any author class rejected by the route policy is retained only outside
-releasable pending context: it cannot be included in a later human or bot invocation
-batch. Blocks take precedence over both grants and automatic route access. A grant
-continues to authorize an eligible principal when the corresponding automatic route
-access is disabled.
+route-eligible triggers. Trigger eligibility is separate from contextual visibility:
+other provider-visible humans, bots, and supported system messages may remain in a
+later eligible invocation's bounded history. Blocks take precedence over both grants
+and automatic route access. A grant continues to authorize an eligible principal when
+the corresponding automatic route access is disabled.
+
+An unresolved Multi App bot invocation creates a selector admission only when at least
+one current visible route enables bot messages. Its selector catalog excludes
+bot-disabled routes before pagination, and route selection revalidates the initiating
+principal's author type and the selected route's bot policy. Human selector behavior
+remains governed by the normal route and access policy.
 
 The authenticated Azents administrator who grants or revokes access is a requester for that public
 management operation only. Neither the administrator nor the ExternalChannelPrincipal becomes an
@@ -66,10 +75,11 @@ prompt, or resource authority.
 
 ## Restricted Human Flow
 
-When `open_access_enabled` is disabled, an unknown human may contribute bounded
-same-route/resource pending context but cannot create an AgentSession, binding
-invocation, or Agent wake-up until a grant is created. With the default open-human
-policy, an eligible unblocked human follows the authorized release flow directly.
+When `open_access_enabled` is disabled, an unknown human invocation cannot create an
+AgentSession, binding invocation, or Agent wake-up until a grant is created. The
+request retains an immutable provider-history replay boundary instead of a mutable
+pending-context buffer. With the default open-human policy, an eligible unblocked
+human follows synchronous authorized ingestion directly.
 
 When a restricted participant invokes the Agent:
 
@@ -77,9 +87,10 @@ When a restricted participant invokes the Agent:
    Multi App shortcut or mention first requires one explicit selector admission and
    validates the chosen route. Slack presents its selector through Block Kit; Discord
    uses a verified command or component interaction.
-2. The event processor creates one idempotent access request for the selected route
-   and original source message.
-3. The request snapshots truncation counters, expires after seven days, and contains an opaque ID.
+2. Synchronous ingestion creates one idempotent access request for the selected route
+   and provider-history source message.
+3. The request snapshots the connection, conversation position, exclusive range start,
+   and inclusive trigger position, expires after seven days, and contains an opaque ID.
 4. One provider control-message intent is persisted and attempted once with the
    participant display label, complete provider user ID, and an authenticated Azents
    approval URL rendered through the provider's safe control shape.
@@ -99,7 +110,14 @@ Supported decisions are `allow_session`, `allow_agent`, `deny`, and `block`.
 - **Deny** resolves only the current request.
 - **Block** resolves the request and creates an Agent-scoped block that takes precedence over grants.
 
-The decision transaction locks the route connection, active binding, resource, and request in that order, verifies an `active` or `degraded` connection plus the route relationship, active resource, and Agent lifecycle state, creates the External Channel AgentSession only when no active binding exists, and writes the binding, grant, and decision atomically. Repeating the same compatible Allow decision returns the existing binding and grant. Conflicting or stale decisions return a conflict instead of creating parallel state.
+The decision transaction first resolves the request identity, then locks and
+revalidates the route connection, active resource and binding, open admission, and the
+same request. It verifies an `active` or `degraded` connection, available route,
+active resource, and active Agent, creates the External Channel AgentSession only when
+no active binding exists, and writes the active binding, grant, and decision
+atomically. Repeating the same compatible Allow decision returns the existing binding
+and grant. Conflicting or stale decisions return a conflict instead of creating
+parallel state.
 
 When Allow needs a new binding, the shared root Session creation boundary reads the
 routed Agent's current automatic Project policy and creates the root
@@ -115,17 +133,25 @@ intent in the decision transaction. The provider delete is attempted only after 
 decision commits. Failed or ambiguous deletion remains a durable delivery outcome
 and never rolls back the authorization result.
 
-## Activation and Context Release
+## Synchronous Replay and Context Release
 
-A new binding starts in `waiting_hydration`. It becomes active only after provider-history reconciliation and correlated-event completion. Authorized release selects unexpired pending revisions from the same binding route/resource through the trigger provider position, records immutable batch membership, and deletes only the released pending rows.
+Allow commits authorization before replay and then calls the shared synchronous
+ingestion service with the request's immutable conversation-position boundary. The
+service re-reads provider history outside a database transaction. If the shared
+position is still before the trigger, it reads forward normally; if another accepted
+invocation advanced past the trigger, it reuses the saved range start and exact trigger
+boundary. Both cases converge on one immutable batch, mailbox item, and logical wake.
+Replay failure never reverts the already committed access decision.
 
-Only revisions from route-eligible authors are projected into that pending set. A
-disabled external bot, app, or system message may never be released incidentally by a
-later authorized human trigger.
+The resulting mailbox item uses `wake_session` scheduling and contains the immutable
+invocation projection rather than a raw callback or mutable pending-context reference.
+At promotion, the batch becomes contiguous `external_channel_message` events with
+provider source attribution, trigger identity, authorization state, and one optional
+leading omission reminder.
 
-The resulting InputBuffer is `batch` scheduling with reference-only metadata containing the invocation batch ID. The buffer does not duplicate provider text. At promotion, the batch becomes contiguous `external_channel_message` events with the trigger identity and authorization state, and then wakes the bound AgentSession.
-
-Later authorized original messages on an active binding create another immutable batch and wake the same Session. Edits and deletes update canonical provider state but do not independently invoke the Agent or rewrite prior projected history.
+Later authorized original messages on an active binding create another immutable batch
+and wake the same Session. Edit and delete callbacks do not independently invoke the
+Agent and never rewrite prior accepted Session input.
 
 ## Revocation
 
@@ -136,6 +162,10 @@ Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-07-30** (spec_version 11) — Replaced pending-context and
+  waiting-hydration release with immutable access-request replay boundaries and shared
+  synchronous provider-history ingestion that converges before or after position
+  advancement, and aligned Multi selector admission with route-level bot policy.
 - **2026-07-28** (spec_version 10) — Verified that Discord selector and approval
   bindings use the shared hydration-fenced activation and source-provenance boundary.
 - **2026-07-27** (spec_version 9) — Added route-scoped open human access by

@@ -16,8 +16,9 @@ code_paths:
   - python/apps/azents/src/azents/runtime/transfer/runtime_to_provider.py
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/services/external_channel/file_transfer.py
-  - python/apps/azents/src/azents/services/external_channel/event_processor.py
+  - python/apps/azents/src/azents/services/external_channel/ingestion_store.py
   - python/apps/azents/src/azents/services/external_channel/presentation.py
+  - python/apps/azents/src/azents/services/external_channel/provider_control.py
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
   - python/apps/azents/src/azents/services/external_channel/discord_delivery.py
   - python/apps/azents/src/azents/services/external_channel/discord_presentation.py
@@ -29,8 +30,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_data.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-07-29
-spec_version: 21
+last_verified_at: 2026-07-30
+spec_version: 22
 ---
 
 # External Channel Delivery and Channel Work
@@ -106,6 +107,15 @@ Provider calls occur without an open database transaction. A delivery is claimed
 - `unknown`: cancellation, timeout, or ambiguous transport outcome prevents safe classification.
 
 Provider mutations are never automatically retried. Stale `attempting` recovery marks an ambiguous outcome conservatively instead of re-executing the call. An explicit Slack `ok: false` response not covered by a specialized provider error is a confirmed `failed` result with the bounded Slack error code retained in its sanitized summary; it is not classified as a transport-ambiguous `unknown` result.
+
+Provider controls created by synchronous ingestion or lifecycle operations use the
+same delivery fence. The Agent Worker periodically recovers stale `attempting`
+controls to `unknown`, lists bounded pending control IDs, and delegates each attempt to
+the shared action service. It never reconstructs provider content from callbacks.
+After provider I/O, final settlement opens a new transaction, locks the delivery and
+current connection/binding/work authority, and verifies that the same claimed attempt
+still owns settlement before recording the provider result. A stale owner or changed
+authority cannot settle newer state.
 
 Discord Create Message uses a deterministic, bounded nonce derived from the durable
 delivery attempt and sends `enforce_nonce=true`. A matching provider message identity
@@ -186,7 +196,7 @@ delivery outcome and never causes an unsafe replay.
 
 - Conversational replies use `chat.postMessage` with Slack `markdown_text` in the bound thread. The Tool schema and the provider delivery boundary enforce Slack's current 12,000-character Markdown limit before a mutation request.
 - Releasing the first eligible invocation while a binding has no unanswered work creates Channel Work and one Block Kit Activity Tracker intent before Session wake-up. Creation does not depend on Todo state or a `channel_action` call.
-- Initial binding activation separately creates one button-only `Open Azents session`
+- Initial binding acceptance separately creates one button-only `Open Azents session`
   control message. Later invocations on the binding do not repeat it, and Activity
   Tracker desired state never contains the Session URL.
 - The initial Tracker states that the Agent is checking the message with one
@@ -283,6 +293,9 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-07-30** (spec_version 22) — Added Worker-owned bounded provider-control
+  recovery and clarified the claim, provider-I/O, and final-settlement split with
+  same-attempt authority revalidation.
 - **2026-07-29** (spec_version 21) — Moved Discord's retained functional Channel Work
   Tracker from ordinary message text into one bounded Embed while preserving its
   durable create, update, replacement, recovery, and cleanup lifecycle.
