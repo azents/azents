@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Annotated, Protocol, TypeGuard, assert_never
 
+import grpc
 import httpx
 from azcommon.infra.s3.service import S3TransferCleanupRequired
 from azcommon.uuid import uuid7
@@ -441,6 +442,10 @@ class ExternalChannelFileTransferService:
             raise ExternalChannelFileTransferError(
                 _slack_transfer_error_message(error, path=path)
             ) from None
+        except grpc.aio.AioRpcError:
+            raise ExternalChannelFileTransferError(
+                f"Failed to write the Runtime file: {path}."
+            ) from None
         except PermissionError:
             raise ExternalChannelFileTransferError(
                 f"Runtime destination is not writable: {path}."
@@ -644,6 +649,10 @@ class ExternalChannelFileTransferService:
         except ServerToRuntimeTransferError as error:
             raise ExternalChannelFileTransferError(
                 _discord_transfer_error_message(error, path=path)
+            ) from None
+        except grpc.aio.AioRpcError:
+            raise ExternalChannelFileTransferError(
+                f"Failed to write the Runtime file: {path}."
             ) from None
         except S3TransferCleanupRequired:
             raise ExternalChannelFileTransferError(

@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, cast
 from unittest.mock import AsyncMock
 
+import grpc
 import pytest
 from azcommon.infra.s3.service import S3TransferCleanupRequired
 from azcommon.result import Failure, Success
@@ -998,6 +999,42 @@ async def test_terminal_runtime_failure_is_not_reported_as_success() -> None:
             overwrite=False,
             file_storage=cast(FileStorage, _FileStorage()),
         )
+
+
+@pytest.mark.asyncio
+async def test_runtime_grpc_transport_failure_is_controlled() -> None:
+    """Do not expose coordinator transport details through file download."""
+    metadata = grpc.aio.Metadata()
+    service = _service(
+        repository=_Repository(_target()),
+        slack_client=_SlackClient(),
+    )
+
+    with pytest.raises(
+        ExternalChannelFileTransferError,
+        match="Failed to write the Runtime file: /workspace/agent/report.csv",
+    ) as raised:
+        await _download(
+            service,
+            transfer=_TransferService(
+                grpc.aio.AioRpcError(
+                    grpc.StatusCode.UNAVAILABLE,
+                    metadata,
+                    metadata,
+                    "coordinator endpoint unavailable",
+                    None,
+                )
+            ),
+            session_id="session-1",
+            agent_id="agent-1",
+            file=_locator(),
+            path="/workspace/agent/report.csv",
+            overwrite=False,
+            file_storage=cast(FileStorage, _FileStorage()),
+        )
+
+    assert "AioRpcError" not in str(raised.value)
+    assert "coordinator endpoint unavailable" not in str(raised.value)
 
 
 @pytest.mark.asyncio

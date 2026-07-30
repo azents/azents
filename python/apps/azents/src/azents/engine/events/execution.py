@@ -1312,7 +1312,7 @@ class AgentRunExecution[
                 status="failed",
                 output=[
                     OutputTextPart(
-                        text=f"Tool execution failed: {exc.__class__.__name__}",
+                        text="Internal error",
                     )
                 ],
             )
