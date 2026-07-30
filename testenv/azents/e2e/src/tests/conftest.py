@@ -39,6 +39,7 @@ from support.runtime_provider_auth import (
     RuntimeProviderAuthenticationError,
     issue_runtime_provider_credential,
 )
+from support.server_readiness import wait_for_server_ready
 from support.system_bootstrap import SystemBootstrapEvidence
 
 _AIMOCK_FIXTURE_DIR = REPOSITORY_ROOT / "testenv/azents/e2e/src/support/aimock_fixtures"
@@ -712,42 +713,6 @@ def _configure_azents_server_container(
     )
 
 
-def _wait_for_server_ready(
-    container: DockerContainer,
-    port: int,
-    server_name: str,
-) -> str:
-    """servert preparet t pendingt base URLt return."""
-    host = container.get_container_host_ip()
-    exposed_port = container.get_exposed_port(port)
-    base_url = f"http://{host}:{exposed_port}"
-
-    max_retries = 30
-    for i in range(max_retries):
-        if container.get_wrapped_container().status == "exited":
-            stdout, stderr = container.get_logs()
-            pytest.fail(
-                f"{server_name} exited\n\n"
-                f"stdout: {stdout.decode()}\n\nstderr: {stderr.decode()}"
-            )
-        try:
-            response = requests.get(f"{base_url}/health/v1/readiness", timeout=2)
-            if response.status_code == 200:
-                break
-        except requests.exceptions.RequestException:
-            pass
-
-        if i == max_retries - 1:
-            stdout, stderr = container.get_logs()
-            pytest.fail(
-                f"{server_name} did not start in time\n\n"
-                f"stdout: {stdout.decode()}\n\nstderr: {stderr.decode()}"
-            )
-        time.sleep(1)
-
-    return base_url
-
-
 def _wait_for_tcp_ready(
     container: DockerContainer,
     port: int,
@@ -887,7 +852,7 @@ def azents_public_server_container(
     )
 
     with container:
-        _wait_for_server_ready(container, 8010, "azents-public-server")
+        wait_for_server_ready(container, 8010, "azents-public-server")
         yield container
         _log_server_output(container, "azents-public-server")
 
@@ -955,7 +920,7 @@ def azents_admin_server_container(
     )
 
     with container:
-        _wait_for_server_ready(container, 8011, "azents-admin-server")
+        wait_for_server_ready(container, 8011, "azents-admin-server")
         yield container
         _log_server_output(container, "azents-admin-server")
 
