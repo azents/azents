@@ -409,10 +409,11 @@ class ExternalChannelActionService:
             )
             raise
         recovery_delivery_id = None
+        settled_status: ExternalChannelDeliveryStatus | None = None
         started_runtime_provider_transfer = _uses_runtime_provider_transfer(started)
         if not (result.status == "delivered" and started_runtime_provider_transfer):
             async with self.session_manager() as session:
-                recovery_delivery_id = await self.repository.finish_delivery(
+                settlement = await self.repository.settle_delivery(
                     session,
                     delivery_attempt_id=target.delivery_attempt_id,
                     status=ExternalChannelDeliveryStatus(result.status),
@@ -422,6 +423,8 @@ class ExternalChannelActionService:
                     now=datetime.datetime.now(datetime.UTC),
                 )
                 await session.commit()
+            recovery_delivery_id = settlement.recovery_delivery_id
+            settled_status = settlement.status
         if recovery_delivery_id is not None:
             await self.attempt_delivery(recovery_delivery_id)
         if started_runtime_provider_transfer:
@@ -429,7 +432,8 @@ class ExternalChannelActionService:
                 target.delivery_attempt_id,
                 provider_delivery_capability=provider_delivery_capability,
             )
-        return ExternalChannelDeliveryStatus(result.status)
+            return ExternalChannelDeliveryStatus(result.status)
+        return settled_status
 
     async def drain_runtime_provider_settlements(
         self,
@@ -744,6 +748,12 @@ class ExternalChannelActionService:
                 embeds = _discord_embeds(payload.get("embeds"))
                 if payload.get("embeds") is not None and embeds is None:
                     return _discord_invalid_payload()
+                if (
+                    target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+                    and payload.get("control_kind") == "session_link"
+                    and (files or components is None or embeds is not None)
+                ):
+                    return _discord_invalid_payload()
                 if files:
                     if components is not None or embeds is not None:
                         return _discord_invalid_payload()
@@ -1007,6 +1017,20 @@ class ExternalChannelActionService:
                 thread_ts=thread_ts,
                 text=selector.text,
                 blocks=selector.blocks,
+                icon_url=None,
+            )
+        if control_kind == "session_link":
+            text = payload.get("text")
+            blocks = _blocks(payload.get("blocks"))
+            if not isinstance(text, str) or blocks is None:
+                return _invalid_payload()
+            return await self.slack_client.post_blocks(
+                bot_token=bot_token,
+                tenant_id=tenant_id,
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text=text,
+                blocks=blocks,
                 icon_url=None,
             )
         if control_kind == "shortcut_already_bound":

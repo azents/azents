@@ -11,6 +11,7 @@ from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
     ExternalChannelConversationAdmissionStatus,
+    ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
 )
 from azents.rdb.deps import get_session_manager
@@ -97,10 +98,20 @@ class ExternalChannelSelectorService:
                 or admission.expires_at <= now
             ):
                 raise ExternalChannelSelectorError("Selector admission is unavailable.")
+            principal = await self.repository.get_principal(
+                session,
+                principal_id=principal_id,
+            )
+            if principal is None or principal.author_type not in {
+                ExternalChannelPrincipalAuthorType.HUMAN,
+                ExternalChannelPrincipalAuthorType.BOT,
+            }:
+                raise ExternalChannelSelectorError("Selector principal is unavailable.")
             rows = await self.repository.list_routable_multi_catalog_routes(
                 session,
                 connection_id=connection.id,
                 principal_id=principal_id,
+                author_type=principal.author_type,
                 search=search,
                 offset=offset,
                 limit=_SELECTOR_PAGE_SIZE + 1,
@@ -152,6 +163,23 @@ class ExternalChannelSelectorService:
                 route_id=route_id,
             )
             if route is None or route.connection_id != connection.id:
+                raise ExternalChannelSelectorError("Selected Agent is unavailable.")
+            principal = await self.repository.get_principal(
+                session,
+                principal_id=principal_id,
+            )
+            if (
+                principal is None
+                or principal.author_type
+                not in {
+                    ExternalChannelPrincipalAuthorType.HUMAN,
+                    ExternalChannelPrincipalAuthorType.BOT,
+                }
+                or (
+                    principal.author_type is ExternalChannelPrincipalAuthorType.BOT
+                    and not route.allow_bot_messages
+                )
+            ):
                 raise ExternalChannelSelectorError("Selected Agent is unavailable.")
             resource = await self.repository.lock_resource(
                 session,

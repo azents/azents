@@ -102,14 +102,19 @@ def _request() -> ExternalChannelIngestionRequest:
     )
 
 
-def _history() -> ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage]:
+def _history(
+    *,
+    author_type: ExternalChannelPrincipalAuthorType = (
+        ExternalChannelPrincipalAuthorType.HUMAN
+    ),
+) -> ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage]:
     trigger = ExternalChannelCanonicalHistoryMessage(
         provider_message_key="message-2",
         provider_position="00000000000000000002",
         revision_key="message-2:original",
         revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
         lifecycle=ExternalChannelMessageLifecycle.CURRENT,
-        author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+        author_type=author_type,
         provider_user_id="participant-1",
         sender_display_name="Participant",
         normalized_body="provider-authoritative content",
@@ -266,6 +271,14 @@ def _store(
         repository=cast(Any, repository),
         work_repository=cast(Any, SimpleNamespace()),
         agent_repository=cast(Any, SimpleNamespace()),
+        workspace_repository=cast(
+            Any,
+            SimpleNamespace(
+                get_by_id=AsyncMock(
+                    return_value=SimpleNamespace(handle="workspace-handle")
+                )
+            ),
+        ),
         agent_session_repository=cast(Any, SimpleNamespace()),
         root_agent_session_creation_service=cast(Any, SimpleNamespace()),
         mailbox_service=cast(Any, SimpleNamespace()),
@@ -377,7 +390,16 @@ async def test_position_mismatch_rolls_back_before_routing_or_content_writes() -
     repository.create_invocation_batch_idempotent.assert_not_awaited()
 
 
-async def test_pending_selector_persists_trigger_before_control_delivery() -> None:
+@pytest.mark.parametrize(
+    "author_type",
+    [
+        ExternalChannelPrincipalAuthorType.HUMAN,
+        ExternalChannelPrincipalAuthorType.BOT,
+    ],
+)
+async def test_pending_selector_persists_trigger_before_control_delivery(
+    author_type: ExternalChannelPrincipalAuthorType,
+) -> None:
     """A route-less Multi App invocation returns one committed selector intent."""
     session = MagicMock(spec=AsyncSession)
     session.commit = AsyncMock()
@@ -389,10 +411,15 @@ async def test_pending_selector_persists_trigger_before_control_delivery() -> No
     resource = SimpleNamespace(id="resource-1")
     admission = SimpleNamespace(
         id="admission-1",
+        connection_id="connection-1",
+        initiating_principal_id="principal-1",
         status=ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
     )
     repository = SimpleNamespace(
         lock_conversation_position=AsyncMock(return_value=position),
+        list_routable_multi_catalog_routes=AsyncMock(
+            return_value=[SimpleNamespace(id="route-1")]
+        ),
     )
     store = _store(
         session=cast(AsyncSession, session),
@@ -417,7 +444,7 @@ async def test_pending_selector_persists_trigger_before_control_delivery() -> No
         return_value="delivery-1"
     )
     request = _request()
-    history = _history()
+    history = _history(author_type=author_type)
 
     result = await store.accept(
         request=request,
@@ -446,6 +473,125 @@ async def test_pending_selector_persists_trigger_before_control_delivery() -> No
         request=request,
         admission=admission,
     )
+    session.commit.assert_awaited_once()
+
+
+async def test_pending_selector_rejects_bot_without_an_eligible_route() -> None:
+    """A bot cannot receive selector controls when every route disables bots."""
+    session = MagicMock(spec=AsyncSession)
+    session.commit = AsyncMock()
+    position = SimpleNamespace(
+        id="position-1",
+        connection_id="connection-1",
+        read_through_position=None,
+    )
+    admission = SimpleNamespace(
+        id="admission-1",
+        connection_id="connection-1",
+        initiating_principal_id="principal-1",
+        status=ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
+    )
+    repository = SimpleNamespace(
+        lock_conversation_position=AsyncMock(return_value=position),
+        list_routable_multi_catalog_routes=AsyncMock(return_value=[]),
+        advance_conversation_position_if_current=AsyncMock(return_value=True),
+    )
+    store = _store(
+        session=cast(AsyncSession, session),
+        repository=repository,
+    )
+    store._lock_authority = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=SimpleNamespace(id="connection-1")
+    )
+    store._lock_pending_selection = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=SimpleNamespace(
+            resource=SimpleNamespace(id="resource-1"),
+            admission=admission,
+        )
+    )
+    store._persist_history_message = AsyncMock()  # pyright: ignore[reportPrivateUsage]
+    store._create_selector_control_intent = AsyncMock()  # pyright: ignore[reportPrivateUsage]
+
+    result = await store.accept(
+        request=_request(),
+        preparation=ExternalChannelIngestionPreparation(
+            position_id=position.id,
+            exclusive_start_position=None,
+            immediate_outcome=None,
+            wake_batch_id=None,
+            wake_session_id=None,
+        ),
+        history=_history(author_type=ExternalChannelPrincipalAuthorType.BOT),
+    )
+
+    assert result.status == "ignored"
+    assert result.reason is ExternalChannelIngestionReason.AUTHOR_NOT_ELIGIBLE
+    repository.list_routable_multi_catalog_routes.assert_awaited_once_with(
+        cast(AsyncSession, session),
+        connection_id="connection-1",
+        principal_id="principal-1",
+        author_type=ExternalChannelPrincipalAuthorType.BOT,
+        search=None,
+        offset=0,
+        limit=1,
+    )
+    store._persist_history_message.assert_not_awaited()  # pyright: ignore[reportPrivateUsage]
+    store._create_selector_control_intent.assert_not_awaited()  # pyright: ignore[reportPrivateUsage]
+    session.commit.assert_awaited_once()
+
+
+async def test_route_rejects_bot_trigger_when_bot_messages_are_disabled() -> None:
+    """A disabled external bot cannot create access, binding, or Session input."""
+    session = MagicMock(spec=AsyncSession)
+    session.commit = AsyncMock()
+    position = SimpleNamespace(
+        id="position-1",
+        connection_id="connection-1",
+        read_through_position=None,
+    )
+    repository = SimpleNamespace(
+        lock_conversation_position=AsyncMock(return_value=position),
+        advance_conversation_position_if_current=AsyncMock(return_value=True),
+    )
+    store = _store(
+        session=cast(AsyncSession, session),
+        repository=repository,
+    )
+    store._lock_authority = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=SimpleNamespace(id="connection-1")
+    )
+    store._lock_pending_selection = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=None
+    )
+    store._lock_routing = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=SimpleNamespace(
+            resource=SimpleNamespace(id="resource-1"),
+            route=SimpleNamespace(
+                open_access_enabled=True,
+                allow_bot_messages=False,
+            ),
+            binding=None,
+            admission=None,
+        )
+    )
+    store._persist_history_message = AsyncMock()  # pyright: ignore[reportPrivateUsage]
+
+    result = await store.accept(
+        request=_request(),
+        preparation=ExternalChannelIngestionPreparation(
+            position_id=position.id,
+            exclusive_start_position=None,
+            immediate_outcome=None,
+            wake_batch_id=None,
+            wake_session_id=None,
+        ),
+        history=_history(author_type=ExternalChannelPrincipalAuthorType.BOT),
+    )
+
+    assert result.status == "ignored"
+    assert result.reason is ExternalChannelIngestionReason.AUTHOR_NOT_ELIGIBLE
+    store._persist_history_message.assert_not_awaited()  # pyright: ignore[reportPrivateUsage]
+    repository.advance_conversation_position_if_current.assert_awaited_once()
     session.commit.assert_awaited_once()
 
 
@@ -584,6 +730,8 @@ async def test_replay_after_shared_position_accepts_without_cursor_rollback() ->
     route = SimpleNamespace(
         id="route-1",
         connection_id="connection-1",
+        open_access_enabled=False,
+        allow_bot_messages=True,
         require_active_agent_id=MagicMock(return_value="agent-1"),
     )
     binding = SimpleNamespace(
@@ -614,7 +762,7 @@ async def test_replay_after_shared_position_accepts_without_cursor_rollback() ->
         create_message_idempotent=AsyncMock(return_value=source_message),
         update_message_identity_metadata=AsyncMock(return_value=source_message),
         get_active_block=AsyncMock(return_value=None),
-        get_active_access_grant=AsyncMock(return_value=SimpleNamespace(id="grant-1")),
+        get_active_access_grant=AsyncMock(return_value=None),
         get_invocation_batch=AsyncMock(return_value=None),
         create_invocation_batch_idempotent=AsyncMock(return_value=batch),
         create_invocation_batch_item_idempotent=AsyncMock(),
@@ -642,15 +790,24 @@ async def test_replay_after_shared_position_accepts_without_cursor_rollback() ->
         SimpleNamespace(mark_running_for_input_wakeup=AsyncMock()),
     )
     store._lock_authority = AsyncMock(  # pyright: ignore[reportPrivateUsage]
-        return_value=SimpleNamespace(id="connection-1")
+        return_value=SimpleNamespace(
+            id="connection-1",
+            workspace_id="workspace-1",
+        )
     )
     store._lock_routing = AsyncMock(  # pyright: ignore[reportPrivateUsage]
         return_value=SimpleNamespace(
             resource=resource,
             route=route,
-            binding=binding,
+            binding=None,
             admission=None,
         )
+    )
+    store._create_binding = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=binding
+    )
+    store._create_session_link_intent = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value="session-link-1"
     )
     store._persist_principal = AsyncMock(  # pyright: ignore[reportPrivateUsage]
         return_value="principal-1"
@@ -674,13 +831,14 @@ async def test_replay_after_shared_position_accepts_without_cursor_rollback() ->
             wake_batch_id=None,
             wake_session_id=None,
         ),
-        history=_history(),
+        history=_history(author_type=ExternalChannelPrincipalAuthorType.BOT),
     )
 
     assert result.status == "accepted"
     assert result.batch_id == "batch-1"
-    assert result.control_delivery_attempt_id == "delivery-1"
+    assert result.control_delivery_attempt_id == "session-link-1"
     assert result.connection_id == "connection-1"
+    store._create_session_link_intent.assert_awaited_once()  # pyright: ignore[reportPrivateUsage]
     delivery = repository.create_delivery_attempt_idempotent.await_args.args[1]
     assert delivery.origin_id == "work-1"
     assert delivery.binding_id == "binding-1"
@@ -689,3 +847,45 @@ async def test_replay_after_shared_position_accepts_without_cursor_rollback() ->
     assert delivery.request_payload["thread_ts"] == "thread-1"
     repository.advance_conversation_position_if_current.assert_not_awaited()
     session.commit.assert_awaited_once()
+
+
+async def test_initial_session_link_intent_targets_the_bound_session() -> None:
+    """The first binding persists a separate provider-native Session link."""
+    session = MagicMock(spec=AsyncSession)
+    repository = SimpleNamespace(
+        create_delivery_attempt_idempotent=AsyncMock(
+            return_value=SimpleNamespace(
+                id="session-link-1",
+                status=ExternalChannelDeliveryStatus.PENDING,
+            )
+        )
+    )
+    store = _store(
+        session=cast(AsyncSession, session),
+        repository=repository,
+    )
+    route = SimpleNamespace(require_active_agent_id=MagicMock(return_value="agent-1"))
+    binding = SimpleNamespace(
+        id="binding-1",
+        agent_session_id="session-1",
+    )
+
+    attempt_id = await store._create_session_link_intent(  # pyright: ignore[reportPrivateUsage]
+        cast(AsyncSession, session),
+        request=_request(),
+        connection=cast(Any, SimpleNamespace(workspace_id="workspace-1")),
+        routing=cast(Any, SimpleNamespace(route=route)),
+        binding=cast(Any, binding),
+    )
+
+    assert attempt_id == "session-link-1"
+    create = repository.create_delivery_attempt_idempotent.await_args.args[1]
+    assert create.origin_id == "binding-1"
+    assert create.binding_id == "binding-1"
+    assert create.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+    assert create.request_payload["control_kind"] == "session_link"
+    assert create.request_payload["thread_ts"] == "thread-1"
+    assert (
+        create.request_payload["blocks"][0]["elements"][0]["url"]
+        == "https://azents.example/w/workspace-handle/agents/agent-1/sessions/session-1"
+    )

@@ -30,6 +30,7 @@ from azents.core.external_channel_file import (
 from azents.rdb.session import SessionManager
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.external_channel.work import (
+    DeliverySettlement,
     ExternalChannelWorkRepository,
     RuntimeProviderDeliveryCompletion,
 )
@@ -88,6 +89,8 @@ class _RepositoryDouble:
         ] = []
         self.recorded_delivery_channels: list[tuple[str, str]] = []
         self.runtime_provider_states: list[tuple[str, dict[str, object]]] = []
+        self.settlement_accepted = True
+        self.settlement_status: ExternalChannelDeliveryStatus | None = None
         self.target = ChannelDeliveryTarget(
             delivery_attempt_id="delivery-1",
             operation=ExternalChannelDeliveryOperation.REPLY,
@@ -245,6 +248,34 @@ class _RepositoryDouble:
         self.events.append("finish")
         self.finished.append((status, provider_message_key, error_kind))
         return self.recovery_delivery_ids.pop(0) if self.recovery_delivery_ids else None
+
+    async def settle_delivery(
+        self,
+        session: AsyncSession,
+        *,
+        delivery_attempt_id: str,
+        status: ExternalChannelDeliveryStatus,
+        provider_message_key: str | None,
+        error_kind: str | None,
+        error_summary: str | None,
+        now: datetime.datetime,
+    ) -> DeliverySettlement:
+        recovery_delivery_id = await self.finish_delivery(
+            session,
+            delivery_attempt_id=delivery_attempt_id,
+            status=status,
+            provider_message_key=provider_message_key,
+            error_kind=error_kind,
+            error_summary=error_summary,
+            now=now,
+        )
+        return DeliverySettlement(
+            accepted=self.settlement_accepted,
+            status=(
+                self.settlement_status or status if self.settlement_accepted else None
+            ),
+            recovery_delivery_id=recovery_delivery_id,
+        )
 
     async def record_discord_delivery_channel(
         self,
@@ -771,6 +802,58 @@ async def test_failed_delivery_is_terminal_and_not_reported_as_success() -> None
 
 
 @pytest.mark.asyncio
+async def test_provider_control_returns_revalidated_settlement_status() -> None:
+    """The service reports a conservative post-provider authority result."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.settlement_status = ExternalChannelDeliveryStatus.UNKNOWN
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key="slack:T1:C1:2.000001",
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+    )
+
+    result = await service.attempt_delivery("delivery-1")
+
+    assert result is ExternalChannelDeliveryStatus.UNKNOWN
+    assert events == ["start", "commit", "provider", "finish", "commit"]
+
+
+@pytest.mark.asyncio
+async def test_delivery_returns_none_when_final_settlement_loses_attempt() -> None:
+    """A superseded final settlement cannot report an uncommitted provider result."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.settlement_accepted = False
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key="slack:T1:C1:2.000001",
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+    )
+
+    result = await service.attempt_delivery("delivery-1")
+
+    assert result is None
+    assert events == ["start", "commit", "provider", "finish", "commit"]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("app_mode", "expected_content"),
     [
@@ -1002,6 +1085,137 @@ async def test_discord_approval_control_delivery_uses_text_create() -> None:
                 "delivery_attempt_id": "delivery-1",
             },
         ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_slack_session_link_control_reaches_provider() -> None:
+    """A committed Slack Session link is delivered as validated blocks."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "operation": ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            "request_payload": {
+                "control_kind": "session_link",
+                "tenant_id": "T1",
+                "channel_id": "C1",
+                "thread_ts": "1.000001",
+                "text": "Open this Session in Azents.",
+                "blocks": [
+                    {
+                        "type": "actions",
+                        "elements": [
+                            {
+                                "type": "button",
+                                "text": {
+                                    "type": "plain_text",
+                                    "text": "Open Session",
+                                },
+                                "url": "https://azents.example/session-1",
+                            }
+                        ],
+                    }
+                ],
+            },
+        }
+    )
+
+    class _SessionLinkSlackClient(_SlackClient):
+        async def post_blocks(self, **kwargs: object) -> SlackControlMessageResult:
+            self.events.append("provider")
+            self.bot_tokens.append(cast(str, kwargs["bot_token"]))
+            assert kwargs["channel_id"] == "C1"
+            assert kwargs["thread_ts"] == "1.000001"
+            assert kwargs["text"] == "Open this Session in Azents."
+            assert kwargs["blocks"] == repository.target.request_payload["blocks"]
+            assert kwargs["icon_url"] is None
+            return self._result()
+
+    service = _service(
+        events,
+        repository,
+        _SessionLinkSlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key="slack:T1:C1:2.000001",
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+    )
+
+    result = await service.attempt_delivery("delivery-1")
+
+    assert result is ExternalChannelDeliveryStatus.DELIVERED
+    assert events == ["start", "commit", "provider", "finish", "commit"]
+
+
+@pytest.mark.asyncio
+async def test_discord_session_link_control_reaches_provider() -> None:
+    """A committed Discord Session link is delivered with its link component."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    components = [
+        {
+            "type": 1,
+            "components": [
+                {
+                    "type": 2,
+                    "style": 5,
+                    "label": "Open Azents session",
+                    "url": "https://azents.example/session-1",
+                }
+            ],
+        }
+    ]
+    repository.target = repository.target.model_copy(
+        update={
+            "provider": ExternalChannelProvider.DISCORD,
+            "provider_tenant_id": "111",
+            "operation": ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            "request_payload": {
+                "control_kind": "session_link",
+                "guild_id": "111",
+                "channel_id": "333",
+                "text": "",
+                "components": components,
+            },
+        }
+    )
+    discord_client = _DiscordClient()
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+        discord_client=discord_client,
+    )
+
+    result = await service.attempt_delivery("delivery-1")
+
+    assert result is ExternalChannelDeliveryStatus.DELIVERED
+    assert discord_client.calls == [
+        (
+            "create",
+            {
+                "bot_token": "xoxb-secret",
+                "guild_id": "111",
+                "channel_id": "333",
+                "content": "",
+                "delivery_attempt_id": "delivery-1",
+                "components": components,
+                "embeds": None,
+            },
+        )
     ]
 
 

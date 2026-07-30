@@ -609,6 +609,19 @@ def test_slack_fake_accepts_url_encoded_file_upload_requests(
     ]
 
 
+def test_slack_fake_accepts_query_encoded_upload_target_requests(
+    slack_fake_url: str,
+) -> None:
+    """Match slack_sdk's query-encoded upload target request format."""
+    target = requests.post(
+        f"{slack_fake_url}/api/files.getUploadURLExternal",
+        params={"filename": "query.txt", "length": "3"},
+        timeout=5,
+    ).json()
+
+    assert target["ok"] is True
+
+
 @pytest.mark.parametrize(
     ("operation", "scenario", "expected_status", "expected_error"),
     [

@@ -20,6 +20,7 @@ from azents.core.enums import (
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
+    ExternalChannelRouteCatalogStatus,
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
@@ -89,6 +90,27 @@ class RuntimeProviderDeliveryCompletion:
 
     accepted: bool
     recovery_delivery_id: str | None
+
+
+@dataclass(frozen=True)
+class DeliverySettlement:
+    """One fenced provider-result settlement."""
+
+    accepted: bool
+    status: ExternalChannelDeliveryStatus | None
+    recovery_delivery_id: str | None
+
+
+@dataclass(frozen=True)
+class ProviderControlAttemptIdentity:
+    """Immutable authority identity captured before final locking."""
+
+    delivery_attempt_id: str
+    origin_type: ExternalChannelDeliveryOriginType
+    origin_id: str
+    operation: ExternalChannelDeliveryOperation
+    binding_id: str | None
+    channel_action_id: str | None
 
 
 class ExternalChannelWorkRepository:
@@ -1653,6 +1675,52 @@ class ExternalChannelWorkRepository:
         now: datetime.datetime,
     ) -> str | None:
         """Persist an outcome and return a missing-Tracker recovery intent."""
+        settlement = await self.settle_delivery(
+            session,
+            delivery_attempt_id=delivery_attempt_id,
+            status=status,
+            provider_message_key=provider_message_key,
+            error_kind=error_kind,
+            error_summary=error_summary,
+            now=now,
+        )
+        return settlement.recovery_delivery_id
+
+    async def settle_delivery(
+        self,
+        session: AsyncSession,
+        *,
+        delivery_attempt_id: str,
+        status: ExternalChannelDeliveryStatus,
+        provider_message_key: str | None,
+        error_kind: str | None,
+        error_summary: str | None,
+        now: datetime.datetime,
+    ) -> DeliverySettlement:
+        """Fence final authority and persist one provider outcome."""
+        snapshot = await session.get(
+            RDBExternalChannelDeliveryAttempt,
+            delivery_attempt_id,
+        )
+        if snapshot is None:
+            return DeliverySettlement(
+                accepted=False,
+                status=None,
+                recovery_delivery_id=None,
+            )
+        provider_control_identity = (
+            _provider_control_attempt_identity(snapshot)
+            if _is_provider_control_attempt(snapshot)
+            else None
+        )
+        authority_current = (
+            await self._provider_control_authority_current(
+                session,
+                identity=provider_control_identity,
+            )
+            if provider_control_identity is not None
+            else True
+        )
         attempt = await session.scalar(
             sa.select(RDBExternalChannelDeliveryAttempt)
             .where(
@@ -1661,9 +1729,33 @@ class ExternalChannelWorkRepository:
                 == ExternalChannelDeliveryStatus.ATTEMPTING,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
-        if attempt is None:
-            return None
+        if attempt is None or (
+            provider_control_identity is not None
+            and _provider_control_attempt_identity(attempt) != provider_control_identity
+        ):
+            return DeliverySettlement(
+                accepted=False,
+                status=None,
+                recovery_delivery_id=None,
+            )
+        if provider_control_identity is not None and not authority_current:
+            attempt.status = ExternalChannelDeliveryStatus.UNKNOWN
+            if provider_message_key is not None:
+                attempt.provider_message_key = provider_message_key
+            attempt.error_kind = "delivery_authority_revoked_after_provider"
+            attempt.error_summary = (
+                "The provider operation completed after External Channel authority "
+                "was revoked."
+            )
+            attempt.completed_at = now
+            await session.flush()
+            return DeliverySettlement(
+                accepted=True,
+                status=ExternalChannelDeliveryStatus.UNKNOWN,
+                recovery_delivery_id=None,
+            )
         attempt.status = status
         if provider_message_key is not None:
             attempt.provider_message_key = provider_message_key
@@ -1855,7 +1947,218 @@ class ExternalChannelWorkRepository:
             if next_cleanup_id is not None:
                 recovery_id = next_cleanup_id
         await session.flush()
-        return recovery_id
+        return DeliverySettlement(
+            accepted=True,
+            status=effective_status,
+            recovery_delivery_id=recovery_id,
+        )
+
+    async def _provider_control_authority_current(
+        self,
+        session: AsyncSession,
+        *,
+        identity: ProviderControlAttemptIdentity,
+    ) -> bool:
+        """Lock authority before the attempt using lifecycle-compatible order."""
+        if identity.binding_id is not None:
+            binding_snapshot = await session.get(
+                RDBExternalChannelBinding,
+                identity.binding_id,
+            )
+            if binding_snapshot is None:
+                return False
+            route_snapshot = await session.get(
+                RDBExternalChannelAgentRoute,
+                binding_snapshot.route_id,
+            )
+            if route_snapshot is None:
+                return False
+            agent_session = await session.get(
+                RDBAgentSession,
+                binding_snapshot.agent_session_id,
+                populate_existing=True,
+                with_for_update=True,
+            )
+            connection = await session.get(
+                RDBExternalChannelConnection,
+                route_snapshot.connection_id,
+                populate_existing=True,
+                with_for_update=True,
+            )
+            route = await session.get(
+                RDBExternalChannelAgentRoute,
+                route_snapshot.id,
+                populate_existing=True,
+                with_for_update=True,
+            )
+            if agent_session is None or connection is None or route is None:
+                return False
+            agent = await session.get(
+                RDBAgent,
+                agent_session.agent_id,
+                populate_existing=True,
+                with_for_update=True,
+            )
+            resource = await session.get(
+                RDBExternalChannelResource,
+                binding_snapshot.resource_id,
+                populate_existing=True,
+                with_for_update=True,
+            )
+            binding = await session.get(
+                RDBExternalChannelBinding,
+                identity.binding_id,
+                populate_existing=True,
+                with_for_update=True,
+            )
+            return (
+                binding is not None
+                and agent is not None
+                and resource is not None
+                and binding.agent_session_id == agent_session.id
+                and binding.route_id == route.id
+                and binding.resource_id == resource.id
+                and binding.status is ExternalChannelBindingStatus.ACTIVE
+                and agent_session.status is AgentSessionStatus.ACTIVE
+                and agent_session.stop_requested_at is None
+                and agent.lifecycle_status is AgentLifecycleStatus.ACTIVE
+                and route.agent_id == agent.id
+                and route.catalog_status is ExternalChannelRouteCatalogStatus.AVAILABLE
+                and route.connection_id == connection.id
+                and resource.status is ExternalChannelResourceStatus.ACTIVE
+                and resource.connection_id == connection.id
+                and connection.status is ExternalChannelConnectionStatus.ACTIVE
+                and connection.encrypted_credentials is not None
+            )
+        if identity.origin_type is ExternalChannelDeliveryOriginType.ACCESS_REQUEST:
+            access_request_snapshot = await session.get(
+                RDBExternalChannelAccessRequest,
+                identity.origin_id,
+            )
+            if (
+                access_request_snapshot is None
+                or access_request_snapshot.connection_id is None
+            ):
+                return False
+            return await self._unbound_provider_control_authority_current(
+                session,
+                identity=identity,
+                resource_id=access_request_snapshot.resource_id,
+                connection_id=access_request_snapshot.connection_id,
+                route_id=access_request_snapshot.route_id,
+            )
+        if identity.origin_type is ExternalChannelDeliveryOriginType.MANAGER_OPERATION:
+            admission_snapshot = await session.get(
+                RDBExternalChannelConversationAdmission,
+                identity.origin_id,
+            )
+            if admission_snapshot is None:
+                return False
+            return await self._unbound_provider_control_authority_current(
+                session,
+                identity=identity,
+                resource_id=admission_snapshot.resource_id,
+                connection_id=admission_snapshot.connection_id,
+                route_id=admission_snapshot.selected_route_id,
+            )
+        return False
+
+    async def _unbound_provider_control_authority_current(
+        self,
+        session: AsyncSession,
+        *,
+        identity: ProviderControlAttemptIdentity,
+        resource_id: str,
+        connection_id: str,
+        route_id: str | None,
+    ) -> bool:
+        """Lock and validate an access or selector provider-control target."""
+        connection = await session.get(
+            RDBExternalChannelConnection,
+            connection_id,
+            populate_existing=True,
+            with_for_update=True,
+        )
+        if connection is None:
+            return False
+        route = (
+            None
+            if route_id is None
+            else await session.get(
+                RDBExternalChannelAgentRoute,
+                route_id,
+                populate_existing=True,
+                with_for_update=True,
+            )
+        )
+        if route_id is not None and (
+            route is None
+            or route.connection_id != connection.id
+            or route.catalog_status is not ExternalChannelRouteCatalogStatus.AVAILABLE
+        ):
+            return False
+        agent = (
+            None
+            if route is None or route.agent_id is None
+            else await session.get(
+                RDBAgent,
+                route.agent_id,
+                populate_existing=True,
+                with_for_update=True,
+            )
+        )
+        resource = await session.get(
+            RDBExternalChannelResource,
+            resource_id,
+            populate_existing=True,
+            with_for_update=True,
+        )
+        if identity.origin_type is ExternalChannelDeliveryOriginType.ACCESS_REQUEST:
+            origin = await session.get(
+                RDBExternalChannelAccessRequest,
+                identity.origin_id,
+                populate_existing=True,
+                with_for_update=True,
+            )
+            origin_current = (
+                origin is not None
+                and origin.connection_id == connection.id
+                and origin.resource_id == resource_id
+                and origin.route_id == route_id
+            )
+        elif (
+            identity.origin_type is ExternalChannelDeliveryOriginType.MANAGER_OPERATION
+        ):
+            origin = await session.get(
+                RDBExternalChannelConversationAdmission,
+                identity.origin_id,
+                populate_existing=True,
+                with_for_update=True,
+            )
+            origin_current = (
+                origin is not None
+                and origin.connection_id == connection.id
+                and origin.resource_id == resource_id
+                and origin.selected_route_id == route_id
+            )
+        else:
+            return False
+        return (
+            resource is not None
+            and origin_current
+            and resource.status is ExternalChannelResourceStatus.ACTIVE
+            and resource.connection_id == connection.id
+            and connection.status is ExternalChannelConnectionStatus.ACTIVE
+            and connection.encrypted_credentials is not None
+            and (
+                route is None
+                or route.agent_id is None
+                or (
+                    agent is not None
+                    and agent.lifecycle_status is AgentLifecycleStatus.ACTIVE
+                )
+            )
+        )
 
     async def _ensure_finished_tracker_delete(
         self,
@@ -2845,6 +3148,41 @@ def _provider_control_predicate() -> sa.ColumnElement[bool]:
                 ExternalChannelDeliveryOperation.PROGRESS_DELETE,
             )
         ),
+    )
+
+
+def _is_provider_control_attempt(
+    attempt: RDBExternalChannelDeliveryAttempt,
+) -> bool:
+    """Return whether the Worker provider-control drain owns one attempt."""
+    return (
+        attempt.channel_action_id is None
+        and attempt.origin_type
+        in {
+            ExternalChannelDeliveryOriginType.ACCESS_REQUEST,
+            ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+        }
+        and attempt.operation
+        in {
+            ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+            ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
+            ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+        }
+    )
+
+
+def _provider_control_attempt_identity(
+    attempt: RDBExternalChannelDeliveryAttempt,
+) -> ProviderControlAttemptIdentity:
+    """Capture immutable identity used across authority-first final locking."""
+    return ProviderControlAttemptIdentity(
+        delivery_attempt_id=attempt.id,
+        origin_type=attempt.origin_type,
+        origin_id=attempt.origin_id,
+        operation=attempt.operation,
+        binding_id=attempt.binding_id,
+        channel_action_id=attempt.channel_action_id,
     )
 
 

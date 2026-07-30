@@ -1879,6 +1879,7 @@ class ExternalChannelRepository:
         *,
         connection_id: str,
         principal_id: str,
+        author_type: ExternalChannelPrincipalAuthorType,
         search: str | None,
         offset: int,
         limit: int,
@@ -1922,6 +1923,12 @@ class ExternalChannelRepository:
             .offset(offset)
             .limit(limit)
         )
+        if author_type is ExternalChannelPrincipalAuthorType.BOT:
+            statement = statement.where(
+                RDBExternalChannelAgentRoute.allow_bot_messages.is_(True)
+            )
+        elif author_type is not ExternalChannelPrincipalAuthorType.HUMAN:
+            return []
         if normalized_search:
             statement = statement.where(RDBAgent.name.ilike(f"%{normalized_search}%"))
         rows = (await session.execute(statement)).all()
