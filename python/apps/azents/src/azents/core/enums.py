@@ -600,15 +600,6 @@ class RuntimeProviderBindingAuditEventType(enum.StrEnum):
     CONFLICT = "conflict"
 
 
-class RuntimeProviderContractStatus(enum.StrEnum):
-    """Administrative state of an immutable Provider capability contract."""
-
-    CANDIDATE = "candidate"
-    ACCEPTED = "accepted"
-    REJECTED = "rejected"
-    SUPERSEDED = "superseded"
-
-
 class RuntimeProviderConfigRevisionState(enum.StrEnum):
     """Lifecycle state of one immutable Provider configuration revision."""
 

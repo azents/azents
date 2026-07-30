@@ -14,7 +14,6 @@ from azents.core.enums import (
     RuntimePolicySnapshotApplicationState,
     RuntimeProviderAvailabilityMode,
     RuntimeProviderConnectionState,
-    RuntimeProviderContractStatus,
     RuntimeProviderKind,
     RuntimeProviderLifecycleState,
     RuntimeProviderObservedState,
@@ -557,7 +556,6 @@ async def _attach_execution_policy(
             },
         },
         compatibility={},
-        status=RuntimeProviderContractStatus.ACCEPTED,
     )
     session.add(contract)
     await session.flush()

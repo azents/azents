@@ -26,13 +26,6 @@ class TestRuntimeProviderV1Api(unittest.TestCase):
     def tearDown(self) -> None:
         pass
 
-    def test_runtime_provider_v1_accept_contract(self) -> None:
-        """Test case for runtime_provider_v1_accept_contract
-
-        Accept Contract
-        """
-        pass
-
     def test_runtime_provider_v1_create_auth_binding(self) -> None:
         """Test case for runtime_provider_v1_create_auth_binding
 

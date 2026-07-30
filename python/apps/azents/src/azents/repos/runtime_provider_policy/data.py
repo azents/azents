@@ -8,7 +8,6 @@ from azents.core.enums import (
     RuntimePolicySnapshotApplicationState,
     RuntimeProviderConfigRevisionState,
     RuntimeProviderConfigValidationStatus,
-    RuntimeProviderContractStatus,
 )
 
 
@@ -23,13 +22,6 @@ class RuntimeProviderContractRevision:
     protocol_version: str
     contract: dict[str, Any]
     compatibility: dict[str, Any]
-    status: RuntimeProviderContractStatus
-    validation_code: str | None
-    validation_message: str | None
-    accepted_by_user_id: str | None
-    accepted_at: datetime.datetime | None
-    rejected_by_user_id: str | None
-    rejected_at: datetime.datetime | None
     created_at: datetime.datetime
 
 
@@ -43,9 +35,6 @@ class RuntimeProviderContractRevisionCreate:
     protocol_version: str
     contract: dict[str, Any]
     compatibility: dict[str, Any]
-    status: RuntimeProviderContractStatus
-    validation_code: str | None
-    validation_message: str | None
 
 
 @dataclass(frozen=True)

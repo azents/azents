@@ -16,7 +16,6 @@ Name | Type | Description | Notes
 **enabled** | **bool** |  | 
 **lifecycle_state** | [**RuntimeProviderLifecycleState**](RuntimeProviderLifecycleState.md) |  | 
 **availability_mode** | [**RuntimeProviderAvailabilityMode**](RuntimeProviderAvailabilityMode.md) |  | 
-**accepted_contract_revision_id** | **str** |  | 
 **current_contract_revision_id** | **str** |  | 
 **active_config_revision_id** | **str** |  | 
 **admin_version** | **int** |  | 

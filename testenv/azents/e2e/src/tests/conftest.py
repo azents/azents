@@ -1182,7 +1182,7 @@ def azents_runtime_provider_docker_container(
                     provider_id=_RUNTIME_PROVIDER_ID,
                     secret_values=(runtime_provider_credential,),
                 )
-                _accept_runtime_provider_contract(
+                _wait_for_runtime_provider_contract(
                     admin_server_url=azents_admin_server_url,
                     access_token=system_bootstrap_evidence.access_token,
                     provider_id=_RUNTIME_PROVIDER_ID,
@@ -1248,13 +1248,13 @@ def _wait_for_runtime_provider_registered(
     )
 
 
-def _accept_runtime_provider_contract(
+def _wait_for_runtime_provider_contract(
     *,
     admin_server_url: str,
     access_token: str,
     provider_id: str,
 ) -> None:
-    """Accept the registered Provider capability contract for E2E provisioning."""
+    """Wait for the registered Provider capability contract to become current."""
     headers = {"Authorization": f"Bearer {access_token}"}
     deadline = time.monotonic() + 60
     last_error = ""
@@ -1282,40 +1282,12 @@ def _accept_runtime_provider_contract(
             time.sleep(1)
             continue
         current_revision = provider.get("current_contract_revision_id")
-        accepted_revision = provider.get("accepted_contract_revision_id")
-        admin_version = provider.get("admin_version")
-        if (
-            isinstance(current_revision, str)
-            and current_revision
-            and accepted_revision == current_revision
-        ):
+        if isinstance(current_revision, str) and current_revision:
             return
-        if not isinstance(current_revision, str) or not current_revision:
-            last_error = f"provider {provider_id} has no candidate contract"
-            time.sleep(1)
-            continue
-        if not isinstance(admin_version, int):
-            pytest.fail(
-                f"provider {provider_id} inventory did not contain an admin version"
-            )
-        accept_response = requests.post(
-            (
-                f"{admin_server_url}/runtime-provider/v1/providers/"
-                f"{provider_id}/contracts/{current_revision}/accept"
-            ),
-            headers=headers,
-            json={"expected_admin_version": admin_version},
-            timeout=10,
-        )
-        if accept_response.status_code == 200:
-            return
-        last_error = (
-            "provider contract acceptance returned "
-            f"HTTP {accept_response.status_code}: {accept_response.text}"
-        )
+        last_error = f"provider {provider_id} has no current capability contract"
         time.sleep(1)
     pytest.fail(
-        f"runtime provider {provider_id} contract did not become accepted: {last_error}"
+        f"runtime provider {provider_id} contract did not become current: {last_error}"
     )
 
 

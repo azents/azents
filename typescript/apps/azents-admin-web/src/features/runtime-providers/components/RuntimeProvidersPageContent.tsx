@@ -200,13 +200,9 @@ function AuthenticationSection({
 function ContractSection({
   provider,
   state,
-  accepting,
-  onAccept,
 }: {
   provider: RuntimeProviderItem;
   state: RuntimeProviderContractState;
-  accepting: boolean;
-  onAccept: (contract: RuntimeProviderContractItem) => void;
 }): React.ReactElement {
   const currentContract =
     state.type === "LOADED"
@@ -226,51 +222,25 @@ function ContractSection({
     current: boolean,
   ): React.ReactElement => (
     <Paper key={contract.id} withBorder p="sm" radius="sm">
-      <Group justify="space-between" align="flex-start" wrap="wrap">
-        <Stack gap={2} style={{ minWidth: 0 }}>
-          <Group gap="xs">
-            {current && (
-              <Badge color="blue" variant="light">
-                Current advertisement
-              </Badge>
-            )}
-            <Badge
-              color={contract.status === "accepted" ? "green" : "yellow"}
-              variant="light"
-            >
-              {contract.status}
-            </Badge>
-            <Text size="xs">
-              Implementation {contract.implementation_version} · Protocol{" "}
-              {contract.protocol_version}
-            </Text>
-          </Group>
-          <Text
-            size="xs"
-            c="dimmed"
-            ff="monospace"
-            style={{ overflowWrap: "anywhere" }}
-          >
-            {contract.digest}
+      <Stack gap={2} style={{ minWidth: 0 }}>
+        <Group gap="xs">
+          <Badge color={current ? "blue" : "gray"} variant="light">
+            {current ? "Current advertisement" : "Historical advertisement"}
+          </Badge>
+          <Text size="xs">
+            Implementation {contract.implementation_version} · Protocol{" "}
+            {contract.protocol_version}
           </Text>
-          {contract.validation_message && (
-            <Text size="xs" c="red">
-              {contract.validation_message}
-            </Text>
-          )}
-        </Stack>
-        {current &&
-          contract.status === "candidate" &&
-          contract.validation_code === null && (
-            <Button
-              size="xs"
-              loading={accepting}
-              onClick={() => onAccept(contract)}
-            >
-              Accept current contract
-            </Button>
-          )}
-      </Group>
+        </Group>
+        <Text
+          size="xs"
+          c="dimmed"
+          ff="monospace"
+          style={{ overflowWrap: "anywhere" }}
+        >
+          {contract.digest}
+        </Text>
+      </Stack>
     </Paper>
   );
 
@@ -280,9 +250,7 @@ function ContractSection({
         Contract and configuration
       </Text>
       <Group gap="xs">
-        {provider.current_contract_revision_id !== null &&
-        provider.current_contract_revision_id ===
-          provider.accepted_contract_revision_id ? (
+        {provider.current_contract_revision_id !== null ? (
           <IconCircleCheck size={16} color="var(--mantine-color-green-6)" />
         ) : (
           <IconCircleX size={16} color="var(--mantine-color-yellow-6)" />
@@ -290,10 +258,7 @@ function ContractSection({
         <Text size="sm">
           {provider.current_contract_revision_id === null
             ? "Waiting for the Provider to advertise a capability contract"
-            : provider.current_contract_revision_id ===
-                provider.accepted_contract_revision_id
-              ? "Current capability contract accepted"
-              : "Current capability contract requires Admin acceptance"}
+            : "Current capability advertisement is authoritative"}
         </Text>
       </Group>
       {state.type === "IDLE" && (
@@ -386,9 +351,7 @@ function ProviderDetail({
   authBindingState,
   authMutating,
   updating,
-  acceptingContract,
   onToggleEnabled,
-  onAcceptContract,
   onCreateAuthBinding,
   onRotateAuthBinding,
   onRevokeAuthBinding,
@@ -399,9 +362,7 @@ function ProviderDetail({
   authBindingState: RuntimeProviderAuthBindingState;
   authMutating: boolean;
   updating: boolean;
-  acceptingContract: boolean;
   onToggleEnabled: () => void;
-  onAcceptContract: (contract: RuntimeProviderContractItem) => void;
   onCreateAuthBinding: () => void;
   onRotateAuthBinding: (binding: RuntimeProviderAuthBindingItem) => void;
   onRevokeAuthBinding: (binding: RuntimeProviderAuthBindingItem) => void;
@@ -467,12 +428,7 @@ function ProviderDetail({
         </Group>
       </Stack>
 
-      <ContractSection
-        provider={provider}
-        state={contractState}
-        accepting={acceptingContract}
-        onAccept={onAcceptContract}
-      />
+      <ContractSection provider={provider} state={contractState} />
 
       <Divider />
       <AuthenticationSection
@@ -497,12 +453,10 @@ export function RuntimeProvidersPageContent({
   authMutating,
   oneTimeSecret,
   updating,
-  acceptingContract,
   errorMessage,
   onSelectProvider,
   onDetailClose,
   onToggleEnabled,
-  onAcceptContract,
   onCreateAuthBinding,
   onRotateAuthBinding,
   onRevokeAuthBinding,
@@ -534,9 +488,7 @@ export function RuntimeProvidersPageContent({
           authBindingState={authBindingState}
           authMutating={authMutating}
           updating={updating}
-          acceptingContract={acceptingContract}
           onToggleEnabled={() => onToggleEnabled(selectedProvider)}
-          onAcceptContract={onAcceptContract}
           onCreateAuthBinding={onCreateAuthBinding}
           onRotateAuthBinding={onRotateAuthBinding}
           onRevokeAuthBinding={onRevokeAuthBinding}

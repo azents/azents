@@ -28,7 +28,7 @@ class ExternalChannelFilesPatchRequest(BaseModel):
     Optimistic partial update for External Channel file limits.
     """ # noqa: E501
     expected_version: Annotated[int, Field(strict=True, ge=0)]
-    inbound_max_file_bytes: Optional[Annotated[int, Field(le=104857600, strict=True, ge=1)]] = None
+    inbound_max_file_bytes: Optional[Annotated[int, Field(le=524288000, strict=True, ge=1)]] = None
     outbound_max_file_bytes: Optional[Annotated[int, Field(le=104857600, strict=True, ge=1)]] = None
     outbound_max_action_bytes: Optional[Annotated[int, Field(le=2097152000, strict=True, ge=1)]] = None
     additional_properties: Dict[str, Any] = {}

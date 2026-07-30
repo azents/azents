@@ -165,6 +165,8 @@ committed before its base PR and mandatory phase plan exist.
 - Replace current/accepted Provider contract state with one current capability revision and audit
   history.
 - Remove Admin acceptance service/API behavior and readiness dependence.
+- Mechanically align the existing Admin capability view, generated clients, and Provider E2E
+  provisioning fixture with direct current-advertisement authority.
 - Define typed capability, Kubernetes Pod Profile, Docker Container Profile, Workspace network
   restriction, compatibility, and configuration revision domain models.
 - Add infrastructure Profile, Workspace Runtime Profile, reconciliation task, Runtime configuration
@@ -186,6 +188,7 @@ committed before its base PR and mandatory phase plan exist.
 - backend focused unit and repository tests;
 - migration upgrade/downgrade and schema invariant tests;
 - contract canonicalization and additive compatibility tests;
+- OpenAPI/client generation and targeted Admin Web type/component tests;
 - backend Ruff, Pyright, and focused Pytest.
 
 ## Phase 2 — Profile APIs and Resolution
@@ -274,7 +277,8 @@ committed before its base PR and mandatory phase plan exist.
 
 ### Deliverables
 
-- Admin capability surface removes acceptance and shows current revision/history/impact.
+- Admin capability surface adds Profile compatibility and impact workflows to the current
+  revision/history view.
 - Admin Pod and Container Profile management uses typed forms and compatibility status.
 - Workspace Runtime Profile catalog supports exact infrastructure selection, network restrictions,
   default, lifecycle, availability, and scoped recreation.

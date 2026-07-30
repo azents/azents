@@ -12,11 +12,6 @@ Name | Type | Description | Notes
 **protocol_version** | **str** |  | 
 **contract** | **object** |  | 
 **compatibility** | **object** |  | 
-**status** | [**RuntimeProviderContractStatus**](RuntimeProviderContractStatus.md) |  | 
-**validation_code** | **str** |  | 
-**validation_message** | **str** |  | 
-**accepted_by_user_id** | **str** |  | 
-**accepted_at** | **datetime** |  | 
 **created_at** | **datetime** |  | 
 
 ## Example

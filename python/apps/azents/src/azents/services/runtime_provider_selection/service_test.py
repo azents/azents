@@ -14,7 +14,6 @@ from azents.core.enums import (
     RuntimeProviderBindingOrigin,
     RuntimeProviderConfigRevisionState,
     RuntimeProviderConfigValidationStatus,
-    RuntimeProviderContractStatus,
     RuntimeProviderKind,
     RuntimeProviderLifecycleState,
     RuntimeProviderRegistrationMethod,
@@ -47,7 +46,6 @@ def _provider(*, capabilities: dict[str, Any] | None = None) -> RuntimeProvider:
         enabled=True,
         lifecycle_state=RuntimeProviderLifecycleState.ACTIVE,
         availability_mode=RuntimeProviderAvailabilityMode.PLATFORM_WIDE,
-        accepted_contract_revision_id="contract-1",
         current_contract_revision_id="contract-1",
         active_config_revision_id=None,
         admin_version=1,
@@ -60,11 +58,14 @@ def _provider(*, capabilities: dict[str, Any] | None = None) -> RuntimeProvider:
 
 
 def _contract(
-    *, provider_id: str = "provider-resource"
+    *,
+    provider_id: str = "provider-resource",
+    contract_id: str = "contract-1",
+    configuration_fields: list[dict[str, object]] | None = None,
 ) -> RuntimeProviderContractRevision:
-    """Build an accepted lifecycle contract."""
+    """Build one current or historical capability contract."""
     return RuntimeProviderContractRevision(
-        id="contract-1",
+        id=contract_id,
         provider_id=provider_id,
         digest="a" * 64,
         implementation_version="1",
@@ -87,17 +88,36 @@ def _contract(
                 "reset_destroys_workspace": False,
                 "terminal_delete_destroys_workspace": True,
             },
-            "configuration_fields": [],
+            "configuration_fields": configuration_fields or [],
         },
         compatibility={},
-        status=RuntimeProviderContractStatus.ACCEPTED,
+        created_at=_NOW,
+    )
+
+
+def _active_config(*, contract_revision_id: str) -> RuntimeProviderConfigRevision:
+    """Build one valid active Provider configuration revision."""
+    return RuntimeProviderConfigRevision(
+        id="config-1",
+        provider_id="provider-resource",
+        revision=1,
+        base_revision_id=None,
+        contract_revision_id=contract_revision_id,
+        config={"region": "us-east-1"},
+        encrypted_secrets=None,
+        secret_metadata={},
+        state=RuntimeProviderConfigRevisionState.ACTIVE,
+        validation_status=RuntimeProviderConfigValidationStatus.VALID,
+        validation_request_id=None,
         validation_code=None,
         validation_message=None,
-        accepted_by_user_id=None,
-        accepted_at=_NOW,
-        rejected_by_user_id=None,
-        rejected_at=None,
+        validation_metadata=None,
+        impact=None,
+        created_by_user_id=None,
+        activated_by_user_id=None,
+        activated_at=_NOW,
         created_at=_NOW,
+        updated_at=_NOW,
     )
 
 
@@ -243,7 +263,7 @@ async def test_contract_and_config_must_match_bound_provider() -> None:
             required_capabilities=None,
         )
 
-    assert raised.value.code == "provider_contract_unaccepted"
+    assert raised.value.code == "provider_contract_unavailable"
 
 
 @pytest.mark.asyncio
@@ -251,8 +271,7 @@ async def test_active_configuration_requires_valid_matching_revision() -> None:
     """A stale or invalid active configuration cannot enter a Runtime snapshot."""
     service = _service()
     service.control_repository.has_connected_connection = AsyncMock(return_value=True)
-    contract = _contract()
-    contract.contract["configuration_fields"] = [
+    configuration_fields: list[dict[str, object]] = [
         {
             "name": "region",
             "scope": "platform",
@@ -260,30 +279,23 @@ async def test_active_configuration_requires_valid_matching_revision() -> None:
             "application_impact": "immediate",
         }
     ]
-    service.policy_repository.get_contract_by_id = AsyncMock(return_value=contract)
+    contract = _contract(configuration_fields=configuration_fields)
+    validated_contract = _contract(
+        contract_id="different-contract",
+        configuration_fields=[
+            {
+                "name": "zone",
+                "scope": "platform",
+                "type": "string",
+                "application_impact": "immediate",
+            }
+        ],
+    )
+    service.policy_repository.get_contract_by_id = AsyncMock(
+        side_effect=[contract, validated_contract]
+    )
     service.policy_repository.get_active_config = AsyncMock(
-        return_value=RuntimeProviderConfigRevision(
-            id="config-1",
-            provider_id="provider-resource",
-            revision=1,
-            base_revision_id=None,
-            contract_revision_id="different-contract",
-            config={"region": "us-east-1"},
-            encrypted_secrets=None,
-            secret_metadata={},
-            state=RuntimeProviderConfigRevisionState.ACTIVE,
-            validation_status=RuntimeProviderConfigValidationStatus.VALID,
-            validation_request_id=None,
-            validation_code=None,
-            validation_message=None,
-            validation_metadata=None,
-            impact=None,
-            created_by_user_id=None,
-            activated_by_user_id=None,
-            activated_at=_NOW,
-            created_at=_NOW,
-            updated_at=_NOW,
-        )
+        return_value=_active_config(contract_revision_id="different-contract")
     )
 
     with pytest.raises(RuntimeProviderSelectionUnavailable) as raised:
@@ -291,6 +303,163 @@ async def test_active_configuration_requires_valid_matching_revision() -> None:
             cast(AsyncSession, Mock()),
             provider_logical_id="system-kubernetes",
             provider=_provider(),
+            workspace_id="workspace-1",
+            required_capabilities=None,
+        )
+
+    assert raised.value.code == "provider_configuration_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_active_configuration_survives_compatible_contract_change() -> None:
+    """A current advertisement may reuse config validated by an equal schema."""
+    service = _service()
+    service.control_repository.has_connected_connection = AsyncMock(return_value=True)
+    configuration_fields: list[dict[str, object]] = [
+        {
+            "name": "region",
+            "scope": "platform",
+            "type": "string",
+            "application_impact": "immediate",
+        }
+    ]
+    current = _contract(
+        contract_id="contract-2",
+        configuration_fields=configuration_fields,
+    )
+    validated = _contract(
+        contract_id="contract-1",
+        configuration_fields=configuration_fields,
+    )
+    active_config = _active_config(contract_revision_id=validated.id)
+    service.policy_repository.get_contract_by_id = AsyncMock(
+        side_effect=[current, validated]
+    )
+    service.policy_repository.get_active_config = AsyncMock(return_value=active_config)
+    provider = _provider().model_copy(
+        update={
+            "current_contract_revision_id": current.id,
+            "active_config_revision_id": active_config.id,
+        }
+    )
+
+    resolved_contract, resolved_config = await service.validate_provider_candidate(
+        cast(AsyncSession, Mock()),
+        provider_logical_id=provider.provider_id,
+        provider=provider,
+        workspace_id="workspace-1",
+        required_capabilities=None,
+    )
+
+    assert resolved_contract is current
+    assert resolved_config is active_config
+
+
+@pytest.mark.asyncio
+async def test_obsolete_configuration_is_dropped_when_current_schema_is_empty() -> None:
+    """A non-empty historical config is not carried under an empty current schema."""
+    service = _service()
+    service.control_repository.has_connected_connection = AsyncMock(return_value=True)
+    current = _contract(contract_id="contract-2")
+    validated = _contract(
+        contract_id="contract-1",
+        configuration_fields=[
+            {
+                "name": "region",
+                "scope": "platform",
+                "type": "string",
+                "application_impact": "immediate",
+            }
+        ],
+    )
+    active_config = _active_config(contract_revision_id=validated.id)
+    service.policy_repository.get_contract_by_id = AsyncMock(
+        side_effect=[current, validated]
+    )
+    service.policy_repository.get_active_config = AsyncMock(return_value=active_config)
+    provider = _provider().model_copy(
+        update={
+            "current_contract_revision_id": current.id,
+            "active_config_revision_id": active_config.id,
+        }
+    )
+
+    resolved_contract, resolved_config = await service.validate_provider_candidate(
+        cast(AsyncSession, Mock()),
+        provider_logical_id=provider.provider_id,
+        provider=provider,
+        workspace_id="workspace-1",
+        required_capabilities=None,
+    )
+
+    assert resolved_contract is current
+    assert resolved_config is None
+
+
+@pytest.mark.asyncio
+async def test_required_configuration_rejects_historical_empty_schema() -> None:
+    """An empty historical schema cannot satisfy a new required configuration."""
+    service = _service()
+    service.control_repository.has_connected_connection = AsyncMock(return_value=True)
+    current = _contract(
+        contract_id="contract-2",
+        configuration_fields=[
+            {
+                "name": "region",
+                "scope": "platform",
+                "type": "string",
+                "application_impact": "immediate",
+            }
+        ],
+    )
+    validated = _contract(contract_id="contract-1")
+    active_config = _active_config(contract_revision_id=validated.id)
+    service.policy_repository.get_contract_by_id = AsyncMock(
+        side_effect=[current, validated]
+    )
+    service.policy_repository.get_active_config = AsyncMock(return_value=active_config)
+    provider = _provider().model_copy(
+        update={
+            "current_contract_revision_id": current.id,
+            "active_config_revision_id": active_config.id,
+        }
+    )
+
+    with pytest.raises(RuntimeProviderSelectionUnavailable) as raised:
+        await service.validate_provider_candidate(
+            cast(AsyncSession, Mock()),
+            provider_logical_id=provider.provider_id,
+            provider=provider,
+            workspace_id="workspace-1",
+            required_capabilities=None,
+        )
+
+    assert raised.value.code == "provider_configuration_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_missing_configuration_validation_contract_fails_closed() -> None:
+    """A dangling validation contract cannot authorize an active configuration."""
+    service = _service()
+    service.control_repository.has_connected_connection = AsyncMock(return_value=True)
+    current = _contract(contract_id="contract-2")
+    active_config = _active_config(contract_revision_id="missing-contract")
+    service.policy_repository.get_contract_by_id = AsyncMock(
+        side_effect=[current, None]
+    )
+    service.policy_repository.get_active_config = AsyncMock(return_value=active_config)
+    provider = _provider().model_copy(
+        update={
+            "current_contract_revision_id": current.id,
+            "active_config_revision_id": active_config.id,
+        }
+    )
+
+    with pytest.raises(RuntimeProviderSelectionUnavailable) as raised:
+        await service.validate_provider_candidate(
+            cast(AsyncSession, Mock()),
+            provider_logical_id=provider.provider_id,
+            provider=provider,
             workspace_id="workspace-1",
             required_capabilities=None,
         )

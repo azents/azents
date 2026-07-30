@@ -41,7 +41,7 @@ class TestRuntimeProviderOptionResponse(unittest.TestCase):
                 scope = '',
                 availability_mode = '',
                 capabilities = { },
-                accepted_contract_revision_id = '',
+                current_contract_revision_id = '',
                 active_config_revision_id = ''
             )
         else:
@@ -52,7 +52,7 @@ class TestRuntimeProviderOptionResponse(unittest.TestCase):
                 scope = '',
                 availability_mode = '',
                 capabilities = { },
-                accepted_contract_revision_id = '',
+                current_contract_revision_id = '',
                 active_config_revision_id = '',
         )
         """
