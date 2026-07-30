@@ -49,8 +49,6 @@ async def _create_agent(
     session: AsyncSession,
     workspace_id: str,
     slug: str,
-    *,
-    runtime_provider_id: str | None = None,
 ) -> str:
     """Create Agent for tests."""
 
@@ -77,7 +75,6 @@ async def _create_agent(
             provider=LLMProvider.ANTHROPIC,
             model_identifier=f"{slug}-id",
         ),
-        runtime_provider_id=runtime_provider_id,
     )
     session.add(agent)
     await session.flush()
@@ -111,76 +108,6 @@ class TestAgentRuntimeRepository:
         )
         assert first.runner_state == RuntimeRunnerState.UNKNOWN
 
-    async def test_ensure_for_agent_uses_default_provider_for_new_runtime(
-        self, rdb_session: AsyncSession
-    ) -> None:
-        """Create Runtime with default provider when Agent provider is empty."""
-        workspace_id = await _create_workspace(
-            rdb_session, "agent-runtime-default-provider-ws"
-        )
-        agent_id = await _create_agent(
-            rdb_session,
-            workspace_id,
-            "agent-runtime-default-provider",
-        )
-        repo = AgentRuntimeRepository()
-
-        runtime = await repo.ensure_for_agent(
-            rdb_session,
-            agent_id,
-            default_runtime_provider_id="system-kubernetes",
-        )
-
-        assert runtime.runtime_provider_id == "system-kubernetes"
-
-    async def test_ensure_for_agent_backfills_default_provider_for_existing_runtime(
-        self, rdb_session: AsyncSession
-    ) -> None:
-        """Fill default provider when existing Runtime provider is empty."""
-        workspace_id = await _create_workspace(
-            rdb_session, "agent-runtime-backfill-provider-ws"
-        )
-        agent_id = await _create_agent(
-            rdb_session,
-            workspace_id,
-            "agent-runtime-backfill-provider",
-        )
-        repo = AgentRuntimeRepository()
-        created = await repo.ensure_for_agent(rdb_session, agent_id)
-        assert created.runtime_provider_id is None
-
-        runtime = await repo.ensure_for_agent(
-            rdb_session,
-            agent_id,
-            default_runtime_provider_id="system-kubernetes",
-        )
-
-        assert runtime.id == created.id
-        assert runtime.runtime_provider_id == "system-kubernetes"
-
-    async def test_ensure_for_agent_preserves_explicit_provider(
-        self, rdb_session: AsyncSession
-    ) -> None:
-        """Explicit provider on Agent is not overwritten by default provider."""
-        workspace_id = await _create_workspace(
-            rdb_session, "agent-runtime-explicit-provider-ws"
-        )
-        agent_id = await _create_agent(
-            rdb_session,
-            workspace_id,
-            "agent-runtime-explicit-provider",
-            runtime_provider_id="workspace-provider",
-        )
-        repo = AgentRuntimeRepository()
-
-        runtime = await repo.ensure_for_agent(
-            rdb_session,
-            agent_id,
-            default_runtime_provider_id="system-kubernetes",
-        )
-
-        assert runtime.runtime_provider_id == "workspace-provider"
-
     async def test_attach_provider_binding_upgrades_exact_legacy_runtime(
         self, rdb_session: AsyncSession
     ) -> None:
@@ -194,11 +121,7 @@ class TestAgentRuntimeRepository:
             "agent-runtime-attach-provider",
         )
         repository = AgentRuntimeRepository()
-        runtime = await repository.ensure_for_agent(
-            rdb_session,
-            agent_id,
-            default_runtime_provider_id="system-kubernetes",
-        )
+        runtime = await repository.ensure_for_agent(rdb_session, agent_id)
         provider = await RuntimeProviderRepository().create(
             rdb_session,
             RuntimeProviderCreate(
@@ -1104,10 +1027,14 @@ class TestAgentRuntimeRepository:
             rdb_session,
             workspace_id,
             "agent-runtime-observe-candidate",
-            runtime_provider_id="provider-1",
         )
         repo = AgentRuntimeRepository()
         runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+        await rdb_session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(runtime_provider_id="provider-1")
+        )
         runtime = await repo.record_provider_connection_state(
             rdb_session,
             runtime.id,
@@ -1169,10 +1096,14 @@ class TestAgentRuntimeRepository:
             rdb_session,
             workspace_id,
             "agent-runtime-observe-stopping",
-            runtime_provider_id="provider-1",
         )
         repo = AgentRuntimeRepository()
         runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+        await rdb_session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(runtime_provider_id="provider-1")
+        )
         runtime = await repo.record_provider_connection_state(
             rdb_session,
             runtime.id,

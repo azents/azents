@@ -14,12 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     RuntimeProviderAvailabilityMode,
     RuntimeProviderLifecycleState,
+    RuntimeProviderScope,
 )
 from azents.core.runtime_profile import (
     RuntimeProfileCompatibility,
     RuntimeProfileLifecycle,
     RuntimeReconcileSourceKind,
     WorkspaceRuntimeProfilePolicyV1,
+    compose_workspace_runtime_profile,
     evaluate_runtime_profile_compatibility,
     parse_runtime_infrastructure_profile_spec,
 )
@@ -40,6 +42,11 @@ from azents.repos.runtime_provider_control.repository import (
 )
 from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
+)
+from azents.repos.workspace import WorkspaceRepository
+from azents.repos.workspace.data import (
+    Workspace,
+    WorkspaceRuntimeProfileDefaultReplace,
 )
 
 
@@ -64,6 +71,15 @@ class SelectableInfrastructureProfileProjection:
     provider: RuntimeProvider
     compatibility: RuntimeProfileCompatibility
     capability_revision_id: str
+
+
+@dataclasses.dataclass(frozen=True)
+class WorkspaceRuntimeProfileDefaultProjection:
+    """Workspace default and its current availability projection."""
+
+    runtime_profile_id: str | None
+    version: int
+    profile: WorkspaceRuntimeProfileProjection | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -97,6 +113,140 @@ class RuntimeProfileWorkspaceService:
     control_repository: Annotated[
         RuntimeProviderControlRepository, Depends(RuntimeProviderControlRepository)
     ]
+    workspace_repository: Annotated[WorkspaceRepository, Depends(WorkspaceRepository)]
+
+    async def get_default(
+        self,
+        workspace_id: str,
+    ) -> WorkspaceRuntimeProfileDefaultProjection:
+        """Return the Workspace default and current Profile availability."""
+        async with self.session_manager() as session:
+            workspace = await self.workspace_repository.get_by_id(
+                session,
+                workspace_id,
+            )
+            if workspace is None:
+                raise RuntimeProfileWorkspaceUnavailable(
+                    code="workspace_not_found",
+                    message="Workspace was not found.",
+                )
+            return await self._project_default(session, workspace_id, workspace)
+
+    async def replace_default(
+        self,
+        workspace_id: str,
+        *,
+        expected_version: int,
+        runtime_profile_id: str | None,
+    ) -> WorkspaceRuntimeProfileDefaultProjection:
+        """Set or clear the Workspace default with optimistic fencing."""
+        async with self.session_manager() as session:
+            if runtime_profile_id is not None:
+                profile = await self.profile_repository.get_workspace_runtime_profile(
+                    session,
+                    workspace_id=workspace_id,
+                    profile_id=runtime_profile_id,
+                    for_update=False,
+                )
+                if profile is None:
+                    raise RuntimeProfileWorkspaceUnavailable(
+                        code="profile_not_found",
+                        message="Workspace Runtime Profile was not found.",
+                    )
+                if profile.lifecycle is not RuntimeProfileLifecycle.ACTIVE:
+                    raise RuntimeProfileWorkspaceUnavailable(
+                        code="workspace_profile_disabled",
+                        message="A disabled Runtime Profile cannot be the default.",
+                    )
+            workspace = await self.workspace_repository.replace_runtime_profile_default(
+                session,
+                workspace_id,
+                WorkspaceRuntimeProfileDefaultReplace(
+                    expected_version=expected_version,
+                    runtime_profile_id=runtime_profile_id,
+                ),
+            )
+            if workspace is None:
+                current = await self.workspace_repository.get_by_id(
+                    session,
+                    workspace_id,
+                )
+                if current is None:
+                    raise RuntimeProfileWorkspaceUnavailable(
+                        code="workspace_not_found",
+                        message="Workspace was not found.",
+                    )
+                raise RuntimeProfileWorkspaceUnavailable(
+                    code="default_version_conflict",
+                    message="Workspace Runtime Profile default version is stale.",
+                )
+            return await self._project_default(session, workspace_id, workspace)
+
+    async def resolve_agent_create_profile(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        explicit_profile_id: str | None,
+    ) -> str | None:
+        """Resolve explicit selection or copy one currently available default."""
+        if explicit_profile_id is not None:
+            await self.require_available_agent_profile(
+                session,
+                workspace_id=workspace_id,
+                profile_id=explicit_profile_id,
+            )
+            return explicit_profile_id
+        workspace = await self.workspace_repository.get_by_id_for_update(
+            session,
+            workspace_id,
+        )
+        if workspace is None:
+            raise RuntimeProfileWorkspaceUnavailable(
+                code="workspace_not_found",
+                message="Workspace was not found.",
+            )
+        default_profile_id = workspace.default_runtime_profile_id
+        if default_profile_id is None:
+            return None
+        profile = await self.profile_repository.get_workspace_runtime_profile(
+            session,
+            workspace_id=workspace_id,
+            profile_id=default_profile_id,
+            for_update=False,
+        )
+        if profile is None:
+            return None
+        projection = await self._project(session, workspace_id, profile)
+        return profile.id if projection.available else None
+
+    async def require_available_agent_profile(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        profile_id: str,
+    ) -> WorkspaceRuntimeProfileProjection:
+        """Require an exact currently available Profile owned by the Workspace."""
+        profile = await self.profile_repository.get_workspace_runtime_profile(
+            session,
+            workspace_id=workspace_id,
+            profile_id=profile_id,
+            for_update=False,
+        )
+        if profile is None:
+            raise RuntimeProfileWorkspaceUnavailable(
+                code="profile_not_found",
+                message="Workspace Runtime Profile was not found.",
+            )
+        projection = await self._project(session, workspace_id, profile)
+        if not projection.available:
+            raise RuntimeProfileWorkspaceUnavailable(
+                code=projection.reason_code or "profile_unavailable",
+                message="Workspace Runtime Profile is currently unavailable.",
+                current_profile=profile,
+            )
+        return projection
 
     async def list_profiles(
         self,
@@ -152,6 +302,10 @@ class RuntimeProfileWorkspaceService:
             infrastructure = await self._require_infrastructure(
                 session,
                 infrastructure_profile_id,
+            )
+            self._require_valid_workspace_policy(
+                infrastructure=infrastructure,
+                policy=policy,
             )
             await self._require_selectable_infrastructure(
                 session,
@@ -221,6 +375,10 @@ class RuntimeProfileWorkspaceService:
             infrastructure = await self._require_infrastructure(
                 session,
                 infrastructure_profile_id,
+            )
+            self._require_valid_workspace_policy(
+                infrastructure=infrastructure,
+                policy=policy,
             )
             if lifecycle is RuntimeProfileLifecycle.ACTIVE:
                 await self._require_selectable_infrastructure(
@@ -396,7 +554,11 @@ class RuntimeProfileWorkspaceService:
             infrastructure=infrastructure,
         )
         try:
-            WorkspaceRuntimeProfilePolicyV1.model_validate(profile.policy)
+            workspace_policy = WorkspaceRuntimeProfilePolicyV1.model_validate(
+                profile.policy
+            )
+            spec = parse_runtime_infrastructure_profile_spec(infrastructure.spec)
+            compose_workspace_runtime_profile(spec, workspace_policy)
         except ValidationError:
             return WorkspaceRuntimeProfileProjection(
                 profile=profile,
@@ -404,6 +566,16 @@ class RuntimeProfileWorkspaceService:
                 provider=provider,
                 available=False,
                 reason_code="workspace_policy_invalid",
+                compatibility=compatibility,
+                capability_revision_id=provider.current_contract_revision_id,
+            )
+        except ValueError as error:
+            return WorkspaceRuntimeProfileProjection(
+                profile=profile,
+                infrastructure_profile=infrastructure,
+                provider=provider,
+                available=False,
+                reason_code=str(error),
                 compatibility=compatibility,
                 capability_revision_id=provider.current_contract_revision_id,
             )
@@ -433,6 +605,33 @@ class RuntimeProfileWorkspaceService:
                 message="Runtime infrastructure Profile was not found.",
             )
         return profile
+
+    async def _project_default(
+        self,
+        session: AsyncSession,
+        workspace_id: str,
+        workspace: Workspace,
+    ) -> WorkspaceRuntimeProfileDefaultProjection:
+        profile_id = workspace.default_runtime_profile_id
+        if profile_id is None:
+            return WorkspaceRuntimeProfileDefaultProjection(
+                runtime_profile_id=None,
+                version=workspace.default_runtime_profile_version,
+                profile=None,
+            )
+        profile = await self.profile_repository.get_workspace_runtime_profile(
+            session,
+            workspace_id=workspace_id,
+            profile_id=profile_id,
+            for_update=False,
+        )
+        if profile is None:
+            raise AssertionError("Workspace default Runtime Profile is missing.")
+        return WorkspaceRuntimeProfileDefaultProjection(
+            runtime_profile_id=profile_id,
+            version=workspace.default_runtime_profile_version,
+            profile=await self._project(session, workspace_id, profile),
+        )
 
     async def _require_selectable_infrastructure(
         self,
@@ -470,6 +669,22 @@ class RuntimeProfileWorkspaceService:
                 message="Runtime infrastructure Profile is incompatible.",
             )
 
+    @staticmethod
+    def _require_valid_workspace_policy(
+        *,
+        infrastructure: RuntimeInfrastructureProfile,
+        policy: WorkspaceRuntimeProfilePolicyV1,
+    ) -> None:
+        """Require policy composition to match Runtime resolution semantics."""
+        spec = parse_runtime_infrastructure_profile_spec(infrastructure.spec)
+        try:
+            compose_workspace_runtime_profile(spec, policy)
+        except ValueError as error:
+            raise RuntimeProfileWorkspaceUnavailable(
+                code=str(error),
+                message="Workspace Runtime Profile policy is invalid.",
+            ) from error
+
     async def _provider_ready_for_workspace(
         self,
         session: AsyncSession,
@@ -478,7 +693,8 @@ class RuntimeProfileWorkspaceService:
         workspace_id: str,
     ) -> bool:
         if (
-            not provider.enabled
+            provider.scope is not RuntimeProviderScope.SYSTEM
+            or not provider.enabled
             or provider.lifecycle_state is not RuntimeProviderLifecycleState.ACTIVE
             or provider.current_contract_revision_id is None
         ):

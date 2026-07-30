@@ -3,6 +3,7 @@
 import dataclasses
 from typing import Annotated
 
+from azcommon.datetime import tznow
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,8 +11,10 @@ from azents.core.enums import (
     RuntimeProviderAvailabilityMode,
     RuntimeProviderLifecycleState,
 )
+from azents.core.runtime_profile import RuntimeReconcileSourceKind
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 
@@ -35,6 +38,9 @@ class RuntimeProviderAdminService:
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
     repository: Annotated[RuntimeProviderRepository, Depends(RuntimeProviderRepository)]
+    profile_repository: Annotated[
+        RuntimeProfileRepository, Depends(RuntimeProfileRepository)
+    ]
 
     async def list_providers(self) -> list[RuntimeProvider]:
         """Return all durable Providers, including disabled resources."""
@@ -87,6 +93,14 @@ class RuntimeProviderAdminService:
                 lifecycle_state=lifecycle_state,
                 availability_mode=availability_mode,
             )
+            if updated is not None:
+                await self.profile_repository.enqueue_reconcile_task(
+                    session,
+                    source_type=RuntimeReconcileSourceKind.PROVIDER,
+                    source_id=updated.id,
+                    source_version=str(updated.admin_version),
+                    available_at=tznow(),
+                )
         if updated is None:
             raise RuntimeProviderAdminUnavailable(
                 code="provider_not_found",
@@ -112,9 +126,22 @@ class RuntimeProviderAdminService:
                     code="provider_not_found",
                     message="Runtime Provider was not found.",
                 )
-            await self.repository.replace_workspace_availability(
+            updated = await self.repository.replace_workspace_availability(
                 session,
                 provider_id=provider.id,
                 workspace_ids=workspace_ids,
             )
-        return provider
+            if updated is not None:
+                await self.profile_repository.enqueue_reconcile_task(
+                    session,
+                    source_type=RuntimeReconcileSourceKind.PROVIDER,
+                    source_id=updated.id,
+                    source_version=str(updated.admin_version),
+                    available_at=tznow(),
+                )
+        if updated is None:
+            raise RuntimeProviderAdminUnavailable(
+                code="provider_not_found",
+                message="Runtime Provider was not found.",
+            )
+        return updated

@@ -339,6 +339,52 @@ def parse_runtime_infrastructure_profile_spec(
     return _RUNTIME_INFRASTRUCTURE_PROFILE_ADAPTER.validate_python(document)
 
 
+def compose_workspace_runtime_profile(
+    spec: RuntimeInfrastructureProfileSpec,
+    workspace_policy: WorkspaceRuntimeProfilePolicyV1,
+) -> dict[str, JsonValue]:
+    """Compose restrictive Workspace policy into one effective Profile."""
+    restriction = workspace_policy.network_restriction
+    if restriction is None:
+        return canonicalize_runtime_profile_document(spec)
+    if isinstance(spec, DockerContainerProfileSpecV1):
+        raise ValueError("workspace_network_restriction_unsupported")
+
+    base = spec.network_policy
+    if base.allowed_cidrs and restriction.allowed_cidrs:
+        base_networks = tuple(
+            ipaddress.ip_network(cidr, strict=False) for cidr in base.allowed_cidrs
+        )
+        for cidr in restriction.allowed_cidrs:
+            restricted = ipaddress.ip_network(cidr, strict=False)
+            if isinstance(restricted, ipaddress.IPv4Network):
+                within_boundary = any(
+                    isinstance(allowed, ipaddress.IPv4Network)
+                    and restricted.subnet_of(allowed)
+                    for allowed in base_networks
+                )
+            else:
+                within_boundary = any(
+                    isinstance(allowed, ipaddress.IPv6Network)
+                    and restricted.subnet_of(allowed)
+                    for allowed in base_networks
+                )
+            if not within_boundary:
+                raise ValueError("workspace_network_restriction_expands")
+        allowed_cidrs = restriction.allowed_cidrs
+    elif restriction.allowed_cidrs:
+        allowed_cidrs = restriction.allowed_cidrs
+    else:
+        allowed_cidrs = base.allowed_cidrs
+
+    effective_network = RuntimeNetworkPolicyModule(
+        allowed_cidrs=allowed_cidrs,
+        denied_cidrs=tuple(sorted({*base.denied_cidrs, *restriction.denied_cidrs})),
+    )
+    effective = spec.model_copy(update={"network_policy": effective_network})
+    return canonicalize_runtime_profile_document(effective)
+
+
 def required_runtime_profile_capabilities(
     spec: RuntimeInfrastructureProfileSpec,
 ) -> frozenset[str]:

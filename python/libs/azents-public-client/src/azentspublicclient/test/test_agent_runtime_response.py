@@ -40,7 +40,11 @@ class TestAgentRuntimeResponse(unittest.TestCase):
                     workspace_id = '', 
                     agent_id = '', 
                     runtime_provider_id = '', 
-                    provider_config = { }, 
+                    runtime_provider_resource_id = '', 
+                    infrastructure_profile_id = '', 
+                    workspace_runtime_profile_id = '', 
+                    desired_runtime_configuration_revision_id = '', 
+                    applied_runtime_configuration_revision_id = '', 
                     desired_state = 'running', 
                     desired_generation = 56, 
                     last_lifecycle_command = 'start', 
@@ -69,46 +73,56 @@ class TestAgentRuntimeResponse(unittest.TestCase):
                         generation = 56, 
                         code = '', 
                         message = '', ), ),
-                execution_policy = azentspublicclient.models.agent_runtime_execution_policy_status_response.AgentRuntimeExecutionPolicyStatusResponse(
-                    status = 'configured', 
-                    configured = azentspublicclient.models.runtime_execution_configured_summary_response.RuntimeExecutionConfiguredSummaryResponse(
-                        profile_id = '', 
-                        digest = '', 
-                        capabilities = [
-                            azentspublicclient.models.runtime_execution_capability_summary_response.RuntimeExecutionCapabilitySummaryResponse(
-                                module_id = 'docker', 
-                                version = 56, 
-                                enabled = True, )
+                configuration = azentspublicclient.models.agent_runtime_configuration_status_response.AgentRuntimeConfigurationStatusResponse(
+                    status = 'profile_required', 
+                    desired = azentspublicclient.models.runtime_configuration_revision_response.RuntimeConfigurationRevisionResponse(
+                        id = '', 
+                        provider_id = '', 
+                        provider_capability_revision_id = '', 
+                        infrastructure_profile_id = '', 
+                        infrastructure_profile_version = 56, 
+                        workspace_runtime_profile_id = '', 
+                        workspace_runtime_profile_version = 56, 
+                        agent_selection_version = 56, 
+                        resolution_status = 'ready', 
+                        reason_code = '', 
+                        required_capabilities = [
+                            ''
                             ], 
-                        storage_mode = 'none', 
-                        storage_capacity_bytes = 56, ), 
-                    target = azentspublicclient.models.runtime_execution_snapshot_summary_response.RuntimeExecutionSnapshotSummaryResponse(
-                        profile_id = '', 
-                        digest = '', 
-                        desired_generation = 56, 
-                        capabilities = [
-                            azentspublicclient.models.runtime_execution_capability_summary_response.RuntimeExecutionCapabilitySummaryResponse(
-                                module_id = 'docker', 
-                                version = 56, 
-                                enabled = True, )
+                        missing_capabilities = [
+                            ''
                             ], 
-                        storage_mode = 'none', 
-                        storage_capacity_bytes = 56, ), 
-                    applied = azentspublicclient.models.runtime_execution_snapshot_summary_response.RuntimeExecutionSnapshotSummaryResponse(
-                        profile_id = '', 
                         digest = '', 
-                        desired_generation = 56, 
-                        capabilities = , 
-                        storage_mode = , 
-                        storage_capacity_bytes = 56, ), 
-                    desired_generation = 56, 
-                    governing_layers = {
-                        'key' : 'profile'
-                        }, 
-                    reason_codes = [
-                        ''
-                        ], 
-                    required_action = 'none', )
+                        target_desired_generation = 56, 
+                        provider_reported_digest = '', 
+                        runner_reported_digest = '', 
+                        provider_acknowledged_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        runtime_observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), 
+                    applied = azentspublicclient.models.runtime_configuration_revision_response.RuntimeConfigurationRevisionResponse(
+                        id = '', 
+                        provider_id = '', 
+                        provider_capability_revision_id = '', 
+                        infrastructure_profile_id = '', 
+                        infrastructure_profile_version = 56, 
+                        workspace_runtime_profile_id = '', 
+                        workspace_runtime_profile_version = 56, 
+                        agent_selection_version = 56, 
+                        resolution_status = 'ready', 
+                        reason_code = '', 
+                        required_capabilities = [
+                            ''
+                            ], 
+                        missing_capabilities = [
+                            ''
+                            ], 
+                        digest = '', 
+                        target_desired_generation = 56, 
+                        provider_reported_digest = '', 
+                        runner_reported_digest = '', 
+                        provider_acknowledged_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        runtime_observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), )
             )
         else:
             return AgentRuntimeResponse(
@@ -117,7 +131,11 @@ class TestAgentRuntimeResponse(unittest.TestCase):
                     workspace_id = '', 
                     agent_id = '', 
                     runtime_provider_id = '', 
-                    provider_config = { }, 
+                    runtime_provider_resource_id = '', 
+                    infrastructure_profile_id = '', 
+                    workspace_runtime_profile_id = '', 
+                    desired_runtime_configuration_revision_id = '', 
+                    applied_runtime_configuration_revision_id = '', 
                     desired_state = 'running', 
                     desired_generation = 56, 
                     last_lifecycle_command = 'start', 
@@ -146,46 +164,56 @@ class TestAgentRuntimeResponse(unittest.TestCase):
                         generation = 56, 
                         code = '', 
                         message = '', ), ),
-                execution_policy = azentspublicclient.models.agent_runtime_execution_policy_status_response.AgentRuntimeExecutionPolicyStatusResponse(
-                    status = 'configured', 
-                    configured = azentspublicclient.models.runtime_execution_configured_summary_response.RuntimeExecutionConfiguredSummaryResponse(
-                        profile_id = '', 
-                        digest = '', 
-                        capabilities = [
-                            azentspublicclient.models.runtime_execution_capability_summary_response.RuntimeExecutionCapabilitySummaryResponse(
-                                module_id = 'docker', 
-                                version = 56, 
-                                enabled = True, )
+                configuration = azentspublicclient.models.agent_runtime_configuration_status_response.AgentRuntimeConfigurationStatusResponse(
+                    status = 'profile_required', 
+                    desired = azentspublicclient.models.runtime_configuration_revision_response.RuntimeConfigurationRevisionResponse(
+                        id = '', 
+                        provider_id = '', 
+                        provider_capability_revision_id = '', 
+                        infrastructure_profile_id = '', 
+                        infrastructure_profile_version = 56, 
+                        workspace_runtime_profile_id = '', 
+                        workspace_runtime_profile_version = 56, 
+                        agent_selection_version = 56, 
+                        resolution_status = 'ready', 
+                        reason_code = '', 
+                        required_capabilities = [
+                            ''
                             ], 
-                        storage_mode = 'none', 
-                        storage_capacity_bytes = 56, ), 
-                    target = azentspublicclient.models.runtime_execution_snapshot_summary_response.RuntimeExecutionSnapshotSummaryResponse(
-                        profile_id = '', 
-                        digest = '', 
-                        desired_generation = 56, 
-                        capabilities = [
-                            azentspublicclient.models.runtime_execution_capability_summary_response.RuntimeExecutionCapabilitySummaryResponse(
-                                module_id = 'docker', 
-                                version = 56, 
-                                enabled = True, )
+                        missing_capabilities = [
+                            ''
                             ], 
-                        storage_mode = 'none', 
-                        storage_capacity_bytes = 56, ), 
-                    applied = azentspublicclient.models.runtime_execution_snapshot_summary_response.RuntimeExecutionSnapshotSummaryResponse(
-                        profile_id = '', 
                         digest = '', 
-                        desired_generation = 56, 
-                        capabilities = , 
-                        storage_mode = , 
-                        storage_capacity_bytes = 56, ), 
-                    desired_generation = 56, 
-                    governing_layers = {
-                        'key' : 'profile'
-                        }, 
-                    reason_codes = [
-                        ''
-                        ], 
-                    required_action = 'none', ),
+                        target_desired_generation = 56, 
+                        provider_reported_digest = '', 
+                        runner_reported_digest = '', 
+                        provider_acknowledged_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        runtime_observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), 
+                    applied = azentspublicclient.models.runtime_configuration_revision_response.RuntimeConfigurationRevisionResponse(
+                        id = '', 
+                        provider_id = '', 
+                        provider_capability_revision_id = '', 
+                        infrastructure_profile_id = '', 
+                        infrastructure_profile_version = 56, 
+                        workspace_runtime_profile_id = '', 
+                        workspace_runtime_profile_version = 56, 
+                        agent_selection_version = 56, 
+                        resolution_status = 'ready', 
+                        reason_code = '', 
+                        required_capabilities = [
+                            ''
+                            ], 
+                        missing_capabilities = [
+                            ''
+                            ], 
+                        digest = '', 
+                        target_desired_generation = 56, 
+                        provider_reported_digest = '', 
+                        runner_reported_digest = '', 
+                        provider_acknowledged_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        runtime_observed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ), ),
         )
         """
 

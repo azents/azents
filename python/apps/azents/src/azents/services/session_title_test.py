@@ -509,6 +509,8 @@ class _AgentRepository:
             enabled=True,
             lifecycle_status=AgentLifecycleStatus.ACTIVE,
             type=AgentType.PUBLIC,
+            runtime_profile_id=None,
+            runtime_profile_selection_version=1,
             created_at=now,
             updated_at=now,
         )

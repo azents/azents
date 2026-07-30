@@ -1,57 +1,41 @@
-"""Agent Runtime execution-policy response tests."""
+"""Agent Runtime configuration response tests."""
+
+import datetime
 
 from azents.api.public.agent_runtime.v1.data import (
-    AgentRuntimeExecutionPolicyStatusResponse,
+    AgentRuntimeConfigurationStatusResponse,
 )
-from azents.core.runtime_execution_policy import (
-    RuntimeExecutionModuleId,
-    RuntimeExecutionPolicyLayer,
-    RuntimeExecutionPolicyStatus,
-    RuntimeExecutionRequiredAction,
-    RuntimeExecutionStorageMode,
-)
-from azents.services.runtime_execution_policy.application_service import (
-    RuntimeExecutionCapabilitySummary,
-    RuntimeExecutionConfiguredSummary,
-    RuntimeExecutionPolicyStatusProjection,
-    RuntimeExecutionSnapshotSummary,
+from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
+from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
+from azents.services.agent_runtime.lifecycle_data import (
+    AgentRuntimeConfigurationStatus,
 )
 
 
-def _projection() -> RuntimeExecutionPolicyStatusProjection:
-    capabilities = (
-        RuntimeExecutionCapabilitySummary(
-            module_id=RuntimeExecutionModuleId.DOCKER,
-            version=1,
-            enabled=False,
-        ),
-    )
-    configured = RuntimeExecutionConfiguredSummary(
-        profile_id="system-standard",
+def _revision() -> RuntimeConfigurationRevision:
+    return RuntimeConfigurationRevision(
+        id="revision-1",
+        runtime_id="runtime-1",
+        provider_id="provider-1",
+        provider_capability_revision_id="capability-1",
+        infrastructure_profile_id="infrastructure-1",
+        infrastructure_profile_version=2,
+        workspace_runtime_profile_id="profile-1",
+        workspace_runtime_profile_version=3,
+        agent_selection_version=4,
+        resolution_status=RuntimeConfigurationResolutionStatus.READY,
+        reason_code=None,
+        required_capabilities=("runtime.resources",),
+        missing_capabilities=(),
+        resolved_configuration={"secret_provider_detail": "not-public"},
+        source_trace={"internal_version": 1},
         digest="a" * 64,
-        capabilities=capabilities,
-        storage_mode=RuntimeExecutionStorageMode.NONE,
-        storage_capacity_bytes=None,
-    )
-    applied = RuntimeExecutionSnapshotSummary(
-        profile_id="system-standard",
-        digest="a" * 64,
-        desired_generation=3,
-        capabilities=capabilities,
-        storage_mode=RuntimeExecutionStorageMode.NONE,
-        storage_capacity_bytes=None,
-    )
-    return RuntimeExecutionPolicyStatusProjection(
-        status=RuntimeExecutionPolicyStatus.APPLIED,
-        configured=configured,
-        target=applied,
-        applied=applied,
-        desired_generation=3,
-        governing_layers={
-            "docker.enabled": RuntimeExecutionPolicyLayer.PROFILE,
-        },
-        reason_codes=(),
-        required_action=RuntimeExecutionRequiredAction.NONE,
+        target_desired_generation=5,
+        provider_reported_digest=None,
+        runner_reported_digest=None,
+        provider_acknowledged_at=None,
+        runtime_observed_at=None,
+        created_at=datetime.datetime(2026, 7, 30, tzinfo=datetime.UTC),
     )
 
 
@@ -65,28 +49,26 @@ def _all_keys(value: object) -> set[str]:
     return set()
 
 
-def test_execution_policy_status_exposes_only_safe_summary_fields() -> None:
-    """Runtime status omits Provider topology, credentials, and raw policy data."""
-    payload = AgentRuntimeExecutionPolicyStatusResponse.convert_from(
-        _projection()
+def test_configuration_status_exposes_only_safe_revision_evidence() -> None:
+    """Runtime status omits resolved infrastructure details and source traces."""
+    revision = _revision()
+    payload = AgentRuntimeConfigurationStatusResponse.convert_from(
+        AgentRuntimeConfigurationStatus(
+            status="applied",
+            desired=revision,
+            applied=revision,
+        )
     ).model_dump(mode="json")
 
     assert payload["status"] == "applied"
-    assert payload["configured"]["profile_id"] == "system-standard"
+    assert payload["desired"]["workspace_runtime_profile_id"] == "profile-1"
     keys = _all_keys(payload)
     assert keys.isdisjoint(
         {
-            "provider_id",
-            "contract_revision_id",
-            "config_revision_id",
-            "snapshot_id",
-            "resolved_config",
-            "resolved_execution_policy",
-            "resolved_execution_policy_json",
+            "resolved_configuration",
+            "source_trace",
             "encrypted_secrets",
             "secret_metadata",
-            "source_trace",
-            "socket_path",
-            "kubernetes_name",
+            "provider_config",
         }
     )

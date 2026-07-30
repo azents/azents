@@ -70,9 +70,9 @@ async def test_reconciler_refreshes_stale_provider_connection_before_start_timeo
             session,
             workspace_id,
             "reconciler-stale-provider-agent",
-            runtime_provider_id="provider-1",
         )
         runtime = await runtime_repository.ensure_for_agent(session, agent_id)
+        await _bind_runtime_provider(session, runtime.id)
         command = await runtime_repository.set_desired_state(
             session,
             runtime.id,
@@ -151,9 +151,9 @@ async def test_reconciler_dispatches_periodic_provider_start_for_running_runtime
             session,
             workspace_id,
             "reconciler-observe-agent",
-            runtime_provider_id="provider-1",
         )
         runtime = await runtime_repository.ensure_for_agent(session, agent_id)
+        await _bind_runtime_provider(session, runtime.id)
         runtime = await runtime_repository.record_provider_connection_state(
             session,
             runtime.id,
@@ -255,9 +255,9 @@ async def test_reconciler_observes_stopping_runtime_after_provider_reconnect(
             session,
             workspace_id,
             "reconciler-disconnected-stopping-agent",
-            runtime_provider_id="provider-1",
         )
         runtime = await runtime_repository.ensure_for_agent(session, agent_id)
+        await _bind_runtime_provider(session, runtime.id)
         command = await runtime_repository.set_desired_state(
             session,
             runtime.id,
@@ -368,9 +368,9 @@ async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
             session,
             workspace_id,
             "reconciler-terminal-agent",
-            runtime_provider_id="provider-1",
         )
         runtime = await runtime_repository.ensure_for_agent(session, agent_id)
+        await _bind_runtime_provider(session, runtime.id)
         requested = await runtime_repository.request_terminal_delete(
             session,
             runtime.id,
@@ -464,8 +464,6 @@ async def _create_agent(
     session: AsyncSession,
     workspace_id: str,
     slug: str,
-    *,
-    runtime_provider_id: str | None = None,
 ) -> str:
     integration = RDBLLMProviderIntegration(
         workspace_id=workspace_id,
@@ -490,11 +488,22 @@ async def _create_agent(
             provider=LLMProvider.ANTHROPIC,
             model_identifier=f"{slug}-id",
         ),
-        runtime_provider_id=runtime_provider_id,
     )
     session.add(agent)
     await session.flush()
     return agent.id
+
+
+async def _bind_runtime_provider(
+    session: AsyncSession,
+    runtime_id: str,
+) -> None:
+    """Bind the legacy dispatch fixture at the Runtime ownership layer."""
+    await session.execute(
+        sa.update(RDBAgentRuntime)
+        .where(RDBAgentRuntime.id == runtime_id)
+        .values(runtime_provider_id="provider-1")
+    )
 
 
 async def _attach_execution_policy(

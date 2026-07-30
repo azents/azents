@@ -8,7 +8,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **runtime** | [**AgentRuntimeRawStateResponse**](AgentRuntimeRawStateResponse.md) |  | 
 **state** | [**AgentRuntimeSummaryResponse**](AgentRuntimeSummaryResponse.md) |  | 
-**execution_policy** | [**AgentRuntimeExecutionPolicyStatusResponse**](AgentRuntimeExecutionPolicyStatusResponse.md) |  | 
+**configuration** | [**AgentRuntimeConfigurationStatusResponse**](AgentRuntimeConfigurationStatusResponse.md) |  | 
 
 ## Example
 

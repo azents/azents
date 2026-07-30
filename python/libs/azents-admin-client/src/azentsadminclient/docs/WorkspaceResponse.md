@@ -8,6 +8,8 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **name** | **str** | Workspace name | 
 **handle** | **str** | Workspace unique handle | 
+**default_runtime_profile_id** | **str** |  | 
+**default_runtime_profile_version** | **int** | Optimistic version for the Workspace Runtime Profile default | 
 **created_at** | **datetime** | Created time | 
 **updated_at** | **datetime** | Updated time | 
 

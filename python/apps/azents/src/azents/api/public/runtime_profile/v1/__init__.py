@@ -17,12 +17,47 @@ from .data import (
     SelectableInfrastructureProfileListResponse,
     SelectableInfrastructureProfileResponse,
     WorkspaceRuntimeProfileCreateRequest,
+    WorkspaceRuntimeProfileDefaultReplaceRequest,
+    WorkspaceRuntimeProfileDefaultResponse,
     WorkspaceRuntimeProfileListResponse,
     WorkspaceRuntimeProfileReplaceRequest,
     WorkspaceRuntimeProfileResponse,
 )
 
 router = APIRouter()
+
+
+@router.get("/workspaces/{handle}/default")
+async def get_workspace_runtime_profile_default(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[RuntimeProfileWorkspaceService, Depends()],
+) -> WorkspaceRuntimeProfileDefaultResponse:
+    """Get the Workspace Runtime Profile default and its current availability."""
+    _require_permission(member, Permissions.RUNTIME_PROFILES_READ)
+    try:
+        projection = await service.get_default(member.workspace_id)
+    except RuntimeProfileWorkspaceUnavailable as error:
+        _raise_unavailable(error)
+    return WorkspaceRuntimeProfileDefaultResponse.convert_from(projection)
+
+
+@router.put("/workspaces/{handle}/default")
+async def replace_workspace_runtime_profile_default(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[RuntimeProfileWorkspaceService, Depends()],
+    request_body: WorkspaceRuntimeProfileDefaultReplaceRequest,
+) -> WorkspaceRuntimeProfileDefaultResponse:
+    """Set or clear the Workspace default with optimistic version fencing."""
+    _require_permission(member, Permissions.RUNTIME_PROFILES_WRITE)
+    try:
+        projection = await service.replace_default(
+            member.workspace_id,
+            expected_version=request_body.expected_version,
+            runtime_profile_id=request_body.runtime_profile_id,
+        )
+    except RuntimeProfileWorkspaceUnavailable as error:
+        _raise_unavailable(error)
+    return WorkspaceRuntimeProfileDefaultResponse.convert_from(projection)
 
 
 @router.get("/workspaces/{handle}/infrastructure-profiles")
@@ -140,7 +175,11 @@ def _require_permission(member: WorkspaceMember, permission: Permission) -> None
 
 
 def _raise_unavailable(error: RuntimeProfileWorkspaceUnavailable) -> NoReturn:
-    if error.code in {"profile_not_found", "infrastructure_profile_not_found"}:
+    if error.code in {
+        "workspace_not_found",
+        "profile_not_found",
+        "infrastructure_profile_not_found",
+    }:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": error.code},

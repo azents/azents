@@ -12,6 +12,7 @@ from azents.core.runtime_profile import (
 )
 from azents.services.runtime_profile_workspace.service import (
     SelectableInfrastructureProfileProjection,
+    WorkspaceRuntimeProfileDefaultProjection,
     WorkspaceRuntimeProfileProjection,
 )
 
@@ -139,3 +140,34 @@ class WorkspaceRuntimeProfileReplaceRequest(BaseModel):
     description: str = Field(max_length=4000)
     lifecycle: RuntimeProfileLifecycle
     policy: WorkspaceRuntimeProfilePolicyV1
+
+
+class WorkspaceRuntimeProfileDefaultResponse(BaseModel):
+    """Current optimistic Workspace Runtime Profile default."""
+
+    runtime_profile_id: str | None
+    version: int = Field(ge=1)
+    profile: WorkspaceRuntimeProfileResponse | None
+
+    @classmethod
+    def convert_from(
+        cls,
+        projection: WorkspaceRuntimeProfileDefaultProjection,
+    ) -> "WorkspaceRuntimeProfileDefaultResponse":
+        """Convert the default and optional availability projection."""
+        return cls(
+            runtime_profile_id=projection.runtime_profile_id,
+            version=projection.version,
+            profile=(
+                WorkspaceRuntimeProfileResponse.convert_from(projection.profile)
+                if projection.profile is not None
+                else None
+            ),
+        )
+
+
+class WorkspaceRuntimeProfileDefaultReplaceRequest(BaseModel):
+    """Optimistically set or clear the Workspace Runtime Profile default."""
+
+    expected_version: int = Field(ge=1)
+    runtime_profile_id: str | None

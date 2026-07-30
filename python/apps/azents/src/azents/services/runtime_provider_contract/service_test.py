@@ -1,5 +1,7 @@
 """Runtime Provider capability advertisement lifecycle tests."""
 
+import datetime
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,6 +13,7 @@ from azents.core.enums import (
     RuntimeProviderScope,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_policy.repository import (
@@ -97,6 +100,7 @@ def _service(
         session_manager=session_manager,
         provider_repository=RuntimeProviderRepository(),
         policy_repository=RuntimeProviderPolicyRepository(),
+        profile_repository=RuntimeProfileRepository(),
     )
 
 
@@ -215,6 +219,20 @@ async def test_restored_advertisement_appends_new_revision(
     assert provider is not None
     assert provider.current_contract_revision_id == restored.id
     assert provider.capabilities["implementation_version"] == "0.1.0"
+    async with rdb_session_manager() as session:
+        tasks = await RuntimeProfileRepository().claim_reconcile_tasks(
+            session,
+            available_before=datetime.datetime.now(datetime.UTC)
+            + datetime.timedelta(seconds=1),
+            reclaim_running_before=datetime.datetime.now(datetime.UTC)
+            - datetime.timedelta(minutes=5),
+            limit=10,
+        )
+    assert {task.source_version for task in tasks} == {
+        original.id,
+        changed.id,
+        restored.id,
+    }
 
 
 async def test_advertisement_rejects_registration_contract_identity_mismatch(

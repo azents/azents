@@ -39,6 +39,8 @@ class TestWorkspaceListResponse(unittest.TestCase):
                     azentsadminclient.models.workspace_response.WorkspaceResponse(
                         name = '', 
                         handle = '', 
+                        default_runtime_profile_id = '', 
+                        default_runtime_profile_version = 1.0, 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ]
@@ -49,6 +51,8 @@ class TestWorkspaceListResponse(unittest.TestCase):
                     azentsadminclient.models.workspace_response.WorkspaceResponse(
                         name = '', 
                         handle = '', 
+                        default_runtime_profile_id = '', 
+                        default_runtime_profile_version = 1.0, 
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],

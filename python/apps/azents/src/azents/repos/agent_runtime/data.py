@@ -34,6 +34,18 @@ class AgentRuntime(BaseModel):
     provider_binding_evidence: dict[str, Any] | None = Field(
         default=None, description="Sanitized immutable Provider binding evidence"
     )
+    infrastructure_profile_id: str | None = Field(
+        default=None, description="Desired infrastructure Profile ID"
+    )
+    workspace_runtime_profile_id: str | None = Field(
+        default=None, description="Desired Workspace Runtime Profile ID"
+    )
+    desired_runtime_configuration_revision_id: str | None = Field(
+        default=None, description="Current desired Runtime configuration revision ID"
+    )
+    applied_runtime_configuration_revision_id: str | None = Field(
+        default=None, description="Last applied Runtime configuration revision ID"
+    )
     runtime_policy_snapshot_id: str | None = Field(
         default=None, description="Current immutable Runtime policy snapshot ID"
     )
@@ -123,6 +135,18 @@ class AgentRuntimeCreate(BaseModel):
     )
     provider_binding_evidence: dict[str, Any] | None = Field(
         default=None, description="Sanitized immutable Provider binding evidence"
+    )
+    infrastructure_profile_id: str | None = Field(
+        description="Desired infrastructure Profile ID"
+    )
+    workspace_runtime_profile_id: str | None = Field(
+        description="Desired Workspace Runtime Profile ID"
+    )
+    desired_runtime_configuration_revision_id: str | None = Field(
+        description="Current desired Runtime configuration revision ID"
+    )
+    applied_runtime_configuration_revision_id: str | None = Field(
+        description="Last applied Runtime configuration revision ID"
     )
     runtime_policy_snapshot_id: str | None = Field(
         default=None, description="Current immutable Runtime policy snapshot ID"

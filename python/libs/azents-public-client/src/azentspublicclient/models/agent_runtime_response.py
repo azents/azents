@@ -19,7 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List
-from azentspublicclient.models.agent_runtime_execution_policy_status_response import AgentRuntimeExecutionPolicyStatusResponse
+from azentspublicclient.models.agent_runtime_configuration_status_response import AgentRuntimeConfigurationStatusResponse
 from azentspublicclient.models.agent_runtime_raw_state_response import AgentRuntimeRawStateResponse
 from azentspublicclient.models.agent_runtime_summary_response import AgentRuntimeSummaryResponse
 from typing import Optional, Set
@@ -31,9 +31,9 @@ class AgentRuntimeResponse(BaseModel):
     """ # noqa: E501
     runtime: AgentRuntimeRawStateResponse
     state: AgentRuntimeSummaryResponse
-    execution_policy: AgentRuntimeExecutionPolicyStatusResponse
+    configuration: AgentRuntimeConfigurationStatusResponse
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["runtime", "state", "execution_policy"]
+    __properties: ClassVar[List[str]] = ["runtime", "state", "configuration"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -82,9 +82,9 @@ class AgentRuntimeResponse(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of state
         if self.state:
             _dict['state'] = self.state.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of execution_policy
-        if self.execution_policy:
-            _dict['execution_policy'] = self.execution_policy.to_dict()
+        # override the default output from pydantic by calling `to_dict()` of configuration
+        if self.configuration:
+            _dict['configuration'] = self.configuration.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -104,7 +104,7 @@ class AgentRuntimeResponse(BaseModel):
         _obj = cls.model_validate({
             "runtime": AgentRuntimeRawStateResponse.from_dict(obj["runtime"]) if obj.get("runtime") is not None else None,
             "state": AgentRuntimeSummaryResponse.from_dict(obj["state"]) if obj.get("state") is not None else None,
-            "execution_policy": AgentRuntimeExecutionPolicyStatusResponse.from_dict(obj["execution_policy"]) if obj.get("execution_policy") is not None else None
+            "configuration": AgentRuntimeConfigurationStatusResponse.from_dict(obj["configuration"]) if obj.get("configuration") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

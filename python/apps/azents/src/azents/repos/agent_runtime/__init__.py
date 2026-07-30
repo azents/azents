@@ -49,6 +49,14 @@ class AgentRuntimeRepository:
             runtime_provider_resource_id=create.runtime_provider_resource_id,
             provider_binding_origin=create.provider_binding_origin,
             provider_binding_evidence=create.provider_binding_evidence,
+            infrastructure_profile_id=create.infrastructure_profile_id,
+            workspace_runtime_profile_id=create.workspace_runtime_profile_id,
+            desired_runtime_configuration_revision_id=(
+                create.desired_runtime_configuration_revision_id
+            ),
+            applied_runtime_configuration_revision_id=(
+                create.applied_runtime_configuration_revision_id
+            ),
             runtime_policy_snapshot_id=create.runtime_policy_snapshot_id,
             applied_runtime_policy_snapshot_id=(
                 create.applied_runtime_policy_snapshot_id
@@ -173,6 +181,49 @@ class AgentRuntimeRepository:
         await session.flush()
         return self._build(rdb) if rdb is not None else None
 
+    async def attach_desired_configuration_revision(
+        self,
+        session: AsyncSession,
+        *,
+        runtime_id: str,
+        expected_revision_id: str | None,
+        provider_logical_id: str,
+        provider_resource_id: str,
+        binding_origin: RuntimeProviderBindingOrigin,
+        binding_evidence: dict[str, object],
+        infrastructure_profile_id: str,
+        workspace_runtime_profile_id: str,
+        configuration_revision_id: str,
+    ) -> AgentRuntime | None:
+        """Attach one desired revision using the prior pointer as a stale fence."""
+        prior_matches = (
+            RDBAgentRuntime.desired_runtime_configuration_revision_id.is_(None)
+            if expected_revision_id is None
+            else RDBAgentRuntime.desired_runtime_configuration_revision_id
+            == expected_revision_id
+        )
+        result = await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(
+                RDBAgentRuntime.id == runtime_id,
+                prior_matches,
+            )
+            .values(
+                runtime_provider_id=provider_logical_id,
+                runtime_provider_resource_id=provider_resource_id,
+                provider_binding_origin=binding_origin,
+                provider_binding_evidence=binding_evidence,
+                infrastructure_profile_id=infrastructure_profile_id,
+                workspace_runtime_profile_id=workspace_runtime_profile_id,
+                desired_runtime_configuration_revision_id=(configuration_revision_id),
+                updated_at=sa.func.now(),
+            )
+            .returning(RDBAgentRuntime)
+        )
+        rdb = result.scalar_one_or_none()
+        await session.flush()
+        return self._build(rdb) if rdb is not None else None
+
     async def provider_report_matches_binding(
         self,
         session: AsyncSession,
@@ -224,6 +275,14 @@ class AgentRuntimeRepository:
                 runtime_provider_resource_id=create.runtime_provider_resource_id,
                 provider_binding_origin=create.provider_binding_origin,
                 provider_binding_evidence=create.provider_binding_evidence,
+                infrastructure_profile_id=create.infrastructure_profile_id,
+                workspace_runtime_profile_id=create.workspace_runtime_profile_id,
+                desired_runtime_configuration_revision_id=(
+                    create.desired_runtime_configuration_revision_id
+                ),
+                applied_runtime_configuration_revision_id=(
+                    create.applied_runtime_configuration_revision_id
+                ),
                 runtime_policy_snapshot_id=create.runtime_policy_snapshot_id,
                 applied_runtime_policy_snapshot_id=(
                     create.applied_runtime_policy_snapshot_id
@@ -248,42 +307,20 @@ class AgentRuntimeRepository:
         self,
         session: AsyncSession,
         agent_id: str,
-        *,
-        default_runtime_provider_id: str | None = None,
     ) -> AgentRuntime:
-        """Ensure AgentRuntime for Agent.
-
-        Return it if it already exists; otherwise create a new one using
-        workspace_id from Agent row. Concurrent creation races are absorbed by
-        unique constraint and refetch. If existing Runtime has no provider and
-        default provider is specified, fill that default provider so existing
-        Agents converge to runnable state before production cutover.
+        """Ensure an unbound logical AgentRuntime row for one Agent.
 
         :param session: Database session
         :param agent_id: Agent ID
-        :param default_runtime_provider_id: Explicit default Provider ID to use
-            when Runtime Provider is empty
         :return: AgentRuntime
         """
         existing = await self.get_by_agent_id(session, agent_id)
         if existing is not None:
-            if (
-                existing.runtime_provider_id is None
-                and default_runtime_provider_id is not None
-            ):
-                updated = await self._set_runtime_provider_if_empty(
-                    session,
-                    existing.id,
-                    default_runtime_provider_id,
-                )
-                if updated is not None:
-                    return updated
             return existing
 
         agent = await session.get(RDBAgent, agent_id)
         if agent is None:
             raise ValueError("Agent not found")
-        runtime_provider_id = agent.runtime_provider_id or default_runtime_provider_id
 
         insert_stmt = (
             insert(RDBAgentRuntime)
@@ -291,7 +328,6 @@ class AgentRuntimeRepository:
                 id=uuid7().hex,
                 workspace_id=agent.workspace_id,
                 agent_id=agent_id,
-                runtime_provider_id=runtime_provider_id,
             )
             .on_conflict_do_nothing(index_elements=["agent_id"])
             .returning(RDBAgentRuntime)
@@ -305,40 +341,7 @@ class AgentRuntimeRepository:
         raced = await self.get_by_agent_id(session, agent_id)
         if raced is None:
             raise RuntimeError("AgentRuntime ensure failed")
-        if (
-            raced.runtime_provider_id is None
-            and default_runtime_provider_id is not None
-        ):
-            updated = await self._set_runtime_provider_if_empty(
-                session,
-                raced.id,
-                default_runtime_provider_id,
-            )
-            if updated is not None:
-                return updated
         return raced
-
-    async def _set_runtime_provider_if_empty(
-        self,
-        session: AsyncSession,
-        runtime_id: str,
-        runtime_provider_id: str,
-    ) -> AgentRuntime | None:
-        """Fill provider ID only when Runtime Provider is empty."""
-        result = await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(
-                RDBAgentRuntime.id == runtime_id,
-                RDBAgentRuntime.runtime_provider_id.is_(None),
-            )
-            .values(runtime_provider_id=runtime_provider_id)
-            .returning(RDBAgentRuntime)
-        )
-        rdb = result.scalar_one_or_none()
-        if rdb is None:
-            return None
-        await session.flush()
-        return self._build(rdb)
 
     async def set_desired_state(
         self,
@@ -980,6 +983,14 @@ class AgentRuntimeRepository:
             runtime_provider_resource_id=rdb.runtime_provider_resource_id,
             provider_binding_origin=rdb.provider_binding_origin,
             provider_binding_evidence=rdb.provider_binding_evidence,
+            infrastructure_profile_id=rdb.infrastructure_profile_id,
+            workspace_runtime_profile_id=rdb.workspace_runtime_profile_id,
+            desired_runtime_configuration_revision_id=(
+                rdb.desired_runtime_configuration_revision_id
+            ),
+            applied_runtime_configuration_revision_id=(
+                rdb.applied_runtime_configuration_revision_id
+            ),
             runtime_policy_snapshot_id=rdb.runtime_policy_snapshot_id,
             applied_runtime_policy_snapshot_id=(rdb.applied_runtime_policy_snapshot_id),
             provider_config=rdb.provider_config,

@@ -12,18 +12,10 @@ from azents.core.agent import (
     SubagentSettings,
 )
 from azents.core.enums import AgentLifecycleStatus, AgentType
-from azents.core.runtime_execution_policy import (
-    SYSTEM_STANDARD_PROFILE_ID,
-    digest_runtime_execution_policy,
-    empty_runtime_execution_restriction,
-)
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_admin import RDBAgentAdmin
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
-)
-from azents.rdb.models.runtime_execution_policy import (
-    RDBAgentRuntimeExecutionSetting,
 )
 from azents.services.uploads.schema import StoredImage
 
@@ -75,7 +67,7 @@ class AgentRepository:
             system_prompt=create.system_prompt,
             enabled=create.enabled,
             type=create.type,
-            runtime_provider_id=create.runtime_provider_id,
+            runtime_profile_id=create.runtime_profile_id,
             shell_enabled=create.shell_enabled,
             memory_enabled=create.memory_enabled,
             tool_search_enabled=create.tool_search_enabled,
@@ -86,17 +78,6 @@ class AgentRepository:
         session.add(rdb_agent)
         await session.flush()
         session.add(RDBAgentAutomaticProjectSetting(agent_id=rdb_agent.id))
-        empty_restriction = empty_runtime_execution_restriction()
-        session.add(
-            RDBAgentRuntimeExecutionSetting(
-                agent_id=rdb_agent.id,
-                profile_id=SYSTEM_STANDARD_PROFILE_ID,
-                version=1,
-                restriction=empty_restriction.model_dump(mode="json"),
-                digest=digest_runtime_execution_policy(empty_restriction),
-                updated_by_workspace_user_id=None,
-            )
-        )
         await session.flush()
         return self._build_row(rdb_agent)
 
@@ -222,8 +203,6 @@ class AgentRepository:
             db_values["enabled"] = update["enabled"]
         if "type" in update:
             db_values["type"] = update["type"]
-        if "runtime_provider_id" in update:
-            db_values["runtime_provider_id"] = update["runtime_provider_id"]
         if "shell_enabled" in update:
             db_values["shell_enabled"] = update["shell_enabled"]
         if "memory_enabled" in update:
@@ -246,6 +225,34 @@ class AgentRepository:
         if rdb_agent is None:
             return Failure(NotFound(agent_id=agent_id))
         return Success(self._build_row(rdb_agent))
+
+    async def replace_runtime_profile_selection(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        expected_version: int,
+        runtime_profile_id: str | None,
+    ) -> Agent | None:
+        """Replace one Agent selection with optimistic version fencing."""
+        result = await session.execute(
+            sa.update(RDBAgent)
+            .where(
+                RDBAgent.id == agent_id,
+                RDBAgent.runtime_profile_selection_version == expected_version,
+            )
+            .values(
+                runtime_profile_id=runtime_profile_id,
+                runtime_profile_selection_version=(
+                    RDBAgent.runtime_profile_selection_version + 1
+                ),
+                updated_at=sa.func.now(),
+            )
+            .returning(RDBAgent)
+        )
+        rdb_agent = result.scalar_one_or_none()
+        await session.flush()
+        return self._build_row(rdb_agent) if rdb_agent is not None else None
 
     async def mark_decommissioning(
         self,
@@ -303,7 +310,8 @@ class AgentRepository:
             enabled=rdb.enabled,
             lifecycle_status=rdb.lifecycle_status,
             type=rdb.type,
-            runtime_provider_id=rdb.runtime_provider_id,
+            runtime_profile_id=rdb.runtime_profile_id,
+            runtime_profile_selection_version=(rdb.runtime_profile_selection_version),
             shell_enabled=rdb.shell_enabled,
             memory_enabled=rdb.memory_enabled,
             tool_search_enabled=rdb.tool_search_enabled,

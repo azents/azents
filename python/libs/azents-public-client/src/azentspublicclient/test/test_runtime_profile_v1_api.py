@@ -40,6 +40,13 @@ class TestRuntimeProfileV1Api(unittest.TestCase):
         """
         pass
 
+    def test_runtime_profile_v1_get_workspace_runtime_profile_default(self) -> None:
+        """Test case for runtime_profile_v1_get_workspace_runtime_profile_default
+
+        Get Workspace Runtime Profile Default
+        """
+        pass
+
     def test_runtime_profile_v1_list_selectable_infrastructure_profiles(self) -> None:
         """Test case for runtime_profile_v1_list_selectable_infrastructure_profiles
 
@@ -58,6 +65,13 @@ class TestRuntimeProfileV1Api(unittest.TestCase):
         """Test case for runtime_profile_v1_replace_workspace_runtime_profile
 
         Replace Workspace Runtime Profile
+        """
+        pass
+
+    def test_runtime_profile_v1_replace_workspace_runtime_profile_default(self) -> None:
+        """Test case for runtime_profile_v1_replace_workspace_runtime_profile_default
+
+        Replace Workspace Runtime Profile Default
         """
         pass
 

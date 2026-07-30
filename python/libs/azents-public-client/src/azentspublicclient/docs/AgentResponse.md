@@ -20,7 +20,10 @@ Name | Type | Description | Notes
 **system_prompt** | **str** |  | 
 **enabled** | **bool** |  | 
 **type** | [**AgentType**](AgentType.md) |  | 
-**runtime_provider_id** | **str** |  | 
+**runtime_profile_id** | **str** |  | 
+**runtime_profile_selection_version** | **int** |  | 
+**runtime_profile_available** | **bool** |  | 
+**runtime_profile_availability_reason_code** | **str** |  | 
 **shell_enabled** | **bool** |  | 
 **memory_enabled** | **bool** |  | 
 **tool_search_enabled** | **bool** |  | 

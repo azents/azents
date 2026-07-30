@@ -126,11 +126,12 @@ class RuntimeConfigurationRevision:
     id: str
     runtime_id: str
     provider_id: str
-    provider_capability_revision_id: str
+    provider_capability_revision_id: str | None
     infrastructure_profile_id: str
     infrastructure_profile_version: int
     workspace_runtime_profile_id: str
     workspace_runtime_profile_version: int
+    agent_selection_version: int
     resolution_status: RuntimeConfigurationResolutionStatus
     reason_code: str | None
     required_capabilities: tuple[str, ...]
@@ -152,11 +153,12 @@ class RuntimeConfigurationRevisionCreate:
 
     runtime_id: str
     provider_id: str
-    provider_capability_revision_id: str
+    provider_capability_revision_id: str | None
     infrastructure_profile_id: str
     infrastructure_profile_version: int
     workspace_runtime_profile_id: str
     workspace_runtime_profile_version: int
+    agent_selection_version: int
     resolution_status: RuntimeConfigurationResolutionStatus
     reason_code: str | None
     required_capabilities: tuple[str, ...]

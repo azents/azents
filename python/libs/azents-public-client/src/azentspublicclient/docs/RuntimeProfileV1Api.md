@@ -6,9 +6,11 @@ Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**runtime_profile_v1_create_workspace_runtime_profile**](RuntimeProfileV1Api.md#runtime_profile_v1_create_workspace_runtime_profile) | **POST** /runtime-profile/v1/workspaces/{handle}/profiles | Create Workspace Runtime Profile
 [**runtime_profile_v1_get_workspace_runtime_profile**](RuntimeProfileV1Api.md#runtime_profile_v1_get_workspace_runtime_profile) | **GET** /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id} | Get Workspace Runtime Profile
+[**runtime_profile_v1_get_workspace_runtime_profile_default**](RuntimeProfileV1Api.md#runtime_profile_v1_get_workspace_runtime_profile_default) | **GET** /runtime-profile/v1/workspaces/{handle}/default | Get Workspace Runtime Profile Default
 [**runtime_profile_v1_list_selectable_infrastructure_profiles**](RuntimeProfileV1Api.md#runtime_profile_v1_list_selectable_infrastructure_profiles) | **GET** /runtime-profile/v1/workspaces/{handle}/infrastructure-profiles | List Selectable Infrastructure Profiles
 [**runtime_profile_v1_list_workspace_runtime_profiles**](RuntimeProfileV1Api.md#runtime_profile_v1_list_workspace_runtime_profiles) | **GET** /runtime-profile/v1/workspaces/{handle}/profiles | List Workspace Runtime Profiles
 [**runtime_profile_v1_replace_workspace_runtime_profile**](RuntimeProfileV1Api.md#runtime_profile_v1_replace_workspace_runtime_profile) | **PUT** /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id} | Replace Workspace Runtime Profile
+[**runtime_profile_v1_replace_workspace_runtime_profile_default**](RuntimeProfileV1Api.md#runtime_profile_v1_replace_workspace_runtime_profile_default) | **PUT** /runtime-profile/v1/workspaces/{handle}/default | Replace Workspace Runtime Profile Default
 
 
 # **runtime_profile_v1_create_workspace_runtime_profile**
@@ -155,6 +157,85 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**WorkspaceRuntimeProfileResponse**](WorkspaceRuntimeProfileResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **runtime_profile_v1_get_workspace_runtime_profile_default**
+> WorkspaceRuntimeProfileDefaultResponse runtime_profile_v1_get_workspace_runtime_profile_default(handle)
+
+Get Workspace Runtime Profile Default
+
+Get the Workspace Runtime Profile default and its current availability.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.workspace_runtime_profile_default_response import WorkspaceRuntimeProfileDefaultResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.RuntimeProfileV1Api(api_client)
+    handle = 'handle_example' # str | 
+
+    try:
+        # Get Workspace Runtime Profile Default
+        api_response = api_instance.runtime_profile_v1_get_workspace_runtime_profile_default(handle)
+        print("The response of RuntimeProfileV1Api->runtime_profile_v1_get_workspace_runtime_profile_default:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeProfileV1Api->runtime_profile_v1_get_workspace_runtime_profile_default: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
+
+### Return type
+
+[**WorkspaceRuntimeProfileDefaultResponse**](WorkspaceRuntimeProfileDefaultResponse.md)
 
 ### Authorization
 
@@ -399,6 +480,88 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**WorkspaceRuntimeProfileResponse**](WorkspaceRuntimeProfileResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **runtime_profile_v1_replace_workspace_runtime_profile_default**
+> WorkspaceRuntimeProfileDefaultResponse runtime_profile_v1_replace_workspace_runtime_profile_default(handle, workspace_runtime_profile_default_replace_request)
+
+Replace Workspace Runtime Profile Default
+
+Set or clear the Workspace default with optimistic version fencing.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.workspace_runtime_profile_default_replace_request import WorkspaceRuntimeProfileDefaultReplaceRequest
+from azentspublicclient.models.workspace_runtime_profile_default_response import WorkspaceRuntimeProfileDefaultResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.RuntimeProfileV1Api(api_client)
+    handle = 'handle_example' # str | 
+    workspace_runtime_profile_default_replace_request = azentspublicclient.WorkspaceRuntimeProfileDefaultReplaceRequest() # WorkspaceRuntimeProfileDefaultReplaceRequest | 
+
+    try:
+        # Replace Workspace Runtime Profile Default
+        api_response = api_instance.runtime_profile_v1_replace_workspace_runtime_profile_default(handle, workspace_runtime_profile_default_replace_request)
+        print("The response of RuntimeProfileV1Api->runtime_profile_v1_replace_workspace_runtime_profile_default:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeProfileV1Api->runtime_profile_v1_replace_workspace_runtime_profile_default: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **handle** | **str**|  | 
+ **workspace_runtime_profile_default_replace_request** | [**WorkspaceRuntimeProfileDefaultReplaceRequest**](WorkspaceRuntimeProfileDefaultReplaceRequest.md)|  | 
+
+### Return type
+
+[**WorkspaceRuntimeProfileDefaultResponse**](WorkspaceRuntimeProfileDefaultResponse.md)
 
 ### Authorization
 

@@ -10,7 +10,11 @@ Name | Type | Description | Notes
 **workspace_id** | **str** |  | 
 **agent_id** | **str** |  | 
 **runtime_provider_id** | **str** |  | 
-**provider_config** | **Dict[str, object]** |  | 
+**runtime_provider_resource_id** | **str** |  | 
+**infrastructure_profile_id** | **str** |  | 
+**workspace_runtime_profile_id** | **str** |  | 
+**desired_runtime_configuration_revision_id** | **str** |  | 
+**applied_runtime_configuration_revision_id** | **str** |  | 
 **desired_state** | [**RuntimeDesiredState**](RuntimeDesiredState.md) |  | 
 **desired_generation** | **int** |  | 
 **last_lifecycle_command** | [**RuntimeLifecycleCommandType**](RuntimeLifecycleCommandType.md) |  | 

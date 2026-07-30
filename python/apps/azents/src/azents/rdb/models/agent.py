@@ -134,10 +134,21 @@ class RDBAgent(RDBModel):
     type: Mapped[AgentType] = mapped_column(
         agent_type_enum, nullable=False, default=AgentType.PUBLIC
     )
-    runtime_provider_id: Mapped[str | None] = mapped_column(
-        sa.String(120),
+    runtime_profile_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey(
+            "workspace_runtime_profiles.id",
+            name="fk_agents_runtime_profile_id",
+            ondelete="RESTRICT",
+        ),
         nullable=True,
         default=None,
+    )
+    runtime_profile_selection_version: Mapped[int] = mapped_column(
+        sa.Integer,
+        nullable=False,
+        default=1,
+        server_default="1",
     )
     # Enable runtime shell access.
     shell_enabled: Mapped[bool] = mapped_column(
@@ -194,8 +205,12 @@ class RDBAgent(RDBModel):
 
     # Index and constraint condition.
     IX_WORKSPACE_ID = sa.Index("ix_agents_workspace_id", "workspace_id")
-    IX_RUNTIME_PROVIDER_ID = sa.Index(
-        "ix_agents_runtime_provider_id", "runtime_provider_id"
+    IX_RUNTIME_PROFILE_ID = sa.Index(
+        "ix_agents_runtime_profile_id", "runtime_profile_id"
+    )
+    CK_RUNTIME_PROFILE_SELECTION_VERSION_POSITIVE = sa.CheckConstraint(
+        "runtime_profile_selection_version >= 1",
+        name="ck_agents_runtime_profile_selection_version_positive",
     )
     CK_MODEL_NOT_NULL = sa.CheckConstraint(
         "model_selection IS NOT NULL AND lightweight_model_selection IS NOT NULL",
@@ -227,7 +242,8 @@ class RDBAgent(RDBModel):
 
     __table_args__ = (
         IX_WORKSPACE_ID,
-        IX_RUNTIME_PROVIDER_ID,
+        IX_RUNTIME_PROFILE_ID,
+        CK_RUNTIME_PROFILE_SELECTION_VERSION_POSITIVE,
         CK_MODEL_NOT_NULL,
         CK_MAX_TURNS_POSITIVE,
         CK_AUTO_ARCHIVE_TTL_DAYS_POSITIVE,

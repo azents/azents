@@ -235,19 +235,13 @@ Class | Method | HTTP request | Description
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_list_integrations**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_list_integrations) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations | List Integrations
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_sync_integration_catalog**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_sync_integration_catalog) | **POST** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/catalog-sync | Sync Integration Catalog
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_update_integration**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_update_integration) | **PATCH** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id} | Update Integration
-*RuntimeExecutionV1Api* | [**runtime_execution_v1_apply_agent_policy**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_apply_agent_policy) | **POST** /runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/apply | Apply Agent Policy
-*RuntimeExecutionV1Api* | [**runtime_execution_v1_get_agent_policy**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_get_agent_policy) | **GET** /runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/settings | Get Agent Policy
-*RuntimeExecutionV1Api* | [**runtime_execution_v1_get_workspace_policy**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_get_workspace_policy) | **GET** /runtime-execution/v1/workspaces/{handle}/policy | Get Workspace Policy
-*RuntimeExecutionV1Api* | [**runtime_execution_v1_list_agent_audit_events**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_list_agent_audit_events) | **GET** /runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/audit-events | List Agent Audit Events
-*RuntimeExecutionV1Api* | [**runtime_execution_v1_list_workspace_audit_events**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_list_workspace_audit_events) | **GET** /runtime-execution/v1/workspaces/{handle}/policy/audit-events | List Workspace Audit Events
-*RuntimeExecutionV1Api* | [**runtime_execution_v1_list_workspace_profiles**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_list_workspace_profiles) | **GET** /runtime-execution/v1/workspaces/{handle}/profiles | List Workspace Profiles
-*RuntimeExecutionV1Api* | [**runtime_execution_v1_replace_agent_policy**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_replace_agent_policy) | **PUT** /runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/settings | Replace Agent Policy
-*RuntimeExecutionV1Api* | [**runtime_execution_v1_replace_workspace_policy**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_replace_workspace_policy) | **PUT** /runtime-execution/v1/workspaces/{handle}/policy | Replace Workspace Policy
 *RuntimeProfileV1Api* | [**runtime_profile_v1_create_workspace_runtime_profile**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_create_workspace_runtime_profile) | **POST** /runtime-profile/v1/workspaces/{handle}/profiles | Create Workspace Runtime Profile
 *RuntimeProfileV1Api* | [**runtime_profile_v1_get_workspace_runtime_profile**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_get_workspace_runtime_profile) | **GET** /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id} | Get Workspace Runtime Profile
+*RuntimeProfileV1Api* | [**runtime_profile_v1_get_workspace_runtime_profile_default**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_get_workspace_runtime_profile_default) | **GET** /runtime-profile/v1/workspaces/{handle}/default | Get Workspace Runtime Profile Default
 *RuntimeProfileV1Api* | [**runtime_profile_v1_list_selectable_infrastructure_profiles**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_list_selectable_infrastructure_profiles) | **GET** /runtime-profile/v1/workspaces/{handle}/infrastructure-profiles | List Selectable Infrastructure Profiles
 *RuntimeProfileV1Api* | [**runtime_profile_v1_list_workspace_runtime_profiles**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_list_workspace_runtime_profiles) | **GET** /runtime-profile/v1/workspaces/{handle}/profiles | List Workspace Runtime Profiles
 *RuntimeProfileV1Api* | [**runtime_profile_v1_replace_workspace_runtime_profile**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_replace_workspace_runtime_profile) | **PUT** /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id} | Replace Workspace Runtime Profile
+*RuntimeProfileV1Api* | [**runtime_profile_v1_replace_workspace_runtime_profile_default**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_replace_workspace_runtime_profile_default) | **PUT** /runtime-profile/v1/workspaces/{handle}/default | Replace Workspace Runtime Profile Default
 *RuntimeProviderEnrollmentV1Api* | [**runtime_provider_enrollment_v1_exchange_credential**](azentspublicclient/docs/RuntimeProviderEnrollmentV1Api.md#runtime_provider_enrollment_v1_exchange_credential) | **POST** /runtime-provider-enrollment/v1/credentials/exchange | Exchange Credential
 *RuntimeProviderV1Api* | [**runtime_provider_v1_list_workspace_runtime_providers**](azentspublicclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_workspace_runtime_providers) | **GET** /runtime-provider/v1/workspaces/{handle}/providers | List Workspace Runtime Providers
 *SecurityV1Api* | [**security_v1_elevate_with_email**](azentspublicclient/docs/SecurityV1Api.md#security_v1_elevate_with_email) | **POST** /security/v1/elevate/email | Elevate With Email
@@ -320,10 +314,7 @@ Class | Method | HTTP request | Description
  - [AgentRunPhase](azentspublicclient/docs/AgentRunPhase.md)
  - [AgentRunStatus](azentspublicclient/docs/AgentRunStatus.md)
  - [AgentRuntimeActionsResponse](azentspublicclient/docs/AgentRuntimeActionsResponse.md)
- - [AgentRuntimeExecutionPolicyApplyResponse](azentspublicclient/docs/AgentRuntimeExecutionPolicyApplyResponse.md)
- - [AgentRuntimeExecutionPolicyReplaceRequest](azentspublicclient/docs/AgentRuntimeExecutionPolicyReplaceRequest.md)
- - [AgentRuntimeExecutionPolicyResponse](azentspublicclient/docs/AgentRuntimeExecutionPolicyResponse.md)
- - [AgentRuntimeExecutionPolicyStatusResponse](azentspublicclient/docs/AgentRuntimeExecutionPolicyStatusResponse.md)
+ - [AgentRuntimeConfigurationStatusResponse](azentspublicclient/docs/AgentRuntimeConfigurationStatusResponse.md)
  - [AgentRuntimeFailureResponse](azentspublicclient/docs/AgentRuntimeFailureResponse.md)
  - [AgentRuntimeLifecycleResponse](azentspublicclient/docs/AgentRuntimeLifecycleResponse.md)
  - [AgentRuntimeRawStateResponse](azentspublicclient/docs/AgentRuntimeRawStateResponse.md)
@@ -598,35 +589,9 @@ Class | Method | HTTP request | Description
  - [ResetAgentRuntimeRequest](azentspublicclient/docs/ResetAgentRuntimeRequest.md)
  - [ResponseChatV1ReadAgentWorkspacePath](azentspublicclient/docs/ResponseChatV1ReadAgentWorkspacePath.md)
  - [ResponseLlmProviderIntegrationV1GetSubscriptionUsage](azentspublicclient/docs/ResponseLlmProviderIntegrationV1GetSubscriptionUsage.md)
+ - [RuntimeConfigurationResolutionStatus](azentspublicclient/docs/RuntimeConfigurationResolutionStatus.md)
+ - [RuntimeConfigurationRevisionResponse](azentspublicclient/docs/RuntimeConfigurationRevisionResponse.md)
  - [RuntimeDesiredState](azentspublicclient/docs/RuntimeDesiredState.md)
- - [RuntimeExecutionAuditEventType](azentspublicclient/docs/RuntimeExecutionAuditEventType.md)
- - [RuntimeExecutionAvailabilityReason](azentspublicclient/docs/RuntimeExecutionAvailabilityReason.md)
- - [RuntimeExecutionCapabilitySummaryResponse](azentspublicclient/docs/RuntimeExecutionCapabilitySummaryResponse.md)
- - [RuntimeExecutionChangeDirection](azentspublicclient/docs/RuntimeExecutionChangeDirection.md)
- - [RuntimeExecutionChangeSummary](azentspublicclient/docs/RuntimeExecutionChangeSummary.md)
- - [RuntimeExecutionConfiguredSummaryResponse](azentspublicclient/docs/RuntimeExecutionConfiguredSummaryResponse.md)
- - [RuntimeExecutionDockerModule](azentspublicclient/docs/RuntimeExecutionDockerModule.md)
- - [RuntimeExecutionDockerRestriction](azentspublicclient/docs/RuntimeExecutionDockerRestriction.md)
- - [RuntimeExecutionFieldChange](azentspublicclient/docs/RuntimeExecutionFieldChange.md)
- - [RuntimeExecutionManagementCapabilitiesResponse](azentspublicclient/docs/RuntimeExecutionManagementCapabilitiesResponse.md)
- - [RuntimeExecutionManagementLayer](azentspublicclient/docs/RuntimeExecutionManagementLayer.md)
- - [RuntimeExecutionModuleId](azentspublicclient/docs/RuntimeExecutionModuleId.md)
- - [RuntimeExecutionPolicyAuditEventResponse](azentspublicclient/docs/RuntimeExecutionPolicyAuditEventResponse.md)
- - [RuntimeExecutionPolicyAuditListResponse](azentspublicclient/docs/RuntimeExecutionPolicyAuditListResponse.md)
- - [RuntimeExecutionPolicyDocument](azentspublicclient/docs/RuntimeExecutionPolicyDocument.md)
- - [RuntimeExecutionPolicyLayer](azentspublicclient/docs/RuntimeExecutionPolicyLayer.md)
- - [RuntimeExecutionPolicyRestriction](azentspublicclient/docs/RuntimeExecutionPolicyRestriction.md)
- - [RuntimeExecutionPolicyStatus](azentspublicclient/docs/RuntimeExecutionPolicyStatus.md)
- - [RuntimeExecutionProfileLifecycle](azentspublicclient/docs/RuntimeExecutionProfileLifecycle.md)
- - [RuntimeExecutionReduction](azentspublicclient/docs/RuntimeExecutionReduction.md)
- - [RuntimeExecutionReductionReason](azentspublicclient/docs/RuntimeExecutionReductionReason.md)
- - [RuntimeExecutionRequiredAction](azentspublicclient/docs/RuntimeExecutionRequiredAction.md)
- - [RuntimeExecutionResolution](azentspublicclient/docs/RuntimeExecutionResolution.md)
- - [RuntimeExecutionResourceModule](azentspublicclient/docs/RuntimeExecutionResourceModule.md)
- - [RuntimeExecutionResourceRestriction](azentspublicclient/docs/RuntimeExecutionResourceRestriction.md)
- - [RuntimeExecutionSnapshotSummaryResponse](azentspublicclient/docs/RuntimeExecutionSnapshotSummaryResponse.md)
- - [RuntimeExecutionSourceVersions](azentspublicclient/docs/RuntimeExecutionSourceVersions.md)
- - [RuntimeExecutionStorageMode](azentspublicclient/docs/RuntimeExecutionStorageMode.md)
  - [RuntimeInfrastructureProfileSpec](azentspublicclient/docs/RuntimeInfrastructureProfileSpec.md)
  - [RuntimeLifecycleCommandType](azentspublicclient/docs/RuntimeLifecycleCommandType.md)
  - [RuntimeNetworkPolicyModule](azentspublicclient/docs/RuntimeNetworkPolicyModule.md)
@@ -704,11 +669,9 @@ Class | Method | HTTP request | Description
  - [WorkspaceModelSettingsResponse](azentspublicclient/docs/WorkspaceModelSettingsResponse.md)
  - [WorkspaceModelSettingsUpdateRequest](azentspublicclient/docs/WorkspaceModelSettingsUpdateRequest.md)
  - [WorkspaceResponse](azentspublicclient/docs/WorkspaceResponse.md)
- - [WorkspaceRuntimeExecutionPolicyReplaceRequest](azentspublicclient/docs/WorkspaceRuntimeExecutionPolicyReplaceRequest.md)
- - [WorkspaceRuntimeExecutionPolicyResponse](azentspublicclient/docs/WorkspaceRuntimeExecutionPolicyResponse.md)
- - [WorkspaceRuntimeExecutionProfileListResponse](azentspublicclient/docs/WorkspaceRuntimeExecutionProfileListResponse.md)
- - [WorkspaceRuntimeExecutionProfileResponse](azentspublicclient/docs/WorkspaceRuntimeExecutionProfileResponse.md)
  - [WorkspaceRuntimeProfileCreateRequest](azentspublicclient/docs/WorkspaceRuntimeProfileCreateRequest.md)
+ - [WorkspaceRuntimeProfileDefaultReplaceRequest](azentspublicclient/docs/WorkspaceRuntimeProfileDefaultReplaceRequest.md)
+ - [WorkspaceRuntimeProfileDefaultResponse](azentspublicclient/docs/WorkspaceRuntimeProfileDefaultResponse.md)
  - [WorkspaceRuntimeProfileListResponse](azentspublicclient/docs/WorkspaceRuntimeProfileListResponse.md)
  - [WorkspaceRuntimeProfilePolicyV1](azentspublicclient/docs/WorkspaceRuntimeProfilePolicyV1.md)
  - [WorkspaceRuntimeProfileReplaceRequest](azentspublicclient/docs/WorkspaceRuntimeProfileReplaceRequest.md)

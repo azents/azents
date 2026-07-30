@@ -39,7 +39,10 @@ class AgentOutput(BaseModel):
     system_prompt: str | None
     enabled: bool
     type: AgentType
-    runtime_provider_id: str | None
+    runtime_profile_id: str | None
+    runtime_profile_selection_version: int
+    runtime_profile_available: bool
+    runtime_profile_availability_reason_code: str | None
     shell_enabled: bool
     memory_enabled: bool
     tool_search_enabled: bool
@@ -58,6 +61,8 @@ class AgentOutput(BaseModel):
         avatar: UploadedImage | None,
         effective_context_window_tokens: int | None,
         effective_auto_compaction_threshold_tokens: int | None,
+        runtime_profile_available: bool,
+        runtime_profile_availability_reason_code: str | None,
     ) -> Self:
         """Create output by combining domain `Agent` and resolved `avatar`."""
         return cls(
@@ -78,7 +83,12 @@ class AgentOutput(BaseModel):
             system_prompt=data.system_prompt,
             enabled=data.enabled,
             type=data.type,
-            runtime_provider_id=data.runtime_provider_id,
+            runtime_profile_id=data.runtime_profile_id,
+            runtime_profile_selection_version=(data.runtime_profile_selection_version),
+            runtime_profile_available=runtime_profile_available,
+            runtime_profile_availability_reason_code=(
+                runtime_profile_availability_reason_code
+            ),
             shell_enabled=data.shell_enabled,
             memory_enabled=data.memory_enabled,
             tool_search_enabled=data.tool_search_enabled,
@@ -135,8 +145,8 @@ class AgentCreateInput(BaseModel):
     system_prompt: str | None = Field(default=None, description="System prompt")
     enabled: bool = Field(default=True, description="Enabled flag")
     type: AgentType = Field(default=AgentType.PUBLIC, description="Visibility scope")
-    runtime_provider_id: str | None = Field(
-        default=None, description="Runtime Provider logical ID"
+    runtime_profile_id: str | None = Field(
+        default=None, description="Selected Workspace Runtime Profile ID"
     )
     shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")
@@ -189,8 +199,15 @@ class AgentUpdateInput(TypedDict, total=False):
     system_prompt: Annotated[str | None, Field(description="System prompt")]
     enabled: Annotated[bool, Field(description="Enabled flag")]
     type: Annotated[AgentType, Field(description="Visibility scope")]
-    runtime_provider_id: Annotated[
-        str | None, Field(description="Runtime Provider logical ID")
+    runtime_profile_id: Annotated[
+        str | None, Field(description="Selected Workspace Runtime Profile ID")
+    ]
+    expected_runtime_profile_selection_version: Annotated[
+        int,
+        Field(
+            ge=1,
+            description="Required optimistic version when replacing the selection",
+        ),
     ]
     shell_enabled: Annotated[bool, Field(description="Shell Enabled flag")]
     memory_enabled: Annotated[bool, Field(description="Memory enabled flag")]
@@ -260,6 +277,25 @@ class InvalidModelParameters:
     """Model parameter payload is invalid."""
 
     errors: list[str]
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeProfileSelectionInvalid:
+    """Requested Runtime Profile cannot become the Agent selection."""
+
+    code: str
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeProfileSelectionVersionRequired:
+    """Agent selection replacement omitted its optimistic version."""
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeProfileSelectionVersionConflict:
+    """Agent selection replacement used a stale optimistic version."""
+
+    current_version: int
 
 
 @dataclasses.dataclass(frozen=True)
