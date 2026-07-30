@@ -105,6 +105,19 @@ class SlackEventCallback:
     event: ExternalChannelEventCreate
 
 
+def slack_event_is_normal_message_ingress(
+    event: ExternalChannelEventCreate,
+) -> bool:
+    """Return whether quiesce should defer one new Slack message."""
+    if event.event_type == "app_mention":
+        return True
+    if event.event_type != "message":
+        return False
+    payload = event.envelope.get("event")
+    subtype = payload.get("subtype") if isinstance(payload, dict) else None
+    return subtype not in {"message_changed", "message_deleted"}
+
+
 @dataclass(frozen=True)
 class SlackInteractionCallback:
     """Authenticated, bounded Slack interaction without raw provider content."""

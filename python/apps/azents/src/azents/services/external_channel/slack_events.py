@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import re
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
@@ -29,6 +30,20 @@ from azents.core.external_channel_file import (
     ExternalChannelFileMetadata,
     ExternalChannelFileUnsupportedReason,
 )
+from azents.services.external_channel.conversation import (
+    ExternalChannelHistoryCredentialsInvalid,
+    ExternalChannelHistoryDeadlineExceeded,
+    ExternalChannelHistoryMalformed,
+    ExternalChannelHistoryPermissionDenied,
+    ExternalChannelHistoryPositionInvalid,
+    ExternalChannelHistoryRange,
+    ExternalChannelHistoryRangeIncomplete,
+    ExternalChannelHistoryRateLimited,
+    ExternalChannelHistoryResourceUnavailable,
+    ExternalChannelHistoryTemporaryFailure,
+    ExternalChannelHistoryTriggerMissing,
+    ExternalChannelOperationDeadline,
+)
 from azents.services.external_channel.slack_blocks import (
     projected_slack_blocks_text,
     slack_blocks_text,
@@ -43,6 +58,11 @@ SLACK_INTERACTION_VIEW_PRIVATE_METADATA_MAX_LENGTH = 3_000
 SLACK_INTERACTION_VIEW_MAX_BLOCKS = 100
 SLACK_INTERACTION_VIEW_MAX_BYTES = 100 * 1024
 _MAX_REFERENCE_IDS = 20
+_MAX_HISTORY_PAGES = 20
+_MAX_HISTORY_SCANNED_MESSAGES = 2_000
+_MAX_HISTORY_RETAINED_MESSAGES = 20
+_MAX_HISTORY_RESPONSE_BYTES = 256 * 1024
+_MAX_HISTORY_MESSAGE_BYTES = 64 * 1024
 _SLACK_USER_REFERENCE = re.compile(r"<@([A-Z0-9]+)(?:\|[^>]+)?>|@([UW][A-Z0-9]+)")
 _SLACK_CHANNEL_REFERENCE = re.compile(
     r"<#([CG][A-Z0-9]+)(?:\|[^>]+)?>|#([CG][A-Z0-9]+)"
@@ -186,6 +206,18 @@ class SlackThreadPage:
 
     messages: tuple[SlackNormalizedMessage, ...]
     next_cursor: str | None
+
+
+@dataclass(frozen=True)
+class SlackConversationHistoryTrigger:
+    """Credential-free provider locator for one bounded Slack history range."""
+
+    tenant_id: str
+    channel_id: str
+    trigger_message_ts: str
+    root_thread_ts: str | None
+    connected_bot_user_id: str | None
+    connected_app_id: str | None
 
 
 @dataclass(frozen=True)
@@ -427,6 +459,75 @@ def slack_provider_position(timestamp: str) -> str:
     return f"{int(seconds):020d}.{fraction}"
 
 
+def _valid_slack_position(position: str) -> bool:
+    seconds, separator, fraction = position.partition(".")
+    return (
+        len(seconds) == 20
+        and seconds.isdigit()
+        and separator == "."
+        and len(fraction) == 6
+        and fraction.isdigit()
+    )
+
+
+def _slack_position_to_timestamp(position: str | None) -> str | None:
+    if position is None:
+        return None
+    if not _valid_slack_position(position):
+        raise ExternalChannelHistoryMalformed(
+            "Slack history range start position is invalid."
+        )
+    seconds, _, fraction = position.partition(".")
+    return f"{int(seconds)}.{fraction}"
+
+
+def _slack_connected_identity(
+    message: SlackNormalizedMessage,
+    *,
+    connected_bot_user_id: str | None,
+    connected_app_id: str | None,
+) -> bool:
+    identities = {
+        identity
+        for identity in (
+            None if connected_bot_user_id is None else f"bot:{connected_bot_user_id}",
+            None if connected_app_id is None else f"app:{connected_app_id}",
+        )
+        if identity is not None
+    }
+    return message.provider_user_id in identities
+
+
+def _validate_slack_history_item(
+    message: dict[str, object],
+    *,
+    trigger: SlackConversationHistoryTrigger,
+) -> None:
+    """Validate one raw message remains inside the requested Slack scope."""
+    raw_channel = message.get("channel")
+    if raw_channel is not None and raw_channel != trigger.channel_id:
+        raise ExternalChannelHistoryMalformed(
+            "Slack history item crossed the requested channel."
+        )
+    if trigger.root_thread_ts is None:
+        return
+    raw_timestamp = message.get("ts")
+    raw_thread_timestamp = message.get("thread_ts")
+    if raw_timestamp == trigger.root_thread_ts:
+        if (
+            raw_thread_timestamp is not None
+            and raw_thread_timestamp != trigger.root_thread_ts
+        ):
+            raise ExternalChannelHistoryMalformed(
+                "Slack history root had an invalid thread boundary."
+            )
+        return
+    if raw_thread_timestamp != trigger.root_thread_ts:
+        raise ExternalChannelHistoryMalformed(
+            "Slack history reply crossed the requested thread."
+        )
+
+
 class SlackConversationClient:
     """Bounded Slack Web API adapter for inbound hydration and access control."""
 
@@ -591,6 +692,271 @@ class SlackConversationClient:
             if isinstance(raw_cursor, str) and raw_cursor:
                 next_cursor = raw_cursor
         return SlackThreadPage(messages=tuple(messages), next_cursor=next_cursor)
+
+    async def read_range(
+        self,
+        *,
+        trigger: SlackConversationHistoryTrigger,
+        bot_token: str,
+        exclusive_start_position: str | None,
+        deadline: ExternalChannelOperationDeadline,
+    ) -> ExternalChannelHistoryRange[SlackNormalizedMessage]:
+        """Read a bounded exclusive-start, inclusive-trigger Slack range."""
+        started = time.monotonic()
+        try:
+            trigger_position = slack_provider_position(trigger.trigger_message_ts)
+        except SlackEventNormalizationError as error:
+            raise ExternalChannelHistoryPositionInvalid(
+                "Slack history trigger position is invalid."
+            ) from error
+        if exclusive_start_position is not None and not _valid_slack_position(
+            exclusive_start_position
+        ):
+            raise ExternalChannelHistoryPositionInvalid(
+                "Slack history range start position is invalid."
+            )
+        cursor: str | None = None
+        pages = 0
+        scanned = 0
+        normalized_messages: list[SlackNormalizedMessage] = []
+        while True:
+            if deadline.remaining_seconds() <= 0:
+                raise ExternalChannelHistoryDeadlineExceeded(
+                    "Slack history retrieval exceeded its deadline."
+                )
+            pages += 1
+            if pages > _MAX_HISTORY_PAGES:
+                raise ExternalChannelHistoryRangeIncomplete(
+                    "Slack history range exceeded the bounded page limit."
+                )
+            try:
+                if trigger.root_thread_ts is None:
+                    request = self.web_client.conversations_history(
+                        channel=trigger.channel_id,
+                        cursor=cursor,
+                        inclusive=True,
+                        latest=trigger.trigger_message_ts,
+                        limit=100,
+                        oldest=(
+                            _slack_position_to_timestamp(exclusive_start_position)
+                            if exclusive_start_position is not None
+                            else None
+                        ),
+                        token=bot_token,
+                    )
+                    payload = await self._call_api(
+                        api_method="conversations.history",
+                        argument_names=(
+                            "channel",
+                            "cursor",
+                            "inclusive",
+                            "latest",
+                            "limit",
+                            "oldest",
+                        ),
+                        request=request,
+                        deadline=deadline,
+                    )
+                else:
+                    request = self.web_client.conversations_replies(
+                        channel=trigger.channel_id,
+                        ts=trigger.root_thread_ts,
+                        cursor=cursor,
+                        inclusive=True,
+                        limit=100,
+                        latest=trigger.trigger_message_ts,
+                        oldest=_slack_position_to_timestamp(exclusive_start_position),
+                        token=bot_token,
+                    )
+                    payload = await self._call_api(
+                        api_method="conversations.replies",
+                        argument_names=(
+                            "channel",
+                            "cursor",
+                            "inclusive",
+                            "latest",
+                            "limit",
+                            "oldest",
+                            "ts",
+                        ),
+                        request=request,
+                        deadline=deadline,
+                    )
+            except SlackProviderRateLimited as error:
+                raise ExternalChannelHistoryRateLimited(
+                    error.retry_after_seconds
+                ) from error
+            except SlackProviderCredentialsInvalid as error:
+                raise ExternalChannelHistoryCredentialsInvalid(str(error)) from error
+            except SlackProviderPermissionDenied as error:
+                raise ExternalChannelHistoryPermissionDenied(str(error)) from error
+            except SlackProviderResourceUnavailable as error:
+                raise ExternalChannelHistoryResourceUnavailable(str(error)) from error
+            except SlackProviderTemporaryError as error:
+                raise ExternalChannelHistoryTemporaryFailure(str(error)) from error
+            except TimeoutError as error:
+                raise ExternalChannelHistoryDeadlineExceeded(
+                    "Slack history retrieval exceeded its deadline."
+                ) from error
+            except SlackEventNormalizationError as error:
+                raise ExternalChannelHistoryMalformed(str(error)) from error
+            raw_messages = payload.get("messages")
+            if not isinstance(raw_messages, list):
+                raise ExternalChannelHistoryMalformed(
+                    "Slack history response is malformed."
+                )
+            try:
+                response_size = len(
+                    json.dumps(
+                        payload,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ).encode()
+                )
+            except (TypeError, ValueError) as error:
+                raise ExternalChannelHistoryMalformed(
+                    "Slack history response could not be bounded."
+                ) from error
+            if response_size > _MAX_HISTORY_RESPONSE_BYTES:
+                raise ExternalChannelHistoryMalformed(
+                    "Slack history response exceeded the size limit."
+                )
+            page_messages: list[SlackNormalizedMessage] = []
+            for raw_message in raw_messages:
+                if not isinstance(raw_message, dict):
+                    continue
+                try:
+                    message_size = len(
+                        json.dumps(
+                            raw_message,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ).encode()
+                    )
+                except (TypeError, ValueError) as error:
+                    raise ExternalChannelHistoryMalformed(
+                        "Slack history message could not be bounded."
+                    ) from error
+                if message_size > _MAX_HISTORY_MESSAGE_BYTES:
+                    raise ExternalChannelHistoryMalformed(
+                        "Slack history message exceeded the size limit."
+                    )
+                _validate_slack_history_item(raw_message, trigger=trigger)
+                if (
+                    trigger.connected_app_id is not None
+                    and raw_message.get("app_id") == trigger.connected_app_id
+                ) or (
+                    trigger.connected_bot_user_id is not None
+                    and raw_message.get("user") == trigger.connected_bot_user_id
+                ):
+                    continue
+                try:
+                    message = normalize_slack_history_message(
+                        tenant_id=trigger.tenant_id,
+                        channel_id=trigger.channel_id,
+                        root_thread_ts=(
+                            trigger.root_thread_ts
+                            or _optional_string(raw_message, "thread_ts")
+                            or _required_string(raw_message, "ts")
+                        ),
+                        message=raw_message,
+                    )
+                except SlackEventExcluded:
+                    continue
+                if _slack_connected_identity(
+                    message,
+                    connected_bot_user_id=trigger.connected_bot_user_id,
+                    connected_app_id=trigger.connected_app_id,
+                ):
+                    continue
+                scanned += 1
+                if scanned > _MAX_HISTORY_SCANNED_MESSAGES:
+                    raise ExternalChannelHistoryRangeIncomplete(
+                        "Slack history range exceeded the bounded message limit."
+                    )
+                page_messages.append(message)
+                eligible_count = sum(
+                    1
+                    for candidate in (*normalized_messages, *page_messages)
+                    if (
+                        (
+                            exclusive_start_position is None
+                            or candidate.provider_position > exclusive_start_position
+                        )
+                        and candidate.provider_position <= trigger_position
+                    )
+                )
+                if eligible_count >= _MAX_HISTORY_RETAINED_MESSAGES + 1:
+                    break
+            normalized_messages.extend(page_messages)
+            eligible_count = sum(
+                1
+                for message in normalized_messages
+                if (
+                    (
+                        exclusive_start_position is None
+                        or message.provider_position > exclusive_start_position
+                    )
+                    and message.provider_position <= trigger_position
+                )
+            )
+            if eligible_count >= _MAX_HISTORY_RETAINED_MESSAGES + 1:
+                break
+            metadata = payload.get("response_metadata")
+            next_cursor = None
+            if isinstance(metadata, dict):
+                value = metadata.get("next_cursor")
+                if isinstance(value, str) and value:
+                    next_cursor = value
+            reached_start = exclusive_start_position is not None and any(
+                message.provider_position <= exclusive_start_position
+                for message in page_messages
+            )
+            if next_cursor is None or reached_start:
+                break
+            cursor = next_cursor
+
+        in_range = [
+            message
+            for message in normalized_messages
+            if (
+                (
+                    exclusive_start_position is None
+                    or message.provider_position > exclusive_start_position
+                )
+                and message.provider_position <= trigger_position
+            )
+        ]
+        in_range.sort(key=lambda message: message.provider_position)
+        trigger_messages = [
+            message
+            for message in in_range
+            if message.message_ts == trigger.trigger_message_ts
+        ]
+        if not trigger_messages:
+            raise ExternalChannelHistoryTriggerMissing(
+                "Slack history did not contain the exact trigger."
+            )
+        context_omitted = len(in_range) > _MAX_HISTORY_RETAINED_MESSAGES
+        retained = tuple(in_range[-_MAX_HISTORY_RETAINED_MESSAGES:])
+        trigger_message = trigger_messages[0]
+        if trigger_message not in retained:
+            retained = tuple(
+                sorted(
+                    (*retained[:-1], trigger_message),
+                    key=lambda message: message.provider_position,
+                )
+            )
+        return ExternalChannelHistoryRange(
+            messages=retained,
+            trigger=trigger_message,
+            context_omitted=context_omitted,
+            range_start_position=exclusive_start_position,
+            trigger_position=trigger_message.provider_position,
+            provider_request_count=pages,
+            scanned_message_count=scanned,
+            elapsed_seconds=max(0.0, time.monotonic() - started),
+        )
 
     async def get_permalink(
         self,
@@ -1501,17 +1867,27 @@ class SlackConversationClient:
         api_method: str,
         argument_names: tuple[str, ...],
         request: Awaitable[AsyncSlackResponse],
+        deadline: ExternalChannelOperationDeadline | None = None,
     ) -> dict[str, object]:
         """Await one public Slack SDK operation and map controlled failures."""
         try:
-            response = await request
+            if deadline is None:
+                response = await request
+            else:
+                remaining = deadline.remaining_seconds()
+                if remaining <= 0:
+                    raise TimeoutError
+                async with asyncio.timeout(remaining):
+                    response = await request
         except SlackApiError as error:
             raise _slack_provider_error(
                 error,
                 api_method=api_method,
                 argument_names=argument_names,
             ) from None
-        except (aiohttp.ClientError, TimeoutError) as error:
+        except TimeoutError:
+            raise
+        except aiohttp.ClientError as error:
             raise SlackProviderTemporaryError(
                 "Slack request did not produce a response.",
                 diagnostics={

@@ -20,6 +20,7 @@ from azents.core.enums import (
     ExternalChannelConnectionStatus,
     ExternalChannelConversationAdmissionOrigin,
     ExternalChannelConversationAdmissionStatus,
+    ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
@@ -29,6 +30,7 @@ from azents.core.enums import (
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
+    ExternalChannelInvocationWakeDispatchStatus,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
@@ -76,6 +78,12 @@ external_channel_connection_status_enum = ENUM(
     create_type=False,
     values_callable=_enum_values,
 )
+external_channel_conversation_scope_kind_enum = ENUM(
+    ExternalChannelConversationScopeKind,
+    name="external_channel_conversation_scope_kind",
+    create_type=False,
+    values_callable=_enum_values,
+)
 external_channel_app_mode_enum = ENUM(
     ExternalChannelAppMode,
     name="external_channel_app_mode",
@@ -103,6 +111,12 @@ external_channel_interaction_type_enum = ENUM(
 external_channel_interaction_status_enum = ENUM(
     ExternalChannelInteractionStatus,
     name="external_channel_interaction_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_invocation_wake_dispatch_status_enum = ENUM(
+    ExternalChannelInvocationWakeDispatchStatus,
+    name="external_channel_invocation_wake_dispatch_status",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -564,6 +578,85 @@ class RDBExternalChannelIngressLease(RDBModel):
     __table_args__ = (UQ_CONNECTION_ID, IX_LEASE_UNTIL)
 
 
+class RDBExternalChannelConversationPosition(RDBModel):
+    """Durable provider-history read position for one conversation scope."""
+
+    __tablename__ = "external_channel_conversation_positions"
+
+    UQ_CONNECTION_ID_ID = sa.UniqueConstraint(
+        "connection_id",
+        "id",
+        name="uq_external_channel_conversation_positions_connection_id_id",
+    )
+    UQ_CONNECTION_PARENT = sa.Index(
+        "uq_external_channel_conversation_positions_parent",
+        "connection_id",
+        "provider_channel_id",
+        unique=True,
+        postgresql_where=sa.text("scope_kind = 'parent_channel'"),
+    )
+    UQ_CONNECTION_THREAD = sa.Index(
+        "uq_external_channel_conversation_positions_thread",
+        "connection_id",
+        "provider_channel_id",
+        "provider_thread_key",
+        unique=True,
+        postgresql_where=sa.text("scope_kind = 'thread'"),
+    )
+    CK_SCOPE_KEY = sa.CheckConstraint(
+        "(scope_kind = 'parent_channel' AND provider_thread_key IS NULL) OR "
+        "(scope_kind = 'thread' AND provider_thread_key IS NOT NULL)",
+        name="ck_external_channel_conversation_positions_scope_key",
+    )
+
+    id: Mapped[str] = mapped_column(
+        sa.String(32),
+        primary_key=True,
+        init=False,
+        default_factory=lambda: uuid7().hex,
+    )
+    connection_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_connections.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    scope_kind: Mapped[ExternalChannelConversationScopeKind] = mapped_column(
+        external_channel_conversation_scope_kind_enum,
+        nullable=False,
+    )
+    provider_channel_id: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    provider_thread_key: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
+        default=None,
+    )
+    read_through_position: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
+        default=None,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+    )
+
+    __table_args__ = (
+        UQ_CONNECTION_ID_ID,
+        UQ_CONNECTION_PARENT,
+        UQ_CONNECTION_THREAD,
+        CK_SCOPE_KEY,
+    )
+
+
 class RDBExternalChannelAgentRoute(RDBModel):
     """Persistent relationship between one Agent and provider connection."""
 
@@ -851,6 +944,15 @@ class RDBExternalChannelConversationAdmission(RDBModel):
         name="fk_external_channel_conv_admissions_connection_interaction",
         ondelete="RESTRICT",
     )
+    FK_CONNECTION_POSITION = sa.ForeignKeyConstraint(
+        ["connection_id", "conversation_position_id"],
+        [
+            "external_channel_conversation_positions.connection_id",
+            "external_channel_conversation_positions.id",
+        ],
+        name="fk_external_channel_conv_admissions_connection_position",
+        ondelete="RESTRICT",
+    )
 
     id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -892,6 +994,21 @@ class RDBExternalChannelConversationAdmission(RDBModel):
         nullable=True,
         default=None,
     )
+    conversation_position_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        nullable=True,
+        default=None,
+    )
+    range_start_position: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
+        default=None,
+    )
+    trigger_position: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
+        default=None,
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         init=False,
@@ -914,6 +1031,7 @@ class RDBExternalChannelConversationAdmission(RDBModel):
         FK_RESOURCE_SOURCE_MESSAGE,
         FK_CONNECTION_SELECTED_ROUTE,
         FK_CONNECTION_INTERACTION,
+        FK_CONNECTION_POSITION,
     )
 
 
@@ -1759,6 +1877,15 @@ class RDBExternalChannelInvocationBatch(RDBModel):
         "trigger_message_id",
         name="uq_external_channel_invocation_batches_binding_trigger_message",
     )
+    FK_CONVERSATION_POSITION = sa.ForeignKeyConstraint(
+        ["connection_id", "conversation_position_id"],
+        [
+            "external_channel_conversation_positions.connection_id",
+            "external_channel_conversation_positions.id",
+        ],
+        name="fk_external_channel_invocation_batches_conversation_position",
+        ondelete="RESTRICT",
+    )
 
     id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -1794,6 +1921,45 @@ class RDBExternalChannelInvocationBatch(RDBModel):
         nullable=True,
         default=None,
     )
+    connection_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        nullable=True,
+        default=None,
+    )
+    conversation_position_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        nullable=True,
+        default=None,
+    )
+    range_start_position: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
+        default=None,
+    )
+    trigger_position: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
+        default=None,
+    )
+    context_omitted: Mapped[bool] = mapped_column(
+        sa.Boolean,
+        nullable=False,
+        default=False,
+        server_default=sa.false(),
+    )
+    wake_dispatch_status: Mapped[ExternalChannelInvocationWakeDispatchStatus] = (
+        mapped_column(
+            external_channel_invocation_wake_dispatch_status_enum,
+            nullable=False,
+            default=ExternalChannelInvocationWakeDispatchStatus.DISPATCHED,
+            server_default=ExternalChannelInvocationWakeDispatchStatus.DISPATCHED.value,
+        )
+    )
+    wake_dispatch_claimed_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         init=False,
@@ -1801,7 +1967,11 @@ class RDBExternalChannelInvocationBatch(RDBModel):
         server_default=sa.func.now(),
     )
 
-    __table_args__ = (IX_BINDING_ID_CREATED_AT, UQ_BINDING_TRIGGER_MESSAGE)
+    __table_args__ = (
+        IX_BINDING_ID_CREATED_AT,
+        UQ_BINDING_TRIGGER_MESSAGE,
+        FK_CONVERSATION_POSITION,
+    )
 
 
 class RDBExternalChannelInvocationBatchItem(RDBModel):
@@ -1878,6 +2048,24 @@ class RDBExternalChannelAccessRequest(RDBModel):
         "source_message_id",
         name="uq_external_channel_access_requests_route_source_message",
     )
+    FK_CONNECTION_RESOURCE = sa.ForeignKeyConstraint(
+        ["connection_id", "resource_id"],
+        [
+            "external_channel_resources.connection_id",
+            "external_channel_resources.id",
+        ],
+        name="fk_external_channel_access_requests_connection_resource",
+        ondelete="RESTRICT",
+    )
+    FK_CONNECTION_POSITION = sa.ForeignKeyConstraint(
+        ["connection_id", "conversation_position_id"],
+        [
+            "external_channel_conversation_positions.connection_id",
+            "external_channel_conversation_positions.id",
+        ],
+        name="fk_external_channel_access_requests_connection_position",
+        ondelete="RESTRICT",
+    )
 
     id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -1917,6 +2105,26 @@ class RDBExternalChannelAccessRequest(RDBModel):
     expires_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         nullable=False,
+    )
+    connection_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        nullable=True,
+        default=None,
+    )
+    conversation_position_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        nullable=True,
+        default=None,
+    )
+    range_start_position: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
+        default=None,
+    )
+    trigger_position: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
+        default=None,
     )
     agent_session_id: Mapped[str | None] = mapped_column(
         sa.String(32),
@@ -1958,6 +2166,8 @@ class RDBExternalChannelAccessRequest(RDBModel):
         IX_STATUS_CREATED_AT,
         IX_AGENT_SESSION_ID,
         UQ_ROUTE_SOURCE_MESSAGE,
+        FK_CONNECTION_RESOURCE,
+        FK_CONNECTION_POSITION,
     )
 
 
