@@ -22,6 +22,7 @@ from azents.core.enums import ExternalChannelProvider
 from azents.core.external_channel_file import (
     EXTERNAL_CHANNEL_FILE_STREAM_CHUNK_BYTES,
     MAX_EXTERNAL_CHANNEL_FILES,
+    MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES,
     ExternalChannelFileLocator,
     ExternalChannelFileMetadata,
     ExternalChannelOutboundFileManifest,
@@ -229,6 +230,7 @@ class ExternalChannelFileTransferService:
         agent_id: str,
         operation_id: str,
         file: str,
+        expected_size_bytes: int,
         path: str,
         overwrite: bool,
         file_storage: FileStorage,
@@ -240,6 +242,10 @@ class ExternalChannelFileTransferService:
         if not PurePosixPath(path).is_absolute():
             raise ExternalChannelFileTransferError(
                 "Runtime destination path must be absolute."
+            )
+        if expected_size_bytes < 0:
+            raise ExternalChannelFileTransferError(
+                "Selected External Channel file size must not be negative."
             )
         async with self.session_manager() as session:
             target = await self.repository.get_active_file_access_target(
@@ -288,12 +294,16 @@ class ExternalChannelFileTransferService:
         )
         if not isinstance(resolved.config, ExternalChannelFilesConfig):
             raise RuntimeError("Unexpected External Channel files settings model.")
-        limit = resolved.config.inbound_max_file_bytes
+        limit = min(
+            resolved.config.inbound_max_file_bytes,
+            MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES,
+        )
         match target.provider:
             case ExternalChannelProvider.SLACK:
                 return await self._download_slack(
                     bot_token=credentials.bot_token,
                     provider_file_id=locator.provider_file_id,
+                    expected_size_bytes=expected_size_bytes,
                     path=path,
                     overwrite=overwrite,
                     limit=limit,
@@ -317,6 +327,7 @@ class ExternalChannelFileTransferService:
                     bot_token=credentials.bot_token,
                     source_identity=source_identity,
                     provider_file_id=locator.provider_file_id,
+                    expected_size_bytes=expected_size_bytes,
                     path=path,
                     overwrite=overwrite,
                     limit=limit,
@@ -337,6 +348,7 @@ class ExternalChannelFileTransferService:
         *,
         bot_token: str,
         provider_file_id: str,
+        expected_size_bytes: int,
         path: str,
         overwrite: bool,
         limit: int,
@@ -358,6 +370,7 @@ class ExternalChannelFileTransferService:
             filename, declared_size = _validate_slack_file_metadata(
                 metadata=metadata,
                 provider_file_id=provider_file_id,
+                expected_size_bytes=expected_size_bytes,
                 limit=limit,
             )
             private_url = info.private_url
@@ -393,6 +406,7 @@ class ExternalChannelFileTransferService:
                     target=target,
                     bot_token=bot_token,
                     expected_metadata=metadata,
+                    expected_size_bytes=expected_size_bytes,
                     limit=limit,
                 ),
                 s3_service=staging_configuration.s3_service,
@@ -550,6 +564,7 @@ class ExternalChannelFileTransferService:
         bot_token: str,
         source_identity: tuple[str, str],
         provider_file_id: str,
+        expected_size_bytes: int,
         path: str,
         overwrite: bool,
         limit: int,
@@ -575,6 +590,7 @@ class ExternalChannelFileTransferService:
                 _validate_discord_attachment_metadata(
                     info=info,
                     provider_file_id=provider_file_id,
+                    expected_size_bytes=expected_size_bytes,
                     limit=limit,
                 )
             )
@@ -607,6 +623,7 @@ class ExternalChannelFileTransferService:
                     bot_token=bot_token,
                     source_identity=source_identity,
                     expected_metadata=metadata,
+                    expected_size_bytes=expected_size_bytes,
                     limit=limit,
                 ),
                 s3_service=staging_configuration.s3_service,
@@ -697,6 +714,7 @@ class ExternalChannelFileTransferService:
         bot_token: str,
         source_identity: tuple[str, str],
         expected_metadata: ExternalChannelFileMetadata,
+        expected_size_bytes: int,
         limit: int,
     ) -> bool:
         """Revalidate active Discord source authority before READY."""
@@ -744,6 +762,7 @@ class ExternalChannelFileTransferService:
         _validate_discord_attachment_metadata(
             info=info,
             provider_file_id=locator.provider_file_id,
+            expected_size_bytes=expected_size_bytes,
             limit=limit,
         )
         if info.metadata != expected_metadata:
@@ -761,6 +780,7 @@ class ExternalChannelFileTransferService:
         target: ExternalChannelFileAccessTarget,
         bot_token: str,
         expected_metadata: ExternalChannelFileMetadata,
+        expected_size_bytes: int,
         limit: int,
     ) -> bool:
         """Revalidate active binding and current provider metadata before READY."""
@@ -795,6 +815,7 @@ class ExternalChannelFileTransferService:
         _validate_slack_file_metadata(
             metadata=info.metadata,
             provider_file_id=locator.provider_file_id,
+            expected_size_bytes=expected_size_bytes,
             limit=limit,
         )
         if info.metadata != expected_metadata:
@@ -1031,6 +1052,7 @@ def _validate_discord_attachment_metadata(
     *,
     info: DiscordAttachmentDownloadInfo,
     provider_file_id: str,
+    expected_size_bytes: int,
     limit: int,
 ) -> tuple[str, int, str]:
     """Validate one current Discord attachment before source admission."""
@@ -1053,6 +1075,10 @@ def _validate_discord_attachment_metadata(
     if declared_size > limit:
         raise ExternalChannelFileTransferError(
             f"Discord attachment exceeds the configured inbound limit of {limit} bytes."
+        )
+    if declared_size != expected_size_bytes:
+        raise ExternalChannelFileTransferError(
+            "Selected file size does not match current Discord attachment metadata."
         )
     filename = metadata.name
     if filename is None:
@@ -1134,6 +1160,7 @@ def _validate_slack_file_metadata(
     *,
     metadata: ExternalChannelFileMetadata,
     provider_file_id: str,
+    expected_size_bytes: int,
     limit: int,
 ) -> tuple[str, int]:
     """Validate one files.info response before source admission."""
@@ -1155,6 +1182,10 @@ def _validate_slack_file_metadata(
     if declared_size > limit:
         raise ExternalChannelFileTransferError(
             f"Slack file exceeds the configured inbound limit of {limit} bytes."
+        )
+    if declared_size != expected_size_bytes:
+        raise ExternalChannelFileTransferError(
+            "Selected file size does not match current Slack file metadata."
         )
     filename = metadata.name or metadata.title
     if filename is None:

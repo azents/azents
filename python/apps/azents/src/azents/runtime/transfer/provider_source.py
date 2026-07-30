@@ -35,9 +35,22 @@ class ProviderByteStreamOpener(Protocol):
         self,
         *,
         maximum_chunk_size: int,
-    ) -> AbstractAsyncContextManager[AsyncIterator[bytes]]:
+    ) -> AbstractAsyncContextManager[ProviderByteStreamResponse]:
         """Open an owned response stream that closes on every caller exit."""
         ...
+
+
+@dataclass(frozen=True)
+class ProviderByteStreamResponse:
+    """One owned provider response with its required declared body size."""
+
+    content_length: int
+    chunks: AsyncIterator[bytes]
+
+    def __post_init__(self) -> None:
+        """Reject invalid provider response size evidence."""
+        if self.content_length < 0:
+            raise ValueError("Provider response content length must not be negative")
 
 
 class ProviderStagingStore(Protocol):
@@ -238,8 +251,12 @@ class DeferredProviderServerToRuntimeSource:
         parts: list[S3CompletedPart] = []
         async with self.open_stream(
             maximum_chunk_size=self.stream_chunk_size
-        ) as chunks:
-            async for chunk in chunks:
+        ) as response:
+            if response.content_length != self.metadata.size:
+                raise ValueError(
+                    "Provider response content length does not match the manifest"
+                )
+            async for chunk in response.chunks:
                 if not isinstance(chunk, bytes):
                     raise ValueError("Provider stream yielded a non-bytes chunk")
                 if len(chunk) > self.stream_chunk_size:
@@ -279,8 +296,12 @@ class DeferredProviderServerToRuntimeSource:
         empty_sha256 = hashlib.sha256(b"").hexdigest()
         async with self.open_stream(
             maximum_chunk_size=self.stream_chunk_size
-        ) as chunks:
-            async for chunk in chunks:
+        ) as response:
+            if response.content_length != 0:
+                raise ValueError(
+                    "Provider response content length does not match the manifest"
+                )
+            async for chunk in response.chunks:
                 if not isinstance(chunk, bytes):
                     raise ValueError("Provider stream yielded a non-bytes chunk")
                 if len(chunk) > self.stream_chunk_size:

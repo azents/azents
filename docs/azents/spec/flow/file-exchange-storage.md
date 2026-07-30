@@ -52,7 +52,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-30
-spec_version: 35
+spec_version: 36
 ---
 
 # File Exchange Storage
@@ -128,12 +128,17 @@ default `/tmp/agent/imports/` copy is temporary.
 
 ### Agent transfers an External Channel file
 
-`download_external_file` accepts one opaque `external-file:v1` locator from the current
-active External Channel binding. The service resolves Slack metadata and authenticated
-private bytes only after the explicit Tool call, enforces configured declared and actual
-byte limits, incrementally stages the authorized source into the common
-Server-to-Runtime transfer capability, and waits for the Runtime destination commit. The
-Tool result retains only Runtime path, filename, media type, and actual size.
+`download_external_file` accepts one opaque `external-file:v1` locator, the exact
+`expected_size_bytes` displayed with that attachment, and one Runtime destination from
+the current active External Channel binding. The service refreshes provider metadata
+before opening a provider response, requires the selected size, refreshed metadata size,
+HTTP `Content-Length`, and incrementally counted body size to agree, and rejects a file
+above the effective per-file inbound policy (at most 500 MiB). It stages only the
+verified source into the common Server-to-Runtime capability and waits for the Runtime
+destination commit. Runtime admission does not reject an independent valid file for
+active-file or aggregate-byte pressure; delivery chunks wait in FIFO-per-file
+round-robin order. The Tool result retains only Runtime path, filename, media type, and
+verified byte count.
 
 A file-bearing `channel_action` accepts absolute Runtime paths and `exchange://` URIs.
 Runtime paths are statted before commit and, when the trusted Runtime provider-delivery
@@ -263,6 +268,10 @@ lifetime. Object existence alone never creates Exchange publication authority.
 
 ## Changelog
 
+- **2026-07-30** — v36. Required explicit displayed-size selection and matching
+  provider metadata, HTTP response declaration, and streamed body for External Channel
+  ingress up to 500 MiB; Runtime delivery now waits fairly at chunk boundaries rather
+  than rejecting independent files for aggregate admission capacity.
 - **2026-07-30** — v34. Reverified the External Channel locator, authority
   revalidation, verified Runtime transfer, provider settlement, and no-durable-body
   boundaries after synchronous ingress contraction; no semantic change.

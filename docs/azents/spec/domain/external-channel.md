@@ -54,7 +54,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-30
-spec_version: 27
+spec_version: 28
 ---
 
 # External Channel
@@ -164,14 +164,16 @@ contain multiple independent bindings.
   lease/configuration/App-claim fence protect canonical admission.
 - Production Discord Gateway endpoint selection belongs to `discord.py`; Azents does
   not expose a custom or insecure Gateway endpoint override.
-- Supported first-release inbound files are direct Slack-hosted uploads with a concrete
-  ID, non-negative declared size, visible access, and no external or Slack Connect
-  classification. Unsupported entries remain metadata-visible with a stable rejection
-  reason but cannot be materialized.
-- Discord attachment metadata likewise stores bounded identifiers, filename, media type,
-  and declared size only. A current provider message lookup obtains a non-durable
-  download URL immediately before a bounded in-memory download; redirects, stale
-  authority, malformed metadata, and oversized streams fail closed.
+- Inbound Slack and Discord attachments retain only bounded identifiers, filename, media
+  type, and an exact non-negative declared byte size in durable state. An attachment is
+  materialized only after the Agent supplies that displayed size to
+  `download_external_file`; absent or unsupported metadata remains visible but is not
+  downloadable.
+- The trusted provider adapter refreshes current metadata, requires one matching HTTP
+  `Content-Length`, streams and counts the response body, and stages an immutable
+  verified object before Runtime delivery. Any metadata, response-header, or body-size
+  mismatch fails closed without a Runtime destination commit; provider URLs and bytes
+  remain outside durable External Channel state.
 - Initial synchronous binding acceptance creates one separate Session navigation message
   and one checking work projection before Session wake-up. Slack lowers work through its
   retained Tracker message; Discord lowers each work snapshot to one retained compact
@@ -294,6 +296,11 @@ Agent administrator; unauthorized and missing requests are returned as not found
 Connection responses expose provider identity, capabilities, health, route relationship, and redacted credential state. They never return ciphertext or decrypted secret values.
 
 ## Changelog
+
+- **2026-07-30** (spec_version 28) — Raised verified inbound attachment eligibility to
+  500 MiB, bound Agent selection to the displayed byte size, required matching current
+  metadata/HTTP `Content-Length`/received-body evidence, and retained provider bytes
+  only in trusted verified staging.
 
 - **2026-07-30** (spec_version 27) — Removed bot-trigger policy and inbound
   edit/delete correction behavior, made pending admission metadata-only and

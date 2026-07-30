@@ -74,7 +74,7 @@ async def test_download_rejects_non_cdn_urls_without_http_access() -> None:
                 max_bytes=7,
                 maximum_chunk_size=4,
             ) as chunks:
-                _ = [chunk async for chunk in chunks]
+                _ = [chunk async for chunk in chunks.chunks]
 
     assert calls == []
 
@@ -102,16 +102,40 @@ async def test_download_enforces_content_length_and_rejects_redirects() -> None:
                 max_bytes=7,
                 maximum_chunk_size=4,
             ) as chunks:
-                _ = [chunk async for chunk in chunks]
+                _ = [chunk async for chunk in chunks.chunks]
         with pytest.raises(DiscordFileTooLarge, match="limit"):
             async with client.open_attachment_stream(
                 download_url="https://media.discordapp.net/attachments/333/555/report.csv",
                 max_bytes=7,
                 maximum_chunk_size=4,
             ) as chunks:
-                _ = [chunk async for chunk in chunks]
+                _ = [chunk async for chunk in chunks.chunks]
 
     assert responses == []
+
+
+@pytest.mark.asyncio
+async def test_download_requires_valid_content_length() -> None:
+    """A complete Discord response must contain one non-negative decimal size."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(
+            200,
+            headers={"Content-Length": "invalid"},
+            content=b"1234567",
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        with pytest.raises(DiscordFileRequestRejected, match="content length"):
+            async with DiscordChannelClient(http_client).open_attachment_stream(
+                download_url="https://cdn.discordapp.com/attachments/333/555/report.csv",
+                max_bytes=7,
+                maximum_chunk_size=3,
+            ):
+                pass
 
 
 @pytest.mark.asyncio
@@ -131,7 +155,7 @@ async def test_download_yields_bounded_chunks_without_retaining_complete_body() 
             max_bytes=7,
             maximum_chunk_size=3,
         ) as chunks:
-            bodies = [chunk async for chunk in chunks]
+            bodies = [chunk async for chunk in chunks.chunks]
 
     assert bodies == [b"123", b"456", b"7"]
 

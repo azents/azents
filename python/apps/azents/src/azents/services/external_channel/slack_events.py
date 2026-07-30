@@ -29,6 +29,7 @@ from azents.core.external_channel_file import (
     ExternalChannelFileMetadata,
     ExternalChannelFileUnsupportedReason,
 )
+from azents.runtime.transfer.provider_source import ProviderByteStreamResponse
 from azents.services.external_channel.conversation import (
     ExternalChannelHistoryCredentialsInvalid,
     ExternalChannelHistoryDeadlineExceeded,
@@ -998,7 +999,7 @@ class SlackConversationClient:
         private_url: str,
         max_bytes: int,
         maximum_chunk_size: int,
-    ) -> AbstractAsyncContextManager[AsyncIterator[bytes]]:
+    ) -> AbstractAsyncContextManager[ProviderByteStreamResponse]:
         """Return one owned bounded private-file stream."""
         return self._open_private_file_stream(
             bot_token=bot_token,
@@ -1015,7 +1016,7 @@ class SlackConversationClient:
         private_url: str,
         max_bytes: int,
         maximum_chunk_size: int,
-    ) -> AsyncIterator[AsyncIterator[bytes]]:
+    ) -> AsyncIterator[ProviderByteStreamResponse]:
         """Open one authenticated private file and close it after stream consumption."""
         if maximum_chunk_size <= 0:
             raise ValueError("Slack stream chunk size must be positive")
@@ -1058,19 +1059,18 @@ class SlackConversationClient:
                     raise SlackProviderTemporaryError(
                         "Slack private file response is incomplete."
                     )
-                content_length = response.headers.get("Content-Length")
-                if content_length is not None:
-                    try:
-                        declared_response_size = int(content_length)
-                    except ValueError:
-                        declared_response_size = None
-                    if (
-                        declared_response_size is not None
-                        and declared_response_size > max_bytes
-                    ):
-                        raise SlackProviderFileTooLarge(
-                            "Slack file exceeds the configured limit."
-                        )
+                content_lengths = response.headers.get_list("Content-Length")
+                if (
+                    len(content_lengths) != 1
+                    or not content_lengths[0].isascii()
+                    or not content_lengths[0].isdecimal()
+                ):
+                    raise SlackProviderRequestRejected("file_download_invalid_size")
+                declared_response_size = int(content_lengths[0])
+                if declared_response_size > max_bytes:
+                    raise SlackProviderFileTooLarge(
+                        "Slack file exceeds the configured limit."
+                    )
 
                 async def chunks() -> AsyncIterator[bytes]:
                     """Yield bounded response chunks without retaining all bytes."""
@@ -1085,7 +1085,10 @@ class SlackConversationClient:
                             )
                         yield chunk
 
-                yield chunks()
+                yield ProviderByteStreamResponse(
+                    content_length=declared_response_size,
+                    chunks=chunks(),
+                )
         except httpx.RequestError as error:
             raise SlackProviderTemporaryError(
                 "Slack file download did not produce a complete response."

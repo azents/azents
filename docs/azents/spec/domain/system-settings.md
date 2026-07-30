@@ -1,7 +1,7 @@
 ---
 title: "System Settings"
 created: 2026-07-19
-updated: 2026-07-23
+updated: 2026-07-30
 tags: [backend, frontend, admin, scheduler, security, infra]
 spec_type: domain
 domain: system-settings
@@ -49,8 +49,8 @@ api_routes:
   - /system/v1/settings/file-lifecycle
   - /system/v1/settings/file-lifecycle/archive-retention/preview
   - /system/v1/settings/file-lifecycle/retention-applications/{application_id}
-last_verified_at: 2026-07-23
-spec_version: 4
+last_verified_at: 2026-07-30
+spec_version: 5
 ---
 
 # System Settings
@@ -201,7 +201,7 @@ and activates directly. Its positive bounded integer configuration is:
 
 | Field | Default | Configured maximum |
 | --- | ---: | ---: |
-| `inbound_max_file_bytes` | 25 MiB | 100 MiB |
+| `inbound_max_file_bytes` | 500 MiB | 500 MiB |
 | `outbound_max_file_bytes` | 25 MiB | 100 MiB |
 | `outbound_max_action_bytes` | 100 MiB | 2,000 MiB |
 
@@ -309,6 +309,9 @@ page resumes the application returned by the settings endpoint.
   [`../flow/file-exchange-storage.md`](../flow/file-exchange-storage.md).
 
 ## Changelog
+
+- **2026-07-30** — v5. Raised the External Channel inbound per-file default and
+  configured ceiling to 500 MiB while retaining lower operator policy overrides.
 
 - **2026-07-23** — v4. Added the direct-activation provider-neutral External Channel file
   limits, optimistic Admin API, generated clients, audit behavior, and whole-MiB

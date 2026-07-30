@@ -78,7 +78,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-30
-spec_version: 136
+spec_version: 137
 ---
 
 # Agent Execution Loop
@@ -724,8 +724,10 @@ operation times out into a failed/cancelled tool result path instead of leaving 
 
 An active root External Channel binding may additionally expose
 `download_external_file` and file-bearing `channel_action`. The download Tool accepts one
-provider-neutral opaque locator and one Runtime destination, performs ownership and
-capability checks before provider access, and writes only the selected bounded file.
+provider-neutral opaque locator, the exact visible attachment byte size, and one Runtime
+destination; it performs ownership and capability checks before provider access and
+writes only a selected file whose current metadata, HTTP declaration, and received bytes
+match that size within the 500 MiB inbound product ceiling.
 `channel_action.files` accepts up to 20 absolute Runtime paths, requires conversational
 text, and preflights all sources before the action commit. Runtime sources require the
 run-scoped trusted provider-delivery capability, which performs one verified Runtime upload
@@ -1187,6 +1189,8 @@ with a channel/message icon rather than presenting it as Goal continuation.
 
 ## Changelog
 
+- **2026-07-30** (spec_version 137) — Required the visible exact attachment size in
+  `download_external_file` and documented verified 500 MiB External Channel ingress.
 - **2026-07-30** (spec_version 136) — Documented synchronous External Channel
   admission before transport success, atomic mailbox/position/wake state, duplicate
   wake recovery, and omission-reminder promotion.

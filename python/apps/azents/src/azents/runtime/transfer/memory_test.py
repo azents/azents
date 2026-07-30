@@ -121,8 +121,8 @@ async def _claim_stream(
 
 
 @pytest.mark.asyncio
-async def test_clock_admission_duplicate_and_capacity() -> None:
-    """Store owns one aware clock and duplicate admission does not reserve twice."""
+async def test_clock_admission_duplicate_and_per_file_validation() -> None:
+    """Store owns one aware clock and does not gate independent admissions."""
     naive = InMemoryRuntimeTransferStateStore(
         config=_config(), clock=lambda: datetime(2026, 7, 25)
     )
@@ -134,7 +134,7 @@ async def test_clock_admission_duplicate_and_capacity() -> None:
     assert first is not None
     assert first.logical_expires_at == _NOW + timedelta(hours=1)
     assert await store.admit(_admission("one", "a"), lease_id="other") == first
-    assert await store.admit(_admission("two", "a"), lease_id="lease") is None
+    assert await store.admit(_admission("two", "a"), lease_id="lease") is not None
     assert await store.admit(_admission("bad", "a", size=11), lease_id="lease") is None
     assert (
         await store.admit(_admission("old", "a", source=_NOW), lease_id="lease") is None
@@ -142,16 +142,16 @@ async def test_clock_admission_duplicate_and_capacity() -> None:
 
 
 @pytest.mark.asyncio
-async def test_concurrent_budget_retry_expiry_and_pagination() -> None:
-    """Admission is atomic, expiry preserves evidence, and stale pages are stable."""
+async def test_concurrent_admission_retry_expiry_and_pagination() -> None:
+    """Independent admissions, expiry, retry, and stale pages remain stable."""
     clock = _Clock(_NOW)
     store = InMemoryRuntimeTransferStateStore(config=_config(attempts=1), clock=clock)
     results = await asyncio.gather(
         *(store.admit(_admission(name, "a"), lease_id=name) for name in ("one", "two"))
     )
-    winners = [item for item in results if item is not None]
-    assert len(winners) == 1
-    winner = winners[0]
+    admitted = [item for item in results if item is not None]
+    assert len(admitted) == 2
+    winner = next(item for item in admitted if item.admission.transfer_id == "one")
     assert (
         await store.admit(_admission(winner.admission.transfer_id, "b"), lease_id="b")
         is None

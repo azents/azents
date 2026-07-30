@@ -10,6 +10,7 @@ from azents.core.external_channel_file import (
     DEFAULT_EXTERNAL_CHANNEL_OUTBOUND_MAX_FILE_BYTES,
     MAX_EXTERNAL_CHANNEL_CONFIGURED_ACTION_BYTES,
     MAX_EXTERNAL_CHANNEL_CONFIGURED_FILE_BYTES,
+    MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES,
 )
 from azents.core.system_setting import (
     SystemSettingActivationMode,
@@ -26,7 +27,7 @@ class ExternalChannelFilesConfig(BaseModel):
     inbound_max_file_bytes: int = Field(
         default=DEFAULT_EXTERNAL_CHANNEL_INBOUND_MAX_FILE_BYTES,
         ge=1,
-        le=MAX_EXTERNAL_CHANNEL_CONFIGURED_FILE_BYTES,
+        le=MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES,
         strict=True,
     )
     outbound_max_file_bytes: int = Field(

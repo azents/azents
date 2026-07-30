@@ -57,7 +57,12 @@ async def _await_coordinator(
         return await operation
     except grpc.aio.AioRpcError as error:
         raise ServerToRuntimeTransferError(
-            "Runtime transfer coordinator request failed"
+            "Runtime transfer coordinator request failed",
+            failure=(
+                CoordinatorTransferFailure.ADMISSION
+                if error.code() is grpc.StatusCode.RESOURCE_EXHAUSTED
+                else None
+            ),
         ) from error
 
 

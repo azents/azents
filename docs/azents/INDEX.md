@@ -17,12 +17,12 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-27 | 58 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-29 | 134 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-30 | 27 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-30 | 28 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-28 | 13 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-07-28 | 13 |
-| [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-23 | 4 |
+| [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-28 | 77 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-30 | 52 |
@@ -31,7 +31,7 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-30 | 136 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-30 | 137 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-30 | 43 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-28 | 12 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
@@ -41,7 +41,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-30 | 23 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-30 | 19 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-30 | 18 |
-| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-30 | 35 |
+| [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-30 | 36 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 3 |
@@ -163,6 +163,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Attachment, Artifact, and FilePart lifecycle Historical Requirements Reconstruction](requirements/file-260601-file-media-resource-lifecycle.md) | file-260601 | 2026-06-01 | 2026-06-01 |
 | [Add Agent Workspace File Management Operations Historical Requirements Reconstruction](requirements/file-260628-file-management.md) | file-260628 | 2026-06-28 | - |
 | [External Channel File Transfer Requirements](requirements/files-260723-external-channel-transfer.md) | files-260723 | 2026-07-23 | 2026-07-23 |
+| [Verified Large External File Transfer Requirements](requirements/files-260730-verified-large-file-transfer.md) | files-260730 | 2026-07-30 | 2026-07-30 |
 | [Filesystem Skill Projection Revisions Historical Requirements Reconstruction](requirements/filesystem-260701-filesystem-skill-projection-revisions.md) | filesystem-260701 | 2026-07-01 | - |
 | [Fold Turn Eligibility with Failure Veto Historical Requirements Reconstruction](requirements/fold-260712-fold-turn-eligibility-with-failure-veto.md) | fold-260712 | 2026-07-12 | - |
 | [Agent User Folder Recognition Historical Requirements Reconstruction](requirements/folder-260403-folder-recognition.md) | folder-260403 | 2026-04-03 | 2026-04-03 |
@@ -509,6 +510,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Attachment, Artifact, and FilePart lifecycle](adr/file-260601-file-media-resource-lifecycle.md)
 - [Add Agent Workspace File Management Operations](adr/file-260628-file-management.md)
 - [External Channel File Transfer](adr/files-260723-external-channel-transfer.md)
+- [Verified Large External File Transfer](adr/files-260730-verified-large-file-transfer.md)
 - [Filesystem Skill Projection Revisions](adr/filesystem-260701-filesystem-skill-projection-revisions.md)
 - [Fold Turn Eligibility with Failure Veto](adr/fold-260712-fold-turn-eligibility-with-failure-veto.md)
 - [Agent User Folder Recognition Historical Decision Reconstruction](adr/folder-260403-folder-recognition.md)

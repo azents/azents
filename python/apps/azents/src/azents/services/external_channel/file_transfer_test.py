@@ -44,7 +44,10 @@ from azents.repos.external_channel.work_data import (
     ExternalChannelFileAccessTarget,
     ExternalChannelFileSource,
 )
-from azents.runtime.transfer.provider_source import ProviderStagingStore
+from azents.runtime.transfer.provider_source import (
+    ProviderByteStreamResponse,
+    ProviderStagingStore,
+)
 from azents.runtime.transfer.server_to_runtime import (
     ServerToRuntimeTarget,
     ServerToRuntimeTransferError,
@@ -190,7 +193,7 @@ class _SlackClient:
         private_url: str,
         max_bytes: int,
         maximum_chunk_size: int,
-    ) -> AsyncGenerator[AsyncIterator[bytes], None]:
+    ) -> AsyncGenerator[ProviderByteStreamResponse, None]:
         assert bot_token == "xoxb-secret"
         assert private_url == "https://files.slack.test/private/F123"
         self.stream_limits.append((max_bytes, maximum_chunk_size))
@@ -206,7 +209,10 @@ class _SlackClient:
                 raise self.stream_error
 
         try:
-            yield iterator()
+            yield ProviderByteStreamResponse(
+                content_length=sum(len(chunk) for chunk in self.chunks),
+                chunks=iterator(),
+            )
         finally:
             self.stream_closed += 1
 
@@ -266,7 +272,7 @@ class _DiscordClient:
         download_url: str,
         max_bytes: int,
         maximum_chunk_size: int,
-    ) -> AsyncGenerator[AsyncIterator[bytes], None]:
+    ) -> AsyncGenerator[ProviderByteStreamResponse, None]:
         self.download_urls.append(download_url)
         self.stream_limits.append((max_bytes, maximum_chunk_size))
         if self.download_error is not None:
@@ -281,7 +287,10 @@ class _DiscordClient:
                 raise self.stream_error
 
         try:
-            yield iterator()
+            yield ProviderByteStreamResponse(
+                content_length=sum(len(chunk) for chunk in self.chunks),
+                chunks=iterator(),
+            )
         finally:
             self.stream_closed += 1
 
@@ -582,6 +591,7 @@ async def _download(
     agent_id: str,
     operation_id: str = "run-1",
     file: str,
+    expected_size_bytes: int = 7,
     path: str,
     overwrite: bool,
     file_storage: FileStorage,
@@ -593,6 +603,7 @@ async def _download(
         agent_id=agent_id,
         operation_id=operation_id,
         file=file,
+        expected_size_bytes=expected_size_bytes,
         path=path,
         overwrite=overwrite,
         file_storage=file_storage,

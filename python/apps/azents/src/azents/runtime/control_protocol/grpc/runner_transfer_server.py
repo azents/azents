@@ -7,6 +7,7 @@
 import asyncio
 import hashlib
 import secrets
+from collections import deque
 from collections.abc import AsyncIterator, Callable
 from contextlib import AbstractAsyncContextManager, suppress
 from datetime import datetime
@@ -79,6 +80,54 @@ class _StreamTermination(StrEnum):
     CANCELLED = "cancelled"
     EXPIRED = "expired"
     FENCED = "fenced"
+
+
+class _RoundRobinChunkScheduler:
+    """Grant bounded chunk turns fairly across active transfer files."""
+
+    def __init__(self, maximum_in_flight: int) -> None:
+        """Initialize one process-local scheduler."""
+        self._maximum_in_flight = maximum_in_flight
+        self._waiting: deque[str] = deque()
+        self._waiting_set: set[str] = set()
+        self._active: set[str] = set()
+        self._condition = asyncio.Condition()
+
+    async def acquire(self, participant: str) -> None:
+        """Wait until one file receives its next chunk-processing turn."""
+        async with self._condition:
+            if participant not in self._waiting_set and participant not in self._active:
+                self._waiting.append(participant)
+                self._waiting_set.add(participant)
+            while participant in self._waiting_set and (
+                not self._waiting
+                or self._waiting[0] != participant
+                or len(self._active) >= self._maximum_in_flight
+            ):
+                await self._condition.wait()
+            if participant not in self._waiting_set:
+                raise asyncio.CancelledError
+            self._waiting.popleft()
+            self._waiting_set.remove(participant)
+            self._active.add(participant)
+
+    async def release(self, participant: str, *, requeue: bool) -> None:
+        """Finish one chunk turn and optionally queue the file's next chunk."""
+        async with self._condition:
+            self._active.discard(participant)
+            if requeue and participant not in self._waiting_set:
+                self._waiting.append(participant)
+                self._waiting_set.add(participant)
+            self._condition.notify_all()
+
+    async def unregister(self, participant: str) -> None:
+        """Remove a cancelled, failed, or completed file from future turns."""
+        async with self._condition:
+            self._active.discard(participant)
+            if participant in self._waiting_set:
+                self._waiting.remove(participant)
+                self._waiting_set.remove(participant)
+            self._condition.notify_all()
 
 
 class _StreamLeaseKeeper:
@@ -286,7 +335,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         :param owner_replica_id: Control replica owning stream claims
         :param runner_authenticator: durable Runner credential authority
         :param clock: timezone-aware clock for deadlines and lease renewal
-        :param max_concurrent_downloads: per-replica bounded stream capacity
+        :param max_concurrent_downloads: per-replica bounded chunk I/O capacity
         :param max_concurrent_uploads: per-replica bounded upload capacity
         :param maximum_chunk_bytes: maximum protobuf transfer payload size
         :param multipart_part_bytes: bounded S3 multipart part aggregation size
@@ -311,7 +360,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         self._runner_authenticator = runner_authenticator
         self._auth = RuntimeRunnerCredentialGrpcAuth(runner_authenticator)
         self._clock = clock
-        self._downloads = asyncio.Semaphore(max_concurrent_downloads)
+        self._download_chunks = _RoundRobinChunkScheduler(max_concurrent_downloads)
         self._uploads = asyncio.Semaphore(max_concurrent_uploads)
         self._maximum_chunk_bytes = maximum_chunk_bytes
         self._multipart_part_bytes = multipart_part_bytes
@@ -333,16 +382,11 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
             )
             raise AssertionError("unreachable")
         record = await self._authorize_download(request, credential, context)
-        if self._downloads.locked():
-            await context.abort(
-                grpc.StatusCode.RESOURCE_EXHAUSTED,
-                "Runner download capacity is exhausted",
-            )
-            raise AssertionError("unreachable")
-        await self._downloads.acquire()
+        participant = _scheduler_participant(record)
         claimed: RuntimeTransferRecord | None = None
         latest: RuntimeTransferRecord | None = None
         keeper: _StreamLeaseKeeper | None = None
+        chunk_turn_held = False
         try:
             claimed = await self._state_store.claim_stream(
                 record.admission.transfer_id,
@@ -397,29 +441,48 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
                 maximum_chunk_size=self._maximum_chunk_bytes,
             ) as chunks:
                 async for chunk in chunks:
-                    latest = await self._check_stream(latest, credential, context)
-                    if not chunk or len(chunk) > self._maximum_chunk_bytes:
-                        await self._fail(latest)
-                        await context.abort(
-                            grpc.StatusCode.DATA_LOSS,
-                            "Transfer object stream is invalid",
+                    await self._download_chunks.acquire(participant)
+                    chunk_turn_held = True
+                    try:
+                        latest = await self._check_stream(latest, credential, context)
+                        if not chunk or len(chunk) > self._maximum_chunk_bytes:
+                            await self._fail(latest)
+                            await context.abort(
+                                grpc.StatusCode.DATA_LOSS,
+                                "Transfer object stream is invalid",
+                            )
+                            raise AssertionError("unreachable")
+                        digest.update(chunk)
+                        offset += len(chunk)
+                        if offset > latest.admission.expected_size:
+                            await self._fail(latest)
+                            await context.abort(
+                                grpc.StatusCode.DATA_LOSS,
+                                "Transfer object exceeds expected size",
+                            )
+                            raise AssertionError("unreachable")
+                        latest = await self._record_progress(
+                            latest,
+                            offset,
+                            context,
+                            force=offset == latest.admission.expected_size,
                         )
-                        raise AssertionError("unreachable")
-                    digest.update(chunk)
-                    offset += len(chunk)
-                    if offset > latest.admission.expected_size:
-                        await self._fail(latest)
-                        await context.abort(
-                            grpc.StatusCode.DATA_LOSS,
-                            "Transfer object exceeds expected size",
+                    except asyncio.CancelledError:
+                        await self._download_chunks.release(
+                            participant,
+                            requeue=False,
                         )
-                        raise AssertionError("unreachable")
-                    latest = await self._record_progress(
-                        latest,
-                        offset,
-                        context,
-                        force=offset == latest.admission.expected_size,
-                    )
+                        chunk_turn_held = False
+                        raise
+                    except Exception:
+                        await self._download_chunks.release(
+                            participant,
+                            requeue=False,
+                        )
+                        chunk_turn_held = False
+                        raise
+                    await self._download_chunks.release(participant, requeue=True)
+                    chunk_turn_held = False
                     yield pb.DownloadTransferFrame(
                         chunk=pb.TransferChunk(offset=offset - len(chunk), data=chunk)
                     )
@@ -525,7 +588,9 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         finally:
             if keeper is not None:
                 await keeper.stop()
-            self._downloads.release()
+            if chunk_turn_held:
+                await self._download_chunks.release(participant, requeue=False)
+            await self._download_chunks.unregister(participant)
 
     async def UploadTransfer(
         self,
@@ -1736,6 +1801,19 @@ def _expired(record: RuntimeTransferRecord, now: datetime) -> bool:
 
 def _claim_id() -> str:
     return f"runner-transfer:{secrets.token_urlsafe(18)}"
+
+
+def _scheduler_participant(record: RuntimeTransferRecord) -> str:
+    """Return one exact active-attempt identity for fair chunk scheduling."""
+    admission = record.admission
+    return ":".join(
+        (
+            admission.transfer_id,
+            admission.attempt_id,
+            admission.runtime_id,
+            str(admission.desired_generation),
+        )
+    )
 
 
 def _multipart_part_count(size: int, multipart_part_bytes: int) -> int:
