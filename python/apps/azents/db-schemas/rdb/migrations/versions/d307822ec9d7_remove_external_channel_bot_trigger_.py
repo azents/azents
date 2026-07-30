@@ -101,6 +101,35 @@ def upgrade() -> None:
                     'awaiting_access'
                 )
             )
+            UPDATE external_channel_messages AS messages
+            SET current_revision_id = NULL
+            FROM pending_sources
+            WHERE messages.id = pending_sources.source_message_id
+              AND messages.current_revision_id IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM external_channel_invocation_batch_items AS batch_items
+                  WHERE batch_items.message_revision_id = messages.current_revision_id
+              )
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            WITH pending_sources AS (
+                SELECT source_message_id
+                FROM external_channel_access_requests
+                WHERE status = 'pending'
+                UNION
+                SELECT source_message_id
+                FROM external_channel_conversation_admissions
+                WHERE status IN (
+                    'pending_selection',
+                    'selected',
+                    'awaiting_access'
+                )
+            )
             DELETE FROM external_channel_message_revisions AS revisions
             USING pending_sources
             WHERE revisions.message_id = pending_sources.source_message_id

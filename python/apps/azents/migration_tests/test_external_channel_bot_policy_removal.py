@@ -263,6 +263,15 @@ def _seed_parent_graph(connection: sa.Connection) -> None:
                     '{"reference": "retained"}'::jsonb
                 ),
                 (
+                    'bot-policy-retained-current',
+                    'bot-policy-retained-message',
+                    'v2',
+                    'edit',
+                    'unaccepted retained edit',
+                    '{"attachment": "unaccepted"}'::jsonb,
+                    '{"reference": "unaccepted"}'::jsonb
+                ),
+                (
                     'bot-policy-scrubbed-revision',
                     'bot-policy-scrubbed-message',
                     'v1',
@@ -280,7 +289,7 @@ def _seed_parent_graph(connection: sa.Connection) -> None:
             UPDATE external_channel_messages
             SET current_revision_id = CASE id
                 WHEN 'bot-policy-retained-message'
-                    THEN 'bot-policy-retained-revision'
+                    THEN 'bot-policy-retained-current'
                 WHEN 'bot-policy-scrubbed-message'
                     THEN 'bot-policy-scrubbed-revision'
             END
@@ -461,7 +470,7 @@ def test_bot_policy_removal_scrubs_only_unaccepted_pending_content(
             connection,
             message_id="bot-policy-retained-message",
         ) == (
-            "bot-policy-retained-revision",
+            None,
             "https://provider.invalid/retained",
             101,
         )
@@ -476,6 +485,18 @@ def test_bot_policy_removal_scrubs_only_unaccepted_pending_content(
                 )
             ).scalar_one()
             == "retained body"
+        )
+        assert (
+            connection.execute(
+                sa.text(
+                    """
+                    SELECT count(*)
+                    FROM external_channel_message_revisions
+                    WHERE id = 'bot-policy-retained-current'
+                    """
+                )
+            ).scalar_one()
+            == 0
         )
 
     alembic_runner.migrate_down_to(_PARENT_REVISION)
@@ -507,7 +528,7 @@ def test_bot_policy_removal_scrubs_only_unaccepted_pending_content(
             connection,
             message_id="bot-policy-retained-message",
         ) == (
-            "bot-policy-retained-revision",
+            None,
             "https://provider.invalid/retained",
             101,
         )
