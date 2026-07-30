@@ -14,6 +14,7 @@ from azents.core.external_channel_file import (
     ExternalChannelFileMetadata,
     ExternalChannelFileUnsupportedReason,
 )
+from azents.runtime.transfer.provider_source import ProviderByteStreamResponse
 from azents.services.external_channel.discord_endpoint import (
     discord_api_base_url,
     discord_test_origin_matches,
@@ -105,7 +106,7 @@ class DiscordChannelClient:
         download_url: str,
         max_bytes: int,
         maximum_chunk_size: int,
-    ) -> AbstractAsyncContextManager[AsyncIterator[bytes]]:
+    ) -> AbstractAsyncContextManager[ProviderByteStreamResponse]:
         """Return one owned bounded attachment stream."""
         return self._open_attachment_stream(
             download_url=download_url,
@@ -120,7 +121,7 @@ class DiscordChannelClient:
         download_url: str,
         max_bytes: int,
         maximum_chunk_size: int,
-    ) -> AsyncIterator[AsyncIterator[bytes]]:
+    ) -> AsyncIterator[ProviderByteStreamResponse]:
         """Open one current attachment URL and close it after stream consumption."""
         if max_bytes < 0:
             raise ValueError("Discord attachment limit must not be negative.")
@@ -156,16 +157,20 @@ class DiscordChannelClient:
                     raise DiscordFileRequestRejected(
                         "Discord rejected attachment download."
                     )
-                content_length = response.headers.get("Content-Length")
-                if content_length is not None:
-                    try:
-                        declared_length = int(content_length)
-                    except ValueError:
-                        declared_length = None
-                    if declared_length is not None and declared_length > max_bytes:
-                        raise DiscordFileTooLarge(
-                            "Discord attachment exceeds the configured limit."
-                        )
+                content_lengths = response.headers.get_list("Content-Length")
+                if (
+                    len(content_lengths) != 1
+                    or not content_lengths[0].isascii()
+                    or not content_lengths[0].isdecimal()
+                ):
+                    raise DiscordFileRequestRejected(
+                        "Discord attachment response has an invalid content length."
+                    )
+                declared_length = int(content_lengths[0])
+                if declared_length > max_bytes:
+                    raise DiscordFileTooLarge(
+                        "Discord attachment exceeds the configured limit."
+                    )
 
                 async def chunks() -> AsyncIterator[bytes]:
                     """Yield bounded response chunks without retaining all bytes."""
@@ -180,7 +185,10 @@ class DiscordChannelClient:
                             )
                         yield chunk
 
-                yield chunks()
+                yield ProviderByteStreamResponse(
+                    content_length=declared_length,
+                    chunks=chunks(),
+                )
         except httpx.RequestError as error:
             raise DiscordFileTemporaryError(
                 "Discord attachment download did not produce a complete response."

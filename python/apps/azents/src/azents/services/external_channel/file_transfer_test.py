@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, cast
 from unittest.mock import AsyncMock
 
+import grpc
 import pytest
 from azcommon.infra.s3.service import S3TransferCleanupRequired
 from azcommon.result import Failure, Success
@@ -43,7 +44,10 @@ from azents.repos.external_channel.work_data import (
     ExternalChannelFileAccessTarget,
     ExternalChannelFileSource,
 )
-from azents.runtime.transfer.provider_source import ProviderStagingStore
+from azents.runtime.transfer.provider_source import (
+    ProviderByteStreamResponse,
+    ProviderStagingStore,
+)
 from azents.runtime.transfer.server_to_runtime import (
     ServerToRuntimeTarget,
     ServerToRuntimeTransferError,
@@ -189,7 +193,7 @@ class _SlackClient:
         private_url: str,
         max_bytes: int,
         maximum_chunk_size: int,
-    ) -> AsyncGenerator[AsyncIterator[bytes], None]:
+    ) -> AsyncGenerator[ProviderByteStreamResponse, None]:
         assert bot_token == "xoxb-secret"
         assert private_url == "https://files.slack.test/private/F123"
         self.stream_limits.append((max_bytes, maximum_chunk_size))
@@ -205,7 +209,10 @@ class _SlackClient:
                 raise self.stream_error
 
         try:
-            yield iterator()
+            yield ProviderByteStreamResponse(
+                content_length=sum(len(chunk) for chunk in self.chunks),
+                chunks=iterator(),
+            )
         finally:
             self.stream_closed += 1
 
@@ -265,7 +272,7 @@ class _DiscordClient:
         download_url: str,
         max_bytes: int,
         maximum_chunk_size: int,
-    ) -> AsyncGenerator[AsyncIterator[bytes], None]:
+    ) -> AsyncGenerator[ProviderByteStreamResponse, None]:
         self.download_urls.append(download_url)
         self.stream_limits.append((max_bytes, maximum_chunk_size))
         if self.download_error is not None:
@@ -280,7 +287,10 @@ class _DiscordClient:
                 raise self.stream_error
 
         try:
-            yield iterator()
+            yield ProviderByteStreamResponse(
+                content_length=sum(len(chunk) for chunk in self.chunks),
+                chunks=iterator(),
+            )
         finally:
             self.stream_closed += 1
 
@@ -581,6 +591,7 @@ async def _download(
     agent_id: str,
     operation_id: str = "run-1",
     file: str,
+    expected_size_bytes: int = 7,
     path: str,
     overwrite: bool,
     file_storage: FileStorage,
@@ -592,6 +603,7 @@ async def _download(
         agent_id=agent_id,
         operation_id=operation_id,
         file=file,
+        expected_size_bytes=expected_size_bytes,
         path=path,
         overwrite=overwrite,
         file_storage=file_storage,
@@ -998,6 +1010,42 @@ async def test_terminal_runtime_failure_is_not_reported_as_success() -> None:
             overwrite=False,
             file_storage=cast(FileStorage, _FileStorage()),
         )
+
+
+@pytest.mark.asyncio
+async def test_runtime_grpc_transport_failure_is_controlled() -> None:
+    """Do not expose coordinator transport details through file download."""
+    metadata = grpc.aio.Metadata()
+    service = _service(
+        repository=_Repository(_target()),
+        slack_client=_SlackClient(),
+    )
+
+    with pytest.raises(
+        ExternalChannelFileTransferError,
+        match="Failed to write the Runtime file: /workspace/agent/report.csv",
+    ) as raised:
+        await _download(
+            service,
+            transfer=_TransferService(
+                grpc.aio.AioRpcError(
+                    grpc.StatusCode.UNAVAILABLE,
+                    metadata,
+                    metadata,
+                    "coordinator endpoint unavailable",
+                    None,
+                )
+            ),
+            session_id="session-1",
+            agent_id="agent-1",
+            file=_locator(),
+            path="/workspace/agent/report.csv",
+            overwrite=False,
+            file_storage=cast(FileStorage, _FileStorage()),
+        )
+
+    assert "AioRpcError" not in str(raised.value)
+    assert "coordinator endpoint unavailable" not in str(raised.value)
 
 
 @pytest.mark.asyncio

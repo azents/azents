@@ -38,6 +38,7 @@ from azents.services.external_channel.slack_events import (
     SlackProviderFileTooLarge,
     SlackProviderPermissionDenied,
     SlackProviderRateLimited,
+    SlackProviderRequestRejected,
     SlackProviderTemporaryError,
     normalize_projected_slack_event,
     normalize_slack_event,
@@ -882,7 +883,7 @@ async def test_private_file_stream_authenticates_and_enforces_actual_limit() -> 
             max_bytes=8,
             maximum_chunk_size=4,
         ) as stream:
-            body = b"".join([chunk async for chunk in stream])
+            body = b"".join([chunk async for chunk in stream.chunks])
         with pytest.raises(SlackProviderFileTooLarge):
             async with client.open_private_file_stream(
                 bot_token="xoxb-secret",
@@ -890,7 +891,7 @@ async def test_private_file_stream_authenticates_and_enforces_actual_limit() -> 
                 max_bytes=7,
                 maximum_chunk_size=4,
             ) as stream:
-                async for _ in stream:
+                async for _ in stream.chunks:
                     pass
 
     assert body == b"12345678"
@@ -906,6 +907,30 @@ async def test_private_file_stream_rejects_partial_response_status() -> None:
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         with pytest.raises(SlackProviderTemporaryError, match="incomplete"):
+            async with _client(http).open_private_file_stream(
+                bot_token="xoxb-secret",
+                private_url="https://files.slack.test/private/F123",
+                max_bytes=100,
+                maximum_chunk_size=4,
+            ):
+                pass
+
+
+@pytest.mark.parametrize("content_length", ("", "invalid", "-1"))
+async def test_private_file_stream_requires_valid_content_length(
+    content_length: str,
+) -> None:
+    """A complete Slack response must contain one non-negative decimal size."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Length": content_length},
+            content=b"content",
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        with pytest.raises(SlackProviderRequestRejected):
             async with _client(http).open_private_file_stream(
                 bot_token="xoxb-secret",
                 private_url="https://files.slack.test/private/F123",

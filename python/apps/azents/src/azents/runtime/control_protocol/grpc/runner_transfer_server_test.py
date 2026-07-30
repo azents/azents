@@ -31,6 +31,7 @@ from azents.core.runtime_runner_credential import (
 )
 from azents.runtime.control_protocol.grpc.runner_transfer_server import (
     RuntimeRunnerTransferGrpcServicer,
+    _RoundRobinChunkScheduler,
     _StreamLeaseKeeper,
     _StreamTermination,
 )
@@ -84,6 +85,25 @@ class _Context:
 
     def cancelled(self) -> bool:
         return self.is_cancelled
+
+
+@pytest.mark.asyncio
+async def test_round_robin_chunk_scheduler_rotates_waiting_files() -> None:
+    """A file returns behind another waiting file before its next chunk turn."""
+    scheduler = _RoundRobinChunkScheduler(maximum_in_flight=1)
+
+    await scheduler.acquire("first")
+    second_turn = asyncio.create_task(scheduler.acquire("second"))
+    await asyncio.sleep(0)
+
+    await scheduler.release("first", requeue=True)
+    await second_turn
+    await scheduler.release("second", requeue=False)
+
+    await scheduler.acquire("first")
+    await scheduler.release("first", requeue=False)
+    await scheduler.unregister("first")
+    await scheduler.unregister("second")
 
 
 class _Authenticator:

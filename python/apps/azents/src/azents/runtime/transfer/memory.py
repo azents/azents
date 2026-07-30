@@ -1590,27 +1590,9 @@ class InMemoryRuntimeTransferStateStore:
             )
 
     def _has_capacity(self, admission: RuntimeTransferAdmission) -> bool:
-        active = [
-            record
-            for key, record in self.records.items()
-            if key not in self.released
-            and record.phase is not RuntimeTransferPhase.TERMINAL
-        ]
-        runtime = [
-            record
-            for record in active
-            if record.admission.runtime_id == admission.runtime_id
-        ]
-        return (
-            len(active) < self.config.deployment_attempts
-            and len(runtime) < self.config.per_runtime_attempts
-            and sum(item.admission.expected_size for item in active)
-            + admission.expected_size
-            <= self.config.deployment_bytes
-            and sum(item.admission.expected_size for item in runtime)
-            + admission.expected_size
-            <= self.config.per_runtime_bytes
-        )
+        """Keep admission independent from concurrent file scheduling capacity."""
+        del admission
+        return True
 
     async def _list_records(
         self,

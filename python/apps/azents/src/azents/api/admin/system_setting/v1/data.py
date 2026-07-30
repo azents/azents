@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from azents.core.external_channel_file import (
     MAX_EXTERNAL_CHANNEL_CONFIGURED_ACTION_BYTES,
     MAX_EXTERNAL_CHANNEL_CONFIGURED_FILE_BYTES,
+    MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES,
 )
 from azents.core.external_channel_file_system_setting import (
     ExternalChannelFilesConfig,
@@ -59,7 +60,7 @@ class ExternalChannelFilesPatchRequest(BaseModel):
     inbound_max_file_bytes: int | None = Field(
         default=None,
         ge=1,
-        le=MAX_EXTERNAL_CHANNEL_CONFIGURED_FILE_BYTES,
+        le=MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES,
     )
     outbound_max_file_bytes: int | None = Field(
         default=None,

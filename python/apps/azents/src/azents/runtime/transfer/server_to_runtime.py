@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Protocol
+from typing import Protocol, TypeVar
 
+import grpc
 from azcommon.uuid import uuid7
 from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorAdmitTransferRequest,
@@ -43,6 +44,26 @@ class ServerToRuntimeTransferError(RuntimeError):
     ) -> None:
         super().__init__(message)
         self.failure = failure
+
+
+_CoordinatorResult = TypeVar("_CoordinatorResult")
+
+
+async def _await_coordinator(
+    operation: Awaitable[_CoordinatorResult],
+) -> _CoordinatorResult:
+    """Translate coordinator transport failures at the transfer boundary."""
+    try:
+        return await operation
+    except grpc.aio.AioRpcError as error:
+        raise ServerToRuntimeTransferError(
+            "Runtime transfer coordinator request failed",
+            failure=(
+                CoordinatorTransferFailure.ADMISSION
+                if error.code() is grpc.StatusCode.RESOURCE_EXHAUSTED
+                else None
+            ),
+        ) from error
 
 
 @dataclass(frozen=True)
@@ -119,12 +140,14 @@ class ServerToRuntimePreparation:
         multipart_cleanup_handle: CoordinatorOpaqueObjectHandle,
     ) -> None:
         """Durably retain abort authority before provider body streaming."""
-        status = await self.coordinator.register_preparation_cleanup(
-            CoordinatorRegisterPreparationCleanupRequest(
-                identity=self.identity,
-                expected_revision=self.revision,
-                preparation_object_handle=preparation_object_handle,
-                multipart_cleanup_handle=multipart_cleanup_handle,
+        status = await _await_coordinator(
+            self.coordinator.register_preparation_cleanup(
+                CoordinatorRegisterPreparationCleanupRequest(
+                    identity=self.identity,
+                    expected_revision=self.revision,
+                    preparation_object_handle=preparation_object_handle,
+                    multipart_cleanup_handle=multipart_cleanup_handle,
+                )
             )
         )
         self.revision = status.revision
@@ -135,21 +158,25 @@ class ServerToRuntimePreparation:
         preparation_object_handle: CoordinatorOpaqueObjectHandle,
     ) -> None:
         """Retain completed preparation-object deletion authority."""
-        status = await self.coordinator.promote_preparation_cleanup(
-            CoordinatorPromotePreparationCleanupRequest(
-                identity=self.identity,
-                expected_revision=self.revision,
-                preparation_object_handle=preparation_object_handle,
+        status = await _await_coordinator(
+            self.coordinator.promote_preparation_cleanup(
+                CoordinatorPromotePreparationCleanupRequest(
+                    identity=self.identity,
+                    expected_revision=self.revision,
+                    preparation_object_handle=preparation_object_handle,
+                )
             )
         )
         self.revision = status.revision
 
     async def clear_cleanup(self) -> None:
         """Clear preparation cleanup evidence after exact owned cleanup."""
-        status = await self.coordinator.clear_preparation_cleanup(
-            CoordinatorClearPreparationCleanupRequest(
-                identity=self.identity,
-                expected_revision=self.revision,
+        status = await _await_coordinator(
+            self.coordinator.clear_preparation_cleanup(
+                CoordinatorClearPreparationCleanupRequest(
+                    identity=self.identity,
+                    expected_revision=self.revision,
+                )
             )
         )
         self.revision = status.revision
@@ -272,21 +299,23 @@ class ServerToRuntimeTransferService:
         expected_revision: int | None = None
         preparation: ServerToRuntimePreparation | None = None
         try:
-            admitted = await self.coordinator.admit_transfer(
-                CoordinatorAdmitTransferRequest(
-                    identity=identity,
-                    lease_id=uuid7().hex,
-                    runtime_path=request.destination,
-                    overwrite=request.overwrite,
-                    expected_manifest=CoordinatorExpectedManifest(
-                        size=metadata.size,
-                        sha256=metadata.sha256,
+            admitted = await _await_coordinator(
+                self.coordinator.admit_transfer(
+                    CoordinatorAdmitTransferRequest(
+                        identity=identity,
+                        lease_id=uuid7().hex,
+                        runtime_path=request.destination,
+                        overwrite=request.overwrite,
+                        expected_manifest=CoordinatorExpectedManifest(
+                            size=metadata.size,
+                            sha256=metadata.sha256,
+                        ),
+                        product_maximum_size=request.product_maximum_size,
+                        provider_maximum_size=request.provider_maximum_size,
+                        deadline_at=request.deadline_at,
+                        source_expires_at=metadata.expires_at,
+                        resource_class=metadata.source_kind,
                     ),
-                    product_maximum_size=request.product_maximum_size,
-                    provider_maximum_size=request.provider_maximum_size,
-                    deadline_at=request.deadline_at,
-                    source_expires_at=metadata.expires_at,
-                    resource_class=metadata.source_kind,
                 )
             )
             expected_revision = admitted.status.revision
@@ -307,24 +336,28 @@ class ServerToRuntimeTransferService:
                 raise ServerToRuntimeTransferError(
                     "Transfer source authority changed before dispatch"
                 )
-            status = await self.coordinator.mark_transfer_ready(
-                CoordinatorMarkTransferReadyRequest(
-                    identity=identity,
-                    expected_revision=expected_revision,
-                    object_handle=prepared.object_handle,
-                    object_manifest=CoordinatorObjectManifest(
-                        size=prepared.size,
-                        sha256=prepared.sha256,
+            status = await _await_coordinator(
+                self.coordinator.mark_transfer_ready(
+                    CoordinatorMarkTransferReadyRequest(
+                        identity=identity,
+                        expected_revision=expected_revision,
+                        object_handle=prepared.object_handle,
+                        object_manifest=CoordinatorObjectManifest(
+                            size=prepared.size,
+                            sha256=prepared.sha256,
+                        ),
                     ),
                 )
             )
             expected_revision = status.revision
             preparation.revision = expected_revision
-            status = await self.coordinator.dispatch_transfer(
-                CoordinatorDispatchTransferRequest(
-                    identity=identity,
-                    expected_revision=expected_revision,
-                    dispatch_id=uuid7().hex,
+            status = await _await_coordinator(
+                self.coordinator.dispatch_transfer(
+                    CoordinatorDispatchTransferRequest(
+                        identity=identity,
+                        expected_revision=expected_revision,
+                        dispatch_id=uuid7().hex,
+                    )
                 )
             )
             expected_revision = status.revision
@@ -376,8 +409,10 @@ class ServerToRuntimeTransferService:
                     "Runtime transfer did not complete before its deadline",
                     failure=CoordinatorTransferFailure.EXPIRED,
                 )
-            status = await self.coordinator.get_transfer_status(
-                CoordinatorGetTransferStatusRequest(identity=identity)
+            status = await _await_coordinator(
+                self.coordinator.get_transfer_status(
+                    CoordinatorGetTransferStatusRequest(identity=identity)
+                )
             )
             preparation.revision = status.revision
             if status.phase is CoordinatorTransferPhase.TERMINAL:
@@ -407,16 +442,20 @@ class ServerToRuntimeTransferService:
         while not attempted or self.clock() < deadline_at:
             attempted = True
             try:
-                status = await self.coordinator.cancel_transfer(
-                    CoordinatorCancelTransferRequest(
-                        identity=identity,
-                        expected_revision=revision,
-                        reason=CoordinatorCancellationReason.CALLER,
+                status = await _await_coordinator(
+                    self.coordinator.cancel_transfer(
+                        CoordinatorCancelTransferRequest(
+                            identity=identity,
+                            expected_revision=revision,
+                            reason=CoordinatorCancellationReason.CALLER,
+                        )
                     )
                 )
             except Exception:
-                status = await self.coordinator.get_transfer_status(
-                    CoordinatorGetTransferStatusRequest(identity=identity)
+                status = await _await_coordinator(
+                    self.coordinator.get_transfer_status(
+                        CoordinatorGetTransferStatusRequest(identity=identity)
+                    )
                 )
             if (
                 status.phase is CoordinatorTransferPhase.TERMINAL

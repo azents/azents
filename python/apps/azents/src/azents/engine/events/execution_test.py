@@ -3398,7 +3398,7 @@ async def test_tool_failure_appends_failed_tool_result() -> None:
     assert payload.status == "failed"
     output = payload.output[0]
     assert isinstance(output, OutputTextPart)
-    assert "Tool execution failed" in output.text
+    assert output.text == "Internal error"
 
 
 async def test_run_input_preparation_does_not_run_lifecycle_cleanup() -> None:

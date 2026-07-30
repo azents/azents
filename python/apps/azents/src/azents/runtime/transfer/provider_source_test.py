@@ -38,6 +38,7 @@ from azents_runtime_control.transfer import CoordinatorTransferIdentity
 
 from azents.runtime.transfer.provider_source import (
     DeferredProviderServerToRuntimeSource,
+    ProviderByteStreamResponse,
 )
 from azents.runtime.transfer.server_to_runtime import (
     ServerToRuntimePreparation,
@@ -188,8 +189,18 @@ class Store:
 
 
 class Stream:
-    def __init__(self, chunks: tuple[bytes, ...]) -> None:
+    def __init__(
+        self,
+        chunks: tuple[bytes, ...],
+        *,
+        content_length: int | None = None,
+    ) -> None:
         self.chunks = chunks
+        self.content_length = (
+            sum(len(chunk) for chunk in chunks)
+            if content_length is None
+            else content_length
+        )
         self.opened = 0
         self.closed = 0
 
@@ -198,7 +209,7 @@ class Stream:
         self,
         *,
         maximum_chunk_size: int,
-    ) -> AsyncIterator[AsyncIterator[bytes]]:
+    ) -> AsyncIterator[ProviderByteStreamResponse]:
         self.opened += 1
 
         async def iterator() -> AsyncIterator[bytes]:
@@ -207,7 +218,10 @@ class Stream:
                 yield chunk
 
         try:
-            yield iterator()
+            yield ProviderByteStreamResponse(
+                content_length=self.content_length,
+                chunks=iterator(),
+            )
         finally:
             self.closed += 1
 
@@ -222,7 +236,7 @@ class BlockingStream(Stream):
         self,
         *,
         maximum_chunk_size: int,
-    ) -> AsyncIterator[AsyncIterator[bytes]]:
+    ) -> AsyncIterator[ProviderByteStreamResponse]:
         self.opened += 1
 
         async def iterator() -> AsyncIterator[bytes]:
@@ -231,7 +245,7 @@ class BlockingStream(Stream):
             yield b"unreachable"
 
         try:
-            yield iterator()
+            yield ProviderByteStreamResponse(content_length=4, chunks=iterator())
         finally:
             self.closed += 1
 
@@ -331,7 +345,12 @@ async def test_provider_stages_bounded_stream_then_promotes_to_canonical_object(
 
 @pytest.mark.asyncio
 async def test_provider_size_mismatch_aborts_and_clears_registered_cleanup() -> None:
-    source, store, stream = _source(body=b"four", declared_size=3, maximum_size=4)
+    source, store, stream = _source(
+        body=b"four",
+        stream=Stream((b"four",), content_length=3),
+        declared_size=3,
+        maximum_size=4,
+    )
     cleanup = CleanupCoordinator()
 
     with pytest.raises(ValueError, match="size"):
@@ -339,6 +358,25 @@ async def test_provider_size_mismatch_aborts_and_clears_registered_cleanup() -> 
 
     assert stream.opened == stream.closed == 1
     assert store.aborted
+    assert not store.copy_calls
+    assert [name for name, _ in cleanup.calls] == ["register", "clear"]
+
+
+@pytest.mark.asyncio
+async def test_provider_content_length_mismatch_aborts_before_body_staging() -> None:
+    """Reject response-header size evidence before accepting provider bytes."""
+    source, store, stream = _source(
+        body=b"four",
+        stream=Stream((b"four",), content_length=3),
+    )
+    cleanup = CleanupCoordinator()
+
+    with pytest.raises(ValueError, match="content length"):
+        await source.prepare(preparation=_preparation(cleanup))
+
+    assert stream.opened == stream.closed == 1
+    assert store.aborted
+    assert store.parts == []
     assert not store.copy_calls
     assert [name for name, _ in cleanup.calls] == ["register", "clear"]
 

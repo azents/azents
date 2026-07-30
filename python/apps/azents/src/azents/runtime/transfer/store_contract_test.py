@@ -823,7 +823,7 @@ async def test_admission_lease_expiry_reclaims_capacity_and_fences_old_owner(
 async def test_duplicate_capacity_expiry_retry_pagination_and_purge(
     store_harness: _StoreHarness,
 ) -> None:
-    """Admission capacity, expiry, retry, stale page, and purge are observable."""
+    """Admission, expiry, retry, stale page, and purge are observable."""
     first = await store_harness.store.admit(
         replace(
             _admission(),
@@ -836,13 +836,11 @@ async def test_duplicate_capacity_expiry_retry_pagination_and_purge(
     blocked = replace(_admission(), transfer_id="other")
     second = await store_harness.store.admit(blocked, lease_id="other")
     assert second is not None
-    assert (
-        await store_harness.store.admit(
-            replace(_admission(), transfer_id="third"),
-            lease_id="third",
-        )
-        is None
+    third = await store_harness.store.admit(
+        replace(_admission(), transfer_id="third"),
+        lease_id="third",
     )
+    assert third is not None
     store_harness.clock.now += timedelta(minutes=2)
     stale = await store_harness.store.list_stale(cursor=None, limit=1)
     assert len(stale.records) == 1

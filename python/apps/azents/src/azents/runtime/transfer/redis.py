@@ -2807,16 +2807,14 @@ class RedisRuntimeTransferStateStore:
         self,
         now: datetime,
     ) -> dict[str, _RedisTransferRecordEnvelope]:
-        """Load the bounded active set and apply due lease reclamation."""
+        """Load all active attempts and apply due lease reclamation."""
         members = _decode_redis_texts(
             await self.redis.zrange(
                 self.keys.active_index(),
                 0,
-                self.config.deployment_attempts,
+                -1,
             )
         )
-        if len(members) > self.config.deployment_attempts:
-            raise RuntimeError("Runtime transfer active index exceeds configured bound")
         if not members:
             return {}
         raw_records = await self.redis.mget(members)
@@ -3016,27 +3014,9 @@ class RedisRuntimeTransferStateStore:
         entries: dict[str, _RedisTransferRecordEnvelope],
         admission: RuntimeTransferAdmission,
     ) -> bool:
-        """Return whether one admission fits bounded active counters."""
-        active = [
-            envelope.record
-            for envelope in entries.values()
-            if _capacity_active(envelope)
-        ]
-        runtime = [
-            record
-            for record in active
-            if record.admission.runtime_id == admission.runtime_id
-        ]
-        return (
-            len(active) < self.config.deployment_attempts
-            and len(runtime) < self.config.per_runtime_attempts
-            and sum(record.admission.expected_size for record in active)
-            + admission.expected_size
-            <= self.config.deployment_bytes
-            and sum(record.admission.expected_size for record in runtime)
-            + admission.expected_size
-            <= self.config.per_runtime_bytes
-        )
+        """Keep admission independent from concurrent file scheduling capacity."""
+        del entries, admission
+        return True
 
     async def _list_index_records(
         self,
@@ -3104,7 +3084,7 @@ class RedisRuntimeTransferStateStore:
                     await self.redis.zrange(
                         self.keys.stream_lease_index(),
                         0,
-                        self.config.deployment_attempts,
+                        -1,
                     )
                 )
             )
@@ -3139,14 +3119,12 @@ class RedisRuntimeTransferStateStore:
         terminal_bucket_removals: dict[str, set[str]] | None = None,
         terminal_bucket_deletes: set[str] | None = None,
     ) -> None:
-        """Persist bounded records, indexes, and counters under lock ownership."""
+        """Persist active records, indexes, and counters under lock ownership."""
         active = {
             key: envelope
             for key, envelope in entries.items()
             if _capacity_active(envelope)
         }
-        if len(active) > self.config.deployment_attempts:
-            raise RuntimeError("Runtime transfer active state exceeds configured bound")
         runtime_ids = {
             envelope.record.admission.runtime_id for envelope in entries.values()
         }

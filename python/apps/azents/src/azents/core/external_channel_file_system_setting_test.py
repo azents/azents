@@ -9,6 +9,7 @@ from azents.core.external_channel_file import (
     DEFAULT_EXTERNAL_CHANNEL_OUTBOUND_MAX_FILE_BYTES,
     MAX_EXTERNAL_CHANNEL_CONFIGURED_ACTION_BYTES,
     MAX_EXTERNAL_CHANNEL_CONFIGURED_FILE_BYTES,
+    MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES,
 )
 from azents.core.external_channel_file_system_setting import (
     ExternalChannelFilesConfig,
@@ -22,7 +23,7 @@ from azents.core.system_setting import (
 
 
 def test_external_channel_file_limits_use_provider_neutral_defaults() -> None:
-    """The compiled policy defaults to 25 MiB files and 100 MiB actions."""
+    """The compiled policy permits 500 MiB inbound files."""
     config = ExternalChannelFilesConfig()
 
     assert (
@@ -43,7 +44,7 @@ def test_external_channel_file_limits_use_provider_neutral_defaults() -> None:
     [
         ("inbound_max_file_bytes", True),
         ("inbound_max_file_bytes", 0),
-        ("inbound_max_file_bytes", MAX_EXTERNAL_CHANNEL_CONFIGURED_FILE_BYTES + 1),
+        ("inbound_max_file_bytes", MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES + 1),
         ("outbound_max_file_bytes", True),
         ("outbound_max_file_bytes", 0),
         ("outbound_max_file_bytes", MAX_EXTERNAL_CHANNEL_CONFIGURED_FILE_BYTES + 1),

@@ -4104,7 +4104,7 @@
             "anyOf": [
               {
                 "type": "integer",
-                "maximum": 104857600.0,
+                "maximum": 524288000.0,
                 "minimum": 1.0
               },
               {

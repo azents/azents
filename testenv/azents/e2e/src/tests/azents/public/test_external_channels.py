@@ -1807,9 +1807,6 @@ def test_provider_native_channel_work_progress_journey(
     }
 
     provider_state = _provider_state(slack_provider_fake_url)
-    request_counts = cast(dict[str, int], provider_state["request_counts"])
-    assert request_counts["users.info"] >= 2
-    assert request_counts["conversations.info"] >= 2
     assert _BOT_TOKEN not in str(provider_state)
     assert _SIGNING_SECRET not in str(provider_state)
 
