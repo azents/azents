@@ -19,8 +19,8 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
-    ExternalChannelEventCreate,
     ExternalChannelResource,
+    ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.connection import (
@@ -112,7 +112,7 @@ class ExternalChannelTransportIngestionService:
     async def ingest_slack_event(
         self,
         *,
-        event: ExternalChannelEventCreate,
+        event: ExternalChannelTrigger,
         authority: ExternalChannelIngressAuthority,
         deadline: ExternalChannelOperationDeadline,
     ) -> SlackTransportIngestionResult:
@@ -170,7 +170,7 @@ class ExternalChannelTransportIngestionService:
     async def ingest_discord_event(
         self,
         *,
-        event: ExternalChannelEventCreate,
+        event: ExternalChannelTrigger,
         authority: ExternalChannelIngressAuthority,
         deadline: ExternalChannelOperationDeadline,
     ) -> ExternalChannelIngestionOutcome | None:
@@ -366,7 +366,7 @@ def external_channel_transport_deadline(
     )
 
 
-def _required_tenant(event: ExternalChannelEventCreate) -> str:
+def _required_tenant(event: ExternalChannelTrigger) -> str:
     tenant_id = event.provider_tenant_id
     if tenant_id is None:
         raise SlackEventNormalizationError("Slack tenant identity is missing.")

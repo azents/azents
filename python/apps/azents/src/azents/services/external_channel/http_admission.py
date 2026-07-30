@@ -296,7 +296,6 @@ class SlackHTTPAdmissionService:
                         transport=ExternalChannelTransport.HTTP,
                     ),
                     principal=callback.principal_create(),
-                    shortcut_source_event=shortcut_source_event,
                 )
                 if shortcut_source_event is not None:
                     await self.shortcut_source_service.ensure(

@@ -23,6 +23,9 @@ from azents.broker.types import (
     WorkerSignal,
 )
 from azents.engine.model_stream import ModelStreamWatchdog, get_model_stream_watchdog
+from azents.services.external_channel.provider_control import (
+    ExternalChannelProviderControlService,
+)
 from azents.services.external_channel.socket_manager import (
     SlackSocketManagerService,
 )
@@ -85,6 +88,10 @@ class AgentWorker:
         SlackSocketManagerService,
         Depends(SlackSocketManagerService),
     ]
+    provider_control: Annotated[
+        ExternalChannelProviderControlService,
+        Depends(ExternalChannelProviderControlService),
+    ]
     shutdown_event: asyncio.Event = dataclasses.field(
         init=False,
         default_factory=asyncio.Event,
@@ -105,6 +112,7 @@ class AgentWorker:
         runners: dict[str, _ActiveSessionRunner] = {}
         backoff = _INITIAL_BACKOFF
         recovery_task = self.stuck_session_recovery.start(shutdown_event)
+        provider_control_task = self.provider_control.start(shutdown_event)
         socket_manager_task = asyncio.create_task(
             self.socket_manager.run(shutdown_event)
         )
@@ -152,6 +160,7 @@ class AgentWorker:
                 extra={"active_sessions": len(runners)},
             )
             recovery_task.cancel()
+            provider_control_task.cancel()
             socket_manager_task.cancel()
             try:
                 await recovery_task
@@ -159,6 +168,12 @@ class AgentWorker:
                 pass
             except Exception:
                 logger.exception("Stuck recovery loop failed on shutdown")
+            try:
+                await provider_control_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.exception("Provider-control loop failed on shutdown")
             try:
                 await socket_manager_task
             except asyncio.CancelledError:

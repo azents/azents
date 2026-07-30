@@ -29,22 +29,21 @@ from azents.repos.external_channel.data import (
     ExternalChannelResource,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.services.external_channel.channel_action import get_slack_delivery_client
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
 )
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import SlackConnectionCredentials
-from azents.services.external_channel.event_processor import (
-    ExternalChannelEventProcessorService,
-    get_slack_conversation_client,
-)
 from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionOutcomeKind,
 )
 from azents.services.external_channel.ingestion_replay import (
     ExternalChannelIngestionReplayService,
-    admission_uses_typed_replay,
     external_channel_replay_deadline,
+)
+from azents.services.external_channel.provider_control import (
+    ExternalChannelProviderControlService,
 )
 from azents.services.external_channel.selector import (
     ExternalChannelSelectorCatalog,
@@ -115,11 +114,11 @@ class ExternalChannelInteractionProcessor:
     ]
     slack_client: Annotated[
         SlackConversationClient,
-        Depends(get_slack_conversation_client),
+        Depends(get_slack_delivery_client),
     ]
-    event_processor: Annotated[
-        ExternalChannelEventProcessorService,
-        Depends(ExternalChannelEventProcessorService),
+    provider_control: Annotated[
+        ExternalChannelProviderControlService,
+        Depends(ExternalChannelProviderControlService),
     ]
     ingestion_replay_service: Annotated[
         ExternalChannelIngestionReplayService,
@@ -286,47 +285,34 @@ class ExternalChannelInteractionProcessor:
             selected_admission = selection.admission
         if selected_admission.id != metadata.admission_id:
             raise ValueError("Slack selector admission is unavailable.")
-        if admission_uses_typed_replay(selected_admission):
-            outcome = await self.ingestion_replay_service.replay_selected_admission(
-                admission_id=selected_admission.id,
-                principal_id=interaction.principal_id,
-                deadline=external_channel_replay_deadline(now=now),
-            )
-            match outcome.kind:
-                case (
-                    ExternalChannelIngestionOutcomeKind.ACCEPTED
-                    | ExternalChannelIngestionOutcomeKind.DUPLICATE
-                ):
-                    return
-                case ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS:
-                    if outcome.control_delivery_attempt_id is not None:
-                        assert outcome.connection_id is not None
-                        await self.attempt_control_delivery(
-                            connection_id=outcome.connection_id,
-                            delivery_attempt_id=outcome.control_delivery_attempt_id,
-                        )
-                    return
-                case (
-                    ExternalChannelIngestionOutcomeKind.AWAITING_SELECTION
-                    | ExternalChannelIngestionOutcomeKind.IGNORED
-                    | ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE
-                    | ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION
-                ):
-                    raise RuntimeError(
-                        "Slack selector ingestion could not be completed."
-                    )
-                case _ as unreachable:
-                    assert_never(unreachable)
-        continuation = await self.event_processor.continue_selected_admission(
+        outcome = await self.ingestion_replay_service.replay_selected_admission(
             admission_id=selected_admission.id,
             principal_id=interaction.principal_id,
-            now=now,
+            deadline=external_channel_replay_deadline(now=now),
         )
-        if continuation.control_delivery_attempt_id is not None:
-            await self.event_processor.attempt_selected_admission_control_delivery(
-                connection_id=interaction.connection_id,
-                delivery_attempt_id=continuation.control_delivery_attempt_id,
-            )
+        match outcome.kind:
+            case (
+                ExternalChannelIngestionOutcomeKind.ACCEPTED
+                | ExternalChannelIngestionOutcomeKind.DUPLICATE
+            ):
+                return
+            case ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS:
+                if outcome.control_delivery_attempt_id is not None:
+                    assert outcome.connection_id is not None
+                    await self.attempt_control_delivery(
+                        connection_id=outcome.connection_id,
+                        delivery_attempt_id=outcome.control_delivery_attempt_id,
+                    )
+                return
+            case (
+                ExternalChannelIngestionOutcomeKind.AWAITING_SELECTION
+                | ExternalChannelIngestionOutcomeKind.IGNORED
+                | ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE
+                | ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION
+            ):
+                raise RuntimeError("Slack selector ingestion could not be completed.")
+            case _ as unreachable:
+                assert_never(unreachable)
 
     async def attempt_control_delivery(
         self,
@@ -335,10 +321,8 @@ class ExternalChannelInteractionProcessor:
         delivery_attempt_id: str,
     ) -> None:
         """Attempt one committed access control through the provider adapter."""
-        await self.event_processor.attempt_selected_admission_control_delivery(
-            connection_id=connection_id,
-            delivery_attempt_id=delivery_attempt_id,
-        )
+        del connection_id
+        await self.provider_control.attempt_delivery(delivery_attempt_id)
 
     async def _load_scope(
         self,

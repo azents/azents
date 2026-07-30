@@ -1126,8 +1126,6 @@
         "cancel": "キャンセル",
         "connectedAt": "接続日時",
         "latestActivity": "最新アクティビティ",
-        "retainedContext": "Pending context の切り詰め",
-        "truncationSummary": "{messages}件 · {bytes}バイトを削除",
         "disconnectReason": "切断理由",
         "channelWork": "Channel Work",
         "noWork": "この binding に関連する Channel Work はありません。",
@@ -1158,11 +1156,6 @@
         "bindingStatus": {
           "active": "有効",
           "disconnected": "切断済み"
-        },
-        "activationStatus": {
-          "waiting_hydration": "履歴の取得待ち",
-          "wake_pending": "呼び出し開始中",
-          "active": "呼び出し有効"
         },
         "workStatus": {
           "active": "Work 実行中",

@@ -16,9 +16,9 @@ from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.rdb.deps import get_session_manager
 from azents.repos.external_channel.data import (
-    ExternalChannelEventCreate,
     ExternalChannelIngressLease,
     ExternalChannelIngressLeaseClaim,
+    ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.connection import (
@@ -303,7 +303,7 @@ async def test_admits_typed_event_under_current_lease() -> None:
     assert "sequence" not in call
     assert "encrypted_checkpoint" not in call
     create = call["event"]
-    assert isinstance(create, ExternalChannelEventCreate)
+    assert isinstance(create, ExternalChannelTrigger)
     assert create.connection_id == "connection-1"
     assert create.provider_event_id == "discord:discord_message_create:300:200:100"
     sessions.session.commit.assert_not_awaited()

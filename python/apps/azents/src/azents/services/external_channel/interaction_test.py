@@ -31,10 +31,6 @@ from azents.services.external_channel.credentials import (
     ExternalChannelCredentialsCodec,
 )
 from azents.services.external_channel.data import SlackConnectionCredentials
-from azents.services.external_channel.event_processor import (
-    ExternalChannelEventProcessorService,
-    ExternalChannelSelectedAdmissionContinuation,
-)
 from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionOutcome,
     ExternalChannelIngestionOutcomeKind,
@@ -49,6 +45,9 @@ from azents.services.external_channel.interaction import (
     SlackInteractionTriggerExpired,
     build_selector_metadata,
     verify_selector_metadata,
+)
+from azents.services.external_channel.provider_control import (
+    ExternalChannelProviderControlService,
 )
 from azents.services.external_channel.selector import (
     ExternalChannelSelectorCandidate,
@@ -237,26 +236,12 @@ class _Slack:
         return self.result
 
 
-class _Continuation:
+class _ProviderControl:
     def __init__(self) -> None:
-        self.calls: list[dict[str, object]] = []
-        self.delivery_calls: list[dict[str, object]] = []
+        self.calls: list[str] = []
 
-    async def continue_selected_admission(
-        self,
-        **kwargs: object,
-    ) -> ExternalChannelSelectedAdmissionContinuation:
-        self.calls.append(kwargs)
-        return ExternalChannelSelectedAdmissionContinuation(
-            status="awaiting_access",
-            control_delivery_attempt_id=None,
-        )
-
-    async def attempt_selected_admission_control_delivery(
-        self,
-        **kwargs: object,
-    ) -> None:
-        self.delivery_calls.append(kwargs)
+    async def attempt_delivery(self, delivery_attempt_id: str) -> None:
+        self.calls.append(delivery_attempt_id)
 
 
 class _Replay:
@@ -285,8 +270,8 @@ def _processor(
     repository: _Repository,
     selector: _Selector,
     slack: _Slack,
-    continuation: _Continuation | None = None,
     replay: _Replay | None = None,
+    provider_control: _ProviderControl | None = None,
 ) -> ExternalChannelInteractionProcessor:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
@@ -298,9 +283,9 @@ def _processor(
         selector_service=cast(ExternalChannelSelectorService, selector),
         credentials_codec=cast(ExternalChannelCredentialsCodec, _Credentials()),
         slack_client=cast(SlackConversationClient, slack),
-        event_processor=cast(
-            ExternalChannelEventProcessorService,
-            continuation or _Continuation(),
+        provider_control=cast(
+            ExternalChannelProviderControlService,
+            provider_control or _ProviderControl(),
         ),
         ingestion_replay_service=cast(
             ExternalChannelIngestionReplayService,
@@ -622,8 +607,8 @@ async def test_submission_revalidates_signed_modal_scope_before_selection() -> N
         offset=0,
     )
 
-    continuation = _Continuation()
-    await _processor(repository, selector, slack, continuation).process(
+    replay = _Replay()
+    await _processor(repository, selector, slack, replay).process(
         ExternalChannelInteractionHandoff(
             interaction_id="interaction-2",
             selector_metadata=metadata,
@@ -637,14 +622,14 @@ async def test_submission_revalidates_signed_modal_scope_before_selection() -> N
     assert call["principal_id"] == "principal-1"
     assert call["route_id"] == "route-alpha"
     assert isinstance(call["now"], datetime.datetime)
-    assert len(continuation.calls) == 1
-    assert continuation.calls[0]["admission_id"] == "admission-1"
-    assert continuation.calls[0]["principal_id"] == "principal-1"
+    assert len(replay.calls) == 1
+    assert replay.calls[0]["admission_id"] == "admission-1"
+    assert replay.calls[0]["principal_id"] == "principal-1"
     assert slack.views == []
 
 
 @pytest.mark.asyncio
-async def test_typed_submission_replays_without_legacy_continuation() -> None:
+async def test_typed_submission_replays_and_delivers_committed_control() -> None:
     """A typed selector boundary uses shared ingestion and its control intent."""
     repository = _Repository()
     repository.interactions["interaction-2"] = (
@@ -687,7 +672,7 @@ async def test_typed_submission_replays_without_legacy_continuation() -> None:
         principal_id="principal-1",
         offset=0,
     )
-    continuation = _Continuation()
+    provider_control = _ProviderControl()
     replay = _Replay(
         ExternalChannelIngestionOutcome(
             kind=ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS,
@@ -702,8 +687,8 @@ async def test_typed_submission_replays_without_legacy_continuation() -> None:
         repository,
         selector,
         slack,
-        continuation,
         replay,
+        provider_control,
     ).process(
         ExternalChannelInteractionHandoff(
             interaction_id="interaction-2",
@@ -714,13 +699,7 @@ async def test_typed_submission_replays_without_legacy_continuation() -> None:
 
     assert len(replay.calls) == 1
     assert replay.calls[0]["admission_id"] == "admission-1"
-    assert continuation.calls == []
-    assert continuation.delivery_calls == [
-        {
-            "connection_id": "connection-1",
-            "delivery_attempt_id": "delivery-1",
-        }
-    ]
+    assert provider_control.calls == ["delivery-1"]
 
 
 @pytest.mark.asyncio

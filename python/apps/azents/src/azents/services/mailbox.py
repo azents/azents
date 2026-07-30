@@ -1336,8 +1336,8 @@ def build_external_channel_mailbox_payload(
             provider_created_at=item.provider_created_at,
             provider_updated_at=item.provider_updated_at,
             original_url=item.original_url,
-            truncated_context_message_count=item.truncation_message_count,
-            truncated_context_size=item.truncation_size,
+            truncated_context_message_count=0,
+            truncated_context_size=0,
             correction_of_revision_id=item.correction_of_revision_id,
         )
         embedded.append(

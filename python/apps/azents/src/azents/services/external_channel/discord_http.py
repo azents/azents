@@ -148,7 +148,6 @@ class DiscordHTTPAdmissionService:
         admission = await self.admission_service.admit_interaction(
             create=inputs.create,
             principal=inputs.principal,
-            shortcut_source_event=shortcut_source_event,
         )
         if envelope.selector_custom_id is not None:
             claim = await self.admission_service.begin_interaction_provider_mutation(

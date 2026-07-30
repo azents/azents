@@ -17145,16 +17145,6 @@
         "title": "ExternalChannelAppMode",
         "description": "Immutable product administration mode for an external connection."
       },
-      "ExternalChannelBindingActivationStatus": {
-        "type": "string",
-        "enum": [
-          "waiting_hydration",
-          "wake_pending",
-          "active"
-        ],
-        "title": "ExternalChannelBindingActivationStatus",
-        "description": "Initial invocation activation state for one active binding."
-      },
       "ExternalChannelBindingStatus": {
         "type": "string",
         "enum": [
@@ -17457,10 +17447,6 @@
             "type": "integer",
             "title": "Pending Access Request Count"
           },
-          "pending_context_count": {
-            "type": "integer",
-            "title": "Pending Context Count"
-          },
           "affected_defaults": {
             "items": {
               "$ref": "#/components/schemas/ExternalChannelMultiImpactDefault"
@@ -17486,7 +17472,6 @@
           "bound_resource_count",
           "open_admission_count",
           "pending_access_request_count",
-          "pending_context_count",
           "affected_defaults",
           "affected_bindings"
         ],
@@ -17618,10 +17603,6 @@
             "type": "integer",
             "title": "Pending Access Request Count"
           },
-          "pending_context_count": {
-            "type": "integer",
-            "title": "Pending Context Count"
-          },
           "affected_defaults": {
             "items": {
               "$ref": "#/components/schemas/ExternalChannelMultiImpactDefault"
@@ -17646,7 +17627,6 @@
           "bound_resource_count",
           "open_admission_count",
           "pending_access_request_count",
-          "pending_context_count",
           "affected_defaults",
           "affected_bindings"
         ],
@@ -19706,17 +19686,6 @@
           "status": {
             "$ref": "#/components/schemas/ExternalChannelBindingStatus"
           },
-          "activation_status": {
-            "$ref": "#/components/schemas/ExternalChannelBindingActivationStatus"
-          },
-          "truncated_message_count": {
-            "type": "integer",
-            "title": "Truncated Message Count"
-          },
-          "truncated_size": {
-            "type": "integer",
-            "title": "Truncated Size"
-          },
           "connected_at": {
             "type": "string",
             "format": "date-time",
@@ -19783,9 +19752,6 @@
           "resource_type",
           "resource_label",
           "status",
-          "activation_status",
-          "truncated_message_count",
-          "truncated_size",
           "connected_at",
           "disconnected_at",
           "disconnect_reason",
@@ -20574,10 +20540,6 @@
           "disconnected_binding_count": {
             "type": "integer",
             "title": "Disconnected Binding Count"
-          },
-          "deleted_pending_context_count": {
-            "type": "integer",
-            "title": "Deleted Pending Context Count"
           }
         },
         "type": "object",
@@ -20587,8 +20549,7 @@
           "expired_admission_count",
           "expired_access_request_count",
           "unavailable_resource_count",
-          "disconnected_binding_count",
-          "deleted_pending_context_count"
+          "disconnected_binding_count"
         ],
         "title": "ManagedMultiConnectionDisconnect",
         "description": "Sanitized terminal Multi App disconnect summary."

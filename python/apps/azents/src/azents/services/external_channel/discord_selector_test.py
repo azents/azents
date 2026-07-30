@@ -13,9 +13,6 @@ from azents.services.external_channel.discord_selector import (
     build_discord_selector_custom_id,
     parse_discord_selector_custom_id,
 )
-from azents.services.external_channel.event_processor import (
-    ExternalChannelEventProcessorService,
-)
 from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionOutcome,
     ExternalChannelIngestionOutcomeKind,
@@ -23,6 +20,9 @@ from azents.services.external_channel.ingestion import (
 )
 from azents.services.external_channel.ingestion_replay import (
     ExternalChannelIngestionReplayService,
+)
+from azents.services.external_channel.provider_control import (
+    ExternalChannelProviderControlService,
 )
 from azents.services.external_channel.selector import (
     ExternalChannelSelectorCandidate,
@@ -102,21 +102,12 @@ class _SelectorDouble:
         return self.selection
 
 
-class _EventProcessorDouble:
-    """Record only the durable post-selection continuation call."""
-
+class _ProviderControlDouble:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str, datetime.datetime]] = []
+        self.calls: list[str] = []
 
-    async def continue_selected_admission(
-        self,
-        *,
-        admission_id: str,
-        principal_id: str,
-        now: datetime.datetime,
-    ) -> object:
-        self.calls.append((admission_id, principal_id, now))
-        return SimpleNamespace(status="bound", control_delivery_attempt_id=None)
+    async def attempt_delivery(self, delivery_attempt_id: str) -> None:
+        self.calls.append(delivery_attempt_id)
 
 
 class _ReplayDouble:
@@ -147,8 +138,8 @@ class _ReplayDouble:
 
 def _service(
     selector: _SelectorDouble,
-    event_processor: _EventProcessorDouble,
     replay: _ReplayDouble | None = None,
+    provider_control: _ProviderControlDouble | None = None,
 ) -> DiscordSelectorResponseService:
     """Build the response service with only redacted local selector state."""
     config = SimpleNamespace(
@@ -159,7 +150,10 @@ def _service(
     return DiscordSelectorResponseService(
         selector_service=cast(ExternalChannelSelectorService, selector),
         config=cast(Config, config),
-        event_processor=cast(ExternalChannelEventProcessorService, event_processor),
+        provider_control=cast(
+            ExternalChannelProviderControlService,
+            provider_control or _ProviderControlDouble(),
+        ),
         ingestion_replay_service=cast(
             ExternalChannelIngestionReplayService,
             replay or _ReplayDouble(),
@@ -193,9 +187,8 @@ def test_signed_component_scope_round_trips_and_rejects_tampering() -> None:
 async def test_initial_response_renders_bounded_selector_and_next_scope() -> None:
     """The initial ephemeral response exposes only route IDs and policy labels."""
     selector = _SelectorDouble()
-    event_processor = _EventProcessorDouble()
 
-    response = await _service(selector, event_processor).initial_response(
+    response = await _service(selector).initial_response(
         admission_id="admission-1",
         principal_id="principal-1",
         now=_NOW,
@@ -227,7 +220,6 @@ async def test_component_next_requeries_signed_offset() -> None:
     """Pagination uses the HMAC-bound offset rather than provider-supplied state."""
     selector = _SelectorDouble()
     selector.catalog = ExternalChannelSelectorCatalog(candidates=(), next_offset=None)
-    event_processor = _EventProcessorDouble()
     custom_id = build_discord_selector_custom_id(
         secret=_SECRET,
         admission_id="admission-1",
@@ -235,7 +227,7 @@ async def test_component_next_requeries_signed_offset() -> None:
         offset=20,
     )
 
-    response = await _service(selector, event_processor).component_response(
+    response = await _service(selector).component_response(
         custom_id=custom_id,
         selected_route_id=None,
         principal_id="principal-1",
@@ -248,7 +240,6 @@ async def test_component_next_requeries_signed_offset() -> None:
     assert response.response["type"] == 7
     assert response.control_delivery_attempt_id is None
     assert response.connection_id is None
-    assert event_processor.calls == []
 
 
 @pytest.mark.asyncio
@@ -266,7 +257,6 @@ async def test_typed_component_selection_replays_shared_ingestion() -> None:
         ),
         binding=None,
     )
-    event_processor = _EventProcessorDouble()
     replay = _ReplayDouble(
         ExternalChannelIngestionOutcome(
             kind=ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS,
@@ -284,7 +274,6 @@ async def test_typed_component_selection_replays_shared_ingestion() -> None:
 
     response = await _service(
         selector,
-        event_processor,
         replay,
     ).component_response(
         custom_id=custom_id,
@@ -296,24 +285,23 @@ async def test_typed_component_selection_replays_shared_ingestion() -> None:
     )
 
     assert replay.calls == [("admission-1", "principal-1")]
-    assert event_processor.calls == []
     assert response.control_delivery_attempt_id == "delivery-1"
     assert response.connection_id == "connection-1"
     assert response.response["type"] == 7
 
 
 @pytest.mark.asyncio
-async def test_component_selection_continues_durable_admission_once() -> None:
-    """A signed route choice delegates immutable selection and continuation once."""
+async def test_component_selection_replays_durable_admission_once() -> None:
+    """A signed route choice replays the immutable selected admission once."""
     selector = _SelectorDouble()
-    event_processor = _EventProcessorDouble()
+    replay = _ReplayDouble()
     custom_id = build_discord_selector_custom_id(
         secret=_SECRET,
         admission_id="admission-1",
         action="select",
     )
 
-    response = await _service(selector, event_processor).component_response(
+    response = await _service(selector, replay).component_response(
         custom_id=custom_id,
         selected_route_id="route-1",
         principal_id="principal-1",
@@ -323,7 +311,7 @@ async def test_component_selection_continues_durable_admission_once() -> None:
     )
 
     assert selector.selection_calls == [("admission-1", "principal-1", "route-1")]
-    assert event_processor.calls == [("admission-1", "principal-1", _NOW)]
+    assert replay.calls == [("admission-1", "principal-1")]
     assert response.response == {
         "type": 7,
         "data": {

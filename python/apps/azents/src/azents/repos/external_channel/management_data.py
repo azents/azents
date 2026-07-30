@@ -9,7 +9,6 @@ from azents.core.enums import (
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
     ExternalChannelAppMode,
-    ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
@@ -125,7 +124,6 @@ class ManagedMultiConnectionDisconnect(_Projection):
     expired_access_request_count: int
     unavailable_resource_count: int
     disconnected_binding_count: int
-    deleted_pending_context_count: int
 
 
 class ManagedDelivery(_Projection):
@@ -179,9 +177,6 @@ class ManagedBinding(_Projection):
     resource_type: str
     resource_label: str
     status: ExternalChannelBindingStatus
-    activation_status: ExternalChannelBindingActivationStatus
-    truncated_message_count: int
-    truncated_size: int
     connected_at: datetime.datetime
     disconnected_at: datetime.datetime | None
     disconnect_reason: str | None

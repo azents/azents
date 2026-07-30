@@ -26,11 +26,10 @@ from azents.core.enums import (
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
-    ExternalChannelEventAdmission,
-    ExternalChannelEventCreate,
     ExternalChannelInteractionAdmission,
     ExternalChannelInteractionCreate,
     ExternalChannelPrincipalCreate,
+    ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
@@ -112,12 +111,11 @@ class _AdmissionDouble:
         self.retryable = retryable
         self.awaiting_access = awaiting_access
         self.revocation_changed = True
-        self.events: list[ExternalChannelEventCreate] = []
+        self.events: list[ExternalChannelTrigger] = []
         self.interactions: list[
             tuple[
                 ExternalChannelInteractionCreate,
                 ExternalChannelPrincipalCreate,
-                ExternalChannelEventCreate | None,
             ]
         ] = []
         self.claimed_interaction_ids: list[str] = []
@@ -128,7 +126,7 @@ class _AdmissionDouble:
     async def ingest_slack_event(
         self,
         *,
-        event: ExternalChannelEventCreate,
+        event: ExternalChannelTrigger,
         authority: object,
         deadline: object,
     ) -> ExternalChannelIngestionOutcome | SlackConnectionRevocation | None:
@@ -185,29 +183,13 @@ class _AdmissionDouble:
         self.revocations.append(revocation)
         return self.revocation_changed
 
-    async def admit(
-        self,
-        create: ExternalChannelEventCreate,
-    ) -> ExternalChannelEventAdmission:
-        self.events.append(create)
-        if self.fail:
-            raise RuntimeError("database unavailable")
-        return cast(
-            ExternalChannelEventAdmission,
-            SimpleNamespace(
-                event=SimpleNamespace(id="event-row-1"),
-                created=True,
-            ),
-        )
-
     async def admit_interaction(
         self,
         *,
         create: ExternalChannelInteractionCreate,
         principal: ExternalChannelPrincipalCreate,
-        shortcut_source_event: ExternalChannelEventCreate | None = None,
     ) -> ExternalChannelInteractionAdmission:
-        self.interactions.append((create, principal, shortcut_source_event))
+        self.interactions.append((create, principal))
         if self.fail:
             raise RuntimeError("database unavailable")
         return cast(
@@ -673,6 +655,10 @@ async def test_matching_active_interaction_is_admitted_without_raw_payload(
     )
     body = _interaction_body(interaction_type=interaction_type)
     timestamp, signature = _signed(body)
+    shortcut_source_ensure = cast(
+        AsyncMock,
+        service.shortcut_source_service.ensure,
+    )
 
     result = await service.handle(
         raw_body=body,
@@ -698,7 +684,7 @@ async def test_matching_active_interaction_is_admitted_without_raw_payload(
     )
     assert admission.events == []
     assert len(admission.interactions) == 1
-    create, principal, shortcut_source_event = admission.interactions[0]
+    create, principal = admission.interactions[0]
     assert create.interaction_type.value == expected_type
     assert create.provider_interaction_key.startswith("http-")
     assert create.resource_correlation_key == "C-1:100.0001"
@@ -713,6 +699,10 @@ async def test_matching_active_interaction_is_admitted_without_raw_payload(
     assert "private source text" not in persisted
     assert "trigger-secret" not in repr(result)
     if interaction_type == "message_action":
+        shortcut_source_ensure.assert_awaited_once()
+        shortcut_source_call = shortcut_source_ensure.await_args
+        assert shortcut_source_call is not None
+        shortcut_source_event = shortcut_source_call.kwargs["shortcut_source_event"]
         assert shortcut_source_event is not None
         assert shortcut_source_event.provider_event_id == (
             f"shortcut-{create.provider_interaction_key}"
@@ -727,7 +717,7 @@ async def test_matching_active_interaction_is_admitted_without_raw_payload(
             "text": "private source text",
         }
     else:
-        assert shortcut_source_event is None
+        shortcut_source_ensure.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -763,7 +753,7 @@ async def test_single_shortcut_is_durably_rejected_without_selector_source() -> 
         ("interaction-row-1", "rejected", "interaction_unsupported")
     ]
     assert len(admission.interactions) == 1
-    assert admission.interactions[0][2] is None
+    cast(AsyncMock, service.shortcut_source_service.ensure).assert_not_awaited()
 
 
 @pytest.mark.asyncio

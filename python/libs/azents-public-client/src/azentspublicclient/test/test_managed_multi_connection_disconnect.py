@@ -40,8 +40,7 @@ class TestManagedMultiConnectionDisconnect(unittest.TestCase):
                 expired_admission_count = 56,
                 expired_access_request_count = 56,
                 unavailable_resource_count = 56,
-                disconnected_binding_count = 56,
-                deleted_pending_context_count = 56
+                disconnected_binding_count = 56
             )
         else:
             return ManagedMultiConnectionDisconnect(
@@ -51,7 +50,6 @@ class TestManagedMultiConnectionDisconnect(unittest.TestCase):
                 expired_access_request_count = 56,
                 unavailable_resource_count = 56,
                 disconnected_binding_count = 56,
-                deleted_pending_context_count = 56,
         )
         """
 

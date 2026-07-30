@@ -63,10 +63,12 @@ from azents.services.external_channel.file_transfer import (
     iter_external_channel_outbound_file_chunks,
 )
 from azents.services.external_channel.presentation import (
+    SlackAgentPresentation,
     normalize_slack_agent_name,
     prepend_agent_blocks,
     prepend_agent_fallback,
     prepend_agent_markdown,
+    resolve_slack_agent_name_presentation,
     resolve_slack_agent_presentation,
 )
 from azents.services.external_channel.slack_events import (
@@ -113,6 +115,14 @@ def get_discord_delivery_client(
 ) -> DiscordDeliveryClient:
     """Provide the Discord Channel Action adapter."""
     return DiscordDeliveryClient(http_client)
+
+
+@dataclass(frozen=True)
+class _SlackSelectorControlPresentation:
+    """One bounded Slack selector control projection."""
+
+    text: str
+    blocks: list[dict[str, object]]
 
 
 @dataclass
@@ -958,9 +968,109 @@ class ExternalChannelActionService:
                     message_ts=message_ts,
                 )
             case ExternalChannelDeliveryOperation.CONTROL_MESSAGE:
-                return _invalid_payload()
+                return await self._deliver_slack_control(
+                    target,
+                    bot_token=bot_token,
+                    tenant_id=tenant_id,
+                    channel_id=channel_id,
+                    thread_ts=thread_ts,
+                    presentation=presentation,
+                )
             case _ as unreachable:
                 assert_never(unreachable)
+
+    async def _deliver_slack_control(
+        self,
+        target: ChannelDeliveryTarget,
+        *,
+        bot_token: str,
+        tenant_id: str,
+        channel_id: str,
+        thread_ts: str,
+        presentation: SlackAgentPresentation | None,
+    ) -> SlackControlMessageResult:
+        """Deliver one validated selector, notice, or approval control."""
+        payload = target.request_payload
+        payload_tenant_id = payload.get("tenant_id")
+        if payload_tenant_id is not None and payload_tenant_id != tenant_id:
+            return _invalid_payload()
+        control_kind = payload.get("control_kind")
+        if control_kind == "agent_selector":
+            admission_id = payload.get("conversation_admission_id")
+            if not isinstance(admission_id, str) or not admission_id:
+                return _invalid_payload()
+            selector = _render_agent_selector_control(admission_id)
+            return await self.slack_client.post_blocks(
+                bot_token=bot_token,
+                tenant_id=tenant_id,
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text=selector.text,
+                blocks=selector.blocks,
+                icon_url=None,
+            )
+        if control_kind == "shortcut_already_bound":
+            recorded_presentation = resolve_slack_agent_name_presentation(
+                payload.get("recorded_agent_name")
+                if isinstance(payload.get("recorded_agent_name"), str)
+                else None
+            )
+            bound_presentation = presentation or recorded_presentation
+            if bound_presentation is None:
+                return _invalid_payload()
+            text = (
+                "This conversation is already linked to the recorded Agent. "
+                "Start a separate top-level conversation to use another Agent."
+            )
+            return await self.slack_client.post_blocks(
+                bot_token=bot_token,
+                tenant_id=tenant_id,
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text=prepend_agent_fallback(bound_presentation, text),
+                blocks=prepend_agent_blocks(
+                    bound_presentation,
+                    [
+                        {
+                            "type": "section",
+                            "text": {"type": "mrkdwn", "text": text},
+                        }
+                    ],
+                ),
+                icon_url=bound_presentation.icon_url,
+            )
+        approval_url = payload.get("approval_url")
+        participant_provider_user_id = payload.get("participant_provider_user_id")
+        participant_label = payload.get("participant_label")
+        if (
+            not isinstance(approval_url, str)
+            or not approval_url
+            or not isinstance(participant_provider_user_id, str)
+            or not participant_provider_user_id
+            or not isinstance(participant_label, str)
+            or not participant_label
+        ):
+            return _invalid_payload()
+        return await self.slack_client.post_approval_control_message(
+            bot_token=bot_token,
+            tenant_id=tenant_id,
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            approval_url=approval_url,
+            participant_label=participant_label,
+            participant_provider_user_id=participant_provider_user_id,
+            agent_name=(
+                None
+                if presentation is None or not presentation.show_name
+                else presentation.name
+            ),
+            agent_markdown_line=(
+                None
+                if presentation is None or not presentation.show_name
+                else presentation.markdown_line
+            ),
+            icon_url=None if presentation is None else presentation.icon_url,
+        )
 
     async def _deliver_slack_files(
         self,
@@ -1405,6 +1515,33 @@ def _invalid_payload() -> SlackControlMessageResult:
         provider_message_key=None,
         error_kind="provider_payload_invalid",
         error_summary="The committed provider request is incomplete.",
+    )
+
+
+def _render_agent_selector_control(
+    conversation_admission_id: str,
+) -> _SlackSelectorControlPresentation:
+    """Render the generic control for one retained Multi-App conversation."""
+    text = "Select an Agent to continue this conversation."
+    return _SlackSelectorControlPresentation(
+        text=text,
+        blocks=[
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": text},
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Select Agent"},
+                        "action_id": "azents_agent_selector_open",
+                        "value": conversation_admission_id,
+                    }
+                ],
+            },
+        ],
     )
 
 

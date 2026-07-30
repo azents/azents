@@ -17,10 +17,8 @@ from azents.core.enums import (
     AgentSessionStatus,
     AgentSessionTitleSource,
     ExternalChannelAppMode,
-    ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
     ExternalChannelConnectionStatus,
-    ExternalChannelHydrationStatus,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
@@ -1184,7 +1182,6 @@ class TestAgentSessionRepository:
             resource_type=ExternalChannelResourceType.THREAD,
             provider_resource_key="thread-1",
             status=ExternalChannelResourceStatus.ACTIVE,
-            hydration_status=ExternalChannelHydrationStatus.PENDING,
         )
         rdb_session.add_all((route, resource))
         await rdb_session.flush()
@@ -1193,9 +1190,6 @@ class TestAgentSessionRepository:
             route_id=route.id,
             agent_session_id=agent_session.id,
             status=ExternalChannelBindingStatus.ACTIVE,
-            activation_status=(
-                ExternalChannelBindingActivationStatus.WAITING_HYDRATION
-            ),
         )
         rdb_session.add(binding)
         await rdb_session.flush()

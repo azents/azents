@@ -1126,8 +1126,6 @@
         "cancel": "취소",
         "connectedAt": "연결 시각",
         "latestActivity": "최근 활동",
-        "retainedContext": "Pending context 잘림",
-        "truncationSummary": "메시지 {messages}개 · {bytes}바이트 제거",
         "disconnectReason": "연결 해제 사유",
         "channelWork": "Channel Work",
         "noWork": "이 binding에 연결된 Channel Work가 없습니다.",
@@ -1158,11 +1156,6 @@
         "bindingStatus": {
           "active": "활성",
           "disconnected": "연결 해제됨"
-        },
-        "activationStatus": {
-          "waiting_hydration": "기록 수집 대기",
-          "wake_pending": "호출 시작 중",
-          "active": "호출 활성"
         },
         "workStatus": {
           "active": "Work 활성",

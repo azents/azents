@@ -20,13 +20,11 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelConnection,
     RDBExternalChannelConversationAdmission,
     RDBExternalChannelDeliveryAttempt,
-    RDBExternalChannelEvent,
     RDBExternalChannelInteraction,
     RDBExternalChannelInvocationBatch,
     RDBExternalChannelInvocationBatchItem,
     RDBExternalChannelMessage,
     RDBExternalChannelMessageRevision,
-    RDBExternalChannelPendingContext,
     RDBExternalChannelPrincipal,
     RDBExternalChannelResource,
     RDBExternalChannelWork,
@@ -174,12 +172,6 @@ def test_external_channel_installed_schema_preserves_lifecycle_ownership(
                 "RESTRICT",
             ),
             (
-                "external_channel_pending_contexts",
-                "route_id",
-                "external_channel_agent_routes",
-                "RESTRICT",
-            ),
-            (
                 "external_channel_access_grants",
                 "agent_id",
                 "agents",
@@ -269,14 +261,12 @@ def test_external_channel_migration_matches_model_metadata(
             RDBExternalChannelConnection,
             RDBExternalChannelAgentRoute,
             RDBExternalChannelResource,
-            RDBExternalChannelEvent,
             RDBExternalChannelInteraction,
             RDBExternalChannelConversationAdmission,
             RDBExternalChannelChannelDefault,
             RDBExternalChannelPrincipal,
             RDBExternalChannelMessage,
             RDBExternalChannelMessageRevision,
-            RDBExternalChannelPendingContext,
             RDBExternalChannelBinding,
             RDBExternalChannelInvocationBatch,
             RDBExternalChannelInvocationBatchItem,
@@ -293,6 +283,89 @@ def test_external_channel_migration_matches_model_metadata(
                 column["name"] for column in inspector.get_columns(table.name)
             }
             assert {column.name for column in table.columns} == installed_columns
+    finally:
+        engine.dispose()
+
+
+def test_external_channel_installed_schema_excludes_retired_processing_state(
+    latest_db_schema: None,
+    postgres_container: PostgresContainer,
+) -> None:
+    """Verify the installed schema contains only retained canonical authorities."""
+    engine = create_engine(postgres_container.get_connection_url())
+    try:
+        inspector = inspect(engine)
+        assert {
+            "external_channel_events",
+            "external_channel_pending_contexts",
+        }.isdisjoint(inspector.get_table_names())
+        retired_columns = {
+            "external_channel_resources": {
+                "hydration_status",
+                "hydration_cursor",
+                "hydration_high_watermark_position",
+                "reconciliation_boundary_received_at",
+                "reconciliation_boundary_event_id",
+                "hydration_error_kind",
+                "hydration_error_summary",
+                "hydration_started_at",
+                "hydration_completed_at",
+            },
+            "external_channel_bindings": {
+                "activation_status",
+                "activation_trigger_message_id",
+                "activated_at",
+                "activation_wake_claimed_at",
+                "projected_through_position",
+                "truncated_message_count",
+                "truncated_size",
+            },
+            "external_channel_invocation_batches": {
+                "truncation_message_count",
+                "truncation_size",
+            },
+            "external_channel_message_revisions": {"source_event_id"},
+        }
+        for table_name, column_names in retired_columns.items():
+            assert column_names.isdisjoint(_columns_by_name(inspector, table_name))
+
+        conversation_checks = {
+            constraint["name"]
+            for constraint in inspector.get_check_constraints(
+                "external_channel_conversation_admissions"
+            )
+        }
+        access_checks = {
+            constraint["name"]
+            for constraint in inspector.get_check_constraints(
+                "external_channel_access_requests"
+            )
+        }
+        assert (
+            "ck_external_channel_conversation_admissions_open_boundary"
+            in conversation_checks
+        )
+        assert "ck_external_channel_access_requests_pending_boundary" in access_checks
+
+        with engine.connect() as connection:
+            retired_enums = set(
+                connection.scalars(
+                    text(
+                        """
+                        SELECT typname
+                        FROM pg_type
+                        WHERE typtype = 'e'
+                          AND typname IN (
+                              'external_channel_event_eligibility_state',
+                              'external_channel_event_status',
+                              'external_channel_hydration_status',
+                              'external_channel_binding_activation_status'
+                          )
+                        """
+                    )
+                )
+            )
+        assert retired_enums == set()
     finally:
         engine.dispose()
 

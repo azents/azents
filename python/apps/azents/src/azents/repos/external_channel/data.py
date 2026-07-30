@@ -1,7 +1,6 @@
 """Provider-generic External Channel repository data records."""
 
 import datetime
-from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -11,7 +10,6 @@ from azents.core.enums import (
     ExternalChannelAccessRequestStatus,
     ExternalChannelActionMode,
     ExternalChannelAppMode,
-    ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
@@ -21,9 +19,6 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
-    ExternalChannelEventEligibilityState,
-    ExternalChannelEventStatus,
-    ExternalChannelHydrationStatus,
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
@@ -48,30 +43,6 @@ class _Record(BaseModel):
     """Immutable repository data base with ORM attribute support."""
 
     model_config = ConfigDict(frozen=True, from_attributes=True)
-
-
-@dataclass(frozen=True)
-class ExternalChannelCutoverPreflightCounts:
-    """Content-free aggregate counts required before legacy cutover."""
-
-    undrained_events: int
-    unactivated_bindings: int
-    incomplete_hydrations: int
-    pending_contexts: int
-    open_conversation_admissions: int
-    pending_access_requests: int
-    inflight_resource_provisionings: int
-    active_bindings_without_delivery_target: int
-    active_bindings_without_session: int
-    active_bindings_without_route: int
-    active_bindings_without_latest_batch: int
-    active_bindings_without_thread_position: int
-    active_bindings_with_ambiguous_thread_position: int
-
-    def __post_init__(self) -> None:
-        """Reject invalid negative aggregate counts."""
-        if any(value < 0 for value in self.__dict__.values()):
-            raise ValueError("Cutover preflight counts must be non-negative.")
 
 
 class ExternalChannelConnection(_Record):
@@ -249,15 +220,6 @@ class ExternalChannelResource(_Record):
     provider_resource_key: str
     labels: dict[str, Any] | None
     status: ExternalChannelResourceStatus
-    hydration_status: ExternalChannelHydrationStatus
-    hydration_cursor: str | None
-    hydration_high_watermark_position: str | None
-    reconciliation_boundary_received_at: datetime.datetime | None
-    reconciliation_boundary_event_id: str | None
-    hydration_error_kind: str | None
-    hydration_error_summary: str | None
-    hydration_started_at: datetime.datetime | None
-    hydration_completed_at: datetime.datetime | None
     discovered_at: datetime.datetime
     latest_activity_at: datetime.datetime | None
     unavailable_at: datetime.datetime | None
@@ -274,50 +236,13 @@ class ExternalChannelResourceCreate(_Record):
     provider_resource_key: str
     labels: dict[str, Any] | None
     status: ExternalChannelResourceStatus
-    hydration_status: ExternalChannelHydrationStatus
-    hydration_cursor: str | None
-    hydration_high_watermark_position: str | None
-    reconciliation_boundary_received_at: datetime.datetime | None
-    reconciliation_boundary_event_id: str | None
-    hydration_error_kind: str | None
-    hydration_error_summary: str | None
-    hydration_started_at: datetime.datetime | None
-    hydration_completed_at: datetime.datetime | None
     latest_activity_at: datetime.datetime | None
     unavailable_at: datetime.datetime | None
     deleted_at: datetime.datetime | None
 
 
-class ExternalChannelEvent(_Record):
-    """Durably admitted provider event awaiting idempotent processing."""
-
-    id: str
-    connection_id: str
-    provider_event_id: str
-    transport_envelope_id: str | None
-    event_type: str
-    provider_app_id: str | None
-    provider_tenant_id: str | None
-    provider_enterprise_id: str | None
-    resource_correlation_key: str | None
-    eligibility_state: ExternalChannelEventEligibilityState
-    envelope: dict[str, Any]
-    status: ExternalChannelEventStatus
-    attempt_count: int
-    claim_owner: str | None
-    claim_until: datetime.datetime | None
-    error_kind: str | None
-    error_summary: str | None
-    provider_occurred_at: datetime.datetime | None
-    received_at: datetime.datetime
-    processing_started_at: datetime.datetime | None
-    processed_at: datetime.datetime | None
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-
-
-class ExternalChannelEventCreate(_Record):
-    """Provider-event admission payload."""
+class ExternalChannelTrigger(_Record):
+    """Transient authenticated provider trigger used for typed ingestion."""
 
     connection_id: str
     provider_event_id: str
@@ -327,18 +252,9 @@ class ExternalChannelEventCreate(_Record):
     provider_tenant_id: str | None
     provider_enterprise_id: str | None
     resource_correlation_key: str | None
-    eligibility_state: ExternalChannelEventEligibilityState
     envelope: dict[str, Any]
-    status: ExternalChannelEventStatus
     provider_occurred_at: datetime.datetime | None
     received_at: datetime.datetime
-
-
-class ExternalChannelEventAdmission(_Record):
-    """Idempotent event-admission result."""
-
-    event: ExternalChannelEvent
-    created: bool
 
 
 class ExternalChannelInteraction(_Record):
@@ -526,7 +442,6 @@ class ExternalChannelMessageRevision(_Record):
     normalized_body: str | None
     attachment_metadata: dict[str, Any] | None
     reference_mappings: dict[str, Any] | None
-    source_event_id: str | None
     provider_occurred_at: datetime.datetime | None
     observed_at: datetime.datetime
     created_at: datetime.datetime
@@ -541,48 +456,7 @@ class ExternalChannelMessageRevisionCreate(_Record):
     normalized_body: str | None
     attachment_metadata: dict[str, Any] | None
     reference_mappings: dict[str, Any] | None
-    source_event_id: str | None
     provider_occurred_at: datetime.datetime | None
-
-
-class ExternalChannelPendingContext(_Record):
-    """Bounded route-and-resource context not yet session-projected."""
-
-    id: str
-    route_id: str
-    resource_id: str
-    message_revision_id: str
-    provider_position: str
-    normalized_size: int
-    expires_at: datetime.datetime
-    created_at: datetime.datetime
-
-
-class ExternalChannelPendingContextCreate(_Record):
-    """Pending-context creation payload."""
-
-    route_id: str
-    resource_id: str
-    message_revision_id: str
-    provider_position: str
-    normalized_size: int
-    expires_at: datetime.datetime
-
-
-class ExternalChannelPendingContextTrim(_Record):
-    """Pending-context retention result for one route and resource."""
-
-    deleted_message_count: int
-    deleted_size: int
-    retained_message_count: int
-    retained_size: int
-
-
-class ExternalChannelEventBoundary(_Record):
-    """Stable received-order boundary for correlated provider events."""
-
-    received_at: datetime.datetime
-    event_id: str
 
 
 class ExternalChannelBinding(_Record):
@@ -593,13 +467,6 @@ class ExternalChannelBinding(_Record):
     route_id: str
     agent_session_id: str
     status: ExternalChannelBindingStatus
-    activation_status: ExternalChannelBindingActivationStatus
-    activation_trigger_message_id: str | None
-    activated_at: datetime.datetime | None
-    activation_wake_claimed_at: datetime.datetime | None = None
-    projected_through_position: str | None
-    truncated_message_count: int
-    truncated_size: int
     connected_at: datetime.datetime
     disconnected_at: datetime.datetime | None
     disconnect_reason: str | None
@@ -614,13 +481,6 @@ class ExternalChannelBindingCreate(_Record):
     route_id: str
     agent_session_id: str
     status: ExternalChannelBindingStatus
-    activation_status: ExternalChannelBindingActivationStatus
-    activation_trigger_message_id: str | None
-    activated_at: datetime.datetime | None
-    activation_wake_claimed_at: datetime.datetime | None = None
-    projected_through_position: str | None
-    truncated_message_count: int
-    truncated_size: int
     disconnected_at: datetime.datetime | None
     disconnect_reason: str | None
 
@@ -641,8 +501,6 @@ class ExternalChannelInvocationBatch(_Record):
         ExternalChannelInvocationWakeDispatchStatus.DISPATCHED
     )
     wake_dispatch_claimed_at: datetime.datetime | None = None
-    truncation_message_count: int
-    truncation_size: int
     mailbox_item_id: str | None
     connection_id: str | None = None
     created_at: datetime.datetime
@@ -663,8 +521,6 @@ class ExternalChannelInvocationBatchCreate(_Record):
         ExternalChannelInvocationWakeDispatchStatus.DISPATCHED
     )
     wake_dispatch_claimed_at: datetime.datetime | None = None
-    truncation_message_count: int
-    truncation_size: int
     mailbox_item_id: str | None
     connection_id: str | None = None
 
@@ -696,8 +552,6 @@ class ExternalChannelInvocationProjectionItem(_Record):
     binding_id: str
     trigger_message_id: str
     context_omitted: bool
-    truncation_message_count: int
-    truncation_size: int
     sequence: int
     message_id: str
     revision_id: str
@@ -998,7 +852,6 @@ class ExternalChannelArchiveTermination(_Record):
 
     disconnected_binding_count: int
     finished_work_count: int
-    deleted_pending_context_count: int
     created_progress_delete_intent_count: int
     progress_delete_intent_ids: tuple[str, ...]
 
@@ -1086,7 +939,6 @@ class ExternalChannelMultiRouteImpact(_Record):
     bound_resource_count: int
     open_admission_count: int
     pending_access_request_count: int
-    pending_context_count: int
     affected_defaults: tuple[ExternalChannelMultiImpactDefault, ...]
     affected_bindings: tuple[ExternalChannelMultiImpactBinding, ...]
 
@@ -1102,7 +954,6 @@ class ExternalChannelMultiConnectionImpact(_Record):
     bound_resource_count: int
     open_admission_count: int
     pending_access_request_count: int
-    pending_context_count: int
     affected_defaults: tuple[ExternalChannelMultiImpactDefault, ...]
     affected_bindings: tuple[ExternalChannelMultiImpactBinding, ...]
 
@@ -1123,5 +974,4 @@ class ExternalChannelMultiConnectionDisconnect(_Record):
     expired_access_request_count: int
     unavailable_resource_count: int
     disconnected_binding_count: int
-    deleted_pending_context_count: int
     progress_delete_intent_ids: tuple[str, ...]

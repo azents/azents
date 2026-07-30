@@ -13,7 +13,7 @@ from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
-from azents.repos.external_channel.data import ExternalChannelEventCreate
+from azents.repos.external_channel.data import ExternalChannelTrigger
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
 )
@@ -203,14 +203,14 @@ def _interactive_envelope(*, envelope_id: str = "interactive-envelope-1") -> str
 def _client(
     *,
     socket: FakeSocket,
-    admitted: list[ExternalChannelEventCreate],
-    admit: Callable[[ExternalChannelEventCreate], Awaitable[object]] | None = None,
+    admitted: list[ExternalChannelTrigger],
+    admit: Callable[[ExternalChannelTrigger], Awaitable[object]] | None = None,
     admitted_interactions: list[SlackInteractionCallback] | None = None,
-    admitted_shortcut_sources: list[ExternalChannelEventCreate] | None = None,
+    admitted_shortcut_sources: list[ExternalChannelTrigger] | None = None,
     admit_interaction: Callable[
         [
             SlackInteractionCallback,
-            ExternalChannelEventCreate | None,
+            ExternalChannelTrigger | None,
         ],
         Awaitable[ExternalChannelInteractionHandoff | None],
     ]
@@ -218,12 +218,12 @@ def _client(
     schedule_interaction: Callable[[ExternalChannelInteractionHandoff], None]
     | None = None,
 ) -> SlackSocketModeRunner:
-    async def default_admit(event: ExternalChannelEventCreate) -> None:
+    async def default_admit(event: ExternalChannelTrigger) -> None:
         admitted.append(event)
 
     async def default_admit_interaction(
         callback: SlackInteractionCallback,
-        shortcut_source_event: ExternalChannelEventCreate | None,
+        shortcut_source_event: ExternalChannelTrigger | None,
     ) -> ExternalChannelInteractionHandoff | None:
         if admitted_interactions is not None:
             admitted_interactions.append(callback)
@@ -382,7 +382,7 @@ async def test_events_api_acknowledges_only_after_durable_admission() -> None:
             ),
         ]
     )
-    admitted: list[ExternalChannelEventCreate] = []
+    admitted: list[ExternalChannelTrigger] = []
     client = _client(socket=socket, admitted=admitted)
 
     result = await client.run_connection(
@@ -427,7 +427,7 @@ async def test_events_api_uses_safe_bounded_file_projection() -> None:
             ),
         ]
     )
-    admitted: list[ExternalChannelEventCreate] = []
+    admitted: list[ExternalChannelTrigger] = []
     client = _client(socket=socket, admitted=admitted)
 
     result = await client.run_connection(
@@ -456,9 +456,9 @@ async def test_events_api_uses_safe_bounded_file_projection() -> None:
 async def test_events_api_does_not_acknowledge_failed_admission() -> None:
     """Leave an envelope unacknowledged when its durable transaction fails."""
     socket = FakeSocket([_events_api_envelope()])
-    admitted: list[ExternalChannelEventCreate] = []
+    admitted: list[ExternalChannelTrigger] = []
 
-    async def rejected_admission(event: ExternalChannelEventCreate) -> None:
+    async def rejected_admission(event: ExternalChannelTrigger) -> None:
         del event
         raise RuntimeError("transaction failed")
 
@@ -489,9 +489,9 @@ async def test_interactive_envelope_acknowledges_only_after_durable_admission() 
             ),
         ]
     )
-    admitted: list[ExternalChannelEventCreate] = []
+    admitted: list[ExternalChannelTrigger] = []
     interactions: list[SlackInteractionCallback] = []
-    shortcut_sources: list[ExternalChannelEventCreate] = []
+    shortcut_sources: list[ExternalChannelTrigger] = []
     client = _client(
         socket=socket,
         admitted=admitted,
@@ -526,11 +526,11 @@ async def test_interactive_envelope_acknowledges_only_after_durable_admission() 
 async def test_interactive_envelope_does_not_acknowledge_failed_admission() -> None:
     """Leave an interaction envelope unacknowledged when its transaction fails."""
     socket = FakeSocket([_interactive_envelope()])
-    admitted: list[ExternalChannelEventCreate] = []
+    admitted: list[ExternalChannelTrigger] = []
 
     async def rejected_interaction(
         _: SlackInteractionCallback,
-        __: ExternalChannelEventCreate | None,
+        __: ExternalChannelTrigger | None,
     ) -> None:
         raise RuntimeError("transaction failed")
 
@@ -565,12 +565,12 @@ async def test_interactive_handoff_is_scheduled_only_after_socket_ack() -> None:
             ),
         ]
     )
-    admitted: list[ExternalChannelEventCreate] = []
+    admitted: list[ExternalChannelTrigger] = []
     scheduled: list[ExternalChannelInteractionHandoff] = []
 
     async def admit_interaction(
         callback: SlackInteractionCallback,
-        shortcut_source_event: ExternalChannelEventCreate | None,
+        shortcut_source_event: ExternalChannelTrigger | None,
     ) -> ExternalChannelInteractionHandoff:
         assert callback.trigger_id == "trigger-secret-must-not-persist"
         assert shortcut_source_event is not None
@@ -629,7 +629,7 @@ async def test_refresh_disconnect_returns_reconnect_decision_to_owner() -> None:
 async def test_connection_close_reconnects_and_cancellation_closes_socket() -> None:
     """Reconnect closed connections and close active sockets during cancellation."""
     socket = FakeSocket([ConnectionError("closed")])
-    admitted: list[ExternalChannelEventCreate] = []
+    admitted: list[ExternalChannelTrigger] = []
     client = _client(socket=socket, admitted=admitted)
 
     result = await client.run_connection(

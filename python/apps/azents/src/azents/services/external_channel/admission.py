@@ -14,8 +14,6 @@ from azents.core.enums import ExternalChannelInteractionStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
-    ExternalChannelEventAdmission,
-    ExternalChannelEventCreate,
     ExternalChannelInteraction,
     ExternalChannelInteractionAdmission,
     ExternalChannelInteractionCreate,
@@ -73,22 +71,11 @@ class ExternalChannelAdmissionService:
                 "External Channel interaction lease must exceed its mutation timeout."
             )
 
-    async def admit(
-        self,
-        create: ExternalChannelEventCreate,
-    ) -> ExternalChannelEventAdmission:
-        """Atomically admit or deduplicate one provider event."""
-        async with self.session_manager() as session:
-            admission = await self.repository.admit_event(session, create)
-            await session.commit()
-            return admission
-
     async def admit_interaction(
         self,
         *,
         create: ExternalChannelInteractionCreate,
         principal: ExternalChannelPrincipalCreate,
-        shortcut_source_event: ExternalChannelEventCreate | None = None,
     ) -> ExternalChannelInteractionAdmission:
         """Commit one interaction and its authenticated provider actor together."""
         async with self.session_manager() as session:
@@ -100,8 +87,6 @@ class ExternalChannelAdmissionService:
                 session,
                 create.model_copy(update={"principal_id": persisted_principal.id}),
             )
-            if shortcut_source_event is not None:
-                await self.repository.admit_event(session, shortcut_source_event)
             await session.commit()
             return admission
 
