@@ -748,6 +748,12 @@ class ExternalChannelActionService:
                 embeds = _discord_embeds(payload.get("embeds"))
                 if payload.get("embeds") is not None and embeds is None:
                     return _discord_invalid_payload()
+                if (
+                    target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+                    and payload.get("control_kind") == "session_link"
+                    and (files or components is None or embeds is not None)
+                ):
+                    return _discord_invalid_payload()
                 if files:
                     if components is not None or embeds is not None:
                         return _discord_invalid_payload()
@@ -1011,6 +1017,20 @@ class ExternalChannelActionService:
                 thread_ts=thread_ts,
                 text=selector.text,
                 blocks=selector.blocks,
+                icon_url=None,
+            )
+        if control_kind == "session_link":
+            text = payload.get("text")
+            blocks = _blocks(payload.get("blocks"))
+            if not isinstance(text, str) or blocks is None:
+                return _invalid_payload()
+            return await self.slack_client.post_blocks(
+                bot_token=bot_token,
+                tenant_id=tenant_id,
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text=text,
+                blocks=blocks,
                 icon_url=None,
             )
         if control_kind == "shortcut_already_bound":

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConversationAdmissionStatus,
+    ExternalChannelPrincipalAuthorType,
 )
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
@@ -19,6 +20,7 @@ from azents.repos.external_channel.data import (
     ExternalChannelCatalogRoute,
     ExternalChannelConnection,
     ExternalChannelConversationAdmission,
+    ExternalChannelPrincipal,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.selector import (
@@ -48,12 +50,18 @@ def _connection() -> ExternalChannelConnection:
     )
 
 
-def _route(route_id: str, agent_id: str) -> ExternalChannelAgentRoute:
+def _route(
+    route_id: str,
+    agent_id: str,
+    *,
+    allow_bot_messages: bool = False,
+) -> ExternalChannelAgentRoute:
     """Build one active selector route."""
     return ExternalChannelAgentRoute.model_construct(
         id=route_id,
         connection_id="connection-1",
         agent_id=agent_id,
+        allow_bot_messages=allow_bot_messages,
     )
 
 
@@ -89,9 +97,18 @@ class _Repository:
         self.transitions: list[
             tuple[ExternalChannelConversationAdmissionStatus, str | None]
         ] = []
-        self.catalog_queries: list[tuple[str, str | None, int, int]] = []
+        self.catalog_queries: list[
+            tuple[
+                str,
+                ExternalChannelPrincipalAuthorType,
+                str | None,
+                int,
+                int,
+            ]
+        ] = []
         self.blocked_agents: set[str] = set()
         self.granted_agents: set[str] = set()
+        self.author_type = ExternalChannelPrincipalAuthorType.HUMAN
 
     async def get_conversation_admission(
         self,
@@ -113,12 +130,28 @@ class _Repository:
         self.calls.append("connection_snapshot")
         return _connection() if connection_id == "connection-1" else None
 
+    async def get_principal(
+        self,
+        session: AsyncSession,
+        *,
+        principal_id: str,
+    ) -> ExternalChannelPrincipal | None:
+        del session
+        self.calls.append("principal")
+        if principal_id != "principal-1":
+            return None
+        return ExternalChannelPrincipal.model_construct(
+            id=principal_id,
+            author_type=self.author_type,
+        )
+
     async def list_routable_multi_catalog_routes(
         self,
         session: AsyncSession,
         *,
         connection_id: str,
         principal_id: str,
+        author_type: ExternalChannelPrincipalAuthorType,
         search: str | None,
         offset: int,
         limit: int,
@@ -127,12 +160,14 @@ class _Repository:
         self.calls.append("catalog")
         assert connection_id == "connection-1"
         assert principal_id == "principal-1"
-        self.catalog_queries.append((principal_id, search, offset, limit))
+        self.catalog_queries.append((principal_id, author_type, search, offset, limit))
         filtered = (
             self.rows
             if search is None
             else [row for row in self.rows if search.lower() in row.agent_name.lower()]
         )
+        if author_type is ExternalChannelPrincipalAuthorType.BOT:
+            filtered = [row for row in filtered if row.route.allow_bot_messages]
         filtered = [
             row
             for row in filtered
@@ -341,10 +376,57 @@ async def test_catalog_search_and_paging_are_bounded_and_deterministic() -> None
     assert second_page.next_offset is None
     assert [candidate.route_id for candidate in searched.candidates] == ["route-20"]
     assert repository.catalog_queries == [
-        ("principal-1", None, 0, 21),
-        ("principal-1", None, 20, 21),
-        ("principal-1", "Agent 20", 0, 21),
+        ("principal-1", ExternalChannelPrincipalAuthorType.HUMAN, None, 0, 21),
+        ("principal-1", ExternalChannelPrincipalAuthorType.HUMAN, None, 20, 21),
+        (
+            "principal-1",
+            ExternalChannelPrincipalAuthorType.HUMAN,
+            "Agent 20",
+            0,
+            21,
+        ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_bot_catalog_and_selection_require_bot_enabled_routes() -> None:
+    """Bot selectors expose and accept only routes that explicitly allow bots."""
+    session = _Session()
+    repository = _Repository(
+        rows=[
+            ExternalChannelCatalogRoute(
+                route=_route("route-1", "agent-1"),
+                agent_name="Human only",
+            ),
+            ExternalChannelCatalogRoute(
+                route=_route(
+                    "route-2",
+                    "agent-2",
+                    allow_bot_messages=True,
+                ),
+                agent_name="Bot enabled",
+            ),
+        ]
+    )
+    repository.author_type = ExternalChannelPrincipalAuthorType.BOT
+    service = _service(session, repository)
+
+    catalog = await service.project_catalog(
+        admission_id="admission-1",
+        principal_id="principal-1",
+        search=None,
+        offset=0,
+        now=_NOW,
+    )
+
+    assert [candidate.route_id for candidate in catalog.candidates] == ["route-2"]
+    with pytest.raises(ValueError, match="Selected Agent is unavailable"):
+        await service.select_route(
+            admission_id="admission-1",
+            principal_id="principal-1",
+            route_id="route-1",
+            now=_NOW,
+        )
 
 
 @pytest.mark.asyncio
@@ -437,6 +519,7 @@ async def test_selection_uses_required_lock_order_and_is_immutable() -> None:
         "admission_snapshot",
         "connection_lock",
         "route_lock",
+        "principal",
         "resource_lock",
         "binding_lock",
         "admission_lock",

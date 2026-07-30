@@ -32,7 +32,10 @@ from azents.core.enums import (
     MailboxSchedulingMode,
 )
 from azents.core.external_channel_progress import checking_progress
-from azents.core.slack_external_channel_progress import render_slack_progress
+from azents.core.slack_external_channel_progress import (
+    render_slack_progress,
+    render_slack_session_link,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -61,6 +64,7 @@ from azents.repos.external_channel.data import (
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.workspace import WorkspaceRepository
 from azents.services.external_channel.conversation import ExternalChannelHistoryRange
 from azents.services.external_channel.discord_selector_scope import (
     build_discord_selector_custom_id,
@@ -142,6 +146,10 @@ class ExternalChannelDatabaseIngestionStore:
         Depends(ExternalChannelWorkRepository),
     ]
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
+    workspace_repository: Annotated[
+        WorkspaceRepository,
+        Depends(WorkspaceRepository),
+    ]
     agent_session_repository: Annotated[
         AgentSessionRepository,
         Depends(AgentSessionRepository),
@@ -328,7 +336,11 @@ class ExternalChannelDatabaseIngestionStore:
             )
             if pending_selection is not None:
                 if (
-                    trigger.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
+                    not await self._pending_selection_accepts_author(
+                        session,
+                        pending_selection=pending_selection,
+                        author_type=trigger.author_type,
+                    )
                     or trigger.provider_user_id is None
                 ):
                     return await self._commit_ignored_position(
@@ -373,7 +385,7 @@ class ExternalChannelDatabaseIngestionStore:
                     ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
                 )
             if (
-                trigger.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
+                not _route_accepts_author(routing.route, trigger.author_type)
                 or trigger.provider_user_id is None
             ):
                 return await self._commit_ignored_position(
@@ -427,7 +439,10 @@ class ExternalChannelDatabaseIngestionStore:
                     else routing.binding.agent_session_id
                 ),
             )
-            if grant is None and not routing.route.open_access_enabled:
+            if grant is None and not _route_has_automatic_access(
+                routing.route,
+                trigger.author_type,
+            ):
                 access_request = await self.repository.create_access_request_idempotent(
                     session,
                     ExternalChannelAccessRequestCreate(
@@ -485,6 +500,7 @@ class ExternalChannelDatabaseIngestionStore:
                         else None
                     ),
                 )
+            initial_binding = routing.binding is None
             binding = routing.binding or await self._create_binding(
                 session,
                 routing=routing,
@@ -548,12 +564,26 @@ class ExternalChannelDatabaseIngestionStore:
                 binding_id=binding.id,
                 desired_progress_payload=checking_progress().model_dump(mode="json"),
             )
-            control_delivery_attempt_id = await self._create_initial_progress_intent(
+            session_link_delivery_attempt_id = (
+                await self._create_session_link_intent(
+                    session,
+                    request=request,
+                    connection=connection,
+                    routing=routing,
+                    binding=binding,
+                )
+                if initial_binding
+                else None
+            )
+            progress_delivery_attempt_id = await self._create_initial_progress_intent(
                 session,
                 request=request,
                 resource=routing.resource,
                 binding=binding,
                 work=work,
+            )
+            control_delivery_attempt_id = (
+                session_link_delivery_attempt_id or progress_delivery_attempt_id
             )
             locked_batch = await self.repository.lock_invocation_batch(
                 session,
@@ -635,6 +665,79 @@ class ExternalChannelDatabaseIngestionStore:
                     connection.id if control_delivery_attempt_id is not None else None
                 ),
             )
+
+    async def _create_session_link_intent(
+        self,
+        session: AsyncSession,
+        *,
+        request: ExternalChannelIngestionRequest,
+        connection: ExternalChannelConnection,
+        routing: _ResolvedRouting,
+        binding: ExternalChannelBinding,
+    ) -> str | None:
+        """Create the initial provider-native Session navigation control."""
+        workspace = await self.workspace_repository.get_by_id(
+            session,
+            connection.workspace_id,
+        )
+        if workspace is None:
+            raise RuntimeError("External Channel Workspace disappeared.")
+        session_url = _session_url(
+            self.config.web_url,
+            workspace.handle,
+            routing.route.require_active_agent_id(),
+            binding.agent_session_id,
+        )
+        if session_url is None:
+            raise RuntimeError("External Channel Session URL is unavailable.")
+        delivery_thread_key = request.locator.delivery_thread_key
+        if delivery_thread_key is None:
+            raise RuntimeError(
+                "External Channel Session navigation target is unavailable."
+            )
+        if request.locator.provider is ExternalChannelProvider.SLACK:
+            presentation = render_slack_session_link(session_url)
+            payload: dict[str, object] = {
+                "control_kind": "session_link",
+                "tenant_id": request.locator.provider_tenant_id,
+                "channel_id": request.locator.provider_channel_id,
+                "thread_ts": delivery_thread_key,
+                "text": presentation.text,
+                "blocks": presentation.blocks,
+            }
+        elif request.locator.provider is ExternalChannelProvider.DISCORD:
+            payload = {
+                "control_kind": "session_link",
+                "guild_id": request.locator.provider_tenant_id,
+                "channel_id": delivery_thread_key,
+                "text": "",
+                "components": _discord_link_button(
+                    label="Open Azents session",
+                    url=session_url,
+                ),
+            }
+        else:
+            raise RuntimeError("External Channel provider is not supported.")
+        attempt = await self.repository.create_delivery_attempt_idempotent(
+            session,
+            ExternalChannelDeliveryAttemptCreate(
+                origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                origin_id=binding.id,
+                channel_action_id=None,
+                binding_id=binding.id,
+                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                request_payload=payload,
+                status=ExternalChannelDeliveryStatus.PENDING,
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+                attempted_at=None,
+                completed_at=None,
+            ),
+        )
+        if attempt.status is ExternalChannelDeliveryStatus.PENDING:
+            return attempt.id
+        return None
 
     async def _create_initial_progress_intent(
         self,
@@ -986,6 +1089,32 @@ class ExternalChannelDatabaseIngestionStore:
         ):
             return None
         return _PendingSelection(resource=resource, admission=admission)
+
+    async def _pending_selection_accepts_author(
+        self,
+        session: AsyncSession,
+        *,
+        pending_selection: _PendingSelection,
+        author_type: ExternalChannelPrincipalAuthorType,
+    ) -> bool:
+        """Accept a selector only when at least one route admits its author."""
+        if author_type is ExternalChannelPrincipalAuthorType.HUMAN:
+            return True
+        if author_type is not ExternalChannelPrincipalAuthorType.BOT:
+            return False
+        principal_id = pending_selection.admission.initiating_principal_id
+        if principal_id is None:
+            return False
+        routes = await self.repository.list_routable_multi_catalog_routes(
+            session,
+            connection_id=pending_selection.admission.connection_id,
+            principal_id=principal_id,
+            author_type=author_type,
+            search=None,
+            offset=0,
+            limit=1,
+        )
+        return bool(routes)
 
     async def _create_binding(
         self,
@@ -1518,6 +1647,45 @@ def _approval_url(web_url: str, access_request_id: str) -> str | None:
     if not normalized:
         return None
     return f"{normalized}/external-channel/access/{access_request_id}"
+
+
+def _session_url(
+    web_url: str,
+    workspace_handle: str,
+    agent_id: str,
+    session_id: str,
+) -> str | None:
+    """Build one browser URL for the bound External Channel Session."""
+    normalized = web_url.rstrip("/")
+    if not normalized:
+        return None
+    return f"{normalized}/w/{workspace_handle}/agents/{agent_id}/sessions/{session_id}"
+
+
+def _route_accepts_author(
+    route: ExternalChannelAgentRoute,
+    author_type: ExternalChannelPrincipalAuthorType,
+) -> bool:
+    """Return whether the route admits this provider author class."""
+    if author_type is ExternalChannelPrincipalAuthorType.HUMAN:
+        return True
+    return (
+        author_type is ExternalChannelPrincipalAuthorType.BOT
+        and route.allow_bot_messages
+    )
+
+
+def _route_has_automatic_access(
+    route: ExternalChannelAgentRoute,
+    author_type: ExternalChannelPrincipalAuthorType,
+) -> bool:
+    """Return whether the route bypasses a per-principal grant."""
+    if author_type is ExternalChannelPrincipalAuthorType.HUMAN:
+        return route.open_access_enabled
+    return (
+        author_type is ExternalChannelPrincipalAuthorType.BOT
+        and route.allow_bot_messages
+    )
 
 
 def _render_discord_access_request_control(approval_url: str) -> str:
