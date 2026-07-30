@@ -12,6 +12,7 @@ import httpx
 from azents.services.external_channel.discord_endpoint import discord_api_base_url
 
 _DISCORD_NONCE_MAX_LENGTH = 25
+_DISCORD_MIN_AUTO_ARCHIVE_MINUTES = 60
 DISCORD_DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024
 DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES = 25 * 1024 * 1024
 
@@ -65,7 +66,10 @@ class DiscordDeliveryClient:
             "POST",
             f"/channels/{parent_channel_id}/messages/{root_message_id}/threads",
             bot_token=bot_token,
-            json_body={"name": "Azents"},
+            json_body={
+                "name": "Azents",
+                "auto_archive_duration": _DISCORD_MIN_AUTO_ARCHIVE_MINUTES,
+            },
         )
         if isinstance(response, DiscordDeliveryResult):
             result = response
