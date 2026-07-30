@@ -14,8 +14,6 @@ from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from azents.core.enums import (
-    ExternalChannelEventEligibilityState,
-    ExternalChannelEventStatus,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
     ExternalChannelPrincipalAuthorType,
@@ -27,9 +25,9 @@ from azents.core.external_channel_file import (
     MAX_EXTERNAL_CHANNEL_FILES,
 )
 from azents.repos.external_channel.data import (
-    ExternalChannelEventCreate,
     ExternalChannelInteractionCreate,
     ExternalChannelPrincipalCreate,
+    ExternalChannelTrigger,
 )
 from azents.services.external_channel.data import (
     ExternalChannelCapabilitySnapshot,
@@ -102,7 +100,20 @@ class SlackEventCallback:
 
     app_id: str
     tenant_id: str
-    event: ExternalChannelEventCreate
+    event: ExternalChannelTrigger
+
+
+def slack_event_is_normal_message_ingress(
+    event: ExternalChannelTrigger,
+) -> bool:
+    """Return whether quiesce should defer one new Slack message."""
+    if event.event_type == "app_mention":
+        return True
+    if event.event_type != "message":
+        return False
+    payload = event.envelope.get("event")
+    subtype = payload.get("subtype") if isinstance(payload, dict) else None
+    return subtype not in {"message_changed", "message_deleted"}
 
 
 @dataclass(frozen=True)
@@ -307,7 +318,7 @@ def parse_slack_callback(
     return SlackEventCallback(
         app_id=app_id,
         tenant_id=tenant_id,
-        event=ExternalChannelEventCreate(
+        event=ExternalChannelTrigger(
             connection_id=connection_id,
             provider_event_id=event_id,
             transport_envelope_id=event_id,
@@ -316,9 +327,7 @@ def parse_slack_callback(
             provider_tenant_id=tenant_id,
             provider_enterprise_id=provider_enterprise_id,
             resource_correlation_key=resource_correlation_key,
-            eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
             envelope=projected_payload,
-            status=ExternalChannelEventStatus.ACCEPTED,
             provider_occurred_at=occurred_at,
             received_at=received_at,
         ),
@@ -402,7 +411,7 @@ def project_slack_shortcut_source_event(
     payload: dict[str, object],
     provider_interaction_key: str,
     received_at: datetime.datetime,
-) -> ExternalChannelEventCreate:
+) -> ExternalChannelTrigger:
     """Project a verified message shortcut source into the canonical event inbox."""
     if _interaction_type(_required_string(payload, "type")) is not (
         ExternalChannelInteractionType.SHORTCUT
@@ -436,7 +445,7 @@ def project_slack_shortcut_source_event(
             else {}
         ),
     }
-    return ExternalChannelEventCreate(
+    return ExternalChannelTrigger(
         connection_id=connection_id,
         provider_event_id=f"shortcut-{provider_interaction_key}",
         transport_envelope_id=None,
@@ -445,9 +454,7 @@ def project_slack_shortcut_source_event(
         provider_tenant_id=tenant_id,
         provider_enterprise_id=None,
         resource_correlation_key=f"{channel_id}:{thread_ts}",
-        eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
         envelope={"event": source},
-        status=ExternalChannelEventStatus.ACCEPTED,
         provider_occurred_at=_provider_occurred_at_from_slack_ts(message_ts),
         received_at=received_at,
     )
@@ -459,7 +466,7 @@ def project_slack_shortcut_source_event_from_callback_body(
     raw_body: bytes,
     provider_interaction_key: str,
     received_at: datetime.datetime,
-) -> ExternalChannelEventCreate | None:
+) -> ExternalChannelTrigger | None:
     """Project a verified shortcut body, or return no source for other callbacks."""
     payload, is_interaction = _parse_callback_payload(raw_body)
     if not is_interaction:

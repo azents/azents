@@ -22,6 +22,9 @@ code_paths:
   - python/apps/azents/src/azents/engine/tools/**
   - python/apps/azents/src/azents/runtime/transfer/runtime_to_provider.py
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
+  - python/apps/azents/src/azents/services/external_channel/ingestion_store.py
+  - python/apps/azents/src/azents/services/mailbox.py
+  - python/apps/azents/src/azents/repos/external_channel/repository.py
   - python/apps/azents/src/azents/repos/external_channel/work.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - python/apps/azents/src/azents/engine/context/compaction.py
@@ -30,7 +33,6 @@ code_paths:
   - python/apps/azents/src/azents/engine/responses.py
   - python/apps/azents/src/azents/engine/events/**
   - python/apps/azents/src/azents/engine/hooks/**
-  - python/apps/azents/src/azents/engine/run/deps.py
   - python/apps/azents/src/azents/engine/run/resolve.py
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - python/apps/azents/src/azents/core/config.py
@@ -41,7 +43,6 @@ code_paths:
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/action_execution.py
   - python/apps/azents/src/azents/services/agent_runtime/**
-  - python/apps/azents/src/azents/services/input_buffer.py
   - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/services/agent_mailbox.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
@@ -76,8 +77,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-07-27
-spec_version: 135
+last_verified_at: 2026-07-30
+spec_version: 136
 ---
 
 # Agent Execution Loop
@@ -1154,14 +1155,21 @@ updated by the user.
 
 ## External Channel Inputs, Tools, and Continuation
 
-An External Channel wake-up references one immutable invocation batch. FIFO
-preparation resolves that batch into contiguous source-attributed
-`external_channel_message` events and associates them with the run before
-model dispatch. Lowering uses an explicit external-source envelope; it never
-presents the content as undifferentiated input from the current Web user. It
-preserves raw provider IDs in each message and appends one deterministic
-user/channel ID-to-display-name mapping table for the contiguous batch when
-the ingress adapter resolved mappings.
+Synchronous External Channel acceptance commits the immutable invocation batch and
+items, one `wake_session` mailbox item, the Session running transition, the
+conversation-position advance, and recoverable wake-dispatch state before the
+transport can report success. The post-commit broker signal contains only
+`session_id`; a duplicate callback recovers the same pending logical wake rather than
+creating another batch.
+
+FIFO preparation resolves the mailbox payload into contiguous source-attributed
+`external_channel_message` events and associates them with the run before model
+dispatch. The first event is a deterministic `system_reminder` when the provider
+history collector omitted earlier eligible context. Lowering uses an explicit
+external-source envelope; it never presents the content as undifferentiated input from
+the current Web user. It preserves raw provider IDs in each message and appends one
+deterministic user/channel ID-to-display-name mapping table for the contiguous batch
+when the history adapter resolved mappings.
 
 When an active binding exists, runtime adds the direct `channel_action` tool and
 the current binding/work snapshot. Normal assistant text is retained only in
@@ -1179,6 +1187,9 @@ with a channel/message icon rather than presenting it as Goal continuation.
 
 ## Changelog
 
+- **2026-07-30** (spec_version 136) — Documented synchronous External Channel
+  admission before transport success, atomic mailbox/position/wake state, duplicate
+  wake recovery, and omission-reminder promotion.
 - **2026-07-27** (spec_version 135) — Serialized terminal failure against durable Stop intent so
   an accepted `interrupt_agent` request cannot race into a failed child Run.
 - **2026-07-26** (spec_version 134) — Replaced the legacy `wait_agent` loop contract with the

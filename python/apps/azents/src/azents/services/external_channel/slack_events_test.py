@@ -1,5 +1,6 @@
 """Slack External Channel event normalization and API adapter tests."""
 
+import datetime
 import json
 from collections.abc import AsyncIterator
 from typing import Any
@@ -16,10 +17,19 @@ from azents.core.enums import (
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
 )
+from azents.services.external_channel.conversation import (
+    ExternalChannelHistoryDeadlineExceeded,
+    ExternalChannelHistoryMalformed,
+    ExternalChannelHistoryPositionInvalid,
+    ExternalChannelHistoryRateLimited,
+    ExternalChannelHistoryTriggerMissing,
+    ExternalChannelOperationDeadline,
+)
 from azents.services.external_channel.slack_endpoint import slack_api_base_url
 from azents.services.external_channel.slack_events import (
     SlackConnectionRevocation,
     SlackConversationClient,
+    SlackConversationHistoryTrigger,
     SlackEventExcluded,
     SlackInteractionView,
     SlackNormalizedMessage,
@@ -126,6 +136,26 @@ def _client(http_client: httpx.AsyncClient) -> SlackConversationClient:
 
 def _envelope(event: dict[str, object]) -> dict[str, object]:
     return {"event": event}
+
+
+def _history_message(
+    *,
+    timestamp: str,
+    user_id: str,
+    text: str | None = None,
+    app_id: str | None = None,
+) -> dict[str, object]:
+    message: dict[str, object] = {
+        "type": "message",
+        "channel": "C1",
+        "channel_type": "channel",
+        "user": user_id,
+        "ts": timestamp,
+        "text": text or f"message-{timestamp}",
+    }
+    if app_id is not None:
+        message["app_id"] = app_id
+    return message
 
 
 def test_normalizes_human_app_mention_as_authorized_invocation_candidate() -> None:
@@ -1792,3 +1822,357 @@ async def test_file_reply_completion_rejection_logs_safe_diagnostics(
     assert "confidential outbound message" not in caplog.text
     assert "private file content" not in caplog.text
     assert "private-report.txt" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_read_range_orders_messages_and_excludes_connected_app_before_bound() -> (
+    None
+):
+    """Slack ranges retain the newest twenty eligible messages in provider order."""
+    raw_messages = [
+        _history_message(
+            timestamp=f"100.{index:06d}",
+            user_id="B1" if index == 1 else f"U{index}",
+            app_id="A1" if index == 1 else None,
+        )
+        for index in range(22, 0, -1)
+    ]
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(200, json={"ok": True, "messages": raw_messages})
+
+    deadline = ExternalChannelOperationDeadline(
+        datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=1)
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await _client(client).read_range(
+            trigger=SlackConversationHistoryTrigger(
+                tenant_id="T1",
+                channel_id="C1",
+                trigger_message_ts="100.000022",
+                root_thread_ts=None,
+                connected_bot_user_id="B1",
+                connected_app_id="A1",
+            ),
+            bot_token="xoxb-secret",
+            exclusive_start_position=None,
+            deadline=deadline,
+        )
+
+    assert result.context_omitted is True
+    assert len(result.messages) == 20
+    assert result.messages[0].message_ts == "100.000003"
+    assert result.messages[-1].message_ts == "100.000022"
+    assert all(message.provider_user_id != "bot:B1" for message in result.messages)
+    assert [message.provider_position for message in result.messages] == sorted(
+        message.provider_position for message in result.messages
+    )
+    assert result.scanned_message_count == 21
+
+
+@pytest.mark.asyncio
+async def test_read_range_continues_after_connected_identity_dominated_page() -> None:
+    """Connected App messages do not make an otherwise incomplete range terminal."""
+    first_page = [
+        _history_message(timestamp="100.000200", user_id="U-trigger"),
+        *[
+            _history_message(
+                timestamp=f"100.{index:06d}",
+                user_id="B1",
+                app_id="A1",
+            )
+            for index in range(199, 100, -1)
+        ],
+    ]
+    second_page = [
+        _history_message(timestamp=f"100.{index:06d}", user_id=f"U{index}")
+        for index in range(100, 79, -1)
+    ]
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if request.url.params.get("cursor") is None:
+            return httpx.Response(
+                200,
+                json={
+                    "ok": True,
+                    "messages": first_page,
+                    "response_metadata": {"next_cursor": "next"},
+                },
+            )
+        return httpx.Response(200, json={"ok": True, "messages": second_page})
+
+    deadline = ExternalChannelOperationDeadline(
+        datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=1)
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await _client(client).read_range(
+            trigger=SlackConversationHistoryTrigger(
+                tenant_id="T1",
+                channel_id="C1",
+                trigger_message_ts="100.000200",
+                root_thread_ts=None,
+                connected_bot_user_id="B1",
+                connected_app_id="A1",
+            ),
+            bot_token="xoxb-secret",
+            exclusive_start_position=None,
+            deadline=deadline,
+        )
+
+    assert len(calls) == 2
+    assert calls[1].url.params["cursor"] == "next"
+    assert result.context_omitted is True
+    assert len(result.messages) == 20
+    assert result.messages[-1].message_ts == "100.000200"
+    assert all(message.provider_user_id != "bot:B1" for message in result.messages)
+
+
+@pytest.mark.asyncio
+async def test_read_range_applies_exclusive_start_and_requires_trigger() -> None:
+    """Slack ranges exclude the cursor and include the exact trigger."""
+    raw_messages = [
+        _history_message(timestamp="100.000003", user_id="U3"),
+        _history_message(timestamp="100.000002", user_id="U2"),
+        _history_message(timestamp="100.000001", user_id="U1"),
+    ]
+
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"ok": True, "messages": raw_messages})
+
+    deadline = ExternalChannelOperationDeadline(
+        datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=1)
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await _client(client).read_range(
+            trigger=SlackConversationHistoryTrigger(
+                tenant_id="T1",
+                channel_id="C1",
+                trigger_message_ts="100.000003",
+                root_thread_ts=None,
+                connected_bot_user_id="B1",
+                connected_app_id=None,
+            ),
+            bot_token="xoxb-secret",
+            exclusive_start_position=slack_provider_position("100.000001"),
+            deadline=deadline,
+        )
+
+    assert [message.message_ts for message in result.messages] == [
+        "100.000002",
+        "100.000003",
+    ]
+    assert calls[0].url.params["oldest"] == "100.000001"
+    assert calls[0].url.params["latest"] == "100.000003"
+    assert calls[0].headers["Authorization"] == "Bearer xoxb-secret"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("root_thread_ts", "raw_scope"),
+    [
+        (None, {"channel": "C-other"}),
+        ("100.000001", {"thread_ts": "100.999999"}),
+    ],
+)
+async def test_read_range_rejects_cross_conversation_items(
+    root_thread_ts: str | None,
+    raw_scope: dict[str, object],
+) -> None:
+    """Slack range items must retain the requested channel and thread identity."""
+    raw_message = _history_message(timestamp="100.000003", user_id="U3")
+    raw_message.update(raw_scope)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(200, json={"ok": True, "messages": [raw_message]})
+
+    deadline = ExternalChannelOperationDeadline(
+        datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=1)
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ExternalChannelHistoryMalformed):
+            await _client(client).read_range(
+                trigger=SlackConversationHistoryTrigger(
+                    tenant_id="T1",
+                    channel_id="C1",
+                    trigger_message_ts="100.000003",
+                    root_thread_ts=root_thread_ts,
+                    connected_bot_user_id=None,
+                    connected_app_id=None,
+                ),
+                bot_token="xoxb-secret",
+                exclusive_start_position=None,
+                deadline=deadline,
+            )
+
+
+@pytest.mark.asyncio
+async def test_thread_range_sends_oldest_latest_boundaries() -> None:
+    """Slack thread reads bound every request to the requested range."""
+    raw_messages = [
+        {
+            **_history_message(timestamp="100.000003", user_id="U3"),
+            "thread_ts": "100.000000",
+        },
+        {
+            **_history_message(timestamp="100.000002", user_id="U2"),
+            "thread_ts": "100.000000",
+        },
+    ]
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"ok": True, "messages": raw_messages})
+
+    deadline = ExternalChannelOperationDeadline(
+        datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=1)
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        await _client(client).read_range(
+            trigger=SlackConversationHistoryTrigger(
+                tenant_id="T1",
+                channel_id="C1",
+                trigger_message_ts="100.000003",
+                root_thread_ts="100.000000",
+                connected_bot_user_id=None,
+                connected_app_id=None,
+            ),
+            bot_token="xoxb-secret",
+            exclusive_start_position=slack_provider_position("100.000001"),
+            deadline=deadline,
+        )
+
+    assert calls[0].url.path.endswith("/conversations.replies")
+    assert calls[0].url.params["oldest"] == "100.000001"
+    assert calls[0].url.params["latest"] == "100.000003"
+
+
+@pytest.mark.asyncio
+async def test_read_range_maps_invalid_start_position() -> None:
+    """Slack timestamps use the typed invalid-position failure."""
+    deadline = ExternalChannelOperationDeadline(
+        datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=1)
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(500))
+    ) as client:
+        with pytest.raises(ExternalChannelHistoryPositionInvalid):
+            await _client(client).read_range(
+                trigger=SlackConversationHistoryTrigger(
+                    tenant_id="T1",
+                    channel_id="C1",
+                    trigger_message_ts="100.000003",
+                    root_thread_ts=None,
+                    connected_bot_user_id=None,
+                    connected_app_id=None,
+                ),
+                bot_token="xoxb-secret",
+                exclusive_start_position="not-a-slack-position",
+                deadline=deadline,
+            )
+
+
+@pytest.mark.asyncio
+async def test_read_range_checks_expired_deadline_before_request() -> None:
+    """An expired range budget does not construct a Slack request."""
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        raise AssertionError("expired history must not reach the provider")
+
+    deadline = ExternalChannelOperationDeadline(
+        datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=1)
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ExternalChannelHistoryDeadlineExceeded):
+            await _client(client).read_range(
+                trigger=SlackConversationHistoryTrigger(
+                    tenant_id="T1",
+                    channel_id="C1",
+                    trigger_message_ts="100.000003",
+                    root_thread_ts=None,
+                    connected_bot_user_id=None,
+                    connected_app_id=None,
+                ),
+                bot_token="xoxb-secret",
+                exclusive_start_position=None,
+                deadline=deadline,
+            )
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_read_range_maps_provider_rate_limit() -> None:
+    """Slack range provider failures retain the typed retry classification."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(
+            429,
+            json={"ok": False, "error": "ratelimited"},
+            headers={"Retry-After": "2"},
+        )
+
+    deadline = ExternalChannelOperationDeadline(
+        datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=1)
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ExternalChannelHistoryRateLimited) as raised:
+            await _client(client).read_range(
+                trigger=SlackConversationHistoryTrigger(
+                    tenant_id="T1",
+                    channel_id="C1",
+                    trigger_message_ts="100.000003",
+                    root_thread_ts=None,
+                    connected_bot_user_id=None,
+                    connected_app_id=None,
+                ),
+                bot_token="xoxb-secret",
+                exclusive_start_position=None,
+                deadline=deadline,
+            )
+
+    assert raised.value.retry_after_seconds == 2
+
+
+@pytest.mark.asyncio
+async def test_read_range_maps_missing_trigger() -> None:
+    """Slack history without the exact trigger is rejected."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "messages": [_history_message(timestamp="100.000001", user_id="U1")],
+            },
+        )
+
+    deadline = ExternalChannelOperationDeadline(
+        datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=1)
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ExternalChannelHistoryTriggerMissing):
+            await _client(client).read_range(
+                trigger=SlackConversationHistoryTrigger(
+                    tenant_id="T1",
+                    channel_id="C1",
+                    trigger_message_ts="100.000002",
+                    root_thread_ts=None,
+                    connected_bot_user_id="B1",
+                    connected_app_id=None,
+                ),
+                bot_token="xoxb-secret",
+                exclusive_start_position=None,
+                deadline=deadline,
+            )

@@ -1,4 +1,4 @@
-"""Slack Socket Mode primitives for durable External Channel event admission."""
+"""Slack Socket Mode primitives for synchronous External Channel handoff."""
 
 import asyncio
 import dataclasses
@@ -16,7 +16,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from azents.core.enums import ExternalChannelInteractionType
-from azents.repos.external_channel.data import ExternalChannelEventCreate
+from azents.repos.external_channel.data import ExternalChannelTrigger
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
 )
@@ -57,6 +57,10 @@ class SlackSocketInvalidEnvelope(SlackSocketError):
     """A Socket Mode message is malformed or cannot be admitted."""
 
 
+class SlackSocketRetryableIngestion(SlackSocketError):
+    """A message envelope must remain unacknowledged for provider redelivery."""
+
+
 @dataclass(frozen=True)
 class SlackSocketConnectionOpen:
     """One short-lived Socket Mode endpoint minted by Slack."""
@@ -82,13 +86,11 @@ class SlackSocketConnectionResult:
     admitted_event_count: int
 
 
-type SlackSocketEventAdmission = Callable[
-    [ExternalChannelEventCreate], Awaitable[object]
-]
+type SlackSocketEventAdmission = Callable[[ExternalChannelTrigger], Awaitable[object]]
 type SlackSocketInteractionAdmission = Callable[
     [
         SlackInteractionCallback,
-        ExternalChannelEventCreate | None,
+        ExternalChannelTrigger | None,
     ],
     Awaitable[ExternalChannelInteractionHandoff | None],
 ]
@@ -209,7 +211,7 @@ class SlackSocketWebAPIClient:
 
 
 class SlackSocketModeRunner:
-    """Admit Socket Mode callbacks durably before acknowledging their envelopes."""
+    """Complete Socket Mode callbacks before acknowledging their envelopes."""
 
     def __init__(
         self,

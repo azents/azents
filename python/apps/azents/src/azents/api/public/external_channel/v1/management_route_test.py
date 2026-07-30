@@ -943,7 +943,6 @@ def test_multi_connection_impact_returns_generation_fenced_preview() -> None:
             bound_resource_count=0,
             open_admission_count=0,
             pending_access_request_count=0,
-            pending_context_count=0,
             affected_defaults=(),
             affected_bindings=(),
         )

@@ -6,6 +6,13 @@ from collections.abc import Awaitable, Callable
 from typing import Literal, Protocol, TypeGuard
 
 import discord
+from discord.gateway import DiscordWebSocket
+from discord.http import Route
+
+from azents.services.external_channel.discord_endpoint import (
+    discord_api_base_url,
+    discord_gateway_url,
+)
 
 DISCORD_GATEWAY_INTENTS = 1 | 512 | 32768
 
@@ -197,6 +204,10 @@ class DiscordGatewayClient:
         """Let discord.py own discovery, heartbeat, reconnect, and Resume."""
         if not target_guild_id.isdigit():
             raise DiscordGatewayError("Discord Guild identity is invalid.")
+        Route.BASE = discord_api_base_url()
+        DiscordWebSocket.DEFAULT_GATEWAY = type(DiscordWebSocket.DEFAULT_GATEWAY)(
+            discord_gateway_url()
+        )
         client = _DiscordLibraryClient(
             target_guild_id=int(target_guild_id),
             handle_event=handle_event,

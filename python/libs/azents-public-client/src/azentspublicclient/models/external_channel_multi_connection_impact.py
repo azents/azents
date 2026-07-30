@@ -37,11 +37,10 @@ class ExternalChannelMultiConnectionImpact(BaseModel):
     bound_resource_count: StrictInt
     open_admission_count: StrictInt
     pending_access_request_count: StrictInt
-    pending_context_count: StrictInt
     affected_defaults: List[ExternalChannelMultiImpactDefault]
     affected_bindings: List[ExternalChannelMultiImpactBinding]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["connection_id", "generation", "active_route_count", "active_default_count", "active_binding_count", "bound_resource_count", "open_admission_count", "pending_access_request_count", "pending_context_count", "affected_defaults", "affected_bindings"]
+    __properties: ClassVar[List[str]] = ["connection_id", "generation", "active_route_count", "active_default_count", "active_binding_count", "bound_resource_count", "open_admission_count", "pending_access_request_count", "affected_defaults", "affected_bindings"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -123,7 +122,6 @@ class ExternalChannelMultiConnectionImpact(BaseModel):
             "bound_resource_count": obj.get("bound_resource_count"),
             "open_admission_count": obj.get("open_admission_count"),
             "pending_access_request_count": obj.get("pending_access_request_count"),
-            "pending_context_count": obj.get("pending_context_count"),
             "affected_defaults": [ExternalChannelMultiImpactDefault.from_dict(_item) for _item in obj["affected_defaults"]] if obj.get("affected_defaults") is not None else None,
             "affected_bindings": [ExternalChannelMultiImpactBinding.from_dict(_item) for _item in obj["affected_bindings"]] if obj.get("affected_bindings") is not None else None
         })

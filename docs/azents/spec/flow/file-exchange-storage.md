@@ -6,8 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [agent, conversation, workspace, toolkit]
 code_paths:
-  - python/apps/azents/db-schemas/rdb/migrations/versions/374a722fb9ee_add_exchange_file_provenance.py
-  - python/apps/azents/db-schemas/rdb/migrations/versions/8fae7b9ab00a_add_model_file_run_lineage.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/b6088a911203_add_provider_output_provenance.py
   - python/apps/azents/src/azents/core/vfs.py
   - python/apps/azents/src/azents/runtime/transfer/**
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
@@ -17,7 +16,7 @@ code_paths:
   - python/apps/azents/src/azents/services/artifact.py
   - python/apps/azents/src/azents/services/model_file.py
   - python/apps/azents/src/azents/services/session_resource_authority.py
-  - python/apps/azents/src/azents/services/input_buffer.py
+  - python/apps/azents/src/azents/services/agent_session_input.py
   - python/apps/azents/src/azents/services/vfs.py
   - python/apps/azents/src/azents/repos/artifact/**
   - python/apps/azents/src/azents/repos/model_file/**
@@ -53,7 +52,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-07-30
-spec_version: 34
+spec_version: 35
 ---
 
 # File Exchange Storage
@@ -264,7 +263,10 @@ lifetime. Object existence alone never creates Exchange publication authority.
 
 ## Changelog
 
-- **2026-07-30** — v34. Moved Runtime image materialization and Agent Workspace complete downloads onto verified Runtime-to-server transfer objects; bounded text reads use direct strict-decoded Control text rather than Base64 chunks.
+- **2026-07-30** — v34. Reverified the External Channel locator, authority
+  revalidation, verified Runtime transfer, provider settlement, and no-durable-body
+  boundaries after synchronous ingress contraction; no semantic change.
+- **2026-07-30** — v35. Moved Runtime image materialization and Agent Workspace complete downloads onto verified Runtime-to-server transfer objects; bounded text reads use direct strict-decoded Control text rather than Base64 chunks.
 - **2026-07-28** — v33. Clarified `present_file` recovery after empty volatile transfer
   state and state-independent one-hour orphan cleanup without reviving S3 objects.
 - **2026-07-28** — v32. Promoted the common Runtime File Transfer behavior for

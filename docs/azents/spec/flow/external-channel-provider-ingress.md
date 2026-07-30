@@ -27,7 +27,15 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/discord_selector.py
   - python/apps/azents/src/azents/services/external_channel/access.py
   - python/apps/azents/src/azents/core/external_channel_file.py
-  - python/apps/azents/src/azents/services/external_channel/event_processor.py
+  - python/apps/azents/src/azents/services/external_channel/conversation.py
+  - python/apps/azents/src/azents/services/external_channel/conversation_lock.py
+  - python/apps/azents/src/azents/services/external_channel/ingestion.py
+  - python/apps/azents/src/azents/services/external_channel/ingestion_history.py
+  - python/apps/azents/src/azents/services/external_channel/ingestion_replay.py
+  - python/apps/azents/src/azents/services/external_channel/ingestion_store.py
+  - python/apps/azents/src/azents/services/external_channel/transport_ingestion.py
+  - python/apps/azents/src/azents/services/external_channel/connection_revocation.py
+  - python/apps/azents/src/azents/services/external_channel/provider_control.py
   - python/apps/azents/src/azents/services/root_agent_session_creation/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/services/external_channel/provider.py
@@ -39,8 +47,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-07-29
-spec_version: 17
+last_verified_at: 2026-07-30
+spec_version: 18
 ---
 
 # External Channel Provider Ingress
@@ -67,17 +75,23 @@ Slack sends HTTP callbacks to the single fixed endpoint
    exactly one active or degraded HTTP connection.
 4. The adapter validates Slack timestamp freshness and the raw-body HMAC signature
    against that candidate's encrypted Signing Secret.
-5. The fully parsed event identity must match the selected connection before the raw
-   provider event is persisted idempotently.
-6. Success is acknowledged only after durable admission. Admission does not decrypt
-   provider content into domain rows, hydrate history, authorize a participant,
-   create an AgentSession, wake an Agent, or call a provider mutation API.
+5. The fully parsed event identity must match the selected connection before the
+   authenticated request is projected into a typed, content-free trigger locator.
+6. Original message triggers enter synchronous conversation ingestion. Provider
+   history is read, and durable Session input, wake state, and provider-control intent
+   are committed before acknowledgement. Any returned control delivery is scheduled
+   as a post-acknowledgement background attempt.
+7. Success is acknowledged only for a completed non-retryable outcome. A retryable
+   coordination, history, position, or wake failure remains unacknowledged so the
+   provider may retry.
 
 Payload App/Team identity is an index key, not authentication. Missing, unknown, or
 ambiguous candidates fail closed, and ordinary events never pass admission without
 successful HMAC verification.
 
-Duplicate `(connection_id, provider_event_id)` callbacks reuse the admitted event and still receive a successful acknowledgement.
+Duplicate callbacks converge through conversation position and immutable
+binding/trigger batch identity and still receive a successful acknowledgement after
+any pending wake is recovered.
 
 ## Discord Interaction Admission
 
@@ -127,7 +141,11 @@ and one admission can select at most once.
 
 ## Socket Mode Admission
 
-A connection-selected Socket worker acquires a fenced lease before opening `apps.connections.open` with the app-level token. The WebSocket client admits Events API envelopes through the same durable admission service and sends the exact envelope acknowledgement only after admission returns. Failed admission remains unacknowledged.
+A connection-selected Socket worker acquires a fenced lease before opening
+`apps.connections.open` with the app-level token. The WebSocket client projects Events
+API envelopes through the same synchronous typed ingestion service and sends the exact
+envelope acknowledgement only after the service returns a non-retryable outcome.
+Retryable ingestion remains unacknowledged.
 
 Endpoint minting uses the public high-level `AsyncWebClient.apps_connections_open`
 method with SDK retries disabled. Each minted endpoint is assigned to a public aiohttp
@@ -168,10 +186,10 @@ identity through public `Client.get_channel` and `Client.fetch_channel` methods.
 Callbacks are serialized per connection, and a callback failure closes the high-level
 client so it cannot be logged and ignored while the lease continues.
 
-The Worker accepts only eligible target-Guild message callbacks. Canonical event
-identity derives from message lifecycle, Guild, channel, and message identity; update
-identity additionally includes a bounded typed-projection fingerprint. Provider event
-idempotency and the current lease/configuration/App-claim fence protect durable
+The Worker accepts only eligible target-Guild message-create callbacks for normal
+conversation ingestion. Typed update/delete callbacks do not create or rewrite Session
+input. Message-create identity derives from Guild, channel, thread, and message
+identity; the current lease/configuration/App-claim fence protects synchronous
 admission without exposing Gateway transport state.
 
 Credential failures and Gateway outcomes that cannot reconnect terminalize the current
@@ -183,83 +201,72 @@ network failures retain the normal gap-and-retry behavior.
 Production Gateway transport is selected and validated by `discord.py`; Azents does
 not provide a custom Gateway endpoint override.
 
-## Asynchronous Processing
+## Synchronous Conversation Ingestion
 
-The worker claims admitted events in bounded batches with a claim owner and expiry. Processing is at-least-once and every canonical insert/update is idempotent.
+Normal Slack HTTP, Slack Socket Mode, and Discord Gateway message-create callbacks use
+one provider-neutral synchronous service under a shared absolute transport deadline.
+The authenticated callback contributes only a typed trigger locator, conversation
+scope, and current configuration or lease authority. Raw callback content is neither
+the canonical message source nor a durable queue item.
 
-- The processor supervises each event-claim and waiting-binding reconciliation
-  iteration. Unexpected iteration failures are logged, followed by the normal idle
-  poll, and then retried by the still-live loop. Cancellation and shutdown continue
-  through the existing task lifecycle.
-- Provider health failures and token revocation update connection health without
-  changing route catalog state, bindings, or work.
-- Every event-persistence and hydration-page transaction locks its `active` or
-  `degraded` connection before route, resource, admission, and binding state. This
-  common order serializes disconnect, route/default mutation, selection, and binding
-  activation rather than allowing them to commit across one another.
-- App uninstall terminalizes provider resources and credentials while preserving the
-  route catalog for later reconfiguration.
-- Eligible invocation messages validate channel membership and Slack Connect/DM exclusion before creating a tracked resource.
-- An existing active binding always wins. Otherwise Single uses its sole route,
-  Multi uses one valid channel default, and unresolved Multi traffic waits for
-  explicit selection. Empty, removed, stale, or ambiguous catalogs never fall back
-  to an arbitrary Agent.
-- Unlinked ordinary messages wait briefly for an out-of-order correlated mention, then become ignored rather than creating a resource.
-- Messages authored by the configured Slack App or bot are ignored during ordinary event processing and history hydration, preventing provider output from re-entering Agent context.
-- Canonical principals, messages, revisions, and pending context are stored before access decisions.
-- An eligible Discord mention uses the same durable route, admission, pending-context,
-  block, grant, binding, invocation-batch, and mailbox boundaries as Slack. A Discord
-  principal remains provider provenance and access-policy subject matter only; it is
-  never inferred to be an Azents User.
-- A granted Discord mention creates or reuses a `waiting_hydration` binding. It does
-  not release retained context, create initial Session/progress delivery, or wake the
-  Session until bounded Discord history reconciliation reaches its persisted event
-  boundary. Selector and approval-created Discord bindings start the same hydration
-  path during waiting-binding reconciliation.
-- An ungranted Discord mention creates the durable access request and its
-  provider-visible approval control without waking a Session. Allow releases the
-  retained source message through the same invocation batch and mailbox boundary;
-  block, revocation, or denial never release new input.
-- When an eligible principal already has an Agent-scoped grant and the resource has
-  no active binding, initial binding creation uses the shared root Session boundary
-  to snapshot the Agent's current automatic Project policy into a new root
-  `SessionAgentContext`. An existing binding is returned unchanged and retains its
-  prior snapshot.
-- Slack message normalization prefers non-blank provider fallback text. When it is absent, HTTP and Socket ingestion derive the same bounded readable body from supported section, header, context, and rich-text elements. User and channel elements retain reference syntax, unsupported elements contribute no text, and edit revision identity uses the resulting normalized body.
-- Ingestion enriches revisions with bounded sender, mentioned-user, current-channel,
-  thread, and parent-channel reference mappings when provider identity is available.
-  The mapping's model-visible size participates in pending-context trimming. Missing
-  optional display identity leaves canonical provider IDs and messages intact.
-- Slack permalink resolution is optional and occurs outside the persistence
-  transaction. Controlled Slack failures leave `original_url` null and do not hide the
-  message. Discord derives its canonical message link only from validated Guild,
-  channel, and message snowflakes.
-- First invocation starts provider-dispatched bounded hydration. Slack reads
-  `conversations.replies`; Discord reads only the canonical root source when no thread
-  exists and pages an existing thread backward by message cursor. Both normalize pages
-  into the same canonical message/revision identities and update the high-watermark and
-  event boundary without persisting raw REST pages, tokens, or attachment URLs.
-- Slack validation, hydration, metadata, interaction, message, and upload-completion
-  operations use public high-level `AsyncWebClient` methods with SDK retries disabled.
-  Direct HTTP remains limited to authenticated private-file streaming and presigned
-  upload-body transfer, which are binary transport boundaries rather than Slack Web
-  API calls.
-- If routing becomes unavailable after hydration starts, hydration completes as
-  `incomplete` with a routing-unavailable error rather than remaining `running`.
-- Rate limits and temporary read failures defer the event with bounded retry timing.
-  Invalid credentials and missing Slack scopes require reconnect but preserve routing.
-  Lost resource access marks hydration incomplete and terminalizes the resource.
+1. The service acquires the configured ephemeral lock for the parent-channel or thread
+   scope. In-memory locks coordinate one process. Redis locks coordinate replicas and
+   use owner-token fencing; Redis unavailability is a retryable failure and never
+   switches implicitly to memory.
+2. A short preparation transaction revalidates ingress authority, creates or reads the
+   PostgreSQL conversation position, resolves existing binding/admission state, and
+   returns the exclusive provider-history start position. It performs no provider I/O.
+3. The provider adapter reads an exclusive-start, inclusive-trigger history range
+   outside any database transaction. It retains the newest 20 eligible visible
+   messages and records one leading omission reminder when earlier eligible context
+   was omitted. The connected Azents App/Bot is excluded; raw REST pages, callbacks,
+   tokens, private URLs, and attachment bodies are not retained.
+4. A short final transaction locks and revalidates the same authority, conversation
+   position, resource, route, binding/admission, and access boundary. PostgreSQL
+   compare-and-set restarts the read when another replica advanced the position.
+5. The transaction persists canonical provider-history messages and immutable accepted
+   revisions, creates or reuses the active binding and root Session, records immutable
+   invocation-batch membership, enqueues one wake-session mailbox item, establishes
+   initial Channel Work and provider-control intents, marks the Session running,
+   advances the position, and records recoverable wake-dispatch state atomically.
+6. After commit, the service claims the wake intent, sends routing-only
+   `SessionWakeUp(session_id)`, and marks dispatch complete. A crash or broker failure
+   resets or preserves recoverable state so duplicate transport delivery can complete
+   the same logical wake without creating another batch.
 
-Slack and Discord activation wait until hydration is terminal and every correlated
-event through the persisted boundary is terminal. This prevents out-of-order or
-post-trigger/pre-activation message loss. After that fence, retained context, the
-active binding, invocation batch, mailbox item, Session navigation, and initial work
-projection commit before the post-commit wake-up.
+An existing active binding wins route resolution. Otherwise Single uses its sole
+route, Multi uses one valid channel default, and unresolved Multi traffic creates an
+immutable selection boundary. Empty, removed, stale, or ambiguous catalogs never fall
+back to an arbitrary Agent. An already-granted first invocation snapshots the Agent's
+current automatic Project policy through the shared root Session creation boundary;
+an existing binding keeps its prior snapshot.
+
+Restricted access persists the trigger source plus immutable conversation-position,
+range-start, and trigger-position replay authority and commits an approval-control
+intent without waking a Session. Allow invokes the same synchronous ingestion service
+with that durable replay boundary. Replay works whether the shared position is still
+before the trigger or has advanced, and converges on one batch and mailbox identity.
+Deny, block, revocation, malformed triggers, and non-invoking edit/delete callbacks
+never release new Session input.
+
+Slack message normalization prefers non-blank provider fallback text and otherwise
+derives bounded readable content from supported Block Kit elements. Discord uses its
+typed SDK projection. Bounded identity mappings, provider links, and metadata-only file
+entries are derived by the history adapter. Slack provider operations use public
+high-level `AsyncWebClient` methods with retries disabled; direct HTTP remains limited
+to authenticated private-file streaming and presigned upload bodies.
+
+Authenticated Slack App uninstall and token revocation bypass normal message
+ingestion and directly apply fenced connection lifecycle handling. Provider-history,
+coordination, position, or wake failures return a retryable transport outcome. Invalid
+or stale authority and malformed replay boundaries fail closed. Committed selector,
+approval, Session-link, and initial progress controls are attempted after commit
+through the shared provider-control delivery fence.
 
 ## File Metadata Projection
 
-HTTP callbacks, Socket Mode envelopes, and `conversations.replies` hydration project the
-same bounded Slack `files[]` metadata. At most 20 entries are retained. Text fields are
+Slack HTTP, Socket Mode, and provider-history projection use the same bounded Slack
+`files[]` metadata. At most 20 entries are retained. Text fields are
 bounded, malformed or truncated items fail closed, and no private URL or file body enters
 the canonical revision or Agent context.
 
@@ -290,6 +297,11 @@ into application logs.
 
 ## Changelog
 
+- **2026-07-30** (spec_version 18) — Replaced durable event admission,
+  background processing, hydration, pending context, and waiting activation with
+  synchronous typed message ingestion, provider-history authority, PostgreSQL
+  conversation positions, atomic mailbox/wake admission, immutable replay, and direct
+  lifecycle control handling.
 - **2026-07-29** (spec_version 17) — Replaced the custom Slack WebSocket transport
   with the public aiohttp SDK Socket Mode client while preserving Azents-owned lease,
   durable admission-before-acknowledgement, reconnect decisions, and sanitized

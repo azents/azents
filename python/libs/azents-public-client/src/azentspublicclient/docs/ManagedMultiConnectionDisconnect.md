@@ -12,7 +12,6 @@ Name | Type | Description | Notes
 **expired_access_request_count** | **int** |  | 
 **unavailable_resource_count** | **int** |  | 
 **disconnected_binding_count** | **int** |  | 
-**deleted_pending_context_count** | **int** |  | 
 
 ## Example
 

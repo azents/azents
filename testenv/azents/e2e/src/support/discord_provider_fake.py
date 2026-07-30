@@ -602,6 +602,31 @@ class FakeState:
             )
             return list(self.gateway_dispatches), self.gateway_scenarios[scenario_index]
 
+    def gateway_ready_payload(self) -> dict[str, object]:
+        """Return the bounded identity projection required by discord.py READY."""
+        with self.lock:
+            return {
+                "session_id": "discord-e2e-session",
+                "resume_gateway_url": "ws://discord-fake:8086",
+                "user": {
+                    "id": self.bot_user_id,
+                    "username": "Azents",
+                    "discriminator": "0",
+                    "avatar": None,
+                    "bot": True,
+                },
+                "application": {
+                    "id": self.application_id,
+                    "flags": 0,
+                },
+                "guilds": [
+                    {
+                        "id": self.guild_id,
+                        "unavailable": True,
+                    }
+                ],
+            }
+
     def gateway_heartbeat(self, sequence: int | None) -> None:
         """Record heartbeat sequence only."""
         with self.lock:
@@ -675,6 +700,17 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 200,
                 {
                     "id": self.state.application_id,
+                    "name": "Azents E2E",
+                    "description": "Deterministic external-channel provider fake.",
+                    "icon": None,
+                    "bot_public": False,
+                    "bot_require_code_grant": False,
+                    "owner": {
+                        "id": self.state.bot_user_id,
+                        "username": "Azents",
+                        "discriminator": "0",
+                        "avatar": None,
+                    },
                     "verify_key": self.state.verify_key,
                 },
             )
@@ -682,12 +718,33 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
         if parsed.path == f"{_API_PREFIX}/users/@me":
             if self._controlled_response(self._operation("get_current_bot_user")):
                 return
-            self._json_response(200, {"id": self.state.bot_user_id})
+            self._json_response(
+                200,
+                {
+                    "id": self.state.bot_user_id,
+                    "username": "Azents",
+                    "discriminator": "0",
+                    "avatar": None,
+                    "bot": True,
+                },
+            )
             return
         if parsed.path == f"{_API_PREFIX}/gateway/bot":
             if self._controlled_response(self._operation("gateway_discovery")):
                 return
-            self._json_response(200, {"url": self.state.gateway_url})
+            self._json_response(
+                200,
+                {
+                    "url": self.state.gateway_url,
+                    "shards": 1,
+                    "session_start_limit": {
+                        "total": 1000,
+                        "remaining": 999,
+                        "reset_after": 0,
+                        "max_concurrency": 1,
+                    },
+                },
+            )
             return
         if parsed.path.startswith(f"{_API_PREFIX}/guilds/") and parsed.path.endswith(
             "/members/@me"
@@ -1478,15 +1535,21 @@ class DiscordWebSocketHandler(socketserver.BaseRequestHandler):
             ).encode()
         )
         _send_websocket_text(self.request, {"op": 10, "d": {"heartbeat_interval": 500}})
-        try:
-            initial = _receive_websocket_json(self.request)
-        except ConnectionError:
-            return
-        except ValueError:
-            return
-        opcode = initial.get("op")
-        if not isinstance(opcode, int):
-            return
+        while True:
+            try:
+                initial = _receive_websocket_json(self.request)
+            except ConnectionError:
+                return
+            except ValueError:
+                return
+            opcode = initial.get("op")
+            if not isinstance(opcode, int):
+                return
+            if opcode != 1:
+                break
+            sequence = initial.get("d")
+            STATE.gateway_heartbeat(sequence if isinstance(sequence, int) else None)
+            _send_websocket_text(self.request, {"op": 11, "d": None})
         dispatches, scenario = STATE.gateway_start(opcode)
         if opcode == 6:
             _send_websocket_text(
@@ -1500,10 +1563,7 @@ class DiscordWebSocketHandler(socketserver.BaseRequestHandler):
                     "op": 0,
                     "s": 1,
                     "t": "READY",
-                    "d": {
-                        "session_id": "discord-e2e-session",
-                        "resume_gateway_url": "ws://discord-fake:8086",
-                    },
+                    "d": STATE.gateway_ready_payload(),
                 },
             )
         else:

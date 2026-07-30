@@ -1126,8 +1126,6 @@
         "cancel": "Cancel",
         "connectedAt": "Connected",
         "latestActivity": "Latest activity",
-        "retainedContext": "Pending-context truncation",
-        "truncationSummary": "{messages} messages · {bytes} bytes removed",
         "disconnectReason": "Disconnect reason",
         "channelWork": "Channel Work",
         "noWork": "No Channel Work is associated with this binding.",
@@ -1158,11 +1156,6 @@
         "bindingStatus": {
           "active": "Active",
           "disconnected": "Disconnected"
-        },
-        "activationStatus": {
-          "waiting_hydration": "Waiting for history",
-          "wake_pending": "Starting invocation",
-          "active": "Invocation active"
         },
         "workStatus": {
           "active": "Work active",

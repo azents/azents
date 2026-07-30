@@ -53,8 +53,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-07-29
-spec_version: 25
+last_verified_at: 2026-07-30
+spec_version: 27
 ---
 
 # External Channel
@@ -75,7 +75,7 @@ contain multiple independent bindings.
 ## Ownership and Security Boundaries
 
 - Connection and route records are Workspace/Agent administration state.
-- Provider resources, canonical events, principals, messages, and immutable revisions are retained independently from AgentSession history.
+- Provider resources, principals, messages, and immutable revisions are retained independently from AgentSession history.
 - Bindings, invocation batches, Channel Work, channel actions, and delivery attempts are Session lifecycle resources.
 - Credentials are encrypted at rest and decrypted only inside provider adapters. Public APIs, generated clients, prompts, events, logs, UI state, and test evidence expose only redacted credential status.
 - Provider message content remains external input even after approval. It retains provider, resource, sender, author type, authorization, message identity, and revision attribution.
@@ -97,13 +97,12 @@ contain multiple independent bindings.
 | Channel default | Multi App channel-to-route preference. At most one active default exists per connection and provider channel. Removing its route invalidates rather than silently retargets it. |
 | Conversation admission | Durable, expiring unbound-conversation scope that records the initiating provider principal and may become selected exactly once. |
 | Interaction | Idempotent signed Slack or Discord shortcut, component/action, navigation, or submission claim. Provider triggers and Discord interaction tokens stay transient and are never persisted or replayed. |
-| Resource | One provider conversation: a Slack thread or Discord root/thread, with provider labels, availability, hydration cursor/high-watermark, reconciliation boundary, and latest activity. Discord labels separately retain source channel, parent channel, root message, existing thread, and provisioned delivery thread identities. |
-| Event | Durable provider envelope admission keyed by connection and provider event identity. Processing is at-least-once and domain writes are idempotent. |
+| Resource | One provider conversation: a Slack thread or Discord root/thread, with provider labels, availability, latest activity, and any provisioned delivery-thread identity. Discord labels separately retain source channel, parent channel, root message, existing thread, and provisioned delivery thread identities. |
+| Conversation position | Durable read-through position for one connection-scoped parent channel or thread. PostgreSQL position compare-and-set is the ordering authority across retries and replicas. |
 | Principal | Provider tenant/user identity and author category. It is not an Azents User or WorkspaceUser. |
-| Message and revision | Canonical provider message plus immutable original/edit/delete revisions. Slack messages prefer non-blank fallback text and otherwise derive bounded readable text from supported Block Kit content. Discord Gateway messages are normalized only after target-Guild, author, content, and message eligibility checks. Raw provider payloads cannot supply Azents' internal normalized-text projection; only the authenticated admission projection may be consumed through the trusted projection path. Revisions retain optional bounded provider identity mappings and up to 20 metadata-only file entries. Supported entries expose binding-scoped opaque locators; private URLs and file bodies are never persisted or rendered. |
-| Pending context | Unprojected same-route/resource revisions retained for at most 7 days, 100 messages, and 256 KiB. Oldest content is expired or trimmed first. |
-| Binding | Active or disconnected link from one route/resource to one AgentSession. Initial activation waits for hydration reconciliation. |
-| Invocation batch | Immutable ordered revision membership released through one authorized trigger and referenced by a batch InputBuffer. |
+| Message and revision | Canonical provider-history snapshot plus immutable accepted revisions. Slack messages prefer non-blank fallback text and otherwise derive bounded readable text from supported Block Kit content. Slack identity mappings include each retained message sender as well as bounded body references. Discord messages are normalized only after target-Guild, author, content, and message eligibility checks. Raw callback payloads are never canonical content authority. Revisions retain optional bounded provider identity mappings and up to 20 metadata-only file entries. Supported entries expose binding-scoped opaque locators; private URLs and file bodies are never persisted or rendered. |
+| Binding | Active or disconnected link from one route/resource to one AgentSession. A new authorized conversation creates an active binding in the final synchronous acceptance transaction. |
+| Invocation batch | Immutable ordered revision membership released through one authorized trigger, linked to its conversation position and mailbox item, and carrying recoverable wake-dispatch state. |
 | Access request/grant/block | Opaque approval request, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
 | Channel Work/action/delivery | Binding-scoped durable current-work title and ordered provider-neutral tasks with stable identities, status, optional details, optional output, and labeled URL sources; one work-cycle-owned desired progress state and provider identity; one atomic explicit action; and persisted provider intents/outcomes. File-bearing replies retain only bounded Runtime source manifests and delivery phase evidence. Management derives projection state from the latest progress operation belonging to the current work cycle. |
 
@@ -136,8 +135,8 @@ contain multiple independent bindings.
 - Durable execution mutations are fenced by the current Session owner generation.
   Provider principals, Slack callback actors, Workspace requesters, and approvers
   remain provenance or authorization identities and never become the execution User.
-- A resource is `active`, `unavailable`, or `deleted`; hydration is `pending`, `running`, `complete`, `bounded`, or `incomplete`.
-- A binding is either active or disconnected. Activation moves from `waiting_hydration` to `active` only after the admitted-event reconciliation boundary is clear.
+- A resource is `active`, `unavailable`, or `deleted`. Provider history is read on demand for one synchronous ingestion operation and has no durable hydration lifecycle.
+- A binding is either active or disconnected. There is no waiting-hydration activation state.
 - Connection capabilities expose `download_files` and `upload_files` independently.
   Missing legacy fields are unavailable. A file locator is valid only for the current
   Agent, Session, active binding, route, and active or degraded connection; provider
@@ -173,8 +172,8 @@ contain multiple independent bindings.
   and declared size only. A current provider message lookup obtains a non-durable
   download URL immediately before a bounded in-memory download; redirects, stale
   authority, malformed metadata, and oversized streams fail closed.
-- Initial binding activation creates one separate Session navigation message and one
-  checking work projection before Session wake-up. Slack lowers work through its
+- Initial synchronous binding acceptance creates one separate Session navigation message
+  and one checking work projection before Session wake-up. Slack lowers work through its
   retained Tracker message; Discord lowers each work snapshot to one retained compact
   Embed Tracker. The Embed title carries the current-work title, while its bounded
   description carries the status summary, every ordered task title and status marker,
@@ -204,16 +203,11 @@ contain multiple independent bindings.
   creation. Finished work never recreates a Tracker, and a missing delete target is
   already absent.
 - Message revisions never rewrite an already projected revision. Later edits or deletes remain distinct corrections.
-- Route author admission is evaluated before pending-context projection. Humans are
-  route-eligible; an external bot is route-eligible only when
-  `allow_bot_messages` is enabled; app and system authors are never eligible. The
-  connected Azents bot is excluded before persistence to prevent provider loops. A
-  rejected author revision cannot enter a later invocation batch through another
-  participant's trigger.
-- The shared admitted-event processor supervises each claim-and-reconciliation
-  iteration. An unexpected iteration exception is logged and followed by the normal
-  idle poll before another iteration, so one transient processing or reconciliation
-  failure cannot permanently stop later Slack or Discord event claims.
+- Trigger eligibility is evaluated independently from provider-visible context.
+  Humans may invoke according to route access policy; external bots require
+  `allow_bot_messages`; app and system authors never trigger execution. The connected
+  Azents bot is excluded from provider-history projection to prevent loops, while other
+  visible history may remain contextual input for an eligible trigger.
 - A Session- or Agent-scoped grant authorizes invocation only for the same Agent, principal, route relationship, and active resource. Blocks take precedence.
 - Creating a new binding Session snapshots the routed Agent's current automatic
   Project policy into the root `SessionAgentContext` in the same transaction as
@@ -221,7 +215,7 @@ contain multiple independent bindings.
   decision and to initial binding creation for an already Agent-authorized
   principal. Reusing an existing binding keeps its existing Session/context
   Project snapshot; later policy changes are not retroactive.
-- Restore never reactivates a disconnected binding, ended work item, removed pending context, or connection.
+- Restore never reactivates a disconnected binding, ended work item, or connection.
 
 ## Management Surface
 
@@ -280,7 +274,7 @@ Agent connection list.
 
 Session Channels shows bindings, the current Channel Work title, typed ordered
 tasks, failed state, details, output, source links, Activity Tracker projection
-state, truncation, delivery outcomes, grants, and terminal disconnect state.
+state, delivery outcomes, grants, and terminal disconnect state.
 Approval and management detail surfaces show complete provider user identities with
 copy controls, while regular timeline summaries remain name-first. Destructive
 connection, binding, grant, and block actions require in-product confirmation.
@@ -294,6 +288,13 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-30** (spec_version 27) — Slack history identity enrichment now resolves
+  retained message senders even when their IDs do not appear in the message body.
+- **2026-07-30** (spec_version 26) — Replaced durable provider events,
+  hydration/pending-context activation, and truncation projections with typed
+  synchronous ingestion, parent/thread conversation positions, immutable invocation
+  batches, active binding acceptance, recoverable wake state, and provider-history
+  content authority.
 - **2026-07-29** (spec_version 25) — Moved Discord's retained functional Channel Work
   Tracker into one bounded Embed without duplicating its body as ordinary message
   content.

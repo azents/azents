@@ -763,6 +763,20 @@ class ExternalChannelIngressProfile(enum.StrEnum):
     DISCORD_GATEWAY_HTTP = "discord_gateway_http"
 
 
+class ExternalChannelConversationScopeKind(enum.StrEnum):
+    """Canonical provider conversation scope."""
+
+    PARENT_CHANNEL = "parent_channel"
+    THREAD = "thread"
+
+
+class ExternalChannelConversationLockBackend(enum.StrEnum):
+    """Ephemeral coordination backend for one external conversation."""
+
+    REDIS = "redis"
+    MEMORY = "memory"
+
+
 class ExternalChannelConnectionStatus(enum.StrEnum):
     """External connection lifecycle status."""
 
@@ -857,35 +871,6 @@ class ExternalChannelResourceStatus(enum.StrEnum):
     DELETED = "deleted"
 
 
-class ExternalChannelHydrationStatus(enum.StrEnum):
-    """Initial provider-history hydration state for one external resource."""
-
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETE = "complete"
-    BOUNDED = "bounded"
-    INCOMPLETE = "incomplete"
-
-
-class ExternalChannelEventEligibilityState(enum.StrEnum):
-    """Classification state for one admitted provider event."""
-
-    UNCLASSIFIED = "unclassified"
-    TRACKED = "tracked"
-    IGNORED = "ignored"
-    PROCESSED = "processed"
-
-
-class ExternalChannelEventStatus(enum.StrEnum):
-    """Asynchronous processing status for one admitted provider event."""
-
-    ACCEPTED = "accepted"
-    IGNORED_UNLINKED = "ignored_unlinked"
-    PROCESSING = "processing"
-    PROCESSED = "processed"
-    FAILED = "failed"
-
-
 class ExternalChannelPrincipalAuthorType(enum.StrEnum):
     """External principal author category."""
 
@@ -918,12 +903,12 @@ class ExternalChannelBindingStatus(enum.StrEnum):
     DISCONNECTED = "disconnected"
 
 
-class ExternalChannelBindingActivationStatus(enum.StrEnum):
-    """Initial invocation activation state for one active binding."""
+class ExternalChannelInvocationWakeDispatchStatus(enum.StrEnum):
+    """Durable broker wake-dispatch state for one invocation batch."""
 
-    WAITING_HYDRATION = "waiting_hydration"
-    WAKE_PENDING = "wake_pending"
-    ACTIVE = "active"
+    PENDING = "pending"
+    CLAIMED = "claimed"
+    DISPATCHED = "dispatched"
 
 
 class ExternalChannelAccessRequestStatus(enum.StrEnum):

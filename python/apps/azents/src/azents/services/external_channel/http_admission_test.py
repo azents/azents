@@ -7,14 +7,15 @@ import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
-from unittest.mock import AsyncMock
+from typing import Literal, cast
+from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import urlencode
 
 import pytest
 from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
 from azents.core.crypto import CredentialCipher
 from azents.core.enums import (
     ExternalChannelAppMode,
@@ -25,17 +26,28 @@ from azents.core.enums import (
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
-    ExternalChannelEventAdmission,
-    ExternalChannelEventCreate,
     ExternalChannelInteractionAdmission,
     ExternalChannelInteractionCreate,
     ExternalChannelPrincipalCreate,
+    ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
+from azents.services.external_channel.connection_revocation import (
+    ExternalChannelConnectionRevocationService,
+)
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import SlackConnectionCredentials
-from azents.services.external_channel.http_admission import SlackHTTPAdmissionService
+from azents.services.external_channel.http_admission import (
+    SlackHTTPAdmissionService,
+    SlackHTTPMessageIngressQuiesced,
+    SlackHTTPRetryableIngestion,
+)
+from azents.services.external_channel.ingestion import (
+    ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
+)
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
     ExternalChannelInteractionProcessor,
@@ -43,9 +55,13 @@ from azents.services.external_channel.interaction import (
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
 )
+from azents.services.external_channel.slack_events import SlackConnectionRevocation
 from azents.services.external_channel.slack_http import (
     SlackHTTPInvalidPayload,
     SlackHTTPUnauthorized,
+)
+from azents.services.external_channel.transport_ingestion import (
+    ExternalChannelTransportIngestionService,
 )
 
 _NOW = datetime.datetime(2026, 7, 22, 1, 0, tzinfo=datetime.UTC)
@@ -84,43 +100,96 @@ class _RepositoryDouble:
 class _AdmissionDouble:
     """Record normalized events and optionally expose a database failure."""
 
-    def __init__(self, *, fail: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail: bool = False,
+        retryable: bool = False,
+        awaiting_access: bool = False,
+    ) -> None:
         self.fail = fail
-        self.events: list[ExternalChannelEventCreate] = []
+        self.retryable = retryable
+        self.awaiting_access = awaiting_access
+        self.revocation_changed = True
+        self.events: list[ExternalChannelTrigger] = []
         self.interactions: list[
             tuple[
                 ExternalChannelInteractionCreate,
                 ExternalChannelPrincipalCreate,
-                ExternalChannelEventCreate | None,
             ]
         ] = []
         self.claimed_interaction_ids: list[str] = []
         self.claimed = True
         self.finished: list[tuple[str, str, str | None]] = []
+        self.revocations: list[SlackConnectionRevocation] = []
 
-    async def admit(
+    async def ingest_slack_event(
         self,
-        create: ExternalChannelEventCreate,
-    ) -> ExternalChannelEventAdmission:
-        self.events.append(create)
+        *,
+        event: ExternalChannelTrigger,
+        authority: object,
+        deadline: object,
+    ) -> ExternalChannelIngestionOutcome | SlackConnectionRevocation | None:
+        del authority, deadline
+        self.events.append(event)
         if self.fail:
             raise RuntimeError("database unavailable")
-        return cast(
-            ExternalChannelEventAdmission,
-            SimpleNamespace(
-                event=SimpleNamespace(id="event-row-1"),
-                created=True,
-            ),
+        if self.retryable:
+            return ExternalChannelIngestionOutcome(
+                kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
+                reason=ExternalChannelIngestionReason.HISTORY_UNAVAILABLE,
+                batch_id=None,
+                control_delivery_attempt_id=None,
+                connection_id=None,
+            )
+        if self.awaiting_access:
+            return ExternalChannelIngestionOutcome(
+                kind=ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS,
+                reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
+                batch_id=None,
+                control_delivery_attempt_id="delivery-1",
+                connection_id=event.connection_id,
+            )
+        if event.event_type == "app_uninstalled":
+            return SlackConnectionRevocation(kind="app_uninstalled")
+        if event.event_type == "tokens_revoked":
+            return SlackConnectionRevocation(kind="tokens_revoked")
+        payload = event.envelope.get("event")
+        if (
+            event.event_type == "message"
+            and isinstance(payload, dict)
+            and payload.get("subtype") in {"message_changed", "message_deleted"}
+        ):
+            return None
+        return ExternalChannelIngestionOutcome(
+            kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
+            reason=ExternalChannelIngestionReason.ACCEPTED,
+            batch_id="batch-1",
+            control_delivery_attempt_id=None,
+            connection_id=None,
         )
+
+    async def apply(
+        self,
+        *,
+        connection_id: str,
+        revocation: SlackConnectionRevocation,
+        required_configuration_generation: int,
+        required_socket_lease_owner: str | None,
+        now: datetime.datetime,
+    ) -> bool:
+        assert required_configuration_generation == 1
+        del connection_id, required_socket_lease_owner, now
+        self.revocations.append(revocation)
+        return self.revocation_changed
 
     async def admit_interaction(
         self,
         *,
         create: ExternalChannelInteractionCreate,
         principal: ExternalChannelPrincipalCreate,
-        shortcut_source_event: ExternalChannelEventCreate | None = None,
     ) -> ExternalChannelInteractionAdmission:
-        self.interactions.append((create, principal, shortcut_source_event))
+        self.interactions.append((create, principal))
         if self.fail:
             raise RuntimeError("database unavailable")
         return cast(
@@ -210,6 +279,7 @@ def _service(
     codec: ExternalChannelCredentialsCodec,
     admission: _AdmissionDouble,
     interaction_processor: ExternalChannelInteractionProcessor | None = None,
+    config: Config | None = None,
 ) -> tuple[SlackHTTPAdmissionService, _RepositoryDouble]:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
@@ -231,6 +301,15 @@ def _service(
                 ExternalChannelShortcutSourceService,
                 AsyncMock(),
             ),
+            transport_ingestion_service=cast(
+                ExternalChannelTransportIngestionService,
+                admission,
+            ),
+            revocation_service=cast(
+                ExternalChannelConnectionRevocationService,
+                admission,
+            ),
+            config=config,
         ),
         repository,
     )
@@ -243,7 +322,22 @@ def _signed(body: bytes) -> tuple[str, str]:
     return timestamp, signature
 
 
-def _event_body(*, app_id: str = "A-1", tenant_id: str = "T-1") -> bytes:
+def _event_body(
+    *,
+    app_id: str = "A-1",
+    tenant_id: str = "T-1",
+    event_type: str = "app_mention",
+    subtype: str | None = None,
+) -> bytes:
+    event: dict[str, object] = {
+        "type": event_type,
+        "channel": "C-1",
+        "user": "U-1",
+        "text": "Run the agent",
+        "ts": "100.1",
+    }
+    if subtype is not None:
+        event["subtype"] = subtype
     return json.dumps(
         {
             "type": "event_callback",
@@ -251,13 +345,7 @@ def _event_body(*, app_id: str = "A-1", tenant_id: str = "T-1") -> bytes:
             "event_time": int(_NOW.timestamp()),
             "api_app_id": app_id,
             "team_id": tenant_id,
-            "event": {
-                "type": "app_mention",
-                "channel": "C-1",
-                "user": "U-1",
-                "text": "Run the agent",
-                "ts": "100.1",
-            },
+            "event": event,
         }
     ).encode()
 
@@ -350,9 +438,192 @@ async def test_matching_active_event_is_admitted_before_return(
         received_at=_NOW,
     )
 
-    assert result.event_id == "event-row-1"
+    assert result.event_id == "Ev-1"
     assert result.created is True
     assert [event.provider_event_id for event in admission.events] == ["Ev-1"]
+
+
+@pytest.mark.asyncio
+async def test_awaiting_access_exposes_only_committed_control_delivery_identity(
+    codec: ExternalChannelCredentialsCodec,
+) -> None:
+    """Return the durable approval-control handoff without provider payload data."""
+    admission = _AdmissionDouble(awaiting_access=True)
+    service, _ = _service(
+        configuration=_configuration(
+            codec,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+        ),
+        codec=codec,
+        admission=admission,
+    )
+    body = _event_body()
+    timestamp, signature = _signed(body)
+
+    result = await service.handle(
+        raw_body=body,
+        timestamp_header=timestamp,
+        signature_header=signature,
+        received_at=_NOW,
+    )
+
+    assert result.event_id == "Ev-1"
+    assert result.created is False
+    assert result.control_delivery_attempt_id == "delivery-1"
+    assert result.control_delivery_connection_id == "connection-1"
+
+
+@pytest.mark.asyncio
+async def test_retryable_http_ingestion_is_not_acknowledgeable(
+    codec: ExternalChannelCredentialsCodec,
+) -> None:
+    """A retryable synchronous failure escapes instead of becoming HTTP success."""
+    admission = _AdmissionDouble(retryable=True)
+    service, _ = _service(
+        configuration=_configuration(
+            codec,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+        ),
+        codec=codec,
+        admission=admission,
+    )
+    body = _event_body()
+    timestamp, signature = _signed(body)
+
+    with pytest.raises(SlackHTTPRetryableIngestion):
+        await service.handle(
+            raw_body=body,
+            timestamp_header=timestamp,
+            signature_header=signature,
+            received_at=_NOW,
+        )
+
+    assert len(admission.events) == 1
+
+
+@pytest.mark.asyncio
+async def test_quiesced_http_blocks_normal_message_event(
+    codec: ExternalChannelCredentialsCodec,
+) -> None:
+    """HTTP quiesce rejects normal message ingress before legacy admission."""
+    admission = _AdmissionDouble()
+    config = MagicMock()
+    config.external_channel_conversation.quiesce.slack_http = True
+    service, _ = _service(
+        configuration=_configuration(
+            codec,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+        ),
+        codec=codec,
+        admission=admission,
+        config=config,
+    )
+    body = _event_body()
+    timestamp, signature = _signed(body)
+
+    with pytest.raises(SlackHTTPMessageIngressQuiesced):
+        await service.handle(
+            raw_body=body,
+            timestamp_header=timestamp,
+            signature_header=signature,
+            received_at=_NOW,
+        )
+
+    assert admission.events == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("event_type", ["app_uninstalled", "tokens_revoked"])
+async def test_quiesced_http_keeps_slack_revocation_events_available(
+    codec: ExternalChannelCredentialsCodec,
+    event_type: Literal["app_uninstalled", "tokens_revoked"],
+) -> None:
+    """Connection lifecycle revocation remains available while messages drain."""
+    admission = _AdmissionDouble()
+    config = MagicMock()
+    config.external_channel_conversation.quiesce.slack_http = True
+    service, _ = _service(
+        configuration=_configuration(
+            codec,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+        ),
+        codec=codec,
+        admission=admission,
+        config=config,
+    )
+    body = _event_body(event_type=event_type)
+    timestamp, signature = _signed(body)
+
+    result = await service.handle(
+        raw_body=body,
+        timestamp_header=timestamp,
+        signature_header=signature,
+        received_at=_NOW,
+    )
+
+    assert result.event_id == "Ev-1"
+    assert len(admission.events) == 1
+    assert admission.revocations == [SlackConnectionRevocation(kind=event_type)]
+
+
+@pytest.mark.asyncio
+async def test_stale_http_revocation_generation_is_not_acknowledged(
+    codec: ExternalChannelCredentialsCodec,
+) -> None:
+    """A configuration replacement wins over an in-flight signed revocation."""
+    admission = _AdmissionDouble()
+    admission.revocation_changed = False
+    service, _ = _service(
+        configuration=_configuration(
+            codec,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+        ),
+        codec=codec,
+        admission=admission,
+    )
+    body = _event_body(event_type="tokens_revoked")
+    timestamp, signature = _signed(body)
+
+    with pytest.raises(SlackHTTPUnauthorized):
+        await service.handle(
+            raw_body=body,
+            timestamp_header=timestamp,
+            signature_header=signature,
+            received_at=_NOW,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("subtype", ["message_changed", "message_deleted"])
+async def test_quiesced_http_keeps_message_lifecycle_events_available(
+    codec: ExternalChannelCredentialsCodec,
+    subtype: str,
+) -> None:
+    """Message updates and deletions remain available while messages drain."""
+    admission = _AdmissionDouble()
+    config = MagicMock()
+    config.external_channel_conversation.quiesce.slack_http = True
+    service, _ = _service(
+        configuration=_configuration(
+            codec,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+        ),
+        codec=codec,
+        admission=admission,
+        config=config,
+    )
+    body = _event_body(event_type="message", subtype=subtype)
+    timestamp, signature = _signed(body)
+
+    result = await service.handle(
+        raw_body=body,
+        timestamp_header=timestamp,
+        signature_header=signature,
+        received_at=_NOW,
+    )
+
+    assert result.event_id == "Ev-1"
+    assert len(admission.events) == 1
 
 
 @pytest.mark.asyncio
@@ -384,6 +655,10 @@ async def test_matching_active_interaction_is_admitted_without_raw_payload(
     )
     body = _interaction_body(interaction_type=interaction_type)
     timestamp, signature = _signed(body)
+    shortcut_source_ensure = cast(
+        AsyncMock,
+        service.shortcut_source_service.ensure,
+    )
 
     result = await service.handle(
         raw_body=body,
@@ -409,7 +684,7 @@ async def test_matching_active_interaction_is_admitted_without_raw_payload(
     )
     assert admission.events == []
     assert len(admission.interactions) == 1
-    create, principal, shortcut_source_event = admission.interactions[0]
+    create, principal = admission.interactions[0]
     assert create.interaction_type.value == expected_type
     assert create.provider_interaction_key.startswith("http-")
     assert create.resource_correlation_key == "C-1:100.0001"
@@ -424,6 +699,10 @@ async def test_matching_active_interaction_is_admitted_without_raw_payload(
     assert "private source text" not in persisted
     assert "trigger-secret" not in repr(result)
     if interaction_type == "message_action":
+        shortcut_source_ensure.assert_awaited_once()
+        shortcut_source_call = shortcut_source_ensure.await_args
+        assert shortcut_source_call is not None
+        shortcut_source_event = shortcut_source_call.kwargs["shortcut_source_event"]
         assert shortcut_source_event is not None
         assert shortcut_source_event.provider_event_id == (
             f"shortcut-{create.provider_interaction_key}"
@@ -438,7 +717,7 @@ async def test_matching_active_interaction_is_admitted_without_raw_payload(
             "text": "private source text",
         }
     else:
-        assert shortcut_source_event is None
+        shortcut_source_ensure.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -474,7 +753,7 @@ async def test_single_shortcut_is_durably_rejected_without_selector_source() -> 
         ("interaction-row-1", "rejected", "interaction_unsupported")
     ]
     assert len(admission.interactions) == 1
-    assert admission.interactions[0][2] is None
+    cast(AsyncMock, service.shortcut_source_service.ensure).assert_not_awaited()
 
 
 @pytest.mark.asyncio

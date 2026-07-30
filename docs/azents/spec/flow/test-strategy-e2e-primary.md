@@ -9,7 +9,6 @@ code_paths:
   - .claude/skills/feature-design/SKILL.md
   - .claude/skills/ship-feature/SKILL.md
   - .github/workflows/ci.yaml
-  - .github/workflows/azents-live-e2e.yaml
   - docs/azents/AGENTS.md
   - testenv/azents/AGENTS.md
   - testenv/azents/README.md
@@ -24,8 +23,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-07-29
-spec_version: 12
+last_verified_at: 2026-07-30
+spec_version: 13
 ---
 
 # E2E Primary Test Strategy
@@ -56,6 +55,12 @@ reconnect, invalid-session, and close-code behavior. It is controlled only throu
 bounded test endpoints and retains evidence limited to operation identifiers,
 provider-safe metadata, acknowledgements, state transitions, delivery outcomes, file
 count, and aggregate byte count.
+
+The Slack and Discord fakes also provide bounded provider-history ranges, mixed author
+types, omission boundaries, failure sequences, duplicate/concurrency barriers, and
+transport acknowledgement evidence for External Channel synchronous ingestion.
+Evidence retains request counts, lifecycle categories, positions, file counts,
+aggregate byte counts, and deterministic hashes only.
 
 Fakes and test evidence never retain credentials, authorization headers, signatures,
 callback URLs, raw payloads, visible message bodies, attachment names, attachment
@@ -117,7 +122,15 @@ Always-on required CI does not depend on external credentials.
   fake; they do not create product rows directly. Focused fake contract tests cover
   signed interaction relay, Gateway lifecycle outcomes, nonce convergence, controlled
   REST failure outcomes, and multipart redaction.
-- Focused Runtime Provider E2E uses a locally bootstrapped and API-enrolled Docker Provider to run selected `runtime_provider` journeys, including Tool Search Runtime Hooks and provider-native External Channel progress.
+- The deterministic External Channel module covers Slack HTTP, Slack Socket Mode, and
+  Discord Gateway synchronous admission; durable admission before acknowledgement;
+  eager or reused thread targeting; bound continuation; mixed-author bounded history;
+  duplicate convergence; access replay; and content-free evidence.
+- Backend contract tests run both independent in-memory conversation locks and two
+  clients against a real Redis container. Memory replicas may overlap and converge at
+  the PostgreSQL position fence; Redis replicas serialize the same scope; unavailable
+  Redis remains a surfaced retryable failure with no memory fallback.
+- Focused Runtime Provider E2E uses a locally bootstrapped and API-enrolled Docker Provider to run selected `runtime_provider` journeys, including Tool Search Runtime Hooks, provider-native External Channel progress, and the External Channel file-transfer journey.
 - Web Surface E2E runs in a separate parallel lane with `uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src`.
 - Web Surface journeys use a pinned remote Chromium container. Web images are built from the tested worktree, and TLS gateways reproduce production secure-cookie and path-routing behavior without external credentials.
 - The stable `ci-python-e2e` required gate aggregates the deterministic, focused Runtime Provider, and Web Surface lane results for the scopes selected by path filtering.
@@ -164,6 +177,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-07-30** — v13. Added the post-contraction Slack HTTP, Slack Socket,
+  Discord Gateway, Redis/memory coordination, provider-history, sanitized evidence,
+  and Runtime file-transfer validation matrix.
 - **2026-07-26** — v11. Added Runtime Execution Profile API-managed E2E, safe policy-evidence redaction, explicit Apply/convergence coverage, and qualified Kubernetes fail/skip requirements.
 - **2026-07-26** — v10. Added the credential-free Discord REST/Gateway fake,
   signed interaction relay, provider-evidence redaction contract, and public-API

@@ -22,10 +22,10 @@ from azents.core.enums import (
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
-    ExternalChannelEventCreate,
     ExternalChannelInteractionAdmission,
     ExternalChannelInteractionCreate,
     ExternalChannelPrincipalCreate,
+    ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
@@ -70,7 +70,6 @@ class _AdmissionDouble:
             tuple[
                 ExternalChannelInteractionCreate,
                 ExternalChannelPrincipalCreate,
-                object | None,
             ]
         ] = []
         self.claimed_interaction_ids: list[str] = []
@@ -81,9 +80,8 @@ class _AdmissionDouble:
         *,
         create: ExternalChannelInteractionCreate,
         principal: ExternalChannelPrincipalCreate,
-        shortcut_source_event: object | None = None,
     ) -> ExternalChannelInteractionAdmission:
-        self.inputs.append((create, principal, shortcut_source_event))
+        self.inputs.append((create, principal))
         return cast(
             ExternalChannelInteractionAdmission,
             SimpleNamespace(
@@ -369,7 +367,7 @@ async def test_signed_interaction_admission_redacts_sensitive_input() -> None:
         hashlib.sha256(b"opaque-selector").hexdigest()
     ]
     assert len(admission.inputs) == 1
-    create, principal, shortcut_source_event = admission.inputs[0]
+    create, principal = admission.inputs[0]
     assert create.connection_id == "connection-1"
     assert create.provider_interaction_key == "discord-interaction-1"
     assert create.resource_correlation_key == "channel-1"
@@ -382,7 +380,6 @@ async def test_signed_interaction_admission_redacts_sensitive_input() -> None:
     assert principal.provider is ExternalChannelProvider.DISCORD
     assert principal.provider_tenant_id == "guild-1"
     assert principal.provider_user_id == "user-1"
-    assert shortcut_source_event is None
     assert admission.finished_interaction_ids == []
     persisted = repr((create, principal, result))
     assert "interaction-token" not in persisted
@@ -413,10 +410,12 @@ async def test_message_command_materializes_safe_source_before_claim() -> None:
         received_at=_NOW,
     )
 
-    create, _, source_event = admission.inputs[0]
+    create, _ = admission.inputs[0]
     assert create.projection["command_kind"] == "message_command"
     assert create.projection["source_message_id"] == "100"
-    assert isinstance(source_event, ExternalChannelEventCreate)
+    assert len(shortcut_source.calls) == 1
+    source_event = shortcut_source.calls[0][0]
+    assert isinstance(source_event, ExternalChannelTrigger)
     assert source_event.provider_event_id == (
         "discord-interaction-source:discord-interaction-1:100"
     )
@@ -425,7 +424,6 @@ async def test_message_command_materializes_safe_source_before_claim() -> None:
     assert "interaction-token" not in serialized
     assert "cdn.discordapp.com" not in serialized
     assert "media.discordapp.net" not in serialized
-    assert len(shortcut_source.calls) == 1
     assert shortcut_source.calls[0][0] is source_event
     assert admission.claimed_interaction_ids == ["interaction-row-1"]
     assert admission.finished_interaction_ids == ["interaction-row-1"]
@@ -458,14 +456,13 @@ async def test_selector_component_keeps_scope_and_route_request_local() -> None:
         received_at=_NOW,
     )
 
-    create, _, shortcut_source_event = admission.inputs[0]
+    create, _ = admission.inputs[0]
     assert create.projection == {
         "interaction_type": "block_action",
         "guild_id": "guild-1",
         "channel_id": "channel-1",
         "discord_interaction_type": "3",
     }
-    assert shortcut_source_event is None
     assert admission.claimed_interaction_ids == ["interaction-row-1"]
     assert admission.finished_interaction_ids == ["interaction-row-1"]
     assert result.response == {

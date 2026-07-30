@@ -4,7 +4,9 @@ import os
 from urllib.parse import urlsplit
 
 DISCORD_API_BASE_URL = "https://discord.com/api/v10"
+DISCORD_GATEWAY_URL = "wss://gateway.discord.gg"
 _TESTENV_DISCORD_API_BASE_URL_ENV = "AZ_TESTENV_DISCORD_API_BASE_URL"
+_TESTENV_DISCORD_GATEWAY_URL_ENV = "AZ_TESTENV_DISCORD_GATEWAY_URL"
 
 
 def discord_api_base_url() -> str:
@@ -12,6 +14,14 @@ def discord_api_base_url() -> str:
     return os.environ.get(
         _TESTENV_DISCORD_API_BASE_URL_ENV,
         DISCORD_API_BASE_URL,
+    ).rstrip("/")
+
+
+def discord_gateway_url() -> str:
+    """Return Discord's Gateway URL or an explicit deterministic test URL."""
+    return os.environ.get(
+        _TESTENV_DISCORD_GATEWAY_URL_ENV,
+        DISCORD_GATEWAY_URL,
     ).rstrip("/")
 
 

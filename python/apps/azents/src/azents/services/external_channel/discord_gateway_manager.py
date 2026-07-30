@@ -12,11 +12,13 @@ from fastapi import Depends
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
+from azents.core.deps import get_config
+from azents.core.enums import ExternalChannelIngressProfile
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
-    ExternalChannelEventCreate,
     ExternalChannelIngressLease,
     ExternalChannelIngressLeaseClaim,
 )
@@ -38,6 +40,15 @@ from azents.services.external_channel.discord_gateway import (
     DiscordGatewayMessageEvent,
     DiscordGatewayRunner,
 )
+from azents.services.external_channel.ingestion import (
+    ExternalChannelIngressAuthority,
+    ExternalChannelIngressAuthorityKind,
+)
+from azents.services.external_channel.transport_ingestion import (
+    ExternalChannelTransportIngestionService,
+    external_channel_transport_deadline,
+    transport_outcome_acknowledgeable,
+)
 
 logger = logging.getLogger(__name__)
 _POLL_INTERVAL = datetime.timedelta(seconds=5)
@@ -50,6 +61,10 @@ _MAX_RECONNECT_DELAY = datetime.timedelta(minutes=5)
 
 class DiscordGatewayLeaseLost(DiscordGatewayError):
     """The current process no longer owns the authoritative Gateway lease."""
+
+
+class DiscordGatewayIngestionRetryable(DiscordGatewayError):
+    """The current Gateway callback must cross the reconnect/gap boundary."""
 
 
 def get_discord_gateway_client() -> DiscordGatewayRunner:
@@ -73,6 +88,10 @@ class DiscordGatewayManagerService:
         ExternalChannelCredentialsCodec,
         Depends(get_external_channel_credentials_codec),
     ]
+    transport_ingestion_service: Annotated[
+        ExternalChannelTransportIngestionService,
+        Depends(ExternalChannelTransportIngestionService),
+    ]
     manager_id: str = dataclasses.field(default_factory=lambda: uuid4().hex)
     gateway_client: Annotated[
         DiscordGatewayRunner,
@@ -82,6 +101,7 @@ class DiscordGatewayManagerService:
     lease_duration: datetime.timedelta = _LEASE_DURATION
     renew_interval: datetime.timedelta = _RENEW_INTERVAL
     reconnect_delay: datetime.timedelta = _RECONNECT_DELAY
+    config: Annotated[Config | None, Depends(get_config)] = None
 
     async def run(self, shutdown_event: asyncio.Event) -> None:
         """Continuously claim configured Discord connections until shutdown."""
@@ -97,10 +117,7 @@ class DiscordGatewayManagerService:
                     except asyncio.CancelledError:
                         pass
                     except Exception:
-                        logger.exception(
-                            "Discord Gateway task failed",
-                            extra={"connection_id": connection_id},
-                        )
+                        logger.exception("Discord Gateway task failed")
                 for connection_id in await self._list_connection_ids():
                     if connection_id not in tasks:
                         tasks[connection_id] = asyncio.create_task(
@@ -157,6 +174,7 @@ class DiscordGatewayManagerService:
                     bot_token=credentials.bot_token,
                     provider_app_id=configuration.provider_app_id,
                     target_guild_id=configuration.provider_tenant_id,
+                    configuration_generation=(configuration.configuration_generation),
                     shutdown_event=shutdown_event,
                 )
                 if result is None:
@@ -226,6 +244,7 @@ class DiscordGatewayManagerService:
         bot_token: str,
         provider_app_id: str | None,
         target_guild_id: str,
+        configuration_generation: int,
         shutdown_event: asyncio.Event,
     ) -> DiscordGatewayConnectionResult | None:
         connection_task = asyncio.create_task(
@@ -237,6 +256,7 @@ class DiscordGatewayManagerService:
                     lease=lease,
                     provider_app_id=provider_app_id,
                     target_guild_id=target_guild_id,
+                    configuration_generation=configuration_generation,
                     event=event,
                 ),
             )
@@ -376,47 +396,45 @@ class DiscordGatewayManagerService:
         lease: ExternalChannelIngressLease,
         provider_app_id: str | None,
         target_guild_id: str,
+        configuration_generation: int,
         event: DiscordGatewayMessageEvent,
     ) -> None:
-        """Durably admit one typed high-level discord.py message event."""
+        """Synchronously hand off one typed high-level discord.py create event."""
+        if (
+            self.config is not None
+            and self.config.external_channel_conversation.quiesce.discord_gateway
+            and event.event_type == "message_create"
+        ):
+            raise DiscordGatewayError(
+                "Discord message ingress is temporarily quiesced."
+            )
+        if event.event_type != "message_create":
+            return
+        received_at = _utc_now()
         create = project_discord_gateway_event(
             connection_id=connection_id,
             provider_app_id=provider_app_id,
             target_guild_id=target_guild_id,
             event=event,
-            received_at=_utc_now(),
+            received_at=received_at,
         )
         if create is None:
             return
-        admitted = await self._commit_event(
-            connection_id=connection_id,
-            lease=lease,
-            create=create,
-        )
-        if not admitted:
-            raise DiscordGatewayLeaseLost
-
-    async def _commit_event(
-        self,
-        *,
-        connection_id: str,
-        lease: ExternalChannelIngressLease,
-        create: ExternalChannelEventCreate,
-    ) -> bool:
-        """Commit canonical admission under the current lease fence."""
-        async with self.session_manager() as session:
-            admission = await self.repository.admit_discord_gateway_event(
-                session,
-                connection_id=connection_id,
+        outcome = await self.transport_ingestion_service.ingest_discord_event(
+            event=create,
+            authority=ExternalChannelIngressAuthority(
+                kind=ExternalChannelIngressAuthorityKind.LEASE,
+                ingress_profile=ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
+                configuration_generation=configuration_generation,
                 lease_owner=self.manager_id,
                 lease_generation=lease.lease_generation,
-                now=_utc_now(),
-                create=create,
+            ),
+            deadline=external_channel_transport_deadline(received_at),
+        )
+        if outcome is not None and not transport_outcome_acknowledgeable(outcome):
+            raise DiscordGatewayIngestionRetryable(
+                "Discord message ingestion is temporarily unavailable."
             )
-            if admission is None:
-                return False
-            await session.commit()
-            return True
 
     async def _sleep_or_shutdown(
         self,

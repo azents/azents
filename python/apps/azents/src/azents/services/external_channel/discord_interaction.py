@@ -16,9 +16,9 @@ from azents.core.enums import (
     ExternalChannelTransport,
 )
 from azents.repos.external_channel.data import (
-    ExternalChannelEventCreate,
     ExternalChannelInteractionCreate,
     ExternalChannelPrincipalCreate,
+    ExternalChannelTrigger,
 )
 from azents.services.external_channel.discord_api import (
     DISCORD_AZENTS_MESSAGE_COMMAND_NAME,
@@ -165,7 +165,7 @@ def discord_message_command_source_event(
     connection_id: str,
     envelope: DiscordInteractionEnvelope,
     received_at: datetime.datetime,
-) -> ExternalChannelEventCreate | None:
+) -> ExternalChannelTrigger | None:
     """Build a safe canonical source event only for the registered Message Command."""
     if (
         envelope.guild_id is None

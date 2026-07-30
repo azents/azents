@@ -44,6 +44,7 @@ from azents.engine.events.types import (
     FileOutputPart,
     SkillLoadedPayload,
     SystemErrorPayload,
+    SystemReminderPayload,
 )
 from azents.engine.events.user_messages import make_run_user_message
 from azents.engine.io.attachments import RuntimeAttachment
@@ -89,6 +90,10 @@ _CHAT_ACTION_ADAPTER = TypeAdapter(ChatAction)
 _AGENT_MESSAGE_ADAPTER = TypeAdapter(AgentMessagePayload)
 EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY = (
     "external_channel_invocation_batch_id"
+)
+_EXTERNAL_CHANNEL_CONTEXT_OMITTED_REMINDER = (
+    "Earlier messages from this external conversation were omitted. "
+    "Only the newest 20 provider messages are included below."
 )
 
 
@@ -1282,6 +1287,19 @@ def build_external_channel_mailbox_payload(
     if [item.sequence for item in ordered] != list(range(len(ordered))):
         raise ValueError("External invocation batch sequence is not contiguous.")
     embedded: list[MailboxPresentationItem] = []
+    context_omitted = ordered[0].context_omitted
+    if any(item.context_omitted is not context_omitted for item in ordered):
+        raise ValueError("External invocation batch omission state is inconsistent.")
+    sequence_offset = 0
+    if context_omitted:
+        embedded.append(
+            MailboxPresentationItem(
+                item_key="external_channel:0",
+                presentation_kind="system_reminder",
+                content=_EXTERNAL_CHANNEL_CONTEXT_OMITTED_REMINDER,
+            )
+        )
+        sequence_offset = 1
     for item in ordered:
         if not item.provider_tenant_id:
             raise ValueError("External invocation is missing provider tenant ID.")
@@ -1318,13 +1336,13 @@ def build_external_channel_mailbox_payload(
             provider_created_at=item.provider_created_at,
             provider_updated_at=item.provider_updated_at,
             original_url=item.original_url,
-            truncated_context_message_count=item.truncation_message_count,
-            truncated_context_size=item.truncation_size,
+            truncated_context_message_count=0,
+            truncated_context_size=0,
             correction_of_revision_id=item.correction_of_revision_id,
         )
         embedded.append(
             MailboxPresentationItem(
-                item_key=f"external_channel:{item.sequence}",
+                item_key=f"external_channel:{item.sequence + sequence_offset}",
                 presentation_kind="external_channel_message",
                 content=item.revision_body or "",
                 metadata={"external_channel_message": payload.model_dump(mode="json")},
@@ -1351,6 +1369,27 @@ class ExternalChannelInvocationMailboxProcessor:
         if not isinstance(buffer.payload, ExternalChannelInvocationMailboxPayload):
             raise ValueError("External invocation MailboxItem payload is malformed.")
         for embedded in buffer.payload.items:
+            if embedded.presentation_kind == "system_reminder":
+                if embedded.metadata or embedded.action is not None:
+                    raise ValueError(
+                        "External invocation omission reminder is malformed."
+                    )
+                payload = SystemReminderPayload(text=embedded.content)
+                promoted.append(
+                    _PromotedMailboxItem(
+                        buffer=buffer,
+                        user_message=None,
+                        event_kind=EventKind.SYSTEM_REMINDER,
+                        payload=_JSON_OBJECT_ADAPTER.validate_python(
+                            payload.model_dump(mode="json")
+                        ),
+                        external_id=(f"external-channel:{buffer.id}:context-omitted"),
+                        item_key=embedded.item_key,
+                    )
+                )
+                continue
+            if embedded.presentation_kind != "external_channel_message":
+                raise ValueError("External invocation payload item kind is malformed.")
             raw_payload = embedded.metadata.get("external_channel_message")
             if not isinstance(raw_payload, dict):
                 raise ValueError("External invocation payload item is malformed.")

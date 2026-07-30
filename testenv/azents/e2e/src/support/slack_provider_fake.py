@@ -342,8 +342,8 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         if operation == "users.info":
             self._user_info(query)
             return
-        if operation == "conversations.replies":
-            self._conversation_replies(query)
+        if operation in {"conversations.history", "conversations.replies"}:
+            self._conversation_history(query)
             return
         if operation == "chat.getPermalink":
             self._permalink(query)
@@ -374,8 +374,16 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             file_id = urlparse(self.path).path.removeprefix("/upload/")
             self._file_upload(file_id)
             return
-        operation = urlparse(self.path).path.removeprefix("/api/")
-        body = self._json_body()
+        parsed_path = urlparse(self.path)
+        operation = parsed_path.path.removeprefix("/api/")
+        query = {
+            key: _form_value(key, values)
+            for key, values in parse_qs(
+                parsed_path.query,
+                keep_blank_values=True,
+            ).items()
+        }
+        body = {**query, **self._json_body()}
         self.state.record_request(
             operation,
             method="POST",
@@ -518,7 +526,7 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             },
         )
 
-    def _conversation_replies(self, query: dict[str, list[str]]) -> None:
+    def _conversation_history(self, query: dict[str, list[str]]) -> None:
         scenario = self.state.history_scenario
         if self._common_failure(scenario):
             return

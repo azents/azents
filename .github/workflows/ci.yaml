@@ -184,11 +184,51 @@ jobs:
           uv run python src/cli/dump_openapi.py
           git diff --exit-code -- specs
 
+  ci_python_migrations_run:
+    name: ci-python-migrations-run
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: azents_migrations
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d azents_migrations"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AZENTS_MIGRATION_TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/azents_migrations
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14"
+      - name: Install dependencies
+        run: |
+          cd python/apps/azents
+          uv sync
+      - name: Run pytest-alembic migration suite
+        run: |
+          cd python/apps/azents
+          uv run pytest -vv migration_tests
+
   ci-python:
     name: ci-python
     needs:
       - changes
       - ci_python_run
+      - ci_python_migrations_run
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -197,6 +237,7 @@ jobs:
           changes_result='${{ needs.changes.result }}'
           changed='${{ needs.changes.outputs.python }}'
           result='${{ needs.ci_python_run.result }}'
+          migrations_result='${{ needs.ci_python_migrations_run.result }}'
           if [ "$changes_result" != 'success' ]; then
             echo "changes job failed or was skipped: $changes_result"
             exit 1
@@ -205,10 +246,10 @@ jobs:
             echo 'Python scope unchanged; passing.'
             exit 0
           fi
-          if [ "$result" = 'success' ]; then
+          if [ "$result" = 'success' ] && [ "$migrations_result" = 'success' ]; then
             exit 0
           fi
-          echo "Python scope changed but ci-python-run result was: $result"
+          echo "Python scope changed but results were: app=$result migrations=$migrations_result"
           exit 1
 
   ci_python_e2e_run:

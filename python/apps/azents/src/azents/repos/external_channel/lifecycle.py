@@ -43,7 +43,6 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelInvocationBatch,
     RDBExternalChannelInvocationBatchItem,
-    RDBExternalChannelPendingContext,
     RDBExternalChannelResource,
     RDBExternalChannelWork,
     RDBExternalChannelWorkProjectionPart,
@@ -88,14 +87,10 @@ class ExternalChannelLifecycleRepository:
             return ExternalChannelArchiveTermination(
                 disconnected_binding_count=0,
                 finished_work_count=0,
-                deleted_pending_context_count=0,
                 created_progress_delete_intent_count=0,
                 progress_delete_intent_ids=(),
             )
         binding_ids = [binding.id for binding in bindings]
-        binding_pairs = [
-            (binding.route_id, binding.resource_id) for binding in bindings
-        ]
         works = list(
             (
                 await session.scalars(
@@ -160,19 +155,10 @@ class ExternalChannelLifecycleRepository:
         )
         progress_delete_intent_ids.extend(discord_cleanup_ids)
         created_progress_delete_intent_count += len(discord_cleanup_ids)
-        deleted_pending_context_count = await self._delete(
-            session,
-            RDBExternalChannelPendingContext,
-            sa.tuple_(
-                RDBExternalChannelPendingContext.route_id,
-                RDBExternalChannelPendingContext.resource_id,
-            ).in_(binding_pairs),
-        )
         await session.flush()
         return ExternalChannelArchiveTermination(
             disconnected_binding_count=len(bindings),
             finished_work_count=finished_work_count,
-            deleted_pending_context_count=deleted_pending_context_count,
             created_progress_delete_intent_count=created_progress_delete_intent_count,
             progress_delete_intent_ids=tuple(progress_delete_intent_ids),
         )
@@ -555,11 +541,6 @@ class ExternalChannelLifecycleRepository:
                     == ExternalChannelAccessRequestStatus.PENDING,
                 ),
             ),
-            pending_context_count=await self._count(
-                session,
-                RDBExternalChannelPendingContext,
-                RDBExternalChannelPendingContext.route_id.in_(route_ids),
-            ),
             affected_defaults=affected_defaults,
             affected_bindings=affected_bindings,
         )
@@ -689,11 +670,6 @@ class ExternalChannelLifecycleRepository:
             request.status = ExternalChannelAccessRequestStatus.EXPIRED
             request.decision_summary = "The External Channel relationship was removed."
             request.decided_at = now
-        await self._delete(
-            session,
-            RDBExternalChannelPendingContext,
-            RDBExternalChannelPendingContext.route_id == route.id,
-        )
         if not already_removed:
             route.catalog_status = ExternalChannelRouteCatalogStatus.REMOVED
             route.catalog_removed_at = now
@@ -909,11 +885,6 @@ class ExternalChannelLifecycleRepository:
                 "The External Channel connection was disconnected."
             )
             request.decided_at = now
-        deleted_pending_context_count = await self._delete(
-            session,
-            RDBExternalChannelPendingContext,
-            RDBExternalChannelPendingContext.route_id.in_(route_ids),
-        )
         disconnected_route_count = 0
         for route in routes:
             if (
@@ -953,7 +924,6 @@ class ExternalChannelLifecycleRepository:
             expired_access_request_count=len(access_requests),
             unavailable_resource_count=unavailable_resource_count,
             disconnected_binding_count=len(bindings),
-            deleted_pending_context_count=deleted_pending_context_count,
             progress_delete_intent_ids=progress_delete_intent_ids,
         )
 
@@ -1164,11 +1134,6 @@ class ExternalChannelLifecycleRepository:
                     RDBExternalChannelAccessRequest.status
                     == ExternalChannelAccessRequestStatus.PENDING,
                 ),
-            ),
-            pending_context_count=await self._count(
-                session,
-                RDBExternalChannelPendingContext,
-                RDBExternalChannelPendingContext.route_id == route_id,
             ),
             affected_defaults=affected_defaults,
             affected_bindings=affected_bindings,

@@ -7,9 +7,12 @@ from typing import Annotated, assert_never
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
+from azents.core.deps import get_config
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
+    ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
     ExternalChannelProvider,
     ExternalChannelTransport,
@@ -21,8 +24,16 @@ from azents.services.external_channel.admission import ExternalChannelAdmissionS
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
 )
+from azents.services.external_channel.connection_revocation import (
+    ExternalChannelConnectionRevocationService,
+)
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import SlackConnectionCredentials
+from azents.services.external_channel.ingestion import (
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngressAuthority,
+    ExternalChannelIngressAuthorityKind,
+)
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
     ExternalChannelInteractionProcessor,
@@ -30,6 +41,7 @@ from azents.services.external_channel.interaction import (
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
 )
+from azents.services.external_channel.slack_events import SlackConnectionRevocation
 from azents.services.external_channel.slack_http import (
     SlackEventCallback,
     SlackEventRouteIdentity,
@@ -40,7 +52,13 @@ from azents.services.external_channel.slack_http import (
     parse_slack_callback,
     parse_slack_callback_route,
     project_slack_shortcut_source_event_from_callback_body,
+    slack_event_is_normal_message_ingress,
     verify_slack_signature,
+)
+from azents.services.external_channel.transport_ingestion import (
+    ExternalChannelTransportIngestionService,
+    external_channel_transport_deadline,
+    transport_outcome_acknowledgeable,
 )
 
 
@@ -56,6 +74,16 @@ class SlackHTTPAdmissionResult:
         default=None,
         repr=False,
     )
+    control_delivery_attempt_id: str | None = field(default=None, repr=False)
+    control_delivery_connection_id: str | None = field(default=None, repr=False)
+
+
+class SlackHTTPMessageIngressQuiesced(RuntimeError):
+    """Normal Slack message ingress is temporarily quiesced."""
+
+
+class SlackHTTPRetryableIngestion(RuntimeError):
+    """Slack message ingestion did not reach an acknowledgeable outcome."""
 
 
 @dataclass
@@ -86,6 +114,15 @@ class SlackHTTPAdmissionService:
         ExternalChannelShortcutSourceService,
         Depends(ExternalChannelShortcutSourceService),
     ]
+    transport_ingestion_service: Annotated[
+        ExternalChannelTransportIngestionService,
+        Depends(ExternalChannelTransportIngestionService),
+    ]
+    revocation_service: Annotated[
+        ExternalChannelConnectionRevocationService,
+        Depends(ExternalChannelConnectionRevocationService),
+    ]
+    config: Annotated[Config | None, Depends(get_config)] = None
 
     async def handle(
         self,
@@ -161,12 +198,67 @@ class SlackHTTPAdmissionService:
                     raise SlackHTTPUnauthorized(
                         "Slack callback could not be authenticated."
                     )
-                admission = await self.admission_service.admit(event)
+                if (
+                    self.config is not None
+                    and self.config.external_channel_conversation.quiesce.slack_http
+                    and slack_event_is_normal_message_ingress(event)
+                ):
+                    raise SlackHTTPMessageIngressQuiesced(
+                        "Slack message ingress is temporarily quiesced."
+                    )
+                result = await self.transport_ingestion_service.ingest_slack_event(
+                    event=event,
+                    authority=ExternalChannelIngressAuthority(
+                        kind=ExternalChannelIngressAuthorityKind.CONFIGURATION,
+                        ingress_profile=ExternalChannelIngressProfile.SLACK_HTTP,
+                        configuration_generation=(
+                            configuration.configuration_generation
+                        ),
+                        lease_owner=None,
+                        lease_generation=None,
+                    ),
+                    deadline=external_channel_transport_deadline(received_at),
+                )
+                if result is None:
+                    return SlackHTTPAdmissionResult(
+                        challenge=None,
+                        event_id=event.provider_event_id,
+                        interaction_id=None,
+                        created=False,
+                    )
+                if isinstance(result, SlackConnectionRevocation):
+                    changed = await self.revocation_service.apply(
+                        connection_id=configuration.id,
+                        revocation=result,
+                        required_configuration_generation=(
+                            configuration.configuration_generation
+                        ),
+                        required_socket_lease_owner=None,
+                        now=received_at,
+                    )
+                    if not changed:
+                        raise SlackHTTPUnauthorized(
+                            "Slack callback could not be authenticated."
+                        )
+                    return SlackHTTPAdmissionResult(
+                        challenge=None,
+                        event_id=event.provider_event_id,
+                        interaction_id=None,
+                        created=False,
+                    )
+                if not transport_outcome_acknowledgeable(result):
+                    raise SlackHTTPRetryableIngestion(
+                        "Slack message ingestion is temporarily unavailable."
+                    )
                 return SlackHTTPAdmissionResult(
                     challenge=None,
-                    event_id=admission.event.id,
+                    event_id=event.provider_event_id,
                     interaction_id=None,
-                    created=admission.created,
+                    created=(
+                        result.kind is ExternalChannelIngestionOutcomeKind.ACCEPTED
+                    ),
+                    control_delivery_attempt_id=result.control_delivery_attempt_id,
+                    control_delivery_connection_id=result.connection_id,
                 )
             case (
                 SlackInteractionCallback(app_id=app_id, tenant_id=tenant_id) as callback
@@ -204,7 +296,6 @@ class SlackHTTPAdmissionService:
                         transport=ExternalChannelTransport.HTTP,
                     ),
                     principal=callback.principal_create(),
-                    shortcut_source_event=shortcut_source_event,
                 )
                 if shortcut_source_event is not None:
                     await self.shortcut_source_service.ensure(
@@ -265,4 +356,16 @@ class SlackHTTPAdmissionService:
         await self.admission_service.run_interaction_provider_mutation(
             handoff=handoff,
             callback=self.interaction_processor.process,
+        )
+
+    async def attempt_control_delivery(
+        self,
+        *,
+        connection_id: str,
+        delivery_attempt_id: str,
+    ) -> None:
+        """Attempt one committed approval control after provider acknowledgement."""
+        await self.interaction_processor.attempt_control_delivery(
+            connection_id=connection_id,
+            delivery_attempt_id=delivery_attempt_id,
         )

@@ -15,13 +15,15 @@ from azents.core.enums import (
     AgentLifecycleStatus,
     ExternalChannelAccessRequestStatus,
     ExternalChannelAppMode,
-    ExternalChannelBindingActivationStatus,
     ExternalChannelBindingStatus,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelConversationAdmissionOrigin,
     ExternalChannelConversationAdmissionStatus,
-    ExternalChannelHydrationStatus,
+    ExternalChannelConversationScopeKind,
+    ExternalChannelDeliveryOperation,
+    ExternalChannelDeliveryOriginType,
+    ExternalChannelDeliveryStatus,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
     ExternalChannelMessageLifecycle,
@@ -35,6 +37,7 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAgentRoute,
     RDBExternalChannelAppClaim,
@@ -42,6 +45,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelChannelDefault,
     RDBExternalChannelConnection,
     RDBExternalChannelConversationAdmission,
+    RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelResource,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
@@ -60,6 +64,7 @@ from .data import (
     ExternalChannelChannelDefaultCreate,
     ExternalChannelConnectionCreate,
     ExternalChannelConversationAdmissionCreate,
+    ExternalChannelConversationPositionCreate,
     ExternalChannelInteractionCreate,
     ExternalChannelMessage,
     ExternalChannelMessageCreate,
@@ -70,6 +75,7 @@ from .data import (
 from .lifecycle import ExternalChannelLifecycleRepository
 from .management import ExternalChannelManagementRepository
 from .repository import ExternalChannelRepository, validate_interaction_projection
+from .work import DeliverySettlement, ExternalChannelWorkRepository
 
 
 def _at(minute: int) -> datetime.datetime:
@@ -185,15 +191,6 @@ async def _resource(
             provider_resource_key=key,
             labels=None,
             status=ExternalChannelResourceStatus.ACTIVE,
-            hydration_status=ExternalChannelHydrationStatus.PENDING,
-            hydration_cursor=None,
-            hydration_high_watermark_position=None,
-            reconciliation_boundary_received_at=None,
-            reconciliation_boundary_event_id=None,
-            hydration_error_kind=None,
-            hydration_error_summary=None,
-            hydration_started_at=None,
-            hydration_completed_at=None,
             latest_activity_at=None,
             unavailable_at=None,
             deleted_at=None,
@@ -257,6 +254,7 @@ def _admission_create(
     connection_id: str,
     resource_id: str,
     source_message_id: str,
+    conversation_position_id: str,
     initiating_principal_id: str | None = None,
     selected_route_id: str | None = None,
     interaction_id: str | None = None,
@@ -274,6 +272,9 @@ def _admission_create(
         status=status,
         selected_route_id=selected_route_id,
         interaction_id=interaction_id,
+        conversation_position_id=conversation_position_id,
+        range_start_position="00000000000000000000",
+        trigger_position="00000000000000000001",
         expires_at=_at(20),
     )
 
@@ -285,6 +286,18 @@ async def _cleanup_committed_workspace(
 ) -> None:
     """Remove direct-engine concurrency fixtures in restrictive FK order."""
     statements = (
+        """
+        DELETE FROM external_channel_delivery_attempts
+        WHERE binding_id IN (
+            SELECT binding.id
+            FROM external_channel_bindings AS binding
+            JOIN external_channel_agent_routes AS route
+              ON route.id = binding.route_id
+            JOIN external_channel_connections AS connection
+              ON connection.id = route.connection_id
+            WHERE connection.workspace_id = :workspace_id
+        )
+        """,
         """
         DELETE FROM external_channel_bindings
         WHERE route_id IN (
@@ -520,6 +533,16 @@ async def test_conversation_admission_preserves_retries_and_ownership_boundaries
         rdb_session,
         _connection_create(workspace_id, provider_app_id="A2", provider_tenant_id="T2"),
     )
+    first_position = await repo.create_conversation_position_idempotent(
+        rdb_session,
+        ExternalChannelConversationPositionCreate(
+            connection_id=first_connection.id,
+            scope_kind=ExternalChannelConversationScopeKind.THREAD,
+            provider_channel_id="C1",
+            provider_thread_key="1.000001",
+            read_through_position=None,
+        ),
+    )
     first_route = await repo.create_agent_route(
         rdb_session,
         _route_create(
@@ -576,6 +599,7 @@ async def test_conversation_admission_preserves_retries_and_ownership_boundaries
         connection_id=first_connection.id,
         resource_id=first_resource.id,
         source_message_id=first_message.id,
+        conversation_position_id=first_position.id,
         initiating_principal_id=first_principal.id,
         selected_route_id=first_route.id,
     )
@@ -598,28 +622,33 @@ async def test_conversation_admission_preserves_retries_and_ownership_boundaries
             connection_id=first_connection.id,
             resource_id=second_resource.id,
             source_message_id=second_message.id,
+            conversation_position_id=first_position.id,
         ),
         _admission_create(
             connection_id=first_connection.id,
             resource_id=first_resource.id,
             source_message_id=second_message.id,
+            conversation_position_id=first_position.id,
         ),
         _admission_create(
             connection_id=first_connection.id,
             resource_id=first_resource.id,
             source_message_id=first_message.id,
+            conversation_position_id=first_position.id,
             selected_route_id=second_route.id,
         ),
         _admission_create(
             connection_id=first_connection.id,
             resource_id=first_resource.id,
             source_message_id=first_message.id,
+            conversation_position_id=first_position.id,
             interaction_id=second_interaction.interaction.id,
         ),
         _admission_create(
             connection_id=first_connection.id,
             resource_id=first_resource.id,
             source_message_id=first_message.id,
+            conversation_position_id=first_position.id,
             initiating_principal_id=foreign_principal.id,
             selected_route_id=first_route.id,
         ),
@@ -656,6 +685,7 @@ async def test_conversation_admission_preserves_retries_and_ownership_boundaries
             connection_id=first_connection.id,
             resource_id=resource.id,
             source_message_id=message.id,
+            conversation_position_id=first_position.id,
             initiating_principal_id=first_principal.id,
             status=status,
         )
@@ -674,6 +704,9 @@ async def test_conversation_admission_preserves_retries_and_ownership_boundaries
                         status=status,
                         selected_route_id=None,
                         interaction_id=None,
+                        conversation_position_id=first_position.id,
+                        range_start_position="00000000000000000000",
+                        trigger_position="00000000000000000001",
                         expires_at=_at(20 + offset),
                     )
                 )
@@ -884,12 +917,6 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
             route_id=first_route.id,
             agent_session_id=first_session.id,
             status=ExternalChannelBindingStatus.ACTIVE,
-            activation_status=ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
-            activation_trigger_message_id=None,
-            activated_at=None,
-            projected_through_position=None,
-            truncated_message_count=0,
-            truncated_size=0,
             disconnected_at=None,
             disconnect_reason=None,
         ),
@@ -904,12 +931,6 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
                 route_id=second_route.id,
                 agent_session_id=second_session.id,
                 status=ExternalChannelBindingStatus.ACTIVE,
-                activation_status=ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
-                activation_trigger_message_id=None,
-                activated_at=None,
-                projected_through_position=None,
-                truncated_message_count=0,
-                truncated_size=0,
                 disconnected_at=None,
                 disconnect_reason=None,
             ),
@@ -932,14 +953,6 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
                 route_id=first_route.id,
                 agent_session_id=duplicate_first_session.id,
                 status=ExternalChannelBindingStatus.ACTIVE,
-                activation_status=(
-                    ExternalChannelBindingActivationStatus.WAITING_HYDRATION
-                ),
-                activation_trigger_message_id=None,
-                activated_at=None,
-                projected_through_position=None,
-                truncated_message_count=0,
-                truncated_size=0,
                 disconnected_at=None,
                 disconnect_reason=None,
             ),
@@ -1148,14 +1161,6 @@ async def test_binding_creation_serializes_on_resource_lock(
             route_id=route.id,
             agent_session_id=agent_session.id,
             status=ExternalChannelBindingStatus.ACTIVE,
-            activation_status=(
-                ExternalChannelBindingActivationStatus.WAITING_HYDRATION
-            ),
-            activation_trigger_message_id=None,
-            activated_at=None,
-            projected_through_position=None,
-            truncated_message_count=0,
-            truncated_size=0,
             disconnected_at=None,
             disconnect_reason=None,
         )
@@ -1199,6 +1204,155 @@ async def test_binding_creation_serializes_on_resource_lock(
         if second_task is not None and not second_task.done():
             second_task.cancel()
             await asyncio.gather(second_task, return_exceptions=True)
+        if workspace_id is not None:
+            await _cleanup_committed_workspace(
+                rdb_engine,
+                workspace_id=workspace_id,
+            )
+
+
+async def test_provider_control_settlement_follows_lifecycle_lock_order(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """Session-tree purge can finish while final settlement waits on authority."""
+    del latest_db_schema
+    suffix = uuid4().hex[:8]
+    workspace_id: str | None = None
+    settlement_task: asyncio.Task[DeliverySettlement] | None = None
+    try:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup:
+            workspace_id = await _workspace(setup, f"settlement-lock-{suffix}")
+            agent = await _agent(setup, workspace_id, f"settlement-lock-{suffix}")
+            repository = ExternalChannelRepository()
+            connection = await repository.create_connection(
+                setup,
+                _connection_create(
+                    workspace_id,
+                    provider_app_id=f"AS{suffix}",
+                    provider_tenant_id=f"TS{suffix}",
+                ),
+            )
+            route = await repository.create_agent_route(
+                setup,
+                _route_create(
+                    connection.id,
+                    agent.id,
+                    mode=ExternalChannelAppMode.SINGLE,
+                ),
+            )
+            resource = await _resource(
+                setup,
+                repository,
+                connection_id=connection.id,
+                key=f"settlement-lock-{suffix}",
+            )
+            agent_session = await AgentSessionRepository().create(
+                setup,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent.id,
+                    title=None,
+                ),
+            )
+            binding = await repository.create_binding_idempotent(
+                setup,
+                ExternalChannelBindingCreate(
+                    resource_id=resource.id,
+                    route_id=route.id,
+                    agent_session_id=agent_session.id,
+                    status=ExternalChannelBindingStatus.ACTIVE,
+                    disconnected_at=None,
+                    disconnect_reason=None,
+                ),
+                expected_admission_id=None,
+                expected_access_request_id=None,
+            )
+            attempt = RDBExternalChannelDeliveryAttempt(
+                origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                origin_id="manager-operation-1",
+                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                request_payload={
+                    "channel_id": "C1",
+                    "thread_ts": "1.000001",
+                    "text": "Control",
+                },
+                status=ExternalChannelDeliveryStatus.PENDING,
+                channel_action_id=None,
+                binding_id=binding.id,
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+                attempted_at=None,
+                completed_at=None,
+            )
+            setup.add(attempt)
+            await setup.commit()
+
+        work_repository = ExternalChannelWorkRepository()
+        lifecycle_repository = ExternalChannelLifecycleRepository()
+        async with AsyncSession(rdb_engine) as start_session:
+            assert await work_repository.start_delivery(
+                start_session,
+                delivery_attempt_id=attempt.id,
+                now=_at(1),
+            )
+            await start_session.commit()
+
+        async with AsyncSession(
+            rdb_engine,
+            expire_on_commit=False,
+        ) as lifecycle_session:
+            assert await lifecycle_session.scalar(
+                sa.select(RDBAgentSession)
+                .where(RDBAgentSession.id == agent_session.id)
+                .with_for_update()
+            )
+            assert await lifecycle_session.scalar(
+                sa.select(RDBExternalChannelBinding)
+                .where(RDBExternalChannelBinding.id == binding.id)
+                .with_for_update()
+            )
+
+            async def settle() -> DeliverySettlement:
+                async with AsyncSession(rdb_engine) as settlement_session:
+                    result = await work_repository.settle_delivery(
+                        settlement_session,
+                        delivery_attempt_id=attempt.id,
+                        status=ExternalChannelDeliveryStatus.DELIVERED,
+                        provider_message_key="slack:TS:C1:2.000001",
+                        error_kind=None,
+                        error_summary=None,
+                        now=_at(3),
+                    )
+                    await settlement_session.commit()
+                    return result
+
+            settlement_task = asyncio.create_task(settle())
+            await asyncio.sleep(0.1)
+            assert not settlement_task.done()
+            purged = await lifecycle_repository.prepare_session_tree_purge(
+                lifecycle_session,
+                session_ids=[agent_session.id],
+                now=_at(2),
+            )
+            await lifecycle_session.commit()
+            settlement = await asyncio.wait_for(settlement_task, timeout=5)
+
+        assert purged.unknown_delivery_count == 1
+        assert not settlement.accepted
+        async with AsyncSession(rdb_engine) as verification:
+            stored = await verification.get(
+                RDBExternalChannelDeliveryAttempt,
+                attempt.id,
+            )
+            assert stored is not None
+            assert stored.status is ExternalChannelDeliveryStatus.UNKNOWN
+            assert stored.error_kind == "PurgeOutcomeUnknown"
+    finally:
+        if settlement_task is not None and not settlement_task.done():
+            settlement_task.cancel()
+            await asyncio.gather(settlement_task, return_exceptions=True)
         if workspace_id is not None:
             await _cleanup_committed_workspace(
                 rdb_engine,
@@ -1341,7 +1495,6 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
         route_id=first_route.id,
         agent_session_id=first_session.id,
         status=ExternalChannelBindingStatus.ACTIVE,
-        activation_status=ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
     )
     rdb_session.add(first)
     await rdb_session.flush()
@@ -1356,9 +1509,6 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
                     route_id=second_route.id,
                     agent_session_id=second_session.id,
                     status=ExternalChannelBindingStatus.ACTIVE,
-                    activation_status=(
-                        ExternalChannelBindingActivationStatus.WAITING_HYDRATION
-                    ),
                 )
             )
             await rdb_session.flush()
@@ -1373,12 +1523,6 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
             route_id=second_route.id,
             agent_session_id=second_session.id,
             status=ExternalChannelBindingStatus.ACTIVE,
-            activation_status=ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
-            activation_trigger_message_id=None,
-            activated_at=None,
-            projected_through_position=None,
-            truncated_message_count=0,
-            truncated_size=0,
             disconnected_at=None,
             disconnect_reason=None,
         ),
@@ -1662,6 +1806,16 @@ async def test_multi_route_removal_preserves_route_identity_and_other_routes(
     )
     rdb_session.add(connection)
     await rdb_session.flush()
+    position = await repo.create_conversation_position_idempotent(
+        rdb_session,
+        ExternalChannelConversationPositionCreate(
+            connection_id=connection.id,
+            scope_kind=ExternalChannelConversationScopeKind.THREAD,
+            provider_channel_id="C-removal",
+            provider_thread_key="123.456",
+            read_through_position=None,
+        ),
+    )
     first_route = await repo.create_agent_route(
         rdb_session,
         _route_create(connection.id, first_agent.id, mode=ExternalChannelAppMode.MULTI),
@@ -1714,14 +1868,6 @@ async def test_multi_route_removal_preserves_route_identity_and_other_routes(
             route_id=first_route.id,
             agent_session_id=agent_session.id,
             status=ExternalChannelBindingStatus.ACTIVE,
-            activation_status=(
-                ExternalChannelBindingActivationStatus.WAITING_HYDRATION
-            ),
-            activation_trigger_message_id=None,
-            activated_at=None,
-            projected_through_position=None,
-            truncated_message_count=0,
-            truncated_size=0,
             disconnected_at=None,
             disconnect_reason=None,
         ),
@@ -1740,6 +1886,7 @@ async def test_multi_route_removal_preserves_route_identity_and_other_routes(
             connection_id=connection.id,
             resource_id=resource.id,
             source_message_id=message.id,
+            conversation_position_id=position.id,
             selected_route_id=first_route.id,
             status=ExternalChannelConversationAdmissionStatus.SELECTED,
         ),
@@ -1766,11 +1913,41 @@ async def test_multi_route_removal_preserves_route_identity_and_other_routes(
             agent_session_id=None,
             status=ExternalChannelAccessRequestStatus.PENDING,
             decision_policy_snapshot={},
+            connection_id=connection.id,
+            conversation_position_id=position.id,
+            range_start_position="00000000000000000000",
+            trigger_position="00000000000000000001",
             decided_by_user_id=None,
             decision_summary=None,
             expires_at=_at(50),
             decided_at=None,
         ),
+    )
+    control_attempt = RDBExternalChannelDeliveryAttempt(
+        origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+        origin_id=admission.id,
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+        request_payload={
+            "channel_id": "C-removal",
+            "thread_ts": "123.456",
+            "text": "Select an Agent.",
+        },
+        status=ExternalChannelDeliveryStatus.PENDING,
+        channel_action_id=None,
+        binding_id=None,
+        provider_message_key=None,
+        error_kind=None,
+        error_summary=None,
+        attempted_at=None,
+        completed_at=None,
+    )
+    rdb_session.add(control_attempt)
+    await rdb_session.flush()
+    work_repository = ExternalChannelWorkRepository()
+    assert await work_repository.start_delivery(
+        rdb_session,
+        delivery_attempt_id=control_attempt.id,
+        now=_at(20),
     )
 
     lifecycle = ExternalChannelLifecycleRepository()
@@ -1841,6 +2018,17 @@ async def test_multi_route_removal_preserves_route_identity_and_other_routes(
     )
     assert persisted_request is not None
     assert persisted_request.status is ExternalChannelAccessRequestStatus.EXPIRED
+    settlement = await work_repository.settle_delivery(
+        rdb_session,
+        delivery_attempt_id=control_attempt.id,
+        status=ExternalChannelDeliveryStatus.DELIVERED,
+        provider_message_key="slack:TR:C-removal:123.457",
+        error_kind=None,
+        error_summary=None,
+        now=_at(31),
+    )
+    assert settlement.status is ExternalChannelDeliveryStatus.UNKNOWN
+    assert control_attempt.error_kind == "delivery_authority_revoked_after_provider"
     assert (
         await rdb_session.get(RDBExternalChannelAgentRoute, second_route.id)
     ) is not None

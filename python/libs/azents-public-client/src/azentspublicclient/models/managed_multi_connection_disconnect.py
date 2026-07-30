@@ -32,9 +32,8 @@ class ManagedMultiConnectionDisconnect(BaseModel):
     expired_access_request_count: StrictInt
     unavailable_resource_count: StrictInt
     disconnected_binding_count: StrictInt
-    deleted_pending_context_count: StrictInt
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["disconnected_route_count", "invalidated_default_count", "expired_admission_count", "expired_access_request_count", "unavailable_resource_count", "disconnected_binding_count", "deleted_pending_context_count"]
+    __properties: ClassVar[List[str]] = ["disconnected_route_count", "invalidated_default_count", "expired_admission_count", "expired_access_request_count", "unavailable_resource_count", "disconnected_binding_count"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -99,8 +98,7 @@ class ManagedMultiConnectionDisconnect(BaseModel):
             "expired_admission_count": obj.get("expired_admission_count"),
             "expired_access_request_count": obj.get("expired_access_request_count"),
             "unavailable_resource_count": obj.get("unavailable_resource_count"),
-            "disconnected_binding_count": obj.get("disconnected_binding_count"),
-            "deleted_pending_context_count": obj.get("deleted_pending_context_count")
+            "disconnected_binding_count": obj.get("disconnected_binding_count")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

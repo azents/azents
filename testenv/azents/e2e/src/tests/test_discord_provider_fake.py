@@ -990,3 +990,4 @@ def test_discord_fake_container_uses_the_azents_server_image(
 
     assert response.json() == {"status": "ok"}
     assert application.json()["verify_key"] == _DISCORD_VERIFY_KEY
+    assert application.json()["owner"]["id"].isdigit()

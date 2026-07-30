@@ -4,6 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import discord
 import pytest
+from discord.gateway import DiscordWebSocket
+from discord.http import Route
 
 from azents.services.external_channel.discord_gateway import (
     DISCORD_GATEWAY_INTENTS,
@@ -221,6 +223,53 @@ async def test_runner_uses_public_start_with_sdk_reconnect(
         reconnect=True,
         reason="gateway_client_closed",
     )
+
+
+@pytest.mark.asyncio
+async def test_runner_uses_explicit_testenv_endpoints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep discord.py REST and Gateway I/O inside deterministic test origins."""
+    observed_endpoints: list[tuple[str, str]] = []
+
+    async def start(
+        self: _DiscordLibraryClient,
+        token: str,
+        *,
+        reconnect: bool = True,
+    ) -> None:
+        del self, token, reconnect
+        observed_endpoints.append((Route.BASE, str(DiscordWebSocket.DEFAULT_GATEWAY)))
+
+    async def close(self: _DiscordLibraryClient) -> None:
+        return None
+
+    monkeypatch.setenv(
+        "AZ_TESTENV_DISCORD_API_BASE_URL",
+        "http://discord-fake:8085/api/v10",
+    )
+    monkeypatch.setenv(
+        "AZ_TESTENV_DISCORD_GATEWAY_URL",
+        "ws://discord-fake:8086",
+    )
+    monkeypatch.setattr(Route, "BASE", "https://invalid.example/api/v10")
+    monkeypatch.setattr(
+        DiscordWebSocket,
+        "DEFAULT_GATEWAY",
+        type(DiscordWebSocket.DEFAULT_GATEWAY)("wss://invalid.example"),
+    )
+    monkeypatch.setattr(_DiscordLibraryClient, "start", start)
+    monkeypatch.setattr(_DiscordLibraryClient, "close", close)
+
+    await DiscordGatewayClient().run_connection(
+        bot_token="redacted-token",
+        target_guild_id="300",
+        handle_event=AsyncMock(),
+    )
+
+    assert observed_endpoints == [
+        ("http://discord-fake:8085/api/v10", "ws://discord-fake:8086")
+    ]
 
 
 @pytest.mark.asyncio

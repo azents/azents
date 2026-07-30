@@ -15,14 +15,9 @@ from sqlalchemy.sql.elements import ClauseElement
 
 from azents.core.enums import (
     ExternalChannelAppMode,
-    ExternalChannelBindingActivationStatus,
     ExternalChannelConnectionStatus,
-    ExternalChannelDeliveryOperation,
-    ExternalChannelDeliveryOriginType,
-    ExternalChannelDeliveryStatus,
-    ExternalChannelEventEligibilityState,
-    ExternalChannelEventStatus,
     ExternalChannelIngressProfile,
+    ExternalChannelInvocationWakeDispatchStatus,
     ExternalChannelProvider,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
@@ -38,10 +33,9 @@ from azents.rdb.models.external_channel import (
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRouteCreate,
-    ExternalChannelBinding,
     ExternalChannelConnectionCreate,
-    ExternalChannelDeliveryAttempt,
-    ExternalChannelEventCreate,
+    ExternalChannelConversationPosition,
+    ExternalChannelInvocationBatch,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.workspace import WorkspaceRepository
@@ -116,141 +110,121 @@ def _connection_create(workspace_id: str) -> ExternalChannelConnectionCreate:
     )
 
 
-def _event_create(connection_id: str) -> ExternalChannelEventCreate:
-    """Build a provider-event admission payload."""
-    return ExternalChannelEventCreate(
-        connection_id=connection_id,
-        provider_event_id="provider-event-1",
-        transport_envelope_id="envelope-1",
-        event_type="app_mention",
-        provider_app_id="app-1",
-        provider_tenant_id="tenant-1",
-        provider_enterprise_id=None,
-        resource_correlation_key="thread-1",
-        eligibility_state=ExternalChannelEventEligibilityState.UNCLASSIFIED,
-        envelope={"event_id": "provider-event-1"},
-        status=ExternalChannelEventStatus.ACCEPTED,
-        provider_occurred_at=_at(1),
-        received_at=_at(2),
-    )
-
-
 @pytest.mark.asyncio
-async def test_list_initial_delivery_attempts_scopes_session_link_and_work_parts(
+async def test_conversation_position_lock_and_compare_and_set_are_fenced(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Initial hydration reads only the binding link and active-work parts."""
+    """The durable position row is locked and advances only from its expected value."""
     repository = ExternalChannelRepository()
+    position = SimpleNamespace(id="position-1", read_through_position=None)
     session = MagicMock(spec=AsyncSession)
-    session.scalar = AsyncMock(side_effect=["work-1", "link-1"])
-    session.scalars = AsyncMock(
-        side_effect=[
-            ["part-1", "part-2"],
-            [
-                SimpleNamespace(
-                    id="link-1",
-                    binding_id="binding-1",
-                    origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-                    origin_id="binding-1",
-                    operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-                    status=ExternalChannelDeliveryStatus.DELIVERED,
-                ),
-                SimpleNamespace(
-                    id="part-1",
-                    binding_id="binding-1",
-                    origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-                    origin_id="work-1",
-                    operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                    status=ExternalChannelDeliveryStatus.DELIVERED,
-                    channel_action_id=None,
-                    request_payload={"work_id": "work-1"},
-                    provider_message_key=None,
-                ),
-                SimpleNamespace(
-                    id="part-2",
-                    binding_id="binding-1",
-                    origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-                    origin_id="work-1",
-                    operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                    status=ExternalChannelDeliveryStatus.UNKNOWN,
-                    channel_action_id=None,
-                    request_payload={"work_id": "work-1"},
-                    provider_message_key=None,
-                ),
-            ],
-        ]
-    )
+    session.scalar = AsyncMock(return_value=position)
+    first_update = MagicMock()
+    first_update.scalar_one_or_none.return_value = "position-1"
+    stale_update = MagicMock()
+    stale_update.scalar_one_or_none.return_value = None
+    session.execute = AsyncMock(side_effect=[first_update, stale_update])
+    session.flush = AsyncMock()
     monkeypatch.setattr(
-        ExternalChannelDeliveryAttempt,
+        ExternalChannelConversationPosition,
         "model_validate",
         classmethod(lambda cls, value: value),
     )
 
-    attempts = await repository.list_initial_delivery_attempts(
+    locked = await repository.lock_conversation_position(
         session,
-        binding_id="binding-1",
+        position_id="position-1",
+    )
+    advanced = await repository.advance_conversation_position_if_current(
+        session,
+        position_id="position-1",
+        expected_read_through_position=None,
+        read_through_position="0000000002",
+    )
+    stale = await repository.advance_conversation_position_if_current(
+        session,
+        position_id="position-1",
+        expected_read_through_position="0000000001",
+        read_through_position="0000000003",
     )
 
-    assert [attempt.id for attempt in attempts] == ["link-1", "part-1", "part-2"]
-    assert attempts[-1].status is ExternalChannelDeliveryStatus.UNKNOWN
-    assert session.scalar.await_count == 2
-    assert session.scalars.await_count == 2
+    assert locked is position
+    assert advanced is True
+    assert stale is False
+    lock_statement = session.scalar.await_args.args[0]
+    assert "FOR UPDATE" in str(lock_statement.compile(dialect=postgresql.dialect()))
+    assert session.flush.await_count == 2
 
 
 @pytest.mark.asyncio
-async def test_claim_binding_wake_has_one_winner_and_reclaims_stale_claim(
+async def test_invocation_wake_dispatch_claim_transitions_are_recoverable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Fresh claims fence concurrent reconcilers while stale claims recover."""
+    """Fresh claims fence dispatchers; stale claims recover; dispatch is terminal."""
     repository = ExternalChannelRepository()
-    binding = SimpleNamespace(
-        id="binding-1",
-        activation_status=ExternalChannelBindingActivationStatus.WAITING_HYDRATION,
-        activation_wake_claimed_at=None,
-        projected_through_position=None,
+    batch = SimpleNamespace(
+        id="batch-1",
+        wake_dispatch_status=ExternalChannelInvocationWakeDispatchStatus.PENDING,
+        wake_dispatch_claimed_at=None,
     )
     session = MagicMock(spec=AsyncSession)
-    session.scalar = AsyncMock(return_value=binding)
+    session.scalar = AsyncMock(return_value=batch)
     session.flush = AsyncMock()
     monkeypatch.setattr(
-        ExternalChannelBinding,
+        ExternalChannelInvocationBatch,
         "model_validate",
         classmethod(lambda cls, value: value),
     )
     now = _at(10)
 
-    claimed, should_wake = await repository.claim_binding_wake(
+    claimed, should_dispatch = await repository.claim_invocation_wake_dispatch(
         session,
-        binding_id="binding-1",
+        batch_id=batch.id,
         now=now,
-        projected_through_position="position-9",
     )
-    assert claimed is binding
-    assert should_wake is True
-    assert binding.activation_status is (
-        ExternalChannelBindingActivationStatus.WAKE_PENDING
+    assert claimed is batch
+    assert should_dispatch is True
+    assert (
+        batch.wake_dispatch_status
+        is ExternalChannelInvocationWakeDispatchStatus.CLAIMED
     )
-    assert binding.projected_through_position == "position-9"
 
-    claimed, should_wake = await repository.claim_binding_wake(
+    claimed, should_dispatch = await repository.claim_invocation_wake_dispatch(
         session,
-        binding_id="binding-1",
+        batch_id=batch.id,
         now=now + datetime.timedelta(seconds=1),
-        projected_through_position="position-9",
     )
-    assert claimed is binding
-    assert should_wake is False
+    assert claimed is batch
+    assert should_dispatch is False
 
-    binding.activation_wake_claimed_at = now - datetime.timedelta(minutes=2)
-    claimed, should_wake = await repository.claim_binding_wake(
+    batch.wake_dispatch_claimed_at = now - datetime.timedelta(minutes=2)
+    claimed, should_dispatch = await repository.claim_invocation_wake_dispatch(
         session,
-        binding_id="binding-1",
+        batch_id=batch.id,
         now=now,
-        projected_through_position="position-9",
     )
-    assert claimed is binding
-    assert should_wake is True
-    assert binding.activation_wake_claimed_at == now
+    assert claimed is batch
+    assert should_dispatch is True
+
+    dispatched = await repository.mark_invocation_wake_dispatched(
+        session,
+        batch_id=batch.id,
+        dispatched_at=now,
+    )
+    assert dispatched is batch
+    assert (
+        batch.wake_dispatch_status
+        is ExternalChannelInvocationWakeDispatchStatus.DISPATCHED
+    )
+    assert batch.wake_dispatch_claimed_at is None
+
+    claimed, should_dispatch = await repository.claim_invocation_wake_dispatch(
+        session,
+        batch_id=batch.id,
+        now=now + datetime.timedelta(minutes=2),
+    )
+    assert claimed is batch
+    assert should_dispatch is False
 
 
 async def test_invocation_projection_query_preserves_inner_revision_from() -> None:
@@ -358,6 +332,7 @@ class TestExternalChannelRepository:
             status=ExternalChannelConnectionStatus.DISCONNECTED,
             reason="app_uninstalled",
             now=_at(4),
+            required_configuration_generation=None,
             required_socket_lease_owner=None,
             defer_provider_state_purge=False,
         )
@@ -401,6 +376,7 @@ class TestExternalChannelRepository:
             status=ExternalChannelConnectionStatus.DISCONNECTED,
             reason="app_uninstalled",
             now=_at(4),
+            required_configuration_generation=None,
             required_socket_lease_owner=None,
             defer_provider_state_purge=True,
         )
@@ -427,6 +403,50 @@ class TestExternalChannelRepository:
         assert purged is not None
         assert purged.encrypted_credentials is None
         assert purged.provider_tenant_id is None
+
+    async def test_provider_lifecycle_rejects_stale_configuration_generation(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A replaced configuration wins over an in-flight provider callback."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "external-channel-stale-provider-lifecycle",
+        )
+        repo = ExternalChannelRepository()
+        connection = await repo.create_connection(
+            rdb_session,
+            _connection_create(workspace_id),
+        )
+        stale_generation = connection.configuration_generation + 1
+
+        terminated = await repo.terminate_connection_for_provider_event(
+            rdb_session,
+            connection_id=connection.id,
+            status=ExternalChannelConnectionStatus.DISCONNECTED,
+            reason="app_uninstalled",
+            now=_at(4),
+            required_configuration_generation=stale_generation,
+            required_socket_lease_owner=None,
+            defer_provider_state_purge=True,
+        )
+        reconnect_required = await repo.mark_connection_reconnect_required(
+            rdb_session,
+            connection_id=connection.id,
+            reason="tokens_revoked",
+            now=_at(4),
+            required_configuration_generation=stale_generation,
+            required_socket_lease_owner=None,
+        )
+        retained = await repo.get_connection_configuration(
+            rdb_session,
+            connection_id=connection.id,
+        )
+
+        assert terminated is None
+        assert reconnect_required is False
+        assert retained is not None
+        assert retained.status is ExternalChannelConnectionStatus.ACTIVE
 
     async def test_connection_health_update_returns_refreshed_projection(
         self,
@@ -509,27 +529,6 @@ class TestExternalChannelRepository:
         assert configured is not None
         assert configured.status is ExternalChannelConnectionStatus.CONFIGURING
         assert configured.capabilities == {"interaction_public_key": "a" * 64}
-
-    async def test_event_admission_returns_existing_event_for_provider_retry(
-        self,
-        rdb_session: AsyncSession,
-    ) -> None:
-        """A duplicate connection-scoped provider event is not inserted twice."""
-        workspace_id = await _create_workspace(rdb_session)
-        repo = ExternalChannelRepository()
-        connection = await repo.create_connection(
-            rdb_session,
-            _connection_create(workspace_id),
-        )
-        create = _event_create(connection.id)
-
-        first = await repo.admit_event(rdb_session, create)
-        second = await repo.admit_event(rdb_session, create)
-
-        assert first.created is True
-        assert second.created is False
-        assert second.event.id == first.event.id
-        assert second.event.provider_event_id == "provider-event-1"
 
     async def test_discord_activation_reclaims_a_disconnected_app_claim(
         self,
@@ -615,151 +614,6 @@ class TestExternalChannelRepository:
         assert claim is not None
         assert claim.connection_id == replacement.id
         assert claim.claim_generation == 2
-
-    async def test_discord_gateway_admission_is_lease_fenced(
-        self,
-        rdb_session: AsyncSession,
-    ) -> None:
-        """Typed Gateway admission remains idempotent under one current lease."""
-        workspace_id = await _create_workspace(
-            rdb_session,
-            "discord-gateway-admission",
-        )
-        repo = ExternalChannelRepository()
-        connection = await repo.create_connection(
-            rdb_session,
-            _connection_create(workspace_id).model_copy(
-                update={
-                    "provider": ExternalChannelProvider.DISCORD,
-                    "ingress_profile": (
-                        ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP
-                    ),
-                    "provider_app_id": "discord-app-1",
-                    "provider_tenant_id": None,
-                    "provider_config": {"target_guild_id": "guild-1"},
-                }
-            ),
-        )
-        prepared = await repo.prepare_discord_callback(
-            rdb_session,
-            connection_id=connection.id,
-            expected_encrypted_credentials="ciphertext-only",
-            expected_configuration_generation=connection.configuration_generation,
-            provider_app_id="discord-app-1",
-            interaction_public_key="a" * 64,
-            callback_selector_hash="selector-hash",
-        )
-        assert prepared is True
-        activated = await repo.activate_discord_connection(
-            rdb_session,
-            connection_id=connection.id,
-            expected_encrypted_credentials="ciphertext-only",
-            expected_configuration_generation=connection.configuration_generation,
-            provider_app_id="discord-app-1",
-            provider_tenant_id="guild-1",
-            provider_bot_user_id=None,
-            interaction_public_key="a" * 64,
-            message_command_id="123456789012345678",
-            capabilities=_discord_capabilities(),
-            callback_selector_hash="selector-hash",
-            checked_at=_at(1),
-        )
-        assert activated is not None
-        assert activated.capabilities == {
-            **_discord_capabilities(),
-            "interaction_public_key": "a" * 64,
-            "message_command_id": "123456789012345678",
-        }
-        claim = await repo.claim_discord_gateway_lease(
-            rdb_session,
-            connection_id=connection.id,
-            lease_owner="manager-1",
-            now=_at(2),
-            lease_until=_at(10),
-        )
-        assert claim is not None
-        first_provider_event_id = (
-            "discord:discord_message_create:guild-1:channel-1:message-1"
-        )
-        create = _event_create(connection.id).model_copy(
-            update={
-                "provider_event_id": first_provider_event_id,
-                "transport_envelope_id": first_provider_event_id,
-                "event_type": "discord_message_create",
-                "provider_app_id": "discord-app-1",
-                "provider_tenant_id": "guild-1",
-                "resource_correlation_key": "guild-1:channel-1",
-                "envelope": {
-                    "message": {
-                        "id": "message-1",
-                        "channel_id": "channel-1",
-                        "guild_id": "guild-1",
-                    }
-                },
-            }
-        )
-
-        first = await repo.admit_discord_gateway_event(
-            rdb_session,
-            connection_id=connection.id,
-            lease_owner="manager-1",
-            lease_generation=claim.lease.lease_generation,
-            now=_at(3),
-            create=create,
-        )
-        duplicate = await repo.admit_discord_gateway_event(
-            rdb_session,
-            connection_id=connection.id,
-            lease_owner="manager-1",
-            lease_generation=claim.lease.lease_generation,
-            now=_at(4),
-            create=create,
-        )
-        lease = await rdb_session.scalar(
-            sa.select(RDBExternalChannelIngressLease).where(
-                RDBExternalChannelIngressLease.connection_id == connection.id
-            )
-        )
-
-        assert first is not None
-        assert first.created is True
-        assert duplicate is not None
-        assert duplicate.created is False
-        assert lease is not None
-
-        rdb_connection = await rdb_session.get(
-            RDBExternalChannelConnection,
-            connection.id,
-        )
-        assert rdb_connection is not None
-        rdb_connection.configuration_generation += 1
-        await rdb_session.flush()
-        second_provider_event_id = (
-            "discord:discord_message_create:guild-1:channel-1:message-2"
-        )
-        fenced = await repo.admit_discord_gateway_event(
-            rdb_session,
-            connection_id=connection.id,
-            lease_owner="manager-1",
-            lease_generation=claim.lease.lease_generation,
-            now=_at(5),
-            create=create.model_copy(
-                update={
-                    "provider_event_id": second_provider_event_id,
-                    "transport_envelope_id": second_provider_event_id,
-                }
-            ),
-        )
-
-        assert fenced is None
-        assert (
-            await repo.get_event_by_provider_identity(
-                rdb_session,
-                connection_id=connection.id,
-                provider_event_id=second_provider_event_id,
-            )
-            is None
-        )
 
     async def test_discord_gateway_terminal_transition_fences_stale_lease(
         self,
@@ -866,121 +720,6 @@ class TestExternalChannelRepository:
         assert lease.gap_detected_at == _at(5)
         assert lease.gap_reason == "gateway_credentials_invalid"
         assert await repo.list_discord_gateway_connection_ids(rdb_session) == []
-
-    async def test_event_claim_is_fenced_and_completion_is_idempotent(
-        self,
-        rdb_session: AsyncSession,
-    ) -> None:
-        """Only the current event lease owner can commit terminal processing."""
-        workspace_id = await _create_workspace(rdb_session)
-        repo = ExternalChannelRepository()
-        connection = await repo.create_connection(
-            rdb_session,
-            _connection_create(workspace_id),
-        )
-        admitted = await repo.admit_event(
-            rdb_session,
-            _event_create(connection.id),
-        )
-
-        claimed = await repo.claim_events(
-            rdb_session,
-            claim_owner="processor-1",
-            now=_at(2),
-            claim_until=_at(5),
-            limit=10,
-        )
-        fenced = await repo.claim_events(
-            rdb_session,
-            claim_owner="processor-2",
-            now=_at(3),
-            claim_until=_at(6),
-            limit=10,
-        )
-        stale_completion = await repo.complete_event(
-            rdb_session,
-            event_id=admitted.event.id,
-            claim_owner="processor-2",
-            now=_at(3),
-            eligibility_state=ExternalChannelEventEligibilityState.PROCESSED,
-            status=ExternalChannelEventStatus.PROCESSED,
-            purge_envelope=False,
-        )
-        completed = await repo.complete_event(
-            rdb_session,
-            event_id=admitted.event.id,
-            claim_owner="processor-1",
-            now=_at(4),
-            eligibility_state=ExternalChannelEventEligibilityState.PROCESSED,
-            status=ExternalChannelEventStatus.PROCESSED,
-            purge_envelope=False,
-        )
-        final = await repo.get_event_by_provider_identity(
-            rdb_session,
-            connection_id=connection.id,
-            provider_event_id="provider-event-1",
-        )
-
-        assert [event.id for event in claimed] == [admitted.event.id]
-        assert claimed[0].attempt_count == 1
-        assert fenced == []
-        assert stale_completion is False
-        assert completed is True
-        assert final is not None
-        assert final.status is ExternalChannelEventStatus.PROCESSED
-        assert final.claim_owner is None
-
-    async def test_event_defer_respects_retry_boundary(
-        self,
-        rdb_session: AsyncSession,
-    ) -> None:
-        """A deferred unlinked event cannot be reclaimed before its retry time."""
-        workspace_id = await _create_workspace(rdb_session)
-        repo = ExternalChannelRepository()
-        connection = await repo.create_connection(
-            rdb_session,
-            _connection_create(workspace_id),
-        )
-        admitted = await repo.admit_event(
-            rdb_session,
-            _event_create(connection.id),
-        )
-        await repo.claim_events(
-            rdb_session,
-            claim_owner="processor-1",
-            now=_at(2),
-            claim_until=_at(5),
-            limit=1,
-        )
-        deferred = await repo.defer_event(
-            rdb_session,
-            event_id=admitted.event.id,
-            claim_owner="processor-1",
-            now=_at(3),
-            retry_at=_at(8),
-            error_kind="awaiting_thread_mention",
-            error_summary="Waiting for a mention.",
-        )
-
-        early = await repo.claim_events(
-            rdb_session,
-            claim_owner="processor-2",
-            now=_at(7),
-            claim_until=_at(9),
-            limit=1,
-        )
-        ready = await repo.claim_events(
-            rdb_session,
-            claim_owner="processor-2",
-            now=_at(8),
-            claim_until=_at(10),
-            limit=1,
-        )
-
-        assert deferred is True
-        assert early == []
-        assert [event.id for event in ready] == [admitted.event.id]
-        assert ready[0].attempt_count == 2
 
     async def test_socket_lease_fences_owner_and_reclaims_after_expiry(
         self,

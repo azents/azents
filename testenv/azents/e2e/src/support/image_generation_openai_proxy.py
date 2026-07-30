@@ -110,6 +110,7 @@ _EXTERNAL_CHANNEL_TURN_BINDING = re.compile(r"Binding: ([A-Za-z0-9_-]+)")
 _EXTERNAL_CHANNEL_COMPACTION_BINDING = re.compile(r"### Binding `([^`]+)`")
 _EXTERNAL_CHANNEL_FILE_MARKER = "External Channel file transfer E2E"
 _EXTERNAL_CHANNEL_FILE_LOCATOR = re.compile(r"File: (external-file:v1:[^\\\s\"']+)")
+_EXTERNAL_CHANNEL_FILE_SEARCH_CALL_ID = "call_external_channel_file_tool_search"
 _EXTERNAL_CHANNEL_FILE_DOWNLOAD_CALL_ID = "call_external_channel_file_download"
 _EXTERNAL_CHANNEL_FILE_PROCESS_CALL_ID = "call_external_channel_file_process"
 _EXTERNAL_CHANNEL_FILE_FINISH_CALL_ID = "call_external_channel_file_finish"
@@ -192,6 +193,7 @@ def external_channel_file_tool_output_evidence(
 ) -> dict[str, dict[str, object]]:
     """Return bounded diagnostic metadata without retaining tool output bodies."""
     call_ids = {
+        _EXTERNAL_CHANNEL_FILE_SEARCH_CALL_ID,
         _EXTERNAL_CHANNEL_FILE_DOWNLOAD_CALL_ID,
         _EXTERNAL_CHANNEL_FILE_PROCESS_CALL_ID,
         _EXTERNAL_CHANNEL_FILE_FINISH_CALL_ID,
@@ -286,15 +288,20 @@ def external_channel_file_locators(request: dict[str, object]) -> list[str]:
 
 
 def is_external_channel_file_request(request: dict[str, object]) -> bool:
-    """Recognize the deterministic file-transfer journey and required tools."""
+    """Recognize the file journey before or after deferred-tool activation."""
     serialized = json.dumps(request, ensure_ascii=False)
     return (
         _EXTERNAL_CHANNEL_FILE_MARKER in serialized
         and external_channel_binding(request) is not None
         and len(external_channel_file_locators(request)) >= 2
-        and _request_has_named_tool(request, "download_external_file")
-        and _request_has_named_tool(request, "exec_command")
-        and _request_has_named_tool(request, "channel_action")
+        and (
+            _request_has_named_tool(request, "tool_search")
+            or (
+                _request_has_named_tool(request, "download_external_file")
+                and _request_has_named_tool(request, "exec_command")
+                and _request_has_named_tool(request, "channel_action")
+            )
+        )
     )
 
 
@@ -304,9 +311,14 @@ def external_channel_file_evidence(
     """Return sanitized request-stage evidence for the file-transfer journey."""
     serialized = json.dumps(request, ensure_ascii=False)
     return {
+        "matched": is_external_channel_file_request(request),
         "binding": external_channel_binding(request),
         "marker_present": _EXTERNAL_CHANNEL_FILE_MARKER in serialized,
         "locator_count": len(external_channel_file_locators(request)),
+        "search_tool_available": _request_has_named_tool(
+            request,
+            "tool_search",
+        ),
         "download_tool_available": _request_has_named_tool(
             request,
             "download_external_file",
@@ -425,7 +437,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._write_image_generation_response(request)
             return
         serialized = json.dumps(request, ensure_ascii=False)
-        if is_external_channel_file_request(request):
+        if _EXTERNAL_CHANNEL_FILE_MARKER in serialized or bool(
+            external_channel_file_locators(request)
+        ):
             file_evidence = external_channel_file_evidence(request)
             file_evidence["tool_outputs"] = external_channel_file_tool_output_evidence(
                 request
@@ -449,7 +463,14 @@ class _Handler(BaseHTTPRequestHandler):
                             request,
                             _EXTERNAL_CHANNEL_FILE_DOWNLOAD_CALL_ID,
                         )
-                        else "initial"
+                        else (
+                            "after_search"
+                            if request_has_tool_output(
+                                request,
+                                _EXTERNAL_CHANNEL_FILE_SEARCH_CALL_ID,
+                            )
+                            else "initial"
+                        )
                     )
                 )
             )
@@ -491,6 +512,37 @@ class _Handler(BaseHTTPRequestHandler):
             binding = external_channel_binding(request)
             locators = external_channel_file_locators(request)
             if binding is not None and locators:
+                if (
+                    _request_has_named_tool(request, "tool_search")
+                    and not request_has_tool_output(
+                        request,
+                        _EXTERNAL_CHANNEL_FILE_SEARCH_CALL_ID,
+                    )
+                    and not _request_has_named_tool(
+                        request,
+                        "download_external_file",
+                    )
+                ):
+                    self._write_function_call_response(
+                        request,
+                        call_id=_EXTERNAL_CHANNEL_FILE_SEARCH_CALL_ID,
+                        name="tool_search",
+                        arguments={
+                            "query": (
+                                "download an external channel file and publish "
+                                "the result"
+                            ),
+                            "limit": 5,
+                        },
+                    )
+                    return
+                if not (
+                    _request_has_named_tool(request, "download_external_file")
+                    and _request_has_named_tool(request, "exec_command")
+                    and _request_has_named_tool(request, "channel_action")
+                ):
+                    self._proxy(body)
+                    return
                 if request_has_tool_output(
                     request,
                     _EXTERNAL_CHANNEL_FILE_FINISH_CALL_ID,

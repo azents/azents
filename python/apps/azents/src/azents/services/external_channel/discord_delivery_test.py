@@ -131,7 +131,10 @@ async def test_ensure_thread_creates_a_missing_root_message_thread() -> None:
         "/api/v10/channels/222/messages/333",
         "/api/v10/channels/222/messages/333/threads",
     ]
-    assert json.loads(calls[1].content) == {"name": "Azents"}
+    assert json.loads(calls[1].content) == {
+        "name": "Azents",
+        "auto_archive_duration": 60,
+    }
 
 
 @pytest.mark.asyncio

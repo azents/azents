@@ -12,24 +12,34 @@ from fastapi import Depends
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
+from azents.core.deps import get_config
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
+    ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
-    ExternalChannelEventCreate,
+    ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.admission import ExternalChannelAdmissionService
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
 )
+from azents.services.external_channel.connection_revocation import (
+    ExternalChannelConnectionRevocationService,
+)
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import SlackConnectionCredentials
+from azents.services.external_channel.ingestion import (
+    ExternalChannelIngressAuthority,
+    ExternalChannelIngressAuthorityKind,
+)
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
     ExternalChannelInteractionProcessor,
@@ -37,7 +47,11 @@ from azents.services.external_channel.interaction import (
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
 )
-from azents.services.external_channel.slack_http import SlackInteractionCallback
+from azents.services.external_channel.slack_events import SlackConnectionRevocation
+from azents.services.external_channel.slack_http import (
+    SlackInteractionCallback,
+    slack_event_is_normal_message_ingress,
+)
 from azents.services.external_channel.slack_sdk_client import create_slack_web_client
 from azents.services.external_channel.slack_socket import (
     SlackSocketConnectionResult,
@@ -45,7 +59,13 @@ from azents.services.external_channel.slack_socket import (
     SlackSocketInvalidEnvelope,
     SlackSocketModeRunner,
     SlackSocketReconnectRequired,
+    SlackSocketRetryableIngestion,
     SlackSocketWebAPIClient,
+)
+from azents.services.external_channel.transport_ingestion import (
+    ExternalChannelTransportIngestionService,
+    external_channel_transport_deadline,
+    transport_outcome_acknowledgeable,
 )
 
 _DEFAULT_POLL_INTERVAL = datetime.timedelta(seconds=5)
@@ -87,11 +107,20 @@ class SlackSocketManagerService:
         ExternalChannelShortcutSourceService,
         Depends(ExternalChannelShortcutSourceService),
     ]
+    transport_ingestion_service: Annotated[
+        ExternalChannelTransportIngestionService,
+        Depends(ExternalChannelTransportIngestionService),
+    ]
+    revocation_service: Annotated[
+        ExternalChannelConnectionRevocationService,
+        Depends(ExternalChannelConnectionRevocationService),
+    ]
     manager_id: str = dataclasses.field(default_factory=lambda: uuid4().hex)
     poll_interval: datetime.timedelta = _DEFAULT_POLL_INTERVAL
     lease_duration: datetime.timedelta = _DEFAULT_LEASE_DURATION
     renew_interval: datetime.timedelta = _DEFAULT_RENEW_INTERVAL
     reconnect_delay: datetime.timedelta = _DEFAULT_RECONNECT_DELAY
+    config: Annotated[Config | None, Depends(get_config)] = None
 
     async def run(self, shutdown_event: asyncio.Event) -> None:
         """Continuously own all claimable Socket Mode connections until shutdown."""
@@ -107,10 +136,7 @@ class SlackSocketManagerService:
                     except asyncio.CancelledError:
                         pass
                     except Exception:
-                        logger.exception(
-                            "Slack Socket connection manager task failed",
-                            extra={"connection_id": connection_id},
-                        )
+                        logger.exception("Slack Socket connection manager task failed")
                 for connection_id in await self._list_connection_ids():
                     if connection_id in tasks:
                         continue
@@ -160,20 +186,16 @@ class SlackSocketManagerService:
             web_client = create_slack_web_client()
             web_api_client = SlackSocketWebAPIClient(web_client)
 
-            async def admit_owned(event: ExternalChannelEventCreate) -> object:
-                if (
-                    event.provider_app_id != configuration.provider_app_id
-                    or event.provider_tenant_id != configuration.provider_tenant_id
-                    or not await self._owned_active(connection_id)
-                ):
-                    raise SlackSocketInvalidEnvelope(
-                        "Slack Socket connection is no longer authorized."
-                    )
-                return await self.admission_service.admit(event)
+            async def admit_owned(event: ExternalChannelTrigger) -> object:
+                return await self._handle_owned_event(
+                    connection_id=connection_id,
+                    configuration=configuration,
+                    event=event,
+                )
 
             async def admit_owned_interaction(
                 callback: SlackInteractionCallback,
-                shortcut_source_event: ExternalChannelEventCreate | None,
+                shortcut_source_event: ExternalChannelTrigger | None,
             ) -> ExternalChannelInteractionHandoff | None:
                 if (
                     callback.app_id != configuration.provider_app_id
@@ -195,7 +217,6 @@ class SlackSocketManagerService:
                         transport=configuration.transport,
                     ),
                     principal=callback.principal_create(),
-                    shortcut_source_event=shortcut_source_event,
                 )
                 if shortcut_source_event is not None:
                     await self.shortcut_source_service.ensure(
@@ -259,13 +280,22 @@ class SlackSocketManagerService:
                 )
                 if not await self._mark_active(connection_id):
                     return
-                result = await self._run_connection_with_lease(
-                    client=client,
-                    connection_id=connection_id,
-                    app_token=credentials.app_token,
-                    endpoint_url=opened.url,
-                    shutdown_event=shutdown_event,
-                )
+                try:
+                    result = await self._run_connection_with_lease(
+                        client=client,
+                        connection_id=connection_id,
+                        app_token=credentials.app_token,
+                        endpoint_url=opened.url,
+                        shutdown_event=shutdown_event,
+                    )
+                except SlackSocketRetryableIngestion:
+                    if not await self._record_gap(
+                        connection_id,
+                        "socket_ingestion_retryable",
+                    ):
+                        return
+                    await self._sleep_or_shutdown(shutdown_event)
+                    continue
                 if result is None:
                     await self._release(
                         connection_id,
@@ -325,6 +355,71 @@ class SlackSocketManagerService:
                 now=_utc_now(),
             )
             return connection is not None
+
+    async def _handle_owned_event(
+        self,
+        *,
+        connection_id: str,
+        configuration: ExternalChannelConnectionConfiguration,
+        event: ExternalChannelTrigger,
+    ) -> object:
+        """Complete one normal or revocation event under the current lease."""
+        if (
+            event.provider_app_id != configuration.provider_app_id
+            or event.provider_tenant_id != configuration.provider_tenant_id
+            or not await self._owned_active(connection_id)
+        ):
+            raise SlackSocketInvalidEnvelope(
+                "Slack Socket connection is no longer authorized."
+            )
+        if self._message_ingress_quiesced(event):
+            raise SlackSocketInvalidEnvelope(
+                "Slack message ingress is temporarily quiesced."
+            )
+        result = await self.transport_ingestion_service.ingest_slack_event(
+            event=event,
+            authority=ExternalChannelIngressAuthority(
+                kind=ExternalChannelIngressAuthorityKind.LEASE,
+                ingress_profile=ExternalChannelIngressProfile.SLACK_SOCKET,
+                configuration_generation=configuration.configuration_generation,
+                lease_owner=self.manager_id,
+                lease_generation=None,
+            ),
+            deadline=external_channel_transport_deadline(event.received_at),
+        )
+        if result is None:
+            return event
+        if isinstance(result, SlackConnectionRevocation):
+            changed = await self.revocation_service.apply(
+                connection_id=connection_id,
+                revocation=result,
+                required_configuration_generation=(
+                    configuration.configuration_generation
+                ),
+                required_socket_lease_owner=self.manager_id,
+                now=event.received_at,
+            )
+            if not changed:
+                raise SlackSocketInvalidEnvelope(
+                    "Slack Socket connection is no longer authorized."
+                )
+            return result
+        if not transport_outcome_acknowledgeable(result):
+            raise SlackSocketRetryableIngestion(
+                "Slack Socket message ingestion is temporarily unavailable."
+            )
+        return result
+
+    def _message_ingress_quiesced(
+        self,
+        event: ExternalChannelTrigger,
+    ) -> bool:
+        """Return whether normal Socket message admission is temporarily blocked."""
+        return (
+            self.config is not None
+            and self.config.external_channel_conversation.quiesce.slack_socket
+            and slack_event_is_normal_message_ingress(event)
+        )
 
     async def _run_connection_with_lease(
         self,
@@ -431,6 +526,7 @@ class SlackSocketManagerService:
                     connection_id=connection_id,
                     reason=reason,
                     now=now,
+                    required_configuration_generation=None,
                     required_socket_lease_owner=self.manager_id,
                 )
             else:
