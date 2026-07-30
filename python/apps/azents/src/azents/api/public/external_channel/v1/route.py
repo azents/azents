@@ -145,6 +145,15 @@ async def receive_slack_event(
             service.run_interaction_handoff,
             result.interaction_handoff,
         )
+    if (
+        result.control_delivery_attempt_id is not None
+        and result.control_delivery_connection_id is not None
+    ):
+        background_tasks.add_task(
+            service.attempt_control_delivery,
+            connection_id=result.control_delivery_connection_id,
+            delivery_attempt_id=result.control_delivery_attempt_id,
+        )
     return Response(status_code=status.HTTP_200_OK)
 
 

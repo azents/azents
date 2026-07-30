@@ -101,9 +101,16 @@ class _RepositoryDouble:
 class _AdmissionDouble:
     """Record normalized events and optionally expose a database failure."""
 
-    def __init__(self, *, fail: bool = False, retryable: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail: bool = False,
+        retryable: bool = False,
+        awaiting_access: bool = False,
+    ) -> None:
         self.fail = fail
         self.retryable = retryable
+        self.awaiting_access = awaiting_access
         self.revocation_changed = True
         self.events: list[ExternalChannelEventCreate] = []
         self.interactions: list[
@@ -136,6 +143,14 @@ class _AdmissionDouble:
                 batch_id=None,
                 control_delivery_attempt_id=None,
                 connection_id=None,
+            )
+        if self.awaiting_access:
+            return ExternalChannelIngestionOutcome(
+                kind=ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS,
+                reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
+                batch_id=None,
+                control_delivery_attempt_id="delivery-1",
+                connection_id=event.connection_id,
             )
         if event.event_type == "app_uninstalled":
             return SlackConnectionRevocation(kind="app_uninstalled")
@@ -444,6 +459,36 @@ async def test_matching_active_event_is_admitted_before_return(
     assert result.event_id == "Ev-1"
     assert result.created is True
     assert [event.provider_event_id for event in admission.events] == ["Ev-1"]
+
+
+@pytest.mark.asyncio
+async def test_awaiting_access_exposes_only_committed_control_delivery_identity(
+    codec: ExternalChannelCredentialsCodec,
+) -> None:
+    """Return the durable approval-control handoff without provider payload data."""
+    admission = _AdmissionDouble(awaiting_access=True)
+    service, _ = _service(
+        configuration=_configuration(
+            codec,
+            status=ExternalChannelConnectionStatus.ACTIVE,
+        ),
+        codec=codec,
+        admission=admission,
+    )
+    body = _event_body()
+    timestamp, signature = _signed(body)
+
+    result = await service.handle(
+        raw_body=body,
+        timestamp_header=timestamp,
+        signature_header=signature,
+        received_at=_NOW,
+    )
+
+    assert result.event_id == "Ev-1"
+    assert result.created is False
+    assert result.control_delivery_attempt_id == "delivery-1"
+    assert result.control_delivery_connection_id == "connection-1"
 
 
 @pytest.mark.asyncio

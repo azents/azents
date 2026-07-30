@@ -202,10 +202,29 @@ tags: [external-channel, ingress, slack, discord, cutover]
     waits the bounded reconnect delay, and opens a fresh connection without acknowledging
     the failed envelope. Targeted re-review concluded:
     `No remaining Critical/Warning findings.`
-  - Final validation on the integrated diff: Ruff format/check passed; Pyright reported
-    `0 errors`; transport and regression focused suites passed; the complete backend
-    suite reported `3818 passed, 17 warnings`; documentation index validation and its 14
-    unit tests passed; and `git diff --check` passed.
+  - Post-PR deterministic CI exposed two Phase 3 cutover defects before the Phase 4
+    qualification boundary: provider-history identity metadata validation could read an
+    expired ORM timestamp after flush, and committed Slack approval controls had no HTTP
+    post-acknowledgement delivery owner after Worker processor removal. The repository now
+    refreshes the locked message before projection, and Slack HTTP carries only the
+    committed delivery-attempt/connection identities into a background provider attempt
+    after returning provider success. No provider payload or credential crosses that
+    handoff.
+  - The deterministic Slack fake now serves the bounded `conversations.history` endpoint
+    required by the cutover reader and verifies that credentials and provider bodies are
+    absent from evidence. Test cleanup uses API finalizers, and Socket Mode uses unique
+    App/Team identities so one failed journey cannot contaminate a later claim.
+  - Two `strict=True` custom-exception xfails mark only the remaining Phase 4
+    qualification boundaries: canonical provider-history revision/permalink persistence
+    after an approval control is delivered, and new selector-control ownership after the
+    callback is durably accepted. HTTP 500, missing acknowledgement, missing approval
+    control, unexpected timeout, teardown failure, or any other exception remains a
+    normal failure. Phase 4 removes both markers and requires both journeys to pass.
+  - Final validation on the remediated integrated diff: Ruff format/check passed; backend
+    and E2E Pyright each reported `0 errors`; focused route/admission/repository and Slack
+    fake tests passed; the complete backend suite reported `3820 passed, 17 warnings`;
+    deterministic E2E reported `288 passed, 6 skipped, 24 deselected, 2 xfailed`; and
+    `git diff --check` passed.
   - Remaining Phase 4 scope is deterministic provider-fake and E2E cutover qualification,
     acknowledgement timing evidence, concurrency/duplicate proof across lock backends,
     and the qualification report. This PR does not contract legacy schema/code, alter

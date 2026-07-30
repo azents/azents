@@ -2945,6 +2945,7 @@ class ExternalChannelRepository:
         if provider_updated_at is not None:
             rdb.provider_updated_at = provider_updated_at
         await session.flush()
+        await session.refresh(rdb)
         return ExternalChannelMessage.model_validate(rdb)
 
     async def create_message_revision_idempotent(

@@ -133,6 +133,61 @@ def test_slack_fake_controls_membership_history_and_delivery_failure(
     assert update == {"ok": False, "error": "token_revoked"}
 
 
+def test_slack_fake_serves_bounded_parent_and_thread_history_pages(
+    slack_fake_url: str,
+) -> None:
+    """Serve the same bounded history fixture through both Slack range APIs."""
+    messages = [
+        {
+            "user": "U-EXTERNAL",
+            "ts": "1721600000.000100",
+            "text": "Private provider history",
+        }
+    ]
+    requests.post(
+        f"{slack_fake_url}/__testenv/configure",
+        json={"history_pages": [messages]},
+        timeout=5,
+    ).raise_for_status()
+
+    parent = requests.get(
+        f"{slack_fake_url}/api/conversations.history",
+        params={
+            "channel": "C-E2E",
+            "latest": "1721600000.000100",
+            "inclusive": "true",
+            "limit": "100",
+        },
+        headers={"Authorization": "Bearer xoxb-private-token"},
+        timeout=5,
+    )
+    thread = requests.get(
+        f"{slack_fake_url}/api/conversations.replies",
+        params={
+            "channel": "C-E2E",
+            "ts": "1721600000.000100",
+            "inclusive": "true",
+            "limit": "100",
+        },
+        headers={"Authorization": "Bearer xoxb-private-token"},
+        timeout=5,
+    )
+
+    assert parent.json()["messages"] == messages
+    assert thread.json()["messages"] == messages
+    evidence = requests.get(
+        f"{slack_fake_url}/__testenv/state",
+        timeout=5,
+    ).json()
+    rendered = str(evidence)
+    assert evidence["request_counts"] == {
+        "conversations.history": 1,
+        "conversations.replies": 1,
+    }
+    assert "xoxb-private-token" not in rendered
+    assert "Private provider history" not in rendered
+
+
 def test_slack_fake_configures_installation_identity_and_captures_selector_view(
     slack_fake_url: str,
 ) -> None:

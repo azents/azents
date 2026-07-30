@@ -323,6 +323,7 @@ async def test_message_identity_metadata_does_not_create_content_revision(
     session = MagicMock(spec=AsyncSession)
     session.scalar = AsyncMock(return_value=message)
     session.flush = AsyncMock()
+    session.refresh = AsyncMock()
     monkeypatch.setattr(
         ExternalChannelMessage,
         "model_validate",
@@ -347,6 +348,7 @@ async def test_message_identity_metadata_does_not_create_content_revision(
     statement = session.scalar.await_args.args[0]
     assert "FOR UPDATE" in str(statement.compile(dialect=postgresql.dialect()))
     session.flush.assert_awaited_once()
+    session.refresh.assert_awaited_once_with(message)
 
 
 @pytest.mark.asyncio

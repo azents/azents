@@ -74,6 +74,8 @@ class SlackHTTPAdmissionResult:
         default=None,
         repr=False,
     )
+    control_delivery_attempt_id: str | None = field(default=None, repr=False)
+    control_delivery_connection_id: str | None = field(default=None, repr=False)
 
 
 class SlackHTTPMessageIngressQuiesced(RuntimeError):
@@ -255,6 +257,8 @@ class SlackHTTPAdmissionService:
                     created=(
                         result.kind is ExternalChannelIngestionOutcomeKind.ACCEPTED
                     ),
+                    control_delivery_attempt_id=result.control_delivery_attempt_id,
+                    control_delivery_connection_id=result.connection_id,
                 )
             case (
                 SlackInteractionCallback(app_id=app_id, tenant_id=tenant_id) as callback
@@ -353,4 +357,16 @@ class SlackHTTPAdmissionService:
         await self.admission_service.run_interaction_provider_mutation(
             handoff=handoff,
             callback=self.interaction_processor.process,
+        )
+
+    async def attempt_control_delivery(
+        self,
+        *,
+        connection_id: str,
+        delivery_attempt_id: str,
+    ) -> None:
+        """Attempt one committed approval control after provider acknowledgement."""
+        await self.interaction_processor.attempt_control_delivery(
+            connection_id=connection_id,
+            delivery_attempt_id=delivery_attempt_id,
         )
