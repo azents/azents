@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.runtime_profile import (
+    RuntimeProfileLifecycle,
     RuntimeReconcileSourceKind,
     RuntimeReconcileTaskStatus,
     RuntimeRecreationItemStatus,
@@ -35,6 +36,7 @@ from .data import (
     RuntimeRecreationOperationItem,
     WorkspaceRuntimeProfile,
     WorkspaceRuntimeProfileCreate,
+    WorkspaceRuntimeProfileReplace,
 )
 
 
@@ -83,6 +85,32 @@ class RuntimeProfileRepository:
         result = await session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_infrastructure_profile(rdb) if rdb is not None else None
+
+    async def list_infrastructure_profiles(
+        self,
+        session: AsyncSession,
+        *,
+        provider_id: str,
+        include_disabled: bool,
+    ) -> list[RuntimeInfrastructureProfile]:
+        """List infrastructure Profiles owned by one exact Provider."""
+        statement = (
+            sa.select(RDBRuntimeInfrastructureProfile)
+            .where(RDBRuntimeInfrastructureProfile.provider_id == provider_id)
+            .order_by(
+                RDBRuntimeInfrastructureProfile.display_name,
+                RDBRuntimeInfrastructureProfile.id,
+            )
+        )
+        if not include_disabled:
+            statement = statement.where(
+                RDBRuntimeInfrastructureProfile.lifecycle
+                == RuntimeProfileLifecycle.ACTIVE
+            )
+        result = await session.execute(statement)
+        return [
+            self._build_infrastructure_profile(rdb) for rdb in result.scalars().all()
+        ]
 
     async def replace_infrastructure_profile(
         self,
@@ -170,6 +198,74 @@ class RuntimeProfileRepository:
             statement = statement.with_for_update()
         result = await session.execute(statement)
         rdb = result.scalar_one_or_none()
+        return self._build_workspace_profile(rdb) if rdb is not None else None
+
+    async def list_workspace_runtime_profiles(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        include_disabled: bool,
+    ) -> list[WorkspaceRuntimeProfile]:
+        """List Runtime Profiles owned by one exact Workspace."""
+        statement = (
+            sa.select(RDBWorkspaceRuntimeProfile)
+            .where(RDBWorkspaceRuntimeProfile.workspace_id == workspace_id)
+            .order_by(
+                RDBWorkspaceRuntimeProfile.display_name,
+                RDBWorkspaceRuntimeProfile.id,
+            )
+        )
+        if not include_disabled:
+            statement = statement.where(
+                RDBWorkspaceRuntimeProfile.lifecycle == RuntimeProfileLifecycle.ACTIVE
+            )
+        result = await session.execute(statement)
+        return [self._build_workspace_profile(rdb) for rdb in result.scalars().all()]
+
+    async def replace_workspace_runtime_profile(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        profile_id: str,
+        expected_version: int,
+        replacement: WorkspaceRuntimeProfileReplace,
+    ) -> WorkspaceRuntimeProfile | None:
+        """Replace a Workspace Profile using ownership and version fencing."""
+        infrastructure_provider_id = await session.scalar(
+            sa.select(RDBRuntimeInfrastructureProfile.provider_id).where(
+                RDBRuntimeInfrastructureProfile.id
+                == replacement.infrastructure_profile_id
+            )
+        )
+        if infrastructure_provider_id != replacement.provider_id:
+            raise ValueError(
+                "Infrastructure Profile does not belong to the selected Provider."
+            )
+        result = await session.execute(
+            sa.update(RDBWorkspaceRuntimeProfile)
+            .where(
+                RDBWorkspaceRuntimeProfile.id == profile_id,
+                RDBWorkspaceRuntimeProfile.workspace_id == workspace_id,
+                RDBWorkspaceRuntimeProfile.version == expected_version,
+            )
+            .values(
+                provider_id=replacement.provider_id,
+                infrastructure_profile_id=replacement.infrastructure_profile_id,
+                display_name=replacement.display_name,
+                description=replacement.description,
+                lifecycle=replacement.lifecycle,
+                policy=replacement.policy,
+                version=RDBWorkspaceRuntimeProfile.version + 1,
+                digest=replacement.digest,
+                updated_by_workspace_user_id=(replacement.actor_workspace_user_id),
+                updated_at=tznow(),
+            )
+            .returning(RDBWorkspaceRuntimeProfile)
+        )
+        rdb = result.scalar_one_or_none()
+        await session.flush()
         return self._build_workspace_profile(rdb) if rdb is not None else None
 
     async def create_configuration_revision(

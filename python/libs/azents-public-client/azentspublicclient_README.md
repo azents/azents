@@ -243,6 +243,11 @@ Class | Method | HTTP request | Description
 *RuntimeExecutionV1Api* | [**runtime_execution_v1_list_workspace_profiles**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_list_workspace_profiles) | **GET** /runtime-execution/v1/workspaces/{handle}/profiles | List Workspace Profiles
 *RuntimeExecutionV1Api* | [**runtime_execution_v1_replace_agent_policy**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_replace_agent_policy) | **PUT** /runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/settings | Replace Agent Policy
 *RuntimeExecutionV1Api* | [**runtime_execution_v1_replace_workspace_policy**](azentspublicclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_replace_workspace_policy) | **PUT** /runtime-execution/v1/workspaces/{handle}/policy | Replace Workspace Policy
+*RuntimeProfileV1Api* | [**runtime_profile_v1_create_workspace_runtime_profile**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_create_workspace_runtime_profile) | **POST** /runtime-profile/v1/workspaces/{handle}/profiles | Create Workspace Runtime Profile
+*RuntimeProfileV1Api* | [**runtime_profile_v1_get_workspace_runtime_profile**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_get_workspace_runtime_profile) | **GET** /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id} | Get Workspace Runtime Profile
+*RuntimeProfileV1Api* | [**runtime_profile_v1_list_selectable_infrastructure_profiles**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_list_selectable_infrastructure_profiles) | **GET** /runtime-profile/v1/workspaces/{handle}/infrastructure-profiles | List Selectable Infrastructure Profiles
+*RuntimeProfileV1Api* | [**runtime_profile_v1_list_workspace_runtime_profiles**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_list_workspace_runtime_profiles) | **GET** /runtime-profile/v1/workspaces/{handle}/profiles | List Workspace Runtime Profiles
+*RuntimeProfileV1Api* | [**runtime_profile_v1_replace_workspace_runtime_profile**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_replace_workspace_runtime_profile) | **PUT** /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id} | Replace Workspace Runtime Profile
 *RuntimeProviderEnrollmentV1Api* | [**runtime_provider_enrollment_v1_exchange_credential**](azentspublicclient/docs/RuntimeProviderEnrollmentV1Api.md#runtime_provider_enrollment_v1_exchange_credential) | **POST** /runtime-provider-enrollment/v1/credentials/exchange | Exchange Credential
 *RuntimeProviderV1Api* | [**runtime_provider_v1_list_workspace_runtime_providers**](azentspublicclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_workspace_runtime_providers) | **GET** /runtime-provider/v1/workspaces/{handle}/providers | List Workspace Runtime Providers
 *SecurityV1Api* | [**security_v1_elevate_with_email**](azentspublicclient/docs/SecurityV1Api.md#security_v1_elevate_with_email) | **POST** /security/v1/elevate/email | Elevate With Email
@@ -416,6 +421,8 @@ Class | Method | HTTP request | Description
  - [DiscordConnectionConfiguration](azentspublicclient/docs/DiscordConnectionConfiguration.md)
  - [DiscordConnectionCredentials](azentspublicclient/docs/DiscordConnectionCredentials.md)
  - [DiscordConnectionSetupRequest](azentspublicclient/docs/DiscordConnectionSetupRequest.md)
+ - [DockerContainerProfileSpecV1](azentspublicclient/docs/DockerContainerProfileSpecV1.md)
+ - [DockerContainerResources](azentspublicclient/docs/DockerContainerResources.md)
  - [ElevateResponse](azentspublicclient/docs/ElevateResponse.md)
  - [ElevateWithEmailRequest](azentspublicclient/docs/ElevateWithEmailRequest.md)
  - [ElevateWithPasswordRequest](azentspublicclient/docs/ElevateWithPasswordRequest.md)
@@ -482,6 +489,12 @@ Class | Method | HTTP request | Description
  - [KimiOAuthDeviceStartResponse](azentspublicclient/docs/KimiOAuthDeviceStartResponse.md)
  - [KimiOAuthDeviceStatusResponse](azentspublicclient/docs/KimiOAuthDeviceStatusResponse.md)
  - [KimiOAuthSessionStatus](azentspublicclient/docs/KimiOAuthSessionStatus.md)
+ - [KubernetesContainerResources](azentspublicclient/docs/KubernetesContainerResources.md)
+ - [KubernetesDinDModule](azentspublicclient/docs/KubernetesDinDModule.md)
+ - [KubernetesPodProfileSpecV1](azentspublicclient/docs/KubernetesPodProfileSpecV1.md)
+ - [KubernetesSchedulingModule](azentspublicclient/docs/KubernetesSchedulingModule.md)
+ - [KubernetesToleration](azentspublicclient/docs/KubernetesToleration.md)
+ - [KubernetesWorkspaceVolume](azentspublicclient/docs/KubernetesWorkspaceVolume.md)
  - [LLMCatalogScope](azentspublicclient/docs/LLMCatalogScope.md)
  - [LLMModelDeveloper](azentspublicclient/docs/LLMModelDeveloper.md)
  - [LLMProvider](azentspublicclient/docs/LLMProvider.md)
@@ -614,7 +627,10 @@ Class | Method | HTTP request | Description
  - [RuntimeExecutionSnapshotSummaryResponse](azentspublicclient/docs/RuntimeExecutionSnapshotSummaryResponse.md)
  - [RuntimeExecutionSourceVersions](azentspublicclient/docs/RuntimeExecutionSourceVersions.md)
  - [RuntimeExecutionStorageMode](azentspublicclient/docs/RuntimeExecutionStorageMode.md)
+ - [RuntimeInfrastructureProfileSpec](azentspublicclient/docs/RuntimeInfrastructureProfileSpec.md)
  - [RuntimeLifecycleCommandType](azentspublicclient/docs/RuntimeLifecycleCommandType.md)
+ - [RuntimeNetworkPolicyModule](azentspublicclient/docs/RuntimeNetworkPolicyModule.md)
+ - [RuntimeProfileLifecycle](azentspublicclient/docs/RuntimeProfileLifecycle.md)
  - [RuntimeProviderConnectionState](azentspublicclient/docs/RuntimeProviderConnectionState.md)
  - [RuntimeProviderCredentialExchangeRequest](azentspublicclient/docs/RuntimeProviderCredentialExchangeRequest.md)
  - [RuntimeProviderCredentialExchangeResponse](azentspublicclient/docs/RuntimeProviderCredentialExchangeResponse.md)
@@ -625,6 +641,8 @@ Class | Method | HTTP request | Description
  - [RuntimeSummary](azentspublicclient/docs/RuntimeSummary.md)
  - [Secrets](azentspublicclient/docs/Secrets.md)
  - [Secrets1](azentspublicclient/docs/Secrets1.md)
+ - [SelectableInfrastructureProfileListResponse](azentspublicclient/docs/SelectableInfrastructureProfileListResponse.md)
+ - [SelectableInfrastructureProfileResponse](azentspublicclient/docs/SelectableInfrastructureProfileResponse.md)
  - [SelectableModelOption](azentspublicclient/docs/SelectableModelOption.md)
  - [SelectableModelOptionInput](azentspublicclient/docs/SelectableModelOptionInput.md)
  - [SelectableModelSettings](azentspublicclient/docs/SelectableModelSettings.md)
@@ -690,6 +708,11 @@ Class | Method | HTTP request | Description
  - [WorkspaceRuntimeExecutionPolicyResponse](azentspublicclient/docs/WorkspaceRuntimeExecutionPolicyResponse.md)
  - [WorkspaceRuntimeExecutionProfileListResponse](azentspublicclient/docs/WorkspaceRuntimeExecutionProfileListResponse.md)
  - [WorkspaceRuntimeExecutionProfileResponse](azentspublicclient/docs/WorkspaceRuntimeExecutionProfileResponse.md)
+ - [WorkspaceRuntimeProfileCreateRequest](azentspublicclient/docs/WorkspaceRuntimeProfileCreateRequest.md)
+ - [WorkspaceRuntimeProfileListResponse](azentspublicclient/docs/WorkspaceRuntimeProfileListResponse.md)
+ - [WorkspaceRuntimeProfilePolicyV1](azentspublicclient/docs/WorkspaceRuntimeProfilePolicyV1.md)
+ - [WorkspaceRuntimeProfileReplaceRequest](azentspublicclient/docs/WorkspaceRuntimeProfileReplaceRequest.md)
+ - [WorkspaceRuntimeProfileResponse](azentspublicclient/docs/WorkspaceRuntimeProfileResponse.md)
  - [WorkspaceUserListResponse](azentspublicclient/docs/WorkspaceUserListResponse.md)
  - [WorkspaceUserResponse](azentspublicclient/docs/WorkspaceUserResponse.md)
  - [WorkspaceUserRole](azentspublicclient/docs/WorkspaceUserRole.md)

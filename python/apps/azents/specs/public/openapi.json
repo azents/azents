@@ -9986,6 +9986,290 @@
         }
       }
     },
+    "/runtime-profile/v1/workspaces/{handle}/infrastructure-profiles": {
+      "get": {
+        "tags": [
+          "Runtime Profile v1"
+        ],
+        "summary": "List Selectable Infrastructure Profiles",
+        "description": "List exact Provider infrastructure Profiles selectable by the Workspace.",
+        "operationId": "runtime_profile_v1_list_selectable_infrastructure_profiles",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectableInfrastructureProfileListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-profile/v1/workspaces/{handle}/profiles": {
+      "get": {
+        "tags": [
+          "Runtime Profile v1"
+        ],
+        "summary": "List Workspace Runtime Profiles",
+        "description": "List Workspace-owned Runtime Profiles with current availability.",
+        "operationId": "runtime_profile_v1_list_workspace_runtime_profiles",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "include_disabled",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Disabled"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceRuntimeProfileListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Runtime Profile v1"
+        ],
+        "summary": "Create Workspace Runtime Profile",
+        "description": "Create one complete Workspace Runtime choice.",
+        "operationId": "runtime_profile_v1_create_workspace_runtime_profile",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceRuntimeProfileCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceRuntimeProfileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-profile/v1/workspaces/{handle}/profiles/{profile_id}": {
+      "get": {
+        "tags": [
+          "Runtime Profile v1"
+        ],
+        "summary": "Get Workspace Runtime Profile",
+        "description": "Inspect one exact Workspace-owned Runtime Profile.",
+        "operationId": "runtime_profile_v1_get_workspace_runtime_profile",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Profile Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceRuntimeProfileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Runtime Profile v1"
+        ],
+        "summary": "Replace Workspace Runtime Profile",
+        "description": "Replace one Workspace Profile with optimistic version fencing.",
+        "operationId": "runtime_profile_v1_replace_workspace_runtime_profile",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Profile Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceRuntimeProfileReplaceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceRuntimeProfileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runtime-provider/v1/workspaces/{handle}/providers": {
       "get": {
         "tags": [
@@ -17002,6 +17286,113 @@
         "title": "DiscordConnectionSetupRequest",
         "description": "Secret-bearing Discord App setup input."
       },
+      "DockerContainerProfileSpecV1": {
+        "properties": {
+          "profile_kind": {
+            "type": "string",
+            "const": "docker_container",
+            "title": "Profile Kind"
+          },
+          "contract_family": {
+            "type": "string",
+            "const": "docker.container-profile",
+            "title": "Contract Family"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schema Version"
+          },
+          "runner_resources": {
+            "$ref": "#/components/schemas/DockerContainerResources"
+          },
+          "network_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Network Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "profile_kind",
+          "contract_family",
+          "schema_version",
+          "runner_resources",
+          "network_name"
+        ],
+        "title": "DockerContainerProfileSpecV1",
+        "description": "Docker Container Profile contract version 1."
+      },
+      "DockerContainerResources": {
+        "properties": {
+          "cpu_reservation_millicores": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Reservation Millicores"
+          },
+          "cpu_limit_millicores": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Limit Millicores"
+          },
+          "memory_reservation_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Reservation Bytes"
+          },
+          "memory_limit_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Limit Bytes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cpu_reservation_millicores",
+          "cpu_limit_millicores",
+          "memory_reservation_bytes",
+          "memory_limit_bytes"
+        ],
+        "title": "DockerContainerResources",
+        "description": "Docker-native enforceable Runner resource choices."
+      },
       "ElevateResponse": {
         "properties": {
           "access_token": {
@@ -19018,6 +19409,277 @@
         ],
         "title": "KimiOAuthSessionStatus",
         "description": "Kimi OAuth session status."
+      },
+      "KubernetesContainerResources": {
+        "properties": {
+          "cpu_request_millicores": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Request Millicores"
+          },
+          "cpu_limit_millicores": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Limit Millicores"
+          },
+          "memory_request_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Request Bytes"
+          },
+          "memory_limit_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Limit Bytes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cpu_request_millicores",
+          "cpu_limit_millicores",
+          "memory_request_bytes",
+          "memory_limit_bytes"
+        ],
+        "title": "KubernetesContainerResources",
+        "description": "Explicit Kubernetes resources for one known Runtime component."
+      },
+      "KubernetesDinDModule": {
+        "properties": {
+          "engine_resources": {
+            "$ref": "#/components/schemas/KubernetesContainerResources"
+          },
+          "docker_storage_bytes": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Docker Storage Bytes"
+          },
+          "shared_temporary_storage_bytes": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Shared Temporary Storage Bytes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "engine_resources",
+          "docker_storage_bytes",
+          "shared_temporary_storage_bytes"
+        ],
+        "title": "KubernetesDinDModule",
+        "description": "Privileged DinD topology owned by a Platform Pod Profile."
+      },
+      "KubernetesPodProfileSpecV1": {
+        "properties": {
+          "profile_kind": {
+            "type": "string",
+            "const": "kubernetes_pod",
+            "title": "Profile Kind"
+          },
+          "contract_family": {
+            "type": "string",
+            "const": "kubernetes.pod-profile",
+            "title": "Contract Family"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schema Version"
+          },
+          "runner_resources": {
+            "$ref": "#/components/schemas/KubernetesContainerResources"
+          },
+          "workspace_volume": {
+            "$ref": "#/components/schemas/KubernetesWorkspaceVolume"
+          },
+          "network_policy": {
+            "$ref": "#/components/schemas/RuntimeNetworkPolicyModule"
+          },
+          "service_account_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 253
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Account Name"
+          },
+          "scheduling": {
+            "$ref": "#/components/schemas/KubernetesSchedulingModule"
+          },
+          "dind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KubernetesDinDModule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "profile_kind",
+          "contract_family",
+          "schema_version",
+          "runner_resources",
+          "workspace_volume",
+          "network_policy",
+          "service_account_name",
+          "scheduling",
+          "dind"
+        ],
+        "title": "KubernetesPodProfileSpecV1",
+        "description": "Kubernetes Pod Profile contract version 1."
+      },
+      "KubernetesSchedulingModule": {
+        "properties": {
+          "node_selector": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Node Selector"
+          },
+          "tolerations": {
+            "items": {
+              "$ref": "#/components/schemas/KubernetesToleration"
+            },
+            "type": "array",
+            "title": "Tolerations",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "KubernetesSchedulingModule",
+        "description": "Typed initial Kubernetes scheduling controls."
+      },
+      "KubernetesToleration": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 253,
+            "minLength": 1,
+            "title": "Key"
+          },
+          "operator": {
+            "type": "string",
+            "enum": [
+              "Equal",
+              "Exists"
+            ],
+            "title": "Operator"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 253
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "effect": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "NoSchedule",
+                  "PreferNoSchedule",
+                  "NoExecute"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effect"
+          },
+          "toleration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Toleration Seconds"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "operator",
+          "value",
+          "effect",
+          "toleration_seconds"
+        ],
+        "title": "KubernetesToleration",
+        "description": "Typed Kubernetes toleration supported by Pod Profile v1."
+      },
+      "KubernetesWorkspaceVolume": {
+        "properties": {
+          "storage_class_name": {
+            "type": "string",
+            "maxLength": 253,
+            "minLength": 1,
+            "title": "Storage Class Name"
+          },
+          "storage_request_bytes": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Storage Request Bytes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "storage_class_name",
+          "storage_request_bytes"
+        ],
+        "title": "KubernetesWorkspaceVolume",
+        "description": "Existing per-Runtime Workspace PVC inputs."
       },
       "LLMCatalogScope": {
         "type": "string",
@@ -24037,6 +24699,23 @@
         "title": "RuntimeExecutionStorageMode",
         "description": "Docker data-storage lifecycle ordered from narrowest to broadest."
       },
+      "RuntimeInfrastructureProfileSpec": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/KubernetesPodProfileSpecV1"
+          },
+          {
+            "$ref": "#/components/schemas/DockerContainerProfileSpecV1"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "profile_kind",
+          "mapping": {
+            "docker_container": "#/components/schemas/DockerContainerProfileSpecV1",
+            "kubernetes_pod": "#/components/schemas/KubernetesPodProfileSpecV1"
+          }
+        }
+      },
       "RuntimeLifecycleCommandType": {
         "type": "string",
         "enum": [
@@ -24048,6 +24727,39 @@
         ],
         "title": "RuntimeLifecycleCommandType",
         "description": "Agent Runtime lifecycle command type."
+      },
+      "RuntimeNetworkPolicyModule": {
+        "properties": {
+          "allowed_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Cidrs",
+            "default": []
+          },
+          "denied_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Denied Cidrs",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "RuntimeNetworkPolicyModule",
+        "description": "Typed customer-traffic network boundary."
+      },
+      "RuntimeProfileLifecycle": {
+        "type": "string",
+        "enum": [
+          "active",
+          "disabled"
+        ],
+        "title": "RuntimeProfileLifecycle",
+        "description": "Mutable Profile lifecycle."
       },
       "RuntimeProviderConnectionState": {
         "type": "string",
@@ -24240,6 +24952,94 @@
         ],
         "title": "RuntimeSummary",
         "description": "Server-computed Agent Runtime summary status."
+      },
+      "SelectableInfrastructureProfileListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SelectableInfrastructureProfileResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "SelectableInfrastructureProfileListResponse",
+        "description": "Workspace-selectable infrastructure Profile list."
+      },
+      "SelectableInfrastructureProfileResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "provider_display_name": {
+            "type": "string",
+            "title": "Provider Display Name"
+          },
+          "provider_kind": {
+            "type": "string",
+            "title": "Provider Kind"
+          },
+          "profile_kind": {
+            "type": "string",
+            "title": "Profile Kind"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/RuntimeInfrastructureProfileSpec"
+          },
+          "required_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required Capabilities"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest"
+          },
+          "capability_revision_id": {
+            "type": "string",
+            "title": "Capability Revision Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "provider_id",
+          "provider_display_name",
+          "provider_kind",
+          "profile_kind",
+          "display_name",
+          "description",
+          "spec",
+          "required_capabilities",
+          "version",
+          "digest",
+          "capability_revision_id"
+        ],
+        "title": "SelectableInfrastructureProfileResponse",
+        "description": "One Provider/Profile option currently selectable by the Workspace."
       },
       "SelectableModelOption": {
         "properties": {
@@ -26763,6 +27563,245 @@
         "title": "WorkspaceRuntimeExecutionProfileResponse",
         "description": "Workspace availability of one execution Profile."
       },
+      "WorkspaceRuntimeProfileCreateRequest": {
+        "properties": {
+          "infrastructure_profile_id": {
+            "type": "string",
+            "title": "Infrastructure Profile Id"
+          },
+          "display_name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Display Name"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Description"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/RuntimeProfileLifecycle",
+            "default": "active"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/WorkspaceRuntimeProfilePolicyV1"
+          }
+        },
+        "type": "object",
+        "required": [
+          "infrastructure_profile_id",
+          "display_name",
+          "description",
+          "policy"
+        ],
+        "title": "WorkspaceRuntimeProfileCreateRequest",
+        "description": "Create one complete Workspace Runtime Profile."
+      },
+      "WorkspaceRuntimeProfileListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceRuntimeProfileResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "WorkspaceRuntimeProfileListResponse",
+        "description": "Workspace-owned Runtime Profile list."
+      },
+      "WorkspaceRuntimeProfilePolicyV1": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schema Version"
+          },
+          "network_restriction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeNetworkPolicyModule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "schema_version",
+          "network_restriction"
+        ],
+        "title": "WorkspaceRuntimeProfilePolicyV1",
+        "description": "Workspace-owned restrictions attached to one Runtime Profile."
+      },
+      "WorkspaceRuntimeProfileReplaceRequest": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "infrastructure_profile_id": {
+            "type": "string",
+            "title": "Infrastructure Profile Id"
+          },
+          "display_name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Display Name"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Description"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/RuntimeProfileLifecycle"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/WorkspaceRuntimeProfilePolicyV1"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_version",
+          "infrastructure_profile_id",
+          "display_name",
+          "description",
+          "lifecycle",
+          "policy"
+        ],
+        "title": "WorkspaceRuntimeProfileReplaceRequest",
+        "description": "Complete optimistic replacement of one Workspace Runtime Profile."
+      },
+      "WorkspaceRuntimeProfileResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "infrastructure_profile_id": {
+            "type": "string",
+            "title": "Infrastructure Profile Id"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/RuntimeProfileLifecycle"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/WorkspaceRuntimeProfilePolicyV1"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "availability_reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Availability Reason Code"
+          },
+          "capability_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capability Revision Id"
+          },
+          "infrastructure_profile_version": {
+            "type": "integer",
+            "title": "Infrastructure Profile Version"
+          },
+          "compatible": {
+            "type": "boolean",
+            "title": "Compatible"
+          },
+          "missing_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Capabilities"
+          },
+          "incompatible_constraints": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Incompatible Constraints"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "provider_id",
+          "infrastructure_profile_id",
+          "display_name",
+          "description",
+          "lifecycle",
+          "policy",
+          "version",
+          "digest",
+          "available",
+          "availability_reason_code",
+          "capability_revision_id",
+          "infrastructure_profile_version",
+          "compatible",
+          "missing_capabilities",
+          "incompatible_constraints",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "WorkspaceRuntimeProfileResponse",
+        "description": "One complete Workspace-owned Runtime choice."
+      },
       "WorkspaceUserListResponse": {
         "properties": {
           "items": {
@@ -27213,6 +28252,10 @@
     {
       "name": "Runtime Execution v1",
       "description": "\nRuntime Execution API (Public)\n\nWorkspace policy and Agent execution-intent management.\n"
+    },
+    {
+      "name": "Runtime Profile v1",
+      "description": "\nRuntime Profile API (Public)\n\nWorkspace-owned complete Runtime choices and selectable Provider\ninfrastructure Profiles.\n"
     },
     {
       "name": "Runtime Provider v1",

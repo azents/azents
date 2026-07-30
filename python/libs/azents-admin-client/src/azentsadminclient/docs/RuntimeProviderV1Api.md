@@ -5,12 +5,20 @@ All URIs are relative to *http://localhost*
 Method | HTTP request | Description
 ------------- | ------------- | -------------
 [**runtime_provider_v1_create_auth_binding**](RuntimeProviderV1Api.md#runtime_provider_v1_create_auth_binding) | **POST** /runtime-provider/v1/providers/{provider_id}/authentication-bindings | Create Auth Binding
+[**runtime_provider_v1_create_container_profile**](RuntimeProviderV1Api.md#runtime_provider_v1_create_container_profile) | **POST** /runtime-provider/v1/providers/{provider_id}/container-profiles | Create Container Profile
+[**runtime_provider_v1_create_pod_profile**](RuntimeProviderV1Api.md#runtime_provider_v1_create_pod_profile) | **POST** /runtime-provider/v1/providers/{provider_id}/pod-profiles | Create Pod Profile
 [**runtime_provider_v1_get_auth_binding**](RuntimeProviderV1Api.md#runtime_provider_v1_get_auth_binding) | **GET** /runtime-provider/v1/authentication-bindings/{binding_id} | Get Auth Binding
+[**runtime_provider_v1_get_container_profile**](RuntimeProviderV1Api.md#runtime_provider_v1_get_container_profile) | **GET** /runtime-provider/v1/providers/{provider_id}/container-profiles/{profile_id} | Get Container Profile
+[**runtime_provider_v1_get_pod_profile**](RuntimeProviderV1Api.md#runtime_provider_v1_get_pod_profile) | **GET** /runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id} | Get Pod Profile
 [**runtime_provider_v1_get_runtime_provider**](RuntimeProviderV1Api.md#runtime_provider_v1_get_runtime_provider) | **GET** /runtime-provider/v1/providers/{provider_id} | Get Runtime Provider
 [**runtime_provider_v1_list_auth_binding_audit_events**](RuntimeProviderV1Api.md#runtime_provider_v1_list_auth_binding_audit_events) | **GET** /runtime-provider/v1/authentication-bindings/{binding_id}/audit-events | List Auth Binding Audit Events
 [**runtime_provider_v1_list_auth_bindings**](RuntimeProviderV1Api.md#runtime_provider_v1_list_auth_bindings) | **GET** /runtime-provider/v1/providers/{provider_id}/authentication-bindings | List Auth Bindings
+[**runtime_provider_v1_list_container_profiles**](RuntimeProviderV1Api.md#runtime_provider_v1_list_container_profiles) | **GET** /runtime-provider/v1/providers/{provider_id}/container-profiles | List Container Profiles
 [**runtime_provider_v1_list_contracts**](RuntimeProviderV1Api.md#runtime_provider_v1_list_contracts) | **GET** /runtime-provider/v1/providers/{provider_id}/contracts | List Contracts
+[**runtime_provider_v1_list_pod_profiles**](RuntimeProviderV1Api.md#runtime_provider_v1_list_pod_profiles) | **GET** /runtime-provider/v1/providers/{provider_id}/pod-profiles | List Pod Profiles
 [**runtime_provider_v1_list_runtime_providers**](RuntimeProviderV1Api.md#runtime_provider_v1_list_runtime_providers) | **GET** /runtime-provider/v1/providers | List Runtime Providers
+[**runtime_provider_v1_replace_container_profile**](RuntimeProviderV1Api.md#runtime_provider_v1_replace_container_profile) | **PUT** /runtime-provider/v1/providers/{provider_id}/container-profiles/{profile_id} | Replace Container Profile
+[**runtime_provider_v1_replace_pod_profile**](RuntimeProviderV1Api.md#runtime_provider_v1_replace_pod_profile) | **PUT** /runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id} | Replace Pod Profile
 [**runtime_provider_v1_replace_runtime_provider_availability**](RuntimeProviderV1Api.md#runtime_provider_v1_replace_runtime_provider_availability) | **PUT** /runtime-provider/v1/providers/{provider_id}/availability | Replace Runtime Provider Availability
 [**runtime_provider_v1_revoke_auth_binding**](RuntimeProviderV1Api.md#runtime_provider_v1_revoke_auth_binding) | **POST** /runtime-provider/v1/authentication-bindings/{binding_id}/revoke | Revoke Auth Binding
 [**runtime_provider_v1_rotate_auth_binding**](RuntimeProviderV1Api.md#runtime_provider_v1_rotate_auth_binding) | **POST** /runtime-provider/v1/authentication-bindings/{binding_id}/rotate | Rotate Auth Binding
@@ -99,6 +107,170 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **runtime_provider_v1_create_container_profile**
+> RuntimeInfrastructureProfileResponse runtime_provider_v1_create_container_profile(provider_id, runtime_infrastructure_profile_create_request)
+
+Create Container Profile
+
+Create one typed Container Profile under one Docker Provider.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.runtime_infrastructure_profile_create_request import RuntimeInfrastructureProfileCreateRequest
+from azentsadminclient.models.runtime_infrastructure_profile_response import RuntimeInfrastructureProfileResponse
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.RuntimeProviderV1Api(api_client)
+    provider_id = 'provider_id_example' # str | 
+    runtime_infrastructure_profile_create_request = azentsadminclient.RuntimeInfrastructureProfileCreateRequest() # RuntimeInfrastructureProfileCreateRequest | 
+
+    try:
+        # Create Container Profile
+        api_response = api_instance.runtime_provider_v1_create_container_profile(provider_id, runtime_infrastructure_profile_create_request)
+        print("The response of RuntimeProviderV1Api->runtime_provider_v1_create_container_profile:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeProviderV1Api->runtime_provider_v1_create_container_profile: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **provider_id** | **str**|  | 
+ **runtime_infrastructure_profile_create_request** | [**RuntimeInfrastructureProfileCreateRequest**](RuntimeInfrastructureProfileCreateRequest.md)|  | 
+
+### Return type
+
+[**RuntimeInfrastructureProfileResponse**](RuntimeInfrastructureProfileResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**201** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **runtime_provider_v1_create_pod_profile**
+> RuntimeInfrastructureProfileResponse runtime_provider_v1_create_pod_profile(provider_id, runtime_infrastructure_profile_create_request)
+
+Create Pod Profile
+
+Create one typed infrastructure Profile under one Provider.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.runtime_infrastructure_profile_create_request import RuntimeInfrastructureProfileCreateRequest
+from azentsadminclient.models.runtime_infrastructure_profile_response import RuntimeInfrastructureProfileResponse
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.RuntimeProviderV1Api(api_client)
+    provider_id = 'provider_id_example' # str | 
+    runtime_infrastructure_profile_create_request = azentsadminclient.RuntimeInfrastructureProfileCreateRequest() # RuntimeInfrastructureProfileCreateRequest | 
+
+    try:
+        # Create Pod Profile
+        api_response = api_instance.runtime_provider_v1_create_pod_profile(provider_id, runtime_infrastructure_profile_create_request)
+        print("The response of RuntimeProviderV1Api->runtime_provider_v1_create_pod_profile:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeProviderV1Api->runtime_provider_v1_create_pod_profile: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **provider_id** | **str**|  | 
+ **runtime_infrastructure_profile_create_request** | [**RuntimeInfrastructureProfileCreateRequest**](RuntimeInfrastructureProfileCreateRequest.md)|  | 
+
+### Return type
+
+[**RuntimeInfrastructureProfileResponse**](RuntimeInfrastructureProfileResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**201** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **runtime_provider_v1_get_auth_binding**
 > RuntimeProviderAuthenticationBindingResponse runtime_provider_v1_get_auth_binding(binding_id)
 
@@ -159,6 +331,168 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**RuntimeProviderAuthenticationBindingResponse**](RuntimeProviderAuthenticationBindingResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **runtime_provider_v1_get_container_profile**
+> RuntimeInfrastructureProfileResponse runtime_provider_v1_get_container_profile(provider_id, profile_id)
+
+Get Container Profile
+
+Inspect one exact Docker Provider-owned Container Profile.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.runtime_infrastructure_profile_response import RuntimeInfrastructureProfileResponse
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.RuntimeProviderV1Api(api_client)
+    provider_id = 'provider_id_example' # str | 
+    profile_id = 'profile_id_example' # str | 
+
+    try:
+        # Get Container Profile
+        api_response = api_instance.runtime_provider_v1_get_container_profile(provider_id, profile_id)
+        print("The response of RuntimeProviderV1Api->runtime_provider_v1_get_container_profile:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeProviderV1Api->runtime_provider_v1_get_container_profile: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **provider_id** | **str**|  | 
+ **profile_id** | **str**|  | 
+
+### Return type
+
+[**RuntimeInfrastructureProfileResponse**](RuntimeInfrastructureProfileResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **runtime_provider_v1_get_pod_profile**
+> RuntimeInfrastructureProfileResponse runtime_provider_v1_get_pod_profile(provider_id, profile_id)
+
+Get Pod Profile
+
+Inspect one exact Provider-owned infrastructure Profile.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.runtime_infrastructure_profile_response import RuntimeInfrastructureProfileResponse
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.RuntimeProviderV1Api(api_client)
+    provider_id = 'provider_id_example' # str | 
+    profile_id = 'profile_id_example' # str | 
+
+    try:
+        # Get Pod Profile
+        api_response = api_instance.runtime_provider_v1_get_pod_profile(provider_id, profile_id)
+        print("The response of RuntimeProviderV1Api->runtime_provider_v1_get_pod_profile:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeProviderV1Api->runtime_provider_v1_get_pod_profile: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **provider_id** | **str**|  | 
+ **profile_id** | **str**|  | 
+
+### Return type
+
+[**RuntimeInfrastructureProfileResponse**](RuntimeInfrastructureProfileResponse.md)
 
 ### Authorization
 
@@ -419,6 +753,87 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **runtime_provider_v1_list_container_profiles**
+> RuntimeInfrastructureProfileListResponse runtime_provider_v1_list_container_profiles(provider_id, include_disabled=include_disabled)
+
+List Container Profiles
+
+List typed Container Profiles owned by one Docker Provider.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.runtime_infrastructure_profile_list_response import RuntimeInfrastructureProfileListResponse
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.RuntimeProviderV1Api(api_client)
+    provider_id = 'provider_id_example' # str | 
+    include_disabled = False # bool |  (optional) (default to False)
+
+    try:
+        # List Container Profiles
+        api_response = api_instance.runtime_provider_v1_list_container_profiles(provider_id, include_disabled=include_disabled)
+        print("The response of RuntimeProviderV1Api->runtime_provider_v1_list_container_profiles:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeProviderV1Api->runtime_provider_v1_list_container_profiles: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **provider_id** | **str**|  | 
+ **include_disabled** | **bool**|  | [optional] [default to False]
+
+### Return type
+
+[**RuntimeInfrastructureProfileListResponse**](RuntimeInfrastructureProfileListResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **runtime_provider_v1_list_contracts**
 > RuntimeProviderContractListResponse runtime_provider_v1_list_contracts(provider_id)
 
@@ -479,6 +894,87 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**RuntimeProviderContractListResponse**](RuntimeProviderContractListResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **runtime_provider_v1_list_pod_profiles**
+> RuntimeInfrastructureProfileListResponse runtime_provider_v1_list_pod_profiles(provider_id, include_disabled=include_disabled)
+
+List Pod Profiles
+
+List typed Pod Profiles owned by one Kubernetes Provider.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.runtime_infrastructure_profile_list_response import RuntimeInfrastructureProfileListResponse
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.RuntimeProviderV1Api(api_client)
+    provider_id = 'provider_id_example' # str | 
+    include_disabled = False # bool |  (optional) (default to False)
+
+    try:
+        # List Pod Profiles
+        api_response = api_instance.runtime_provider_v1_list_pod_profiles(provider_id, include_disabled=include_disabled)
+        print("The response of RuntimeProviderV1Api->runtime_provider_v1_list_pod_profiles:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeProviderV1Api->runtime_provider_v1_list_pod_profiles: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **provider_id** | **str**|  | 
+ **include_disabled** | **bool**|  | [optional] [default to False]
+
+### Return type
+
+[**RuntimeInfrastructureProfileListResponse**](RuntimeInfrastructureProfileListResponse.md)
 
 ### Authorization
 
@@ -569,6 +1065,174 @@ This endpoint does not need any parameter.
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 **200** | Successful Response |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **runtime_provider_v1_replace_container_profile**
+> RuntimeInfrastructureProfileResponse runtime_provider_v1_replace_container_profile(provider_id, profile_id, runtime_infrastructure_profile_replace_request)
+
+Replace Container Profile
+
+Replace one Container Profile with optimistic version fencing.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.runtime_infrastructure_profile_replace_request import RuntimeInfrastructureProfileReplaceRequest
+from azentsadminclient.models.runtime_infrastructure_profile_response import RuntimeInfrastructureProfileResponse
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.RuntimeProviderV1Api(api_client)
+    provider_id = 'provider_id_example' # str | 
+    profile_id = 'profile_id_example' # str | 
+    runtime_infrastructure_profile_replace_request = azentsadminclient.RuntimeInfrastructureProfileReplaceRequest() # RuntimeInfrastructureProfileReplaceRequest | 
+
+    try:
+        # Replace Container Profile
+        api_response = api_instance.runtime_provider_v1_replace_container_profile(provider_id, profile_id, runtime_infrastructure_profile_replace_request)
+        print("The response of RuntimeProviderV1Api->runtime_provider_v1_replace_container_profile:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeProviderV1Api->runtime_provider_v1_replace_container_profile: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **provider_id** | **str**|  | 
+ **profile_id** | **str**|  | 
+ **runtime_infrastructure_profile_replace_request** | [**RuntimeInfrastructureProfileReplaceRequest**](RuntimeInfrastructureProfileReplaceRequest.md)|  | 
+
+### Return type
+
+[**RuntimeInfrastructureProfileResponse**](RuntimeInfrastructureProfileResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **runtime_provider_v1_replace_pod_profile**
+> RuntimeInfrastructureProfileResponse runtime_provider_v1_replace_pod_profile(provider_id, profile_id, runtime_infrastructure_profile_replace_request)
+
+Replace Pod Profile
+
+Replace one infrastructure Profile with optimistic version fencing.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentsadminclient
+from azentsadminclient.models.runtime_infrastructure_profile_replace_request import RuntimeInfrastructureProfileReplaceRequest
+from azentsadminclient.models.runtime_infrastructure_profile_response import RuntimeInfrastructureProfileResponse
+from azentsadminclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentsadminclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentsadminclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentsadminclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentsadminclient.RuntimeProviderV1Api(api_client)
+    provider_id = 'provider_id_example' # str | 
+    profile_id = 'profile_id_example' # str | 
+    runtime_infrastructure_profile_replace_request = azentsadminclient.RuntimeInfrastructureProfileReplaceRequest() # RuntimeInfrastructureProfileReplaceRequest | 
+
+    try:
+        # Replace Pod Profile
+        api_response = api_instance.runtime_provider_v1_replace_pod_profile(provider_id, profile_id, runtime_infrastructure_profile_replace_request)
+        print("The response of RuntimeProviderV1Api->runtime_provider_v1_replace_pod_profile:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling RuntimeProviderV1Api->runtime_provider_v1_replace_pod_profile: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **provider_id** | **str**|  | 
+ **profile_id** | **str**|  | 
+ **runtime_infrastructure_profile_replace_request** | [**RuntimeInfrastructureProfileReplaceRequest**](RuntimeInfrastructureProfileReplaceRequest.md)|  | 
+
+### Return type
+
+[**RuntimeInfrastructureProfileResponse**](RuntimeInfrastructureProfileResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 

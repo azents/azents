@@ -1,0 +1,354 @@
+"""System-Admin operations for Provider-owned infrastructure Profiles."""
+
+import dataclasses
+from typing import Annotated
+
+from azcommon.datetime import tznow
+from fastapi import Depends
+from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from azents.core.enums import RuntimeProviderKind
+from azents.core.runtime_profile import (
+    RuntimeInfrastructureProfileKind,
+    RuntimeInfrastructureProfileSpec,
+    RuntimeProfileCompatibility,
+    RuntimeProfileLifecycle,
+    RuntimeReconcileSourceKind,
+    digest_runtime_profile_document,
+    evaluate_runtime_profile_compatibility,
+    parse_runtime_infrastructure_profile_spec,
+    required_runtime_profile_capabilities,
+)
+from azents.core.runtime_provider_contract import RuntimeProviderCapabilityContract
+from azents.rdb.deps import get_session_manager
+from azents.rdb.session import SessionManager
+from azents.repos.runtime_profile.data import (
+    RuntimeInfrastructureProfile,
+    RuntimeInfrastructureProfileCreate,
+    RuntimeInfrastructureProfileReplace,
+)
+from azents.repos.runtime_profile.repository import RuntimeProfileRepository
+from azents.repos.runtime_provider.data import RuntimeProvider
+from azents.repos.runtime_provider.repository import RuntimeProviderRepository
+from azents.repos.runtime_provider_policy.repository import (
+    RuntimeProviderPolicyRepository,
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeInfrastructureProfileProjection:
+    """Infrastructure Profile plus current Provider compatibility evidence."""
+
+    profile: RuntimeInfrastructureProfile
+    compatibility: RuntimeProfileCompatibility
+    capability_revision_id: str | None
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeProfileAdminUnavailable(Exception):
+    """One bounded infrastructure Profile management failure."""
+
+    code: str
+    message: str
+    current_profile: RuntimeInfrastructureProfile | None = None
+
+    def __post_init__(self) -> None:
+        Exception.__init__(self, self.message)
+
+
+@dataclasses.dataclass
+class RuntimeProfileAdminService:
+    """Manage typed infrastructure Profiles within one Provider boundary."""
+
+    session_manager: Annotated[
+        SessionManager[AsyncSession], Depends(get_session_manager)
+    ]
+    profile_repository: Annotated[
+        RuntimeProfileRepository, Depends(RuntimeProfileRepository)
+    ]
+    provider_repository: Annotated[
+        RuntimeProviderRepository, Depends(RuntimeProviderRepository)
+    ]
+    policy_repository: Annotated[
+        RuntimeProviderPolicyRepository, Depends(RuntimeProviderPolicyRepository)
+    ]
+
+    async def list_profiles(
+        self,
+        provider_logical_id: str,
+        *,
+        profile_kind: RuntimeInfrastructureProfileKind,
+        include_disabled: bool,
+    ) -> list[RuntimeInfrastructureProfileProjection]:
+        """List one Provider's Profiles with current compatibility."""
+        async with self.session_manager() as session:
+            provider = await self._require_provider(session, provider_logical_id)
+            self._validate_provider_kind(provider.kind, profile_kind)
+            profiles = await self.profile_repository.list_infrastructure_profiles(
+                session,
+                provider_id=provider.id,
+                include_disabled=include_disabled,
+            )
+            contract, revision_id = await self._current_contract(session, provider)
+            return [
+                RuntimeInfrastructureProfileProjection(
+                    profile=profile,
+                    compatibility=self._compatibility(profile, contract),
+                    capability_revision_id=revision_id,
+                )
+                for profile in profiles
+            ]
+
+    async def get_profile(
+        self,
+        provider_logical_id: str,
+        profile_id: str,
+        *,
+        profile_kind: RuntimeInfrastructureProfileKind,
+    ) -> RuntimeInfrastructureProfileProjection:
+        """Get one exact Provider-owned Profile."""
+        async with self.session_manager() as session:
+            provider = await self._require_provider(session, provider_logical_id)
+            self._validate_provider_kind(provider.kind, profile_kind)
+            profile = await self.profile_repository.get_infrastructure_profile(
+                session,
+                profile_id=profile_id,
+                for_update=False,
+            )
+            if profile is None or profile.provider_id != provider.id:
+                raise RuntimeProfileAdminUnavailable(
+                    code="profile_not_found",
+                    message="Runtime infrastructure Profile was not found.",
+                )
+            contract, revision_id = await self._current_contract(session, provider)
+            return RuntimeInfrastructureProfileProjection(
+                profile=profile,
+                compatibility=self._compatibility(profile, contract),
+                capability_revision_id=revision_id,
+            )
+
+    async def create_profile(
+        self,
+        provider_logical_id: str,
+        *,
+        profile_kind: RuntimeInfrastructureProfileKind,
+        display_name: str,
+        description: str,
+        lifecycle: RuntimeProfileLifecycle,
+        spec: RuntimeInfrastructureProfileSpec,
+        actor_user_id: str,
+    ) -> RuntimeInfrastructureProfileProjection:
+        """Create one typed Profile and enqueue its first source version."""
+        async with self.session_manager() as session:
+            provider = await self._require_provider(session, provider_logical_id)
+            if spec.profile_kind is not profile_kind:
+                raise RuntimeProfileAdminUnavailable(
+                    code="profile_kind_mismatch",
+                    message="Profile document does not match the requested API kind.",
+                )
+            self._validate_provider_kind(provider.kind, spec.profile_kind)
+            try:
+                profile = await self.profile_repository.create_infrastructure_profile(
+                    session,
+                    create=RuntimeInfrastructureProfileCreate(
+                        provider_id=provider.id,
+                        profile_kind=spec.profile_kind,
+                        display_name=display_name,
+                        description=description,
+                        lifecycle=lifecycle,
+                        contract_family=spec.contract_family,
+                        schema_version=spec.schema_version,
+                        spec=spec.model_dump(mode="json"),
+                        required_capabilities=tuple(
+                            sorted(required_runtime_profile_capabilities(spec))
+                        ),
+                        digest=digest_runtime_profile_document(spec),
+                        actor_user_id=actor_user_id,
+                    ),
+                )
+            except IntegrityError as error:
+                raise RuntimeProfileAdminUnavailable(
+                    code="profile_name_conflict",
+                    message="A Profile with this name already exists for the Provider.",
+                ) from error
+            await self.profile_repository.enqueue_reconcile_task(
+                session,
+                source_type=RuntimeReconcileSourceKind.INFRASTRUCTURE_PROFILE,
+                source_id=profile.id,
+                source_version=str(profile.version),
+                available_at=tznow(),
+            )
+            contract, revision_id = await self._current_contract(session, provider)
+            return RuntimeInfrastructureProfileProjection(
+                profile=profile,
+                compatibility=evaluate_runtime_profile_compatibility(
+                    spec,
+                    contract.profile_contracts if contract is not None else [],
+                ),
+                capability_revision_id=revision_id,
+            )
+
+    async def replace_profile(
+        self,
+        provider_logical_id: str,
+        profile_id: str,
+        *,
+        profile_kind: RuntimeInfrastructureProfileKind,
+        expected_version: int,
+        display_name: str,
+        description: str,
+        lifecycle: RuntimeProfileLifecycle,
+        spec: RuntimeInfrastructureProfileSpec,
+        actor_user_id: str,
+    ) -> RuntimeInfrastructureProfileProjection:
+        """Replace one Profile with optimistic version fencing."""
+        async with self.session_manager() as session:
+            provider = await self._require_provider(session, provider_logical_id)
+            if spec.profile_kind is not profile_kind:
+                raise RuntimeProfileAdminUnavailable(
+                    code="profile_kind_mismatch",
+                    message="Profile document does not match the requested API kind.",
+                )
+            self._validate_provider_kind(provider.kind, spec.profile_kind)
+            current = await self.profile_repository.get_infrastructure_profile(
+                session,
+                profile_id=profile_id,
+                for_update=False,
+            )
+            if current is None or current.provider_id != provider.id:
+                raise RuntimeProfileAdminUnavailable(
+                    code="profile_not_found",
+                    message="Runtime infrastructure Profile was not found.",
+                )
+            try:
+                profile = await self.profile_repository.replace_infrastructure_profile(
+                    session,
+                    provider_id=provider.id,
+                    profile_id=profile_id,
+                    expected_version=expected_version,
+                    replacement=RuntimeInfrastructureProfileReplace(
+                        display_name=display_name,
+                        description=description,
+                        lifecycle=lifecycle,
+                        contract_family=spec.contract_family,
+                        schema_version=spec.schema_version,
+                        spec=spec.model_dump(mode="json"),
+                        required_capabilities=tuple(
+                            sorted(required_runtime_profile_capabilities(spec))
+                        ),
+                        digest=digest_runtime_profile_document(spec),
+                        actor_user_id=actor_user_id,
+                    ),
+                )
+            except IntegrityError as error:
+                raise RuntimeProfileAdminUnavailable(
+                    code="profile_name_conflict",
+                    message="A Profile with this name already exists for the Provider.",
+                ) from error
+            if profile is None:
+                latest = await self.profile_repository.get_infrastructure_profile(
+                    session,
+                    profile_id=profile_id,
+                    for_update=False,
+                )
+                raise RuntimeProfileAdminUnavailable(
+                    code="profile_version_conflict",
+                    message="Runtime infrastructure Profile version is stale.",
+                    current_profile=latest,
+                )
+            await self.profile_repository.enqueue_reconcile_task(
+                session,
+                source_type=RuntimeReconcileSourceKind.INFRASTRUCTURE_PROFILE,
+                source_id=profile.id,
+                source_version=str(profile.version),
+                available_at=tznow(),
+            )
+            contract, revision_id = await self._current_contract(session, provider)
+            return RuntimeInfrastructureProfileProjection(
+                profile=profile,
+                compatibility=evaluate_runtime_profile_compatibility(
+                    spec,
+                    contract.profile_contracts if contract is not None else [],
+                ),
+                capability_revision_id=revision_id,
+            )
+
+    async def _require_provider(
+        self,
+        session: AsyncSession,
+        provider_logical_id: str,
+    ) -> RuntimeProvider:
+        provider = await self.provider_repository.get_by_provider_id(
+            session,
+            provider_logical_id=provider_logical_id,
+            for_update=False,
+        )
+        if provider is None:
+            raise RuntimeProfileAdminUnavailable(
+                code="provider_not_found",
+                message="Runtime Provider was not found.",
+            )
+        return provider
+
+    async def _current_contract(
+        self,
+        session: AsyncSession,
+        provider: RuntimeProvider,
+    ) -> tuple[RuntimeProviderCapabilityContract | None, str | None]:
+        revision_id = provider.current_contract_revision_id
+        if revision_id is None:
+            return None, None
+        revision = await self.policy_repository.get_contract_by_id(
+            session,
+            contract_revision_id=revision_id,
+            for_update=False,
+        )
+        if revision is None or revision.provider_id != provider.id:
+            return None, revision_id
+        try:
+            return (
+                RuntimeProviderCapabilityContract.model_validate(revision.contract),
+                revision.id,
+            )
+        except ValidationError:
+            return None, revision.id
+
+    @staticmethod
+    def _compatibility(
+        profile: RuntimeInfrastructureProfile,
+        contract: RuntimeProviderCapabilityContract | None,
+    ) -> RuntimeProfileCompatibility:
+        try:
+            spec = parse_runtime_infrastructure_profile_spec(profile.spec)
+        except ValidationError:
+            return RuntimeProfileCompatibility(
+                compatible=False,
+                reason_code="profile_document_invalid",
+                missing_capabilities=(),
+                incompatible_constraints=(),
+            )
+        return evaluate_runtime_profile_compatibility(
+            spec,
+            contract.profile_contracts if contract is not None else [],
+        )
+
+    @staticmethod
+    def _validate_provider_kind(
+        provider_kind: RuntimeProviderKind,
+        profile_kind: RuntimeInfrastructureProfileKind,
+    ) -> None:
+        expected = {
+            RuntimeProviderKind.KUBERNETES: (
+                RuntimeInfrastructureProfileKind.KUBERNETES_POD
+            ),
+            RuntimeProviderKind.DOCKER: (
+                RuntimeInfrastructureProfileKind.DOCKER_CONTAINER
+            ),
+        }.get(provider_kind)
+        if expected is not profile_kind:
+            raise RuntimeProfileAdminUnavailable(
+                code="profile_kind_mismatch",
+                message="Profile kind does not match the owning Provider kind.",
+            )

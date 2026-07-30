@@ -81,6 +81,16 @@ def test_mounts_runtime_provider_inventory_and_authentication_routes() -> None:
     assert "/runtime-provider/v1/providers/{provider_id}/policy" in paths
     assert "/runtime-provider/v1/providers/{provider_id}/availability" in paths
     assert "/runtime-provider/v1/providers/{provider_id}/contracts" in paths
+    assert "/runtime-provider/v1/providers/{provider_id}/pod-profiles" in paths
+    assert (
+        "/runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id}"
+        in paths
+    )
+    assert "/runtime-provider/v1/providers/{provider_id}/container-profiles" in paths
+    assert (
+        "/runtime-provider/v1/providers/{provider_id}/container-profiles/{profile_id}"
+        in paths
+    )
     assert not any(path.endswith("/contracts/{revision_id}/accept") for path in paths)
     assert (
         "/runtime-provider/v1/providers/{provider_id}/authentication-bindings" in paths
