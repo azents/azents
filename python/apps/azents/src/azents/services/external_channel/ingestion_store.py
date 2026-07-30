@@ -186,7 +186,6 @@ class ExternalChannelDatabaseIngestionStore:
                 connection_id=request.locator.connection_id,
                 provider_resource_key=request.locator.provider_resource_key,
             )
-            metadata_source_created = resource is None
             if request.replay_boundary is not None and (
                 resource is None
                 or not await self._replay_source_matches(
@@ -207,36 +206,41 @@ class ExternalChannelDatabaseIngestionStore:
                         ExternalChannelIngestionOutcomeKind.IGNORED,
                         ExternalChannelIngestionReason.NOT_AN_INVOCATION,
                     )
-                resource = await self._create_metadata_source(
+                binding = None
+                admission = None
+            else:
+                binding = await self.repository.get_active_binding_by_resource(
                     session,
-                    request=request,
-                    position=position,
-                    now=now,
+                    resource_id=resource.id,
                 )
-            binding = await self.repository.get_active_binding_by_resource(
-                session,
-                resource_id=resource.id,
-            )
-            existing = await self._existing_batch(
-                session,
-                resource=resource,
-                binding=binding,
-                request=request,
-            )
-            if existing is not None:
-                await session.commit()
-                return ExternalChannelIngestionPreparation(
-                    position_id=None,
-                    exclusive_start_position=None,
-                    immediate_outcome=ExternalChannelIngestionOutcome(
-                        kind=ExternalChannelIngestionOutcomeKind.DUPLICATE,
-                        reason=ExternalChannelIngestionReason.DUPLICATE,
-                        batch_id=existing.batch_id,
-                        control_delivery_attempt_id=None,
-                        connection_id=None,
-                    ),
-                    wake_batch_id=existing.batch_id,
-                    wake_session_id=existing.session_id,
+                existing = await self._existing_batch(
+                    session,
+                    resource=resource,
+                    binding=binding,
+                    request=request,
+                )
+                if existing is not None:
+                    await session.commit()
+                    return ExternalChannelIngestionPreparation(
+                        position_id=None,
+                        exclusive_start_position=None,
+                        immediate_outcome=ExternalChannelIngestionOutcome(
+                            kind=ExternalChannelIngestionOutcomeKind.DUPLICATE,
+                            reason=ExternalChannelIngestionReason.DUPLICATE,
+                            batch_id=existing.batch_id,
+                            control_delivery_attempt_id=None,
+                            connection_id=None,
+                        ),
+                        wake_batch_id=existing.batch_id,
+                        wake_session_id=existing.session_id,
+                    )
+                admission = (
+                    None
+                    if binding is not None
+                    else await self.repository.get_open_conversation_admission(
+                        session,
+                        resource_id=resource.id,
+                    )
                 )
             if (
                 position.read_through_position is not None
@@ -249,20 +253,11 @@ class ExternalChannelDatabaseIngestionStore:
                     ExternalChannelIngestionOutcomeKind.IGNORED,
                     ExternalChannelIngestionReason.DUPLICATE,
                 )
-            admission = (
-                None
-                if binding is not None
-                else await self.repository.get_open_conversation_admission(
-                    session,
-                    resource_id=resource.id,
-                )
-            )
             if (
                 admission is not None
                 and admission.status
                 is ExternalChannelConversationAdmissionStatus.PENDING_SELECTION
                 and request.selected_route_id is None
-                and not metadata_source_created
             ):
                 await session.commit()
                 return _immediate(
@@ -329,28 +324,37 @@ class ExternalChannelDatabaseIngestionStore:
                 or trigger.provider_position != request.locator.trigger_position
             ):
                 return _rejected(ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY)
+            if (
+                trigger.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
+                or trigger.provider_user_id is None
+            ):
+                return await self._commit_ignored(
+                    session,
+                    reason=ExternalChannelIngestionReason.AUTHOR_NOT_ELIGIBLE,
+                )
+            resource = await self.repository.get_resource_by_provider_key(
+                session,
+                connection_id=request.locator.connection_id,
+                provider_resource_key=request.locator.provider_resource_key,
+            )
+            if resource is None:
+                if request.replay_boundary is not None:
+                    return _rejected(
+                        ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY
+                    )
+                await self._create_metadata_source(
+                    session,
+                    request=request,
+                    position=position,
+                    now=now,
+                )
             pending_selection = await self._lock_pending_selection(
                 session,
                 request=request,
                 position=position,
             )
             if pending_selection is not None:
-                if (
-                    not await self._pending_selection_accepts_author(
-                        session,
-                        pending_selection=pending_selection,
-                        author_type=trigger.author_type,
-                    )
-                    or trigger.provider_user_id is None
-                ):
-                    return await self._commit_ignored_position(
-                        session,
-                        request=request,
-                        position=position,
-                        replay_after_position=replay_after_position,
-                        reason=ExternalChannelIngestionReason.AUTHOR_NOT_ELIGIBLE,
-                    )
-                await self._persist_history_message(
+                await self._persist_message_identity(
                     session,
                     request=request,
                     resource=pending_selection.resource,
@@ -384,32 +388,17 @@ class ExternalChannelDatabaseIngestionStore:
                 return _rejected(
                     ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
                 )
-            if (
-                not _route_accepts_author(routing.route, trigger.author_type)
-                or trigger.provider_user_id is None
-            ):
-                return await self._commit_ignored_position(
-                    session,
-                    request=request,
-                    position=position,
-                    replay_after_position=replay_after_position,
-                    reason=ExternalChannelIngestionReason.AUTHOR_NOT_ELIGIBLE,
-                )
             if routing.binding is None and not request.locator.invocation:
-                return await self._commit_ignored_position(
+                return await self._commit_ignored(
                     session,
-                    request=request,
-                    position=position,
-                    replay_after_position=replay_after_position,
                     reason=ExternalChannelIngestionReason.NOT_AN_INVOCATION,
                 )
-            persisted_source = await self._persist_history_message(
+            source_message = await self._persist_message_identity(
                 session,
                 request=request,
                 resource=routing.resource,
                 message=trigger,
             )
-            source_message = persisted_source.message
             trigger_principal_id = source_message.principal_id
             if trigger_principal_id is None:
                 raise RuntimeError("External Channel trigger principal disappeared.")
@@ -422,11 +411,8 @@ class ExternalChannelDatabaseIngestionStore:
                 )
                 is not None
             ):
-                return await self._commit_ignored_position(
+                return await self._commit_ignored(
                     session,
-                    request=request,
-                    position=position,
-                    replay_after_position=replay_after_position,
                     reason=ExternalChannelIngestionReason.AUTHOR_NOT_ELIGIBLE,
                 )
             grant = await self.repository.get_active_access_grant(
@@ -439,10 +425,7 @@ class ExternalChannelDatabaseIngestionStore:
                     else routing.binding.agent_session_id
                 ),
             )
-            if grant is None and not _route_has_automatic_access(
-                routing.route,
-                trigger.author_type,
-            ):
+            if grant is None and not _route_has_automatic_access(routing.route):
                 access_request = await self.repository.create_access_request_idempotent(
                     session,
                     ExternalChannelAccessRequestCreate(
@@ -1090,32 +1073,6 @@ class ExternalChannelDatabaseIngestionStore:
             return None
         return _PendingSelection(resource=resource, admission=admission)
 
-    async def _pending_selection_accepts_author(
-        self,
-        session: AsyncSession,
-        *,
-        pending_selection: _PendingSelection,
-        author_type: ExternalChannelPrincipalAuthorType,
-    ) -> bool:
-        """Accept a selector only when at least one route admits its author."""
-        if author_type is ExternalChannelPrincipalAuthorType.HUMAN:
-            return True
-        if author_type is not ExternalChannelPrincipalAuthorType.BOT:
-            return False
-        principal_id = pending_selection.admission.initiating_principal_id
-        if principal_id is None:
-            return False
-        routes = await self.repository.list_routable_multi_catalog_routes(
-            session,
-            connection_id=pending_selection.admission.connection_id,
-            principal_id=principal_id,
-            author_type=author_type,
-            search=None,
-            offset=0,
-            limit=1,
-        )
-        return bool(routes)
-
     async def _create_binding(
         self,
         session: AsyncSession,
@@ -1411,6 +1368,49 @@ class ExternalChannelDatabaseIngestionStore:
             raise RuntimeError("External Channel canonical message disappeared.")
         return _PersistedMessage(message=canonical, revision_id=revision.id)
 
+    async def _persist_message_identity(
+        self,
+        session: AsyncSession,
+        *,
+        request: ExternalChannelIngestionRequest,
+        resource: ExternalChannelResource,
+        message: ExternalChannelCanonicalHistoryMessage,
+    ) -> ExternalChannelMessage:
+        """Persist only safe identity metadata before authorization."""
+        principal_id = await self._persist_principal(
+            session,
+            request=request,
+            message=message,
+        )
+        canonical = await self.repository.create_message_idempotent(
+            session,
+            ExternalChannelMessageCreate(
+                resource_id=resource.id,
+                provider_message_key=message.provider_message_key,
+                provider_position=message.provider_position,
+                principal_id=principal_id,
+                author_type=message.author_type,
+                current_revision_id=None,
+                original_url=None,
+                lifecycle=message.lifecycle,
+                pending_size=0,
+                provider_created_at=message.provider_created_at,
+                provider_updated_at=message.provider_updated_at,
+            ),
+        )
+        updated = await self.repository.update_message_identity_metadata(
+            session,
+            message_id=canonical.id,
+            principal_id=principal_id,
+            author_type=message.author_type,
+            lifecycle=message.lifecycle,
+            provider_created_at=message.provider_created_at,
+            provider_updated_at=message.provider_updated_at,
+        )
+        if updated is None:
+            raise RuntimeError("External Channel canonical message disappeared.")
+        return updated
+
     async def _initialize_thread_position(
         self,
         session: AsyncSession,
@@ -1444,22 +1444,12 @@ class ExternalChannelDatabaseIngestionStore:
             ),
         )
 
-    async def _commit_ignored_position(
+    async def _commit_ignored(
         self,
         session: AsyncSession,
         *,
-        request: ExternalChannelIngestionRequest,
-        position: ExternalChannelConversationPosition,
-        replay_after_position: bool,
         reason: ExternalChannelIngestionReason,
     ) -> ExternalChannelIngestionAcceptance:
-        if not replay_after_position:
-            await self.repository.advance_conversation_position_if_current(
-                session,
-                position_id=position.id,
-                expected_read_through_position=position.read_through_position,
-                read_through_position=request.locator.trigger_position,
-            )
         await session.commit()
         return ExternalChannelIngestionAcceptance(
             status="ignored",
@@ -1662,30 +1652,11 @@ def _session_url(
     return f"{normalized}/w/{workspace_handle}/agents/{agent_id}/sessions/{session_id}"
 
 
-def _route_accepts_author(
-    route: ExternalChannelAgentRoute,
-    author_type: ExternalChannelPrincipalAuthorType,
-) -> bool:
-    """Return whether the route admits this provider author class."""
-    if author_type is ExternalChannelPrincipalAuthorType.HUMAN:
-        return True
-    return (
-        author_type is ExternalChannelPrincipalAuthorType.BOT
-        and route.allow_bot_messages
-    )
-
-
 def _route_has_automatic_access(
     route: ExternalChannelAgentRoute,
-    author_type: ExternalChannelPrincipalAuthorType,
 ) -> bool:
     """Return whether the route bypasses a per-principal grant."""
-    if author_type is ExternalChannelPrincipalAuthorType.HUMAN:
-        return route.open_access_enabled
-    return (
-        author_type is ExternalChannelPrincipalAuthorType.BOT
-        and route.allow_bot_messages
-    )
+    return route.open_access_enabled
 
 
 def _render_discord_access_request_control(approval_url: str) -> str:

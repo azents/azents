@@ -195,8 +195,8 @@ async def test_slack_history_uses_native_trigger_and_returns_canonical_messages(
         },
         "channels": {"CRELATED": "#related"},
     }
-    assert history.messages[0].reference_mappings == history.trigger.reference_mappings
     assert history.trigger.sender_display_name == "Participant"
+    assert history.messages[0].reference_mappings == history.trigger.reference_mappings
     assert history.messages[0].sender_display_name == "Participant"
     assert (
         history.trigger.original_url
@@ -225,6 +225,92 @@ async def test_slack_history_uses_native_trigger_and_returns_canonical_messages(
         bot_token="secret-bot-token",
         channel_id="CRELATED",
     )
+
+
+async def test_slack_history_resolves_visible_bot_author_display_name() -> None:
+    """A provider-visible non-connected bot is context with a readable sender name."""
+    message = dataclasses.replace(
+        _slack_message(),
+        author_type=ExternalChannelPrincipalAuthorType.BOT,
+        provider_user_id="bot:BVISIBLE",
+        normalized_body="Deployment completed.",
+    )
+    slack_client = SimpleNamespace(
+        read_range=AsyncMock(
+            return_value=ExternalChannelHistoryRange(
+                messages=(message,),
+                trigger=message,
+                context_omitted=False,
+                range_start_position=None,
+                trigger_position=message.provider_position,
+                provider_request_count=1,
+                scanned_message_count=1,
+                elapsed_seconds=0,
+            )
+        ),
+        get_permalink=AsyncMock(return_value=None),
+        fetch_user_display_name=AsyncMock(return_value="Deploy Bot"),
+        fetch_channel_display_name=AsyncMock(),
+    )
+    repository = SimpleNamespace(
+        get_connection_configuration=AsyncMock(
+            return_value=SimpleNamespace(
+                provider=ExternalChannelProvider.SLACK,
+                provider_tenant_id="tenant-1",
+                provider_bot_user_id="connected-bot",
+                provider_app_id="connected-app",
+                encrypted_credentials="ciphertext",
+            )
+        )
+    )
+    reader = ExternalChannelProviderHistoryReader(
+        session_manager=cast(Any, _SessionManager()),
+        repository=cast(Any, repository),
+        credentials_codec=cast(
+            Any,
+            SimpleNamespace(
+                decrypt=lambda ciphertext: SlackConnectionCredentials(
+                    bot_token="secret-bot-token",
+                    signing_secret="secret-signing-key",
+                    app_token=None,
+                )
+            ),
+        ),
+        slack_client=cast(Any, slack_client),
+        discord_client=cast(Any, SimpleNamespace()),
+    )
+    locator = ExternalChannelTriggerLocator(
+        connection_id="connection-1",
+        provider=ExternalChannelProvider.SLACK,
+        provider_tenant_id="tenant-1",
+        provider_channel_id="channel-1",
+        provider_parent_channel_id=None,
+        provider_thread_key="1.000000",
+        delivery_thread_key="1.000000",
+        provider_resource_key=message.provider_resource_key,
+        trigger_provider_message_key=message.provider_message_key,
+        trigger_provider_message_id="2.000000",
+        trigger_position=message.provider_position,
+        provider_user_id="participant-1",
+        invocation=False,
+    )
+
+    history = await reader.read_range(
+        locator=locator,
+        exclusive_start_position=None,
+        deadline=_deadline(),
+    )
+
+    assert history.trigger.author_type is ExternalChannelPrincipalAuthorType.BOT
+    assert history.trigger.sender_display_name == "Deploy Bot"
+    assert history.trigger.reference_mappings == {
+        "users": {"bot:BVISIBLE": "Deploy Bot"}
+    }
+    slack_client.fetch_user_display_name.assert_awaited_once_with(
+        bot_token="secret-bot-token",
+        provider_user_id="bot:BVISIBLE",
+    )
+    slack_client.fetch_channel_display_name.assert_not_awaited()
 
 
 async def test_discord_history_preserves_reference_mappings() -> None:

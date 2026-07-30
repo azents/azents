@@ -2,7 +2,6 @@
 
 import {
   Alert,
-  Anchor,
   Badge,
   Button,
   Container,
@@ -24,7 +23,6 @@ import {
   IconBrandSlack,
   IconCheck,
   IconCopy,
-  IconExternalLink,
   IconLock,
   IconRefresh,
   IconUser,
@@ -47,20 +45,6 @@ interface ApprovalStatusPresentation {
   color: "blue" | "green" | "gray" | "red" | "yellow";
   label: string;
   description: string;
-}
-
-function validHttpUrl(value: string | null): string | null {
-  if (value === null) {
-    return null;
-  }
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "https:" || parsed.protocol === "http:"
-      ? parsed.toString()
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 function formatDateTime(value: string, locale: string): string {
@@ -209,7 +193,6 @@ function ReadyApproval({
   const t = useTranslations("externalChannelApproval");
   const locale = useLocale();
   const status = statusPresentation(state.request, t);
-  const originalUrl = validHttpUrl(state.request.original_url);
   const pending = state.request.status === "pending";
   const ProviderIcon =
     state.request.provider === "discord" ? IconBrandDiscord : IconBrandSlack;
@@ -279,49 +262,6 @@ function ReadyApproval({
               )}
             />
           </Stack>
-
-          {state.request.source_text !== null && (
-            <>
-              <Divider />
-              <Stack gap="xs">
-                <Text size="xs" c="dimmed" fw={600} tt="uppercase">
-                  {t("message")}
-                </Text>
-                <Paper
-                  withBorder
-                  radius="md"
-                  p="sm"
-                  bg="var(--mantine-color-default-hover)"
-                >
-                  <Text
-                    size="sm"
-                    style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
-                  >
-                    {state.request.source_text}
-                  </Text>
-                </Paper>
-              </Stack>
-            </>
-          )}
-
-          {originalUrl !== null ? (
-            <Anchor
-              href={originalUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              size="sm"
-              fw={600}
-            >
-              <Group component="span" gap={rem(4)} wrap="nowrap">
-                <IconExternalLink aria-hidden="true" size={16} />
-                <span>{t("openOriginal")}</span>
-              </Group>
-            </Anchor>
-          ) : (
-            <Text size="sm" c="dimmed">
-              {t("originalUnavailable")}
-            </Text>
-          )}
 
           {state.actionError !== null && (
             <Alert color="red" icon={<IconX size={16} />} role="alert">

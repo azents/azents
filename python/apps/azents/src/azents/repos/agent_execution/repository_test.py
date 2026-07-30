@@ -16,8 +16,6 @@ from azents.core.enums import (
     AgentSessionEndReason,
     AgentSessionStatus,
     EventKind,
-    ExternalChannelMessageLifecycle,
-    ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceType,
@@ -243,8 +241,6 @@ class TestEventExecutionRepositories:
             binding_id="binding-1",
             invocation_batch_id="batch-1",
             external_message_id="message-1",
-            revision_id="revision-1",
-            revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
             projection_root_id="external-channel:binding-1:message-1",
             provider_message_key="C123:1.0:1",
             provider_position="1",
@@ -253,7 +249,6 @@ class TestEventExecutionRepositories:
             sender_display_name="Alice",
             author_type=ExternalChannelPrincipalAuthorType.HUMAN,
             authorization="authorized_invocation",
-            lifecycle=ExternalChannelMessageLifecycle.CURRENT,
             body="hello",
             attachment_metadata={},
             provider_created_at=datetime.datetime(
@@ -266,7 +261,6 @@ class TestEventExecutionRepositories:
             original_url=None,
             truncated_context_message_count=0,
             truncated_context_size=0,
-            correction_of_revision_id=None,
         )
 
         appended = await EventTranscriptRepository().append(

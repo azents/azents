@@ -63,7 +63,6 @@ def _connection() -> ManagedConnection:
         provider_tenant_id=None,
         provider_bot_user_id=None,
         open_access_enabled=True,
-        allow_bot_messages=False,
         credentials_configured=False,
         capabilities=None,
         provider_config=None,
@@ -375,7 +374,6 @@ async def test_replace_discord_configuration_invalidates_prior_authority() -> No
             id="route-1",
             agent_id="agent-1",
             open_access_enabled=True,
-            allow_bot_messages=False,
         ),
     )
     session = AsyncMock(spec=AsyncSession)

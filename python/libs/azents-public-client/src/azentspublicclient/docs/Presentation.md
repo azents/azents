@@ -15,12 +15,9 @@ Name | Type | Description | Notes
 **resource_label** | **str** |  | 
 **resource_type** | **str** |  | 
 **external_message_id** | **str** |  | 
-**revision_id** | **str** |  | 
-**revision_kind** | **str** |  | 
 **sender_display_name** | **str** |  | 
 **author_type** | **str** |  | 
 **authorization** | **str** |  | 
-**lifecycle** | **str** |  | 
 **body** | **str** |  | 
 **original_url** | **str** |  | 
 **action** | [**Action2**](Action2.md) |  | 

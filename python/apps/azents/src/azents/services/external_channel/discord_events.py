@@ -1,7 +1,6 @@
 """Discord Gateway message projection and normalization."""
 
 import datetime
-import hashlib
 import json
 from dataclasses import dataclass
 
@@ -23,10 +22,10 @@ from azents.repos.external_channel.data import ExternalChannelTrigger
 from azents.services.external_channel.discord_gateway import DiscordGatewayMessageEvent
 
 _MAX_DISCORD_MESSAGE_CONTENT_BYTES = 64 * 1024
+_MAX_DISCORD_EMBEDS = 10
+_MAX_DISCORD_EMBED_FIELDS = 25
 _MESSAGE_EVENT_TYPES = {
     "message_create": "discord_message_create",
-    "message_update": "discord_message_update",
-    "message_delete": "discord_message_delete",
 }
 
 
@@ -44,7 +43,7 @@ class DiscordMessageContentUnavailable(DiscordEventNormalizationError):
 
 @dataclass(frozen=True)
 class DiscordNormalizedMessage:
-    """One Discord message lifecycle mutation independent from raw Gateway payloads."""
+    """One Discord message snapshot independent from raw Gateway payloads."""
 
     tenant_id: str
     channel_id: str
@@ -110,47 +109,38 @@ def _project_discord_sdk_event(
 ) -> dict[str, object]:
     """Project public SDK attributes into the bounded provider-neutral envelope."""
     channel_id = str(event.channel.id)
-    if event.event_type == "message_delete":
-        deleted = event.deleted_message
-        if deleted is None:
-            raise ValueError("Discord delete event is missing its typed payload.")
-        source: dict[str, object] = {
-            "id": str(deleted.message_id),
-            "channel_id": channel_id,
-            "guild_id": guild_id,
-        }
-    else:
-        message = event.message
-        if message is None:
-            raise ValueError("Discord message event is missing its typed Message.")
-        if message.guild is None or str(message.guild.id) != guild_id:
-            raise ValueError("Discord Message Guild identity is invalid.")
-        if message.channel.id != event.channel.id:
-            raise ValueError("Discord Message channel identity is invalid.")
-        source = {
-            "id": str(message.id),
-            "channel_id": channel_id,
-            "guild_id": guild_id,
-            "content": message.content,
-            "timestamp": message.created_at.isoformat(),
-            "author": _sdk_user(message.author),
-            "mentions": [_sdk_user(mention) for mention in message.mentions],
-            "attachments": [
-                {
-                    "id": str(attachment.id),
-                    "filename": attachment.filename,
-                    "size": attachment.size,
-                    **(
-                        {"content_type": attachment.content_type}
-                        if attachment.content_type is not None
-                        else {}
-                    ),
-                }
-                for attachment in message.attachments
-            ],
-        }
-        if message.edited_at is not None:
-            source["edited_timestamp"] = message.edited_at.isoformat()
+    message = event.message
+    if message is None:
+        raise ValueError("Discord message event is missing its typed Message.")
+    if message.guild is None or str(message.guild.id) != guild_id:
+        raise ValueError("Discord Message Guild identity is invalid.")
+    if message.channel.id != event.channel.id:
+        raise ValueError("Discord Message channel identity is invalid.")
+    source: dict[str, object] = {
+        "id": str(message.id),
+        "channel_id": channel_id,
+        "guild_id": guild_id,
+        "content": message.content,
+        "timestamp": message.created_at.isoformat(),
+        "author": _sdk_user(message.author),
+        "mentions": [_sdk_user(mention) for mention in message.mentions],
+        "attachments": [
+            {
+                "id": str(attachment.id),
+                "filename": attachment.filename,
+                "size": attachment.size,
+                **(
+                    {"content_type": attachment.content_type}
+                    if attachment.content_type is not None
+                    else {}
+                ),
+            }
+            for attachment in message.attachments
+        ],
+    }
+    embeds = [_sdk_embed(embed) for embed in message.embeds]
+    if embeds:
+        source["embeds"] = embeds
     channel_name = getattr(event.channel, "name", None)
     if isinstance(channel_name, str) and channel_name:
         source["channel_name"] = channel_name
@@ -200,16 +190,7 @@ def _discord_gateway_event_id(
     channel_id = _required_string(projection, "channel_id")
     message_id = _required_string(projection, "id")
     identity = f"discord:{event_type}:{guild_id}:{channel_id}:{message_id}"
-    if event_type != "discord_message_update":
-        return identity
-    revision = hashlib.sha256(
-        json.dumps(
-            projection,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode()
-    ).hexdigest()
-    return f"{identity}:{revision}"
+    return identity
 
 
 def project_discord_message_command_source_event(
@@ -282,6 +263,10 @@ def project_discord_message(
         projection["attachments_truncated"] = (
             len(attachments) > MAX_EXTERNAL_CHANNEL_FILES
         )
+    embeds = message.get("embeds")
+    if isinstance(embeds, list):
+        projection["embeds"] = _project_embeds(embeds)
+        projection["embeds_truncated"] = len(embeds) > _MAX_DISCORD_EMBEDS
     thread = message.get("thread")
     if isinstance(thread, dict):
         projected_thread = _project_thread(thread)
@@ -300,8 +285,11 @@ def normalize_projected_discord_event(
     envelope: dict[str, object],
     connected_bot_user_id: str | None,
 ) -> DiscordNormalizedMessage:
-    """Normalize one bounded Discord message event into a canonical revision."""
-    revision_kind, lifecycle = _message_lifecycle(event_type)
+    """Normalize one bounded Discord create event into a canonical snapshot."""
+    if event_type != "discord_message_create":
+        raise DiscordEventExcluded(
+            "Discord event type is outside the configured scope."
+        )
     raw_message = envelope.get("message")
     if not isinstance(raw_message, dict):
         raise DiscordEventNormalizationError("Discord projected message is missing.")
@@ -315,11 +303,7 @@ def normalize_projected_discord_event(
     )
     if connected_bot_user_id is not None and provider_user_id == connected_bot_user_id:
         author_type = ExternalChannelPrincipalAuthorType.BOT
-    normalized_body = (
-        None
-        if revision_kind is ExternalChannelMessageRevisionKind.DELETE
-        else _optional_content(raw_message)
-    )
+    normalized_body = _optional_content(raw_message)
     attachment_metadata = _attachment_metadata(raw_message)
     created_at = _discord_timestamp(raw_message.get("timestamp"))
     updated_at = _discord_timestamp(raw_message.get("edited_timestamp"))
@@ -337,15 +321,9 @@ def normalize_projected_discord_event(
         message_id=message_id,
         provider_message_key=f"discord:{tenant_id}:{message_id}",
         provider_position=_discord_position(message_id),
-        revision_key=_revision_key(
-            message_id=message_id,
-            revision_kind=revision_kind,
-            created_at=created_at,
-            updated_at=updated_at,
-            normalized_body=normalized_body,
-        ),
-        revision_kind=revision_kind,
-        lifecycle=lifecycle,
+        revision_key=_revision_key(message_id=message_id),
+        revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
+        lifecycle=ExternalChannelMessageLifecycle.CURRENT,
         author_type=author_type,
         provider_user_id=provider_user_id,
         sender_display_name=sender_display_name,
@@ -491,35 +469,86 @@ def _project_attachments(
     return {"files": files}
 
 
+def _sdk_embed(embed: discord.Embed) -> dict[str, object]:
+    """Project typed embed attributes without URLs, CDN locators, or raw objects."""
+    return {
+        "type": embed.type,
+        "title": embed.title,
+        "description": embed.description,
+        "author": {"name": embed.author.name} if embed.author.name else {},
+        "footer": {"text": embed.footer.text} if embed.footer.text else {},
+        "fields": [
+            {
+                "name": field.name,
+                "value": field.value,
+                "inline": field.inline,
+            }
+            for field in embed.fields
+        ],
+        "image": {"present": bool(embed.image.url)},
+        "thumbnail": {"present": bool(embed.thumbnail.url)},
+    }
+
+
+def _project_embeds(embeds: list[object]) -> list[dict[str, object]]:
+    """Retain bounded visible Discord embed semantics without any URLs."""
+    projected: list[dict[str, object]] = []
+    for embed in embeds[:_MAX_DISCORD_EMBEDS]:
+        if not isinstance(embed, dict):
+            continue
+        item: dict[str, object] = {}
+        for key in ("type", "title", "description"):
+            value = _bounded_string(embed.get(key))
+            if value is not None:
+                item[key] = value
+        for source_key, destination_key, text_key in (
+            ("author", "author_name", "name"),
+            ("footer", "footer_text", "text"),
+        ):
+            source = embed.get(source_key)
+            if not isinstance(source, dict):
+                continue
+            value = _bounded_string(source.get(text_key))
+            if value is not None:
+                item[destination_key] = value
+        fields = embed.get("fields")
+        if isinstance(fields, list):
+            projected_fields: list[dict[str, object]] = []
+            for field in fields[:_MAX_DISCORD_EMBED_FIELDS]:
+                if not isinstance(field, dict):
+                    continue
+                name = _bounded_string(field.get("name"))
+                value = _bounded_string(field.get("value"))
+                if name is None and value is None:
+                    continue
+                projected_fields.append(
+                    {
+                        **({"name": name} if name is not None else {}),
+                        **({"value": value} if value is not None else {}),
+                        **({"inline": True} if field.get("inline") is True else {}),
+                    }
+                )
+            if projected_fields:
+                item["fields"] = projected_fields
+                if len(fields) > _MAX_DISCORD_EMBED_FIELDS:
+                    item["fields_truncated"] = True
+        for key in ("image", "thumbnail"):
+            source = embed.get(key)
+            if isinstance(source, dict) and (
+                source.get("present") is True
+                or isinstance(source.get("url"), str)
+                or isinstance(source.get("proxy_url"), str)
+            ):
+                item[f"has_{key}"] = True
+        if item:
+            projected.append(item)
+    return projected
+
+
 def _bounded_string(value: object) -> str | None:
     if not isinstance(value, str) or not value:
         return None
     return value[:MAX_EXTERNAL_CHANNEL_FILE_TEXT_LENGTH]
-
-
-def _message_lifecycle(
-    event_type: str,
-) -> tuple[ExternalChannelMessageRevisionKind, ExternalChannelMessageLifecycle]:
-    mapping = {
-        "discord_message_create": (
-            ExternalChannelMessageRevisionKind.ORIGINAL,
-            ExternalChannelMessageLifecycle.CURRENT,
-        ),
-        "discord_message_update": (
-            ExternalChannelMessageRevisionKind.EDIT,
-            ExternalChannelMessageLifecycle.EDITED,
-        ),
-        "discord_message_delete": (
-            ExternalChannelMessageRevisionKind.DELETE,
-            ExternalChannelMessageLifecycle.DELETED,
-        ),
-    }
-    lifecycle = mapping.get(event_type)
-    if lifecycle is None:
-        raise DiscordEventExcluded(
-            "Discord event type is outside the configured scope."
-        )
-    return lifecycle
 
 
 def _author(
@@ -606,20 +635,29 @@ def _optional_content(message: dict[str, object]) -> str | None:
 
 
 def _attachment_metadata(message: dict[str, object]) -> dict[str, object] | None:
-    value = message.get("attachments")
-    if value is None:
+    attachments = message.get("attachments")
+    embeds = message.get("embeds")
+    if attachments is None and embeds is None:
         return None
-    if not isinstance(value, dict):
+    metadata: dict[str, object] = {}
+    if attachments is not None and not isinstance(attachments, dict):
         raise DiscordEventNormalizationError(
             "Discord attachment projection is invalid."
         )
-    files = value.get("files")
-    if not isinstance(files, list):
-        raise DiscordEventNormalizationError("Discord attachment list is invalid.")
-    return {
-        "files": files,
-        **({"truncated": True} if message.get("attachments_truncated") is True else {}),
-    }
+    if isinstance(attachments, dict):
+        files = attachments.get("files")
+        if not isinstance(files, list):
+            raise DiscordEventNormalizationError("Discord attachment list is invalid.")
+        metadata["files"] = files
+        if message.get("attachments_truncated") is True:
+            metadata["files_truncated"] = True
+    if embeds is not None:
+        if not isinstance(embeds, list):
+            raise DiscordEventNormalizationError("Discord embed projection is invalid.")
+        metadata["embeds"] = embeds
+        if message.get("embeds_truncated") is True:
+            metadata["embeds_truncated"] = True
+    return metadata
 
 
 def _thread_identity(message: dict[str, object]) -> tuple[str | None, str | None]:
@@ -655,20 +693,9 @@ def _discord_position(message_id: str) -> str:
 def _revision_key(
     *,
     message_id: str,
-    revision_kind: ExternalChannelMessageRevisionKind,
-    created_at: datetime.datetime | None,
-    updated_at: datetime.datetime | None,
-    normalized_body: str | None,
 ) -> str:
-    if revision_kind is ExternalChannelMessageRevisionKind.ORIGINAL:
-        return f"discord:{message_id}:original"
-    if revision_kind is ExternalChannelMessageRevisionKind.DELETE:
-        return f"discord:{message_id}:delete"
-    timestamp = updated_at or created_at
-    if timestamp is not None:
-        return f"discord:{message_id}:edit:{timestamp.isoformat()}"
-    body = "" if normalized_body is None else normalized_body
-    return f"discord:{message_id}:edit:{hashlib.sha256(body.encode()).hexdigest()}"
+    """Return one immutable original snapshot identity."""
+    return f"discord:{message_id}:original"
 
 
 def _normalized_size(

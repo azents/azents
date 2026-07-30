@@ -4,7 +4,6 @@ import asyncio
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Literal
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
@@ -33,7 +32,7 @@ from azents.services.external_channel.discord_gateway import (
     DiscordGatewayMessageEvent,
 )
 from azents.services.external_channel.discord_gateway_manager import (
-    DiscordGatewayIngestionRetryable,
+    DiscordGatewayLeaseLost,
     DiscordGatewayManagerService,
 )
 from azents.services.external_channel.ingestion import (
@@ -124,6 +123,48 @@ class _Repository:
         return True
 
 
+class _RetryThenAcceptRepository(_Repository):
+    """Return one transient ingestion result before accepting the same event."""
+
+    async def ingest_discord_event(
+        self,
+        **kwargs: object,
+    ) -> ExternalChannelIngestionOutcome:
+        self.admission_calls.append(kwargs)
+        if len(self.admission_calls) == 1:
+            return ExternalChannelIngestionOutcome(
+                kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
+                reason=ExternalChannelIngestionReason.HISTORY_UNAVAILABLE,
+                batch_id=None,
+                control_delivery_attempt_id=None,
+                connection_id=None,
+            )
+        return ExternalChannelIngestionOutcome(
+            kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
+            reason=ExternalChannelIngestionReason.ACCEPTED,
+            batch_id="batch-1",
+            control_delivery_attempt_id=None,
+            connection_id=None,
+        )
+
+
+class _StaleAuthorityRepository(_Repository):
+    """Return one fenced stale-authority outcome."""
+
+    async def ingest_discord_event(
+        self,
+        **kwargs: object,
+    ) -> ExternalChannelIngestionOutcome:
+        self.admission_calls.append(kwargs)
+        return ExternalChannelIngestionOutcome(
+            kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
+            reason=ExternalChannelIngestionReason.INGRESS_AUTHORITY_STALE,
+            batch_id=None,
+            control_delivery_attempt_id=None,
+            connection_id=None,
+        )
+
+
 class _OwnedRepository(_Repository):
     """Return one owned Discord connection for manager lifecycle tests."""
 
@@ -200,9 +241,6 @@ def _lease() -> ExternalChannelIngressLease:
 def _event(
     *,
     guild_id: int = 300,
-    event_type: Literal["message_create", "message_update", "message_delete"] = (
-        "message_create"
-    ),
 ) -> DiscordGatewayMessageEvent:
     guild = MagicMock(spec=discord.Guild)
     guild.id = guild_id
@@ -227,7 +265,7 @@ def _event(
     message.mentions = []
     message.attachments = []
     return DiscordGatewayMessageEvent(
-        event_type=event_type,
+        event_type="message_create",
         channel=channel,
         message=message,
     )
@@ -310,6 +348,36 @@ async def test_admits_typed_event_under_current_lease() -> None:
 
 
 @pytest.mark.asyncio
+async def test_retries_same_typed_event_before_later_callback_can_advance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Transient ingestion keeps the exact typed event until it is accepted."""
+    sessions = _SessionManager()
+    repository = _RetryThenAcceptRepository()
+    service = _service(repository=repository, sessions=sessions)
+    sleep = AsyncMock()
+    monkeypatch.setattr(
+        "azents.services.external_channel.discord_gateway_manager.asyncio.sleep",
+        sleep,
+    )
+
+    await service._admit_gateway_event(  # pyright: ignore[reportPrivateUsage]
+        connection_id="connection-1",
+        lease=_lease(),
+        provider_app_id="app-1",
+        target_guild_id="300",
+        configuration_generation=2,
+        event=_event(),
+    )
+
+    assert len(repository.admission_calls) == 2
+    assert (
+        repository.admission_calls[0]["event"] is repository.admission_calls[1]["event"]
+    )
+    sleep.assert_awaited_once_with(1.0)
+
+
+@pytest.mark.asyncio
 async def test_quiesced_gateway_rejects_message_create_before_legacy_admission() -> (
     None
 ):
@@ -335,27 +403,6 @@ async def test_quiesced_gateway_rejects_message_create_before_legacy_admission()
 
 
 @pytest.mark.asyncio
-async def test_quiesced_gateway_keeps_message_update_lifecycle_available() -> None:
-    """Quiesce does not disable lifecycle callbacks owned by the legacy path."""
-    sessions = _SessionManager()
-    repository = _Repository(admission=object())
-    config = MagicMock()
-    config.external_channel_conversation.quiesce.discord_gateway = True
-    service = _service(repository=repository, sessions=sessions, config=config)
-
-    await service._admit_gateway_event(  # pyright: ignore[reportPrivateUsage]
-        connection_id="connection-1",
-        lease=_lease(),
-        provider_app_id="app-1",
-        target_guild_id="300",
-        configuration_generation=2,
-        event=_event(event_type="message_update"),
-    )
-
-    assert repository.admission_calls == []
-
-
-@pytest.mark.asyncio
 async def test_cross_guild_event_is_not_admitted() -> None:
     sessions = _SessionManager()
     repository = _Repository(admission=object())
@@ -376,10 +423,10 @@ async def test_cross_guild_event_is_not_admitted() -> None:
 @pytest.mark.asyncio
 async def test_stale_lease_stops_typed_event_admission() -> None:
     sessions = _SessionManager()
-    repository = _Repository(admission=None)
+    repository = _StaleAuthorityRepository()
     service = _service(repository=repository, sessions=sessions)
 
-    with pytest.raises(DiscordGatewayIngestionRetryable):
+    with pytest.raises(DiscordGatewayLeaseLost):
         await service._admit_gateway_event(  # pyright: ignore[reportPrivateUsage]
             connection_id="connection-1",
             lease=_lease(),

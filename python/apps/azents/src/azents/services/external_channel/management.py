@@ -124,7 +124,6 @@ class ExternalChannelAccessPolicyInput(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     open_access_enabled: bool = True
-    allow_bot_messages: bool = False
 
 
 @dataclass
@@ -1089,7 +1088,6 @@ class ExternalChannelManagementService:
                 agent_id=agent_id,
                 connection_id=connection_id,
                 open_access_enabled=policy.open_access_enabled,
-                allow_bot_messages=policy.allow_bot_messages,
             )
             if connection is None:
                 raise ExternalChannelManagementNotFound(connection_id)

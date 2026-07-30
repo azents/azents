@@ -39,13 +39,11 @@ class ManagedApprovalRequest(BaseModel):
     principal_label: StrictStr
     principal_provider_user_id: StrictStr
     resource_label: StrictStr
-    source_text: Optional[StrictStr]
-    original_url: Optional[StrictStr]
     expires_at: datetime
     decided_at: Optional[datetime]
     decision_summary: Optional[StrictStr]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "agent_id", "workspace_id", "agent_session_id", "provider", "status", "principal_id", "principal_label", "principal_provider_user_id", "resource_label", "source_text", "original_url", "expires_at", "decided_at", "decision_summary"]
+    __properties: ClassVar[List[str]] = ["id", "agent_id", "workspace_id", "agent_session_id", "provider", "status", "principal_id", "principal_label", "principal_provider_user_id", "resource_label", "expires_at", "decided_at", "decision_summary"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -98,16 +96,6 @@ class ManagedApprovalRequest(BaseModel):
         if self.agent_session_id is None and "agent_session_id" in self.model_fields_set:
             _dict['agent_session_id'] = None
 
-        # set to None if source_text (nullable) is None
-        # and model_fields_set contains the field
-        if self.source_text is None and "source_text" in self.model_fields_set:
-            _dict['source_text'] = None
-
-        # set to None if original_url (nullable) is None
-        # and model_fields_set contains the field
-        if self.original_url is None and "original_url" in self.model_fields_set:
-            _dict['original_url'] = None
-
         # set to None if decided_at (nullable) is None
         # and model_fields_set contains the field
         if self.decided_at is None and "decided_at" in self.model_fields_set:
@@ -140,8 +128,6 @@ class ManagedApprovalRequest(BaseModel):
             "principal_label": obj.get("principal_label"),
             "principal_provider_user_id": obj.get("principal_provider_user_id"),
             "resource_label": obj.get("resource_label"),
-            "source_text": obj.get("source_text"),
-            "original_url": obj.get("original_url"),
             "expires_at": obj.get("expires_at"),
             "decided_at": obj.get("decided_at"),
             "decision_summary": obj.get("decision_summary")

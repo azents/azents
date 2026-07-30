@@ -36,6 +36,14 @@ async def test_root_history_fetches_only_the_canonical_source_message() -> None:
                 "content": "Need help",
                 "author": {"id": "300"},
                 "timestamp": "2026-07-28T00:00:00.000000+00:00",
+                "embeds": [
+                    {
+                        "title": "Incident",
+                        "description": "A visible provider card.",
+                        "url": "https://untrusted.example/card",
+                        "image": {"url": "https://cdn.discordapp.com/incident.png"},
+                    }
+                ],
             },
         )
 
@@ -54,6 +62,15 @@ async def test_root_history_fetches_only_the_canonical_source_message() -> None:
         )
 
     assert [message.message_id for message in page.messages] == ["100"]
+    assert page.messages[0].attachment_metadata == {
+        "embeds": [
+            {
+                "title": "Incident",
+                "description": "A visible provider card.",
+                "has_image": True,
+            }
+        ]
+    }
     assert page.next_cursor is None
     assert calls[0].url.path == "/api/v10/channels/200/messages/100"
     assert calls[0].headers["Authorization"] == "Bot discord-secret"

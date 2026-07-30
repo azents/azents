@@ -40,7 +40,6 @@ class ManagedConnection(BaseModel):
     provider_tenant_id: Optional[StrictStr]
     provider_bot_user_id: Optional[StrictStr]
     open_access_enabled: StrictBool
-    allow_bot_messages: StrictBool
     credentials_configured: StrictBool
     capabilities: Optional[Dict[str, Any]]
     provider_config: Optional[Dict[str, Any]]
@@ -51,7 +50,7 @@ class ManagedConnection(BaseModel):
     socket_gap_reason: Optional[StrictStr]
     disconnected_at: Optional[datetime]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "route_id", "agent_id", "provider", "transport", "status", "provider_app_id", "provider_tenant_id", "provider_bot_user_id", "open_access_enabled", "allow_bot_messages", "credentials_configured", "capabilities", "provider_config", "last_verified_at", "last_health_at", "last_health_code", "socket_gap_detected_at", "socket_gap_reason", "disconnected_at"]
+    __properties: ClassVar[List[str]] = ["id", "route_id", "agent_id", "provider", "transport", "status", "provider_app_id", "provider_tenant_id", "provider_bot_user_id", "open_access_enabled", "credentials_configured", "capabilities", "provider_config", "last_verified_at", "last_health_at", "last_health_code", "socket_gap_detected_at", "socket_gap_reason", "disconnected_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -176,7 +175,6 @@ class ManagedConnection(BaseModel):
             "provider_tenant_id": obj.get("provider_tenant_id"),
             "provider_bot_user_id": obj.get("provider_bot_user_id"),
             "open_access_enabled": obj.get("open_access_enabled"),
-            "allow_bot_messages": obj.get("allow_bot_messages"),
             "credentials_configured": obj.get("credentials_configured"),
             "capabilities": obj.get("capabilities"),
             "provider_config": obj.get("provider_config"),

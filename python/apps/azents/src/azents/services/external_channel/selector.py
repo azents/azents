@@ -102,10 +102,10 @@ class ExternalChannelSelectorService:
                 session,
                 principal_id=principal_id,
             )
-            if principal is None or principal.author_type not in {
-                ExternalChannelPrincipalAuthorType.HUMAN,
-                ExternalChannelPrincipalAuthorType.BOT,
-            }:
+            if (
+                principal is None
+                or principal.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
+            ):
                 raise ExternalChannelSelectorError("Selector principal is unavailable.")
             rows = await self.repository.list_routable_multi_catalog_routes(
                 session,
@@ -170,15 +170,7 @@ class ExternalChannelSelectorService:
             )
             if (
                 principal is None
-                or principal.author_type
-                not in {
-                    ExternalChannelPrincipalAuthorType.HUMAN,
-                    ExternalChannelPrincipalAuthorType.BOT,
-                }
-                or (
-                    principal.author_type is ExternalChannelPrincipalAuthorType.BOT
-                    and not route.allow_bot_messages
-                )
+                or principal.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
             ):
                 raise ExternalChannelSelectorError("Selected Agent is unavailable.")
             resource = await self.repository.lock_resource(

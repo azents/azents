@@ -13,11 +13,8 @@ const baseSource = {
   providerMessageKey: "slack:T01:C01:1721600000.000100",
   authorType: "human",
   authorization: "authorized_invocation",
-  lifecycle: "active",
-  revisionKind: "original",
   providerTimestamp: "2026-07-22T01:15:00.000Z",
   originalUrl: "https://example.slack.com/archives/C1/p1",
-  correctionOfRevisionId: null,
   body: "Please verify the **production rollout** and summarize any blockers.",
 };
 
@@ -78,37 +75,6 @@ export const Discord = {
       originalUrl:
         "https://discord.com/channels/345678901234567890/456789012345678901/567890123456789012",
       body: "Please continue investigating the deployment thread.",
-    },
-  },
-} satisfies Story;
-
-export const EditedWithoutOriginalLink = {
-  args: {
-    source: {
-      ...baseSource,
-      lifecycle: "edited",
-      revisionKind: "edit",
-      originalUrl: null,
-      correctionOfRevisionId: "revision-1",
-      body: "Please verify the production rollout and focus on database locks.",
-    },
-  },
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await userEvent.click(canvas.getByRole("button"));
-    await expect(
-      canvas.getByText(/original message is unavailable/i),
-    ).toBeVisible();
-  },
-} satisfies Story;
-
-export const Deleted = {
-  args: {
-    source: {
-      ...baseSource,
-      lifecycle: "deleted",
-      revisionKind: "delete",
-      body: "[Message deleted by provider.]",
     },
   },
 } satisfies Story;

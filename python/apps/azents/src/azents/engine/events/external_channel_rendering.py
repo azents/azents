@@ -36,8 +36,6 @@ def external_channel_message_visible_value(
         "binding_id": payload.binding_id,
         "invocation_batch_id": payload.invocation_batch_id,
         "external_message_id": payload.external_message_id,
-        "revision_id": payload.revision_id,
-        "revision_kind": payload.revision_kind.value,
         "projection_root_id": payload.projection_root_id,
         "provider_position": payload.provider_position,
         "sender": {
@@ -47,7 +45,6 @@ def external_channel_message_visible_value(
             "author_type": payload.author_type.value,
         },
         "authorization": payload.authorization,
-        "lifecycle": payload.lifecycle.value,
         "timestamp": timestamp.isoformat() if timestamp is not None else None,
         "body": _body(payload),
     }
@@ -58,8 +55,6 @@ def external_channel_message_visible_value(
         value["original_url"] = payload.original_url
     if payload.reference_mappings:
         value["reference_mappings"] = payload.reference_mappings
-    if payload.correction_of_revision_id is not None:
-        value["correction_of_revision_id"] = payload.correction_of_revision_id
     if payload.truncated_context_message_count or payload.truncated_context_size:
         value["truncated_context"] = {
             "message_count": payload.truncated_context_message_count,
@@ -81,15 +76,10 @@ def render_external_channel_message(
         f"Resource: {payload.resource_label}",
         f"Sender: {sender} ({payload.author_type.value})",
         f"Authorization: {payload.authorization}",
-        f"Lifecycle: {payload.lifecycle.value}",
     ]
     if timestamp is not None:
         lines.append(f"Timestamp: {timestamp.isoformat()}")
-    if payload.revision_kind.value != "original":
-        lines.append(f"Revision: {payload.revision_kind.value}")
     lines.extend(_identity_mapping_lines((payload,)))
-    if payload.correction_of_revision_id is not None:
-        lines.append(f"Correction of revision: {payload.correction_of_revision_id}")
     if payload.truncated_context_message_count or payload.truncated_context_size:
         lines.append(
             "Truncated context: "
@@ -98,6 +88,7 @@ def render_external_channel_message(
         )
     lines.extend(["Body:", _body(payload)])
     lines.extend(_render_file_lines(payload.attachment_metadata))
+    lines.extend(_render_embed_lines(payload.attachment_metadata))
     body = "\n".join(lines)
     return f"External Channel Message:\n{body}" if include_label else body
 
@@ -131,26 +122,18 @@ def render_external_channel_turn(
                 f"{index}. Sender: {sender}",
                 f"   Author Type: {payload.author_type.value}",
                 f"   Authorization: {payload.authorization}",
-                f"   Lifecycle: {payload.lifecycle.value}",
             ]
         )
         if timestamp is not None:
             lines.append(f"   Timestamp: {timestamp.isoformat()}")
-        if payload.revision_kind.value != "original":
-            lines.append(f"   Revision: {payload.revision_kind.value}")
-        if payload.correction_of_revision_id is not None:
-            lines.append(
-                f"   Correction of revision: {payload.correction_of_revision_id}"
-            )
         lines.append(f"   Body: {_body(payload)}")
         lines.extend(_render_file_lines(payload.attachment_metadata, indent="   "))
+        lines.extend(_render_embed_lines(payload.attachment_metadata, indent="   "))
     return "\n".join(lines)
 
 
 def _body(payload: ExternalChannelMessagePayload) -> str:
-    """Return explicit bounded body text for current, edited, or deleted state."""
-    if payload.lifecycle.value == "deleted":
-        return "[Message deleted by provider.]"
+    """Return explicit bounded body text for one accepted history snapshot."""
     if payload.body is None or not payload.body.strip():
         return "[Message has no text content.]"
     return _display_body(payload.body, payload.reference_mappings)
@@ -234,6 +217,12 @@ def _visible_attachment_metadata(
     if files:
         visible["files"] = files
         visible["files_truncated"] = attachment_metadata.get("files_truncated") is True
+    embeds = _visible_embed_metadata(attachment_metadata)
+    if embeds:
+        visible["embeds"] = embeds
+        visible["embeds_truncated"] = (
+            attachment_metadata.get("embeds_truncated") is True
+        )
     return visible
 
 
@@ -289,6 +278,49 @@ def _visible_file_metadata(metadata: dict[str, object]) -> dict[str, object]:
     return visible
 
 
+def _visible_embed_metadata(
+    attachment_metadata: dict[str, object],
+) -> list[dict[str, object]]:
+    """Return only safe, bounded text and media-presence embed fields."""
+    raw_embeds = attachment_metadata.get("embeds")
+    if not isinstance(raw_embeds, list):
+        return []
+    visible_embeds: list[dict[str, object]] = []
+    for raw_embed in raw_embeds[:10]:
+        if not isinstance(raw_embed, dict):
+            continue
+        embed: dict[str, object] = {}
+        for key in ("type", "title", "description", "author_name", "footer_text"):
+            value = _optional_inline_text(raw_embed.get(key))
+            if value is not None:
+                embed[key] = value
+        raw_fields = raw_embed.get("fields")
+        if isinstance(raw_fields, list):
+            fields: list[dict[str, object]] = []
+            for raw_field in raw_fields[:25]:
+                if not isinstance(raw_field, dict):
+                    continue
+                field: dict[str, object] = {}
+                for key in ("name", "value"):
+                    value = _optional_inline_text(raw_field.get(key))
+                    if value is not None:
+                        field[key] = value
+                if raw_field.get("inline") is True:
+                    field["inline"] = True
+                if field:
+                    fields.append(field)
+            if fields:
+                embed["fields"] = fields
+                if raw_embed.get("fields_truncated") is True:
+                    embed["fields_truncated"] = True
+        for key in ("has_image", "has_thumbnail"):
+            if raw_embed.get(key) is True:
+                embed[key] = True
+        if embed:
+            visible_embeds.append(embed)
+    return visible_embeds
+
+
 def _render_file_lines(
     attachment_metadata: dict[str, object],
     *,
@@ -328,6 +360,54 @@ def _render_file_lines(
     if visible.get("files_truncated") is True:
         lines.append(
             f"{indent}[Additional files omitted by the provider metadata limit.]"
+        )
+    return lines
+
+
+def _render_embed_lines(
+    attachment_metadata: dict[str, object],
+    *,
+    indent: str = "",
+) -> list[str]:
+    """Render the safe structured embed projection used by model-visible values."""
+    visible = _visible_attachment_metadata(attachment_metadata)
+    embeds = visible.get("embeds")
+    if not isinstance(embeds, list) or not embeds:
+        return []
+    lines = [f"{indent}Embeds:"]
+    for index, raw_embed in enumerate(embeds, start=1):
+        if not isinstance(raw_embed, dict):
+            continue
+        lines.append(f"{indent}{index}.")
+        for key, label in (
+            ("type", "Type"),
+            ("title", "Title"),
+            ("description", "Description"),
+            ("author_name", "Author"),
+            ("footer_text", "Footer"),
+        ):
+            value = raw_embed.get(key)
+            if isinstance(value, str):
+                lines.append(f"{indent}   {label}: {value}")
+        if raw_embed.get("has_image") is True:
+            lines.append(f"{indent}   Image: present")
+        if raw_embed.get("has_thumbnail") is True:
+            lines.append(f"{indent}   Thumbnail: present")
+        fields = raw_embed.get("fields")
+        if isinstance(fields, list):
+            lines.append(f"{indent}   Fields:")
+            for field_index, raw_field in enumerate(fields, start=1):
+                if not isinstance(raw_field, dict):
+                    continue
+                name = raw_field.get("name") or "[unnamed]"
+                value = raw_field.get("value") or "[empty]"
+                suffix = " (inline)" if raw_field.get("inline") is True else ""
+                lines.append(f"{indent}   {field_index}. {name}: {value}{suffix}")
+            if raw_embed.get("fields_truncated") is True:
+                lines.append(f"{indent}   [Additional fields omitted.]")
+    if visible.get("embeds_truncated") is True:
+        lines.append(
+            f"{indent}[Additional embeds omitted by the provider metadata limit.]"
         )
     return lines
 

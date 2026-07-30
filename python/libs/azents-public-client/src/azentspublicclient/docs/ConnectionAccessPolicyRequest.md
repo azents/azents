@@ -7,7 +7,6 @@ Dedicated External Channel ingress policy request.
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **open_access_enabled** | **bool** |  | [optional] [default to True]
-**allow_bot_messages** | **bool** |  | [optional] [default to False]
 
 ## Example
 

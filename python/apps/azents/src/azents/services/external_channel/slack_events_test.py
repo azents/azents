@@ -13,8 +13,6 @@ from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from azents.core.enums import (
-    ExternalChannelMessageLifecycle,
-    ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
 )
 from azents.services.external_channel.conversation import (
@@ -386,57 +384,23 @@ def test_excludes_dm_and_slack_connect_scope(event: dict[str, object]) -> None:
         )
 
 
-def test_normalizes_edit_and_delete_with_distinct_lifecycle_identity() -> None:
-    """Edits and deletes preserve message identity while creating new revisions."""
-    edited = normalize_slack_event(
-        event_type="message",
-        tenant_id="T1",
-        envelope=_envelope(
-            {
-                "type": "message",
-                "subtype": "message_changed",
-                "channel": "C1",
-                "channel_type": "channel",
-                "event_ts": "1721600002.000100",
-                "message": {
-                    "user": "U1",
+@pytest.mark.parametrize("subtype", ("message_changed", "message_deleted"))
+def test_excludes_edit_and_delete_events(subtype: str) -> None:
+    """Provider mutations do not create a secondary inbound lifecycle path."""
+    with pytest.raises(SlackEventExcluded):
+        normalize_slack_event(
+            event_type="message",
+            tenant_id="T1",
+            envelope=_envelope(
+                {
+                    "type": "message",
+                    "subtype": subtype,
+                    "channel": "C1",
+                    "channel_type": "channel",
                     "ts": "1721600000.000100",
-                    "thread_ts": "1721599999.000100",
-                    "text": "updated",
-                    "edited": {"ts": "1721600002.000000"},
-                },
-            }
-        ),
-    )
-    deleted = normalize_slack_event(
-        event_type="message",
-        tenant_id="T1",
-        envelope=_envelope(
-            {
-                "type": "message",
-                "subtype": "message_deleted",
-                "channel": "C1",
-                "channel_type": "channel",
-                "event_ts": "1721600003.000000",
-                "deleted_ts": "1721600000.000100",
-                "previous_message": {
-                    "user": "U1",
-                    "ts": "1721600000.000100",
-                    "thread_ts": "1721599999.000100",
-                },
-            }
-        ),
-    )
-
-    assert isinstance(edited, SlackNormalizedMessage)
-    assert isinstance(deleted, SlackNormalizedMessage)
-    assert edited.provider_message_key == deleted.provider_message_key
-    assert edited.revision_kind is ExternalChannelMessageRevisionKind.EDIT
-    assert edited.lifecycle is ExternalChannelMessageLifecycle.EDITED
-    assert edited.revision_key.startswith("edit:1721600002.000000:")
-    assert deleted.revision_kind is ExternalChannelMessageRevisionKind.DELETE
-    assert deleted.lifecycle is ExternalChannelMessageLifecycle.DELETED
-    assert deleted.normalized_body is None
+                }
+            ),
+        )
 
 
 def test_normalizes_connection_revocation_without_message_identity() -> None:
@@ -594,51 +558,6 @@ def test_raw_provider_normalization_ignores_spoofed_normalized_text() -> None:
     assert raw.normalized_body == ""
     assert isinstance(projected, SlackNormalizedMessage)
     assert projected.normalized_body == "Admission-projected content"
-
-
-def test_rich_text_edit_revision_identity_uses_normalized_body() -> None:
-    """Changing block-only content creates a distinct edit revision key."""
-
-    def edited(text: str) -> SlackNormalizedMessage:
-        normalized = normalize_slack_event(
-            event_type="message",
-            tenant_id="T1",
-            envelope=_envelope(
-                {
-                    "type": "message",
-                    "subtype": "message_changed",
-                    "channel": "C1",
-                    "channel_type": "channel",
-                    "event_ts": "1721600002.000100",
-                    "message": {
-                        "user": "U1",
-                        "ts": "1721600000.000100",
-                        "text": "",
-                        "edited": {"ts": "1721600002.000000"},
-                        "blocks": [
-                            {
-                                "type": "rich_text",
-                                "elements": [
-                                    {
-                                        "type": "rich_text_section",
-                                        "elements": [{"type": "text", "text": text}],
-                                    }
-                                ],
-                            }
-                        ],
-                    },
-                }
-            ),
-        )
-        assert isinstance(normalized, SlackNormalizedMessage)
-        return normalized
-
-    first = edited("First")
-    second = edited("Second")
-
-    assert first.normalized_body == "First"
-    assert second.normalized_body == "Second"
-    assert first.revision_key != second.revision_key
 
 
 async def test_conversation_access_requires_membership_and_exposes_connect() -> None:

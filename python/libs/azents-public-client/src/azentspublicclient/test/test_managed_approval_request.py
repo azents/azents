@@ -45,8 +45,6 @@ class TestManagedApprovalRequest(unittest.TestCase):
                 principal_label = '',
                 principal_provider_user_id = '',
                 resource_label = '',
-                source_text = '',
-                original_url = '',
                 expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 decided_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 decision_summary = ''
@@ -63,8 +61,6 @@ class TestManagedApprovalRequest(unittest.TestCase):
                 principal_label = '',
                 principal_provider_user_id = '',
                 resource_label = '',
-                source_text = '',
-                original_url = '',
                 expires_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 decided_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 decision_summary = '',

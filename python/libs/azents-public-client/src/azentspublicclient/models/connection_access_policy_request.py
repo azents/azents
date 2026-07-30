@@ -27,9 +27,8 @@ class ConnectionAccessPolicyRequest(BaseModel):
     Dedicated External Channel ingress policy request.
     """ # noqa: E501
     open_access_enabled: Optional[StrictBool] = True
-    allow_bot_messages: Optional[StrictBool] = False
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["open_access_enabled", "allow_bot_messages"]
+    __properties: ClassVar[List[str]] = ["open_access_enabled"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -89,8 +88,7 @@ class ConnectionAccessPolicyRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "open_access_enabled": obj.get("open_access_enabled") if obj.get("open_access_enabled") is not None else True,
-            "allow_bot_messages": obj.get("allow_bot_messages") if obj.get("allow_bot_messages") is not None else False
+            "open_access_enabled": obj.get("open_access_enabled") if obj.get("open_access_enabled") is not None else True
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

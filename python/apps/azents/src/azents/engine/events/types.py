@@ -391,8 +391,11 @@ class ExternalChannelMessagePayload(BaseModel):
     binding_id: str = Field(min_length=1)
     invocation_batch_id: str = Field(min_length=1)
     external_message_id: str = Field(min_length=1)
-    revision_id: str = Field(min_length=1)
-    revision_kind: ExternalChannelMessageRevisionKind
+    revision_id: str | None = Field(default=None, exclude=True)
+    revision_kind: ExternalChannelMessageRevisionKind = Field(
+        default=ExternalChannelMessageRevisionKind.ORIGINAL,
+        exclude=True,
+    )
     projection_root_id: str = Field(min_length=1)
     provider_message_key: str = Field(min_length=1)
     provider_position: str = Field(min_length=1)
@@ -401,7 +404,10 @@ class ExternalChannelMessagePayload(BaseModel):
     sender_display_name: str | None
     author_type: ExternalChannelPrincipalAuthorType
     authorization: Literal["context_only", "authorized_invocation"]
-    lifecycle: ExternalChannelMessageLifecycle
+    lifecycle: ExternalChannelMessageLifecycle | None = Field(
+        default=None,
+        exclude=True,
+    )
     body: str | None
     attachment_metadata: dict[str, object]
     reference_mappings: dict[str, dict[str, str]] = Field(default_factory=dict)
@@ -410,7 +416,7 @@ class ExternalChannelMessagePayload(BaseModel):
     original_url: str | None
     truncated_context_message_count: int = Field(ge=0)
     truncated_context_size: int = Field(ge=0)
-    correction_of_revision_id: str | None
+    correction_of_revision_id: str | None = Field(default=None, exclude=True)
 
     @model_serializer(mode="wrap")
     def serialize_required_nullable_fields(
@@ -428,34 +434,15 @@ class ExternalChannelMessagePayload(BaseModel):
             provider_created_at=self.provider_created_at,
             provider_updated_at=self.provider_updated_at,
             original_url=self.original_url,
-            correction_of_revision_id=self.correction_of_revision_id,
         )
         return serialized
 
     @model_validator(mode="after")
     def validate_projection_identity(self) -> "ExternalChannelMessagePayload":
-        """Validate revision semantics and the stable correction root."""
+        """Validate the stable provider-message projection root."""
         expected_root = f"external-channel:{self.binding_id}:{self.external_message_id}"
         if self.projection_root_id != expected_root:
             raise ValueError("External Channel projection root is inconsistent")
-        expected_lifecycle = {
-            ExternalChannelMessageRevisionKind.ORIGINAL: (
-                ExternalChannelMessageLifecycle.CURRENT
-            ),
-            ExternalChannelMessageRevisionKind.EDIT: (
-                ExternalChannelMessageLifecycle.EDITED
-            ),
-            ExternalChannelMessageRevisionKind.DELETE: (
-                ExternalChannelMessageLifecycle.DELETED
-            ),
-        }[self.revision_kind]
-        if self.lifecycle is not expected_lifecycle:
-            raise ValueError("External Channel revision lifecycle is inconsistent")
-        if self.revision_kind is ExternalChannelMessageRevisionKind.ORIGINAL:
-            if self.correction_of_revision_id is not None:
-                raise ValueError(
-                    "Original External Channel revision cannot be a correction"
-                )
         return self
 
 

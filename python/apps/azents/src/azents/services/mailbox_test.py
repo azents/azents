@@ -2682,8 +2682,6 @@ async def test_external_invocation_projection() -> None:
                     update={
                         "sequence": 1,
                         "message_id": "message-2",
-                        "revision_kind": ExternalChannelMessageRevisionKind.EDIT,
-                        "correction_of_revision_id": "revision-1",
                         "revision_id": "revision-2",
                         "revision_body": "Invoke",
                         "provider_message_key": "C123:1.0:2",
@@ -2739,8 +2737,8 @@ async def test_external_invocation_projection() -> None:
     assert outcome.turn_effect is TurnEffect.ELIGIBLE
     assert [item.external_id for item in outcome.promoted] == [
         "external-channel:buffer-1:context-omitted",
-        "external-channel:binding-1:message-1:revision-1",
-        "external-channel:binding-1:message-2:revision-2",
+        "external-channel:binding-1:message-1",
+        "external-channel:binding-1:message-2",
     ]
     assert [item.event_kind for item in outcome.promoted] == [
         EventKind.SYSTEM_REMINDER,
@@ -2755,8 +2753,8 @@ async def test_external_invocation_projection() -> None:
     }
     assert outcome.promoted[1].payload["authorization"] == "context_only"
     assert outcome.promoted[2].payload["authorization"] == "authorized_invocation"
-    assert outcome.promoted[2].payload["revision_kind"] == "edit"
-    assert outcome.promoted[2].payload["correction_of_revision_id"] == "revision-1"
+    assert "revision_kind" not in outcome.promoted[2].payload
+    assert "correction_of_revision_id" not in outcome.promoted[2].payload
     assert outcome.promoted[0].item_key == "external_channel:0"
     assert outcome.promoted[1].item_key == "external_channel:1"
     assert outcome.promoted[2].item_key == "external_channel:2"

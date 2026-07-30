@@ -786,7 +786,6 @@ export const externalChannelRouter = router({
         agentId: z.string().min(1),
         connectionId: z.string().min(1),
         openAccessEnabled: z.boolean(),
-        allowBotMessages: z.boolean(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -800,7 +799,6 @@ export const externalChannelRouter = router({
           },
           body: {
             open_access_enabled: input.openAccessEnabled,
-            allow_bot_messages: input.allowBotMessages,
           },
           throwOnError: true,
         });

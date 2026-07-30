@@ -390,17 +390,8 @@ async def test_position_mismatch_rolls_back_before_routing_or_content_writes() -
     repository.create_invocation_batch_idempotent.assert_not_awaited()
 
 
-@pytest.mark.parametrize(
-    "author_type",
-    [
-        ExternalChannelPrincipalAuthorType.HUMAN,
-        ExternalChannelPrincipalAuthorType.BOT,
-    ],
-)
-async def test_pending_selector_persists_trigger_before_control_delivery(
-    author_type: ExternalChannelPrincipalAuthorType,
-) -> None:
-    """A route-less Multi App invocation returns one committed selector intent."""
+async def test_pending_selector_persists_only_human_trigger_identity() -> None:
+    """A route-less human invocation commits metadata and one selector intent."""
     session = MagicMock(spec=AsyncSession)
     session.commit = AsyncMock()
     position = SimpleNamespace(
@@ -417,9 +408,7 @@ async def test_pending_selector_persists_trigger_before_control_delivery(
     )
     repository = SimpleNamespace(
         lock_conversation_position=AsyncMock(return_value=position),
-        list_routable_multi_catalog_routes=AsyncMock(
-            return_value=[SimpleNamespace(id="route-1")]
-        ),
+        get_resource_by_provider_key=AsyncMock(return_value=resource),
     )
     store = _store(
         session=cast(AsyncSession, session),
@@ -434,17 +423,21 @@ async def test_pending_selector_persists_trigger_before_control_delivery(
             admission=admission,
         )
     )
-    store._persist_history_message = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+    store._persist_message_identity = AsyncMock(  # pyright: ignore[reportPrivateUsage]
         return_value=SimpleNamespace(
-            message=SimpleNamespace(id="message-2"),
-            revision_id="revision-1",
+            id="message-2",
+            principal_id="principal-1",
+            current_revision_id=None,
+            original_url=None,
+            pending_size=0,
         )
     )
+    store._persist_history_message = AsyncMock()  # pyright: ignore[reportPrivateUsage]
     store._create_selector_control_intent = AsyncMock(  # pyright: ignore[reportPrivateUsage]
         return_value="delivery-1"
     )
     request = _request()
-    history = _history(author_type=author_type)
+    history = _history()
 
     result = await store.accept(
         request=request,
@@ -462,12 +455,13 @@ async def test_pending_selector_persists_trigger_before_control_delivery(
     assert result.reason is ExternalChannelIngestionReason.SELECTION_REQUIRED
     assert result.control_delivery_attempt_id == "delivery-1"
     assert result.connection_id == "connection-1"
-    store._persist_history_message.assert_awaited_once_with(  # pyright: ignore[reportPrivateUsage]
+    store._persist_message_identity.assert_awaited_once_with(  # pyright: ignore[reportPrivateUsage]
         cast(AsyncSession, session),
         request=request,
         resource=resource,
         message=history.trigger,
     )
+    store._persist_history_message.assert_not_awaited()  # pyright: ignore[reportPrivateUsage]
     store._create_selector_control_intent.assert_awaited_once_with(  # pyright: ignore[reportPrivateUsage]
         cast(AsyncSession, session),
         request=request,
@@ -476,8 +470,47 @@ async def test_pending_selector_persists_trigger_before_control_delivery(
     session.commit.assert_awaited_once()
 
 
-async def test_pending_selector_rejects_bot_without_an_eligible_route() -> None:
-    """A bot cannot receive selector controls when every route disables bots."""
+async def test_pending_source_identity_never_persists_provider_content() -> None:
+    """Pre-authorization source rows retain only identity and ordering facts."""
+    session = MagicMock(spec=AsyncSession)
+    message = _history().trigger
+    repository = SimpleNamespace(
+        create_principal_idempotent=AsyncMock(return_value=SimpleNamespace(id="p-1")),
+        create_message_idempotent=AsyncMock(return_value=SimpleNamespace(id="m-1")),
+        update_message_identity_metadata=AsyncMock(
+            return_value=SimpleNamespace(id="m-1")
+        ),
+        create_message_revision_idempotent=AsyncMock(),
+        apply_message_revision=AsyncMock(),
+    )
+    store = _store(
+        session=cast(AsyncSession, session),
+        repository=repository,
+    )
+
+    persisted = await store._persist_message_identity(  # pyright: ignore[reportPrivateUsage]
+        cast(AsyncSession, session),
+        request=_request(),
+        resource=cast(Any, SimpleNamespace(id="resource-1")),
+        message=message,
+    )
+
+    assert persisted.id == "m-1"
+    create = repository.create_message_idempotent.await_args.args[1]
+    assert create.resource_id == "resource-1"
+    assert create.provider_message_key == message.provider_message_key
+    assert create.provider_position == message.provider_position
+    assert create.current_revision_id is None
+    assert create.original_url is None
+    assert create.pending_size == 0
+    repository.create_message_revision_idempotent.assert_not_awaited()
+    repository.apply_message_revision.assert_not_awaited()
+
+
+async def test_pending_selector_ignores_bot_before_catalog_or_source_persistence() -> (
+    None
+):
+    """A bot cannot create selector state, content, controls, or cursor progress."""
     session = MagicMock(spec=AsyncSession)
     session.commit = AsyncMock()
     position = SimpleNamespace(
@@ -485,15 +518,10 @@ async def test_pending_selector_rejects_bot_without_an_eligible_route() -> None:
         connection_id="connection-1",
         read_through_position=None,
     )
-    admission = SimpleNamespace(
-        id="admission-1",
-        connection_id="connection-1",
-        initiating_principal_id="principal-1",
-        status=ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
-    )
     repository = SimpleNamespace(
         lock_conversation_position=AsyncMock(return_value=position),
         list_routable_multi_catalog_routes=AsyncMock(return_value=[]),
+        get_resource_by_provider_key=AsyncMock(),
         advance_conversation_position_if_current=AsyncMock(return_value=True),
     )
     store = _store(
@@ -503,12 +531,8 @@ async def test_pending_selector_rejects_bot_without_an_eligible_route() -> None:
     store._lock_authority = AsyncMock(  # pyright: ignore[reportPrivateUsage]
         return_value=SimpleNamespace(id="connection-1")
     )
-    store._lock_pending_selection = AsyncMock(  # pyright: ignore[reportPrivateUsage]
-        return_value=SimpleNamespace(
-            resource=SimpleNamespace(id="resource-1"),
-            admission=admission,
-        )
-    )
+    store._lock_pending_selection = AsyncMock()  # pyright: ignore[reportPrivateUsage]
+    store._persist_message_identity = AsyncMock()  # pyright: ignore[reportPrivateUsage]
     store._persist_history_message = AsyncMock()  # pyright: ignore[reportPrivateUsage]
     store._create_selector_control_intent = AsyncMock()  # pyright: ignore[reportPrivateUsage]
 
@@ -526,22 +550,27 @@ async def test_pending_selector_rejects_bot_without_an_eligible_route() -> None:
 
     assert result.status == "ignored"
     assert result.reason is ExternalChannelIngestionReason.AUTHOR_NOT_ELIGIBLE
-    repository.list_routable_multi_catalog_routes.assert_awaited_once_with(
-        cast(AsyncSession, session),
-        connection_id="connection-1",
-        principal_id="principal-1",
-        author_type=ExternalChannelPrincipalAuthorType.BOT,
-        search=None,
-        offset=0,
-        limit=1,
-    )
+    repository.list_routable_multi_catalog_routes.assert_not_awaited()
+    repository.get_resource_by_provider_key.assert_not_awaited()
+    repository.advance_conversation_position_if_current.assert_not_awaited()
+    store._lock_pending_selection.assert_not_awaited()  # pyright: ignore[reportPrivateUsage]
+    store._persist_message_identity.assert_not_awaited()  # pyright: ignore[reportPrivateUsage]
     store._persist_history_message.assert_not_awaited()  # pyright: ignore[reportPrivateUsage]
     store._create_selector_control_intent.assert_not_awaited()  # pyright: ignore[reportPrivateUsage]
     session.commit.assert_awaited_once()
 
 
-async def test_route_rejects_bot_trigger_when_bot_messages_are_disabled() -> None:
-    """A disabled external bot cannot create access, binding, or Session input."""
+@pytest.mark.parametrize(
+    "author_type",
+    [
+        ExternalChannelPrincipalAuthorType.BOT,
+        ExternalChannelPrincipalAuthorType.SYSTEM,
+    ],
+)
+async def test_context_only_trigger_is_ignored_without_cursor_advance_or_source_content(
+    author_type: ExternalChannelPrincipalAuthorType,
+) -> None:
+    """Bot and system triggers remain context-only and never move the cursor."""
     session = MagicMock(spec=AsyncSession)
     session.commit = AsyncMock()
     position = SimpleNamespace(
@@ -552,6 +581,7 @@ async def test_route_rejects_bot_trigger_when_bot_messages_are_disabled() -> Non
     repository = SimpleNamespace(
         lock_conversation_position=AsyncMock(return_value=position),
         advance_conversation_position_if_current=AsyncMock(return_value=True),
+        get_resource_by_provider_key=AsyncMock(return_value=None),
     )
     store = _store(
         session=cast(AsyncSession, session),
@@ -568,13 +598,14 @@ async def test_route_rejects_bot_trigger_when_bot_messages_are_disabled() -> Non
             resource=SimpleNamespace(id="resource-1"),
             route=SimpleNamespace(
                 open_access_enabled=True,
-                allow_bot_messages=False,
             ),
             binding=None,
             admission=None,
         )
     )
+    store._persist_message_identity = AsyncMock()  # pyright: ignore[reportPrivateUsage]
     store._persist_history_message = AsyncMock()  # pyright: ignore[reportPrivateUsage]
+    store._create_metadata_source = AsyncMock()  # pyright: ignore[reportPrivateUsage]
 
     result = await store.accept(
         request=_request(),
@@ -585,13 +616,16 @@ async def test_route_rejects_bot_trigger_when_bot_messages_are_disabled() -> Non
             wake_batch_id=None,
             wake_session_id=None,
         ),
-        history=_history(author_type=ExternalChannelPrincipalAuthorType.BOT),
+        history=_history(author_type=author_type),
     )
 
     assert result.status == "ignored"
     assert result.reason is ExternalChannelIngestionReason.AUTHOR_NOT_ELIGIBLE
+    store._persist_message_identity.assert_not_awaited()  # pyright: ignore[reportPrivateUsage]
     store._persist_history_message.assert_not_awaited()  # pyright: ignore[reportPrivateUsage]
-    repository.advance_conversation_position_if_current.assert_awaited_once()
+    store._create_metadata_source.assert_not_awaited()  # pyright: ignore[reportPrivateUsage]
+    store._lock_routing.assert_not_awaited()  # pyright: ignore[reportPrivateUsage]
+    repository.advance_conversation_position_if_current.assert_not_awaited()
     session.commit.assert_awaited_once()
 
 
@@ -731,7 +765,6 @@ async def test_replay_after_shared_position_accepts_without_cursor_rollback() ->
         id="route-1",
         connection_id="connection-1",
         open_access_enabled=False,
-        allow_bot_messages=True,
         require_active_agent_id=MagicMock(return_value="agent-1"),
     )
     binding = SimpleNamespace(
@@ -745,6 +778,15 @@ async def test_replay_after_shared_position_accepts_without_cursor_rollback() ->
         resource_id="resource-1",
         provider_message_key="message-2",
         provider_position=request.locator.trigger_position,
+        principal_id="principal-1",
+    )
+    persisted_context = SimpleNamespace(
+        message=SimpleNamespace(
+            id="message-1",
+            provider_message_key="message-1",
+            provider_position="00000000000000000001",
+        ),
+        revision_id="revision-0",
     )
     persisted_trigger = SimpleNamespace(
         id="message-2",
@@ -759,10 +801,11 @@ async def test_replay_after_shared_position_accepts_without_cursor_rollback() ->
     )
     repository = SimpleNamespace(
         lock_conversation_position=AsyncMock(return_value=position),
+        get_resource_by_provider_key=AsyncMock(return_value=resource),
         create_message_idempotent=AsyncMock(return_value=source_message),
         update_message_identity_metadata=AsyncMock(return_value=source_message),
         get_active_block=AsyncMock(return_value=None),
-        get_active_access_grant=AsyncMock(return_value=None),
+        get_active_access_grant=AsyncMock(return_value=object()),
         get_invocation_batch=AsyncMock(return_value=None),
         create_invocation_batch_idempotent=AsyncMock(return_value=batch),
         create_invocation_batch_item_idempotent=AsyncMock(),
@@ -812,14 +855,31 @@ async def test_replay_after_shared_position_accepts_without_cursor_rollback() ->
     store._persist_principal = AsyncMock(  # pyright: ignore[reportPrivateUsage]
         return_value="principal-1"
     )
+    persisted_trigger_result = SimpleNamespace(
+        message=persisted_trigger,
+        revision_id="revision-1",
+    )
     store._persist_history_message = AsyncMock(  # pyright: ignore[reportPrivateUsage]
-        return_value=SimpleNamespace(
-            message=persisted_trigger,
-            revision_id="revision-1",
-        )
+        side_effect=[persisted_context, persisted_trigger_result]
     )
     store._initialize_thread_position = AsyncMock()  # pyright: ignore[reportPrivateUsage]
 
+    human_history = _history()
+    bot_context = dataclasses.replace(
+        human_history.trigger,
+        provider_message_key="message-1",
+        provider_position="00000000000000000001",
+        revision_key="message-1:original",
+        author_type=ExternalChannelPrincipalAuthorType.BOT,
+        provider_user_id="context-bot-1",
+        sender_display_name="Context Bot",
+        normalized_body="provider-visible bot context",
+    )
+    history = dataclasses.replace(
+        human_history,
+        messages=(bot_context, human_history.trigger),
+        scanned_message_count=2,
+    )
     boundary = request.replay_boundary
     assert boundary is not None
     result = await store.accept(
@@ -831,7 +891,7 @@ async def test_replay_after_shared_position_accepts_without_cursor_rollback() ->
             wake_batch_id=None,
             wake_session_id=None,
         ),
-        history=_history(author_type=ExternalChannelPrincipalAuthorType.BOT),
+        history=history,
     )
 
     assert result.status == "accepted"
@@ -845,6 +905,14 @@ async def test_replay_after_shared_position_accepts_without_cursor_rollback() ->
     assert delivery.operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE
     assert delivery.request_payload["work_id"] == "work-1"
     assert delivery.request_payload["thread_ts"] == "thread-1"
+    persisted_messages = [
+        call.kwargs["message"]
+        for call in store._persist_history_message.await_args_list  # pyright: ignore[reportPrivateUsage]
+    ]
+    assert [message.author_type for message in persisted_messages] == [
+        ExternalChannelPrincipalAuthorType.BOT,
+        ExternalChannelPrincipalAuthorType.HUMAN,
+    ]
     repository.advance_conversation_position_if_current.assert_not_awaited()
     session.commit.assert_awaited_once()
 

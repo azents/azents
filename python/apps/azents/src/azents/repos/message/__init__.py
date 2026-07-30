@@ -180,14 +180,11 @@ def _to_chat_message(row: RDBEvent) -> ChatMessage | None:
                     "binding_id": payload.binding_id,
                     "invocation_batch_id": payload.invocation_batch_id,
                     "external_message_id": payload.external_message_id,
-                    "revision_id": payload.revision_id,
-                    "revision_kind": payload.revision_kind.value,
                     "projection_root_id": payload.projection_root_id,
                     "provider_message_key": payload.provider_message_key,
                     "provider_position": payload.provider_position,
                     "author_type": payload.author_type.value,
                     "authorization": payload.authorization,
-                    "lifecycle": payload.lifecycle.value,
                     "event_render_key": f"event:{row.external_id or row.id}",
                     **(
                         {"principal_id": payload.principal_id}
@@ -236,15 +233,6 @@ def _to_chat_message(row: RDBEvent) -> ChatMessage | None:
                     **(
                         {"original_url": payload.original_url}
                         if payload.original_url is not None
-                        else {}
-                    ),
-                    **(
-                        {
-                            "correction_of_revision_id": (
-                                payload.correction_of_revision_id
-                            )
-                        }
-                        if payload.correction_of_revision_id is not None
                         else {}
                     ),
                 },

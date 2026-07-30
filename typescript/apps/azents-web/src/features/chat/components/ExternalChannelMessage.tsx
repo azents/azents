@@ -62,12 +62,6 @@ function sourceStatusLabel(
   source: ExternalChannelMessagePresentation,
   t: ChatTranslator,
 ): string {
-  if (source.lifecycle === "deleted") {
-    return t("externalMessage.status.deleted");
-  }
-  if (source.revisionKind === "edit" || source.lifecycle === "edited") {
-    return t("externalMessage.status.edited");
-  }
   if (source.authorization === "authorized_invocation") {
     return t("externalMessage.status.invoked");
   }
@@ -76,10 +70,7 @@ function sourceStatusLabel(
 
 function statusColor(
   source: ExternalChannelMessagePresentation,
-): "gray" | "blue" | "yellow" {
-  if (source.lifecycle === "deleted") {
-    return "gray";
-  }
+): "blue" | "yellow" {
   if (source.authorization === "authorized_invocation") {
     return "blue";
   }
@@ -111,7 +102,6 @@ function sourceMetadataRows(
       label: t("externalMessage.authorization"),
       value: source.authorization,
     },
-    { label: t("externalMessage.lifecycle"), value: source.lifecycle },
     {
       label: t("externalMessage.timestamp"),
       value: formatTimestamp(source.providerTimestamp, locale),
@@ -129,19 +119,6 @@ function sourceMetadataRows(
       label: t("externalMessage.providerMessageId"),
       value: source.providerMessageKey,
       copyValue: source.providerMessageKey,
-    });
-  }
-  if (source.revisionKind !== "original") {
-    rows.push({
-      label: t("externalMessage.revision"),
-      value: source.revisionKind,
-    });
-  }
-  if (source.correctionOfRevisionId !== null) {
-    rows.push({
-      label: t("externalMessage.corrects"),
-      value: source.correctionOfRevisionId,
-      copyValue: source.correctionOfRevisionId,
     });
   }
   return rows;

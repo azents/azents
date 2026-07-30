@@ -53,15 +53,12 @@ def _connection() -> ExternalChannelConnection:
 def _route(
     route_id: str,
     agent_id: str,
-    *,
-    allow_bot_messages: bool = False,
 ) -> ExternalChannelAgentRoute:
     """Build one active selector route."""
     return ExternalChannelAgentRoute.model_construct(
         id=route_id,
         connection_id="connection-1",
         agent_id=agent_id,
-        allow_bot_messages=allow_bot_messages,
     )
 
 
@@ -166,8 +163,8 @@ class _Repository:
             if search is None
             else [row for row in self.rows if search.lower() in row.agent_name.lower()]
         )
-        if author_type is ExternalChannelPrincipalAuthorType.BOT:
-            filtered = [row for row in filtered if row.route.allow_bot_messages]
+        if author_type is not ExternalChannelPrincipalAuthorType.HUMAN:
+            return []
         filtered = [
             row
             for row in filtered
@@ -389,37 +386,28 @@ async def test_catalog_search_and_paging_are_bounded_and_deterministic() -> None
 
 
 @pytest.mark.asyncio
-async def test_bot_catalog_and_selection_require_bot_enabled_routes() -> None:
-    """Bot selectors expose and accept only routes that explicitly allow bots."""
+async def test_bot_principal_cannot_project_or_select_catalog() -> None:
+    """Only human principals may use Multi App selector admission."""
     session = _Session()
     repository = _Repository(
         rows=[
             ExternalChannelCatalogRoute(
                 route=_route("route-1", "agent-1"),
-                agent_name="Human only",
-            ),
-            ExternalChannelCatalogRoute(
-                route=_route(
-                    "route-2",
-                    "agent-2",
-                    allow_bot_messages=True,
-                ),
-                agent_name="Bot enabled",
+                agent_name="Incident Agent",
             ),
         ]
     )
     repository.author_type = ExternalChannelPrincipalAuthorType.BOT
     service = _service(session, repository)
 
-    catalog = await service.project_catalog(
-        admission_id="admission-1",
-        principal_id="principal-1",
-        search=None,
-        offset=0,
-        now=_NOW,
-    )
-
-    assert [candidate.route_id for candidate in catalog.candidates] == ["route-2"]
+    with pytest.raises(ValueError, match="Selector principal is unavailable"):
+        await service.project_catalog(
+            admission_id="admission-1",
+            principal_id="principal-1",
+            search=None,
+            offset=0,
+            now=_NOW,
+        )
     with pytest.raises(ValueError, match="Selected Agent is unavailable"):
         await service.select_route(
             admission_id="admission-1",

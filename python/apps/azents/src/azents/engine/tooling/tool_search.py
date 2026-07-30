@@ -37,12 +37,6 @@ _TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
 _BM25_K1 = 1.5
 _BM25_B = 0.75
 _DIRECT_REGISTERED_TOOLS = frozenset({("github", "switch_installation")})
-_DEFERRED_AUTO_BOUND_TOOLS = frozenset(
-    {
-        ("external_channel", "channel_action"),
-        ("external_channel", "download_external_file"),
-    }
-)
 _TOOL_SEARCH_DESCRIPTION = (
     "Search deferred tools by capability and activate matching tools for the next "
     "model call. Use a concise query describing the capability you need."
@@ -444,8 +438,6 @@ def classify_tool_exposure(
     original_tool_name: str,
 ) -> ToolExposure:
     """Classify core tools as direct and attached service operations as deferred."""
-    if (source.slug, original_tool_name) in _DEFERRED_AUTO_BOUND_TOOLS:
-        return ToolExposure.DEFERRED
     if source.toolkit_type is None:
         return ToolExposure.DIRECT
     if (source.toolkit_type, original_tool_name) in _DIRECT_REGISTERED_TOOLS:

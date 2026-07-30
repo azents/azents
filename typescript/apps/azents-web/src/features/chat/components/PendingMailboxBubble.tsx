@@ -2,7 +2,6 @@
 
 import {
   ActionIcon,
-  Badge,
   Box,
   Group,
   Loader,
@@ -147,13 +146,10 @@ export function PendingMailboxBubble({
               >
                 {presentation.resource_label}
               </Text>
-              <Badge size="xs" variant="light" style={{ flexShrink: 0 }}>
-                {presentation.lifecycle}
-              </Badge>
             </Group>
             <Text size="xs" c="dimmed" style={{ overflowWrap: "anywhere" }}>
               {presentation.provider} · {presentation.resource_type} ·{" "}
-              {presentation.authorization} · {presentation.revision_kind}
+              {presentation.authorization}
             </Text>
             <Text
               size="sm"

@@ -353,25 +353,19 @@ def _external_channel_input_evidence(
                 ):
                     candidates.append(cast(dict[str, object], event_payload))
 
-    logical_items: dict[tuple[str, str, str], dict[str, object]] = {}
+    logical_items: dict[tuple[str, str], dict[str, object]] = {}
     for candidate in candidates:
         provider = candidate.get("provider")
         external_message_id = candidate.get("external_message_id")
-        revision_id = candidate.get("revision_id")
         if not all(
             isinstance(value, str) and value
-            for value in (provider, external_message_id, revision_id)
+            for value in (provider, external_message_id)
         ):
             continue
-        key = (
-            cast(str, provider),
-            cast(str, external_message_id),
-            cast(str, revision_id),
-        )
+        key = (cast(str, provider), cast(str, external_message_id))
         evidence = {
             "provider": provider,
             "external_message_id": external_message_id,
-            "revision_id": revision_id,
             "authorization": candidate.get("authorization"),
             "body": candidate.get("body"),
             "original_url": candidate.get("original_url"),
@@ -380,7 +374,7 @@ def _external_channel_input_evidence(
         if previous is not None and previous != evidence:
             raise AssertionError(
                 "Public live and history projections disagree for one "
-                f"External Channel revision: {key!r}"
+                f"External Channel message: {key!r}"
             )
         logical_items[key] = evidence
     return list(logical_items.values())
@@ -677,13 +671,11 @@ def test_http_admission_unknown_participant_and_approval_journey(
             handle=handle,
             connection_access_policy_request=ConnectionAccessPolicyRequest(
                 open_access_enabled=False,
-                allow_bot_messages=False,
             ),
             _headers=headers,
         )
     )
     assert restricted_policy.open_access_enabled is False
-    assert restricted_policy.allow_bot_messages is False
 
     validated = external_api.external_channel_v1_validate_connection(
         agent_id=agent_id,
@@ -761,26 +753,14 @@ def test_http_admission_unknown_participant_and_approval_journey(
         message="Unknown participant approval control message was not delivered",
     )
 
-    def hydrated_approval() -> object | None:
-        current = external_api.external_channel_v1_get_approval_request(
-            access_request_id=request_id,
-            _headers=headers,
-        )
-        return current if current.original_url is not None else None
-
-    approval = cast(
-        Any,
-        wait_until(
-            hydrated_approval,
-            timeout=15,
-            interval=0.2,
-            message="Slack history and permalink hydration did not complete",
-        ),
+    approval = external_api.external_channel_v1_get_approval_request(
+        access_request_id=request_id,
+        _headers=headers,
     )
     assert approval.status is ExternalChannelAccessRequestStatus.PENDING
     assert approval.agent_id == agent_id
-    assert approval.source_text == "Please investigate the deterministic incident."
-    assert approval.original_url is not None
+    assert approval.principal_provider_user_id
+    assert approval.resource_label
 
     decision = ExternalChannelDecisionInput(
         decision="allow_agent",
@@ -839,7 +819,6 @@ def test_http_admission_unknown_participant_and_approval_journey(
     logical_input = input_evidence[0]
     assert logical_input["provider"] == "slack"
     assert logical_input["external_message_id"]
-    assert logical_input["revision_id"]
     assert logical_input["authorization"] == "authorized_invocation"
     assert logical_input["body"] == "Please investigate the deterministic incident."
     assert logical_input["original_url"] == (
@@ -1575,13 +1554,11 @@ def test_provider_native_channel_work_progress_journey(
             handle=handle,
             connection_access_policy_request=ConnectionAccessPolicyRequest(
                 open_access_enabled=False,
-                allow_bot_messages=False,
             ),
             _headers=headers,
         )
     )
     assert restricted_policy.open_access_enabled is False
-    assert restricted_policy.allow_bot_messages is False
 
     def disconnect_connection() -> None:
         external_api.external_channel_v1_disconnect_connection(
@@ -1955,13 +1932,11 @@ def test_external_channel_file_transfer_journey(
             handle=handle,
             connection_access_policy_request=ConnectionAccessPolicyRequest(
                 open_access_enabled=False,
-                allow_bot_messages=False,
             ),
             _headers=headers,
         )
     )
     assert restricted_policy.open_access_enabled is False
-    assert restricted_policy.allow_bot_messages is False
 
     def disconnect_connection() -> None:
         external_api.external_channel_v1_disconnect_connection(
@@ -2669,7 +2644,6 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
         handle=handle,
         connection_access_policy_request=ConnectionAccessPolicyRequest(
             open_access_enabled=True,
-            allow_bot_messages=False,
         ),
         _headers=headers,
     )
@@ -2731,7 +2705,6 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
     logical_input = input_evidence[0]
     assert logical_input["provider"] == "discord"
     assert logical_input["external_message_id"]
-    assert logical_input["revision_id"]
     assert logical_input["authorization"] == "authorized_invocation"
     assert logical_input["body"] == source_text
     assert logical_input["original_url"] == (

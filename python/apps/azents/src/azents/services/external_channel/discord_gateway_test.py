@@ -79,62 +79,6 @@ async def test_message_callback_emits_typed_sdk_event() -> None:
     assert event.event_type == "message_create"
     assert event.message is message
     assert event.channel is channel
-    assert event.deleted_message is None
-
-
-@pytest.mark.asyncio
-async def test_update_callback_fetches_complete_typed_message() -> None:
-    """Message updates fetch a complete Message without reading payload.data."""
-    handler = AsyncMock()
-    client = _DiscordLibraryClient(
-        target_guild_id=300,
-        handle_event=handler,
-    )
-    channel = _channel()
-    message = _message(channel=channel)
-    channel.fetch_message = AsyncMock(return_value=message)
-    client.get_channel = MagicMock(return_value=channel)
-    payload = MagicMock(spec=discord.RawMessageUpdateEvent)
-    payload.guild_id = 300
-    payload.channel_id = 200
-    payload.message_id = 100
-    payload.data = MagicMock(side_effect=AssertionError("raw data accessed"))
-
-    await client.on_raw_message_edit(payload)
-
-    channel.fetch_message.assert_awaited_once_with(100)
-    await_args = handler.await_args
-    assert await_args is not None
-    event = await_args.args[0]
-    assert event.event_type == "message_update"
-    assert event.message is message
-
-
-@pytest.mark.asyncio
-async def test_delete_callback_resolves_channel_through_public_sdk_api() -> None:
-    """Cache misses use Client.fetch_channel and retain a typed channel."""
-    handler = AsyncMock()
-    client = _DiscordLibraryClient(
-        target_guild_id=300,
-        handle_event=handler,
-    )
-    channel = _channel()
-    client.get_channel = MagicMock(return_value=None)
-    client.fetch_channel = AsyncMock(return_value=channel)
-    payload = MagicMock(spec=discord.RawMessageDeleteEvent)
-    payload.guild_id = 300
-    payload.channel_id = 200
-    payload.message_id = 100
-
-    await client.on_raw_message_delete(payload)
-
-    client.fetch_channel.assert_awaited_once_with(200)
-    await_args = handler.await_args
-    assert await_args is not None
-    event = await_args.args[0]
-    assert event.event_type == "message_delete"
-    assert event.deleted_message is payload
-    assert event.channel is channel
 
 
 @pytest.mark.asyncio
@@ -163,31 +107,6 @@ async def test_handler_failure_closes_client_and_is_retained() -> None:
     await client.on_message(_message())
 
     assert client.event_error is error
-    client.close.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_typed_message_fetch_failure_closes_client() -> None:
-    """SDK resolution failures stop the connection before admission continues."""
-    error = RuntimeError("typed message lookup failed")
-    channel = _channel()
-    channel.fetch_message = AsyncMock(side_effect=error)
-    handler = AsyncMock()
-    client = _DiscordLibraryClient(
-        target_guild_id=300,
-        handle_event=handler,
-    )
-    client.get_channel = MagicMock(return_value=channel)
-    client.close = AsyncMock()
-    payload = MagicMock(spec=discord.RawMessageUpdateEvent)
-    payload.guild_id = 300
-    payload.channel_id = 200
-    payload.message_id = 100
-
-    await client.on_raw_message_edit(payload)
-
-    assert client.event_error is error
-    handler.assert_not_awaited()
     client.close.assert_awaited_once()
 
 

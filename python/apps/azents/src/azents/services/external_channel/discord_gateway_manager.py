@@ -41,6 +41,7 @@ from azents.services.external_channel.discord_gateway import (
     DiscordGatewayRunner,
 )
 from azents.services.external_channel.ingestion import (
+    ExternalChannelIngestionReason,
     ExternalChannelIngressAuthority,
     ExternalChannelIngressAuthorityKind,
 )
@@ -57,14 +58,11 @@ _RENEW_INTERVAL = datetime.timedelta(seconds=15)
 _RECONNECT_DELAY = datetime.timedelta(seconds=5)
 _RATE_LIMIT_RECONNECT_DELAY = datetime.timedelta(minutes=1)
 _MAX_RECONNECT_DELAY = datetime.timedelta(minutes=5)
+_EVENT_RETRY_DELAY_SECONDS = 1.0
 
 
 class DiscordGatewayLeaseLost(DiscordGatewayError):
     """The current process no longer owns the authoritative Gateway lease."""
-
-
-class DiscordGatewayIngestionRetryable(DiscordGatewayError):
-    """The current Gateway callback must cross the reconnect/gap boundary."""
 
 
 def get_discord_gateway_client() -> DiscordGatewayRunner:
@@ -420,21 +418,32 @@ class DiscordGatewayManagerService:
         )
         if create is None:
             return
-        outcome = await self.transport_ingestion_service.ingest_discord_event(
-            event=create,
-            authority=ExternalChannelIngressAuthority(
-                kind=ExternalChannelIngressAuthorityKind.LEASE,
-                ingress_profile=ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
-                configuration_generation=configuration_generation,
-                lease_owner=self.manager_id,
-                lease_generation=lease.lease_generation,
-            ),
-            deadline=external_channel_transport_deadline(received_at),
+        authority = ExternalChannelIngressAuthority(
+            kind=ExternalChannelIngressAuthorityKind.LEASE,
+            ingress_profile=ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
+            configuration_generation=configuration_generation,
+            lease_owner=self.manager_id,
+            lease_generation=lease.lease_generation,
         )
-        if outcome is not None and not transport_outcome_acknowledgeable(outcome):
-            raise DiscordGatewayIngestionRetryable(
-                "Discord message ingestion is temporarily unavailable."
+        deadline = external_channel_transport_deadline(received_at)
+        while True:
+            outcome = await self.transport_ingestion_service.ingest_discord_event(
+                event=create,
+                authority=authority,
+                deadline=deadline,
             )
+            if outcome is None or transport_outcome_acknowledgeable(outcome):
+                return
+            if outcome.reason is ExternalChannelIngestionReason.INGRESS_AUTHORITY_STALE:
+                raise DiscordGatewayLeaseLost(
+                    "Discord Gateway ingestion authority is stale."
+                )
+            remaining_seconds = deadline.remaining_seconds()
+            if remaining_seconds <= 0:
+                raise DiscordGatewayError(
+                    "Discord message ingestion remained unavailable."
+                )
+            await asyncio.sleep(min(_EVENT_RETRY_DELAY_SECONDS, remaining_seconds))
 
     async def _sleep_or_shutdown(
         self,

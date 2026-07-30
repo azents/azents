@@ -968,13 +968,8 @@
         "discordAppId": "Discord Application ID",
         "discordGuildId": "Discord Guild ID",
         "discordBotToken": "Discord Bot Token",
-        "discordGuide": "고객 소유의 Discord App을 사용합니다. Azents는 이 Bot Token을 검증한 후 interaction callback을 설정하며, 토큰을 다시 표시하지 않습니다.",
+        "discordGuide": "Discord Developer Portal에서 아래 순서대로 설정한 뒤 세 값을 입력하세요. Azents가 Bot Token을 검증하고 interaction callback과 명령을 자동으로 구성합니다.",
         "discordGuideTitle": "Discord App 만들기 및 설정",
-        "discordGuideStep1": "Discord Developer Portal에서 Application을 만들고 Bot 페이지에서 Bot Token을 만들거나 재설정합니다.",
-        "discordGuideStep2": "General Information에서 Application ID를 복사하고, Discord Developer Mode를 켠 뒤 대상 서버의 Guild ID를 복사합니다.",
-        "discordGuideStep3": "워크플로에 필요한 privileged Gateway intent를 켜고 Bot 설정을 저장합니다.",
-        "discordGuideStep4": "OAuth2 URL Generator에서 대상 Guild에 Bot을 추가하고, 사용할 채널을 읽고 응답하는 데 필요한 권한을 부여합니다.",
-        "discordGuideStep5": "아래에 Application ID, Guild ID, Bot Token을 입력하세요. Azents가 공개 interaction callback을 자동으로 설정하고 검증합니다.",
         "identityUnavailable": "Provider identity를 아직 검증하지 않았습니다",
         "credentialsConfigured": "Credential 설정됨",
         "credentialsMissing": "Credential 없음",
@@ -1035,8 +1030,6 @@
         "accessDescription": "활성 호출 권한과 차단된 외부 참여자를 확인합니다.",
         "openAccessEnabled": "누구나 대화 시작 허용",
         "openAccessEnabledDescription": "끄면 사람은 명시적인 접근 승인이 필요합니다.",
-        "allowBotMessages": "외부 bot 메시지 허용",
-        "allowBotMessagesDescription": "반복 방지를 위해 연결된 Azents bot은 항상 제외합니다.",
         "emptyAccess": "활성 grant 또는 block이 없습니다.",
         "associatedMultiAppsTitle": "연결된 워크스페이스 앱",
         "associatedMultiAppsDescription": "지원되는 Slack 및 Discord 대화를 이 에이전트로 라우팅할 수 있는 워크스페이스 소유 Multi App입니다. 워크스페이스 설정에서 관리하세요.",
@@ -1109,7 +1102,19 @@
           "agent": "에이전트 접근"
         },
         "revokeConfirm": "이 참여자의 접근 권한을 회수하시겠습니까?",
-        "unblockConfirm": "이 참여자의 차단을 해제하시겠습니까?"
+        "unblockConfirm": "이 참여자의 차단을 해제하시겠습니까?",
+        "discordGuideCreateApplication": "Discord Developer Portal → Applications → New Application에서 App을 만들고, 왼쪽 메뉴의 Bot → Add Bot을 선택합니다. 이미 Bot이 있으면 다음 단계로 이동합니다.",
+        "discordGuideEnableIntent": "Bot 페이지의 Privileged Gateway Intents에서 아래 항목을 켜고 Save Changes를 누릅니다. 이 항목이 꺼져 있으면 Bot을 다시 멘션하지 않은 후속 메시지가 누락될 수 있습니다.",
+        "discordGuideCopyIdentifiers": "General Information에서 Application ID를 복사합니다. Discord 앱에서 User Settings → Advanced → Developer Mode를 켠 뒤 대상 서버를 우클릭하여 Copy Server ID로 Guild ID를 복사합니다. Bot 페이지에서는 Reset Token으로 Bot Token을 발급해 안전하게 보관합니다.",
+        "discordGuideConfigureOAuth": "OAuth2 → URL Generator에서 아래 Scopes를 모두 선택합니다.",
+        "discordGuideGrantBotPermissions": "URL Generator에 표시되는 Bot Permissions에서 아래 권한을 모두 선택하고, 생성된 URL을 열어 대상 서버에 Bot을 추가합니다.",
+        "discordGuideVerifyChannelPermissions": "Bot이 사용할 각 채널에서 Edit Channel → Permissions를 열고 Bot 역할의 아래 권한이 허용되어 있는지 확인합니다. 카테고리 권한을 상속한다면 카테고리의 Deny 설정도 확인합니다.",
+        "discordGuideFinishSetup": "아래 입력란에 Application ID, Guild ID, Bot Token을 붙여넣고 연결을 누릅니다. Azents가 App과 서버 identity, command, interaction callback, Gateway 연결을 검증합니다.",
+        "discordGuideGatewayIntentLabel": "필수 Gateway Intent",
+        "discordGuideOAuthScopesLabel": "필수 OAuth2 Scopes",
+        "discordGuideBotPermissionsLabel": "필수 Bot Permissions",
+        "discordGuideChannelPermissionsLabel": "채널별 확인 권한",
+        "discordGuideLeastPrivilegeNote": "Bot에게 Administrator 또는 Manage Messages 권한을 줄 필요가 없습니다. Presence Intent와 Server Members Intent도 켜지 마세요. 서버 역할에서 권한을 허용했더라도 채널이나 카테고리의 Deny가 우선할 수 있습니다."
       },
       "sessionChannels": {
         "title": "채널",
@@ -1754,11 +1759,6 @@
       "slackGuideStep3": "App을 Slack Workspace에 설치하거나 다시 설치한 뒤 App ID, Bot Token, Signing Secret과 Socket Mode 사용 시 App Token을 복사합니다.",
       "slackGuideStep4": "연결 후 Bot이 메시지를 받고 라우팅할 수 있도록 대상 채널마다 Bot을 초대합니다.",
       "discordGuideTitle": "Discord Multi App 만들기 및 설정",
-      "discordGuideStep1": "Discord Developer Portal에서 Application을 만들고 Bot Token을 만들거나 재설정합니다.",
-      "discordGuideStep2": "Application ID와 Discord Developer Mode를 켠 대상 서버의 Guild ID를 복사합니다.",
-      "discordGuideStep3": "App에 필요한 Gateway intent를 켠 다음 OAuth2 URL Generator로 Bot을 대상 Guild에 추가합니다.",
-      "discordGuideStep4": "Bot이 의도한 대화에 사용할 수 있도록 대상 채널 권한을 부여합니다.",
-      "discordGuideStep5": "아래에 Application ID, Guild ID, Bot Token을 입력하세요. Azents가 interaction callback을 자동으로 설정하고 검증합니다.",
       "app": "앱",
       "status": "상태",
       "agents": "에이전트",
@@ -1859,7 +1859,20 @@
       },
       "handoffUnavailableTitle": "Slack 핸드오프를 사용할 수 없습니다",
       "handoffPermissionTitle": "워크스페이스 권한 필요",
-      "handoffPermissionDescription": "워크스페이스 소유자와 매니저만 이 Slack 채널 기본값을 관리할 수 있습니다."
+      "handoffPermissionDescription": "워크스페이스 소유자와 매니저만 이 Slack 채널 기본값을 관리할 수 있습니다.",
+      "discordGuide": "Discord Developer Portal에서 아래 순서대로 설정한 뒤 세 값을 입력하세요. Azents가 Bot Token을 검증하고 interaction callback과 명령을 자동으로 구성합니다.",
+      "discordGuideCreateApplication": "Discord Developer Portal → Applications → New Application에서 App을 만들고, 왼쪽 메뉴의 Bot → Add Bot을 선택합니다. 이미 Bot이 있으면 다음 단계로 이동합니다.",
+      "discordGuideEnableIntent": "Bot 페이지의 Privileged Gateway Intents에서 아래 항목을 켜고 Save Changes를 누릅니다. 이 항목이 꺼져 있으면 Bot을 다시 멘션하지 않은 후속 메시지가 누락될 수 있습니다.",
+      "discordGuideCopyIdentifiers": "General Information에서 Application ID를 복사합니다. Discord 앱에서 User Settings → Advanced → Developer Mode를 켠 뒤 대상 서버를 우클릭하여 Copy Server ID로 Guild ID를 복사합니다. Bot 페이지에서는 Reset Token으로 Bot Token을 발급해 안전하게 보관합니다.",
+      "discordGuideConfigureOAuth": "OAuth2 → URL Generator에서 아래 Scopes를 모두 선택합니다.",
+      "discordGuideGrantBotPermissions": "URL Generator에 표시되는 Bot Permissions에서 아래 권한을 모두 선택하고, 생성된 URL을 열어 대상 서버에 Bot을 추가합니다.",
+      "discordGuideVerifyChannelPermissions": "Bot이 사용할 각 채널에서 Edit Channel → Permissions를 열고 Bot 역할의 아래 권한이 허용되어 있는지 확인합니다. 카테고리 권한을 상속한다면 카테고리의 Deny 설정도 확인합니다.",
+      "discordGuideFinishSetup": "아래 입력란에 Application ID, Guild ID, Bot Token을 붙여넣고 연결을 누릅니다. Azents가 App과 서버 identity, command, interaction callback, Gateway 연결을 검증합니다.",
+      "discordGuideGatewayIntentLabel": "필수 Gateway Intent",
+      "discordGuideOAuthScopesLabel": "필수 OAuth2 Scopes",
+      "discordGuideBotPermissionsLabel": "필수 Bot Permissions",
+      "discordGuideChannelPermissionsLabel": "채널별 확인 권한",
+      "discordGuideLeastPrivilegeNote": "Bot에게 Administrator 또는 Manage Messages 권한을 줄 필요가 없습니다. Presence Intent와 Server Members Intent도 켜지 마세요. 서버 역할에서 권한을 허용했더라도 채널이나 카테고리의 Deny가 우선할 수 있습니다."
     }
   },
   "memberProfile": {
@@ -2535,10 +2548,7 @@
       "providerMessageId": "Provider 메시지 ID",
       "authorType": "작성자 유형",
       "authorization": "권한 상태",
-      "lifecycle": "메시지 상태",
       "timestamp": "제공자 시간",
-      "revision": "수정 유형",
-      "corrects": "수정 대상 리비전",
       "openOriginal": "원본 메시지 열기",
       "openOriginalAccessible": "{resource}의 원본 메시지 열기",
       "originalUnavailable": "원본 메시지를 열 수 없습니다.",
@@ -2548,9 +2558,7 @@
       "copied": "복사됨",
       "status": {
         "invoked": "호출",
-        "context": "컨텍스트",
-        "edited": "수정됨",
-        "deleted": "삭제됨"
+        "context": "컨텍스트"
       }
     }
   },
@@ -2599,9 +2607,6 @@
     "provider": "제공자",
     "expiresAt": "만료",
     "decidedAt": "결정 시각",
-    "message": "요청 메시지",
-    "openOriginal": "원본 메시지 열기",
-    "originalUnavailable": "원본 메시지를 열 수 없습니다.",
     "chooseAccess": "접근 범위를 선택하세요",
     "decisionSummary": "결정 메모: {summary}",
     "status": {

@@ -38,6 +38,7 @@ import {
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
+import { DiscordSetupGuide } from "@/shared/components/DiscordSetupGuide";
 import type { ExternalChannelSettingsContainerOutput } from "../containers/useExternalChannelSettingsContainer";
 import type {
   ConnectionDialogState,
@@ -122,7 +123,6 @@ function ConnectionRow({
   onUpdateAccessPolicy: (
     connection: ManagedConnection,
     openAccessEnabled: boolean,
-    allowBotMessages: boolean,
   ) => void;
 }): React.ReactElement {
   const t = useTranslations("workspace.agents.externalChannels");
@@ -238,24 +238,7 @@ function ConnectionRow({
             checked={connection.open_access_enabled}
             disabled={actionsBusy}
             onChange={(event) =>
-              onUpdateAccessPolicy(
-                connection,
-                event.currentTarget.checked,
-                connection.allow_bot_messages,
-              )
-            }
-          />
-          <Switch
-            label={t("allowBotMessages")}
-            description={t("allowBotMessagesDescription")}
-            checked={connection.allow_bot_messages}
-            disabled={actionsBusy}
-            onChange={(event) =>
-              onUpdateAccessPolicy(
-                connection,
-                connection.open_access_enabled,
-                event.currentTarget.checked,
-              )
+              onUpdateAccessPolicy(connection, event.currentTarget.checked)
             }
           />
         </Stack>
@@ -745,6 +728,22 @@ function DiscordConnectionDialog({
     state.appId.trim() === "" ||
     state.targetGuildId.trim() === "" ||
     state.botToken.trim() === "";
+  const guideCopy = {
+    title: t("discordGuideTitle"),
+    description: t("discordGuide"),
+    createApplication: t("discordGuideCreateApplication"),
+    enableIntent: t("discordGuideEnableIntent"),
+    copyIdentifiers: t("discordGuideCopyIdentifiers"),
+    configureOAuth: t("discordGuideConfigureOAuth"),
+    grantBotPermissions: t("discordGuideGrantBotPermissions"),
+    verifyChannelPermissions: t("discordGuideVerifyChannelPermissions"),
+    finishSetup: t("discordGuideFinishSetup"),
+    gatewayIntentLabel: t("discordGuideGatewayIntentLabel"),
+    oauthScopesLabel: t("discordGuideOAuthScopesLabel"),
+    botPermissionsLabel: t("discordGuideBotPermissionsLabel"),
+    channelPermissionsLabel: t("discordGuideChannelPermissionsLabel"),
+    leastPrivilegeNote: t("discordGuideLeastPrivilegeNote"),
+  };
 
   return (
     <Modal
@@ -757,21 +756,17 @@ function DiscordConnectionDialog({
       title={
         state?.type === "EDIT" ? t("discordEditTitle") : t("discordSetupTitle")
       }
+      size="xl"
       closeOnClickOutside={!saving}
       closeOnEscape={!saving}
+      styles={{
+        body: { overflowX: "hidden" },
+        content: { overflowX: "hidden" },
+      }}
     >
       {state && (
-        <Stack gap="md">
-          <Alert color="blue" title={t("discordGuideTitle")}>
-            <Text size="sm">{t("discordGuide")}</Text>
-            <List size="sm" spacing="xs" mt="xs">
-              <List.Item>{t("discordGuideStep1")}</List.Item>
-              <List.Item>{t("discordGuideStep2")}</List.Item>
-              <List.Item>{t("discordGuideStep3")}</List.Item>
-              <List.Item>{t("discordGuideStep4")}</List.Item>
-              <List.Item>{t("discordGuideStep5")}</List.Item>
-            </List>
-          </Alert>
+        <Stack gap="md" style={{ minWidth: 0 }}>
+          <DiscordSetupGuide copy={guideCopy} />
           <TextInput
             label={t("discordAppId")}
             value={state.appId}

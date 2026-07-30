@@ -62,12 +62,9 @@ class PendingMailboxExternalChannelPresentation(BaseModel):
     resource_label: str
     resource_type: str
     external_message_id: str
-    revision_id: str
-    revision_kind: str
     sender_display_name: str | None
     author_type: str
     authorization: Literal["context_only", "authorized_invocation"]
-    lifecycle: str
     body: str | None
     original_url: str | None
 

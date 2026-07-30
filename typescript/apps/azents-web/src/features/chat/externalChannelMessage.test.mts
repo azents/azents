@@ -22,8 +22,6 @@ function message(
       sender_display_name: "Alice",
       author_type: "human",
       authorization: "authorized_invocation",
-      lifecycle: "active",
-      revision_kind: "original",
       provider_created_at: "2026-07-22T00:59:00.000Z",
       ...metadata,
     },
@@ -55,16 +53,13 @@ void test("rejects unsafe original-message links", () => {
   assert.equal(projected?.originalUrl, null);
 });
 
-void test("keeps deleted and empty messages visible", () => {
-  const deleted = externalChannelMessagePresentation(
-    message(
-      { content: null },
-      { lifecycle: "deleted", revision_kind: "delete" },
-    ),
+void test("keeps empty messages visible without provider lifecycle interpretation", () => {
+  const legacyDeleted = externalChannelMessagePresentation(
+    message({ content: null }, {}),
   );
   const empty = externalChannelMessagePresentation(message({ content: " " }));
 
-  assert.equal(deleted?.body, "[Message deleted by provider.]");
+  assert.equal(legacyDeleted?.body, "[Message has no text content.]");
   assert.equal(empty?.body, "[Message has no text content.]");
 });
 

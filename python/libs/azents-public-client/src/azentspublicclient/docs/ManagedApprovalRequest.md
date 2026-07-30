@@ -15,8 +15,6 @@ Name | Type | Description | Notes
 **principal_label** | **str** |  | 
 **principal_provider_user_id** | **str** |  | 
 **resource_label** | **str** |  | 
-**source_text** | **str** |  | 
-**original_url** | **str** |  | 
 **expires_at** | **datetime** |  | 
 **decided_at** | **datetime** |  | 
 **decision_summary** | **str** |  | 

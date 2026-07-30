@@ -7,8 +7,6 @@ import pytest
 from pydantic import ValidationError
 
 from azents.core.enums import (
-    ExternalChannelMessageLifecycle,
-    ExternalChannelMessageRevisionKind,
     ExternalChannelProvider,
     ExternalChannelResourceType,
     MailboxItemKind,
@@ -56,8 +54,6 @@ def _external_message_data() -> dict[str, object]:
         "binding_id": "binding-1",
         "invocation_batch_id": "batch-1",
         "external_message_id": "message-1",
-        "revision_id": "revision-1",
-        "revision_kind": ExternalChannelMessageRevisionKind.ORIGINAL.value,
         "projection_root_id": "external-channel:binding-1:message-1",
         "provider_message_key": "C123:1.0:1",
         "provider_position": "1",
@@ -66,7 +62,6 @@ def _external_message_data() -> dict[str, object]:
         "sender_display_name": None,
         "author_type": "human",
         "authorization": "context_only",
-        "lifecycle": ExternalChannelMessageLifecycle.CURRENT.value,
         "body": "hello",
         "attachment_metadata": {},
         "reference_mappings": {},
@@ -75,7 +70,6 @@ def _external_message_data() -> dict[str, object]:
         "original_url": None,
         "truncated_context_message_count": 0,
         "truncated_context_size": 0,
-        "correction_of_revision_id": None,
     }
 
 
@@ -110,10 +104,9 @@ def test_mailbox_item_rejects_kind_payload_discriminator_mismatch() -> None:
     (
         ("provider", "unknown"),
         ("resource_label", ""),
-        ("lifecycle", ExternalChannelMessageLifecycle.EDITED.value),
     ),
 )
-def test_external_payload_rejects_malformed_provider_resource_or_lifecycle(
+def test_external_payload_rejects_malformed_provider_or_resource(
     field: str,
     value: object,
 ) -> None:

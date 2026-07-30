@@ -31,16 +31,13 @@ class PendingMailboxExternalChannelPresentation(BaseModel):
     resource_label: StrictStr
     resource_type: StrictStr
     external_message_id: StrictStr
-    revision_id: StrictStr
-    revision_kind: StrictStr
     sender_display_name: Optional[StrictStr]
     author_type: StrictStr
     authorization: StrictStr
-    lifecycle: StrictStr
     body: Optional[StrictStr]
     original_url: Optional[StrictStr]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["type", "provider", "resource_label", "resource_type", "external_message_id", "revision_id", "revision_kind", "sender_display_name", "author_type", "authorization", "lifecycle", "body", "original_url"]
+    __properties: ClassVar[List[str]] = ["type", "provider", "resource_label", "resource_type", "external_message_id", "sender_display_name", "author_type", "authorization", "body", "original_url"]
 
     @field_validator('type')
     def type_validate_enum(cls, value):
@@ -134,12 +131,9 @@ class PendingMailboxExternalChannelPresentation(BaseModel):
             "resource_label": obj.get("resource_label"),
             "resource_type": obj.get("resource_type"),
             "external_message_id": obj.get("external_message_id"),
-            "revision_id": obj.get("revision_id"),
-            "revision_kind": obj.get("revision_kind"),
             "sender_display_name": obj.get("sender_display_name"),
             "author_type": obj.get("author_type"),
             "authorization": obj.get("authorization"),
-            "lifecycle": obj.get("lifecycle"),
             "body": obj.get("body"),
             "original_url": obj.get("original_url")
         })
