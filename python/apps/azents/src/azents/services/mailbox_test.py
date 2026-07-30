@@ -2554,6 +2554,7 @@ def _external_projection_item(
         batch_id="batch-1",
         binding_id="binding-1",
         trigger_message_id="message-1",
+        context_omitted=False,
         truncation_message_count=0,
         truncation_size=0,
         sequence=0,
@@ -2651,6 +2652,7 @@ async def test_external_invocation_projection() -> None:
                 batch_id="batch-1",
                 binding_id="binding-1",
                 trigger_message_id="message-2",
+                context_omitted=True,
                 truncation_message_count=2,
                 truncation_size=128,
                 sequence=0,
@@ -2740,24 +2742,37 @@ async def test_external_invocation_projection() -> None:
 
     assert outcome.turn_effect is TurnEffect.ELIGIBLE
     assert [item.external_id for item in outcome.promoted] == [
+        "external-channel:buffer-1:context-omitted",
         "external-channel:binding-1:message-1:revision-1",
         "external-channel:binding-1:message-2:revision-2",
     ]
-    assert outcome.promoted[0].payload["authorization"] == "context_only"
-    assert outcome.promoted[1].payload["authorization"] == "authorized_invocation"
-    assert outcome.promoted[1].payload["revision_kind"] == "edit"
-    assert outcome.promoted[1].payload["correction_of_revision_id"] == "revision-1"
+    assert [item.event_kind for item in outcome.promoted] == [
+        EventKind.SYSTEM_REMINDER,
+        EventKind.EXTERNAL_CHANNEL_MESSAGE,
+        EventKind.EXTERNAL_CHANNEL_MESSAGE,
+    ]
+    assert outcome.promoted[0].payload == {
+        "text": (
+            "Earlier messages from this external conversation were omitted. "
+            "Only the newest 20 provider messages are included below."
+        )
+    }
+    assert outcome.promoted[1].payload["authorization"] == "context_only"
+    assert outcome.promoted[2].payload["authorization"] == "authorized_invocation"
+    assert outcome.promoted[2].payload["revision_kind"] == "edit"
+    assert outcome.promoted[2].payload["correction_of_revision_id"] == "revision-1"
     assert outcome.promoted[0].item_key == "external_channel:0"
     assert outcome.promoted[1].item_key == "external_channel:1"
-    assert outcome.promoted[0].payload["invocation_batch_id"] == "batch-1"
-    projected_metadata = outcome.promoted[0].payload["attachment_metadata"]
+    assert outcome.promoted[2].item_key == "external_channel:2"
+    assert outcome.promoted[1].payload["invocation_batch_id"] == "batch-1"
+    projected_metadata = outcome.promoted[1].payload["attachment_metadata"]
     assert isinstance(projected_metadata, dict)
     projected_files = projected_metadata["files"]
     assert isinstance(projected_files, list)
     assert isinstance(projected_files[0], dict)
     assert projected_files[0]["file"] == "external-file:v1:slack:binding-1:F123"
     second_metadata = cast(
-        dict[str, object], outcome.promoted[1].payload["attachment_metadata"]
+        dict[str, object], outcome.promoted[2].payload["attachment_metadata"]
     )
     second_files = cast(list[object], second_metadata["files"])
     second_file = cast(dict[str, object], second_files[0])

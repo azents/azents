@@ -422,7 +422,10 @@ cutover and production-validation gates in `channel-260729/DESIGN` have been sat
 - Drop `external_channel_events`, `external_channel_pending_contexts`, legacy hydration,
   activation, truncation, projection-position, and revision source-event schema after the
   qualification and preflight guards.
-- Remove event/hydration processor repositories, services, enums, models, and dead tests.
+- Remove event/hydration processor repositories, services, enums, models, and dead tests,
+  including the one-time finished Discord activation recovery query, reconciliation
+  branch, stale-mailbox cleanup path, and its historical regression fixtures previously
+  tracked by PR #1020.
 - Preserve canonical external messages/revisions, invocation batches/items, bindings,
   Channel Work, delivery, file, interaction, provisioning, route, access, and Session
   behavior that remains authoritative.
@@ -446,7 +449,8 @@ cutover and production-validation gates in `channel-260729/DESIGN` have been sat
 ### Required Evidence
 
 - Contraction upgrade/downgrade tests and repeated zero-backlog/ownership preflight.
-- Focused full external-channel backend tests after processor removal.
+- Focused full external-channel backend tests after processor removal, including proof
+  that no finished-activation recovery or stale-mailbox cleanup branch remains.
 - OpenAPI generation and generated Python/TypeScript client checks.
 - Contract test proving retired `ManagedBinding` keys are absent.
 - TypeScript format, lint, typecheck, build, and changed Storybook/component tests.

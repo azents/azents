@@ -16,6 +16,14 @@ from azents.services.external_channel.discord_selector import (
 from azents.services.external_channel.event_processor import (
     ExternalChannelEventProcessorService,
 )
+from azents.services.external_channel.ingestion import (
+    ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
+)
+from azents.services.external_channel.ingestion_replay import (
+    ExternalChannelIngestionReplayService,
+)
 from azents.services.external_channel.selector import (
     ExternalChannelSelectorCandidate,
     ExternalChannelSelectorCatalog,
@@ -111,9 +119,36 @@ class _EventProcessorDouble:
         return SimpleNamespace(status="bound", control_delivery_attempt_id=None)
 
 
+class _ReplayDouble:
+    def __init__(
+        self,
+        outcome: ExternalChannelIngestionOutcome | None = None,
+    ) -> None:
+        self.outcome = outcome or ExternalChannelIngestionOutcome(
+            kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
+            reason=ExternalChannelIngestionReason.ACCEPTED,
+            batch_id=None,
+            control_delivery_attempt_id=None,
+            connection_id=None,
+        )
+        self.calls: list[tuple[str, str]] = []
+
+    async def replay_selected_admission(
+        self,
+        *,
+        admission_id: str,
+        principal_id: str,
+        deadline: object,
+    ) -> ExternalChannelIngestionOutcome:
+        del deadline
+        self.calls.append((admission_id, principal_id))
+        return self.outcome
+
+
 def _service(
     selector: _SelectorDouble,
     event_processor: _EventProcessorDouble,
+    replay: _ReplayDouble | None = None,
 ) -> DiscordSelectorResponseService:
     """Build the response service with only redacted local selector state."""
     config = SimpleNamespace(
@@ -125,6 +160,10 @@ def _service(
         selector_service=cast(ExternalChannelSelectorService, selector),
         config=cast(Config, config),
         event_processor=cast(ExternalChannelEventProcessorService, event_processor),
+        ingestion_replay_service=cast(
+            ExternalChannelIngestionReplayService,
+            replay or _ReplayDouble(),
+        ),
     )
 
 
@@ -210,6 +249,57 @@ async def test_component_next_requeries_signed_offset() -> None:
     assert response.control_delivery_attempt_id is None
     assert response.connection_id is None
     assert event_processor.calls == []
+
+
+@pytest.mark.asyncio
+async def test_typed_component_selection_replays_shared_ingestion() -> None:
+    """A typed Discord selection returns the shared access-control identity."""
+    selector = _SelectorDouble()
+    selector.selection = ExternalChannelSelectorSelection(
+        status="selected",
+        admission=ExternalChannelConversationAdmission.model_construct(
+            id="admission-1",
+            connection_id="connection-1",
+            conversation_position_id="position-1",
+            range_start_position="0001",
+            trigger_position="0002",
+        ),
+        binding=None,
+    )
+    event_processor = _EventProcessorDouble()
+    replay = _ReplayDouble(
+        ExternalChannelIngestionOutcome(
+            kind=ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS,
+            reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
+            batch_id=None,
+            control_delivery_attempt_id="delivery-1",
+            connection_id="connection-1",
+        )
+    )
+    custom_id = build_discord_selector_custom_id(
+        secret=_SECRET,
+        admission_id="admission-1",
+        action="select",
+    )
+
+    response = await _service(
+        selector,
+        event_processor,
+        replay,
+    ).component_response(
+        custom_id=custom_id,
+        selected_route_id="route-1",
+        principal_id="principal-1",
+        guild_id="guild-1",
+        channel_id="channel-1",
+        now=_NOW,
+    )
+
+    assert replay.calls == [("admission-1", "principal-1")]
+    assert event_processor.calls == []
+    assert response.control_delivery_attempt_id == "delivery-1"
+    assert response.connection_id == "connection-1"
+    assert response.response["type"] == 7
 
 
 @pytest.mark.asyncio

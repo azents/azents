@@ -2350,6 +2350,34 @@ class ExternalChannelRepository:
         await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelResource.model_validate(rdb)
 
+    async def mark_resource_history_ready(
+        self,
+        session: AsyncSession,
+        *,
+        resource_id: str,
+        through_provider_position: str,
+        completed_at: datetime.datetime,
+    ) -> ExternalChannelResource | None:
+        """Mark one synchronously read resource bounded through its trigger."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelResource)
+            .where(RDBExternalChannelResource.id == resource_id)
+            .with_for_update()
+        )
+        if rdb is None:
+            return None
+        rdb.hydration_status = ExternalChannelHydrationStatus.BOUNDED
+        rdb.hydration_cursor = through_provider_position
+        rdb.hydration_high_watermark_position = through_provider_position
+        rdb.hydration_error_kind = None
+        rdb.hydration_error_summary = None
+        if rdb.hydration_started_at is None:
+            rdb.hydration_started_at = completed_at
+        rdb.hydration_completed_at = completed_at
+        await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
+        return ExternalChannelResource.model_validate(rdb)
+
     async def update_resource_hydration_cursor(
         self,
         session: AsyncSession,
@@ -2879,6 +2907,33 @@ class ExternalChannelRepository:
             )
         )
         return self._as(ExternalChannelMessage, rdb)
+
+    async def update_message_identity_metadata(
+        self,
+        session: AsyncSession,
+        *,
+        message_id: str,
+        principal_id: str | None,
+        author_type: ExternalChannelPrincipalAuthorType,
+        provider_created_at: datetime.datetime | None,
+        provider_updated_at: datetime.datetime | None,
+    ) -> ExternalChannelMessage | None:
+        """Apply provider-history identity metadata without retaining content."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelMessage)
+            .where(RDBExternalChannelMessage.id == message_id)
+            .with_for_update()
+        )
+        if rdb is None:
+            return None
+        rdb.principal_id = principal_id
+        rdb.author_type = author_type
+        if provider_created_at is not None:
+            rdb.provider_created_at = provider_created_at
+        if provider_updated_at is not None:
+            rdb.provider_updated_at = provider_updated_at
+        await session.flush()
+        return ExternalChannelMessage.model_validate(rdb)
 
     async def create_message_revision_idempotent(
         self,
@@ -3944,6 +3999,7 @@ class ExternalChannelRepository:
                 RDBExternalChannelInvocationBatch.id.label("batch_id"),
                 RDBExternalChannelInvocationBatch.binding_id,
                 RDBExternalChannelInvocationBatch.trigger_message_id,
+                RDBExternalChannelInvocationBatch.context_omitted,
                 RDBExternalChannelInvocationBatch.truncation_message_count,
                 RDBExternalChannelInvocationBatch.truncation_size,
                 RDBExternalChannelInvocationBatchItem.sequence,

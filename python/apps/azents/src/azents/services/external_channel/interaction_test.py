@@ -35,6 +35,14 @@ from azents.services.external_channel.event_processor import (
     ExternalChannelEventProcessorService,
     ExternalChannelSelectedAdmissionContinuation,
 )
+from azents.services.external_channel.ingestion import (
+    ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
+)
+from azents.services.external_channel.ingestion_replay import (
+    ExternalChannelIngestionReplayService,
+)
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
     ExternalChannelInteractionProcessor,
@@ -251,11 +259,34 @@ class _Continuation:
         self.delivery_calls.append(kwargs)
 
 
+class _Replay:
+    def __init__(
+        self,
+        outcome: ExternalChannelIngestionOutcome | None = None,
+    ) -> None:
+        self.outcome = outcome or ExternalChannelIngestionOutcome(
+            kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
+            reason=ExternalChannelIngestionReason.ACCEPTED,
+            batch_id=None,
+            control_delivery_attempt_id=None,
+            connection_id=None,
+        )
+        self.calls: list[dict[str, object]] = []
+
+    async def replay_selected_admission(
+        self,
+        **kwargs: object,
+    ) -> ExternalChannelIngestionOutcome:
+        self.calls.append(kwargs)
+        return self.outcome
+
+
 def _processor(
     repository: _Repository,
     selector: _Selector,
     slack: _Slack,
     continuation: _Continuation | None = None,
+    replay: _Replay | None = None,
 ) -> ExternalChannelInteractionProcessor:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
@@ -270,6 +301,10 @@ def _processor(
         event_processor=cast(
             ExternalChannelEventProcessorService,
             continuation or _Continuation(),
+        ),
+        ingestion_replay_service=cast(
+            ExternalChannelIngestionReplayService,
+            replay or _Replay(),
         ),
         config=cast(
             Config,
@@ -606,6 +641,86 @@ async def test_submission_revalidates_signed_modal_scope_before_selection() -> N
     assert continuation.calls[0]["admission_id"] == "admission-1"
     assert continuation.calls[0]["principal_id"] == "principal-1"
     assert slack.views == []
+
+
+@pytest.mark.asyncio
+async def test_typed_submission_replays_without_legacy_continuation() -> None:
+    """A typed selector boundary uses shared ingestion and its control intent."""
+    repository = _Repository()
+    repository.interactions["interaction-2"] = (
+        ExternalChannelInteraction.model_construct(
+            id="interaction-2",
+            connection_id="connection-1",
+            principal_id="principal-1",
+            resource_correlation_key=None,
+            interaction_type=ExternalChannelInteractionType.VIEW_SUBMISSION,
+            status=ExternalChannelInteractionStatus.PROCESSING,
+        )
+    )
+    selector = _Selector(_catalog())
+    selector.selection = ExternalChannelSelectorSelection(
+        status="selected",
+        admission=repository.admission.model_copy(
+            update={
+                "status": ExternalChannelConversationAdmissionStatus.SELECTED,
+                "selected_route_id": "route-alpha",
+                "conversation_position_id": "position-1",
+                "range_start_position": "0001",
+                "trigger_position": "0002",
+            }
+        ),
+        binding=None,
+    )
+    slack = _Slack(
+        SlackInteractionViewResult(
+            status="opened",
+            error_kind=None,
+            error_summary=None,
+        )
+    )
+    metadata = build_selector_metadata(
+        secret=_SECRET,
+        connection_id="connection-1",
+        resource_id="resource-1",
+        admission_id="admission-1",
+        interaction_id="interaction-1",
+        principal_id="principal-1",
+        offset=0,
+    )
+    continuation = _Continuation()
+    replay = _Replay(
+        ExternalChannelIngestionOutcome(
+            kind=ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS,
+            reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
+            batch_id=None,
+            control_delivery_attempt_id="delivery-1",
+            connection_id="connection-1",
+        )
+    )
+
+    await _processor(
+        repository,
+        selector,
+        slack,
+        continuation,
+        replay,
+    ).process(
+        ExternalChannelInteractionHandoff(
+            interaction_id="interaction-2",
+            selector_metadata=metadata,
+            selected_route_id="route-alpha",
+        )
+    )
+
+    assert len(replay.calls) == 1
+    assert replay.calls[0]["admission_id"] == "admission-1"
+    assert continuation.calls == []
+    assert continuation.delivery_calls == [
+        {
+            "connection_id": "connection-1",
+            "delivery_attempt_id": "delivery-1",
+        }
+    ]
 
 
 @pytest.mark.asyncio
