@@ -260,12 +260,13 @@ async def test_build_tool_catalog_classifies_direct_and_deferred_tools() -> None
         ),
     )
 
-    assert catalog.direct_tool_names == ["echo", "github__switch_installation"]
-    assert catalog.deferred_tool_names == [
-        "azents__echo",
+    assert catalog.direct_tool_names == [
         "channel_action",
         "download_external_file",
+        "echo",
+        "github__switch_installation",
     ]
+    assert catalog.deferred_tool_names == ["azents__echo"]
     assert catalog.entries["azents__echo"].source.slug == "azents"
     assert catalog.entries["azents__echo"].source.toolkit_type == "github"
 

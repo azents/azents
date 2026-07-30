@@ -3,8 +3,6 @@
 import datetime
 
 from azents.core.enums import (
-    ExternalChannelMessageLifecycle,
-    ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceType,
@@ -21,15 +19,8 @@ def _payload(
     *,
     provider: ExternalChannelProvider = ExternalChannelProvider.SLACK,
     body: str | None = "hello",
-    lifecycle: ExternalChannelMessageLifecycle = (
-        ExternalChannelMessageLifecycle.CURRENT
-    ),
-    revision_kind: ExternalChannelMessageRevisionKind = (
-        ExternalChannelMessageRevisionKind.ORIGINAL
-    ),
     batch_id: str = "batch-1",
     external_message_id: str = "message-1",
-    revision_id: str = "revision-1",
     reference_mappings: dict[str, dict[str, str]] | None = None,
     attachment_metadata: dict[str, object] | None = None,
 ) -> ExternalChannelMessagePayload:
@@ -42,8 +33,6 @@ def _payload(
         binding_id="binding-1",
         invocation_batch_id=batch_id,
         external_message_id=external_message_id,
-        revision_id=revision_id,
-        revision_kind=revision_kind,
         projection_root_id=f"external-channel:binding-1:{external_message_id}",
         provider_message_key="slack:tenant-1:C1:1.000001",
         provider_position="00000000000000000001.000001",
@@ -52,7 +41,6 @@ def _payload(
         sender_display_name="Alice",
         author_type=ExternalChannelPrincipalAuthorType.HUMAN,
         authorization="authorized_invocation",
-        lifecycle=lifecycle,
         body=body,
         attachment_metadata=attachment_metadata or {},
         reference_mappings=reference_mappings or {},
@@ -61,11 +49,6 @@ def _payload(
         original_url="https://slack.example/permalink",
         truncated_context_message_count=2,
         truncated_context_size=128,
-        correction_of_revision_id=(
-            None
-            if revision_kind is ExternalChannelMessageRevisionKind.ORIGINAL
-            else "revision-original"
-        ),
     )
 
 
@@ -85,24 +68,12 @@ def test_shared_renderer_preserves_source_and_truncation_metadata() -> None:
     assert "Truncated context: 2 messages, 128 bytes" in rendered
 
 
-def test_shared_renderer_marks_deleted_revision_without_body() -> None:
-    payload = _payload(
-        body=None,
-        lifecycle=ExternalChannelMessageLifecycle.DELETED,
-        revision_kind=ExternalChannelMessageRevisionKind.DELETE,
-    )
+def test_shared_renderer_preserves_attachment_only_message_state() -> None:
+    payload = _payload(body=None)
 
     rendered = render_external_channel_message(payload)
 
-    assert "Revision: delete" in rendered
-    assert "[Message deleted by provider.]" in rendered
-
-
-def test_shared_renderer_preserves_attachment_only_message_state() -> None:
-    rendered = render_external_channel_message(_payload(body=None))
-
     assert "[Message has no text content.]" in rendered
-    assert "[Message deleted by provider.]" not in rendered
 
 
 def test_turn_renderer_aggregates_payloads_without_losing_order() -> None:
@@ -110,7 +81,6 @@ def test_turn_renderer_aggregates_payloads_without_losing_order() -> None:
     second = _payload(
         batch_id="batch-1",
         external_message_id="message-2",
-        revision_id="revision-2",
         body="second",
     )
 
@@ -118,18 +88,6 @@ def test_turn_renderer_aggregates_payloads_without_losing_order() -> None:
 
     assert rendered.startswith("Message Type: EXTERNAL_CHANNEL_TURN")
     assert rendered.index("Body: hello") < rendered.index("Body: second")
-
-
-def test_turn_renderer_labels_corrections() -> None:
-    edited = _payload(
-        lifecycle=ExternalChannelMessageLifecycle.EDITED,
-        revision_kind=ExternalChannelMessageRevisionKind.EDIT,
-    )
-
-    rendered = render_external_channel_turn([edited])
-
-    assert "Revision: edit" in rendered
-    assert "Correction of revision: revision-original" in rendered
 
 
 def test_turn_renderer_resolves_visible_references_but_retains_raw_payload() -> None:
@@ -297,3 +255,53 @@ def test_file_renderer_omits_untrusted_locator_values() -> None:
 
     assert "file" not in value["attachments"]["files"][0]  # type: ignore[index]
     assert "secret-download" not in rendered
+
+
+def test_embed_metadata_is_visible_without_urls_or_provider_payload() -> None:
+    """Embed text and media presence reach models without locators or raw fields."""
+    payload = _payload(
+        provider=ExternalChannelProvider.DISCORD,
+        attachment_metadata={
+            "embeds": [
+                {
+                    "type": "rich",
+                    "title": "Incident summary",
+                    "description": "Database latency is elevated.",
+                    "author_name": "Status Bot",
+                    "footer_text": "Updated now",
+                    "fields": [{"name": "Severity", "value": "High", "inline": True}],
+                    "has_image": True,
+                    "has_thumbnail": True,
+                    "url": "https://untrusted.example/incident",
+                    "image": {"url": "https://cdn.discordapp.com/image.png"},
+                }
+            ]
+        },
+    )
+
+    value = external_channel_message_visible_value(payload)
+    rendered_message = render_external_channel_message(payload)
+    rendered_turn = render_external_channel_turn([payload])
+
+    assert value["attachments"]["embeds"] == [  # type: ignore[index]
+        {
+            "type": "rich",
+            "title": "Incident summary",
+            "description": "Database latency is elevated.",
+            "author_name": "Status Bot",
+            "footer_text": "Updated now",
+            "fields": [{"name": "Severity", "value": "High", "inline": True}],
+            "has_image": True,
+            "has_thumbnail": True,
+        }
+    ]
+    for rendered in (rendered_message, rendered_turn):
+        assert "Embeds:" in rendered
+        assert "Title: Incident summary" in rendered
+        assert "Severity: High (inline)" in rendered
+        assert "Image: present" in rendered
+        assert "Thumbnail: present" in rendered
+        assert "untrusted.example" not in rendered
+        assert "discordapp" not in rendered
+    assert "untrusted.example" not in str(value)
+    assert "discordapp" not in str(value)

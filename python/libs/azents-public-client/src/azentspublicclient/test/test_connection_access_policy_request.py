@@ -35,8 +35,7 @@ class TestConnectionAccessPolicyRequest(unittest.TestCase):
         model = ConnectionAccessPolicyRequest()
         if include_optional:
             return ConnectionAccessPolicyRequest(
-                open_access_enabled = True,
-                allow_bot_messages = True
+                open_access_enabled = True
             )
         else:
             return ConnectionAccessPolicyRequest(

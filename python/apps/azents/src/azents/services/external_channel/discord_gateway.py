@@ -19,11 +19,7 @@ DISCORD_GATEWAY_INTENTS = 1 | 512 | 32768
 type DiscordMessageChannel = (
     discord.TextChannel | discord.Thread | discord.VoiceChannel | discord.StageChannel
 )
-type DiscordGatewayMessageEventType = Literal[
-    "message_create",
-    "message_update",
-    "message_delete",
-]
+type DiscordGatewayMessageEventType = Literal["message_create"]
 
 
 class DiscordGatewayError(RuntimeError):
@@ -48,12 +44,11 @@ class DiscordGatewayConnectionResult:
 
 @dataclasses.dataclass(frozen=True)
 class DiscordGatewayMessageEvent:
-    """One typed discord.py message lifecycle event."""
+    """One typed discord.py message-create event."""
 
     event_type: DiscordGatewayMessageEventType
     channel: DiscordMessageChannel
     message: discord.Message | None = None
-    deleted_message: discord.RawMessageDeleteEvent | None = None
 
 
 type DiscordGatewayEventHandler = Callable[
@@ -114,43 +109,6 @@ class _DiscordLibraryClient(discord.Client):
                 event_type="message_create",
                 channel=channel,
                 message=message,
-            )
-
-        await self._emit(event_factory)
-
-    async def on_raw_message_edit(
-        self,
-        payload: discord.RawMessageUpdateEvent,
-    ) -> None:
-        """Admit one typed message-update callback without reading raw data."""
-        if payload.guild_id != self.target_guild_id:
-            return
-
-        async def event_factory() -> DiscordGatewayMessageEvent:
-            channel = await self._resolve_message_channel_id(payload.channel_id)
-            message = await channel.fetch_message(payload.message_id)
-            return DiscordGatewayMessageEvent(
-                event_type="message_update",
-                channel=channel,
-                message=message,
-            )
-
-        await self._emit(event_factory)
-
-    async def on_raw_message_delete(
-        self,
-        payload: discord.RawMessageDeleteEvent,
-    ) -> None:
-        """Admit one typed message-delete callback."""
-        if payload.guild_id != self.target_guild_id:
-            return
-
-        async def event_factory() -> DiscordGatewayMessageEvent:
-            channel = await self._resolve_message_channel_id(payload.channel_id)
-            return DiscordGatewayMessageEvent(
-                event_type="message_delete",
-                channel=channel,
-                deleted_message=payload,
             )
 
         await self._emit(event_factory)

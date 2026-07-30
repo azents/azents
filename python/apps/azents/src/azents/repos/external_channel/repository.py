@@ -1923,11 +1923,7 @@ class ExternalChannelRepository:
             .offset(offset)
             .limit(limit)
         )
-        if author_type is ExternalChannelPrincipalAuthorType.BOT:
-            statement = statement.where(
-                RDBExternalChannelAgentRoute.allow_bot_messages.is_(True)
-            )
-        elif author_type is not ExternalChannelPrincipalAuthorType.HUMAN:
+        if author_type is not ExternalChannelPrincipalAuthorType.HUMAN:
             return []
         if normalized_search:
             statement = statement.where(RDBAgent.name.ilike(f"%{normalized_search}%"))
@@ -2438,6 +2434,39 @@ class ExternalChannelRepository:
             )
         )
         return self._as(ExternalChannelMessage, rdb)
+
+    async def update_message_identity_metadata(
+        self,
+        session: AsyncSession,
+        *,
+        message_id: str,
+        principal_id: str | None,
+        author_type: ExternalChannelPrincipalAuthorType,
+        lifecycle: ExternalChannelMessageLifecycle,
+        provider_created_at: datetime.datetime | None,
+        provider_updated_at: datetime.datetime | None,
+    ) -> ExternalChannelMessage | None:
+        """Update content-free message identity without admitting a revision."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelMessage)
+            .where(RDBExternalChannelMessage.id == message_id)
+            .with_for_update()
+        )
+        if rdb is None:
+            return None
+        rdb.principal_id = principal_id
+        rdb.author_type = author_type
+        rdb.lifecycle = lifecycle
+        if rdb.current_revision_id is None:
+            rdb.pending_size = 0
+            rdb.original_url = None
+        if provider_created_at is not None:
+            rdb.provider_created_at = provider_created_at
+        if provider_updated_at is not None:
+            rdb.provider_updated_at = provider_updated_at
+        await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
+        return ExternalChannelMessage.model_validate(rdb)
 
     async def create_message_revision_idempotent(
         self,

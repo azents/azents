@@ -356,12 +356,9 @@ def mailbox_item_to_pending_projection(
                 resource_label=external.resource_label,
                 resource_type=external.resource_type.value,
                 external_message_id=external.external_message_id,
-                revision_id=external.revision_id,
-                revision_kind=external.revision_kind.value,
                 sender_display_name=external.sender_display_name,
                 author_type=external.author_type.value,
                 authorization=external.authorization,
-                lifecycle=external.lifecycle.value,
                 body=external.body,
                 original_url=external.original_url,
             )

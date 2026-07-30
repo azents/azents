@@ -50,7 +50,6 @@ const connection: ManagedConnection = {
   provider_tenant_id: "Engineering Workspace",
   provider_bot_user_id: "U0123456789",
   open_access_enabled: true,
-  allow_bot_messages: false,
   credentials_configured: true,
   capabilities: {
     inbound_events: true,
@@ -225,6 +224,17 @@ export const Setup = {
         signingSecret: "",
         appToken: "",
       },
+    },
+  },
+} satisfies Story;
+
+export const DiscordSetup = {
+  args: {
+    discordDialogState: {
+      type: "SETUP",
+      appId: "",
+      targetGuildId: "",
+      botToken: "",
     },
   },
 } satisfies Story;

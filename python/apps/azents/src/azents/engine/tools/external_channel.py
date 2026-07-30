@@ -67,12 +67,6 @@ _STATIC_PROMPT = (
     "continuation, ordinary assistant output is not delivered to the external "
     "channel. Invoke `channel_action` before completing that request."
 )
-_STATIC_PROMPT_WITH_TOOL_SEARCH = (
-    "For a current input explicitly marked as an External Channel turn or "
-    "continuation, ordinary assistant output is not delivered to the external "
-    "channel. Use Tool Search to discover the appropriate Channel tool, and invoke "
-    "`channel_action` before completing that request."
-)
 _CHANNEL_ACTION_DESCRIPTION = (
     "Publish replies and progress to one active External Channel binding. Invoke "
     "this tool only for the current External Channel turn or continuation, or when "
@@ -298,12 +292,9 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
         )
 
     async def get_static_prompt(self, context: TurnContext) -> str:
-        """Return the pre-discovery external publication boundary."""
-        return (
-            _STATIC_PROMPT_WITH_TOOL_SEARCH
-            if context.tool_search_enabled
-            else _STATIC_PROMPT
-        )
+        """Return the direct external publication boundary."""
+        del context
+        return _STATIC_PROMPT
 
     def hooks(self) -> RuntimeHooks:
         """Return compaction enrichment and generic idle continuation hooks."""

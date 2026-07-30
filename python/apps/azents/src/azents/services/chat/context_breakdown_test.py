@@ -6,8 +6,6 @@ from typing import cast
 
 from azents.core.enums import (
     EventKind,
-    ExternalChannelMessageLifecycle,
-    ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceType,
@@ -151,8 +149,6 @@ def test_context_breakdown_counts_external_file_metadata() -> None:
         binding_id="binding-1",
         invocation_batch_id="batch-1",
         external_message_id="message-1",
-        revision_id="revision-1",
-        revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
         projection_root_id="external-channel:binding-1:message-1",
         provider_message_key="slack:tenant-1:C1:1.000001",
         provider_position="00000000000000000001.000001",
@@ -161,7 +157,6 @@ def test_context_breakdown_counts_external_file_metadata() -> None:
         sender_display_name="Alice",
         author_type=ExternalChannelPrincipalAuthorType.HUMAN,
         authorization="authorized_invocation",
-        lifecycle=ExternalChannelMessageLifecycle.CURRENT,
         body="Process the attached report.",
         attachment_metadata={
             "files": [
@@ -182,7 +177,6 @@ def test_context_breakdown_counts_external_file_metadata() -> None:
         original_url=None,
         truncated_context_message_count=0,
         truncated_context_size=0,
-        correction_of_revision_id=None,
     )
     event = Event(
         id="2" * 32,

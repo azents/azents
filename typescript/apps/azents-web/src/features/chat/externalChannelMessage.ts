@@ -9,11 +9,8 @@ export interface ExternalChannelMessagePresentation {
   providerMessageKey: string | null;
   authorType: string;
   authorization: string;
-  lifecycle: string;
-  revisionKind: string;
   providerTimestamp: string;
   originalUrl: string | null;
-  correctionOfRevisionId: string | null;
   body: string;
 }
 
@@ -36,10 +33,7 @@ function validHttpUrl(value?: string): string | null {
   }
 }
 
-function visibleBody(message: ChatMessage, lifecycle: string): string {
-  if (lifecycle === "deleted") {
-    return "[Message deleted by provider.]";
-  }
+function visibleBody(message: ChatMessage): string {
   const content = message.content?.trim();
   return content ? (message.content ?? "") : "[Message has no text content.]";
 }
@@ -145,7 +139,6 @@ export function externalChannelMessagePresentation(
   if (metadata?.source !== "external_channel") {
     return null;
   }
-  const lifecycle = metadata.lifecycle ?? "active";
   const providerTimestamp =
     metadata.provider_updated_at ??
     metadata.provider_created_at ??
@@ -170,11 +163,8 @@ export function externalChannelMessagePresentation(
     providerMessageKey: metadata.provider_message_key ?? null,
     authorType: metadata.author_type ?? "unknown",
     authorization: metadata.authorization ?? "context_only",
-    lifecycle,
-    revisionKind: metadata.revision_kind ?? "original",
     providerTimestamp,
     originalUrl: validHttpUrl(metadata.original_url),
-    correctionOfRevisionId: metadata.correction_of_revision_id ?? null,
-    body: visibleReferences(visibleBody(message, lifecycle), mappings),
+    body: visibleReferences(visibleBody(message), mappings),
   };
 }

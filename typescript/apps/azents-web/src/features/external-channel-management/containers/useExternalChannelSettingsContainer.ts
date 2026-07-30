@@ -54,7 +54,6 @@ export interface ExternalChannelSettingsContainerOutput {
   onUpdateAccessPolicy: (
     connection: ManagedConnection,
     openAccessEnabled: boolean,
-    allowBotMessages: boolean,
   ) => void;
   onRevokeGrant: (grant: ManagedGrant) => void;
   onRemoveBlock: (block: ManagedBlock) => void;
@@ -434,7 +433,7 @@ export function useExternalChannelSettingsContainer({
         connectionId: connection.id,
       });
     },
-    onUpdateAccessPolicy: (connection, openAccessEnabled, allowBotMessages) => {
+    onUpdateAccessPolicy: (connection, openAccessEnabled) => {
       if (!beginAction(connection.id)) {
         return;
       }
@@ -442,7 +441,6 @@ export function useExternalChannelSettingsContainer({
         ...queryInput,
         connectionId: connection.id,
         openAccessEnabled,
-        allowBotMessages,
       });
     },
     onRevokeGrant: (grant) => {

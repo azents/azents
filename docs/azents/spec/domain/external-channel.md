@@ -202,12 +202,19 @@ contain multiple independent bindings.
   that captured an older desired revision is updated once to the latest state after
   creation. Finished work never recreates a Tracker, and a missing delete target is
   already absent.
-- Message revisions never rewrite an already projected revision. Later edits or deletes remain distinct corrections.
+- Inbound message-create snapshots are immutable. Provider edit and delete callbacks
+  are excluded; they do not create lifecycle corrections or rewrite already accepted
+  Session input.
 - Trigger eligibility is evaluated independently from provider-visible context.
-  Humans may invoke according to route access policy; external bots require
-  `allow_bot_messages`; app and system authors never trigger execution. The connected
-  Azents bot is excluded from provider-history projection to prevent loops, while other
-  visible history may remain contextual input for an eligible trigger.
+  Only humans may invoke according to route access policy. Bot, app, and system
+  callbacks never trigger execution or consume a conversation read position. The
+  connected Azents bot is excluded from provider-history projection to prevent loops,
+  while other visible humans, bots, and system authors remain contextual input for a
+  later eligible human trigger.
+- Discord inbound and REST-history projection retains bounded embed title,
+  description, author/footer text, fields, and image/thumbnail presence alongside
+  visible message and file metadata. Raw provider payloads and embed, CDN, proxy, and
+  profile URLs are not persisted or shown to the model.
 - A Session- or Agent-scoped grant authorizes invocation only for the same Agent, principal, route relationship, and active resource. Blocks take precedence.
 - Creating a new binding Session snapshots the routed Agent's current automatic
   Project policy into the root `SessionAgentContext` in the same transaction as
@@ -223,11 +230,11 @@ Agent administrators manage Single Apps from Agent settings. They can retrieve a
 complete copy-ready Slack App Manifest, follow equivalent manual Slack UI
 instructions, create the App and its sole route, validate it, replace its App ID,
 transport, and complete credential set, disconnect it terminally, and manage grants
-and blocks. The active dedicated route management operation also controls
-`open_access_enabled` and `allow_bot_messages`: humans are open by default, external
-bots are disabled by default, and neither setting overrides a block or admits the
-connected Azents bot. Removing the Single association disconnects the App. Secret
-fields remain blank and required when an existing connection is edited.
+and blocks. The active dedicated route management operation controls
+`open_access_enabled`: humans are open by default, and no bot, app, or system author
+can invoke. This setting never overrides a block or admits the connected Azents bot.
+Removing the Single association disconnects the App. Secret fields remain blank and
+required when an existing connection is edited.
 
 Workspace Owners and Managers manage provider-scoped Multi Apps from Workspace
 integrations. Ordinary Members have neither Multi read nor write authority. Slack and
@@ -288,8 +295,11 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
-- **2026-07-30** (spec_version 27) — Slack history identity enrichment now resolves
-  retained message senders even when their IDs do not appear in the message body.
+- **2026-07-30** (spec_version 27) — Removed bot-trigger policy and inbound
+  edit/delete correction behavior, made pending admission metadata-only and
+  human-triggered, retained other visible author classes as history context, and
+  documented safe Discord embed projection. Slack history identity enrichment resolves
+  retained message senders even when their IDs do not appear in message bodies.
 - **2026-07-30** (spec_version 26) — Replaced durable provider events,
   hydration/pending-context activation, and truncation projections with typed
   synchronous ingestion, parent/thread conversation positions, immutable invocation

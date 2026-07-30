@@ -40,12 +40,9 @@ class TestPendingMailboxExternalChannelPresentation(unittest.TestCase):
                 resource_label = '',
                 resource_type = '',
                 external_message_id = '',
-                revision_id = '',
-                revision_kind = '',
                 sender_display_name = '',
                 author_type = '',
                 authorization = 'context_only',
-                lifecycle = '',
                 body = '',
                 original_url = ''
             )
@@ -56,12 +53,9 @@ class TestPendingMailboxExternalChannelPresentation(unittest.TestCase):
                 resource_label = '',
                 resource_type = '',
                 external_message_id = '',
-                revision_id = '',
-                revision_kind = '',
                 sender_display_name = '',
                 author_type = '',
                 authorization = 'context_only',
-                lifecycle = '',
                 body = '',
                 original_url = '',
         )

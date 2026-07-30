@@ -33,7 +33,7 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
 last_verified_at: 2026-07-30
-spec_version: 11
+spec_version: 12
 ---
 
 # External Channel Authorization
@@ -44,27 +44,23 @@ An External Channel participant is an `ExternalChannelPrincipal`, not an Azents 
 or WorkspaceUser. Provider identity is scoped by provider tenant and user ID. Human,
 bot, app, and system authors are retained separately.
 
-Every dedicated route has two independent author-admission settings:
+Every dedicated route has one automatic author-admission setting:
 
 - `open_access_enabled` defaults to `true`. A human author may invoke the routed
   Agent without a per-principal grant unless an active block applies.
-- `allow_bot_messages` defaults to `false`. An external bot author may invoke only
-  when this setting is enabled; it is then eligible without a per-principal grant
-  unless an active block applies.
 
-The connected Azents provider bot is excluded from provider-history projection
-regardless of either setting, preventing output loops. App and system authors are not
-route-eligible triggers. Trigger eligibility is separate from contextual visibility:
-other provider-visible humans, bots, and supported system messages may remain in a
-later eligible invocation's bounded history. Blocks take precedence over both grants
-and automatic route access. A grant continues to authorize an eligible principal when
-the corresponding automatic route access is disabled.
+Only human authors are eligible triggers. Bot, app, and system callbacks never create
+selector or approval state and do not consume the conversation read position. The
+connected Azents provider bot is excluded from provider-history projection, preventing
+output loops. Trigger eligibility is separate from contextual visibility: other
+provider-visible humans, bots, and supported system messages remain in a later eligible
+human invocation's bounded history. Blocks take precedence over grants and automatic
+route access. A grant continues to authorize an eligible human when automatic route
+access is disabled.
 
-An unresolved Multi App bot invocation creates a selector admission only when at least
-one current visible route enables bot messages. Its selector catalog excludes
-bot-disabled routes before pagination, and route selection revalidates the initiating
-principal's author type and the selected route's bot policy. Human selector behavior
-remains governed by the normal route and access policy.
+Only a human Multi App invocation can create a selector admission. Its catalog and
+route selection revalidate the initiating human principal before a route-specific
+access decision.
 
 The authenticated Azents administrator who grants or revokes access is a requester for that public
 management operation only. Neither the administrator nor the ExternalChannelPrincipal becomes an
@@ -88,12 +84,14 @@ When a restricted participant invokes the Agent:
    validates the chosen route. Slack presents its selector through Block Kit; Discord
    uses a verified command or component interaction.
 2. Synchronous ingestion creates one idempotent access request for the selected route
-   and provider-history source message.
+   and metadata-only provider-history source identity.
 3. The request snapshots the connection, conversation position, exclusive range start,
    and inclusive trigger position, expires after seven days, and contains an opaque ID.
 4. One provider control-message intent is persisted and attempted once with the
    participant display label, complete provider user ID, and an authenticated Azents
-   approval URL rendered through the provider's safe control shape.
+   approval URL rendered through the provider's safe control shape. Pending selector
+   and approval rows contain no provider body, revision, attachment metadata,
+   reference mappings, or original-message URL.
 5. The approval page requires an authenticated user who is an administrator of the routed Agent. Unauthorized, cross-Agent, missing, and expired requests do not disclose the request and appear not found or unavailable.
 
 Selector completion does not grant access. It preserves the original sender and
@@ -150,8 +148,8 @@ provider source attribution, trigger identity, authorization state, and one opti
 leading omission reminder.
 
 Later authorized original messages on an active binding create another immutable batch
-and wake the same Session. Edit and delete callbacks do not independently invoke the
-Agent and never rewrite prior accepted Session input.
+and wake the same Session. Edit and delete callbacks are excluded; they do not
+independently invoke the Agent or create a lifecycle/revision correction.
 
 ## Revocation
 
@@ -162,6 +160,10 @@ Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-07-30** (spec_version 12) — Removed bot-trigger admission and its route
+  policy, made selector and approval state metadata-only, and excluded inbound
+  edit/delete lifecycle corrections while retaining provider-visible nonhuman history
+  as context for later human triggers.
 - **2026-07-30** (spec_version 11) — Replaced pending-context and
   waiting-hydration release with immutable access-request replay boundaries and shared
   synchronous provider-history ingestion that converges before or after position

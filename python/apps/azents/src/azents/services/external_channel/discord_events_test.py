@@ -14,11 +14,9 @@ from azents.services.external_channel.discord_events import (
     DiscordMessageContentUnavailable,
     normalize_projected_discord_event,
     project_discord_gateway_event,
+    project_discord_message,
 )
-from azents.services.external_channel.discord_gateway import (
-    DiscordGatewayMessageEvent,
-    DiscordGatewayMessageEventType,
-)
+from azents.services.external_channel.discord_gateway import DiscordGatewayMessageEvent
 
 
 def _guild(*, guild_id: int = 300) -> MagicMock:
@@ -37,21 +35,10 @@ def _channel(*, guild_id: int = 300) -> MagicMock:
 
 def _event(
     *,
-    event_type: DiscordGatewayMessageEventType = "message_create",
     guild_id: int = 300,
 ) -> DiscordGatewayMessageEvent:
     """Build one representative typed discord.py event."""
     channel = _channel(guild_id=guild_id)
-    if event_type == "message_delete":
-        deleted = MagicMock(spec=discord.RawMessageDeleteEvent)
-        deleted.message_id = 100
-        deleted.channel_id = 200
-        deleted.guild_id = guild_id
-        return DiscordGatewayMessageEvent(
-            event_type=event_type,
-            channel=channel,
-            deleted_message=deleted,
-        )
     author = MagicMock(spec=discord.User)
     author.id = 400
     author.name = "Example"
@@ -69,16 +56,12 @@ def _event(
     message.channel = channel
     message.content = "Please help with this."
     message.created_at = datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC)
-    message.edited_at = (
-        datetime.datetime(2026, 7, 26, 0, 1, tzinfo=datetime.UTC)
-        if event_type == "message_update"
-        else None
-    )
+    message.edited_at = None
     message.author = author
     message.mentions = []
     message.attachments = [attachment]
     return DiscordGatewayMessageEvent(
-        event_type=event_type,
+        event_type="message_create",
         channel=channel,
         message=message,
     )
@@ -139,27 +122,18 @@ def test_projects_message_event_without_attachment_urls_or_raw_payload() -> None
     assert '"avatar"' not in serialized
 
 
-@pytest.mark.parametrize(
-    "event_type",
-    ("message_create", "message_update", "message_delete"),
-)
-def test_projects_all_supported_message_lifecycle_events(event_type: str) -> None:
-    """Every supported typed lifecycle callback has its own event type."""
-    typed_event_type = cast(DiscordGatewayMessageEventType, event_type)
+def test_projects_only_message_create_events() -> None:
+    """The Gateway projects only message-create callbacks into ingestion."""
     event = project_discord_gateway_event(
         connection_id="connection-1",
         provider_app_id="app-1",
         target_guild_id="300",
-        event=_event(event_type=typed_event_type),
+        event=_event(),
         received_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
     )
 
     assert event is not None
-    assert event.event_type == f"discord_{event_type}"
-    if event_type == "message_update":
-        assert event.provider_event_id.startswith(
-            "discord:discord_message_update:300:200:100:"
-        )
+    assert event.event_type == "discord_message_create"
 
 
 def test_ignores_cross_guild_typed_events() -> None:
@@ -248,6 +222,72 @@ def test_normalizes_create_with_principal_and_attachment_metadata() -> None:
     assert normalized.normalized_size > len(normalized.normalized_body.encode())
 
 
+def test_projects_safe_bounded_embeds_without_urls() -> None:
+    """Gateway and REST inputs share visible embed text but never persist locators."""
+    projection = project_discord_message(
+        guild_id="guild-1",
+        message={
+            "id": "100",
+            "channel_id": "200",
+            "content": "",
+            "embeds": [
+                {
+                    "type": "rich",
+                    "title": "Incident summary",
+                    "description": "Database latency is elevated.",
+                    "url": "https://untrusted.example/incident",
+                    "author": {
+                        "name": "Status Bot",
+                        "url": "https://untrusted.example/author",
+                        "icon_url": "https://cdn.discordapp.com/avatar.png",
+                    },
+                    "footer": {
+                        "text": "Updated now",
+                        "icon_url": "https://cdn.discordapp.com/footer.png",
+                    },
+                    "fields": [
+                        {
+                            "name": "Severity",
+                            "value": "High",
+                            "inline": True,
+                        }
+                    ],
+                    "image": {"url": "https://cdn.discordapp.com/image.png"},
+                    "thumbnail": {
+                        "proxy_url": "https://media.discordapp.net/thumb.png"
+                    },
+                }
+            ],
+        },
+    )
+
+    normalized = normalize_projected_discord_event(
+        event_type="discord_message_create",
+        tenant_id="guild-1",
+        connected_bot_user_id=None,
+        envelope={"message": projection},
+    )
+
+    assert normalized.attachment_metadata == {
+        "embeds": [
+            {
+                "type": "rich",
+                "title": "Incident summary",
+                "description": "Database latency is elevated.",
+                "author_name": "Status Bot",
+                "footer_text": "Updated now",
+                "fields": [{"name": "Severity", "value": "High", "inline": True}],
+                "has_image": True,
+                "has_thumbnail": True,
+            }
+        ]
+    }
+    serialized = json.dumps(projection)
+    assert "untrusted.example" not in serialized
+    assert "discordapp" not in serialized
+    assert "media.discord" not in serialized
+
+
 def test_identity_mapping_render_budget_is_included_in_pending_size() -> None:
     """Discord display names consume the same bounded pending-context budget."""
     without_mappings = normalize_projected_discord_event(
@@ -283,22 +323,10 @@ def test_identity_mapping_render_budget_is_included_in_pending_size() -> None:
     assert with_mappings.normalized_size > without_mappings.normalized_size
 
 
-@pytest.mark.parametrize(
-    ("event_type", "expected_revision", "expected_lifecycle"),
-    (
-        ("discord_message_create", "original", "current"),
-        ("discord_message_update", "edit", "edited"),
-        ("discord_message_delete", "delete", "deleted"),
-    ),
-)
-def test_normalizes_message_lifecycle_events(
-    event_type: str,
-    expected_revision: str,
-    expected_lifecycle: str,
-) -> None:
-    """Create, update, and delete have deterministic revision semantics."""
+def test_normalizes_only_message_create_events() -> None:
+    """Create events retain one immutable original snapshot."""
     normalized = normalize_projected_discord_event(
-        event_type=event_type,
+        event_type="discord_message_create",
         tenant_id="guild-1",
         connected_bot_user_id="900",
         envelope={
@@ -314,11 +342,25 @@ def test_normalizes_message_lifecycle_events(
         },
     )
 
-    assert normalized.revision_kind.value == expected_revision
-    assert normalized.lifecycle.value == expected_lifecycle
-    assert normalized.normalized_body == (
-        None if expected_revision == "delete" else "current content"
-    )
+    assert normalized.revision_kind.value == "original"
+    assert normalized.lifecycle.value == "current"
+    assert normalized.normalized_body == "current content"
+
+    with pytest.raises(DiscordEventExcluded):
+        normalize_projected_discord_event(
+            event_type="discord_message_update",
+            tenant_id="guild-1",
+            connected_bot_user_id="900",
+            envelope={
+                "message": {
+                    "id": "100",
+                    "channel_id": "200",
+                    "guild_id": "guild-1",
+                    "content": "current content",
+                    "author": {"id": "300"},
+                }
+            },
+        )
 
 
 def test_rejects_wrong_guild_and_non_snowflake_message_identity() -> None:

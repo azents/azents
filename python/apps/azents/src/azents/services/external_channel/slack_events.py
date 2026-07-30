@@ -2,7 +2,6 @@
 
 import asyncio
 import datetime
-import hashlib
 import json
 import logging
 import re
@@ -334,33 +333,16 @@ def _normalize_slack_event(
         raise SlackEventExcluded("Slack direct and group messages are not supported.")
 
     subtype = _optional_string(event, "subtype")
+    if event_type == "message" and subtype in {"message_changed", "message_deleted"}:
+        raise SlackEventExcluded(
+            "Slack message updates and deletions are outside the configured scope."
+        )
     if event_type == "app_mention":
         message = event
         revision_kind = ExternalChannelMessageRevisionKind.ORIGINAL
         lifecycle = ExternalChannelMessageLifecycle.CURRENT
         message_ts = _required_string(message, "ts")
         provider_updated_at = None
-    elif subtype == "message_changed":
-        raw_message = event.get("message")
-        if not isinstance(raw_message, dict):
-            raise SlackEventNormalizationError("Slack edited message is missing.")
-        message = raw_message
-        message_ts = _required_string(message, "ts")
-        revision_kind = ExternalChannelMessageRevisionKind.EDIT
-        lifecycle = ExternalChannelMessageLifecycle.EDITED
-        provider_updated_at = _slack_timestamp(
-            _edited_timestamp(message) or _optional_string(event, "event_ts")
-        )
-    elif subtype == "message_deleted":
-        raw_previous = event.get("previous_message")
-        previous = raw_previous if isinstance(raw_previous, dict) else {}
-        message_ts = _required_string(event, "deleted_ts")
-        message = previous
-        revision_kind = ExternalChannelMessageRevisionKind.DELETE
-        lifecycle = ExternalChannelMessageLifecycle.DELETED
-        provider_updated_at = _slack_timestamp(
-            _optional_string(event, "event_ts") or message_ts
-        )
     else:
         raw_message = event.get("message")
         message = (
@@ -375,13 +357,9 @@ def _normalize_slack_event(
 
     root_thread_ts = _optional_string(message, "thread_ts") or message_ts
     author_type, provider_user_id = _author(message)
-    normalized_body = (
-        None
-        if revision_kind is ExternalChannelMessageRevisionKind.DELETE
-        else _normalized_message_body(
-            message,
-            trusted_block_projection=trusted_block_projection,
-        )
+    normalized_body = _normalized_message_body(
+        message,
+        trusted_block_projection=trusted_block_projection,
     )
     attachment_metadata = _attachment_metadata(
         blocks=message.get("blocks"),
@@ -391,13 +369,7 @@ def _normalize_slack_event(
     normalized_size = _normalized_size(normalized_body, attachment_metadata)
     provider_created_at = _slack_timestamp(message_ts)
     provider_position = slack_provider_position(message_ts)
-    revision_key = _revision_key(
-        revision_kind=revision_kind,
-        message_ts=message_ts,
-        event=event,
-        message=message,
-        normalized_body=normalized_body,
-    )
+    revision_key = _revision_key(message_ts=message_ts)
     invocation = event_type == "app_mention"
     return SlackNormalizedMessage(
         tenant_id=tenant_id,
@@ -2338,27 +2310,6 @@ def _slack_timestamp(value: str | None) -> datetime.datetime | None:
         return None
 
 
-def _edited_timestamp(message: dict[str, object]) -> str | None:
-    edited = message.get("edited")
-    if not isinstance(edited, dict):
-        return None
-    return _optional_string(edited, "ts")
-
-
-def _revision_key(
-    *,
-    revision_kind: ExternalChannelMessageRevisionKind,
-    message_ts: str,
-    event: dict[str, object],
-    message: dict[str, object],
-    normalized_body: str | None,
-) -> str:
-    if revision_kind is ExternalChannelMessageRevisionKind.ORIGINAL:
-        return f"original:{message_ts}"
-    if revision_kind is ExternalChannelMessageRevisionKind.DELETE:
-        return f"delete:{message_ts}"
-    lifecycle_ts = (
-        _edited_timestamp(message) or _optional_string(event, "event_ts") or message_ts
-    )
-    body_digest = hashlib.sha256((normalized_body or "").encode()).hexdigest()[:16]
-    return f"edit:{lifecycle_ts}:{body_digest}"
+def _revision_key(*, message_ts: str) -> str:
+    """Return one immutable original snapshot identity."""
+    return f"original:{message_ts}"

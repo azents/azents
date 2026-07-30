@@ -155,6 +155,7 @@ class ExternalChannelProviderHistoryReader:
                 client=self.slack_client,
                 bot_token=credentials.bot_token,
                 messages=history.messages,
+                trigger=history.trigger,
                 deadline=deadline,
             )
             messages = tuple(
@@ -247,22 +248,35 @@ async def _optional_slack_reference_cache(
     client: SlackConversationClient,
     bot_token: str,
     messages: tuple[SlackNormalizedMessage, ...],
+    trigger: SlackNormalizedMessage,
     deadline: ExternalChannelOperationDeadline,
 ) -> dict[str, dict[str, str]]:
-    """Resolve bounded Slack senders and references without blocking admission."""
-    user_ids: set[str] = set()
+    """Resolve bounded provider-history identities without blocking admission."""
+    author_ids: list[str] = []
+    seen_author_ids: set[str] = set()
+    for message in (trigger, *messages):
+        if (
+            message.provider_user_id is not None
+            and message.provider_user_id not in seen_author_ids
+        ):
+            author_ids.append(message.provider_user_id)
+            seen_author_ids.add(message.provider_user_id)
+
+    reference_user_ids: set[str] = set()
     channel_ids: set[str] = set()
     for message in messages:
-        if message.provider_user_id is not None:
-            user_ids.add(message.provider_user_id)
         message_user_ids, message_channel_ids = slack_message_reference_ids(
             message.normalized_body
         )
-        user_ids.update(message_user_ids)
+        reference_user_ids.update(message_user_ids)
         channel_ids.update(message_channel_ids)
 
+    user_ids = [
+        *author_ids,
+        *sorted(reference_user_ids.difference(seen_author_ids)),
+    ][:_MAX_SLACK_REFERENCE_IDS]
     cache: dict[str, dict[str, str]] = {"users": {}, "channels": {}}
-    for user_id in sorted(user_ids)[:_MAX_SLACK_REFERENCE_IDS]:
+    for user_id in user_ids:
         display_name = await _optional_slack_display_name(
             client.fetch_user_display_name(
                 bot_token=bot_token,

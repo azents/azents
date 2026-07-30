@@ -18,8 +18,6 @@ from azents.core.enums import (
     AgentRunStatus,
     AgentSessionStatus,
     EventKind,
-    ExternalChannelMessageLifecycle,
-    ExternalChannelMessageRevisionKind,
     MailboxItemKind,
     MailboxSchedulingMode,
 )
@@ -1312,8 +1310,6 @@ def build_external_channel_mailbox_payload(
             binding_id=item.binding_id,
             invocation_batch_id=item.batch_id,
             external_message_id=item.message_id,
-            revision_id=item.revision_id,
-            revision_kind=item.revision_kind,
             projection_root_id=f"external-channel:{item.binding_id}:{item.message_id}",
             provider_message_key=item.provider_message_key,
             provider_position=item.provider_position,
@@ -1326,7 +1322,6 @@ def build_external_channel_mailbox_payload(
                 if item.message_id == item.trigger_message_id
                 else "context_only"
             ),
-            lifecycle=_external_message_lifecycle(item.revision_kind),
             body=item.revision_body,
             attachment_metadata=add_external_channel_file_locators(
                 item.attachment_metadata or {},
@@ -1338,7 +1333,6 @@ def build_external_channel_mailbox_payload(
             original_url=item.original_url,
             truncated_context_message_count=0,
             truncated_context_size=0,
-            correction_of_revision_id=item.correction_of_revision_id,
         )
         embedded.append(
             MailboxPresentationItem(
@@ -1394,10 +1388,7 @@ class ExternalChannelInvocationMailboxProcessor:
             if not isinstance(raw_payload, dict):
                 raise ValueError("External invocation payload item is malformed.")
             payload = ExternalChannelMessagePayload.model_validate(raw_payload)
-            external_id = (
-                f"external-channel:{payload.binding_id}:"
-                f"{payload.external_message_id}:{payload.revision_id}"
-            )
+            external_id = payload.projection_root_id
             promoted.append(
                 _PromotedMailboxItem(
                     buffer=buffer,
@@ -1560,21 +1551,6 @@ def _external_reference_mappings(
         if entries:
             mappings[category] = entries
     return mappings
-
-
-def _external_message_lifecycle(
-    revision_kind: ExternalChannelMessageRevisionKind,
-) -> ExternalChannelMessageLifecycle:
-    """Return the immutable lifecycle represented by one revision."""
-    match revision_kind:
-        case ExternalChannelMessageRevisionKind.ORIGINAL:
-            return ExternalChannelMessageLifecycle.CURRENT
-        case ExternalChannelMessageRevisionKind.EDIT:
-            return ExternalChannelMessageLifecycle.EDITED
-        case ExternalChannelMessageRevisionKind.DELETE:
-            return ExternalChannelMessageLifecycle.DELETED
-        case _:
-            assert_never(revision_kind)
 
 
 def _buffer_requires_inference(buffer: MailboxItem) -> bool:

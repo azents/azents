@@ -510,8 +510,9 @@ async def test_static_prompt_compaction_and_idle_keep_minimal_channel_context() 
     assert "current input explicitly marked" in direct_prompt
     assert "ordinary user input" not in direct_prompt
     assert "Tool Search" not in direct_prompt
-    assert "Use Tool Search" in search_prompt
+    assert "Tool Search" not in search_prompt
     assert "`channel_action` before completing" in search_prompt
+    assert search_prompt == direct_prompt
     assert await toolkit.get_dynamic_prompt(_turn_context()) == ""
 
     compacted = await toolkit._on_compaction_summary(  # pyright: ignore[reportPrivateUsage]
@@ -552,7 +553,7 @@ async def test_static_prompt_compaction_and_idle_keep_minimal_channel_context() 
 
 @pytest.mark.asyncio
 async def test_channel_tool_descriptions_own_post_discovery_guidance() -> None:
-    """Deferred Channel tools remain searchable without a dynamic prompt."""
+    """Direct Channel tools retain their invocation and lifecycle guidance."""
     toolkit = _toolkit(
         _ActionService([_snapshot()]),
         file_storage=cast(FileStorage, object()),

@@ -16,9 +16,6 @@ const pendingRequest: ManagedApprovalRequest = {
   principal_label: "Alice Chen",
   principal_provider_user_id: "U01ALICECHEN",
   resource_label: "#incident-response / deployment thread",
-  source_text:
-    "Please let the Agent inspect the production rollout and summarize any blockers.",
-  original_url: "https://example.slack.com/archives/C1/p1",
   expires_at: "2026-07-23T01:15:00.000Z",
   decided_at: null,
   decision_summary: null,
@@ -117,17 +114,6 @@ export const DisconnectedConflict = {
       request: pendingRequest,
       submittingDecision: null,
       actionError: "CONFLICT",
-    },
-  },
-} satisfies Story;
-
-export const OriginalLinkUnavailable = {
-  args: {
-    state: {
-      type: "READY",
-      request: { ...pendingRequest, original_url: null },
-      submittingDecision: null,
-      actionError: null,
     },
   },
 } satisfies Story;

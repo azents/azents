@@ -12,8 +12,6 @@ import azents.engine.events.filters as filters
 from azents.core.enums import (
     EventKind,
     ExchangeFileStatus,
-    ExternalChannelMessageLifecycle,
-    ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceType,
@@ -1853,8 +1851,6 @@ def _external_payload() -> ExternalChannelMessagePayload:
         binding_id="binding-1",
         invocation_batch_id="batch-1",
         external_message_id="message-1",
-        revision_id="revision-1",
-        revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
         projection_root_id="external-channel:binding-1:message-1",
         provider_message_key="slack:tenant-1:C1:1.000001",
         provider_position="00000000000000000001.000001",
@@ -1863,7 +1859,6 @@ def _external_payload() -> ExternalChannelMessagePayload:
         sender_display_name="Alice",
         author_type=ExternalChannelPrincipalAuthorType.HUMAN,
         authorization="context_only",
-        lifecycle=ExternalChannelMessageLifecycle.CURRENT,
         body="context body",
         attachment_metadata={
             "files": [
@@ -1884,7 +1879,6 @@ def _external_payload() -> ExternalChannelMessagePayload:
         original_url=None,
         truncated_context_message_count=3,
         truncated_context_size=256,
-        correction_of_revision_id=None,
     )
 
 

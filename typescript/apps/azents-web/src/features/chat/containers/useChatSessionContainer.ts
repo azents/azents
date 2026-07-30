@@ -833,20 +833,16 @@ function externalChannelEventMetadata(
     binding_id: stringField(payload, "binding_id") ?? "",
     invocation_batch_id: stringField(payload, "invocation_batch_id") ?? "",
     external_message_id: stringField(payload, "external_message_id") ?? "",
-    revision_id: stringField(payload, "revision_id") ?? "",
-    revision_kind: stringField(payload, "revision_kind") ?? "original",
     projection_root_id: stringField(payload, "projection_root_id") ?? "",
     provider_position: stringField(payload, "provider_position") ?? "",
     author_type: stringField(payload, "author_type") ?? "unknown",
     authorization: stringField(payload, "authorization") ?? "context_only",
-    lifecycle: stringField(payload, "lifecycle") ?? "active",
     provider_created_at:
       stringField(payload, "provider_created_at") ?? event.created_at,
     ...optionalEventMetadata(payload, "provider_updated_at"),
     ...optionalEventMetadata(payload, "provider_user_id"),
     ...optionalEventMetadata(payload, "sender_display_name"),
     ...optionalEventMetadata(payload, "original_url"),
-    ...optionalEventMetadata(payload, "correction_of_revision_id"),
     ...(referenceMappings === null
       ? {}
       : { reference_mappings: referenceMappings }),

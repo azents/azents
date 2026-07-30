@@ -16800,11 +16800,6 @@
             "type": "boolean",
             "title": "Open Access Enabled",
             "default": true
-          },
-          "allow_bot_messages": {
-            "type": "boolean",
-            "title": "Allow Bot Messages",
-            "default": false
           }
         },
         "type": "object",
@@ -19591,28 +19586,6 @@
             "type": "string",
             "title": "Resource Label"
           },
-          "source_text": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Text"
-          },
-          "original_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Original Url"
-          },
           "expires_at": {
             "type": "string",
             "format": "date-time",
@@ -19654,8 +19627,6 @@
           "principal_label",
           "principal_provider_user_id",
           "resource_label",
-          "source_text",
-          "original_url",
           "expires_at",
           "decided_at",
           "decision_summary"
@@ -20019,10 +19990,6 @@
             "type": "boolean",
             "title": "Open Access Enabled"
           },
-          "allow_bot_messages": {
-            "type": "boolean",
-            "title": "Allow Bot Messages"
-          },
           "credentials_configured": {
             "type": "boolean",
             "title": "Credentials Configured"
@@ -20134,7 +20101,6 @@
           "provider_tenant_id",
           "provider_bot_user_id",
           "open_access_enabled",
-          "allow_bot_messages",
           "credentials_configured",
           "capabilities",
           "provider_config",
@@ -22203,14 +22169,6 @@
             "type": "string",
             "title": "External Message Id"
           },
-          "revision_id": {
-            "type": "string",
-            "title": "Revision Id"
-          },
-          "revision_kind": {
-            "type": "string",
-            "title": "Revision Kind"
-          },
           "sender_display_name": {
             "anyOf": [
               {
@@ -22233,10 +22191,6 @@
               "authorized_invocation"
             ],
             "title": "Authorization"
-          },
-          "lifecycle": {
-            "type": "string",
-            "title": "Lifecycle"
           },
           "body": {
             "anyOf": [
@@ -22268,12 +22222,9 @@
           "resource_label",
           "resource_type",
           "external_message_id",
-          "revision_id",
-          "revision_kind",
           "sender_display_name",
           "author_type",
           "authorization",
-          "lifecycle",
           "body",
           "original_url"
         ],

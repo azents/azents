@@ -24,8 +24,6 @@ from pydantic import ValidationError
 from azents.core.enums import (
     AgentRunStatus,
     EventKind,
-    ExternalChannelMessageLifecycle,
-    ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceType,
@@ -197,12 +195,6 @@ def _external_payload(
         binding_id="binding-1",
         invocation_batch_id=batch_id,
         external_message_id=message_id,
-        revision_id=revision_id,
-        revision_kind=(
-            ExternalChannelMessageRevisionKind.DELETE
-            if body is None
-            else ExternalChannelMessageRevisionKind.ORIGINAL
-        ),
         projection_root_id=f"external-channel:binding-1:{message_id}",
         provider_message_key=f"slack:tenant-1:C1:{message_id}",
         provider_position=f"000000000000000000{message_id}.000001",
@@ -211,11 +203,6 @@ def _external_payload(
         sender_display_name="Alice",
         author_type=ExternalChannelPrincipalAuthorType.HUMAN,
         authorization="authorized_invocation",
-        lifecycle=(
-            ExternalChannelMessageLifecycle.DELETED
-            if body is None
-            else ExternalChannelMessageLifecycle.CURRENT
-        ),
         body=body,
         attachment_metadata=attachment_metadata or {},
         provider_created_at=datetime.datetime(2026, 7, 22, 12, 0, tzinfo=datetime.UTC),
@@ -223,7 +210,6 @@ def _external_payload(
         original_url=None,
         truncated_context_message_count=0,
         truncated_context_size=0,
-        correction_of_revision_id=None,
     )
 
 

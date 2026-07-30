@@ -968,13 +968,8 @@
         "discordAppId": "Discord Application ID",
         "discordGuildId": "Discord Guild ID",
         "discordBotToken": "Discord Bot Token",
-        "discordGuide": "お客様所有の Discord App を使用します。Azents はこの Bot Token を検証した後に interaction callback を設定し、保存後に token を再表示しません。",
+        "discordGuide": "Discord Developer Portal で以下の手順を完了してから、下の 3 つの値を入力してください。Azents が Bot Token を検証し、interaction callback と command を自動で設定します。",
         "discordGuideTitle": "Discord App を作成して設定",
-        "discordGuideStep1": "Discord Developer Portal で Application を作成し、Bot ページで Bot Token を作成またはリセットします。",
-        "discordGuideStep2": "General Information から Application ID をコピーし、Discord Developer Mode を有効にした対象サーバーの Guild ID をコピーします。",
-        "discordGuideStep3": "ワークフローに必要な privileged Gateway intent を有効にして、Bot 設定を保存します。",
-        "discordGuideStep4": "OAuth2 URL Generator で Bot を対象 Guild に追加し、選択したチャンネルで読み取りと応答に必要な権限を付与します。",
-        "discordGuideStep5": "以下に Application ID、Guild ID、Bot Token を入力します。Azents が公開 interaction callback を自動で設定・検証します。",
         "identityUnavailable": "Provider identity は未検証です",
         "credentialsConfigured": "Credential 設定済み",
         "credentialsMissing": "Credential 未設定",
@@ -1035,8 +1030,6 @@
         "accessDescription": "有効な呼び出し権限とブロック済みの外部参加者を確認します。",
         "openAccessEnabled": "誰でも会話を開始できるようにする",
         "openAccessEnabledDescription": "無効にすると、人は明示的なアクセス承認が必要です。",
-        "allowBotMessages": "外部 bot メッセージを許可する",
-        "allowBotMessagesDescription": "ループ防止のため、接続済みの Azents bot は常に除外されます。",
         "emptyAccess": "有効な grant または block はありません。",
         "associatedMultiAppsTitle": "関連するワークスペース App",
         "associatedMultiAppsDescription": "対応する Slack・Discord の会話をこのエージェントへルーティングできる、ワークスペース所有の Multi App です。ワークスペース設定で管理できます。",
@@ -1109,7 +1102,19 @@
           "agent": "エージェントアクセス"
         },
         "revokeConfirm": "この参加者のアクセス権限を取り消しますか？",
-        "unblockConfirm": "この参加者のブロックを解除しますか？"
+        "unblockConfirm": "この参加者のブロックを解除しますか？",
+        "discordGuideCreateApplication": "Discord Developer Portal で Applications → New Application を開いて App を作成し、左側の Bot → Add Bot を選択します。すでに Bot がある場合は次へ進みます。",
+        "discordGuideEnableIntent": "Bot ページの Privileged Gateway Intents で以下の項目を有効にし、Save Changes を選択します。無効な場合、Bot を再度 mention しない後続メッセージが欠落したように見えることがあります。",
+        "discordGuideCopyIdentifiers": "General Information から Application ID をコピーします。Discord で User Settings → Advanced → Developer Mode を有効にし、対象サーバーを右クリックして Copy Server ID から Guild ID をコピーします。Bot ページでは Reset Token で Bot Token を発行し、安全に保管します。",
+        "discordGuideConfigureOAuth": "OAuth2 → URL Generator で以下の Scopes をすべて選択します。",
+        "discordGuideGrantBotPermissions": "Bot Permissions で以下の権限をすべて選択し、生成された URL を開いて対象サーバーに Bot を追加します。",
+        "discordGuideVerifyChannelPermissions": "Bot が使用する各チャンネルで Edit Channel → Permissions を開き、Bot role に以下の権限が許可されていることを確認します。カテゴリから継承する場合は、カテゴリの明示的な Deny も確認します。",
+        "discordGuideFinishSetup": "下の入力欄に Application ID、Guild ID、Bot Token を貼り付けて接続します。Azents が App とサーバーの identity、command、interaction callback、Gateway 接続を検証します。",
+        "discordGuideGatewayIntentLabel": "必須 Gateway Intent",
+        "discordGuideOAuthScopesLabel": "必須 OAuth2 Scopes",
+        "discordGuideBotPermissionsLabel": "必須 Bot Permissions",
+        "discordGuideChannelPermissionsLabel": "チャンネルごとに確認する権限",
+        "discordGuideLeastPrivilegeNote": "Bot に Administrator や Manage Messages を付与する必要はありません。Presence Intent と Server Members Intent も有効にしないでください。サーバー role で許可していても、チャンネルやカテゴリの Deny が優先される場合があります。"
       },
       "sessionChannels": {
         "title": "チャンネル",
@@ -1754,11 +1759,6 @@
       "slackGuideStep3": "Slack Workspace に App をインストールまたは再インストールし、App ID、Bot Token、Signing Secret、Socket Mode を使う場合は App Token をコピーします。",
       "slackGuideStep4": "接続後に Bot がメッセージを受信してルーティングできるよう、対象チャンネルごとに Bot を招待します。",
       "discordGuideTitle": "Discord Multi App を作成して設定",
-      "discordGuideStep1": "Discord Developer Portal で Application を作成し、Bot Token を作成またはリセットします。",
-      "discordGuideStep2": "Application ID と、Discord Developer Mode を有効にした対象サーバーの Guild ID をコピーします。",
-      "discordGuideStep3": "App に必要な Gateway intent を有効にし、OAuth2 URL Generator で Bot を対象 Guild に追加します。",
-      "discordGuideStep4": "Bot が想定した会話で利用できるよう、対象チャンネルの権限を付与します。",
-      "discordGuideStep5": "以下に Application ID、Guild ID、Bot Token を入力します。Azents が interaction callback を自動で設定・検証します。",
       "app": "アプリ",
       "status": "状態",
       "agents": "エージェント",
@@ -1859,7 +1859,20 @@
       },
       "handoffUnavailableTitle": "Slack ハンドオフは利用できません",
       "handoffPermissionTitle": "ワークスペース権限が必要です",
-      "handoffPermissionDescription": "この Slack チャンネルの既定値を管理できるのは、ワークスペースの所有者と管理者のみです。"
+      "handoffPermissionDescription": "この Slack チャンネルの既定値を管理できるのは、ワークスペースの所有者と管理者のみです。",
+      "discordGuide": "Discord Developer Portal で以下の手順を完了してから、下の 3 つの値を入力してください。Azents が Bot Token を検証し、interaction callback と command を自動で設定します。",
+      "discordGuideCreateApplication": "Discord Developer Portal で Applications → New Application を開いて App を作成し、左側の Bot → Add Bot を選択します。すでに Bot がある場合は次へ進みます。",
+      "discordGuideEnableIntent": "Bot ページの Privileged Gateway Intents で以下の項目を有効にし、Save Changes を選択します。無効な場合、Bot を再度 mention しない後続メッセージが欠落したように見えることがあります。",
+      "discordGuideCopyIdentifiers": "General Information から Application ID をコピーします。Discord で User Settings → Advanced → Developer Mode を有効にし、対象サーバーを右クリックして Copy Server ID から Guild ID をコピーします。Bot ページでは Reset Token で Bot Token を発行し、安全に保管します。",
+      "discordGuideConfigureOAuth": "OAuth2 → URL Generator で以下の Scopes をすべて選択します。",
+      "discordGuideGrantBotPermissions": "Bot Permissions で以下の権限をすべて選択し、生成された URL を開いて対象サーバーに Bot を追加します。",
+      "discordGuideVerifyChannelPermissions": "Bot が使用する各チャンネルで Edit Channel → Permissions を開き、Bot role に以下の権限が許可されていることを確認します。カテゴリから継承する場合は、カテゴリの明示的な Deny も確認します。",
+      "discordGuideFinishSetup": "下の入力欄に Application ID、Guild ID、Bot Token を貼り付けて接続します。Azents が App とサーバーの identity、command、interaction callback、Gateway 接続を検証します。",
+      "discordGuideGatewayIntentLabel": "必須 Gateway Intent",
+      "discordGuideOAuthScopesLabel": "必須 OAuth2 Scopes",
+      "discordGuideBotPermissionsLabel": "必須 Bot Permissions",
+      "discordGuideChannelPermissionsLabel": "チャンネルごとに確認する権限",
+      "discordGuideLeastPrivilegeNote": "Bot に Administrator や Manage Messages を付与する必要はありません。Presence Intent と Server Members Intent も有効にしないでください。サーバー role で許可していても、チャンネルやカテゴリの Deny が優先される場合があります。"
     }
   },
   "memberProfile": {
@@ -2535,10 +2548,7 @@
       "providerMessageId": "プロバイダーメッセージ ID",
       "authorType": "投稿者タイプ",
       "authorization": "認可状態",
-      "lifecycle": "メッセージ状態",
       "timestamp": "プロバイダー時刻",
-      "revision": "変更タイプ",
-      "corrects": "修正対象リビジョン",
       "openOriginal": "元のメッセージを開く",
       "openOriginalAccessible": "{resource} の元のメッセージを開く",
       "originalUnavailable": "元のメッセージは利用できません。",
@@ -2548,9 +2558,7 @@
       "copied": "コピー済み",
       "status": {
         "invoked": "呼び出し",
-        "context": "コンテキスト",
-        "edited": "編集済み",
-        "deleted": "削除済み"
+        "context": "コンテキスト"
       }
     }
   },
@@ -2599,9 +2607,6 @@
     "provider": "プロバイダー",
     "expiresAt": "有効期限",
     "decidedAt": "決定日時",
-    "message": "要求メッセージ",
-    "openOriginal": "元メッセージを開く",
-    "originalUnavailable": "元メッセージは利用できません。",
     "chooseAccess": "アクセス範囲を選択",
     "decisionSummary": "決定メモ: {summary}",
     "status": {

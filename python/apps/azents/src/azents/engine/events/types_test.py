@@ -8,8 +8,6 @@ from pydantic import ValidationError
 from azents.core.enums import (
     AgentRunStatus,
     EventKind,
-    ExternalChannelMessageLifecycle,
-    ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceType,
@@ -165,14 +163,7 @@ def test_event_rejects_payload_kind_mismatch() -> None:
 
 def _external_message_payload(
     *,
-    revision_kind: ExternalChannelMessageRevisionKind = (
-        ExternalChannelMessageRevisionKind.ORIGINAL
-    ),
-    lifecycle: ExternalChannelMessageLifecycle = (
-        ExternalChannelMessageLifecycle.CURRENT
-    ),
     projection_root_id: str = "external-channel:binding-1:message-1",
-    correction_of_revision_id: str | None = None,
 ) -> ExternalChannelMessagePayload:
     """Create one canonical External Channel payload."""
     return ExternalChannelMessagePayload(
@@ -184,8 +175,6 @@ def _external_message_payload(
         binding_id="binding-1",
         invocation_batch_id="batch-1",
         external_message_id="message-1",
-        revision_id="revision-1",
-        revision_kind=revision_kind,
         projection_root_id=projection_root_id,
         provider_message_key="C123:1.0:1",
         provider_position="1",
@@ -194,7 +183,6 @@ def _external_message_payload(
         sender_display_name="Alice",
         author_type=ExternalChannelPrincipalAuthorType.HUMAN,
         authorization="authorized_invocation",
-        lifecycle=lifecycle,
         body="hello",
         attachment_metadata={},
         provider_created_at=datetime.datetime(2026, 7, 22, tzinfo=datetime.UTC),
@@ -202,7 +190,6 @@ def _external_message_payload(
         original_url=None,
         truncated_context_message_count=0,
         truncated_context_size=0,
-        correction_of_revision_id=correction_of_revision_id,
     )
 
 
@@ -228,7 +215,6 @@ def test_external_message_payload_preserves_required_nullable_fields() -> None:
             "provider_created_at": None,
             "provider_updated_at": None,
             "original_url": None,
-            "correction_of_revision_id": None,
         }
     )
 
@@ -241,7 +227,6 @@ def test_external_message_payload_preserves_required_nullable_fields() -> None:
     assert serialized["provider_created_at"] is None
     assert serialized["provider_updated_at"] is None
     assert serialized["original_url"] is None
-    assert serialized["correction_of_revision_id"] is None
     assert validate_event_payload(EventKind.EXTERNAL_CHANNEL_MESSAGE, serialized) == (
         payload
     )
@@ -250,24 +235,6 @@ def test_external_message_payload_preserves_required_nullable_fields() -> None:
 def test_external_message_payload_rejects_inconsistent_projection_root() -> None:
     with pytest.raises(ValidationError, match="projection root"):
         _external_message_payload(projection_root_id="external-channel:wrong")
-
-
-def test_external_message_payload_allows_correction_without_known_original() -> None:
-    payload = _external_message_payload(
-        revision_kind=ExternalChannelMessageRevisionKind.EDIT,
-        lifecycle=ExternalChannelMessageLifecycle.EDITED,
-    )
-
-    assert payload.correction_of_revision_id is None
-
-
-def test_external_message_payload_rejects_revision_lifecycle_mismatch() -> None:
-    with pytest.raises(ValidationError, match="revision lifecycle"):
-        _external_message_payload(
-            revision_kind=ExternalChannelMessageRevisionKind.DELETE,
-            lifecycle=ExternalChannelMessageLifecycle.EDITED,
-            correction_of_revision_id="revision-original",
-        )
 
 
 def test_turn_marker_decodes_historical_payload_without_provenance() -> None:

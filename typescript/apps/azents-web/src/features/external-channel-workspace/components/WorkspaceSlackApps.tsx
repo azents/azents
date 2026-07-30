@@ -34,6 +34,7 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import { DiscordSetupGuide } from "@/shared/components/DiscordSetupGuide";
 import type { WorkspaceSlackAppsContainerOutput } from "../containers/useWorkspaceSlackAppsContainer";
 import type {
   DiscordMultiConnectionDraft,
@@ -100,15 +101,24 @@ function DiscordMultiAppGuide(): ReactElement {
   const t = useTranslations("workspace.integrations");
 
   return (
-    <Alert color="blue" title={t("discordGuideTitle")}>
-      <List size="sm" spacing="xs">
-        <List.Item>{t("discordGuideStep1")}</List.Item>
-        <List.Item>{t("discordGuideStep2")}</List.Item>
-        <List.Item>{t("discordGuideStep3")}</List.Item>
-        <List.Item>{t("discordGuideStep4")}</List.Item>
-        <List.Item>{t("discordGuideStep5")}</List.Item>
-      </List>
-    </Alert>
+    <DiscordSetupGuide
+      copy={{
+        title: t("discordGuideTitle"),
+        description: t("discordGuide"),
+        createApplication: t("discordGuideCreateApplication"),
+        enableIntent: t("discordGuideEnableIntent"),
+        copyIdentifiers: t("discordGuideCopyIdentifiers"),
+        configureOAuth: t("discordGuideConfigureOAuth"),
+        grantBotPermissions: t("discordGuideGrantBotPermissions"),
+        verifyChannelPermissions: t("discordGuideVerifyChannelPermissions"),
+        finishSetup: t("discordGuideFinishSetup"),
+        gatewayIntentLabel: t("discordGuideGatewayIntentLabel"),
+        oauthScopesLabel: t("discordGuideOAuthScopesLabel"),
+        botPermissionsLabel: t("discordGuideBotPermissionsLabel"),
+        channelPermissionsLabel: t("discordGuideChannelPermissionsLabel"),
+        leastPrivilegeNote: t("discordGuideLeastPrivilegeNote"),
+      }}
+    />
   );
 }
 

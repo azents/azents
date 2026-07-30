@@ -5,7 +5,6 @@ from typing import Literal
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -39,8 +38,6 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelConnection,
     RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelInteraction,
-    RDBExternalChannelMessage,
-    RDBExternalChannelMessageRevision,
     RDBExternalChannelPrincipal,
     RDBExternalChannelResource,
     RDBExternalChannelWork,
@@ -119,7 +116,6 @@ class ExternalChannelManagementRepository:
         agent_id: str,
         connection_id: str,
         open_access_enabled: bool,
-        allow_bot_messages: bool,
     ) -> ManagedConnection | None:
         """Persist one dedicated route's non-secret ingress policy."""
         row = (
@@ -149,7 +145,6 @@ class ExternalChannelManagementRepository:
             return None
         connection, route = row
         route.open_access_enabled = open_access_enabled
-        route.allow_bot_messages = allow_bot_messages
         await session.flush()
         await session.refresh(route, attribute_names=["updated_at"])
         return _connection(connection, route)
@@ -1430,7 +1425,6 @@ class ExternalChannelManagementRepository:
         *,
         access_request_id: str,
     ) -> ManagedApprovalRequest | None:
-        revision = aliased(RDBExternalChannelMessageRevision)
         row = (
             await session.execute(
                 sa.select(
@@ -1439,8 +1433,6 @@ class ExternalChannelManagementRepository:
                     RDBExternalChannelConnection,
                     RDBExternalChannelResource,
                     RDBExternalChannelPrincipal,
-                    RDBExternalChannelMessage,
-                    revision,
                     RDBAgent,
                 )
                 .join(
@@ -1464,15 +1456,6 @@ class ExternalChannelManagementRepository:
                     == RDBExternalChannelAccessRequest.principal_id,
                 )
                 .join(
-                    RDBExternalChannelMessage,
-                    RDBExternalChannelMessage.id
-                    == RDBExternalChannelAccessRequest.source_message_id,
-                )
-                .outerjoin(
-                    revision,
-                    revision.id == RDBExternalChannelMessage.current_revision_id,
-                )
-                .join(
                     RDBAgent,
                     RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
                 )
@@ -1481,7 +1464,7 @@ class ExternalChannelManagementRepository:
         ).one_or_none()
         if row is None:
             return None
-        request, route, connection, resource, principal, message, current, agent = row
+        request, route, connection, resource, principal, agent = row
         if route.agent_id is None:
             return None
         return ManagedApprovalRequest(
@@ -1495,8 +1478,6 @@ class ExternalChannelManagementRepository:
             principal_label=(principal.display_name or principal.provider_user_id),
             principal_provider_user_id=principal.provider_user_id,
             resource_label=_resource_label(resource.labels, resource.id),
-            source_text=None if current is None else current.normalized_body,
-            original_url=message.original_url,
             expires_at=request.expires_at,
             decided_at=request.decided_at,
             decision_summary=request.decision_summary,
@@ -1623,7 +1604,6 @@ def _connection(
         provider_tenant_id=connection.provider_tenant_id,
         provider_bot_user_id=connection.provider_bot_user_id,
         open_access_enabled=route.open_access_enabled,
-        allow_bot_messages=route.allow_bot_messages,
         credentials_configured=connection.encrypted_credentials is not None,
         capabilities=connection.capabilities,
         provider_config=connection.provider_config,

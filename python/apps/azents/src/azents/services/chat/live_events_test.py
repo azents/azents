@@ -10,8 +10,6 @@ from redis.asyncio import Redis
 from azents.core.enums import (
     AgentRunStatus,
     EventKind,
-    ExternalChannelMessageLifecycle,
-    ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceType,
@@ -185,8 +183,6 @@ def test_external_invocation_pending_projection_exposes_safe_snapshot() -> None:
         binding_id="binding-1",
         invocation_batch_id="batch-1",
         external_message_id="message-1",
-        revision_id="revision-1",
-        revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
         projection_root_id="external-channel:binding-1:message-1",
         provider_message_key="provider-message-1",
         provider_position="1",
@@ -195,7 +191,6 @@ def test_external_invocation_pending_projection_exposes_safe_snapshot() -> None:
         sender_display_name="Ada",
         author_type=ExternalChannelPrincipalAuthorType.HUMAN,
         authorization="authorized_invocation",
-        lifecycle=ExternalChannelMessageLifecycle.CURRENT,
         body="Deploy is ready.",
         attachment_metadata={},
         reference_mappings={},
@@ -204,7 +199,6 @@ def test_external_invocation_pending_projection_exposes_safe_snapshot() -> None:
         original_url="https://example.test/message-1",
         truncated_context_message_count=0,
         truncated_context_size=0,
-        correction_of_revision_id=None,
     )
     mailbox_item = MailboxItem(
         id="0423456789abcdef0123456789abcdef",

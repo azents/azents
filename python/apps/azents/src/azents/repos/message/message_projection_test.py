@@ -6,8 +6,6 @@ from pydantic import TypeAdapter
 
 from azents.core.enums import (
     EventKind,
-    ExternalChannelMessageLifecycle,
-    ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceType,
@@ -153,7 +151,7 @@ def test_user_message_attachment_projection_preserves_download_identity() -> Non
 
 
 def test_external_channel_message_projects_source_metadata() -> None:
-    """REST history preserves exact external source and correction identities."""
+    """REST history hides legacy lifecycle metadata from Chat presentation."""
     created_at = datetime.datetime(2026, 7, 22, tzinfo=datetime.UTC)
     payload = ExternalChannelMessagePayload(
         provider=ExternalChannelProvider.SLACK,
@@ -164,8 +162,6 @@ def test_external_channel_message_projects_source_metadata() -> None:
         binding_id="binding-1",
         invocation_batch_id="batch-1",
         external_message_id="message-1",
-        revision_id="revision-2",
-        revision_kind=ExternalChannelMessageRevisionKind.EDIT,
         projection_root_id="external-channel:binding-1:message-1",
         provider_message_key="C123:1.0:1",
         provider_position="1",
@@ -174,7 +170,6 @@ def test_external_channel_message_projects_source_metadata() -> None:
         sender_display_name="Alice",
         author_type=ExternalChannelPrincipalAuthorType.HUMAN,
         authorization="authorized_invocation",
-        lifecycle=ExternalChannelMessageLifecycle.EDITED,
         body="updated",
         attachment_metadata={},
         provider_created_at=created_at,
@@ -182,7 +177,6 @@ def test_external_channel_message_projects_source_metadata() -> None:
         original_url="https://slack.example/message",
         truncated_context_message_count=0,
         truncated_context_size=0,
-        correction_of_revision_id="revision-1",
     )
     external_id = "external-channel:binding-1:message-1:revision-2"
     row = RDBEvent(
@@ -209,7 +203,10 @@ def test_external_channel_message_projects_source_metadata() -> None:
     assert message.metadata["provider_created_at"] == created_at.isoformat()
     assert message.metadata["provider_updated_at"] == created_at.isoformat()
     assert message.metadata["projection_root_id"] == payload.projection_root_id
-    assert message.metadata["correction_of_revision_id"] == "revision-1"
+    assert "revision_id" not in message.metadata
+    assert "revision_kind" not in message.metadata
+    assert "lifecycle" not in message.metadata
+    assert "correction_of_revision_id" not in message.metadata
     assert message.metadata["event_render_key"] == f"event:{external_id}"
 
 

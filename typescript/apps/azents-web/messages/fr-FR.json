@@ -968,13 +968,8 @@
         "discordAppId": "ID de l’application Discord",
         "discordGuildId": "ID du serveur Discord",
         "discordBotToken": "Jeton de bot Discord",
-        "discordGuide": "Utilisez une application Discord détenue par le client. Azents configure le callback d’interaction après avoir validé ce jeton de bot et ne l’affiche plus ensuite.",
+        "discordGuide": "Suivez ces étapes dans le portail développeur Discord, puis saisissez les trois valeurs ci-dessous. Azents valide le jeton du bot et configure automatiquement le callback d’interaction et les commandes.",
         "discordGuideTitle": "Créer et configurer votre application Discord",
-        "discordGuideStep1": "Dans Discord Developer Portal, créez une Application, puis créez ou réinitialisez le jeton sur la page Bot.",
-        "discordGuideStep2": "Copiez l’Application ID depuis General Information et le Guild ID du serveur cible après avoir activé Discord Developer Mode.",
-        "discordGuideStep3": "Activez les Gateway intents privilégiés requis par votre workflow, puis enregistrez les paramètres du bot.",
-        "discordGuideStep4": "Utilisez OAuth2 URL Generator pour ajouter le bot au Guild cible avec les autorisations nécessaires pour lire et répondre dans les canaux sélectionnés.",
-        "discordGuideStep5": "Saisissez ci-dessous l’Application ID, le Guild ID et le jeton de bot. Azents configure et vérifie automatiquement le callback d’interaction public.",
         "identityUnavailable": "Identité du fournisseur non vérifiée",
         "credentialsConfigured": "Identifiants configurés",
         "credentialsMissing": "Identifiants manquants",
@@ -1035,8 +1030,6 @@
         "accessDescription": "Consultez les autorisations actives et les participants externes bloqués.",
         "openAccessEnabled": "Autoriser tout le monde à démarrer une conversation",
         "openAccessEnabledDescription": "Lorsqu’elle est désactivée, les personnes nécessitent une approbation d’accès explicite.",
-        "allowBotMessages": "Autoriser les messages de bots externes",
-        "allowBotMessagesDescription": "Le bot Azents connecté est toujours exclu pour éviter les boucles.",
         "emptyAccess": "Aucune autorisation ni aucun blocage actif.",
         "associatedMultiAppsTitle": "Applications d’espace de travail associées",
         "associatedMultiAppsDescription": "Applications Multi Slack et Discord appartenant à l’espace de travail qui peuvent router des conversations compatibles vers cet agent. Gérez-les dans les paramètres de l’espace de travail.",
@@ -1109,7 +1102,19 @@
           "agent": "Accès à l’agent"
         },
         "revokeConfirm": "Révoquer l’autorisation d’accès de ce participant ?",
-        "unblockConfirm": "Débloquer ce participant ?"
+        "unblockConfirm": "Débloquer ce participant ?",
+        "discordGuideCreateApplication": "Dans le portail développeur Discord, ouvrez Applications → New Application. Créez l’application, puis sélectionnez Bot → Add Bot dans la navigation de gauche. Si un bot existe déjà, passez à l’étape suivante.",
+        "discordGuideEnableIntent": "Sur la page Bot, activez l’élément ci-dessous dans Privileged Gateway Intents, puis sélectionnez Save Changes. Sans cet intent, les messages suivants qui ne mentionnent pas le bot peuvent sembler manquants.",
+        "discordGuideCopyIdentifiers": "Copiez l’Application ID depuis General Information. Dans Discord, activez User Settings → Advanced → Developer Mode, faites un clic droit sur le serveur cible et sélectionnez Copy Server ID pour obtenir le Guild ID. Sur la page Bot, utilisez Reset Token pour générer le Bot Token et conservez-le en lieu sûr.",
+        "discordGuideConfigureOAuth": "Dans OAuth2 → URL Generator, sélectionnez tous les Scopes suivants.",
+        "discordGuideGrantBotPermissions": "Dans Bot Permissions, sélectionnez toutes les autorisations ci-dessous. Ouvrez l’URL générée et ajoutez le bot au serveur cible.",
+        "discordGuideVerifyChannelPermissions": "Pour chaque canal utilisé par le bot, ouvrez Edit Channel → Permissions et vérifiez que le rôle du bot possède les autorisations ci-dessous. Si le canal hérite d’une catégorie, vérifiez également les règles Deny explicites de cette catégorie.",
+        "discordGuideFinishSetup": "Collez ci-dessous l’Application ID, le Guild ID et le Bot Token, puis sélectionnez Connecter. Azents vérifie les identités de l’application et du serveur, les commandes, le callback d’interaction et la connexion Gateway.",
+        "discordGuideGatewayIntentLabel": "Gateway Intent requis",
+        "discordGuideOAuthScopesLabel": "OAuth2 Scopes requis",
+        "discordGuideBotPermissionsLabel": "Bot Permissions requises",
+        "discordGuideChannelPermissionsLabel": "Autorisations à vérifier par canal",
+        "discordGuideLeastPrivilegeNote": "Le bot n’a pas besoin des autorisations Administrator ou Manage Messages. N’activez pas Presence Intent ni Server Members Intent. Une règle Deny de canal ou de catégorie peut remplacer les autorisations accordées au rôle du serveur."
       },
       "sessionChannels": {
         "title": "Canaux",
@@ -1754,11 +1759,6 @@
       "slackGuideStep3": "Installez ou réinstallez l’application dans le workspace Slack, puis copiez l’App ID, le Bot Token, le Signing Secret et, si nécessaire, l’App Token Socket Mode.",
       "slackGuideStep4": "Après la connexion, invitez le bot dans chaque canal cible afin que l’application puisse recevoir et acheminer les messages.",
       "discordGuideTitle": "Créer et configurer votre application Discord Multi",
-      "discordGuideStep1": "Dans Discord Developer Portal, créez une Application et créez ou réinitialisez son jeton de bot.",
-      "discordGuideStep2": "Copiez l’Application ID et le Guild ID du serveur cible après avoir activé Discord Developer Mode.",
-      "discordGuideStep3": "Activez les Gateway intents requis, puis utilisez OAuth2 URL Generator pour ajouter le bot au Guild cible.",
-      "discordGuideStep4": "Accordez au bot les autorisations de canal nécessaires aux conversations prévues.",
-      "discordGuideStep5": "Saisissez ci-dessous l’Application ID, le Guild ID et le jeton de bot. Azents configure et vérifie automatiquement le callback d’interaction.",
       "app": "Application",
       "status": "État",
       "agents": "Agents",
@@ -1859,7 +1859,20 @@
       },
       "handoffUnavailableTitle": "Le relais Slack est indisponible",
       "handoffPermissionTitle": "Autorisation de l’espace de travail requise",
-      "handoffPermissionDescription": "Seuls les propriétaires et les gestionnaires de l’espace de travail peuvent gérer cette valeur par défaut du canal Slack."
+      "handoffPermissionDescription": "Seuls les propriétaires et les gestionnaires de l’espace de travail peuvent gérer cette valeur par défaut du canal Slack.",
+      "discordGuide": "Suivez ces étapes dans le portail développeur Discord, puis saisissez les trois valeurs ci-dessous. Azents valide le jeton du bot et configure automatiquement le callback d’interaction et les commandes.",
+      "discordGuideCreateApplication": "Dans le portail développeur Discord, ouvrez Applications → New Application. Créez l’application, puis sélectionnez Bot → Add Bot dans la navigation de gauche. Si un bot existe déjà, passez à l’étape suivante.",
+      "discordGuideEnableIntent": "Sur la page Bot, activez l’élément ci-dessous dans Privileged Gateway Intents, puis sélectionnez Save Changes. Sans cet intent, les messages suivants qui ne mentionnent pas le bot peuvent sembler manquants.",
+      "discordGuideCopyIdentifiers": "Copiez l’Application ID depuis General Information. Dans Discord, activez User Settings → Advanced → Developer Mode, faites un clic droit sur le serveur cible et sélectionnez Copy Server ID pour obtenir le Guild ID. Sur la page Bot, utilisez Reset Token pour générer le Bot Token et conservez-le en lieu sûr.",
+      "discordGuideConfigureOAuth": "Dans OAuth2 → URL Generator, sélectionnez tous les Scopes suivants.",
+      "discordGuideGrantBotPermissions": "Dans Bot Permissions, sélectionnez toutes les autorisations ci-dessous. Ouvrez l’URL générée et ajoutez le bot au serveur cible.",
+      "discordGuideVerifyChannelPermissions": "Pour chaque canal utilisé par le bot, ouvrez Edit Channel → Permissions et vérifiez que le rôle du bot possède les autorisations ci-dessous. Si le canal hérite d’une catégorie, vérifiez également les règles Deny explicites de cette catégorie.",
+      "discordGuideFinishSetup": "Collez ci-dessous l’Application ID, le Guild ID et le Bot Token, puis sélectionnez Connecter. Azents vérifie les identités de l’application et du serveur, les commandes, le callback d’interaction et la connexion Gateway.",
+      "discordGuideGatewayIntentLabel": "Gateway Intent requis",
+      "discordGuideOAuthScopesLabel": "OAuth2 Scopes requis",
+      "discordGuideBotPermissionsLabel": "Bot Permissions requises",
+      "discordGuideChannelPermissionsLabel": "Autorisations à vérifier par canal",
+      "discordGuideLeastPrivilegeNote": "Le bot n’a pas besoin des autorisations Administrator ou Manage Messages. N’activez pas Presence Intent ni Server Members Intent. Une règle Deny de canal ou de catégorie peut remplacer les autorisations accordées au rôle du serveur."
     }
   },
   "memberProfile": {
@@ -2535,10 +2548,7 @@
       "providerMessageId": "ID du message du fournisseur",
       "authorType": "Type d’auteur",
       "authorization": "Autorisation",
-      "lifecycle": "État du message",
       "timestamp": "Heure du fournisseur",
-      "revision": "Type de modification",
-      "corrects": "Révision corrigée",
       "openOriginal": "Ouvrir le message original",
       "openOriginalAccessible": "Ouvrir le message original dans {resource}",
       "originalUnavailable": "Le message original n’est pas disponible.",
@@ -2548,9 +2558,7 @@
       "copied": "Copié",
       "status": {
         "invoked": "Invocation",
-        "context": "Contexte",
-        "edited": "Modifié",
-        "deleted": "Supprimé"
+        "context": "Contexte"
       }
     }
   },
@@ -2599,9 +2607,6 @@
     "provider": "Fournisseur",
     "expiresAt": "Expiration",
     "decidedAt": "Décision",
-    "message": "Message de la demande",
-    "openOriginal": "Ouvrir le message original",
-    "originalUnavailable": "Le message original n’est pas disponible.",
     "chooseAccess": "Choisissez la portée d’accès",
     "decisionSummary": "Note de décision : {summary}",
     "status": {
