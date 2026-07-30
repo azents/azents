@@ -27,7 +27,7 @@ coordination, approval replay, provider-control settlement, Slack HTTP and Socke
 Discord interactions and Gateway ingress, provider-native Channel Work, and explicit
 External Channel file transfer.
 
-- Validation date: July 29, 2026 (KST).
+- Validation date: July 30, 2026 (KST).
 - Validation branch: `feature/channel-responsive-context-08-validation`.
 - Base branch: `feature/channel-responsive-context-07-contraction-surfaces`.
 - Phase boundary: no living spec, Requirements implementation date, Design
@@ -67,14 +67,15 @@ or production database mutation was performed.
 | Backend format | `cd python/apps/azents && uv run ruff format --check .` | Passed; 1,464 files already formatted after review remediation |
 | Backend lint | `cd python/apps/azents && uv run ruff check .` | Passed after review remediation |
 | Backend types | `cd python/apps/azents && uv run pyright` | Passed; 0 errors, 0 warnings |
-| Backend complete suite | `cd python/apps/azents && uv run pytest` | Passed; 3,754 tests, 6 warnings |
+| Backend complete suite | `cd python/apps/azents && uv run pytest` | Passed after provider-control settlement remediation; 3,758 tests, 6 warnings |
 | Redis and memory lock contract | `cd python/apps/azents && uv run pytest -q src/azents/services/external_channel/conversation_lock_test.py` | Passed after review remediation; 5 tests, 3 dependency deprecation warnings |
-| Focused External Channel backend/API/repository suite | `cd python/apps/azents && uv run pytest -q src/azents/repos/external_channel src/azents/services/external_channel src/azents/api/public/external_channel/v1` | Passed; 521 tests, 5 warnings |
+| Focused External Channel backend/API/repository suite | `cd python/apps/azents && uv run pytest -q src/azents/repos/external_channel src/azents/services/external_channel src/azents/api/public/external_channel/v1` | Passed after provider-control settlement remediation; 525 tests, 5 warnings |
+| Provider-control final settlement regression | `cd python/apps/azents && uv run pytest -q src/azents/repos/external_channel/work_test.py::test_provider_control_final_settlement_revalidates_current_authority src/azents/services/external_channel/channel_action_test.py::test_provider_control_returns_revalidated_settlement_status src/azents/services/external_channel/channel_action_test.py::test_delivery_returns_none_when_final_settlement_loses_attempt src/azents/repos/external_channel/app_mode_repository_test.py::test_provider_control_settlement_follows_lifecycle_lock_order src/azents/repos/external_channel/app_mode_repository_test.py::test_multi_route_removal_preserves_route_identity_and_other_routes` | Passed; 5 tests, 3 dependency deprecation warnings |
 | Testenv format | `cd testenv/azents/e2e && uv run ruff format --check src/support/image_generation_openai_proxy.py src/support/slack_provider_fake.py src/tests/azents/public/test_external_channels.py src/tests/test_external_channel_file_proxy.py src/tests/test_slack_provider_fake.py` | Passed |
 | Testenv lint | `cd testenv/azents/e2e && uv run ruff check src/support/image_generation_openai_proxy.py src/support/slack_provider_fake.py src/tests/azents/public/test_external_channels.py src/tests/test_external_channel_file_proxy.py src/tests/test_slack_provider_fake.py` | Passed |
 | Testenv types | `cd testenv/azents/e2e && uv run pyright .` | Passed; 0 errors, 0 warnings |
 | Provider fake/proxy contracts | `cd testenv/azents/e2e && uv run pytest -q src/tests/test_slack_provider_fake.py src/tests/test_discord_provider_fake.py src/tests/test_external_channel_progress_proxy.py src/tests/test_external_channel_file_proxy.py` | Passed; 53 tests, 2 warnings |
-| Deterministic External Channel E2E | `cd testenv/azents/e2e && uv run pytest -vv -s -m "not runtime_provider and not live_external and not web_surface" src/tests/azents/public/test_external_channels.py` | Passed; 9 tests, 3 deselected, 2 warnings in 127.86 seconds |
+| Deterministic External Channel E2E | `cd testenv/azents/e2e && uv run pytest -vv -s -m "not runtime_provider and not live_external and not web_surface" src/tests/azents/public/test_external_channels.py` | Passed after provider-control settlement remediation; 9 tests, 3 deselected, 2 warnings in 74.10 seconds |
 | Runtime-provider External Channel E2E | `cd testenv/azents/e2e && uv run pytest -vv -s src/tests/azents/public/test_external_channels.py::test_provider_native_channel_work_progress_journey src/tests/azents/public/test_external_channels.py::test_external_channel_file_transfer_journey` | Passed; 2 tests, 2 warnings in 53.85 seconds |
 | Focused file-transfer E2E | `cd testenv/azents/e2e && uv run pytest -vv -s src/tests/azents/public/test_external_channels.py::test_external_channel_file_transfer_journey` | Passed; 1 test, 2 warnings in 53.33 seconds |
 | Documentation index | `python scripts/gen_docs_index.py --docs-root docs/azents --project-name azents --check` | Passed |
@@ -161,8 +162,9 @@ retryable surfaced failure rather than an implicit backend switch.
 
 ## Failures found and corrections applied
 
-Validation found two deterministic fixture defects and one static typing defect. All
-were corrected and their invalidated lanes were rerun.
+Validation found two deterministic fixture defects, one static typing defect, and one
+provider-control correctness defect. All were corrected and their invalidated lanes
+were rerun.
 
 1. **Redis test client construction did not satisfy the installed Redis type surface.**
    The real-Redis contract directly constructed `Redis(host=..., port=...)`, which
@@ -184,9 +186,21 @@ were corrected and their invalidated lanes were rerun.
    `invalid_arguments`, and prevented the final Channel Action result. The fake now
    merges typed query parameters with the request body and has a regression test for
    the SDK-compatible shape. The complete 6 MiB file-transfer E2E then passed.
-
-No production behavior defect was found by the completed backend, transport, provider,
-Runtime, or deterministic E2E validation.
+4. **Provider-control final settlement did not revalidate current authority.**
+   The durable start path locked and validated the delivery attempt before committing
+   `attempting`, but the final transaction only re-locked that attempt after provider
+   I/O. A binding, Session, Agent, route, resource, connection, access request, or
+   selector admission could therefore lose authority while the provider request was in
+   flight without affecting settlement. Final settlement now snapshots immutable attempt
+   identity, locks the applicable authority graph in lifecycle-compatible order, then
+   re-locks and revalidates the same `attempting` row. Active routes must still be
+   catalog-available. If authority is no longer current, settlement records `unknown`,
+   preserves any returned provider message key, and creates no projection recovery that
+   could imply the provider write was absent. A real PostgreSQL two-session regression
+   proves Session-tree purge can terminalize the attempt without an attempt-to-authority
+   deadlock. Repository and service regressions, full backend, focused External Channel,
+   and deterministic provider E2E suites were rerun. Targeted independent re-review
+   found no remaining Critical or Warning issues.
 
 ## Implementation-to-spec comparison
 

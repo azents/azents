@@ -30,6 +30,7 @@ from azents.core.external_channel_file import (
 from azents.rdb.session import SessionManager
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.external_channel.work import (
+    DeliverySettlement,
     ExternalChannelWorkRepository,
     RuntimeProviderDeliveryCompletion,
 )
@@ -88,6 +89,8 @@ class _RepositoryDouble:
         ] = []
         self.recorded_delivery_channels: list[tuple[str, str]] = []
         self.runtime_provider_states: list[tuple[str, dict[str, object]]] = []
+        self.settlement_accepted = True
+        self.settlement_status: ExternalChannelDeliveryStatus | None = None
         self.target = ChannelDeliveryTarget(
             delivery_attempt_id="delivery-1",
             operation=ExternalChannelDeliveryOperation.REPLY,
@@ -245,6 +248,34 @@ class _RepositoryDouble:
         self.events.append("finish")
         self.finished.append((status, provider_message_key, error_kind))
         return self.recovery_delivery_ids.pop(0) if self.recovery_delivery_ids else None
+
+    async def settle_delivery(
+        self,
+        session: AsyncSession,
+        *,
+        delivery_attempt_id: str,
+        status: ExternalChannelDeliveryStatus,
+        provider_message_key: str | None,
+        error_kind: str | None,
+        error_summary: str | None,
+        now: datetime.datetime,
+    ) -> DeliverySettlement:
+        recovery_delivery_id = await self.finish_delivery(
+            session,
+            delivery_attempt_id=delivery_attempt_id,
+            status=status,
+            provider_message_key=provider_message_key,
+            error_kind=error_kind,
+            error_summary=error_summary,
+            now=now,
+        )
+        return DeliverySettlement(
+            accepted=self.settlement_accepted,
+            status=(
+                self.settlement_status or status if self.settlement_accepted else None
+            ),
+            recovery_delivery_id=recovery_delivery_id,
+        )
 
     async def record_discord_delivery_channel(
         self,
@@ -768,6 +799,58 @@ async def test_failed_delivery_is_terminal_and_not_reported_as_success() -> None
         (ExternalChannelDeliveryStatus.FAILED, None, "resource_unavailable")
     ]
     assert events.count("provider") == 1
+
+
+@pytest.mark.asyncio
+async def test_provider_control_returns_revalidated_settlement_status() -> None:
+    """The service reports a conservative post-provider authority result."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.settlement_status = ExternalChannelDeliveryStatus.UNKNOWN
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key="slack:T1:C1:2.000001",
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+    )
+
+    result = await service.attempt_delivery("delivery-1")
+
+    assert result is ExternalChannelDeliveryStatus.UNKNOWN
+    assert events == ["start", "commit", "provider", "finish", "commit"]
+
+
+@pytest.mark.asyncio
+async def test_delivery_returns_none_when_final_settlement_loses_attempt() -> None:
+    """A superseded final settlement cannot report an uncommitted provider result."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.settlement_accepted = False
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key="slack:T1:C1:2.000001",
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+    )
+
+    result = await service.attempt_delivery("delivery-1")
+
+    assert result is None
+    assert events == ["start", "commit", "provider", "finish", "commit"]
 
 
 @pytest.mark.asyncio

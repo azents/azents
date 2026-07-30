@@ -1133,6 +1133,62 @@ async def test_runtime_authority_revocation_after_provider_start_is_unknown(
     assert attempt.error_kind == "runtime_delivery_authority_revoked"
 
 
+async def test_provider_control_final_settlement_revalidates_current_authority(
+    rdb_session: AsyncSession,
+) -> None:
+    """A provider control becomes unknown when its binding is revoked after I/O."""
+    _agent_id, binding_id = await _setup_binding(rdb_session)
+    binding = await rdb_session.get(RDBExternalChannelBinding, binding_id)
+    assert binding is not None
+    attempt = RDBExternalChannelDeliveryAttempt(
+        origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+        origin_id="manager-operation-1",
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+        request_payload={
+            "channel_id": "C1",
+            "thread_ts": "1.000001",
+            "text": "Control",
+        },
+        status=ExternalChannelDeliveryStatus.PENDING,
+        channel_action_id=None,
+        binding_id=binding_id,
+        provider_message_key=None,
+        error_kind=None,
+        error_summary=None,
+        attempted_at=None,
+        completed_at=None,
+    )
+    rdb_session.add(attempt)
+    await rdb_session.flush()
+    repository = ExternalChannelWorkRepository()
+    started = await repository.start_delivery(
+        rdb_session,
+        delivery_attempt_id=attempt.id,
+        now=_at(2),
+    )
+    assert started is not None
+    binding.status = ExternalChannelBindingStatus.DISCONNECTED
+    await rdb_session.flush()
+
+    settlement = await repository.settle_delivery(
+        rdb_session,
+        delivery_attempt_id=attempt.id,
+        status=ExternalChannelDeliveryStatus.DELIVERED,
+        provider_message_key="slack:T1:C1:2.000001",
+        error_kind=None,
+        error_summary=None,
+        now=_at(3),
+    )
+
+    assert settlement.accepted
+    assert settlement.status is ExternalChannelDeliveryStatus.UNKNOWN
+    assert settlement.recovery_delivery_id is None
+    assert attempt.status is ExternalChannelDeliveryStatus.UNKNOWN
+    assert attempt.provider_message_key == "slack:T1:C1:2.000001"
+    assert attempt.error_kind == "delivery_authority_revoked_after_provider"
+    assert attempt.completed_at == _at(3)
+
+
 async def test_initial_discord_delivery_uses_active_binding_authority(
     rdb_session: AsyncSession,
 ) -> None:

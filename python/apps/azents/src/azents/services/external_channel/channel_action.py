@@ -409,10 +409,11 @@ class ExternalChannelActionService:
             )
             raise
         recovery_delivery_id = None
+        settled_status: ExternalChannelDeliveryStatus | None = None
         started_runtime_provider_transfer = _uses_runtime_provider_transfer(started)
         if not (result.status == "delivered" and started_runtime_provider_transfer):
             async with self.session_manager() as session:
-                recovery_delivery_id = await self.repository.finish_delivery(
+                settlement = await self.repository.settle_delivery(
                     session,
                     delivery_attempt_id=target.delivery_attempt_id,
                     status=ExternalChannelDeliveryStatus(result.status),
@@ -422,6 +423,8 @@ class ExternalChannelActionService:
                     now=datetime.datetime.now(datetime.UTC),
                 )
                 await session.commit()
+            recovery_delivery_id = settlement.recovery_delivery_id
+            settled_status = settlement.status
         if recovery_delivery_id is not None:
             await self.attempt_delivery(recovery_delivery_id)
         if started_runtime_provider_transfer:
@@ -429,7 +432,8 @@ class ExternalChannelActionService:
                 target.delivery_attempt_id,
                 provider_delivery_capability=provider_delivery_capability,
             )
-        return ExternalChannelDeliveryStatus(result.status)
+            return ExternalChannelDeliveryStatus(result.status)
+        return settled_status
 
     async def drain_runtime_provider_settlements(
         self,
