@@ -27,6 +27,7 @@ export type ActivityEventKind =
   | "tool"
   | "skill"
   | "goal-control"
+  | "external-channel-continuation"
   | "other";
 
 export interface ActivityCategory {
@@ -438,6 +439,26 @@ function timelineEvents(
           message,
           activityEvent: null,
           boundary: true,
+          hidden: false,
+          usage: null,
+        },
+      ];
+    }
+
+    if (event.kind === "external_channel_continuation") {
+      return [
+        {
+          id: event.id,
+          event,
+          message,
+          activityEvent: {
+            id: semanticKey(event),
+            kind: "external-channel-continuation",
+            message,
+            category: { key: "organize", label: "organize" },
+            status: "complete",
+          },
+          boundary: false,
           hidden: false,
           usage: null,
         },

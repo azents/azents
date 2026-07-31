@@ -41,6 +41,7 @@ from azents.services.chat.data import (
     PendingMailboxActionPresentation,
     PendingMailboxAgentMessagePresentation,
     PendingMailboxEnvelope,
+    PendingMailboxExternalChannelContinuationPresentation,
     PendingMailboxExternalChannelPresentation,
     PendingMailboxGoalContinuationPresentation,
     PendingMailboxItem,
@@ -323,6 +324,14 @@ def mailbox_item_to_pending_projection(
                     mailbox_item
                 ),
             )
+        elif mailbox_item.kind is MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION:
+            presentation = PendingMailboxExternalChannelContinuationPresentation(
+                type="external_channel_continuation",
+                content=item.content,
+                requested_inference_profile=_mailbox_item_requested_profile(
+                    mailbox_item
+                ),
+            )
         elif mailbox_item.kind is MailboxItemKind.AGENT_MESSAGE:
             message_kind = item.metadata.get("message_kind")
             if message_kind not in {
@@ -487,6 +496,8 @@ def _event_kind_for_mailbox_item(kind: MailboxItemKind) -> EventKind:
             return EventKind.USER_MESSAGE
         case MailboxItemKind.GOAL_CONTINUATION:
             return EventKind.GOAL_CONTINUATION
+        case MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION:
+            return EventKind.EXTERNAL_CHANNEL_CONTINUATION
         case MailboxItemKind.ACTION_MESSAGE:
             return EventKind.ACTION_MESSAGE
         case MailboxItemKind.AGENT_MESSAGE:

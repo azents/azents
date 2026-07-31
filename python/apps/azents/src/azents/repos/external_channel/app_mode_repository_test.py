@@ -13,9 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentSessionRunState,
     ExternalChannelAppMode,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
+    ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
@@ -27,8 +29,11 @@ from azents.core.enums import (
     ExternalChannelResourceType,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
+    ExternalChannelSessionActivationState,
     ExternalChannelTransport,
     LLMProvider,
+    MailboxItemKind,
+    MailboxSchedulingMode,
 )
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -39,8 +44,10 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelChannelDefault,
     RDBExternalChannelConnection,
     RDBExternalChannelDeliveryAttempt,
+    RDBExternalChannelResource,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.mailbox_item import RDBMailboxItem
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.user import UserRepository
@@ -54,10 +61,15 @@ from .data import (
     ExternalChannelBindingCreate,
     ExternalChannelChannelDefaultCreate,
     ExternalChannelConnectionCreate,
+    ExternalChannelConversationPositionCreate,
+    ExternalChannelDeliveryAttemptCreate,
     ExternalChannelInteractionCreate,
     ExternalChannelPrincipalCreate,
+    ExternalChannelPurgePreparation,
     ExternalChannelResource,
     ExternalChannelResourceCreate,
+    ExternalChannelSessionActivationCreate,
+    ExternalChannelSessionActivationDeliveryCreate,
 )
 from .lifecycle import ExternalChannelLifecycleRepository
 from .management import ExternalChannelManagementRepository
@@ -218,6 +230,32 @@ async def _cleanup_committed_workspace(
     """Remove direct-engine concurrency fixtures in restrictive FK order."""
     statements = (
         """
+        DELETE FROM external_channel_session_activation_deliveries
+        WHERE activation_id IN (
+            SELECT activation.id
+            FROM external_channel_session_activations AS activation
+            JOIN external_channel_bindings AS binding
+              ON binding.id = activation.binding_id
+            JOIN external_channel_agent_routes AS route
+              ON route.id = binding.route_id
+            JOIN external_channel_connections AS connection
+              ON connection.id = route.connection_id
+            WHERE connection.workspace_id = :workspace_id
+        )
+        """,
+        """
+        DELETE FROM external_channel_session_activations
+        WHERE binding_id IN (
+            SELECT binding.id
+            FROM external_channel_bindings AS binding
+            JOIN external_channel_agent_routes AS route
+              ON route.id = binding.route_id
+            JOIN external_channel_connections AS connection
+              ON connection.id = route.connection_id
+            WHERE connection.workspace_id = :workspace_id
+        )
+        """,
+        """
         DELETE FROM external_channel_delivery_attempts
         WHERE binding_id IN (
             SELECT binding.id
@@ -241,6 +279,13 @@ async def _cleanup_committed_workspace(
         """,
         """
         DELETE FROM external_channel_resources
+        WHERE connection_id IN (
+            SELECT id FROM external_channel_connections
+            WHERE workspace_id = :workspace_id
+        )
+        """,
+        """
+        DELETE FROM external_channel_conversation_positions
         WHERE connection_id IN (
             SELECT id FROM external_channel_connections
             WHERE workspace_id = :workspace_id
@@ -904,6 +949,519 @@ async def test_binding_creation_serializes_on_resource_lock(
             )
 
 
+async def test_session_activation_persists_ordered_delivery_and_activation(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """One trigger reuses its activation and becomes non-barrier after activation."""
+    del latest_db_schema
+    suffix = uuid4().hex[:8]
+    workspace_id: str | None = None
+    try:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+            workspace_id = await _workspace(session, f"activation-{suffix}")
+            agent = await _agent(session, workspace_id, f"activation-{suffix}")
+            repository = ExternalChannelRepository()
+            work_repository = ExternalChannelWorkRepository()
+            connection = await repository.create_connection(
+                session,
+                _connection_create(
+                    workspace_id,
+                    provider_app_id=f"AA{suffix}",
+                    provider_tenant_id=f"TA{suffix}",
+                ),
+            )
+            route = await repository.create_agent_route(
+                session,
+                _route_create(
+                    connection.id,
+                    agent.id,
+                    mode=ExternalChannelAppMode.SINGLE,
+                ),
+            )
+            resource = await _resource(
+                session,
+                repository,
+                connection_id=connection.id,
+                key=f"activation-{suffix}",
+            )
+            agent_session = await AgentSessionRepository().create(
+                session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent.id,
+                    title=None,
+                ),
+            )
+            binding = await repository.create_binding_idempotent(
+                session,
+                ExternalChannelBindingCreate(
+                    resource_id=resource.id,
+                    route_id=route.id,
+                    agent_session_id=agent_session.id,
+                    disconnected_at=None,
+                    disconnect_reason=None,
+                ),
+                expected_access_request_id=None,
+            )
+            position = await repository.create_conversation_position_idempotent(
+                session,
+                ExternalChannelConversationPositionCreate(
+                    connection_id=connection.id,
+                    scope_kind=ExternalChannelConversationScopeKind.THREAD,
+                    provider_channel_id=f"C{suffix}",
+                    provider_thread_key=f"T{suffix}",
+                    read_through_position=None,
+                ),
+            )
+            session_link_delivery = await repository.create_delivery_attempt_idempotent(
+                session,
+                ExternalChannelDeliveryAttemptCreate(
+                    origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                    origin_id=binding.id,
+                    channel_action_id=None,
+                    binding_id=binding.id,
+                    operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                    request_payload={"control_kind": "session_link"},
+                    status=ExternalChannelDeliveryStatus.PENDING,
+                    provider_message_key=None,
+                    error_kind=None,
+                    error_summary=None,
+                    attempted_at=None,
+                    completed_at=None,
+                ),
+            )
+            tracker_delivery = await repository.create_delivery_attempt_idempotent(
+                session,
+                ExternalChannelDeliveryAttemptCreate(
+                    origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                    origin_id=binding.id,
+                    channel_action_id=None,
+                    binding_id=binding.id,
+                    operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+                    request_payload={"control_kind": "initial_progress"},
+                    status=ExternalChannelDeliveryStatus.PENDING,
+                    provider_message_key=None,
+                    error_kind=None,
+                    error_summary=None,
+                    attempted_at=None,
+                    completed_at=None,
+                ),
+            )
+            mailbox_item = RDBMailboxItem(
+                session_id=agent_session.id,
+                kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
+                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                sender_user_id=None,
+                idempotency_key=f"activation-{suffix}",
+                payload={},
+            )
+            session.add(mailbox_item)
+            await session.flush()
+            create = ExternalChannelSessionActivationCreate(
+                connection_id=connection.id,
+                conversation_position_id=position.id,
+                binding_id=binding.id,
+                agent_session_id=agent_session.id,
+                trigger_provider_message_key=f"message-{suffix}",
+                trigger_position="00000000000000000001",
+                range_start_position=None,
+                state=ExternalChannelSessionActivationState.INITIALIZING,
+                mailbox_item_id=mailbox_item.id,
+                failure_kind=None,
+                failure_summary=None,
+                activated_at=None,
+                blocked_at=None,
+            )
+            activation = await repository.create_session_activation_idempotent(
+                session,
+                create,
+            )
+            duplicate = await repository.create_session_activation_idempotent(
+                session,
+                create,
+            )
+            await repository.create_session_activation_delivery_idempotent(
+                session,
+                ExternalChannelSessionActivationDeliveryCreate(
+                    activation_id=activation.id,
+                    ordinal=0,
+                    delivery_attempt_id=session_link_delivery.id,
+                ),
+            )
+            await repository.create_session_activation_delivery_idempotent(
+                session,
+                ExternalChannelSessionActivationDeliveryCreate(
+                    activation_id=activation.id,
+                    ordinal=1,
+                    delivery_attempt_id=tracker_delivery.id,
+                ),
+            )
+            await session.commit()
+
+        assert duplicate.id == activation.id
+        async with AsyncSession(rdb_engine) as verification:
+            barrier = await repository.get_open_session_activation_by_position(
+                verification,
+                conversation_position_id=position.id,
+            )
+            linked = await repository.list_session_activation_deliveries(
+                verification,
+                activation_id=activation.id,
+            )
+            assert barrier is not None
+            assert barrier.id == activation.id
+            assert [item.delivery_attempt_id for item in linked] == [
+                session_link_delivery.id,
+                tracker_delivery.id,
+            ]
+            pending_delivery_ids = (
+                await work_repository.list_pending_provider_control_delivery_ids(
+                    verification,
+                    limit=20,
+                )
+            )
+            assert session_link_delivery.id in pending_delivery_ids
+            assert tracker_delivery.id not in pending_delivery_ids
+            visible = await AgentSessionRepository().list_active_unread_by_agent_id(
+                verification,
+                agent.id,
+                auto_archive_ttl_days=30,
+            )
+            detail = await AgentSessionRepository().get_with_unread_terminal_run_by_id(
+                verification,
+                agent_session.id,
+            )
+            assert [item.session.id for item in visible] == [agent_session.id]
+            assert detail is not None
+            assert detail.session.id == agent_session.id
+            assert detail.session.run_state is AgentSessionRunState.IDLE
+            assert barrier.mailbox_item_id == mailbox_item.id
+            assert (
+                await repository.get_session_activation_state_by_mailbox_item_id(
+                    verification,
+                    mailbox_item_id=mailbox_item.id,
+                )
+                is ExternalChannelSessionActivationState.INITIALIZING
+            )
+            assert (
+                await repository.activate_session_activation(
+                    verification,
+                    activation_id=activation.id,
+                    mailbox_item_id=mailbox_item.id,
+                    activated_at=_at(1),
+                )
+                is None
+            )
+            started = await repository.start_delivery_attempt(
+                verification,
+                delivery_attempt_id=session_link_delivery.id,
+                attempted_at=_at(1),
+            )
+            assert started is not None
+            delivered = await repository.finish_delivery_attempt(
+                verification,
+                delivery_attempt_id=session_link_delivery.id,
+                status=ExternalChannelDeliveryStatus.DELIVERED,
+                provider_message_key=f"provider-{suffix}",
+                error_kind=None,
+                error_summary=None,
+                completed_at=_at(2),
+            )
+            assert delivered is not None
+            pending_delivery_ids = (
+                await work_repository.list_pending_provider_control_delivery_ids(
+                    verification,
+                    limit=20,
+                )
+            )
+            assert tracker_delivery.id in pending_delivery_ids
+            tracker_started = await repository.start_delivery_attempt(
+                verification,
+                delivery_attempt_id=tracker_delivery.id,
+                attempted_at=_at(2),
+            )
+            assert tracker_started is not None
+            tracker_delivered = await repository.finish_delivery_attempt(
+                verification,
+                delivery_attempt_id=tracker_delivery.id,
+                status=ExternalChannelDeliveryStatus.DELIVERED,
+                provider_message_key=f"tracker-{suffix}",
+                error_kind=None,
+                error_summary=None,
+                completed_at=_at(3),
+            )
+            assert tracker_delivered is not None
+            other_session = await AgentSessionRepository().create(
+                verification,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent.id,
+                    title=None,
+                ),
+            )
+            other_mailbox_item = RDBMailboxItem(
+                session_id=other_session.id,
+                kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
+                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                sender_user_id=None,
+                idempotency_key=f"other-activation-{suffix}",
+                payload={},
+            )
+            verification.add(other_mailbox_item)
+            await verification.flush()
+            assert (
+                await repository.activate_session_activation(
+                    verification,
+                    activation_id=activation.id,
+                    mailbox_item_id=other_mailbox_item.id,
+                    activated_at=_at(2),
+                )
+                is None
+            )
+            activated = await repository.activate_session_activation(
+                verification,
+                activation_id=activation.id,
+                mailbox_item_id=mailbox_item.id,
+                activated_at=_at(4),
+            )
+            await verification.commit()
+            assert activated is not None
+            assert activated.state is ExternalChannelSessionActivationState.ACTIVATED
+
+        async with AsyncSession(rdb_engine) as verification:
+            assert (
+                await repository.get_open_session_activation_by_position(
+                    verification,
+                    conversation_position_id=position.id,
+                )
+                is None
+            )
+            await verification.execute(
+                sa.delete(RDBMailboxItem).where(RDBMailboxItem.id == mailbox_item.id)
+            )
+            await verification.commit()
+
+        async with AsyncSession(rdb_engine) as verification:
+            consumed = await repository.lock_session_activation(
+                verification,
+                activation_id=activation.id,
+            )
+            assert consumed is not None
+            assert consumed.state is ExternalChannelSessionActivationState.ACTIVATED
+            assert consumed.mailbox_item_id == mailbox_item.id
+    finally:
+        if workspace_id is not None:
+            await _cleanup_committed_workspace(
+                rdb_engine,
+                workspace_id=workspace_id,
+            )
+
+
+@pytest.mark.parametrize(
+    "termination_path",
+    ("management", "provider_loss", "provider_uninstall", "activation_block"),
+)
+async def test_terminal_activation_paths_block_initializing_provider_delivery(
+    rdb_session: AsyncSession,
+    termination_path: str,
+) -> None:
+    """Every terminal activation boundary fences its retained provider delivery."""
+    suffix = f"{termination_path}-{uuid4().hex[:8]}"
+    workspace_id = await _workspace(rdb_session, f"activation-terminal-{suffix}")
+    agent = await _agent(rdb_session, workspace_id, f"activation-terminal-{suffix}")
+    repository = ExternalChannelRepository()
+    work_repository = ExternalChannelWorkRepository()
+    connection = await repository.create_connection(
+        rdb_session,
+        _connection_create(
+            workspace_id,
+            provider_app_id=f"AT{suffix}",
+            provider_tenant_id=f"TT{suffix}",
+        ),
+    )
+    route = await repository.create_agent_route(
+        rdb_session,
+        _route_create(
+            connection.id,
+            agent.id,
+            mode=ExternalChannelAppMode.SINGLE,
+        ),
+    )
+    resource = await _resource(
+        rdb_session,
+        repository,
+        connection_id=connection.id,
+        key=f"activation-terminal-{suffix}",
+    )
+    agent_session = await AgentSessionRepository().create(
+        rdb_session,
+        AgentSessionCreate(
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            title=None,
+        ),
+    )
+    binding = await repository.create_binding_idempotent(
+        rdb_session,
+        ExternalChannelBindingCreate(
+            resource_id=resource.id,
+            route_id=route.id,
+            agent_session_id=agent_session.id,
+            disconnected_at=None,
+            disconnect_reason=None,
+        ),
+        expected_access_request_id=None,
+    )
+    position = await repository.create_conversation_position_idempotent(
+        rdb_session,
+        ExternalChannelConversationPositionCreate(
+            connection_id=connection.id,
+            scope_kind=ExternalChannelConversationScopeKind.THREAD,
+            provider_channel_id=f"C{suffix}",
+            provider_thread_key=f"T{suffix}",
+            read_through_position=None,
+        ),
+    )
+    mailbox_item = RDBMailboxItem(
+        session_id=agent_session.id,
+        kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
+        scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+        requested_model_target_label=None,
+        requested_reasoning_effort=None,
+        sender_user_id=None,
+        idempotency_key=f"activation-terminal-{suffix}",
+        payload={},
+    )
+    rdb_session.add(mailbox_item)
+    await rdb_session.flush()
+    activation = await repository.create_session_activation_idempotent(
+        rdb_session,
+        ExternalChannelSessionActivationCreate(
+            connection_id=connection.id,
+            conversation_position_id=position.id,
+            binding_id=binding.id,
+            agent_session_id=agent_session.id,
+            trigger_provider_message_key=f"message-{suffix}",
+            trigger_position="00000000000000000001",
+            range_start_position=None,
+            state=ExternalChannelSessionActivationState.INITIALIZING,
+            mailbox_item_id=mailbox_item.id,
+            failure_kind=None,
+            failure_summary=None,
+            activated_at=None,
+            blocked_at=None,
+        ),
+    )
+    delivery = await repository.create_delivery_attempt_idempotent(
+        rdb_session,
+        ExternalChannelDeliveryAttemptCreate(
+            origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+            origin_id=binding.id,
+            channel_action_id=None,
+            binding_id=binding.id,
+            operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            request_payload={"control_kind": "session_link"},
+            status=ExternalChannelDeliveryStatus.PENDING,
+            provider_message_key=None,
+            error_kind=None,
+            error_summary=None,
+            attempted_at=None,
+            completed_at=None,
+        ),
+    )
+    await repository.create_session_activation_delivery_idempotent(
+        rdb_session,
+        ExternalChannelSessionActivationDeliveryCreate(
+            activation_id=activation.id,
+            ordinal=0,
+            delivery_attempt_id=delivery.id,
+        ),
+    )
+
+    if termination_path == "management":
+        binding_row = await rdb_session.get(RDBExternalChannelBinding, binding.id)
+        resource_row = await rdb_session.get(RDBExternalChannelResource, resource.id)
+        assert binding_row is not None
+        assert resource_row is not None
+        terminate = ExternalChannelManagementRepository()._terminate_binding  # pyright: ignore[reportPrivateUsage]
+        await terminate(
+            rdb_session,
+            binding=binding_row,
+            resource=resource_row,
+            now=_at(40),
+            reason="manager_disconnected",
+        )
+    elif termination_path == "provider_loss":
+        assert await repository.terminate_resource_for_provider_loss(
+            rdb_session,
+            resource_id=resource.id,
+            reason="provider_resource_lost",
+            now=_at(40),
+        )
+    elif termination_path == "provider_uninstall":
+        assert (
+            await repository.terminate_connection_for_provider_event(
+                rdb_session,
+                connection_id=connection.id,
+                status=ExternalChannelConnectionStatus.DISCONNECTED,
+                reason="app_uninstalled",
+                now=_at(40),
+                required_configuration_generation=None,
+                required_socket_lease_owner=None,
+                defer_provider_state_purge=True,
+            )
+            is not None
+        )
+    else:
+        blocked_activation = await repository.block_session_activation(
+            rdb_session,
+            activation_id=activation.id,
+            failure_kind="initial_delivery_unavailable",
+            failure_summary=("External Channel initialization became non-recoverable."),
+            blocked_at=_at(40),
+        )
+        assert blocked_activation is not None
+
+    blocked = await repository.lock_session_activation(
+        rdb_session,
+        activation_id=activation.id,
+    )
+    assert blocked is not None
+    assert blocked.state is ExternalChannelSessionActivationState.BLOCKED
+    assert blocked.mailbox_item_id == mailbox_item.id
+    assert blocked.failure_kind == (
+        "initial_delivery_unavailable"
+        if termination_path == "activation_block"
+        else "binding_disconnected"
+    )
+    pending_delivery_ids = (
+        await work_repository.list_pending_provider_control_delivery_ids(
+            rdb_session,
+            limit=20,
+        )
+    )
+    assert delivery.id not in pending_delivery_ids
+    assert (
+        await work_repository.start_delivery(
+            rdb_session,
+            delivery_attempt_id=delivery.id,
+            now=_at(41),
+        )
+        is None
+    )
+    terminal_delivery = await repository.lock_delivery_attempt(
+        rdb_session,
+        delivery_attempt_id=delivery.id,
+    )
+    assert terminal_delivery is not None
+    assert terminal_delivery.status is ExternalChannelDeliveryStatus.NOT_ATTEMPTED
+
+
 async def test_provider_control_settlement_follows_lifecycle_lock_order(
     rdb_engine: AsyncEngine,
     latest_db_schema: None,
@@ -1044,6 +1602,146 @@ async def test_provider_control_settlement_follows_lifecycle_lock_order(
         if settlement_task is not None and not settlement_task.done():
             settlement_task.cancel()
             await asyncio.gather(settlement_task, return_exceptions=True)
+        if workspace_id is not None:
+            await _cleanup_committed_workspace(
+                rdb_engine,
+                workspace_id=workspace_id,
+            )
+
+
+async def test_provider_control_start_follows_lifecycle_lock_order(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """Session purge can finish while delivery start waits on connection authority."""
+    del latest_db_schema
+    suffix = uuid4().hex[:8]
+    workspace_id: str | None = None
+    start_task: asyncio.Task[object] | None = None
+    try:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup:
+            workspace_id = await _workspace(setup, f"start-lock-{suffix}")
+            agent = await _agent(setup, workspace_id, f"start-lock-{suffix}")
+            repository = ExternalChannelRepository()
+            connection = await repository.create_connection(
+                setup,
+                _connection_create(
+                    workspace_id,
+                    provider_app_id=f"AL{suffix}",
+                    provider_tenant_id=f"TL{suffix}",
+                ),
+            )
+            route = await repository.create_agent_route(
+                setup,
+                _route_create(
+                    connection.id,
+                    agent.id,
+                    mode=ExternalChannelAppMode.SINGLE,
+                ),
+            )
+            resource = await _resource(
+                setup,
+                repository,
+                connection_id=connection.id,
+                key=f"start-lock-{suffix}",
+            )
+            agent_session = await AgentSessionRepository().create(
+                setup,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent.id,
+                    title=None,
+                ),
+            )
+            binding = await repository.create_binding_idempotent(
+                setup,
+                ExternalChannelBindingCreate(
+                    resource_id=resource.id,
+                    route_id=route.id,
+                    agent_session_id=agent_session.id,
+                    disconnected_at=None,
+                    disconnect_reason=None,
+                ),
+                expected_access_request_id=None,
+            )
+            attempt = RDBExternalChannelDeliveryAttempt(
+                origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
+                origin_id="manager-operation-1",
+                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                request_payload={
+                    "channel_id": "C1",
+                    "thread_ts": "1.000001",
+                    "text": "Control",
+                },
+                status=ExternalChannelDeliveryStatus.PENDING,
+                channel_action_id=None,
+                binding_id=binding.id,
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+                attempted_at=None,
+                completed_at=None,
+            )
+            setup.add(attempt)
+            await setup.commit()
+
+        work_repository = ExternalChannelWorkRepository()
+        lifecycle_repository = ExternalChannelLifecycleRepository()
+        async with AsyncSession(rdb_engine) as authority_session:
+            assert await authority_session.scalar(
+                sa.select(RDBExternalChannelConnection)
+                .where(RDBExternalChannelConnection.id == connection.id)
+                .with_for_update()
+            )
+
+            async def start_delivery() -> object:
+                async with AsyncSession(rdb_engine) as start_session:
+                    result = await work_repository.start_delivery(
+                        start_session,
+                        delivery_attempt_id=attempt.id,
+                        now=_at(2),
+                    )
+                    await start_session.commit()
+                    return result
+
+            start_task = asyncio.create_task(start_delivery())
+            await asyncio.sleep(0.1)
+            assert not start_task.done()
+
+            async def purge_session() -> ExternalChannelPurgePreparation:
+                async with AsyncSession(rdb_engine) as purge_session:
+                    assert await purge_session.scalar(
+                        sa.select(RDBAgentSession)
+                        .where(RDBAgentSession.id == agent_session.id)
+                        .with_for_update()
+                    )
+                    result = await lifecycle_repository.prepare_session_tree_purge(
+                        purge_session,
+                        session_ids=[agent_session.id],
+                        now=_at(3),
+                    )
+                    await purge_session.commit()
+                    return result
+
+            purged = await asyncio.wait_for(purge_session(), timeout=5)
+            assert not start_task.done()
+            await authority_session.commit()
+            started = await asyncio.wait_for(start_task, timeout=5)
+
+        assert purged.not_attempted_delivery_count == 1
+        assert started is None
+        async with AsyncSession(rdb_engine) as verification:
+            stored = await verification.get(
+                RDBExternalChannelDeliveryAttempt,
+                attempt.id,
+            )
+            assert stored is not None
+            assert stored.status is ExternalChannelDeliveryStatus.NOT_ATTEMPTED
+            assert stored.error_kind == "PurgeNotAttempted"
+    finally:
+        if start_task is not None and not start_task.done():
+            start_task.cancel()
+            await asyncio.gather(start_task, return_exceptions=True)
         if workspace_id is not None:
             await _cleanup_committed_workspace(
                 rdb_engine,

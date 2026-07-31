@@ -16,9 +16,9 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-31 | 59 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-29 | 134 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-31 | 32 |
-| [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-28 | 13 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-31 | 136 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-31 | 34 |
+| [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-07-31 | 14 |
@@ -31,16 +31,16 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-30 | 137 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-31 | 139 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-31 | 45 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-31 | 13 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
-| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-31 | 14 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-31 | 25 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-31 | 23 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-31 | 22 |
+| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-31 | 15 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-31 | 26 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-31 | 24 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-31 | 23 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-30 | 36 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
@@ -48,7 +48,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-26 | 11 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-24 | 25 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-31 | 15 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-31 | 16 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-07-18 | 3 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-07-19 | 6 |
 
@@ -62,6 +62,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Provider Tool Live Activity Historical Requirements Reconstruction](requirements/activity-260716-live-activity.md) | activity-260716 | 2026-07-16 | 2026-07-16 |
 | [Slack Activity Tracker Lifecycle Requirements](requirements/activity-260723-slack-tracker-lifecycle.md) | activity-260723 | 2026-07-23 | - |
 | [Generalize Admin-Managed System Configuration Historical Requirements Reconstruction](requirements/admin-260718-admin-configuration.md) | admin-260718 | 2026-07-18 | - |
+| [External Channel Session Activation Requirements](requirements/admission-260731-external-channel-session-activation.md) | admission-260731 | 2026-07-31 | - |
 | [Agent Default Projects for Automatic Sessions Requirements](requirements/agent-260724-automatic-session-default-projects.md) | agent-260724 | 2026-07-24 | 2026-07-24 |
 | [Release and Snapshot Artifact Policy Historical Requirements Reconstruction](requirements/and-260623-and-snapshot-artifact-policy.md) | and-260623 | 2026-06-23 | - |
 | [AgentSession Archive Policy Historical Requirements Reconstruction](requirements/archive-260626-archive-policy.md) | archive-260626 | 2026-06-26 | - |
@@ -414,6 +415,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Provider Tool Live Activity Historical Decision Reconstruction](adr/activity-260716-live-activity.md)
 - [Slack Activity Tracker Lifecycle](adr/activity-260723-slack-tracker-lifecycle.md)
 - [Generalize Admin-Managed System Configuration](adr/admin-260718-admin-configuration.md)
+- [External Channel Session Activation](adr/admission-260731-external-channel-session-activation.md)
 - [Agent Default Projects for Automatic Sessions](adr/agent-260724-automatic-session-default-projects.md)
 - [Release and Snapshot Artifact Policy](adr/and-260623-and-snapshot-artifact-policy.md)
 - [AgentSession Archive Policy](adr/archive-260626-archive-policy.md)

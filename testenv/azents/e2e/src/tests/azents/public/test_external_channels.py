@@ -25,6 +25,7 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from azentspublicclient.exceptions import ApiException
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
+from azentspublicclient.models.agent_session_run_state import AgentSessionRunState
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.connection_access_policy_request import (
@@ -304,6 +305,26 @@ def _discord_provider_state(discord_provider_fake_url: str) -> dict[str, object]
     )
     response.raise_for_status()
     return cast(dict[str, object], response.json())
+
+
+def _successful_session_paths(provider_state: dict[str, object]) -> list[str]:
+    """Return sanitized Session routes from successful provider controls."""
+    deliveries = provider_state.get("deliveries")
+    if not isinstance(deliveries, list):
+        return []
+    paths: list[str] = []
+    for raw_delivery in cast(list[object], deliveries):
+        if not isinstance(raw_delivery, dict):
+            continue
+        delivery = cast(dict[str, object], raw_delivery)
+        path = delivery.get("session_path")
+        if delivery.get("outcome") in {
+            "delivered",
+            "created",
+            "duplicate",
+        } and isinstance(path, str):
+            paths.append(path)
+    return paths
 
 
 def _external_channel_input_evidence(
@@ -816,6 +837,18 @@ def test_http_admission_unknown_participant_and_approval_journey(
     )
     assert len(bindings.items) == 1
     assert bindings.grants == []
+    chat_api = ChatV1Api(public_api_client)
+    sessions = chat_api.chat_v1_list_agent_sessions(
+        agent_id=agent_id,
+        _headers=headers,
+    )
+    assert decided.agent_session_id in [session.id for session in sessions.items]
+    detail = chat_api.chat_v1_get_agent_session(
+        agent_id=agent_id,
+        session_id=decided.agent_session_id,
+        _headers=headers,
+    )
+    assert detail.id == decided.agent_session_id
     agent_access = external_api.external_channel_v1_list_agent_access(
         agent_id=agent_id,
         handle=handle,
@@ -871,6 +904,9 @@ def test_http_admission_unknown_participant_and_approval_journey(
     # delivers the Session link followed by the initial provider-native work progress.
     assert typed_counts["chat.postMessage"] == 3
     assert typed_counts["chat.delete"] == 1
+    assert _successful_session_paths(provider_state) == [
+        f"/w/{handle}/agents/{agent_id}/sessions/{decided.agent_session_id}"
+    ]
     rendered_state = str(provider_state)
     assert _BOT_TOKEN not in rendered_state
     assert _SIGNING_SECRET not in rendered_state
@@ -908,6 +944,180 @@ def test_http_admission_unknown_participant_and_approval_journey(
         interval=0.2,
         message="Slack uninstall did not remove the connection from active management",
     )
+
+
+def test_http_initial_delivery_failure_retains_nonexecuting_session(
+    request: pytest.FixtureRequest,
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    azents_engine_worker_container: Container,
+    slack_provider_fake_url: str,
+) -> None:
+    """A terminal initial delivery keeps one visible Session without execution."""
+    del azents_engine_worker_container
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    root_timestamp = f"{int(time.time()) - 60}.000100"
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/configure",
+        json={
+            "history_pages": [
+                [
+                    {
+                        "user": "U-EXTERNAL",
+                        "ts": root_timestamp,
+                        "text": "Retain this invocation without executing it.",
+                    }
+                ]
+            ],
+            "delivery_scenarios": {
+                "chat.postMessage": "failed",
+                "chat.update": "delivered",
+                "chat.delete": "delivered",
+            },
+        },
+        timeout=5,
+    ).raise_for_status()
+    token, _, handle, agent_id = _create_agent(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+        runtime_profile_provider_id=None,
+        shell_enabled=False,
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    external_api = ExternalChannelV1Api(public_api_client)
+    setup = external_api.external_channel_v1_setup_slack_connection(
+        agent_id=agent_id,
+        handle=handle,
+        slack_connection_setup_request=SlackConnectionSetupRequest(
+            app_id=_APP_ID,
+            transport=ExternalChannelTransport.HTTP,
+            credentials=SlackConnectionCredentials(
+                bot_token=_BOT_TOKEN,
+                signing_secret=_SIGNING_SECRET,
+                app_token=None,
+            ),
+        ),
+        _headers=headers,
+    )
+
+    def disconnect_connection() -> None:
+        external_api.external_channel_v1_disconnect_connection(
+            agent_id=agent_id,
+            connection_id=setup.connection.id,
+            handle=handle,
+            _headers=headers,
+        )
+
+    request.addfinalizer(disconnect_connection)
+    external_api.external_channel_v1_update_connection_access_policy(
+        agent_id=agent_id,
+        connection_id=setup.connection.id,
+        handle=handle,
+        connection_access_policy_request=ConnectionAccessPolicyRequest(
+            open_access_enabled=True,
+        ),
+        _headers=headers,
+    )
+    event_body = json.dumps(
+        {
+            "type": "event_callback",
+            "event_id": f"Ev-{unique()}",
+            "event_time": int(time.time()),
+            "api_app_id": _APP_ID,
+            "team_id": _TEAM_ID,
+            "event": {
+                "type": "app_mention",
+                "channel": _CHANNEL_ID,
+                "channel_type": "channel",
+                "user": "U-EXTERNAL",
+                "text": "<@B-E2E> retain without execution",
+                "ts": root_timestamp,
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+    callback_url = f"{azents_public_server_url}/external-channel/v1/slack/events"
+    first = requests.post(
+        callback_url,
+        data=event_body,
+        headers=_signed_headers(event_body),
+        timeout=5,
+    )
+    assert first.status_code == 200
+
+    chat_api = ChatV1Api(public_api_client)
+
+    def retained_binding() -> tuple[Any, Any] | None:
+        sessions = chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        )
+        for session in sessions.items:
+            projection = external_api.external_channel_v1_list_session_channels(
+                agent_id=agent_id,
+                session_id=session.id,
+                handle=handle,
+                _headers=headers,
+            )
+            if len(projection.items) == 1:
+                return session, projection.items[0]
+        return None
+
+    retained_session, retained_channel = cast(
+        tuple[Any, Any],
+        wait_until(
+            retained_binding,
+            timeout=15,
+            interval=0.2,
+            message="Failed initialization did not retain one visible Session",
+        ),
+    )
+    assert retained_session.agent_id == agent_id
+    assert retained_channel.provider.value == "slack"
+    detail = chat_api.chat_v1_get_agent_session(
+        agent_id=agent_id,
+        session_id=retained_session.id,
+        _headers=headers,
+    )
+    assert detail.id == retained_session.id
+    assert detail.run_state is AgentSessionRunState.IDLE
+    retained_input = _external_channel_input_evidence(
+        public_server_url=azents_public_server_url,
+        token=token,
+        session_id=retained_session.id,
+    )
+    assert len(retained_input) == 1
+    assert retained_input[0]["body"] == ("Retain this invocation without executing it.")
+
+    duplicate = requests.post(
+        callback_url,
+        data=event_body,
+        headers=_signed_headers(event_body),
+        timeout=5,
+    )
+    assert duplicate.status_code == 200
+    time.sleep(2)
+    provider_state = _provider_state(slack_provider_fake_url)
+    request_counts = cast(dict[str, int], provider_state["request_counts"])
+    assert request_counts["chat.postMessage"] == 1
+    assert _successful_session_paths(provider_state) == []
+    detail = chat_api.chat_v1_get_agent_session(
+        agent_id=agent_id,
+        session_id=retained_session.id,
+        _headers=headers,
+    )
+    assert detail.run_state is AgentSessionRunState.IDLE
+    duplicate_input = _external_channel_input_evidence(
+        public_server_url=azents_public_server_url,
+        token=token,
+        session_id=retained_session.id,
+    )
+    assert duplicate_input == retained_input
 
 
 def test_connection_update_and_repeated_disconnect(
@@ -2037,7 +2247,10 @@ def test_external_channel_file_transfer_journey(
             item.get("binding") == binding_id
             and item.get("marker_present") is True
             and item.get("locator_count") == 2
-            and item.get("search_tool_available") is True
+            and item.get("search_tool_available") is False
+            and item.get("download_tool_available") is True
+            and item.get("process_tool_available") is True
+            and item.get("channel_action_tool_available") is True
             and item.get("stage") == "initial"
             for item in evidence
         ), evidence
@@ -2059,7 +2272,6 @@ def test_external_channel_file_transfer_journey(
         stages = [item.get("stage") for item in evidence]
         expected_stages = [
             "initial",
-            "after_search",
             "after_download",
             "after_process",
         ]
@@ -2069,10 +2281,11 @@ def test_external_channel_file_transfer_journey(
             index = stages.index(stage)
             assert index > previous_index, evidence
             previous_index = index
-        after_search = evidence[stages.index("after_search")]
-        assert after_search.get("download_tool_available") is True, evidence
-        assert after_search.get("process_tool_available") is True, evidence
-        assert after_search.get("channel_action_tool_available") is True, evidence
+        initial = evidence[stages.index("initial")]
+        assert initial.get("search_tool_available") is False, evidence
+        assert initial.get("download_tool_available") is True, evidence
+        assert initial.get("process_tool_available") is True, evidence
+        assert initial.get("channel_action_tool_available") is True, evidence
         for item in evidence:
             tool_outputs = cast(
                 dict[str, dict[str, object]],
@@ -2126,6 +2339,26 @@ def test_external_channel_file_transfer_journey(
         interval=0.2,
         message="Final Channel Action tool execution did not complete",
     )
+
+    def completed_file_response() -> list[dict[str, object]]:
+        evidence = [
+            item
+            for item in _file_request_evidence(openai_proxy_url)
+            if item.get("binding") == binding_id
+        ]
+        assert sum(item.get("stage") == "after_finish" for item in evidence) == 1, (
+            evidence
+        )
+        return evidence
+
+    wait_until(
+        completed_file_response,
+        timeout=30,
+        interval=0.2,
+        message="Final Channel Action result did not reach the model",
+    )
+    time.sleep(2)
+    completed_file_response()
 
     def file_completion_delivery() -> dict[str, object]:
         deliveries = _provider_state(slack_provider_fake_url).get("deliveries")
@@ -2296,6 +2529,32 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
         "bot_token",
         "signing_secret",
     }
+    external_api.external_channel_v1_update_connection_access_policy(
+        agent_id=agent_id,
+        connection_id=setup.connection.id,
+        handle=handle,
+        connection_access_policy_request=ConnectionAccessPolicyRequest(
+            open_access_enabled=True,
+        ),
+        _headers=headers,
+    )
+    chat_api = ChatV1Api(public_api_client)
+
+    def socket_binding() -> tuple[Any, Any] | None:
+        sessions = chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        )
+        for session in sessions.items:
+            projection = external_api.external_channel_v1_list_session_channels(
+                agent_id=agent_id,
+                session_id=session.id,
+                handle=handle,
+                _headers=headers,
+            )
+            if len(projection.items) == 1:
+                return session, projection.items[0]
+        return None
 
     def socket_acknowledged() -> bool:
         socket_state = _provider_state(slack_provider_fake_url).get("socket")
@@ -2314,6 +2573,33 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
             interval=0.2,
             message="Socket Mode envelope was not acknowledged after admission",
         )
+        socket_session, socket_channel = cast(
+            tuple[Any, Any],
+            wait_until(
+                socket_binding,
+                timeout=15,
+                interval=0.2,
+                message="Socket Mode invocation did not retain one Session binding",
+            ),
+        )
+        assert socket_session.agent_id == agent_id
+        assert socket_channel.provider.value == "slack"
+        detail = chat_api.chat_v1_get_agent_session(
+            agent_id=agent_id,
+            session_id=socket_session.id,
+            _headers=headers,
+        )
+        assert detail.id == socket_session.id
+        input_evidence = _external_channel_input_evidence(
+            public_server_url=azents_public_server_url,
+            token=token,
+            session_id=socket_session.id,
+        )
+        assert len(input_evidence) == 1
+        assert input_evidence[0]["provider"] == "slack"
+        assert _successful_session_paths(_provider_state(slack_provider_fake_url)) == [
+            f"/w/{handle}/agents/{agent_id}/sessions/{socket_session.id}"
+        ]
 
         def reconnect_required_connection() -> object | None:
             connections = external_api.external_channel_v1_list_connections(
@@ -2724,6 +3010,12 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
 
     assert session.agent_id == agent_id
     assert binding.provider.value == "discord"
+    detail = chat_api.chat_v1_get_agent_session(
+        agent_id=agent_id,
+        session_id=session.id,
+        _headers=headers,
+    )
+    assert detail.id == session.id
     input_evidence = _external_channel_input_evidence(
         public_server_url=azents_public_server_url,
         token=token,
@@ -2739,6 +3031,9 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
         f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
     )
     state = _discord_provider_state(discord_provider_fake_url)
+    assert _successful_session_paths(state) == [
+        f"/w/{handle}/agents/{agent_id}/sessions/{session.id}"
+    ]
     request_counts = cast(dict[str, int], state["request_counts"])
     assert request_counts["create_thread"] >= 1
     # Thread reconciliation runs before create; canonical history runs after create.
@@ -2974,6 +3269,86 @@ def test_discord_message_command_selector_and_component_journey(
         and delivery.get("channel_id") == thread_channel_id
         for delivery in deliveries
     )
+    chat_api = ChatV1Api(public_api_client)
+
+    def selected_binding() -> tuple[Any, Any] | None:
+        sessions = chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_ids[1],
+            _headers=headers,
+        )
+        for session in sessions.items:
+            projection = external_api.external_channel_v1_list_session_channels(
+                agent_id=agent_ids[1],
+                session_id=session.id,
+                handle=handle,
+                _headers=headers,
+            )
+            if (
+                len(projection.items) == 1
+                and projection.items[0].provider.value == "discord"
+            ):
+                return session, projection.items[0]
+        return None
+
+    selected_session, selected_channel = cast(
+        tuple[Any, Any],
+        wait_until(
+            selected_binding,
+            timeout=15,
+            interval=0.2,
+            message="Discord HTTP selector replay did not retain one Session binding",
+        ),
+    )
+    assert selected_session.agent_id == agent_ids[1]
+    assert selected_channel.provider.value == "discord"
+    detail = chat_api.chat_v1_get_agent_session(
+        agent_id=agent_ids[1],
+        session_id=selected_session.id,
+        _headers=headers,
+    )
+    assert detail.id == selected_session.id
+    input_evidence = cast(
+        list[dict[str, object]],
+        wait_until(
+            lambda: (
+                evidence
+                if len(
+                    evidence := _external_channel_input_evidence(
+                        public_server_url=azents_public_server_url,
+                        token=owner_token,
+                        session_id=selected_session.id,
+                    )
+                )
+                == 1
+                else None
+            ),
+            timeout=15,
+            interval=0.2,
+            message="Discord HTTP selector replay did not activate one mailbox input",
+        ),
+    )
+    assert input_evidence[0]["provider"] == "discord"
+    assert input_evidence[0]["body"] == source_content
+    expected_session_path = (
+        f"/w/{handle}/agents/{agent_ids[1]}/sessions/{selected_session.id}"
+    )
+    activation_state = cast(
+        dict[str, object],
+        wait_until(
+            lambda: (
+                provider_state
+                if expected_session_path
+                in _successful_session_paths(
+                    provider_state := _discord_provider_state(discord_provider_fake_url)
+                )
+                else None
+            ),
+            timeout=15,
+            interval=0.2,
+            message="Discord HTTP selector replay did not deliver the Session link",
+        ),
+    )
+    assert _successful_session_paths(activation_state) == [expected_session_path]
     assert source_content not in rendered
     assert _DISCORD_BOT_TOKEN not in rendered
     assert selector not in rendered

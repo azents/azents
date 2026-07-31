@@ -71,6 +71,7 @@ function isPendingMailboxEnvelope(
     return [
       "user_message",
       "goal_continuation",
+      "external_channel_continuation",
       "agent_message",
       "external_channel_message",
       "action_message",

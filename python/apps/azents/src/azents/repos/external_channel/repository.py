@@ -32,6 +32,7 @@ from azents.core.enums import (
     ExternalChannelResourceStatus,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
+    ExternalChannelSessionActivationState,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
@@ -54,8 +55,11 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelInteraction,
     RDBExternalChannelPrincipal,
     RDBExternalChannelResource,
+    RDBExternalChannelSessionActivation,
+    RDBExternalChannelSessionActivationDelivery,
     RDBExternalChannelWork,
 )
+from azents.rdb.models.mailbox_item import RDBMailboxItem
 
 from .data import (
     ExternalChannelAccessGrant,
@@ -89,6 +93,10 @@ from .data import (
     ExternalChannelPrincipalCreate,
     ExternalChannelResource,
     ExternalChannelResourceCreate,
+    ExternalChannelSessionActivation,
+    ExternalChannelSessionActivationCreate,
+    ExternalChannelSessionActivationDelivery,
+    ExternalChannelSessionActivationDeliveryCreate,
     ExternalChannelWork,
     ExternalChannelWorkCreate,
 )
@@ -122,6 +130,29 @@ _FORBIDDEN_INTERACTION_PROJECTION_VALUE_PATTERNS = (
     re.compile(r"(?i)^\s*cookie\s*:\s*\S+"),
 )
 _INTERACTION_OPAQUE_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/=@+-]*$")
+
+
+async def block_initializing_session_activations(
+    session: AsyncSession,
+    *,
+    binding_condition: sa.ColumnElement[bool],
+    now: datetime.datetime,
+) -> None:
+    """Block retained Session input after its binding becomes terminal."""
+    await session.execute(
+        sa.update(RDBExternalChannelSessionActivation)
+        .where(
+            binding_condition,
+            RDBExternalChannelSessionActivation.state
+            == ExternalChannelSessionActivationState.INITIALIZING,
+        )
+        .values(
+            state=ExternalChannelSessionActivationState.BLOCKED,
+            failure_kind="binding_disconnected",
+            failure_summary=("The binding disconnected before activation completed."),
+            blocked_at=now,
+        )
+    )
 
 
 class ExternalChannelRepository:
@@ -1310,6 +1341,13 @@ class ExternalChannelRepository:
             if binding.disconnected_at is None:
                 binding.disconnected_at = now
                 binding.disconnect_reason = reason
+        await block_initializing_session_activations(
+            session,
+            binding_condition=(
+                RDBExternalChannelSessionActivation.binding_id.in_(binding_ids)
+            ),
+            now=now,
+        )
         await session.execute(
             sa.update(RDBExternalChannelChannelDefault)
             .where(
@@ -2145,6 +2183,13 @@ class ExternalChannelRepository:
                 disconnect_reason=reason,
             )
         )
+        await block_initializing_session_activations(
+            session,
+            binding_condition=(
+                RDBExternalChannelSessionActivation.binding_id.in_(binding_ids)
+            ),
+            now=now,
+        )
         await session.execute(
             sa.update(RDBExternalChannelAccessRequest)
             .where(
@@ -2345,6 +2390,216 @@ class ExternalChannelRepository:
             ExternalChannelBinding,
             await session.get(RDBExternalChannelBinding, binding_id),
         )
+
+    async def create_session_activation_idempotent(
+        self,
+        session: AsyncSession,
+        create: ExternalChannelSessionActivationCreate,
+    ) -> ExternalChannelSessionActivation:
+        """Create or return one activation for a canonical provider trigger."""
+        rdb = await self._insert_or_lookup(
+            session,
+            RDBExternalChannelSessionActivation,
+            create,
+            lambda: session.scalar(
+                sa.select(RDBExternalChannelSessionActivation).where(
+                    RDBExternalChannelSessionActivation.conversation_position_id
+                    == create.conversation_position_id,
+                    RDBExternalChannelSessionActivation.trigger_provider_message_key
+                    == create.trigger_provider_message_key,
+                    RDBExternalChannelSessionActivation.trigger_position
+                    == create.trigger_position,
+                )
+            ),
+        )
+        activation = ExternalChannelSessionActivation.model_validate(rdb)
+        if (
+            activation.connection_id != create.connection_id
+            or activation.binding_id != create.binding_id
+            or activation.agent_session_id != create.agent_session_id
+            or activation.range_start_position != create.range_start_position
+            or activation.mailbox_item_id != create.mailbox_item_id
+        ):
+            raise ValueError("External Channel activation retry is incompatible.")
+        return activation
+
+    async def get_session_activation_state_by_mailbox_item_id(
+        self,
+        session: AsyncSession,
+        *,
+        mailbox_item_id: str,
+    ) -> ExternalChannelSessionActivationState | None:
+        """Return the durable execution gate for one canonical mailbox item."""
+        return await session.scalar(
+            sa.select(RDBExternalChannelSessionActivation.state).where(
+                RDBExternalChannelSessionActivation.mailbox_item_id == mailbox_item_id
+            )
+        )
+
+    async def get_open_session_activation_by_position(
+        self,
+        session: AsyncSession,
+        *,
+        conversation_position_id: str,
+    ) -> ExternalChannelSessionActivation | None:
+        """Fetch the current activation barrier for a conversation position."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelSessionActivation).where(
+                RDBExternalChannelSessionActivation.conversation_position_id
+                == conversation_position_id,
+                RDBExternalChannelSessionActivation.state.in_(
+                    (
+                        ExternalChannelSessionActivationState.INITIALIZING,
+                        ExternalChannelSessionActivationState.BLOCKED,
+                    )
+                ),
+            )
+        )
+        return self._as(ExternalChannelSessionActivation, rdb)
+
+    async def lock_session_activation(
+        self,
+        session: AsyncSession,
+        *,
+        activation_id: str,
+    ) -> ExternalChannelSessionActivation | None:
+        """Lock one activation before a terminal transition."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelSessionActivation)
+            .where(RDBExternalChannelSessionActivation.id == activation_id)
+            .with_for_update()
+        )
+        return self._as(ExternalChannelSessionActivation, rdb)
+
+    async def create_session_activation_delivery_idempotent(
+        self,
+        session: AsyncSession,
+        create: ExternalChannelSessionActivationDeliveryCreate,
+    ) -> ExternalChannelSessionActivationDelivery:
+        """Create or return one stable ordered activation delivery link."""
+        rdb = await self._insert_or_lookup(
+            session,
+            RDBExternalChannelSessionActivationDelivery,
+            create,
+            lambda: session.scalar(
+                sa.select(RDBExternalChannelSessionActivationDelivery).where(
+                    RDBExternalChannelSessionActivationDelivery.activation_id
+                    == create.activation_id,
+                    RDBExternalChannelSessionActivationDelivery.ordinal
+                    == create.ordinal,
+                )
+            ),
+        )
+        delivery = ExternalChannelSessionActivationDelivery.model_validate(rdb)
+        if delivery.delivery_attempt_id != create.delivery_attempt_id:
+            raise ValueError(
+                "External Channel activation delivery retry is incompatible."
+            )
+        return delivery
+
+    async def list_session_activation_deliveries(
+        self,
+        session: AsyncSession,
+        *,
+        activation_id: str,
+    ) -> tuple[ExternalChannelSessionActivationDelivery, ...]:
+        """List required provider deliveries in activation order."""
+        rows = await session.scalars(
+            sa.select(RDBExternalChannelSessionActivationDelivery)
+            .where(
+                RDBExternalChannelSessionActivationDelivery.activation_id
+                == activation_id
+            )
+            .order_by(RDBExternalChannelSessionActivationDelivery.ordinal)
+        )
+        return tuple(
+            ExternalChannelSessionActivationDelivery.model_validate(row) for row in rows
+        )
+
+    async def block_session_activation(
+        self,
+        session: AsyncSession,
+        *,
+        activation_id: str,
+        failure_kind: str,
+        failure_summary: str,
+        blocked_at: datetime.datetime,
+    ) -> ExternalChannelSessionActivation | None:
+        """Terminally block one initializing activation without execution."""
+        result = await session.execute(
+            sa.update(RDBExternalChannelSessionActivation)
+            .where(
+                RDBExternalChannelSessionActivation.id == activation_id,
+                RDBExternalChannelSessionActivation.state
+                == ExternalChannelSessionActivationState.INITIALIZING,
+            )
+            .values(
+                state=ExternalChannelSessionActivationState.BLOCKED,
+                failure_kind=failure_kind,
+                failure_summary=failure_summary,
+                blocked_at=blocked_at,
+            )
+            .returning(RDBExternalChannelSessionActivation)
+        )
+        return self._as(ExternalChannelSessionActivation, result.scalar_one_or_none())
+
+    async def activate_session_activation(
+        self,
+        session: AsyncSession,
+        *,
+        activation_id: str,
+        mailbox_item_id: str,
+        activated_at: datetime.datetime,
+    ) -> ExternalChannelSessionActivation | None:
+        """Mark one fully initialized activation executable exactly once."""
+        linked_deliveries = sa.select(
+            RDBExternalChannelSessionActivationDelivery.id
+        ).where(
+            RDBExternalChannelSessionActivationDelivery.activation_id == activation_id
+        )
+        incomplete_deliveries = (
+            sa.select(RDBExternalChannelSessionActivationDelivery.id)
+            .join(
+                RDBExternalChannelDeliveryAttempt,
+                RDBExternalChannelDeliveryAttempt.id
+                == RDBExternalChannelSessionActivationDelivery.delivery_attempt_id,
+            )
+            .where(
+                RDBExternalChannelSessionActivationDelivery.activation_id
+                == activation_id,
+                RDBExternalChannelDeliveryAttempt.status
+                != ExternalChannelDeliveryStatus.DELIVERED,
+            )
+        )
+        connected_binding = sa.select(RDBExternalChannelBinding.id).where(
+            RDBExternalChannelBinding.id
+            == RDBExternalChannelSessionActivation.binding_id,
+            RDBExternalChannelBinding.disconnected_at.is_(None),
+        )
+        owned_mailbox_item = sa.select(RDBMailboxItem.id).where(
+            RDBMailboxItem.id == mailbox_item_id,
+            RDBMailboxItem.session_id
+            == RDBExternalChannelSessionActivation.agent_session_id,
+            RDBExternalChannelSessionActivation.mailbox_item_id == mailbox_item_id,
+        )
+        result = await session.execute(
+            sa.update(RDBExternalChannelSessionActivation)
+            .where(
+                RDBExternalChannelSessionActivation.id == activation_id,
+                RDBExternalChannelSessionActivation.state
+                == ExternalChannelSessionActivationState.INITIALIZING,
+                sa.exists(linked_deliveries),
+                ~sa.exists(incomplete_deliveries),
+                sa.exists(connected_binding),
+                sa.exists(owned_mailbox_item),
+            )
+            .values(
+                state=ExternalChannelSessionActivationState.ACTIVATED,
+                activated_at=activated_at,
+            )
+            .returning(RDBExternalChannelSessionActivation)
+        )
+        return self._as(ExternalChannelSessionActivation, result.scalar_one_or_none())
 
     async def create_access_request_idempotent(
         self,

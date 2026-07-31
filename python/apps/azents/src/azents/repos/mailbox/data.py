@@ -49,6 +49,12 @@ class GoalContinuationMailboxPayload(MailboxPayloadBase):
     type: Literal["goal_continuation"]
 
 
+class ExternalChannelContinuationMailboxPayload(MailboxPayloadBase):
+    """Typed External Channel continuation mailbox payload."""
+
+    type: Literal["external_channel_continuation"]
+
+
 class AgentMessageMailboxPayload(MailboxPayloadBase):
     """Typed Agent-message mailbox payload."""
 
@@ -80,6 +86,7 @@ class TurnActionMailboxPayload(MailboxPayloadBase):
 MailboxEnvelopePayload: TypeAlias = Annotated[
     UserMessageMailboxPayload
     | GoalContinuationMailboxPayload
+    | ExternalChannelContinuationMailboxPayload
     | AgentMessageMailboxPayload
     | ExternalChannelInvocationMailboxPayload
     | TurnActionMailboxPayload,
@@ -114,6 +121,8 @@ def mailbox_payload_from_fields(
         return UserMessageMailboxPayload(type=kind.value, items=[item])
     if kind is MailboxItemKind.GOAL_CONTINUATION:
         return GoalContinuationMailboxPayload(type=kind.value, items=[item])
+    if kind is MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION:
+        return ExternalChannelContinuationMailboxPayload(type=kind.value, items=[item])
     if kind is MailboxItemKind.AGENT_MESSAGE:
         return AgentMessageMailboxPayload(type=kind.value, items=[item])
     if kind is MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION:

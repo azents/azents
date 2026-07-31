@@ -346,6 +346,7 @@ class ExternalChannelIngestionPreparation:
 
     position_id: str | None
     exclusive_start_position: str | None
+    activation_id: str | None
     immediate_outcome: ExternalChannelIngestionOutcome | None
     wake_mailbox_item_id: str | None
     wake_session_id: str | None
@@ -358,7 +359,7 @@ class ExternalChannelIngestionPreparation:
             raise ValueError("External Channel wake recovery identity is incomplete.")
 
 
-ExternalChannelAcceptanceStatus = Literal[
+ExternalChannelActivationStatus = Literal[
     "accepted",
     "duplicate",
     "position_mismatch",
@@ -366,7 +367,7 @@ ExternalChannelAcceptanceStatus = Literal[
 ]
 
 
-ExternalChannelStageStatus = Literal[
+ExternalChannelAdmissionStatus = Literal[
     "ready",
     "position_mismatch",
     "awaiting_selection",
@@ -377,13 +378,15 @@ ExternalChannelStageStatus = Literal[
 
 
 @dataclasses.dataclass(frozen=True)
-class ExternalChannelIngestionStage:
-    """Committed pre-mailbox state and ordered provider deliveries."""
+class ExternalChannelIngestionAdmission:
+    """Committed non-executing mailbox admission and provider deliveries."""
 
-    status: ExternalChannelStageStatus
+    status: ExternalChannelAdmissionStatus
     reason: ExternalChannelIngestionReason
+    activation_id: str | None
     binding_id: str | None
     session_id: str | None
+    mailbox_item_id: str | None
     required_delivery_attempt_ids: tuple[str, ...]
     control_delivery_attempt_id: str | None
     connection_id: str | None
@@ -391,7 +394,12 @@ class ExternalChannelIngestionStage:
     def __post_init__(self) -> None:
         """Require complete ready and non-ready stage identities."""
         ready = self.status == "ready"
-        if ready != (self.binding_id is not None and self.session_id is not None):
+        if ready != (
+            self.activation_id is not None
+            and self.binding_id is not None
+            and self.session_id is not None
+            and self.mailbox_item_id is not None
+        ):
             raise ValueError("External Channel ready stage identity is incomplete.")
         if ready != bool(self.required_delivery_attempt_ids):
             raise ValueError(
@@ -408,10 +416,10 @@ class ExternalChannelIngestionStage:
 
 
 @dataclasses.dataclass(frozen=True)
-class ExternalChannelIngestionAcceptance:
+class ExternalChannelIngestionActivation:
     """Final short-transaction acceptance result."""
 
-    status: ExternalChannelAcceptanceStatus
+    status: ExternalChannelActivationStatus
     reason: ExternalChannelIngestionReason
     mailbox_item_id: str | None
     session_id: str | None
@@ -453,37 +461,53 @@ class ExternalChannelIngestionStore(Protocol):
         """Load a content-free position/routing snapshot without provider I/O."""
         ...
 
-    async def stage(
+    async def admit(
         self,
         *,
         request: ExternalChannelIngestionRequest,
         preparation: ExternalChannelIngestionPreparation,
         history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
-    ) -> ExternalChannelIngestionStage:
-        """Commit binding and ordered provider-delivery intents."""
+    ) -> ExternalChannelIngestionAdmission:
+        """Commit binding, canonical mailbox input, and delivery intents."""
         ...
 
-    async def finalize(
+    async def activate(
         self,
         *,
         request: ExternalChannelIngestionRequest,
         preparation: ExternalChannelIngestionPreparation,
         history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
-        stage: ExternalChannelIngestionStage,
-    ) -> ExternalChannelIngestionAcceptance:
-        """Commit mailbox acceptance after required provider delivery."""
+        stage: ExternalChannelIngestionAdmission,
+    ) -> ExternalChannelIngestionActivation:
+        """Activate the retained mailbox input after required provider delivery."""
         ...
+
+    async def block(
+        self,
+        *,
+        stage: ExternalChannelIngestionAdmission,
+        reason: ExternalChannelIngestionReason,
+    ) -> None:
+        """Block one activation after a terminal initialization outcome."""
+        ...
+
+
+ExternalChannelRequiredDeliveryResult = Literal[
+    "delivered",
+    "pending",
+    "terminal_failure",
+]
 
 
 class ExternalChannelRequiredDeliveryCoordinator(Protocol):
-    """Synchronous ordered delivery boundary before mailbox acceptance."""
+    """Synchronous ordered delivery boundary before Session activation."""
 
     async def ensure_delivered(
         self,
         *,
         delivery_attempt_id: str,
         deadline: ExternalChannelOperationDeadline,
-    ) -> bool:
+    ) -> ExternalChannelRequiredDeliveryResult:
         """Attempt or observe one durable delivery through its terminal status."""
         ...
 
@@ -564,7 +588,7 @@ class ExternalChannelConversationIngestionService:
                             connection_id=None,
                         )
                     await lease.assert_owned()
-                    stage = await self.store.stage(
+                    stage = await self.store.admit(
                         request=request,
                         preparation=preparation,
                         history=history,
@@ -572,15 +596,33 @@ class ExternalChannelConversationIngestionService:
                     if stage.status == "position_mismatch":
                         continue
                     if stage.status != "ready":
-                        return self._finish_stage(stage)
+                        return self._finish_admission(stage)
                     for delivery_attempt_id in stage.required_delivery_attempt_ids:
-                        delivered = (
+                        delivery_result = (
                             await self.required_delivery_coordinator.ensure_delivered(
                                 delivery_attempt_id=delivery_attempt_id,
                                 deadline=request.deadline,
                             )
                         )
-                        if not delivered:
+                        if delivery_result == "terminal_failure":
+                            await self.store.block(
+                                stage=stage,
+                                reason=(
+                                    ExternalChannelIngestionReason.INITIAL_DELIVERY_UNAVAILABLE
+                                ),
+                            )
+                            return ExternalChannelIngestionOutcome(
+                                kind=(
+                                    ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION
+                                ),
+                                reason=(
+                                    ExternalChannelIngestionReason.INITIAL_DELIVERY_UNAVAILABLE
+                                ),
+                                mailbox_item_id=None,
+                                control_delivery_attempt_id=None,
+                                connection_id=None,
+                            )
+                        if delivery_result == "pending":
                             return ExternalChannelIngestionOutcome(
                                 kind=(
                                     ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE
@@ -605,7 +647,7 @@ class ExternalChannelConversationIngestionService:
                             control_delivery_attempt_id=None,
                             connection_id=None,
                         )
-                    acceptance = await self.store.finalize(
+                    acceptance = await self.store.activate(
                         request=request,
                         preparation=preparation,
                         history=history,
@@ -613,7 +655,12 @@ class ExternalChannelConversationIngestionService:
                     )
                     if acceptance.status == "position_mismatch":
                         continue
-                    return await self._finish_acceptance(
+                    if acceptance.status == "terminal_rejection":
+                        await self.store.block(
+                            stage=stage,
+                            reason=acceptance.reason,
+                        )
+                    return await self._finish_activation(
                         acceptance,
                         now=_utc_now(),
                         deadline=request.deadline,
@@ -652,9 +699,9 @@ class ExternalChannelConversationIngestionService:
                 connection_id=None,
             )
 
-    def _finish_stage(
+    def _finish_admission(
         self,
-        stage: ExternalChannelIngestionStage,
+        stage: ExternalChannelIngestionAdmission,
     ) -> ExternalChannelIngestionOutcome:
         """Translate one non-ready committed stage without mailbox dispatch."""
         match stage.status:
@@ -710,9 +757,9 @@ class ExternalChannelConversationIngestionService:
                 )
         return outcome
 
-    async def _finish_acceptance(
+    async def _finish_activation(
         self,
-        acceptance: ExternalChannelIngestionAcceptance,
+        acceptance: ExternalChannelIngestionActivation,
         *,
         now: datetime.datetime,
         deadline: ExternalChannelOperationDeadline,

@@ -51,7 +51,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-07-31
-spec_version: 22
+spec_version: 23
 ---
 
 # External Channel Provider Ingress
@@ -81,10 +81,11 @@ Slack sends HTTP callbacks to the single fixed endpoint
 5. The fully parsed event identity must match the selected connection before the
    authenticated request is projected into a typed, content-free trigger locator.
 6. Original message triggers enter synchronous conversation ingestion. Provider
-   history is read, and one canonical mailbox input plus provider-control intent are
-   committed before acknowledgement. The mailbox item is also pending wake-recovery
-   identity. Any returned control delivery is scheduled
-   as a post-acknowledgement background attempt.
+   history is read; a real idle Session, binding, canonical non-promotable mailbox
+   input, durable activation, and required provider-control intents are committed; the
+   Session link and Tracker are delivered in order; and only then are activation,
+   running state, and position advancement committed. The mailbox item is also pending
+   wake-recovery identity.
 7. Success is acknowledged only for a completed non-retryable outcome. A retryable
    coordination, history, position, or wake failure remains unacknowledged so the
    provider may retry.
@@ -228,21 +229,28 @@ the canonical message source nor a durable queue item.
    tokens, private URLs, and attachment bodies are not retained.
    Slack display-name and permalink enrichment is optional and starts only while a
    fixed reserve remains for required admission.
-4. A short staging transaction locks and revalidates the same authority, conversation
-   position, active resource, route/binding/selector, and access boundary. It creates
-   or reuses the connected binding, root Session, initial Channel Work, and
-   deterministic Session-link and progress delivery intents. PostgreSQL
-   compare-and-set restarts the read when another replica advanced the position.
-5. Outside a database transaction, the service settles the one-time Session-link
-   delivery followed by every initial progress part in stable order through the
-   shared one-attempt delivery fence. Only durable `delivered` results continue.
+4. A short admission transaction locks and revalidates the same authority,
+   conversation position, active resource, route/binding/selector, and access
+   boundary. It creates or reuses the connected binding, real idle root Session,
+   initial Channel Work, deterministic canonical mailbox input, durable Session
+   activation, and deterministic Session-link and progress delivery intents. The
+   activation binds the inert mailbox item and ordered delivery attempts to the exact
+   trigger. PostgreSQL compare-and-set restarts the read when another replica advanced
+   the position, and an incomplete activation is the durable barrier against a later
+   trigger and mailbox promotion.
+5. Outside a database transaction, the service settles the activation's one-time
+   Session-link delivery followed by every initial progress part in stable order
+   through the shared one-attempt delivery fence. Only durable `delivered` results
+   continue. A failed, unknown, missing, or not-attempted result retains the mailbox
+   item but blocks the activation without promotion or execution; deadline expiry
+   leaves initialization retryable.
 6. After required delivery and lock-ownership validation, the service rechecks the same
-   absolute transport deadline. Expiration fails retryably before mailbox admission. A
-   short final transaction then revalidates authority and the exact staged identities,
-   verifies every required delivery is still `delivered`, enqueues one deterministic
-   wake-session mailbox item containing the ordered provider-history projection, marks
-   the Session running, initializes thread position, and advances the conversation
-   position atomically.
+   absolute transport deadline. Expiration fails retryably before activation. A
+   short activation transaction then revalidates authority and the exact durable
+   activation identities, verifies every linked delivery is still `delivered` and the
+   retained mailbox item still belongs to the bound Session, transitions the
+   activation, marks the Session running, initializes thread position, and advances the
+   conversation position atomically.
 7. After commit, the service claims the pending mailbox item and sends routing-only
    `SessionWakeUp(session_id)`. A crash or broker failure leaves that item recoverable,
    so duplicate transport delivery can complete the same logical wake without creating
@@ -275,7 +283,9 @@ ingestion and directly apply fenced connection lifecycle handling. Provider-hist
 coordination, position, or wake failures return a retryable transport outcome. Invalid
 or stale authority and malformed replay boundaries fail closed. Committed selector,
 and approval controls may be attempted after their commit. Session-link and initial
-progress controls are required synchronous gates before mailbox admission.
+progress controls are required synchronous gates before mailbox promotion. Provider
+Session links use only `/w/{workspace}/agents/{agent}/sessions/{session}` and target
+the same durable Session exposed by existing Agent Session list and detail APIs.
 
 ## File Metadata Projection
 
@@ -319,6 +329,10 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-07-31** (spec_version 23) — Added durable ordered Session activation as
+  the shared binding-to-wake authority, blocked execution after terminal provider
+  initialization failure, and corrected Session navigation to the canonical `/w`
+  route.
 - **2026-07-31** (spec_version 22) — Split synchronous admission into staging,
   ordered required provider delivery, and mailbox finalization; reserved Slack
   optional-enrichment time for required work; and made `disconnected_at` the binding

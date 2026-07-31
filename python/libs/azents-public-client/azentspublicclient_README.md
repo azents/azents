@@ -558,6 +558,7 @@ Class | Method | HTTP request | Description
  - [PendingMailboxActionPresentation](azentspublicclient/docs/PendingMailboxActionPresentation.md)
  - [PendingMailboxAgentMessagePresentation](azentspublicclient/docs/PendingMailboxAgentMessagePresentation.md)
  - [PendingMailboxEnvelope](azentspublicclient/docs/PendingMailboxEnvelope.md)
+ - [PendingMailboxExternalChannelContinuationPresentation](azentspublicclient/docs/PendingMailboxExternalChannelContinuationPresentation.md)
  - [PendingMailboxExternalChannelPresentation](azentspublicclient/docs/PendingMailboxExternalChannelPresentation.md)
  - [PendingMailboxGoalContinuationPresentation](azentspublicclient/docs/PendingMailboxGoalContinuationPresentation.md)
  - [PendingMailboxItem](azentspublicclient/docs/PendingMailboxItem.md)

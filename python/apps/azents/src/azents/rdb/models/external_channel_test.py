@@ -72,6 +72,8 @@ def test_external_channel_model_metadata_excludes_retired_inbound_storage() -> N
         "external_channel_interactions",
         "external_channel_resources",
         "external_channel_bindings",
+        "external_channel_session_activations",
+        "external_channel_session_activation_deliveries",
         "external_channel_access_requests",
         "external_channel_access_grants",
         "external_channel_works",
@@ -123,6 +125,28 @@ def test_external_channel_installed_schema_matches_replacement_boundary(
             "external_channel_conversation_positions",
         } <= {foreign_key["referred_table"] for foreign_key in access_foreign_keys}
 
+        activation_foreign_keys = inspector.get_foreign_keys(
+            "external_channel_session_activations"
+        )
+        activation_columns = _columns_by_name(
+            inspector,
+            "external_channel_session_activations",
+        )
+        assert activation_columns["mailbox_item_id"]["nullable"] is False
+        assert {
+            "agent_sessions",
+            "external_channel_bindings",
+            "external_channel_conversation_positions",
+        } <= {foreign_key["referred_table"] for foreign_key in activation_foreign_keys}
+        assert "mailbox_items" not in {
+            foreign_key["referred_table"] for foreign_key in activation_foreign_keys
+        }
+        assert any(
+            foreign_key["constrained_columns"] == ["binding_id", "agent_session_id"]
+            and foreign_key["referred_columns"] == ["id", "agent_session_id"]
+            for foreign_key in activation_foreign_keys
+        )
+
         for table_name in model_tables:
             assert {
                 foreign_key["referred_table"]
@@ -140,5 +164,6 @@ def test_external_channel_installed_schema_matches_replacement_boundary(
                 ).scalars()
             )
         assert _RETIRED_ENUMS.isdisjoint(enum_names)
+        assert "external_channel_session_activation_state" in enum_names
     finally:
         engine.dispose()

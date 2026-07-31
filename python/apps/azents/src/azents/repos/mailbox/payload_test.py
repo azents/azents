@@ -15,6 +15,7 @@ from azents.core.enums import (
 from azents.engine.events.types import ExternalChannelMessagePayload
 from azents.rdb.models.event import JSONValue
 from azents.repos.mailbox.data import (
+    ExternalChannelContinuationMailboxPayload,
     ExternalChannelInvocationMailboxPayload,
     MailboxEnvelopePayload,
     MailboxItem,
@@ -24,11 +25,15 @@ from azents.repos.mailbox.data import (
 )
 
 
-def _item(*, payload: MailboxEnvelopePayload | None = None) -> MailboxItem:
+def _item(
+    *,
+    payload: MailboxEnvelopePayload | None = None,
+    kind: MailboxItemKind = MailboxItemKind.USER_MESSAGE,
+) -> MailboxItem:
     return MailboxItem(
         id="0123456789abcdef0123456789abcdef",
         session_id="1123456789abcdef0123456789abcdef",
-        kind=MailboxItemKind.USER_MESSAGE,
+        kind=kind,
         scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
         requested_model_target_label=None,
         requested_reasoning_effort=None,
@@ -97,6 +102,26 @@ def test_mailbox_item_rejects_kind_payload_discriminator_mismatch() -> None:
                 ],
             )
         )
+
+
+def test_external_channel_continuation_payload_is_distinct_from_goal() -> None:
+    payload = ExternalChannelContinuationMailboxPayload(
+        type="external_channel_continuation",
+        items=[
+            MailboxPresentationItem(
+                item_key="external_channel_continuation:0",
+                presentation_kind="external_channel_continuation",
+            )
+        ],
+    )
+
+    item = _item(
+        payload=payload,
+        kind=MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION,
+    )
+
+    assert item.payload is not None
+    assert item.payload.type == "external_channel_continuation"
 
 
 @pytest.mark.parametrize(

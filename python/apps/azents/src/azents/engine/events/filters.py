@@ -33,9 +33,10 @@ from azents.engine.events.protocols import (
 from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
 from azents.engine.events.system_reminders import (
     format_compaction_summary_reminder,
+    format_external_channel_continuation_reminder,
+    format_goal_continuation_reminder,
     format_goal_resumed_reminder,
     format_goal_updated_reminder,
-    format_idle_continuation_reminder,
     format_interrupted_reminder,
     format_plain_system_reminder,
 )
@@ -846,7 +847,17 @@ def _model_visible_event_value(event: Event) -> object | None:
     ):
         return {
             "role": "user",
-            "content": format_idle_continuation_reminder(payload.metadata),
+            "content": format_goal_continuation_reminder(
+                payload.metadata.get("goal_objective")
+            ),
+        }
+    if event.kind == EventKind.EXTERNAL_CHANNEL_CONTINUATION and isinstance(
+        payload,
+        UserMessagePayload,
+    ):
+        return {
+            "role": "user",
+            "content": format_external_channel_continuation_reminder(payload.metadata),
         }
     if event.kind == EventKind.GOAL_UPDATED and isinstance(payload, UserMessagePayload):
         return {"role": "user", "content": _format_goal_updated_event_reminder(payload)}
@@ -915,7 +926,16 @@ def _model_visible_event_text(
     ):
         return _format_continuity_block(
             "User",
-            format_idle_continuation_reminder(payload.metadata),
+            format_goal_continuation_reminder(payload.metadata.get("goal_objective")),
+            include_label=include_label,
+        )
+    if event.kind == EventKind.EXTERNAL_CHANNEL_CONTINUATION and isinstance(
+        payload,
+        UserMessagePayload,
+    ):
+        return _format_continuity_block(
+            "User",
+            format_external_channel_continuation_reminder(payload.metadata),
             include_label=include_label,
         )
     if event.kind == EventKind.GOAL_UPDATED and isinstance(payload, UserMessagePayload):

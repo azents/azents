@@ -24,7 +24,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-07-31
-spec_version: 15
+spec_version: 16
 ---
 
 # E2E Primary Test Strategy
@@ -60,7 +60,8 @@ The Slack and Discord fakes also provide bounded provider-history ranges, mixed 
 types, omission boundaries, failure sequences, duplicate/concurrency barriers, and
 transport acknowledgement evidence for External Channel synchronous ingestion.
 Evidence retains request counts, lifecycle categories, positions, file counts,
-aggregate byte counts, and deterministic hashes only.
+aggregate byte counts, deterministic hashes, and canonical relative Azents Session
+routes only.
 
 Fakes and test evidence never retain credentials, authorization headers, signatures,
 callback URLs, raw payloads, visible message bodies, attachment names, attachment
@@ -122,8 +123,8 @@ Always-on required CI does not depend on external credentials.
   fake; they do not create product rows directly. Focused fake contract tests cover
   signed interaction relay, Gateway lifecycle outcomes, nonce convergence, controlled
   REST failure outcomes, and multipart redaction.
-- The deterministic External Channel module covers Slack HTTP, Slack Socket Mode, and
-  Discord Gateway synchronous admission; durable admission before acknowledgement;
+- The deterministic External Channel module covers Slack HTTP, Slack Socket Mode,
+  Discord HTTP interactions, and Discord Gateway synchronous admission; durable admission before acknowledgement;
   SDK-owned Slack endpoint replacement; Discord Identify-to-Resume recovery; eager or
   reused thread targeting; bound continuation; mixed-author bounded history; duplicate
   convergence; access replay; and content-free evidence. Slack Socket and Discord
@@ -180,6 +181,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-07-31** — v16. Allowed fake-provider evidence to retain only the canonical
+  relative Azents Session route needed to verify provider links against public
+  Session list/detail projections.
 - **2026-07-31** — v15. Replaced the Discord-only gateway fixture and Worker-owned
   Slack Socket lifecycle with one provider-neutral External Channel gateway fixture.
 - **2026-07-31** — v14. Added deterministic Slack Socket endpoint-replacement and

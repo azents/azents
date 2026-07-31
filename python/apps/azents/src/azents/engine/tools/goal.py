@@ -20,8 +20,8 @@ from azents.core.tools import (
 from azents.engine.hooks.types import (
     CompactionSummaryHookContext,
     CompactionSummaryReplace,
+    GoalSessionContinuationInput,
     RuntimeHooks,
-    SessionContinuationInput,
     SessionIdleHookContext,
     SessionIdleResult,
 )
@@ -281,7 +281,7 @@ class GoalToolkit(Toolkit[GoalToolkitConfig]):
             return None
         return SessionIdleResult(
             continuations=[
-                SessionContinuationInput(
+                GoalSessionContinuationInput(
                     content="",
                     metadata={
                         "source": "goal",

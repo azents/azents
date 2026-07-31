@@ -13,7 +13,6 @@ from azents.broker.deps import get_broker
 from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
-from azents.repos.agent_session import AgentSessionRepository
 from azents.services.external_channel.conversation import (
     ExternalChannelOperationDeadline,
 )
@@ -33,10 +32,6 @@ class ExternalChannelMailboxWakeDispatcher:
         Depends(get_session_manager),
     ]
     mailbox_service: Annotated[MailboxService, Depends(MailboxService)]
-    agent_session_repository: Annotated[
-        AgentSessionRepository,
-        Depends(AgentSessionRepository),
-    ]
     broker: Annotated[SessionBroker, Depends(get_broker)]
 
     async def dispatch(
@@ -59,10 +54,6 @@ class ExternalChannelMailboxWakeDispatcher:
                 return "already_dispatched"
             if mailbox_item.session_id != session_id:
                 raise ValueError("External Channel mailbox wake ownership is invalid.")
-            await self.agent_session_repository.mark_running_for_input_wakeup(
-                session,
-                session_id,
-            )
             await session.commit()
         try:
             async with asyncio.timeout(deadline.remaining_seconds()):

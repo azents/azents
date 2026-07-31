@@ -182,7 +182,7 @@ async def test_required_delivery_terminal_or_missing_status_fails_closed(
         ),
     )
 
-    assert delivered is False
+    assert delivered == "terminal_failure"
     assert events == ["status"]
 
 
@@ -217,5 +217,5 @@ async def test_required_pending_delivery_is_attempted_then_observed_delivered() 
         ),
     )
 
-    assert delivered is True
+    assert delivered == "delivered"
     assert events == ["status", "delivery-1", "status"]

@@ -758,6 +758,9 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             "outcome": "delivered",
             "approval_request_id": approval_request_id,
         }
+        session_path = _session_path(body)
+        if session_path is not None:
+            delivery["session_path"] = session_path
         if action_ids:
             delivery["action_ids"] = action_ids
         if selector_admission_id is not None:
@@ -1146,6 +1149,22 @@ def _body_metadata(body: dict[str, object]) -> dict[str, object]:
     if isinstance(files, list):
         metadata["file_count"] = len(cast(list[object], files))
     return metadata
+
+
+def _session_path(body: dict[str, object]) -> str | None:
+    """Extract only the relative Azents Session route from one control payload."""
+    for block in _object_list_or_empty(body.get("blocks")):
+        for element in _object_list_or_empty(block.get("elements")):
+            if element.get("action_id") != "open_azents_session":
+                continue
+            url = element.get("url")
+            if not isinstance(url, str):
+                return None
+            parsed = urlparse(url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                return None
+            return parsed.path if parsed.path.startswith("/w/") else None
+    return None
 
 
 def _selector_route_ids(view: dict[str, object]) -> list[str]:
