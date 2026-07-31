@@ -92,19 +92,21 @@ Class | Method | HTTP request | Description
 *ModelCatalogV1Api* | [**model_catalog_v1_list_system_model_catalogs**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_list_system_model_catalogs) | **GET** /model-catalog/v1/system-catalogs | List System Model Catalogs
 *ModelCatalogV1Api* | [**model_catalog_v1_refresh_system_model_catalog**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_refresh_system_model_catalog) | **POST** /model-catalog/v1/system-catalogs/{provider}/refresh | Refresh System Model Catalog
 *ModelCatalogV1Api* | [**model_catalog_v1_refresh_system_model_catalogs**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_refresh_system_model_catalogs) | **POST** /model-catalog/v1/system-catalogs/refresh | Refresh System Model Catalogs
-*RuntimeExecutionV1Api* | [**runtime_execution_v1_create_profile**](azentsadminclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_create_profile) | **POST** /runtime-execution/v1/profiles | Create Profile
-*RuntimeExecutionV1Api* | [**runtime_execution_v1_get_profile**](azentsadminclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_get_profile) | **GET** /runtime-execution/v1/profiles/{profile_id} | Get Profile
-*RuntimeExecutionV1Api* | [**runtime_execution_v1_list_audit_events**](azentsadminclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_list_audit_events) | **GET** /runtime-execution/v1/audit-events | List Audit Events
-*RuntimeExecutionV1Api* | [**runtime_execution_v1_list_profiles**](azentsadminclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_list_profiles) | **GET** /runtime-execution/v1/profiles | List Profiles
-*RuntimeExecutionV1Api* | [**runtime_execution_v1_replace_profile**](azentsadminclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_replace_profile) | **PUT** /runtime-execution/v1/profiles/{profile_id} | Replace Profile
-*RuntimeExecutionV1Api* | [**runtime_execution_v1_retire_profile**](azentsadminclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_retire_profile) | **POST** /runtime-execution/v1/profiles/{profile_id}/retire | Retire Profile
 *RuntimeProviderV1Api* | [**runtime_provider_v1_create_auth_binding**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_create_auth_binding) | **POST** /runtime-provider/v1/providers/{provider_id}/authentication-bindings | Create Auth Binding
+*RuntimeProviderV1Api* | [**runtime_provider_v1_create_container_profile**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_create_container_profile) | **POST** /runtime-provider/v1/providers/{provider_id}/container-profiles | Create Container Profile
+*RuntimeProviderV1Api* | [**runtime_provider_v1_create_pod_profile**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_create_pod_profile) | **POST** /runtime-provider/v1/providers/{provider_id}/pod-profiles | Create Pod Profile
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_auth_binding**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_auth_binding) | **GET** /runtime-provider/v1/authentication-bindings/{binding_id} | Get Auth Binding
+*RuntimeProviderV1Api* | [**runtime_provider_v1_get_container_profile**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_container_profile) | **GET** /runtime-provider/v1/providers/{provider_id}/container-profiles/{profile_id} | Get Container Profile
+*RuntimeProviderV1Api* | [**runtime_provider_v1_get_pod_profile**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_pod_profile) | **GET** /runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id} | Get Pod Profile
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_runtime_provider**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_runtime_provider) | **GET** /runtime-provider/v1/providers/{provider_id} | Get Runtime Provider
 *RuntimeProviderV1Api* | [**runtime_provider_v1_list_auth_binding_audit_events**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_auth_binding_audit_events) | **GET** /runtime-provider/v1/authentication-bindings/{binding_id}/audit-events | List Auth Binding Audit Events
 *RuntimeProviderV1Api* | [**runtime_provider_v1_list_auth_bindings**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_auth_bindings) | **GET** /runtime-provider/v1/providers/{provider_id}/authentication-bindings | List Auth Bindings
+*RuntimeProviderV1Api* | [**runtime_provider_v1_list_container_profiles**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_container_profiles) | **GET** /runtime-provider/v1/providers/{provider_id}/container-profiles | List Container Profiles
 *RuntimeProviderV1Api* | [**runtime_provider_v1_list_contracts**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_contracts) | **GET** /runtime-provider/v1/providers/{provider_id}/contracts | List Contracts
+*RuntimeProviderV1Api* | [**runtime_provider_v1_list_pod_profiles**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_pod_profiles) | **GET** /runtime-provider/v1/providers/{provider_id}/pod-profiles | List Pod Profiles
 *RuntimeProviderV1Api* | [**runtime_provider_v1_list_runtime_providers**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_runtime_providers) | **GET** /runtime-provider/v1/providers | List Runtime Providers
+*RuntimeProviderV1Api* | [**runtime_provider_v1_replace_container_profile**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_replace_container_profile) | **PUT** /runtime-provider/v1/providers/{provider_id}/container-profiles/{profile_id} | Replace Container Profile
+*RuntimeProviderV1Api* | [**runtime_provider_v1_replace_pod_profile**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_replace_pod_profile) | **PUT** /runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id} | Replace Pod Profile
 *RuntimeProviderV1Api* | [**runtime_provider_v1_replace_runtime_provider_availability**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_replace_runtime_provider_availability) | **PUT** /runtime-provider/v1/providers/{provider_id}/availability | Replace Runtime Provider Availability
 *RuntimeProviderV1Api* | [**runtime_provider_v1_revoke_auth_binding**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_revoke_auth_binding) | **POST** /runtime-provider/v1/authentication-bindings/{binding_id}/revoke | Revoke Auth Binding
 *RuntimeProviderV1Api* | [**runtime_provider_v1_rotate_auth_binding**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_rotate_auth_binding) | **POST** /runtime-provider/v1/authentication-bindings/{binding_id}/rotate | Rotate Auth Binding
@@ -160,6 +162,8 @@ Class | Method | HTTP request | Description
  - [CreateSignupTokenResponse](azentsadminclient/docs/CreateSignupTokenResponse.md)
  - [DebugErrorResponse](azentsadminclient/docs/DebugErrorResponse.md)
  - [DebugExceptionResponse](azentsadminclient/docs/DebugExceptionResponse.md)
+ - [DockerContainerProfileSpecV1](azentsadminclient/docs/DockerContainerProfileSpecV1.md)
+ - [DockerContainerResources](azentsadminclient/docs/DockerContainerResources.md)
  - [EmailVerificationListResponse](azentsadminclient/docs/EmailVerificationListResponse.md)
  - [EmailVerificationResponse](azentsadminclient/docs/EmailVerificationResponse.md)
  - [ErrorLevel](azentsadminclient/docs/ErrorLevel.md)
@@ -173,6 +177,12 @@ Class | Method | HTTP request | Description
  - [InvitationListResponse](azentsadminclient/docs/InvitationListResponse.md)
  - [InvitationResponse](azentsadminclient/docs/InvitationResponse.md)
  - [InvitationStatus](azentsadminclient/docs/InvitationStatus.md)
+ - [KubernetesContainerResources](azentsadminclient/docs/KubernetesContainerResources.md)
+ - [KubernetesDinDModule](azentsadminclient/docs/KubernetesDinDModule.md)
+ - [KubernetesPodProfileSpecV1](azentsadminclient/docs/KubernetesPodProfileSpecV1.md)
+ - [KubernetesSchedulingModule](azentsadminclient/docs/KubernetesSchedulingModule.md)
+ - [KubernetesToleration](azentsadminclient/docs/KubernetesToleration.md)
+ - [KubernetesWorkspaceVolume](azentsadminclient/docs/KubernetesWorkspaceVolume.md)
  - [PasswordResetTokenListResponse](azentsadminclient/docs/PasswordResetTokenListResponse.md)
  - [PasswordResetTokenResponse](azentsadminclient/docs/PasswordResetTokenResponse.md)
  - [PlatformGitHubAppBindingResponse](azentsadminclient/docs/PlatformGitHubAppBindingResponse.md)
@@ -183,22 +193,13 @@ Class | Method | HTTP request | Description
  - [PlatformGitHubAppFieldResponse](azentsadminclient/docs/PlatformGitHubAppFieldResponse.md)
  - [PlatformGitHubAppHealthResponse](azentsadminclient/docs/PlatformGitHubAppHealthResponse.md)
  - [PlatformGitHubAppPatchRequest](azentsadminclient/docs/PlatformGitHubAppPatchRequest.md)
- - [RuntimeExecutionAuditEventType](azentsadminclient/docs/RuntimeExecutionAuditEventType.md)
- - [RuntimeExecutionChangeDirection](azentsadminclient/docs/RuntimeExecutionChangeDirection.md)
- - [RuntimeExecutionDockerModule](azentsadminclient/docs/RuntimeExecutionDockerModule.md)
- - [RuntimeExecutionManagementCapabilitiesResponse](azentsadminclient/docs/RuntimeExecutionManagementCapabilitiesResponse.md)
- - [RuntimeExecutionManagementLayer](azentsadminclient/docs/RuntimeExecutionManagementLayer.md)
- - [RuntimeExecutionPolicyAuditEventResponse](azentsadminclient/docs/RuntimeExecutionPolicyAuditEventResponse.md)
- - [RuntimeExecutionPolicyAuditListResponse](azentsadminclient/docs/RuntimeExecutionPolicyAuditListResponse.md)
- - [RuntimeExecutionPolicyDocument](azentsadminclient/docs/RuntimeExecutionPolicyDocument.md)
- - [RuntimeExecutionProfileCreateRequest](azentsadminclient/docs/RuntimeExecutionProfileCreateRequest.md)
- - [RuntimeExecutionProfileLifecycle](azentsadminclient/docs/RuntimeExecutionProfileLifecycle.md)
- - [RuntimeExecutionProfileListResponse](azentsadminclient/docs/RuntimeExecutionProfileListResponse.md)
- - [RuntimeExecutionProfileReplaceRequest](azentsadminclient/docs/RuntimeExecutionProfileReplaceRequest.md)
- - [RuntimeExecutionProfileResponse](azentsadminclient/docs/RuntimeExecutionProfileResponse.md)
- - [RuntimeExecutionProfileRetireRequest](azentsadminclient/docs/RuntimeExecutionProfileRetireRequest.md)
- - [RuntimeExecutionResourceModule](azentsadminclient/docs/RuntimeExecutionResourceModule.md)
- - [RuntimeExecutionStorageMode](azentsadminclient/docs/RuntimeExecutionStorageMode.md)
+ - [RuntimeInfrastructureProfileCreateRequest](azentsadminclient/docs/RuntimeInfrastructureProfileCreateRequest.md)
+ - [RuntimeInfrastructureProfileListResponse](azentsadminclient/docs/RuntimeInfrastructureProfileListResponse.md)
+ - [RuntimeInfrastructureProfileReplaceRequest](azentsadminclient/docs/RuntimeInfrastructureProfileReplaceRequest.md)
+ - [RuntimeInfrastructureProfileResponse](azentsadminclient/docs/RuntimeInfrastructureProfileResponse.md)
+ - [RuntimeInfrastructureProfileSpec](azentsadminclient/docs/RuntimeInfrastructureProfileSpec.md)
+ - [RuntimeNetworkPolicyModule](azentsadminclient/docs/RuntimeNetworkPolicyModule.md)
+ - [RuntimeProfileLifecycle](azentsadminclient/docs/RuntimeProfileLifecycle.md)
  - [RuntimeProviderAuthMethod](azentsadminclient/docs/RuntimeProviderAuthMethod.md)
  - [RuntimeProviderAuthenticationBindingAuditEventResponse](azentsadminclient/docs/RuntimeProviderAuthenticationBindingAuditEventResponse.md)
  - [RuntimeProviderAuthenticationBindingAuditListResponse](azentsadminclient/docs/RuntimeProviderAuthenticationBindingAuditListResponse.md)

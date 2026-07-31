@@ -113,7 +113,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Retry prepare file resource lifecycle attachment 1"
+        "userMessage": "Retry prepare file resource lifecycle attachment 1",
+        "turnIndex": 2
       },
       "response": {
         "toolCalls": [
@@ -132,7 +133,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Retry prepare file resource lifecycle attachment 2"
+        "userMessage": "Retry prepare file resource lifecycle attachment 2",
+        "turnIndex": 4
       },
       "response": {
         "toolCalls": [
@@ -151,7 +153,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Retry prepare file resource lifecycle attachment 3"
+        "userMessage": "Retry prepare file resource lifecycle attachment 3",
+        "turnIndex": 6
       },
       "response": {
         "toolCalls": [
@@ -170,7 +173,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_file_resource_lifecycle_write_retry_1"
+        "toolCallId": "call_file_resource_lifecycle_write_retry_1",
+        "turnIndex": 3
       },
       "response": {
         "content": "File resource lifecycle source file was prepared."
@@ -179,7 +183,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_file_resource_lifecycle_write_retry_2"
+        "toolCallId": "call_file_resource_lifecycle_write_retry_2",
+        "turnIndex": 5
       },
       "response": {
         "content": "File resource lifecycle source file was prepared."
@@ -188,7 +193,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_file_resource_lifecycle_write_retry_3"
+        "toolCallId": "call_file_resource_lifecycle_write_retry_3",
+        "turnIndex": 7
       },
       "response": {
         "content": "File resource lifecycle source file was prepared."
@@ -197,7 +203,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Present file resource lifecycle attachment"
+        "userMessage": "Present file resource lifecycle attachment",
+        "turnIndex": 2
       },
       "response": {
         "toolCalls": [
@@ -216,7 +223,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_file_resource_lifecycle_present"
+        "toolCallId": "call_file_resource_lifecycle_present",
+        "turnIndex": 3
       },
       "response": {
         "content": "File resource lifecycle attachment metadata was observed."
@@ -225,7 +233,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Retry present file resource lifecycle attachment 1"
+        "userMessage": "Retry present file resource lifecycle attachment 1",
+        "turnIndex": 4
       },
       "response": {
         "toolCalls": [
@@ -244,7 +253,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Retry present file resource lifecycle attachment 2"
+        "userMessage": "Retry present file resource lifecycle attachment 2",
+        "turnIndex": 6
       },
       "response": {
         "toolCalls": [
@@ -263,7 +273,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Retry present file resource lifecycle attachment 3"
+        "userMessage": "Retry present file resource lifecycle attachment 3",
+        "turnIndex": 8
       },
       "response": {
         "toolCalls": [
@@ -282,7 +293,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_file_resource_lifecycle_present_retry_1"
+        "toolCallId": "call_file_resource_lifecycle_present_retry_1",
+        "turnIndex": 5
       },
       "response": {
         "content": "File resource lifecycle attachment metadata was observed."
@@ -291,7 +303,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_file_resource_lifecycle_present_retry_2"
+        "toolCallId": "call_file_resource_lifecycle_present_retry_2",
+        "turnIndex": 7
       },
       "response": {
         "content": "File resource lifecycle attachment metadata was observed."
@@ -300,7 +313,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_file_resource_lifecycle_present_retry_3"
+        "toolCallId": "call_file_resource_lifecycle_present_retry_3",
+        "turnIndex": 9
       },
       "response": {
         "content": "File resource lifecycle attachment metadata was observed."
@@ -338,100 +352,6 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Apply patch E2E success",
-        "hasToolResult": false
-      },
-      "response": {
-        "toolCalls": [
-          {
-            "id": "call_apply_patch_success",
-            "name": "apply_patch",
-            "arguments": {
-              "base_path": "/workspace/agent/apply-patch-e2e",
-              "patch": "*** Begin Patch\n*** Update File: source.txt\n@@\n-alpha\n+ALPHA\n keep-one\n@@\n keep-two\n-omega\n+OMEGA\n*** Add File: added.txt\n+first\n+second\n*** Delete File: legacy.txt\n*** End Patch"
-            }
-          }
-        ]
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "toolCallId": "call_apply_patch_success"
-      },
-      "response": {
-        "toolCalls": [
-          {
-            "id": "call_apply_patch_success_inspect",
-            "name": "exec_command",
-            "arguments": {
-              "command": "base=/workspace/agent/apply-patch-e2e; echo 'source<<'; cat \"$base/source.txt\"; echo '>>'; echo 'added<<'; cat \"$base/added.txt\"; echo '>>'; test ! -e \"$base/legacy.txt\" && echo 'legacy=missing'",
-              "yield_time_ms": 10000,
-              "max_output_bytes": 2000
-            }
-          }
-        ]
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "toolCallId": "call_apply_patch_success_inspect"
-      },
-      "response": {
-        "content": "Apply patch E2E success verified."
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "userMessage": "Apply patch E2E reject traversal",
-        "hasToolResult": false
-      },
-      "response": {
-        "toolCalls": [
-          {
-            "id": "call_apply_patch_traversal",
-            "name": "apply_patch",
-            "arguments": {
-              "base_path": "/workspace/agent/apply-patch-e2e",
-              "patch": "*** Begin Patch\n*** Add File: ../apply-patch-escaped.txt\n+TRAVERSAL_SECRET\n*** End Patch"
-            }
-          }
-        ]
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "toolCallId": "call_apply_patch_traversal"
-      },
-      "response": {
-        "toolCalls": [
-          {
-            "id": "call_apply_patch_traversal_inspect",
-            "name": "exec_command",
-            "arguments": {
-              "command": "base=/workspace/agent/apply-patch-e2e; test ! -e /workspace/agent/apply-patch-escaped.txt && echo 'escape=missing'; source=$(paste -sd, \"$base/source.txt\"); echo \"source=$source\"",
-              "yield_time_ms": 10000,
-              "max_output_bytes": 1000
-            }
-          }
-        ]
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
-        "toolCallId": "call_apply_patch_traversal_inspect"
-      },
-      "response": {
-        "content": "Apply patch E2E traversal rejection verified."
-      }
-    },
-    {
-      "match": {
-        "endpoint": "chat",
         "userMessage": "Runtime exec quick command",
         "hasToolResult": false
       },
@@ -462,7 +382,7 @@
       "match": {
         "endpoint": "chat",
         "userMessage": "Runtime exec missing process",
-        "hasToolResult": false
+        "turnIndex": 2
       },
       "response": {
         "toolCalls": [
@@ -482,7 +402,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_runtime_exec_missing"
+        "toolCallId": "call_runtime_exec_missing",
+        "turnIndex": 3
       },
       "response": {
         "content": "Runtime exec missing process observed."
@@ -618,7 +539,7 @@
       "match": {
         "endpoint": "chat",
         "userMessage": "Read governed file",
-        "hasToolResult": false
+        "turnIndex": 2
       },
       "response": {
         "toolCalls": [
@@ -635,7 +556,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_agents_md_appendix_read"
+        "toolCallId": "call_agents_md_appendix_read",
+        "turnIndex": 3
       },
       "response": {
         "content": "QA observed ROOT_AGENTS_E2E_MARKER_3542."
@@ -815,7 +737,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "userMessage": "Tool Search deferred probe persisted run"
+        "userMessage": "Tool Search deferred probe persisted run",
+        "turnIndex": 3
       },
       "response": {
         "toolCalls": [
@@ -832,7 +755,8 @@
     {
       "match": {
         "endpoint": "chat",
-        "toolCallId": "call_tool_search_deferred_probe_persisted"
+        "toolCallId": "call_tool_search_deferred_probe_persisted",
+        "turnIndex": 4
       },
       "response": {
         "content": "TOOL_SEARCH_PERSISTED_RUN_COMPLETED"

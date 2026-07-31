@@ -48,7 +48,7 @@ class TestAgentCreateRequest(unittest.TestCase):
                 system_prompt = '',
                 enabled = True,
                 type = 'public',
-                runtime_provider_id = '',
+                runtime_profile_id = '',
                 shell_enabled = True,
                 memory_enabled = True,
                 tool_search_enabled = True,

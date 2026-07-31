@@ -26,6 +26,7 @@ from azentspublicclient.models.secrets import Secrets
 from pydantic import TypeAdapter
 from testcontainers.core.container import DockerContainer
 
+from support.runtime_profiles import create_workspace_runtime_profile
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
@@ -180,6 +181,12 @@ def _create_shell_enabled_chat_session_with_agent(
         workspace_handle,
         integration.id,
     )
+    runtime_profile_id = create_workspace_runtime_profile(
+        public_api_client,
+        token=token,
+        workspace_handle=workspace_handle,
+        provider_id=_RUNTIME_PROVIDER_ID,
+    )
 
     agent = AgentV1Api(public_api_client).agent_v1_create_agent(
         handle=workspace_handle,
@@ -188,7 +195,7 @@ def _create_shell_enabled_chat_session_with_agent(
             model_selection=model_selection,
             lightweight_model_selection=model_selection,
             type=AgentType.PUBLIC,
-            runtime_provider_id=_RUNTIME_PROVIDER_ID,
+            runtime_profile_id=runtime_profile_id,
             shell_enabled=True,
         ),
         _headers=_headers(token),

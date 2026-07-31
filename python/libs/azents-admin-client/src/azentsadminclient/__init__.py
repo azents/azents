@@ -23,7 +23,6 @@ __all__ = [
     "HealthV1Api",
     "InvitationV1Api",
     "ModelCatalogV1Api",
-    "RuntimeExecutionV1Api",
     "RuntimeProviderV1Api",
     "SystemBootstrapV1Api",
     "SystemSettingsV1Api",
@@ -51,6 +50,8 @@ __all__ = [
     "CreateSignupTokenResponse",
     "DebugErrorResponse",
     "DebugExceptionResponse",
+    "DockerContainerProfileSpecV1",
+    "DockerContainerResources",
     "EmailVerificationListResponse",
     "EmailVerificationResponse",
     "ErrorLevel",
@@ -64,6 +65,12 @@ __all__ = [
     "InvitationListResponse",
     "InvitationResponse",
     "InvitationStatus",
+    "KubernetesContainerResources",
+    "KubernetesDinDModule",
+    "KubernetesPodProfileSpecV1",
+    "KubernetesSchedulingModule",
+    "KubernetesToleration",
+    "KubernetesWorkspaceVolume",
     "PasswordResetTokenListResponse",
     "PasswordResetTokenResponse",
     "PlatformGitHubAppBindingResponse",
@@ -74,22 +81,13 @@ __all__ = [
     "PlatformGitHubAppFieldResponse",
     "PlatformGitHubAppHealthResponse",
     "PlatformGitHubAppPatchRequest",
-    "RuntimeExecutionAuditEventType",
-    "RuntimeExecutionChangeDirection",
-    "RuntimeExecutionDockerModule",
-    "RuntimeExecutionManagementCapabilitiesResponse",
-    "RuntimeExecutionManagementLayer",
-    "RuntimeExecutionPolicyAuditEventResponse",
-    "RuntimeExecutionPolicyAuditListResponse",
-    "RuntimeExecutionPolicyDocument",
-    "RuntimeExecutionProfileCreateRequest",
-    "RuntimeExecutionProfileLifecycle",
-    "RuntimeExecutionProfileListResponse",
-    "RuntimeExecutionProfileReplaceRequest",
-    "RuntimeExecutionProfileResponse",
-    "RuntimeExecutionProfileRetireRequest",
-    "RuntimeExecutionResourceModule",
-    "RuntimeExecutionStorageMode",
+    "RuntimeInfrastructureProfileCreateRequest",
+    "RuntimeInfrastructureProfileListResponse",
+    "RuntimeInfrastructureProfileReplaceRequest",
+    "RuntimeInfrastructureProfileResponse",
+    "RuntimeInfrastructureProfileSpec",
+    "RuntimeNetworkPolicyModule",
+    "RuntimeProfileLifecycle",
     "RuntimeProviderAuthMethod",
     "RuntimeProviderAuthenticationBindingAuditEventResponse",
     "RuntimeProviderAuthenticationBindingAuditListResponse",
@@ -165,7 +163,6 @@ from azentsadminclient.api.debug_v1_api import DebugV1Api as DebugV1Api
 from azentsadminclient.api.health_v1_api import HealthV1Api as HealthV1Api
 from azentsadminclient.api.invitation_v1_api import InvitationV1Api as InvitationV1Api
 from azentsadminclient.api.model_catalog_v1_api import ModelCatalogV1Api as ModelCatalogV1Api
-from azentsadminclient.api.runtime_execution_v1_api import RuntimeExecutionV1Api as RuntimeExecutionV1Api
 from azentsadminclient.api.runtime_provider_v1_api import RuntimeProviderV1Api as RuntimeProviderV1Api
 from azentsadminclient.api.system_bootstrap_v1_api import SystemBootstrapV1Api as SystemBootstrapV1Api
 from azentsadminclient.api.system_settings_v1_api import SystemSettingsV1Api as SystemSettingsV1Api
@@ -197,6 +194,8 @@ from azentsadminclient.models.create_signup_token_request import CreateSignupTok
 from azentsadminclient.models.create_signup_token_response import CreateSignupTokenResponse as CreateSignupTokenResponse
 from azentsadminclient.models.debug_error_response import DebugErrorResponse as DebugErrorResponse
 from azentsadminclient.models.debug_exception_response import DebugExceptionResponse as DebugExceptionResponse
+from azentsadminclient.models.docker_container_profile_spec_v1 import DockerContainerProfileSpecV1 as DockerContainerProfileSpecV1
+from azentsadminclient.models.docker_container_resources import DockerContainerResources as DockerContainerResources
 from azentsadminclient.models.email_verification_list_response import EmailVerificationListResponse as EmailVerificationListResponse
 from azentsadminclient.models.email_verification_response import EmailVerificationResponse as EmailVerificationResponse
 from azentsadminclient.models.error_level import ErrorLevel as ErrorLevel
@@ -210,6 +209,12 @@ from azentsadminclient.models.health_status import HealthStatus as HealthStatus
 from azentsadminclient.models.invitation_list_response import InvitationListResponse as InvitationListResponse
 from azentsadminclient.models.invitation_response import InvitationResponse as InvitationResponse
 from azentsadminclient.models.invitation_status import InvitationStatus as InvitationStatus
+from azentsadminclient.models.kubernetes_container_resources import KubernetesContainerResources as KubernetesContainerResources
+from azentsadminclient.models.kubernetes_din_d_module import KubernetesDinDModule as KubernetesDinDModule
+from azentsadminclient.models.kubernetes_pod_profile_spec_v1 import KubernetesPodProfileSpecV1 as KubernetesPodProfileSpecV1
+from azentsadminclient.models.kubernetes_scheduling_module import KubernetesSchedulingModule as KubernetesSchedulingModule
+from azentsadminclient.models.kubernetes_toleration import KubernetesToleration as KubernetesToleration
+from azentsadminclient.models.kubernetes_workspace_volume import KubernetesWorkspaceVolume as KubernetesWorkspaceVolume
 from azentsadminclient.models.password_reset_token_list_response import PasswordResetTokenListResponse as PasswordResetTokenListResponse
 from azentsadminclient.models.password_reset_token_response import PasswordResetTokenResponse as PasswordResetTokenResponse
 from azentsadminclient.models.platform_git_hub_app_binding_response import PlatformGitHubAppBindingResponse as PlatformGitHubAppBindingResponse
@@ -220,22 +225,13 @@ from azentsadminclient.models.platform_git_hub_app_effective_status import Platf
 from azentsadminclient.models.platform_git_hub_app_field_response import PlatformGitHubAppFieldResponse as PlatformGitHubAppFieldResponse
 from azentsadminclient.models.platform_git_hub_app_health_response import PlatformGitHubAppHealthResponse as PlatformGitHubAppHealthResponse
 from azentsadminclient.models.platform_git_hub_app_patch_request import PlatformGitHubAppPatchRequest as PlatformGitHubAppPatchRequest
-from azentsadminclient.models.runtime_execution_audit_event_type import RuntimeExecutionAuditEventType as RuntimeExecutionAuditEventType
-from azentsadminclient.models.runtime_execution_change_direction import RuntimeExecutionChangeDirection as RuntimeExecutionChangeDirection
-from azentsadminclient.models.runtime_execution_docker_module import RuntimeExecutionDockerModule as RuntimeExecutionDockerModule
-from azentsadminclient.models.runtime_execution_management_capabilities_response import RuntimeExecutionManagementCapabilitiesResponse as RuntimeExecutionManagementCapabilitiesResponse
-from azentsadminclient.models.runtime_execution_management_layer import RuntimeExecutionManagementLayer as RuntimeExecutionManagementLayer
-from azentsadminclient.models.runtime_execution_policy_audit_event_response import RuntimeExecutionPolicyAuditEventResponse as RuntimeExecutionPolicyAuditEventResponse
-from azentsadminclient.models.runtime_execution_policy_audit_list_response import RuntimeExecutionPolicyAuditListResponse as RuntimeExecutionPolicyAuditListResponse
-from azentsadminclient.models.runtime_execution_policy_document import RuntimeExecutionPolicyDocument as RuntimeExecutionPolicyDocument
-from azentsadminclient.models.runtime_execution_profile_create_request import RuntimeExecutionProfileCreateRequest as RuntimeExecutionProfileCreateRequest
-from azentsadminclient.models.runtime_execution_profile_lifecycle import RuntimeExecutionProfileLifecycle as RuntimeExecutionProfileLifecycle
-from azentsadminclient.models.runtime_execution_profile_list_response import RuntimeExecutionProfileListResponse as RuntimeExecutionProfileListResponse
-from azentsadminclient.models.runtime_execution_profile_replace_request import RuntimeExecutionProfileReplaceRequest as RuntimeExecutionProfileReplaceRequest
-from azentsadminclient.models.runtime_execution_profile_response import RuntimeExecutionProfileResponse as RuntimeExecutionProfileResponse
-from azentsadminclient.models.runtime_execution_profile_retire_request import RuntimeExecutionProfileRetireRequest as RuntimeExecutionProfileRetireRequest
-from azentsadminclient.models.runtime_execution_resource_module import RuntimeExecutionResourceModule as RuntimeExecutionResourceModule
-from azentsadminclient.models.runtime_execution_storage_mode import RuntimeExecutionStorageMode as RuntimeExecutionStorageMode
+from azentsadminclient.models.runtime_infrastructure_profile_create_request import RuntimeInfrastructureProfileCreateRequest as RuntimeInfrastructureProfileCreateRequest
+from azentsadminclient.models.runtime_infrastructure_profile_list_response import RuntimeInfrastructureProfileListResponse as RuntimeInfrastructureProfileListResponse
+from azentsadminclient.models.runtime_infrastructure_profile_replace_request import RuntimeInfrastructureProfileReplaceRequest as RuntimeInfrastructureProfileReplaceRequest
+from azentsadminclient.models.runtime_infrastructure_profile_response import RuntimeInfrastructureProfileResponse as RuntimeInfrastructureProfileResponse
+from azentsadminclient.models.runtime_infrastructure_profile_spec import RuntimeInfrastructureProfileSpec as RuntimeInfrastructureProfileSpec
+from azentsadminclient.models.runtime_network_policy_module import RuntimeNetworkPolicyModule as RuntimeNetworkPolicyModule
+from azentsadminclient.models.runtime_profile_lifecycle import RuntimeProfileLifecycle as RuntimeProfileLifecycle
 from azentsadminclient.models.runtime_provider_auth_method import RuntimeProviderAuthMethod as RuntimeProviderAuthMethod
 from azentsadminclient.models.runtime_provider_authentication_binding_audit_event_response import RuntimeProviderAuthenticationBindingAuditEventResponse as RuntimeProviderAuthenticationBindingAuditEventResponse
 from azentsadminclient.models.runtime_provider_authentication_binding_audit_list_response import RuntimeProviderAuthenticationBindingAuditListResponse as RuntimeProviderAuthenticationBindingAuditListResponse

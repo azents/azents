@@ -4,6 +4,7 @@ import dataclasses
 import datetime
 from typing import Annotated, assert_never
 
+from azcommon.datetime import tznow
 from azcommon.infra.s3.service import S3Service
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
@@ -22,6 +23,7 @@ from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import AgentType, WorkspaceUserRole
 from azents.core.llm_mapping import to_runtime_model
+from azents.core.runtime_profile import RuntimeReconcileSourceKind
 from azents.core.s3.deps import get_s3_service
 from azents.engine.context.window import (
     EffectiveContextWindow,
@@ -36,6 +38,7 @@ from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.agent_admin.data import AgentAdminCreate
 from azents.repos.agent_decommission import AgentDecommissionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
+from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.workspace_model_settings import WorkspaceModelSettingsRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.llm_catalog import ModelCatalogReadService
@@ -44,6 +47,10 @@ from azents.services.model_options import (
     build_legacy_selectable_model_options,
     normalize_selectable_model_options,
     normalize_stored_selectable_model_options,
+)
+from azents.services.runtime_profile_workspace.service import (
+    RuntimeProfileWorkspaceService,
+    RuntimeProfileWorkspaceUnavailable,
 )
 from azents.services.uploads import UploadService, UploadValidationError
 from azents.services.uploads.deps import get_upload_service
@@ -76,6 +83,9 @@ from .data import (
     NotAdmin,
     NotBelongToWorkspace,
     PrivateAgentAccessDenied,
+    RuntimeProfileSelectionInvalid,
+    RuntimeProfileSelectionVersionConflict,
+    RuntimeProfileSelectionVersionRequired,
     UnlimitedRetention,
     WorkspaceUserNotFound,
 )
@@ -119,6 +129,14 @@ class AgentService:
     archived_session_retention_repository: Annotated[
         ArchivedSessionRetentionRepository,
         Depends(ArchivedSessionRetentionRepository),
+    ]
+    runtime_profile_repository: Annotated[
+        RuntimeProfileRepository,
+        Depends(RuntimeProfileRepository),
+    ]
+    runtime_profile_service: Annotated[
+        RuntimeProfileWorkspaceService,
+        Depends(RuntimeProfileWorkspaceService),
     ]
     upload_service: Annotated[UploadService, Depends(get_upload_service)]
     avatar_handler: Annotated[AvatarUploadHandler, Depends(_get_avatar_handler)]
@@ -330,7 +348,8 @@ class AgentService:
         ModelRequired
         | ModelSelectionNotFound
         | InvalidSelectableModelOptions
-        | InvalidModelParameters,
+        | InvalidModelParameters
+        | RuntimeProfileSelectionInvalid,
     ]:
         """Create Agent and add creator as first admin."""
         selections_result = await self._resolve_create_model_options(create)
@@ -366,7 +385,7 @@ class AgentService:
             system_prompt=create.system_prompt,
             enabled=create.enabled,
             type=create.type,
-            runtime_provider_id=create.runtime_provider_id,
+            runtime_profile_id=None,
             shell_enabled=create.shell_enabled,
             memory_enabled=create.memory_enabled,
             tool_search_enabled=create.tool_search_enabled,
@@ -375,18 +394,40 @@ class AgentService:
             subagent_settings=create.subagent_settings,
         )
         async with self.session_manager() as session:
+            try:
+                runtime_profile_id = (
+                    await self.runtime_profile_service.resolve_agent_create_profile(
+                        session,
+                        workspace_id=create.workspace_id,
+                        explicit_profile_id=create.runtime_profile_id,
+                    )
+                )
+            except RuntimeProfileWorkspaceUnavailable as error:
+                return Failure(RuntimeProfileSelectionInvalid(code=error.code))
             if create.model_selection is not None:
                 set_default = (
                     self.workspace_model_settings_repository.set_default_model_if_empty
                 )
                 await set_default(session, create.workspace_id, main_selection)
-            agent = await self.repository.create(session, repo_create)
+            agent = await self.repository.create(
+                session,
+                repo_create.model_copy(
+                    update={"runtime_profile_id": runtime_profile_id}
+                ),
+            )
             await self.admin_repository.create(
                 session,
                 AgentAdminCreate(
                     agent_id=agent.id,
                     workspace_user_id=creator_workspace_user_id,
                 ),
+            )
+            await self.runtime_profile_repository.enqueue_reconcile_task(
+                session,
+                source_type=RuntimeReconcileSourceKind.AGENT_SELECTION,
+                source_id=agent.id,
+                source_version=str(agent.runtime_profile_selection_version),
+                available_at=tznow(),
             )
         return Success(await self._build_output(agent))
 
@@ -451,7 +492,10 @@ class AgentService:
         | ModelRequired
         | ModelSelectionNotFound
         | InvalidSelectableModelOptions
-        | InvalidModelParameters,
+        | InvalidModelParameters
+        | RuntimeProfileSelectionInvalid
+        | RuntimeProfileSelectionVersionRequired
+        | RuntimeProfileSelectionVersionConflict,
     ]:
         """Update Agent by ID."""
         async with self.session_manager() as session:
@@ -583,7 +627,6 @@ class AgentService:
             "system_prompt",
             "enabled",
             "type",
-            "runtime_provider_id",
             "shell_enabled",
             "memory_enabled",
             "tool_search_enabled",
@@ -595,6 +638,46 @@ class AgentService:
                 repo_update[key] = update[key]  # type: ignore[literal-required]
 
         async with self.session_manager() as session:
+            if "runtime_profile_id" in update:
+                if "expected_runtime_profile_selection_version" not in update:
+                    return Failure(RuntimeProfileSelectionVersionRequired())
+                runtime_profile_id = update["runtime_profile_id"]
+                if runtime_profile_id is not None:
+                    try:
+                        require_available = (
+                            self.runtime_profile_service.require_available_agent_profile
+                        )
+                        await require_available(
+                            session,
+                            workspace_id=workspace_id,
+                            profile_id=runtime_profile_id,
+                        )
+                    except RuntimeProfileWorkspaceUnavailable as error:
+                        return Failure(RuntimeProfileSelectionInvalid(code=error.code))
+                selected = await self.repository.replace_runtime_profile_selection(
+                    session,
+                    agent_id=agent_id,
+                    expected_version=update[
+                        "expected_runtime_profile_selection_version"
+                    ],
+                    runtime_profile_id=runtime_profile_id,
+                )
+                if selected is None:
+                    current = await self.repository.get_by_id(session, agent_id)
+                    if current is None:
+                        return Failure(NotFound(agent_id=agent_id))
+                    return Failure(
+                        RuntimeProfileSelectionVersionConflict(
+                            current_version=(current.runtime_profile_selection_version)
+                        )
+                    )
+                await self.runtime_profile_repository.enqueue_reconcile_task(
+                    session,
+                    source_type=RuntimeReconcileSourceKind.AGENT_SELECTION,
+                    source_id=selected.id,
+                    source_version=str(selected.runtime_profile_selection_version),
+                    available_at=tznow(),
+                )
             result = await self.repository.update_by_id(session, agent_id, repo_update)
         match result:
             case Success(value):
@@ -927,6 +1010,19 @@ class AgentService:
         """Convert `Agent` domain model to output."""
         avatar = await self._resolve_avatar(agent.avatar)
         context_window = self._compute_effective_context_window(agent)
+        runtime_profile_available = False
+        runtime_profile_reason = "runtime_profile_unconfigured"
+        if agent.runtime_profile_id is not None:
+            try:
+                projection = await self.runtime_profile_service.get_profile(
+                    agent.workspace_id,
+                    agent.runtime_profile_id,
+                )
+            except RuntimeProfileWorkspaceUnavailable as error:
+                runtime_profile_reason = error.code
+            else:
+                runtime_profile_available = projection.available
+                runtime_profile_reason = projection.reason_code
         return AgentOutput.convert_from(
             agent,
             avatar=avatar,
@@ -940,6 +1036,8 @@ class AgentService:
                 if context_window is not None
                 else None
             ),
+            runtime_profile_available=runtime_profile_available,
+            runtime_profile_availability_reason_code=runtime_profile_reason,
         )
 
     def _compute_effective_context_window(

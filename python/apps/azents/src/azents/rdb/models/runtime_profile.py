@@ -264,6 +264,14 @@ class RDBRuntimeConfigurationRevision(RDBModel):
         "target_desired_generation >= 0",
         name="ck_runtime_configuration_revisions_target_generation",
     )
+    CK_AGENT_SELECTION_VERSION = sa.CheckConstraint(
+        "agent_selection_version >= 1",
+        name="ck_runtime_configuration_revisions_agent_selection_version",
+    )
+    CK_READY_CAPABILITY = sa.CheckConstraint(
+        "resolution_status = 'blocked' OR provider_capability_revision_id IS NOT NULL",
+        name="ck_runtime_configuration_revisions_ready_capability",
+    )
     IX_RUNTIME_CREATED = sa.Index(
         "ix_runtime_configuration_revisions_runtime_created",
         "runtime_id",
@@ -290,10 +298,10 @@ class RDBRuntimeConfigurationRevision(RDBModel):
         sa.ForeignKey("runtime_providers.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    provider_capability_revision_id: Mapped[str] = mapped_column(
+    provider_capability_revision_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         sa.ForeignKey("runtime_provider_contract_revisions.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
     )
     infrastructure_profile_id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -311,6 +319,7 @@ class RDBRuntimeConfigurationRevision(RDBModel):
     workspace_runtime_profile_version: Mapped[int] = mapped_column(
         sa.Integer, nullable=False
     )
+    agent_selection_version: Mapped[int] = mapped_column(sa.Integer, nullable=False)
     resolution_status: Mapped[RuntimeConfigurationResolutionStatus] = mapped_column(
         runtime_configuration_resolution_status_enum,
         nullable=False,
@@ -324,7 +333,7 @@ class RDBRuntimeConfigurationRevision(RDBModel):
         sa.String(120), nullable=True, default=None
     )
     resolved_configuration: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB, nullable=True, default=None
+        JSONB(none_as_null=True), nullable=True, default=None
     )
     provider_reported_digest: Mapped[str | None] = mapped_column(
         sa.String(64), nullable=True, default=None
@@ -346,6 +355,8 @@ class RDBRuntimeConfigurationRevision(RDBModel):
         UQ_RUNTIME_DIGEST_GENERATION,
         CK_RESOLUTION_DOCUMENT,
         CK_TARGET_GENERATION,
+        CK_AGENT_SELECTION_VERSION,
+        CK_READY_CAPABILITY,
         IX_RUNTIME_CREATED,
         IX_PROVIDER,
         IX_WORKSPACE_PROFILE,

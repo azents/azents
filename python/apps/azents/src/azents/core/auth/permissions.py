@@ -20,6 +20,7 @@ class Resource(StrEnum):
     WORKSPACE_JOIN_REQUESTS = "workspace_join_requests"
     EXTERNAL_CHANNELS = "external_channels"
     RUNTIME_EXECUTION_POLICY = "runtime_execution_policy"
+    RUNTIME_PROFILES = "runtime_profiles"
 
 
 class Action(StrEnum):
@@ -148,6 +149,10 @@ class Permissions:
         Resource.RUNTIME_EXECUTION_POLICY,
         Action.WRITE,
     )
+
+    # Workspace Runtime Profiles
+    RUNTIME_PROFILES_READ = Permission(Resource.RUNTIME_PROFILES, Action.READ)
+    RUNTIME_PROFILES_WRITE = Permission(Resource.RUNTIME_PROFILES, Action.WRITE)
 
 
 def has_permission(granted: set[Permission], required: Permission) -> bool:

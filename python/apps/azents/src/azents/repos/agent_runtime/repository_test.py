@@ -1,10 +1,13 @@
 """AgentRuntimeRepository tests."""
 
+import asyncio
 import datetime
+from contextlib import suppress
+from uuid import uuid4
 
 import sqlalchemy as sa
 from azcommon.result import Success
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import (
     LLMProvider,
@@ -23,6 +26,8 @@ from azents.core.enums import (
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.workspace import RDBWorkspace
+from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime.data import AgentRuntimeFailurePatch
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
@@ -49,8 +54,6 @@ async def _create_agent(
     session: AsyncSession,
     workspace_id: str,
     slug: str,
-    *,
-    runtime_provider_id: str | None = None,
 ) -> str:
     """Create Agent for tests."""
 
@@ -77,7 +80,6 @@ async def _create_agent(
             provider=LLMProvider.ANTHROPIC,
             model_identifier=f"{slug}-id",
         ),
-        runtime_provider_id=runtime_provider_id,
     )
     session.add(agent)
     await session.flush()
@@ -86,6 +88,128 @@ async def _create_agent(
 
 class TestAgentRuntimeRepository:
     """AgentRuntimeRepository tests."""
+
+    async def test_runtime_selection_lock_serializes_selection_not_state_reports(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+    ) -> None:
+        """Selection updates wait while independent Runtime reports proceed."""
+        del latest_db_schema
+        suffix = uuid4().hex[:8]
+        workspace_id: str | None = None
+        agent_id: str | None = None
+        runtime_id: str | None = None
+        report_task: asyncio.Task[object] | None = None
+        update_task: asyncio.Task[object] | None = None
+
+        try:
+            async with AsyncSession(
+                rdb_engine,
+                expire_on_commit=False,
+            ) as setup_session:
+                workspace_id = await _create_workspace(
+                    setup_session,
+                    f"runtime-selection-lock-{suffix}",
+                )
+                agent_id = await _create_agent(
+                    setup_session,
+                    workspace_id,
+                    f"runtime-selection-lock-{suffix}",
+                )
+                runtime = await AgentRuntimeRepository().ensure_for_agent(
+                    setup_session,
+                    agent_id,
+                )
+                runtime_id = runtime.id
+                await setup_session.commit()
+
+            async with AsyncSession(
+                rdb_engine,
+                expire_on_commit=False,
+            ) as selection_session:
+                locked = await AgentRepository().get_runtime_selection_input_for_update(
+                    selection_session,
+                    agent_id,
+                )
+                assert locked is not None
+
+                async def update_selection() -> object:
+                    async with AsyncSession(
+                        rdb_engine,
+                        expire_on_commit=False,
+                    ) as update_session:
+                        result = await update_session.execute(
+                            sa.update(RDBAgent)
+                            .where(RDBAgent.id == agent_id)
+                            .values(
+                                runtime_profile_selection_version=(
+                                    RDBAgent.runtime_profile_selection_version + 1
+                                )
+                            )
+                            .returning(RDBAgent.runtime_profile_selection_version)
+                        )
+                        await update_session.commit()
+                        return result.scalar_one()
+
+                async def record_state() -> object:
+                    async with AsyncSession(
+                        rdb_engine,
+                        expire_on_commit=False,
+                    ) as report_session:
+                        updated = await (
+                            AgentRuntimeRepository().record_provider_connection_state(
+                                report_session,
+                                runtime_id,
+                                RuntimeProviderConnectionState.CONNECTED,
+                            )
+                        )
+                        await report_session.commit()
+                        return updated
+
+                update_task = asyncio.create_task(update_selection())
+                await asyncio.sleep(0.1)
+                assert not update_task.done()
+
+                report_task = asyncio.create_task(record_state())
+                updated = await asyncio.wait_for(report_task, timeout=5)
+                assert updated is not None
+                await selection_session.commit()
+                updated_version = await asyncio.wait_for(update_task, timeout=5)
+                assert updated_version == locked.runtime_profile_selection_version + 1
+        finally:
+            if report_task is not None and not report_task.done():
+                report_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await report_task
+            if update_task is not None and not update_task.done():
+                update_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await update_task
+            async with AsyncSession(
+                rdb_engine,
+                expire_on_commit=False,
+            ) as cleanup_session:
+                if runtime_id is not None:
+                    await cleanup_session.execute(
+                        sa.delete(RDBAgentRuntime).where(
+                            RDBAgentRuntime.id == runtime_id
+                        )
+                    )
+                if agent_id is not None:
+                    await cleanup_session.execute(
+                        sa.delete(RDBAgent).where(RDBAgent.id == agent_id)
+                    )
+                if workspace_id is not None:
+                    await cleanup_session.execute(
+                        sa.delete(RDBLLMProviderIntegration).where(
+                            RDBLLMProviderIntegration.workspace_id == workspace_id
+                        )
+                    )
+                    await cleanup_session.execute(
+                        sa.delete(RDBWorkspace).where(RDBWorkspace.id == workspace_id)
+                    )
+                await cleanup_session.commit()
 
     async def test_ensure_for_agent_creates_one_runtime(
         self, rdb_session: AsyncSession
@@ -111,76 +235,6 @@ class TestAgentRuntimeRepository:
         )
         assert first.runner_state == RuntimeRunnerState.UNKNOWN
 
-    async def test_ensure_for_agent_uses_default_provider_for_new_runtime(
-        self, rdb_session: AsyncSession
-    ) -> None:
-        """Create Runtime with default provider when Agent provider is empty."""
-        workspace_id = await _create_workspace(
-            rdb_session, "agent-runtime-default-provider-ws"
-        )
-        agent_id = await _create_agent(
-            rdb_session,
-            workspace_id,
-            "agent-runtime-default-provider",
-        )
-        repo = AgentRuntimeRepository()
-
-        runtime = await repo.ensure_for_agent(
-            rdb_session,
-            agent_id,
-            default_runtime_provider_id="system-kubernetes",
-        )
-
-        assert runtime.runtime_provider_id == "system-kubernetes"
-
-    async def test_ensure_for_agent_backfills_default_provider_for_existing_runtime(
-        self, rdb_session: AsyncSession
-    ) -> None:
-        """Fill default provider when existing Runtime provider is empty."""
-        workspace_id = await _create_workspace(
-            rdb_session, "agent-runtime-backfill-provider-ws"
-        )
-        agent_id = await _create_agent(
-            rdb_session,
-            workspace_id,
-            "agent-runtime-backfill-provider",
-        )
-        repo = AgentRuntimeRepository()
-        created = await repo.ensure_for_agent(rdb_session, agent_id)
-        assert created.runtime_provider_id is None
-
-        runtime = await repo.ensure_for_agent(
-            rdb_session,
-            agent_id,
-            default_runtime_provider_id="system-kubernetes",
-        )
-
-        assert runtime.id == created.id
-        assert runtime.runtime_provider_id == "system-kubernetes"
-
-    async def test_ensure_for_agent_preserves_explicit_provider(
-        self, rdb_session: AsyncSession
-    ) -> None:
-        """Explicit provider on Agent is not overwritten by default provider."""
-        workspace_id = await _create_workspace(
-            rdb_session, "agent-runtime-explicit-provider-ws"
-        )
-        agent_id = await _create_agent(
-            rdb_session,
-            workspace_id,
-            "agent-runtime-explicit-provider",
-            runtime_provider_id="workspace-provider",
-        )
-        repo = AgentRuntimeRepository()
-
-        runtime = await repo.ensure_for_agent(
-            rdb_session,
-            agent_id,
-            default_runtime_provider_id="system-kubernetes",
-        )
-
-        assert runtime.runtime_provider_id == "workspace-provider"
-
     async def test_attach_provider_binding_upgrades_exact_legacy_runtime(
         self, rdb_session: AsyncSession
     ) -> None:
@@ -194,11 +248,7 @@ class TestAgentRuntimeRepository:
             "agent-runtime-attach-provider",
         )
         repository = AgentRuntimeRepository()
-        runtime = await repository.ensure_for_agent(
-            rdb_session,
-            agent_id,
-            default_runtime_provider_id="system-kubernetes",
-        )
+        runtime = await repository.ensure_for_agent(rdb_session, agent_id)
         provider = await RuntimeProviderRepository().create(
             rdb_session,
             RuntimeProviderCreate(
@@ -324,6 +374,7 @@ class TestAgentRuntimeRepository:
             runtime.id,
             RuntimeRunnerState.READY,
             runner_generation=1,
+            expected_desired_generation=requested.desired_generation,
         )
         late_provider = await repo.record_provider_observed_state(
             rdb_session,
@@ -387,6 +438,7 @@ class TestAgentRuntimeRepository:
             runtime.id,
             RuntimeRunnerState.READY,
             4,
+            expected_desired_generation=runtime.desired_generation,
             failure=AgentRuntimeFailurePatch(
                 generation=4, code="runner_failed", message="Runner failed"
             ),
@@ -507,6 +559,7 @@ class TestAgentRuntimeRepository:
             runtime.id,
             RuntimeRunnerState.READY,
             2,
+            expected_desired_generation=runtime.desired_generation,
         )
         assert current is not None
 
@@ -515,6 +568,7 @@ class TestAgentRuntimeRepository:
             runtime.id,
             RuntimeRunnerState.DISCONNECTED,
             1,
+            expected_desired_generation=runtime.desired_generation,
             failure=AgentRuntimeFailurePatch(
                 generation=runtime.desired_generation,
                 code="STALE_RUNNER_FAILURE",
@@ -546,6 +600,7 @@ class TestAgentRuntimeRepository:
             runtime.id,
             RuntimeRunnerState.READY,
             2,
+            expected_desired_generation=runtime.desired_generation,
         )
         assert current is not None
 
@@ -554,6 +609,7 @@ class TestAgentRuntimeRepository:
             runtime.id,
             RuntimeRunnerState.DISCONNECTED,
             2,
+            expected_desired_generation=runtime.desired_generation,
         )
 
         assert disconnected is not None
@@ -1104,10 +1160,14 @@ class TestAgentRuntimeRepository:
             rdb_session,
             workspace_id,
             "agent-runtime-observe-candidate",
-            runtime_provider_id="provider-1",
         )
         repo = AgentRuntimeRepository()
         runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+        await rdb_session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(runtime_provider_id="provider-1")
+        )
         runtime = await repo.record_provider_connection_state(
             rdb_session,
             runtime.id,
@@ -1169,10 +1229,14 @@ class TestAgentRuntimeRepository:
             rdb_session,
             workspace_id,
             "agent-runtime-observe-stopping",
-            runtime_provider_id="provider-1",
         )
         repo = AgentRuntimeRepository()
         runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+        await rdb_session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(runtime_provider_id="provider-1")
+        )
         runtime = await repo.record_provider_connection_state(
             rdb_session,
             runtime.id,

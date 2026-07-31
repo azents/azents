@@ -55,6 +55,22 @@ _CAPABILITY_CONTRACT: dict[str, JsonValue] = {
         "terminal_delete_destroys_workspace": True,
     },
     "configuration_fields": [],
+    "profile_contracts": [
+        {
+            "profile_kind": "docker_container",
+            "contract_family": "docker.container-profile",
+            "schema_versions": [1],
+            "capabilities": [
+                "docker.container-profile",
+                "runtime.resources",
+                "workspace.host-directory",
+            ],
+            "constraints": {
+                "maximums": {},
+                "allowed_values": {},
+            },
+        }
+    ],
 }
 
 

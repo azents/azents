@@ -3,16 +3,19 @@
 import dataclasses
 from typing import Annotated, Any
 
+from azcommon.datetime import tznow
 from fastapi import Depends
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.runtime_profile import RuntimeReconcileSourceKind
 from azents.core.runtime_provider_contract import (
     RuntimeProviderCapabilityContract,
     canonicalize_runtime_provider_contract,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_policy.data import (
     RuntimeProviderContractRevision,
@@ -47,6 +50,9 @@ class RuntimeProviderContractService:
     ]
     policy_repository: Annotated[
         RuntimeProviderPolicyRepository, Depends(RuntimeProviderPolicyRepository)
+    ]
+    profile_repository: Annotated[
+        RuntimeProfileRepository, Depends(RuntimeProfileRepository)
     ]
 
     async def propose_contract(
@@ -109,7 +115,7 @@ class RuntimeProviderContractService:
                 )
                 if current is not None and current.digest == canonical.digest:
                     return current
-            return await self.policy_repository.create_contract(
+            revision = await self.policy_repository.create_contract(
                 session,
                 create=RuntimeProviderContractRevisionCreate(
                     provider_id=provider.id,
@@ -120,6 +126,14 @@ class RuntimeProviderContractService:
                     compatibility={"compatible": True},
                 ),
             )
+            await self.profile_repository.enqueue_reconcile_task(
+                session,
+                source_type=RuntimeReconcileSourceKind.PROVIDER_CAPABILITY,
+                source_id=provider.id,
+                source_version=revision.id,
+                available_at=tznow(),
+            )
+            return revision
 
     async def list_contracts(
         self,

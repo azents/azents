@@ -9,13 +9,9 @@ from azents.core.agent import (
     DEFAULT_MAIN_MODEL_OPTION_LABEL,
     SelectableModelOption,
 )
-from azents.core.runtime_execution_policy import SYSTEM_STANDARD_PROFILE_ID
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
-)
-from azents.rdb.models.runtime_execution_policy import (
-    RDBAgentRuntimeExecutionSetting,
 )
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -46,6 +42,7 @@ def _agent_create(*, tool_search_enabled: bool = True) -> AgentCreate:
         selectable_model_options=[option],
         main_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
         lightweight_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
+        runtime_profile_id=None,
         tool_search_enabled=tool_search_enabled,
     )
 
@@ -100,8 +97,8 @@ async def test_create_adds_initial_empty_automatic_project_policy() -> None:
     assert policy_setting.updated_by_workspace_user_id is None
 
 
-async def test_create_adds_system_standard_execution_setting() -> None:
-    """Persist explicit Standard execution intent with each new Agent."""
+async def test_create_does_not_add_legacy_execution_setting() -> None:
+    """Do not reactivate the legacy execution-policy selection path."""
     session = AsyncMock(spec=AsyncSession)
     session.flush.side_effect = [None, _StopAfterWrite]
 
@@ -111,16 +108,7 @@ async def test_create_adds_system_standard_execution_setting() -> None:
             _agent_create(),
         )
 
-    execution_setting = session.add.call_args_list[2].args[0]
-    assert isinstance(execution_setting, RDBAgentRuntimeExecutionSetting)
-    assert execution_setting.agent_id == session.add.call_args_list[0].args[0].id
-    assert execution_setting.profile_id == SYSTEM_STANDARD_PROFILE_ID
-    assert execution_setting.version == 1
-    assert execution_setting.restriction == {
-        "schema_version": 1,
-        "docker": None,
-        "resources": None,
-    }
+    assert len(session.add.call_args_list) == 2
 
 
 async def test_update_maps_tool_search_enabled_to_update_statement() -> None:

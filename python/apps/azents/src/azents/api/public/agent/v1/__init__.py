@@ -27,6 +27,9 @@ from azents.services.agent.data import (
     NotAdmin,
     NotBelongToWorkspace,
     PrivateAgentAccessDenied,
+    RuntimeProfileSelectionInvalid,
+    RuntimeProfileSelectionVersionConflict,
+    RuntimeProfileSelectionVersionRequired,
     UnlimitedRetention,
     WorkspaceUserNotFound,
 )
@@ -240,7 +243,7 @@ async def create_agent(
         system_prompt=request_body.system_prompt,
         enabled=request_body.enabled,
         type=request_body.type,
-        runtime_provider_id=request_body.runtime_provider_id,
+        runtime_profile_id=request_body.runtime_profile_id,
         shell_enabled=request_body.shell_enabled,
         memory_enabled=request_body.memory_enabled,
         tool_search_enabled=request_body.tool_search_enabled,
@@ -281,6 +284,11 @@ async def create_agent(
                             "message": "Invalid model parameters.",
                             "errors": errors,
                         },
+                    )
+                case RuntimeProfileSelectionInvalid(code=code):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={"code": code},
                     )
                 case _:
                     assert_never(error)
@@ -381,8 +389,12 @@ def _build_agent_update_input(
     if "type" in request_body:
         result["type"] = request_body["type"]
 
-    if "runtime_provider_id" in request_body:
-        result["runtime_provider_id"] = request_body["runtime_provider_id"]
+    if "runtime_profile_id" in request_body:
+        result["runtime_profile_id"] = request_body["runtime_profile_id"]
+    if "expected_runtime_profile_selection_version" in request_body:
+        result["expected_runtime_profile_selection_version"] = request_body[
+            "expected_runtime_profile_selection_version"
+        ]
     if "shell_enabled" in request_body:
         result["shell_enabled"] = request_body["shell_enabled"]
 
@@ -462,6 +474,26 @@ async def update_agent(
                         detail={
                             "message": "Invalid model parameters.",
                             "errors": errors,
+                        },
+                    )
+                case RuntimeProfileSelectionInvalid(code=code):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={"code": code},
+                    )
+                case RuntimeProfileSelectionVersionRequired():
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                        detail={"code": "runtime_profile_selection_version_required"},
+                    )
+                case RuntimeProfileSelectionVersionConflict(
+                    current_version=current_version
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail={
+                            "code": "runtime_profile_selection_version_conflict",
+                            "current_version": current_version,
                         },
                     )
                 case _:

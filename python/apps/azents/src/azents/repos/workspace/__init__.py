@@ -14,6 +14,7 @@ from .data import (
     Workspace,
     WorkspaceCreate,
     WorkspaceList,
+    WorkspaceRuntimeProfileDefaultReplace,
     WorkspaceUpdate,
 )
 
@@ -71,6 +72,49 @@ class WorkspaceRepository:
             sa.select(RDBWorkspace).where(RDBWorkspace.handle == handle)
         )
         rdb_workspace = result.scalar_one_or_none()
+        if rdb_workspace is None:
+            return None
+        return self._build_workspace(rdb_workspace)
+
+    async def get_by_id_for_update(
+        self, session: AsyncSession, workspace_id: str
+    ) -> Workspace | None:
+        """Fetch and lock one Workspace."""
+        result = await session.execute(
+            sa.select(RDBWorkspace)
+            .where(RDBWorkspace.id == workspace_id)
+            .with_for_update()
+        )
+        rdb_workspace = result.scalar_one_or_none()
+        if rdb_workspace is None:
+            return None
+        return self._build_workspace(rdb_workspace)
+
+    async def replace_runtime_profile_default(
+        self,
+        session: AsyncSession,
+        workspace_id: str,
+        replacement: WorkspaceRuntimeProfileDefaultReplace,
+    ) -> Workspace | None:
+        """Replace the Workspace default with optimistic version fencing."""
+        result = await session.execute(
+            sa.update(RDBWorkspace)
+            .where(
+                RDBWorkspace.id == workspace_id,
+                RDBWorkspace.default_runtime_profile_version
+                == replacement.expected_version,
+            )
+            .values(
+                default_runtime_profile_id=replacement.runtime_profile_id,
+                default_runtime_profile_version=(
+                    RDBWorkspace.default_runtime_profile_version + 1
+                ),
+                updated_at=sa.func.now(),
+            )
+            .returning(RDBWorkspace)
+        )
+        rdb_workspace = result.scalar_one_or_none()
+        await session.flush()
         if rdb_workspace is None:
             return None
         return self._build_workspace(rdb_workspace)
@@ -143,6 +187,10 @@ class WorkspaceRepository:
         return Workspace(
             name=rdb_workspace.name,
             handle=rdb_workspace.handle,
+            default_runtime_profile_id=rdb_workspace.default_runtime_profile_id,
+            default_runtime_profile_version=(
+                rdb_workspace.default_runtime_profile_version
+            ),
             created_at=rdb_workspace.created_at,
             updated_at=rdb_workspace.updated_at,
         )

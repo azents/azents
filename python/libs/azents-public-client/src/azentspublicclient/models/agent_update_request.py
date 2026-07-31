@@ -19,6 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
+from typing_extensions import Annotated
 from azentspublicclient.models.agent_model_selection_input import AgentModelSelectionInput
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.model_parameters import ModelParameters
@@ -42,7 +43,8 @@ class AgentUpdateRequest(BaseModel):
     system_prompt: Optional[StrictStr] = None
     enabled: Optional[StrictBool] = Field(default=None, description="Enabled state")
     type: Optional[AgentType] = Field(default=None, description="Visibility scope")
-    runtime_provider_id: Optional[StrictStr] = None
+    runtime_profile_id: Optional[StrictStr] = None
+    expected_runtime_profile_selection_version: Optional[Annotated[int, Field(strict=True, ge=1)]] = Field(default=None, description="Required optimistic version when replacing the selection")
     shell_enabled: Optional[StrictBool] = Field(default=None, description="Shell enabled state")
     memory_enabled: Optional[StrictBool] = Field(default=None, description="Memory enabled state")
     tool_search_enabled: Optional[StrictBool] = Field(default=None, description="Tool Search enabled state")
@@ -50,7 +52,7 @@ class AgentUpdateRequest(BaseModel):
     auto_archive_ttl_days: Optional[StrictInt] = Field(default=None, description="Inactivity period before automatic Session archive")
     subagent_settings: Optional[SubagentSettings] = Field(default=None, description="Subagent execution settings")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["name", "description", "model_selection", "lightweight_model_selection", "selectable_model_options", "main_model_label", "lightweight_model_label", "model_parameters", "system_prompt", "enabled", "type", "runtime_provider_id", "shell_enabled", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "subagent_settings"]
+    __properties: ClassVar[List[str]] = ["name", "description", "model_selection", "lightweight_model_selection", "selectable_model_options", "main_model_label", "lightweight_model_label", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "expected_runtime_profile_selection_version", "shell_enabled", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "subagent_settings"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -157,10 +159,10 @@ class AgentUpdateRequest(BaseModel):
         if self.system_prompt is None and "system_prompt" in self.model_fields_set:
             _dict['system_prompt'] = None
 
-        # set to None if runtime_provider_id (nullable) is None
+        # set to None if runtime_profile_id (nullable) is None
         # and model_fields_set contains the field
-        if self.runtime_provider_id is None and "runtime_provider_id" in self.model_fields_set:
-            _dict['runtime_provider_id'] = None
+        if self.runtime_profile_id is None and "runtime_profile_id" in self.model_fields_set:
+            _dict['runtime_profile_id'] = None
 
         # set to None if max_turns (nullable) is None
         # and model_fields_set contains the field
@@ -190,7 +192,8 @@ class AgentUpdateRequest(BaseModel):
             "system_prompt": obj.get("system_prompt"),
             "enabled": obj.get("enabled"),
             "type": obj.get("type"),
-            "runtime_provider_id": obj.get("runtime_provider_id"),
+            "runtime_profile_id": obj.get("runtime_profile_id"),
+            "expected_runtime_profile_selection_version": obj.get("expected_runtime_profile_selection_version"),
             "shell_enabled": obj.get("shell_enabled"),
             "memory_enabled": obj.get("memory_enabled"),
             "tool_search_enabled": obj.get("tool_search_enabled"),

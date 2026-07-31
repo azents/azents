@@ -47,7 +47,10 @@ class AgentResponse(BaseModel):
     system_prompt: Optional[StrictStr]
     enabled: StrictBool
     type: AgentType
-    runtime_provider_id: Optional[StrictStr]
+    runtime_profile_id: Optional[StrictStr]
+    runtime_profile_selection_version: StrictInt
+    runtime_profile_available: StrictBool
+    runtime_profile_availability_reason_code: Optional[StrictStr]
     shell_enabled: StrictBool
     memory_enabled: StrictBool
     tool_search_enabled: StrictBool
@@ -58,7 +61,7 @@ class AgentResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "name", "description", "model_selection", "lightweight_model_selection", "selectable_model_options", "main_model_label", "lightweight_model_label", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "runtime_provider_id", "shell_enabled", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "subagent_settings", "avatar", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "name", "description", "model_selection", "lightweight_model_selection", "selectable_model_options", "main_model_label", "lightweight_model_label", "effective_context_window_tokens", "effective_auto_compaction_threshold_tokens", "model_parameters", "system_prompt", "enabled", "type", "runtime_profile_id", "runtime_profile_selection_version", "runtime_profile_available", "runtime_profile_availability_reason_code", "shell_enabled", "memory_enabled", "tool_search_enabled", "max_turns", "auto_archive_ttl_days", "subagent_settings", "avatar", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -163,10 +166,15 @@ class AgentResponse(BaseModel):
         if self.system_prompt is None and "system_prompt" in self.model_fields_set:
             _dict['system_prompt'] = None
 
-        # set to None if runtime_provider_id (nullable) is None
+        # set to None if runtime_profile_id (nullable) is None
         # and model_fields_set contains the field
-        if self.runtime_provider_id is None and "runtime_provider_id" in self.model_fields_set:
-            _dict['runtime_provider_id'] = None
+        if self.runtime_profile_id is None and "runtime_profile_id" in self.model_fields_set:
+            _dict['runtime_profile_id'] = None
+
+        # set to None if runtime_profile_availability_reason_code (nullable) is None
+        # and model_fields_set contains the field
+        if self.runtime_profile_availability_reason_code is None and "runtime_profile_availability_reason_code" in self.model_fields_set:
+            _dict['runtime_profile_availability_reason_code'] = None
 
         # set to None if max_turns (nullable) is None
         # and model_fields_set contains the field
@@ -204,7 +212,10 @@ class AgentResponse(BaseModel):
             "system_prompt": obj.get("system_prompt"),
             "enabled": obj.get("enabled"),
             "type": obj.get("type"),
-            "runtime_provider_id": obj.get("runtime_provider_id"),
+            "runtime_profile_id": obj.get("runtime_profile_id"),
+            "runtime_profile_selection_version": obj.get("runtime_profile_selection_version"),
+            "runtime_profile_available": obj.get("runtime_profile_available"),
+            "runtime_profile_availability_reason_code": obj.get("runtime_profile_availability_reason_code"),
             "shell_enabled": obj.get("shell_enabled"),
             "memory_enabled": obj.get("memory_enabled"),
             "tool_search_enabled": obj.get("tool_search_enabled"),

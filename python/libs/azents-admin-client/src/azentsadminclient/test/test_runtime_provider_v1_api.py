@@ -33,10 +33,38 @@ class TestRuntimeProviderV1Api(unittest.TestCase):
         """
         pass
 
+    def test_runtime_provider_v1_create_container_profile(self) -> None:
+        """Test case for runtime_provider_v1_create_container_profile
+
+        Create Container Profile
+        """
+        pass
+
+    def test_runtime_provider_v1_create_pod_profile(self) -> None:
+        """Test case for runtime_provider_v1_create_pod_profile
+
+        Create Pod Profile
+        """
+        pass
+
     def test_runtime_provider_v1_get_auth_binding(self) -> None:
         """Test case for runtime_provider_v1_get_auth_binding
 
         Get Auth Binding
+        """
+        pass
+
+    def test_runtime_provider_v1_get_container_profile(self) -> None:
+        """Test case for runtime_provider_v1_get_container_profile
+
+        Get Container Profile
+        """
+        pass
+
+    def test_runtime_provider_v1_get_pod_profile(self) -> None:
+        """Test case for runtime_provider_v1_get_pod_profile
+
+        Get Pod Profile
         """
         pass
 
@@ -61,6 +89,13 @@ class TestRuntimeProviderV1Api(unittest.TestCase):
         """
         pass
 
+    def test_runtime_provider_v1_list_container_profiles(self) -> None:
+        """Test case for runtime_provider_v1_list_container_profiles
+
+        List Container Profiles
+        """
+        pass
+
     def test_runtime_provider_v1_list_contracts(self) -> None:
         """Test case for runtime_provider_v1_list_contracts
 
@@ -68,10 +103,31 @@ class TestRuntimeProviderV1Api(unittest.TestCase):
         """
         pass
 
+    def test_runtime_provider_v1_list_pod_profiles(self) -> None:
+        """Test case for runtime_provider_v1_list_pod_profiles
+
+        List Pod Profiles
+        """
+        pass
+
     def test_runtime_provider_v1_list_runtime_providers(self) -> None:
         """Test case for runtime_provider_v1_list_runtime_providers
 
         List Runtime Providers
+        """
+        pass
+
+    def test_runtime_provider_v1_replace_container_profile(self) -> None:
+        """Test case for runtime_provider_v1_replace_container_profile
+
+        Replace Container Profile
+        """
+        pass
+
+    def test_runtime_provider_v1_replace_pod_profile(self) -> None:
+        """Test case for runtime_provider_v1_replace_pod_profile
+
+        Replace Pod Profile
         """
         pass
 

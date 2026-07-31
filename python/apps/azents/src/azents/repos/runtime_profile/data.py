@@ -106,17 +106,32 @@ class WorkspaceRuntimeProfileCreate:
 
 
 @dataclass(frozen=True)
+class WorkspaceRuntimeProfileReplace:
+    """Complete optimistic replacement of one Workspace Runtime Profile."""
+
+    provider_id: str
+    infrastructure_profile_id: str
+    display_name: str
+    description: str
+    lifecycle: RuntimeProfileLifecycle
+    policy: dict[str, Any]
+    digest: str
+    actor_workspace_user_id: str | None
+
+
+@dataclass(frozen=True)
 class RuntimeConfigurationRevision:
     """Immutable desired or applied full Runtime configuration evidence."""
 
     id: str
     runtime_id: str
     provider_id: str
-    provider_capability_revision_id: str
+    provider_capability_revision_id: str | None
     infrastructure_profile_id: str
     infrastructure_profile_version: int
     workspace_runtime_profile_id: str
     workspace_runtime_profile_version: int
+    agent_selection_version: int
     resolution_status: RuntimeConfigurationResolutionStatus
     reason_code: str | None
     required_capabilities: tuple[str, ...]
@@ -138,11 +153,12 @@ class RuntimeConfigurationRevisionCreate:
 
     runtime_id: str
     provider_id: str
-    provider_capability_revision_id: str
+    provider_capability_revision_id: str | None
     infrastructure_profile_id: str
     infrastructure_profile_version: int
     workspace_runtime_profile_id: str
     workspace_runtime_profile_version: int
+    agent_selection_version: int
     resolution_status: RuntimeConfigurationResolutionStatus
     reason_code: str | None
     required_capabilities: tuple[str, ...]

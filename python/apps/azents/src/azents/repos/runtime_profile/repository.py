@@ -5,16 +5,25 @@ import datetime
 import sqlalchemy as sa
 from azcommon.datetime import tznow
 from azcommon.uuid import uuid7
+from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.runtime_execution_policy import (
+    digest_runtime_execution_policy,
+    standard_runtime_execution_policy,
+)
 from azents.core.runtime_profile import (
+    RuntimeConfigurationResolutionStatus,
+    RuntimeProfileLifecycle,
     RuntimeReconcileSourceKind,
     RuntimeReconcileTaskStatus,
     RuntimeRecreationItemStatus,
     RuntimeRecreationOperationStatus,
     RuntimeRecreationTargetKind,
 )
+from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.runtime_profile import (
     RDBRuntimeConfigurationReconcileTask,
     RDBRuntimeConfigurationRevision,
@@ -23,6 +32,7 @@ from azents.rdb.models.runtime_profile import (
     RDBRuntimeRecreationOperationItem,
     RDBWorkspaceRuntimeProfile,
 )
+from azents.rdb.models.runtime_provider import RDBRuntimeProvider
 
 from .data import (
     RuntimeConfigurationReconcileTask,
@@ -35,6 +45,7 @@ from .data import (
     RuntimeRecreationOperationItem,
     WorkspaceRuntimeProfile,
     WorkspaceRuntimeProfileCreate,
+    WorkspaceRuntimeProfileReplace,
 )
 
 
@@ -83,6 +94,32 @@ class RuntimeProfileRepository:
         result = await session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_infrastructure_profile(rdb) if rdb is not None else None
+
+    async def list_infrastructure_profiles(
+        self,
+        session: AsyncSession,
+        *,
+        provider_id: str,
+        include_disabled: bool,
+    ) -> list[RuntimeInfrastructureProfile]:
+        """List infrastructure Profiles owned by one exact Provider."""
+        statement = (
+            sa.select(RDBRuntimeInfrastructureProfile)
+            .where(RDBRuntimeInfrastructureProfile.provider_id == provider_id)
+            .order_by(
+                RDBRuntimeInfrastructureProfile.display_name,
+                RDBRuntimeInfrastructureProfile.id,
+            )
+        )
+        if not include_disabled:
+            statement = statement.where(
+                RDBRuntimeInfrastructureProfile.lifecycle
+                == RuntimeProfileLifecycle.ACTIVE
+            )
+        result = await session.execute(statement)
+        return [
+            self._build_infrastructure_profile(rdb) for rdb in result.scalars().all()
+        ]
 
     async def replace_infrastructure_profile(
         self,
@@ -172,6 +209,74 @@ class RuntimeProfileRepository:
         rdb = result.scalar_one_or_none()
         return self._build_workspace_profile(rdb) if rdb is not None else None
 
+    async def list_workspace_runtime_profiles(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        include_disabled: bool,
+    ) -> list[WorkspaceRuntimeProfile]:
+        """List Runtime Profiles owned by one exact Workspace."""
+        statement = (
+            sa.select(RDBWorkspaceRuntimeProfile)
+            .where(RDBWorkspaceRuntimeProfile.workspace_id == workspace_id)
+            .order_by(
+                RDBWorkspaceRuntimeProfile.display_name,
+                RDBWorkspaceRuntimeProfile.id,
+            )
+        )
+        if not include_disabled:
+            statement = statement.where(
+                RDBWorkspaceRuntimeProfile.lifecycle == RuntimeProfileLifecycle.ACTIVE
+            )
+        result = await session.execute(statement)
+        return [self._build_workspace_profile(rdb) for rdb in result.scalars().all()]
+
+    async def replace_workspace_runtime_profile(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        profile_id: str,
+        expected_version: int,
+        replacement: WorkspaceRuntimeProfileReplace,
+    ) -> WorkspaceRuntimeProfile | None:
+        """Replace a Workspace Profile using ownership and version fencing."""
+        infrastructure_provider_id = await session.scalar(
+            sa.select(RDBRuntimeInfrastructureProfile.provider_id).where(
+                RDBRuntimeInfrastructureProfile.id
+                == replacement.infrastructure_profile_id
+            )
+        )
+        if infrastructure_provider_id != replacement.provider_id:
+            raise ValueError(
+                "Infrastructure Profile does not belong to the selected Provider."
+            )
+        result = await session.execute(
+            sa.update(RDBWorkspaceRuntimeProfile)
+            .where(
+                RDBWorkspaceRuntimeProfile.id == profile_id,
+                RDBWorkspaceRuntimeProfile.workspace_id == workspace_id,
+                RDBWorkspaceRuntimeProfile.version == expected_version,
+            )
+            .values(
+                provider_id=replacement.provider_id,
+                infrastructure_profile_id=replacement.infrastructure_profile_id,
+                display_name=replacement.display_name,
+                description=replacement.description,
+                lifecycle=replacement.lifecycle,
+                policy=replacement.policy,
+                version=RDBWorkspaceRuntimeProfile.version + 1,
+                digest=replacement.digest,
+                updated_by_workspace_user_id=(replacement.actor_workspace_user_id),
+                updated_at=tznow(),
+            )
+            .returning(RDBWorkspaceRuntimeProfile)
+        )
+        rdb = result.scalar_one_or_none()
+        await session.flush()
+        return self._build_workspace_profile(rdb) if rdb is not None else None
+
     async def create_configuration_revision(
         self,
         session: AsyncSession,
@@ -187,6 +292,7 @@ class RuntimeProfileRepository:
             infrastructure_profile_version=create.infrastructure_profile_version,
             workspace_runtime_profile_id=create.workspace_runtime_profile_id,
             workspace_runtime_profile_version=create.workspace_runtime_profile_version,
+            agent_selection_version=create.agent_selection_version,
             resolution_status=create.resolution_status,
             required_capabilities=list(create.required_capabilities),
             missing_capabilities=list(create.missing_capabilities),
@@ -203,6 +309,117 @@ class RuntimeProfileRepository:
         session.add(rdb)
         await session.flush()
         return self._build_configuration_revision(rdb)
+
+    async def create_or_get_configuration_revision(
+        self,
+        session: AsyncSession,
+        *,
+        create: RuntimeConfigurationRevisionCreate,
+    ) -> RuntimeConfigurationRevision:
+        """Append immutable evidence or reuse the equivalent Runtime revision."""
+        revision_id = uuid7().hex
+        result = await session.execute(
+            insert(RDBRuntimeConfigurationRevision)
+            .values(
+                id=revision_id,
+                runtime_id=create.runtime_id,
+                provider_id=create.provider_id,
+                provider_capability_revision_id=(
+                    create.provider_capability_revision_id
+                ),
+                infrastructure_profile_id=create.infrastructure_profile_id,
+                infrastructure_profile_version=create.infrastructure_profile_version,
+                workspace_runtime_profile_id=create.workspace_runtime_profile_id,
+                workspace_runtime_profile_version=(
+                    create.workspace_runtime_profile_version
+                ),
+                agent_selection_version=create.agent_selection_version,
+                resolution_status=create.resolution_status,
+                required_capabilities=list(create.required_capabilities),
+                missing_capabilities=list(create.missing_capabilities),
+                source_trace=create.source_trace,
+                digest=create.digest,
+                target_desired_generation=create.target_desired_generation,
+                reason_code=create.reason_code,
+                resolved_configuration=create.resolved_configuration,
+                provider_reported_digest=None,
+                runner_reported_digest=None,
+                provider_acknowledged_at=None,
+                runtime_observed_at=None,
+            )
+            .on_conflict_do_nothing(
+                constraint="uq_runtime_configuration_revisions_runtime_digest_generation"
+            )
+            .returning(RDBRuntimeConfigurationRevision)
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None:
+            existing = await session.execute(
+                sa.select(RDBRuntimeConfigurationRevision).where(
+                    RDBRuntimeConfigurationRevision.runtime_id == create.runtime_id,
+                    RDBRuntimeConfigurationRevision.digest == create.digest,
+                    RDBRuntimeConfigurationRevision.target_desired_generation
+                    == create.target_desired_generation,
+                )
+            )
+            rdb = existing.scalar_one()
+        await session.flush()
+        return self._build_configuration_revision(rdb)
+
+    async def get_configuration_revision(
+        self,
+        session: AsyncSession,
+        *,
+        revision_id: str,
+    ) -> RuntimeConfigurationRevision | None:
+        """Fetch one immutable Runtime configuration revision."""
+        rdb = await session.get(RDBRuntimeConfigurationRevision, revision_id)
+        return self._build_configuration_revision(rdb) if rdb is not None else None
+
+    async def configuration_transport_evidence_matches_current(
+        self,
+        session: AsyncSession,
+        *,
+        runtime_id: str,
+        provider_id: str,
+        evidence: RuntimeExecutionPolicyEvidence,
+    ) -> bool:
+        """Validate the Phase-2 transport envelope without claiming adoption."""
+        revision = await self._current_configuration_evidence(
+            session,
+            runtime_id=runtime_id,
+            provider_id=provider_id,
+            evidence=evidence,
+        )
+        return revision is not None
+
+    async def _current_configuration_evidence(
+        self,
+        session: AsyncSession,
+        *,
+        runtime_id: str,
+        provider_id: str,
+        evidence: RuntimeExecutionPolicyEvidence,
+    ) -> RuntimeConfigurationRevision | None:
+        runtime_statement = sa.select(RDBAgentRuntime).where(
+            RDBAgentRuntime.id == runtime_id,
+            RDBAgentRuntime.runtime_provider_resource_id == provider_id,
+            RDBAgentRuntime.desired_runtime_configuration_revision_id
+            == evidence.snapshot_id,
+            RDBAgentRuntime.desired_generation == evidence.desired_generation,
+        )
+        runtime = (await session.execute(runtime_statement)).scalar_one_or_none()
+        if runtime is None:
+            return None
+        revision_statement = sa.select(RDBRuntimeConfigurationRevision).where(
+            RDBRuntimeConfigurationRevision.id == evidence.snapshot_id,
+            RDBRuntimeConfigurationRevision.runtime_id == runtime_id,
+            RDBRuntimeConfigurationRevision.provider_id == provider_id,
+        )
+        revision = (await session.execute(revision_statement)).scalar_one_or_none()
+        if revision is None or not _configuration_evidence_matches(revision, evidence):
+            return None
+        return self._build_configuration_revision(revision)
 
     async def enqueue_reconcile_task(
         self,
@@ -252,21 +469,33 @@ class RuntimeProfileRepository:
         session: AsyncSession,
         *,
         available_before: datetime.datetime,
+        reclaim_running_before: datetime.datetime,
         limit: int,
     ) -> list[RuntimeConfigurationReconcileTask]:
-        """Claim available fan-out tasks with PostgreSQL ``SKIP LOCKED``."""
+        """Claim available or abandoned tasks with PostgreSQL ``SKIP LOCKED``."""
         if limit < 1:
             raise ValueError("Reconcile claim limit must be positive.")
         result = await session.execute(
             sa.select(RDBRuntimeConfigurationReconcileTask)
             .where(
-                RDBRuntimeConfigurationReconcileTask.status.in_(
-                    (
-                        RuntimeReconcileTaskStatus.PENDING,
-                        RuntimeReconcileTaskStatus.RETRY_WAIT,
-                    )
+                sa.or_(
+                    sa.and_(
+                        RDBRuntimeConfigurationReconcileTask.status.in_(
+                            (
+                                RuntimeReconcileTaskStatus.PENDING,
+                                RuntimeReconcileTaskStatus.RETRY_WAIT,
+                            )
+                        ),
+                        RDBRuntimeConfigurationReconcileTask.available_at
+                        <= available_before,
+                    ),
+                    sa.and_(
+                        RDBRuntimeConfigurationReconcileTask.status
+                        == RuntimeReconcileTaskStatus.RUNNING,
+                        RDBRuntimeConfigurationReconcileTask.updated_at
+                        <= reclaim_running_before,
+                    ),
                 ),
-                RDBRuntimeConfigurationReconcileTask.available_at <= available_before,
             )
             .order_by(
                 RDBRuntimeConfigurationReconcileTask.available_at,
@@ -290,19 +519,50 @@ class RuntimeProfileRepository:
         session: AsyncSession,
         *,
         task_id: str,
+        expected_attempt: int,
         cursor: str | None,
     ) -> bool:
-        """Complete one currently claimed reconcile task."""
+        """Complete one currently owned reconcile-task attempt."""
         result = await session.execute(
             sa.update(RDBRuntimeConfigurationReconcileTask)
             .where(
                 RDBRuntimeConfigurationReconcileTask.id == task_id,
                 RDBRuntimeConfigurationReconcileTask.status
                 == RuntimeReconcileTaskStatus.RUNNING,
+                RDBRuntimeConfigurationReconcileTask.attempt == expected_attempt,
             )
             .values(
                 status=RuntimeReconcileTaskStatus.COMPLETED,
                 cursor=cursor,
+                failure_code=None,
+                updated_at=sa.func.now(),
+            )
+            .returning(RDBRuntimeConfigurationReconcileTask.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def continue_reconcile_task(
+        self,
+        session: AsyncSession,
+        *,
+        task_id: str,
+        expected_attempt: int,
+        cursor: str,
+        available_at: datetime.datetime,
+    ) -> bool:
+        """Persist one page only while its reconcile-task attempt is owned."""
+        result = await session.execute(
+            sa.update(RDBRuntimeConfigurationReconcileTask)
+            .where(
+                RDBRuntimeConfigurationReconcileTask.id == task_id,
+                RDBRuntimeConfigurationReconcileTask.status
+                == RuntimeReconcileTaskStatus.RUNNING,
+                RDBRuntimeConfigurationReconcileTask.attempt == expected_attempt,
+            )
+            .values(
+                status=RuntimeReconcileTaskStatus.PENDING,
+                cursor=cursor,
+                available_at=available_at,
                 failure_code=None,
                 updated_at=sa.func.now(),
             )
@@ -315,17 +575,19 @@ class RuntimeProfileRepository:
         session: AsyncSession,
         *,
         task_id: str,
+        expected_attempt: int,
         cursor: str | None,
         available_at: datetime.datetime,
         failure_code: str,
     ) -> bool:
-        """Return one claimed task to bounded durable retry wait."""
+        """Retry one task only while its claimed attempt is still owned."""
         result = await session.execute(
             sa.update(RDBRuntimeConfigurationReconcileTask)
             .where(
                 RDBRuntimeConfigurationReconcileTask.id == task_id,
                 RDBRuntimeConfigurationReconcileTask.status
                 == RuntimeReconcileTaskStatus.RUNNING,
+                RDBRuntimeConfigurationReconcileTask.attempt == expected_attempt,
             )
             .values(
                 status=RuntimeReconcileTaskStatus.RETRY_WAIT,
@@ -337,6 +599,93 @@ class RuntimeProfileRepository:
             .returning(RDBRuntimeConfigurationReconcileTask.id)
         )
         return result.scalar_one_or_none() is not None
+
+    async def get_reconcile_source_version(
+        self,
+        session: AsyncSession,
+        *,
+        source_type: RuntimeReconcileSourceKind,
+        source_id: str,
+    ) -> str | None:
+        """Return the current monotonic version for one reconcile source."""
+        if source_type is RuntimeReconcileSourceKind.AGENT_SELECTION:
+            version = await session.scalar(
+                sa.select(RDBAgent.runtime_profile_selection_version).where(
+                    RDBAgent.id == source_id
+                )
+            )
+            return str(version) if version is not None else None
+        if source_type is RuntimeReconcileSourceKind.WORKSPACE_RUNTIME_PROFILE:
+            version = await session.scalar(
+                sa.select(RDBWorkspaceRuntimeProfile.version).where(
+                    RDBWorkspaceRuntimeProfile.id == source_id
+                )
+            )
+            return str(version) if version is not None else None
+        if source_type is RuntimeReconcileSourceKind.INFRASTRUCTURE_PROFILE:
+            version = await session.scalar(
+                sa.select(RDBRuntimeInfrastructureProfile.version).where(
+                    RDBRuntimeInfrastructureProfile.id == source_id
+                )
+            )
+            return str(version) if version is not None else None
+        if source_type is RuntimeReconcileSourceKind.PROVIDER:
+            version = await session.scalar(
+                sa.select(RDBRuntimeProvider.admin_version).where(
+                    RDBRuntimeProvider.id == source_id
+                )
+            )
+            return str(version) if version is not None else None
+        if source_type is RuntimeReconcileSourceKind.PROVIDER_CAPABILITY:
+            revision_id = await session.scalar(
+                sa.select(RDBRuntimeProvider.current_contract_revision_id).where(
+                    RDBRuntimeProvider.id == source_id
+                )
+            )
+            return str(revision_id) if revision_id is not None else None
+        raise AssertionError(f"Unsupported reconcile source type: {source_type}")
+
+    async def list_affected_agent_ids(
+        self,
+        session: AsyncSession,
+        *,
+        source_type: RuntimeReconcileSourceKind,
+        source_id: str,
+        after_agent_id: str | None,
+        limit: int,
+    ) -> list[str]:
+        """List one bounded page of Agents affected by an authoritative source."""
+        if limit < 1:
+            raise ValueError("Reconcile page limit must be positive.")
+        statement = sa.select(RDBAgent.id).order_by(RDBAgent.id).limit(limit)
+        if source_type is RuntimeReconcileSourceKind.AGENT_SELECTION:
+            statement = statement.where(RDBAgent.id == source_id)
+        elif source_type is RuntimeReconcileSourceKind.WORKSPACE_RUNTIME_PROFILE:
+            statement = statement.where(RDBAgent.runtime_profile_id == source_id)
+        else:
+            statement = statement.join(
+                RDBWorkspaceRuntimeProfile,
+                RDBWorkspaceRuntimeProfile.id == RDBAgent.runtime_profile_id,
+            )
+            if source_type is RuntimeReconcileSourceKind.INFRASTRUCTURE_PROFILE:
+                statement = statement.where(
+                    RDBWorkspaceRuntimeProfile.infrastructure_profile_id == source_id
+                )
+            elif source_type in {
+                RuntimeReconcileSourceKind.PROVIDER,
+                RuntimeReconcileSourceKind.PROVIDER_CAPABILITY,
+            }:
+                statement = statement.where(
+                    RDBWorkspaceRuntimeProfile.provider_id == source_id
+                )
+            else:
+                raise AssertionError(
+                    f"Unsupported reconcile source type: {source_type}"
+                )
+        if after_agent_id is not None:
+            statement = statement.where(RDBAgent.id > after_agent_id)
+        result = await session.execute(statement)
+        return list(result.scalars())
 
     async def create_recreation_operation(
         self,
@@ -517,6 +866,7 @@ class RuntimeProfileRepository:
             infrastructure_profile_version=rdb.infrastructure_profile_version,
             workspace_runtime_profile_id=rdb.workspace_runtime_profile_id,
             workspace_runtime_profile_version=rdb.workspace_runtime_profile_version,
+            agent_selection_version=rdb.agent_selection_version,
             resolution_status=rdb.resolution_status,
             reason_code=rdb.reason_code,
             required_capabilities=tuple(rdb.required_capabilities),
@@ -590,3 +940,25 @@ class RuntimeProfileRepository:
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,
         )
+
+
+def _configuration_evidence_matches(
+    revision: RDBRuntimeConfigurationRevision,
+    evidence: RuntimeExecutionPolicyEvidence,
+) -> bool:
+    """Validate the transitional transport envelope against one revision."""
+    return (
+        revision.id == evidence.snapshot_id
+        and revision.target_desired_generation == evidence.desired_generation
+        and revision.resolution_status is RuntimeConfigurationResolutionStatus.READY
+        and revision.resolved_configuration is not None
+        and evidence.digest
+        == digest_runtime_execution_policy(standard_runtime_execution_policy())
+        and dict(evidence.module_versions) == {"docker": 1, "runtime.resources": 1}
+        and dict(evidence.source_versions)
+        == {
+            "profile": revision.infrastructure_profile_version,
+            "workspace": revision.workspace_runtime_profile_version,
+            "agent": revision.agent_selection_version,
+        }
+    )

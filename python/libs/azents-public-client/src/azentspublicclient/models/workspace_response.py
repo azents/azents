@@ -19,7 +19,8 @@ import json
 
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar, Dict, List, Optional
+from typing_extensions import Annotated
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -29,10 +30,12 @@ class WorkspaceResponse(BaseModel):
     """ # noqa: E501
     name: StrictStr = Field(description="Workspace name")
     handle: StrictStr = Field(description="Workspace unique handle")
+    default_runtime_profile_id: Optional[StrictStr]
+    default_runtime_profile_version: Annotated[int, Field(strict=True, ge=1)] = Field(description="Optimistic version for the Workspace Runtime Profile default")
     created_at: datetime = Field(description="Created time")
     updated_at: datetime = Field(description="Updated time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["name", "handle", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["name", "handle", "default_runtime_profile_id", "default_runtime_profile_version", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -80,6 +83,11 @@ class WorkspaceResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if default_runtime_profile_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.default_runtime_profile_id is None and "default_runtime_profile_id" in self.model_fields_set:
+            _dict['default_runtime_profile_id'] = None
+
         return _dict
 
     @classmethod
@@ -94,6 +102,8 @@ class WorkspaceResponse(BaseModel):
         _obj = cls.model_validate({
             "name": obj.get("name"),
             "handle": obj.get("handle"),
+            "default_runtime_profile_id": obj.get("default_runtime_profile_id"),
+            "default_runtime_profile_version": obj.get("default_runtime_profile_version"),
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")
         })
