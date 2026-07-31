@@ -1,7 +1,10 @@
 """Runtime lifecycle reconciler tests."""
 
+# pyright: reportPrivateUsage=false
+
 import datetime
 
+import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
 from cryptography.fernet import Fernet
@@ -28,16 +31,18 @@ from azents.core.runtime_runner_credential import RuntimeRunnerCredentialVerifie
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
-from azents.rdb.models.runtime_profile import (
-    RDBRuntimeInfrastructureProfile,
-    RDBWorkspaceRuntimeProfile,
-)
+from azents.rdb.models.runtime_profile import RDBRuntimeConfigurationRevision
 from azents.rdb.models.runtime_provider_policy import (
     RDBRuntimeProviderContractRevision,
 )
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.runtime_profile.data import RuntimeConfigurationRevisionCreate
+from azents.repos.runtime_profile.data import (
+    RuntimeConfigurationRevision,
+    RuntimeConfigurationRevisionCreate,
+    RuntimeInfrastructureProfileCreate,
+    WorkspaceRuntimeProfileCreate,
+)
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
@@ -240,6 +245,71 @@ async def test_reconciler_dispatches_periodic_provider_start_for_running_runtime
     assert "control_token" not in auth
     assert updated is not None
     assert updated.provider_observe_requested_at is not None
+
+
+async def test_reconciler_rejects_mismatched_resolved_provider_reference(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Dispatch validates resolved references against the immutable revision row."""
+    runtime_repository = AgentRuntimeRepository()
+    async with rdb_session_manager() as session:
+        workspace_id = await _create_workspace(
+            session,
+            "reconciler-provider-reference-ws",
+        )
+        agent_id = await _create_agent(
+            session,
+            workspace_id,
+            "reconciler-provider-reference-agent",
+        )
+        runtime = await runtime_repository.ensure_for_agent(session, agent_id)
+        await _bind_runtime_provider(session, runtime.id)
+        command = await runtime_repository.set_desired_state(
+            session,
+            runtime.id,
+            RuntimeLifecycleCommandType.START,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert command is not None
+        revision = await _attach_runtime_configuration(
+            session,
+            runtime_id=runtime.id,
+            target_desired_generation=command.desired_generation,
+        )
+        configuration = dict(revision.resolved_configuration or {})
+        provider_reference = configuration["provider"]
+        assert isinstance(provider_reference, dict)
+        configuration["provider"] = {
+            **provider_reference,
+            "id": "mismatched-provider-resource",
+        }
+        await session.execute(
+            sa.update(RDBRuntimeConfigurationRevision)
+            .where(RDBRuntimeConfigurationRevision.id == revision.id)
+            .values(resolved_configuration=configuration)
+        )
+        current = await runtime_repository.get_by_id(session, runtime.id)
+        assert current is not None
+
+    store = InMemoryRuntimeCoordinationStore()
+    reconciler = RuntimeLifecycleReconciler(
+        runtime_repository=runtime_repository,
+        profile_repository=RuntimeProfileRepository(),
+        session_manager=rdb_session_manager,
+        coordination_store=store,
+        control_protocol=RuntimeControlProtocolService(store),
+        config=RuntimeLifecycleDispatchConfig(
+            runner_image="runner:test",
+            runner_control_endpoint="runtime-control:9090",
+            runner_transfer_endpoint="runtime-transfer:9091",
+            runner_credential_identifier=_runner_credential_verifier(),
+            runner_control_tls_ca_pem=None,
+            allow_insecure_runner_control=True,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Provider reference"):
+        await reconciler._runtime_configuration(current)
 
 
 async def test_reconciler_observes_stopping_runtime_after_provider_reconnect(
@@ -512,7 +582,9 @@ async def _attach_runtime_configuration(
     *,
     runtime_id: str,
     target_desired_generation: int,
-) -> None:
+) -> RuntimeConfigurationRevision:
+    runtime = await session.get(RDBAgentRuntime, runtime_id)
+    assert runtime is not None
     provider = await RuntimeProviderRepository().create(
         session,
         RuntimeProviderCreate(
@@ -548,78 +620,111 @@ async def _attach_runtime_configuration(
                 "stop",
                 "terminal_delete",
             ],
-            "optional_capabilities": ["execution_policy_v1"],
+            "optional_capabilities": [],
             "persistence": {
                 "kind": "persistent",
                 "reset_destroys_workspace": True,
                 "terminal_delete_destroys_workspace": True,
             },
             "configuration_fields": [],
-            "execution_policy": {
-                "schema_version": 1,
-                "supported_modules": [
-                    {"module_id": "docker", "version": 1},
-                    {"module_id": "runtime.resources", "version": 1},
-                ],
-                "storage_modes": ["ephemeral", "none"],
-                "resource_maxima": None,
-            },
+            "profile_contracts": [],
         },
         compatibility={},
     )
     session.add(contract)
     await session.flush()
 
-    runtime = await session.get(RDBAgentRuntime, runtime_id)
-    assert runtime is not None
-    infrastructure = RDBRuntimeInfrastructureProfile(
-        provider_id=provider.id,
-        profile_kind=RuntimeInfrastructureProfileKind.KUBERNETES_POD,
-        display_name=f"Infrastructure {runtime_id}",
-        description="Reconciler test infrastructure Profile",
-        lifecycle=RuntimeProfileLifecycle.ACTIVE,
-        contract_family="kubernetes.pod-profile",
-        schema_version=1,
-        spec={"profile_kind": "kubernetes_pod"},
-        required_capabilities=[],
-        version=1,
-        digest="i" * 64,
-        created_by_user_id=None,
-        updated_by_user_id=None,
+    effective_profile = {
+        "profile_kind": "kubernetes_pod",
+        "contract_family": "kubernetes.pod-profile",
+        "schema_version": 1,
+        "runner_resources": {
+            "cpu_request_millicores": None,
+            "cpu_limit_millicores": None,
+            "memory_request_bytes": None,
+            "memory_limit_bytes": None,
+        },
+        "workspace_volume": {
+            "storage_class_name": "standard",
+            "storage_request_bytes": 1_073_741_824,
+        },
+        "network_policy": {"allowed_cidrs": [], "denied_cidrs": []},
+        "service_account_name": None,
+        "scheduling": {"node_selector": {}, "tolerations": []},
+        "dind": None,
+    }
+    profile_repository = RuntimeProfileRepository()
+    infrastructure = await profile_repository.create_infrastructure_profile(
+        session,
+        create=RuntimeInfrastructureProfileCreate(
+            provider_id=provider.id,
+            profile_kind=RuntimeInfrastructureProfileKind.KUBERNETES_POD,
+            display_name="Test Pod Profile",
+            description="Reconciler test infrastructure",
+            lifecycle=RuntimeProfileLifecycle.ACTIVE,
+            contract_family="kubernetes.pod-profile",
+            schema_version=1,
+            spec=effective_profile,
+            required_capabilities=(
+                "kubernetes.pod-profile",
+                "runtime.resources",
+                "workspace.persistent-volume",
+                "runtime.network-policy",
+            ),
+            digest="a" * 64,
+            actor_user_id=None,
+        ),
     )
-    session.add(infrastructure)
-    await session.flush()
-    workspace_profile = RDBWorkspaceRuntimeProfile(
-        workspace_id=runtime.workspace_id,
-        provider_id=provider.id,
-        infrastructure_profile_id=infrastructure.id,
-        display_name=f"Workspace Profile {runtime_id}",
-        description="Reconciler test Workspace Runtime Profile",
-        lifecycle=RuntimeProfileLifecycle.ACTIVE,
-        policy={"schema_version": 1, "network_restriction": None},
-        version=1,
-        digest="w" * 64,
-        created_by_workspace_user_id=None,
-        updated_by_workspace_user_id=None,
+    workspace_profile = await profile_repository.create_workspace_runtime_profile(
+        session,
+        create=WorkspaceRuntimeProfileCreate(
+            workspace_id=runtime.workspace_id,
+            provider_id=provider.id,
+            infrastructure_profile_id=infrastructure.id,
+            display_name="Test Runtime Profile",
+            description="Reconciler test Workspace Profile",
+            lifecycle=RuntimeProfileLifecycle.ACTIVE,
+            policy={"schema_version": 1, "network_restriction": None},
+            digest="b" * 64,
+            actor_workspace_user_id=None,
+        ),
     )
-    session.add(workspace_profile)
-    await session.flush()
-    revision = await RuntimeProfileRepository().create_configuration_revision(
+    revision = await profile_repository.create_configuration_revision(
         session,
         create=RuntimeConfigurationRevisionCreate(
             runtime_id=runtime_id,
             provider_id=provider.id,
             provider_capability_revision_id=contract.id,
             infrastructure_profile_id=infrastructure.id,
-            infrastructure_profile_version=1,
+            infrastructure_profile_version=infrastructure.version,
             workspace_runtime_profile_id=workspace_profile.id,
-            workspace_runtime_profile_version=1,
+            workspace_runtime_profile_version=workspace_profile.version,
             agent_selection_version=1,
             resolution_status=RuntimeConfigurationResolutionStatus.READY,
             reason_code=None,
-            required_capabilities=(),
+            required_capabilities=infrastructure.required_capabilities,
             missing_capabilities=(),
-            resolved_configuration={"schema_version": 1},
+            resolved_configuration={
+                "schema_version": 1,
+                "provider": {
+                    "id": provider.id,
+                    "logical_id": provider.provider_id,
+                    "kind": provider.kind.value,
+                    "capability_revision_id": contract.id,
+                    "capability_digest": contract.digest,
+                },
+                "infrastructure_profile": {
+                    "id": infrastructure.id,
+                    "version": infrastructure.version,
+                    "digest": infrastructure.digest,
+                },
+                "workspace_runtime_profile": {
+                    "id": workspace_profile.id,
+                    "version": workspace_profile.version,
+                    "digest": workspace_profile.digest,
+                },
+                "effective_profile": effective_profile,
+            },
             source_trace={},
             digest="d" * 64,
             target_desired_generation=target_desired_generation,
@@ -635,3 +740,4 @@ async def _attach_runtime_configuration(
             desired_runtime_configuration_revision_id=revision.id,
         )
     )
+    return revision

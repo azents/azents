@@ -4,7 +4,6 @@ import datetime
 import json
 
 import sqlalchemy as sa
-from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -25,6 +24,7 @@ from azents.rdb.models.runtime_provider_policy import (
 
 from .data import (
     AgentRuntimeProviderOverride,
+    LegacyRuntimeExecutionPolicyEvidence,
     RuntimePolicySnapshot,
     RuntimePolicySnapshotCreate,
     RuntimeProviderConfigRevision,
@@ -540,7 +540,7 @@ class RuntimeProviderPolicyRepository:
         *,
         runtime_id: str,
         provider_id: str,
-        evidence: RuntimeExecutionPolicyEvidence,
+        evidence: LegacyRuntimeExecutionPolicyEvidence,
         acknowledged_at: datetime.datetime,
     ) -> RuntimePolicySnapshot | None:
         """Record exact Provider evidence and promote only after Runner evidence."""
@@ -585,7 +585,7 @@ class RuntimeProviderPolicyRepository:
         *,
         runtime_id: str,
         provider_id: str,
-        evidence: RuntimeExecutionPolicyEvidence,
+        evidence: LegacyRuntimeExecutionPolicyEvidence,
     ) -> bool:
         """Return whether evidence identifies the exact current target."""
         runtime_result = await session.execute(
@@ -611,7 +611,7 @@ class RuntimeProviderPolicyRepository:
         *,
         runtime_id: str,
         provider_id: str,
-        evidence: RuntimeExecutionPolicyEvidence,
+        evidence: LegacyRuntimeExecutionPolicyEvidence,
         observed_at: datetime.datetime,
     ) -> RuntimePolicySnapshot | None:
         """Record exact Runner evidence and promote only after Provider evidence."""
@@ -653,7 +653,7 @@ class RuntimeProviderPolicyRepository:
         *,
         runtime_id: str,
         provider_id: str,
-        evidence: RuntimeExecutionPolicyEvidence,
+        evidence: LegacyRuntimeExecutionPolicyEvidence,
     ) -> RuntimePolicySnapshot | None:
         runtime_result = await session.execute(
             sa.select(RDBAgentRuntime)
@@ -682,7 +682,7 @@ class RuntimeProviderPolicyRepository:
         *,
         runtime_id: str,
         provider_id: str,
-        evidence: RuntimeExecutionPolicyEvidence,
+        evidence: LegacyRuntimeExecutionPolicyEvidence,
     ) -> RuntimePolicySnapshot | None:
         result = await session.execute(
             sa.update(RDBRuntimePolicySnapshot)
@@ -848,7 +848,7 @@ class RuntimeProviderPolicyRepository:
 
 def _snapshot_evidence_matches(
     snapshot: RuntimePolicySnapshot,
-    evidence: RuntimeExecutionPolicyEvidence,
+    evidence: LegacyRuntimeExecutionPolicyEvidence,
 ) -> bool:
     return (
         snapshot.id == evidence.snapshot_id

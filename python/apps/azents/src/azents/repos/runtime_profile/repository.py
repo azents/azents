@@ -5,14 +5,10 @@ import datetime
 import sqlalchemy as sa
 from azcommon.datetime import tznow
 from azcommon.uuid import uuid7
-from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
+from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.runtime_execution_policy import (
-    digest_runtime_execution_policy,
-    standard_runtime_execution_policy,
-)
 from azents.core.runtime_profile import (
     RuntimeConfigurationResolutionStatus,
     RuntimeProfileLifecycle,
@@ -376,50 +372,194 @@ class RuntimeProfileRepository:
         rdb = await session.get(RDBRuntimeConfigurationRevision, revision_id)
         return self._build_configuration_revision(rdb) if rdb is not None else None
 
-    async def configuration_transport_evidence_matches_current(
+    async def configuration_evidence_matches_current(
         self,
         session: AsyncSession,
         *,
         runtime_id: str,
         provider_id: str,
-        evidence: RuntimeExecutionPolicyEvidence,
+        evidence: RuntimeConfigurationEvidence,
     ) -> bool:
-        """Validate the Phase-2 transport envelope without claiming adoption."""
-        revision = await self._current_configuration_evidence(
+        """Return whether evidence identifies the exact current desired revision."""
+        runtime_result = await session.execute(
+            sa.select(RDBAgentRuntime.id).where(
+                RDBAgentRuntime.id == runtime_id,
+                RDBAgentRuntime.runtime_provider_resource_id == provider_id,
+                RDBAgentRuntime.desired_runtime_configuration_revision_id
+                == evidence.revision_id,
+                RDBAgentRuntime.desired_generation == evidence.desired_generation,
+            )
+        )
+        if runtime_result.scalar_one_or_none() is None:
+            return False
+        revision = await self.get_configuration_revision(
+            session,
+            revision_id=evidence.revision_id,
+        )
+        return revision is not None and _configuration_evidence_matches(
+            revision,
+            runtime_id=runtime_id,
+            provider_id=provider_id,
+            evidence=evidence,
+        )
+
+    async def record_provider_configuration_evidence(
+        self,
+        session: AsyncSession,
+        *,
+        runtime_id: str,
+        provider_id: str,
+        evidence: RuntimeConfigurationEvidence,
+        acknowledged_at: datetime.datetime,
+    ) -> RuntimeConfigurationRevision | None:
+        """Record exact Provider evidence and promote after Runner evidence."""
+        revision = await self._lock_current_configuration_evidence(
             session,
             runtime_id=runtime_id,
             provider_id=provider_id,
             evidence=evidence,
         )
-        return revision is not None
+        if revision is None:
+            return None
+        await session.execute(
+            sa.update(RDBRuntimeConfigurationRevision)
+            .where(RDBRuntimeConfigurationRevision.id == evidence.revision_id)
+            .values(
+                provider_reported_digest=evidence.digest,
+                provider_acknowledged_at=acknowledged_at,
+            )
+        )
+        await self._promote_configuration_if_complete(
+            session,
+            runtime_id=runtime_id,
+            provider_id=provider_id,
+            evidence=evidence,
+        )
+        await session.flush()
+        return await self.get_configuration_revision(
+            session,
+            revision_id=evidence.revision_id,
+        )
 
-    async def _current_configuration_evidence(
+    async def record_runner_configuration_evidence(
         self,
         session: AsyncSession,
         *,
         runtime_id: str,
         provider_id: str,
-        evidence: RuntimeExecutionPolicyEvidence,
+        evidence: RuntimeConfigurationEvidence,
+        observed_at: datetime.datetime,
     ) -> RuntimeConfigurationRevision | None:
-        runtime_statement = sa.select(RDBAgentRuntime).where(
-            RDBAgentRuntime.id == runtime_id,
-            RDBAgentRuntime.runtime_provider_resource_id == provider_id,
-            RDBAgentRuntime.desired_runtime_configuration_revision_id
-            == evidence.snapshot_id,
-            RDBAgentRuntime.desired_generation == evidence.desired_generation,
+        """Record exact Runner evidence and promote after Provider evidence."""
+        revision = await self._lock_current_configuration_evidence(
+            session,
+            runtime_id=runtime_id,
+            provider_id=provider_id,
+            evidence=evidence,
         )
-        runtime = (await session.execute(runtime_statement)).scalar_one_or_none()
-        if runtime is None:
+        if revision is None:
             return None
-        revision_statement = sa.select(RDBRuntimeConfigurationRevision).where(
-            RDBRuntimeConfigurationRevision.id == evidence.snapshot_id,
-            RDBRuntimeConfigurationRevision.runtime_id == runtime_id,
-            RDBRuntimeConfigurationRevision.provider_id == provider_id,
+        await session.execute(
+            sa.update(RDBRuntimeConfigurationRevision)
+            .where(RDBRuntimeConfigurationRevision.id == evidence.revision_id)
+            .values(
+                runner_reported_digest=evidence.digest,
+                runtime_observed_at=observed_at,
+            )
         )
-        revision = (await session.execute(revision_statement)).scalar_one_or_none()
-        if revision is None or not _configuration_evidence_matches(revision, evidence):
+        await self._promote_configuration_if_complete(
+            session,
+            runtime_id=runtime_id,
+            provider_id=provider_id,
+            evidence=evidence,
+        )
+        await session.flush()
+        return await self.get_configuration_revision(
+            session,
+            revision_id=evidence.revision_id,
+        )
+
+    async def _lock_current_configuration_evidence(
+        self,
+        session: AsyncSession,
+        *,
+        runtime_id: str,
+        provider_id: str,
+        evidence: RuntimeConfigurationEvidence,
+    ) -> RuntimeConfigurationRevision | None:
+        runtime_result = await session.execute(
+            sa.select(RDBAgentRuntime.id)
+            .where(
+                RDBAgentRuntime.id == runtime_id,
+                RDBAgentRuntime.runtime_provider_resource_id == provider_id,
+                RDBAgentRuntime.desired_runtime_configuration_revision_id
+                == evidence.revision_id,
+                RDBAgentRuntime.desired_generation == evidence.desired_generation,
+            )
+            .with_for_update()
+        )
+        if runtime_result.scalar_one_or_none() is None:
             return None
-        return self._build_configuration_revision(revision)
+        revision_result = await session.execute(
+            sa.select(RDBRuntimeConfigurationRevision)
+            .where(RDBRuntimeConfigurationRevision.id == evidence.revision_id)
+            .with_for_update()
+        )
+        rdb = revision_result.scalar_one_or_none()
+        if rdb is None:
+            return None
+        revision = self._build_configuration_revision(rdb)
+        if not _configuration_evidence_matches(
+            revision,
+            runtime_id=runtime_id,
+            provider_id=provider_id,
+            evidence=evidence,
+        ):
+            return None
+        return revision
+
+    async def _promote_configuration_if_complete(
+        self,
+        session: AsyncSession,
+        *,
+        runtime_id: str,
+        provider_id: str,
+        evidence: RuntimeConfigurationEvidence,
+    ) -> None:
+        revision_result = await session.execute(
+            sa.select(RDBRuntimeConfigurationRevision.id).where(
+                RDBRuntimeConfigurationRevision.id == evidence.revision_id,
+                RDBRuntimeConfigurationRevision.runtime_id == runtime_id,
+                RDBRuntimeConfigurationRevision.provider_id == provider_id,
+                RDBRuntimeConfigurationRevision.target_desired_generation
+                == evidence.desired_generation,
+                RDBRuntimeConfigurationRevision.digest == evidence.digest,
+                RDBRuntimeConfigurationRevision.provider_reported_digest
+                == evidence.digest,
+                RDBRuntimeConfigurationRevision.runner_reported_digest
+                == evidence.digest,
+                RDBRuntimeConfigurationRevision.provider_acknowledged_at.is_not(None),
+                RDBRuntimeConfigurationRevision.runtime_observed_at.is_not(None),
+            )
+        )
+        if revision_result.scalar_one_or_none() is None:
+            return
+        promoted = await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(
+                RDBAgentRuntime.id == runtime_id,
+                RDBAgentRuntime.runtime_provider_resource_id == provider_id,
+                RDBAgentRuntime.desired_runtime_configuration_revision_id
+                == evidence.revision_id,
+                RDBAgentRuntime.desired_generation == evidence.desired_generation,
+            )
+            .values(
+                applied_runtime_configuration_revision_id=evidence.revision_id,
+            )
+            .returning(RDBAgentRuntime.id)
+        )
+        if promoted.scalar_one_or_none() is None:
+            raise RuntimeError("Applied Runtime configuration target became stale.")
 
     async def enqueue_reconcile_task(
         self,
@@ -943,22 +1083,18 @@ class RuntimeProfileRepository:
 
 
 def _configuration_evidence_matches(
-    revision: RDBRuntimeConfigurationRevision,
-    evidence: RuntimeExecutionPolicyEvidence,
+    revision: RuntimeConfigurationRevision,
+    *,
+    runtime_id: str,
+    provider_id: str,
+    evidence: RuntimeConfigurationEvidence,
 ) -> bool:
-    """Validate the transitional transport envelope against one revision."""
     return (
-        revision.id == evidence.snapshot_id
+        revision.id == evidence.revision_id
+        and revision.runtime_id == runtime_id
+        and revision.provider_id == provider_id
         and revision.target_desired_generation == evidence.desired_generation
+        and revision.digest == evidence.digest
         and revision.resolution_status is RuntimeConfigurationResolutionStatus.READY
         and revision.resolved_configuration is not None
-        and evidence.digest
-        == digest_runtime_execution_policy(standard_runtime_execution_policy())
-        and dict(evidence.module_versions) == {"docker": 1, "runtime.resources": 1}
-        and dict(evidence.source_versions)
-        == {
-            "profile": revision.infrastructure_profile_version,
-            "workspace": revision.workspace_runtime_profile_version,
-            "agent": revision.agent_selection_version,
-        }
     )

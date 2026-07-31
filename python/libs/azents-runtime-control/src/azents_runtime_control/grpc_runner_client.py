@@ -12,12 +12,12 @@ from typing import Protocol
 import grpc
 from google.protobuf import timestamp_pb2
 
-from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 from azents_runtime_control.grpc_tls import (
     GrpcClientTlsConfig,
     create_grpc_aio_channel,
 )
 from azents_runtime_control.proto import (
+    runtime_configuration_pb2,
     runtime_runner_control_pb2,
     runtime_runner_control_pb2_grpc,
     runtime_runner_transfer_pb2,
@@ -49,6 +49,7 @@ from azents_runtime_control.runner_transfer import (
     RunnerTransferOutcome,
     RunnerTransferResult,
 )
+from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 
 
 class RunnerControlStream(Protocol):
@@ -423,8 +424,8 @@ def _register_message(
             workspace_path=registration.workspace_path,
         ),
     )
-    message.register.execution_policy.CopyFrom(
-        _execution_policy_evidence_message(registration.execution_policy)
+    message.register.runtime_configuration.CopyFrom(
+        _runtime_configuration_evidence_message(registration.runtime_configuration)
     )
     return message
 
@@ -456,8 +457,8 @@ def _state_report_message(
         workspace_path=report.workspace_path,
         reported_at=_timestamp(report.reported_at),
     )
-    message.execution_policy.CopyFrom(
-        _execution_policy_evidence_message(report.execution_policy)
+    message.runtime_configuration.CopyFrom(
+        _runtime_configuration_evidence_message(report.runtime_configuration)
     )
     return message
 
@@ -509,8 +510,8 @@ def _event_message(
 def runner_state_report_from_message(
     message: runtime_runner_control_pb2.RunnerStateReport,
 ) -> RunnerStateReport:
-    if not message.HasField("execution_policy"):
-        raise ValueError("Runtime Runner execution-policy evidence is required.")
+    if not message.HasField("runtime_configuration"):
+        raise ValueError("Runtime Runner configuration evidence is required.")
     return RunnerStateReport(
         runtime_id=message.runtime_id,
         runner_id=message.runner_id,
@@ -522,38 +523,36 @@ def runner_state_report_from_message(
         diagnostic=dict(message.diagnostic),
         workspace_path=message.workspace_path,
         reported_at=_datetime(message.reported_at),
-        execution_policy=_execution_policy_evidence(message.execution_policy),
+        runtime_configuration=_runtime_configuration_evidence(
+            message.runtime_configuration
+        ),
     )
 
 
-def _execution_policy_evidence(
-    message: runtime_runner_control_pb2.RunnerExecutionPolicyEvidence,
-) -> RuntimeExecutionPolicyEvidence:
-    return RuntimeExecutionPolicyEvidence(
-        snapshot_id=message.snapshot_id,
+def _runtime_configuration_evidence(
+    message: runtime_configuration_pb2.RuntimeConfigurationEvidence,
+) -> RuntimeConfigurationEvidence:
+    return RuntimeConfigurationEvidence(
+        revision_id=message.revision_id,
         digest=message.digest,
         desired_generation=message.desired_generation,
-        module_versions=dict(message.module_versions),
-        source_versions=dict(message.source_versions),
     )
 
 
-def runner_execution_policy_evidence_from_message(
-    message: runtime_runner_control_pb2.RunnerExecutionPolicyEvidence,
-) -> RuntimeExecutionPolicyEvidence:
-    """Deserialize required Runner execution-policy evidence."""
-    return _execution_policy_evidence(message)
+def runner_runtime_configuration_evidence_from_message(
+    message: runtime_configuration_pb2.RuntimeConfigurationEvidence,
+) -> RuntimeConfigurationEvidence:
+    """Deserialize required Runner configuration evidence."""
+    return _runtime_configuration_evidence(message)
 
 
-def _execution_policy_evidence_message(
-    evidence: RuntimeExecutionPolicyEvidence,
-) -> runtime_runner_control_pb2.RunnerExecutionPolicyEvidence:
-    return runtime_runner_control_pb2.RunnerExecutionPolicyEvidence(
-        snapshot_id=evidence.snapshot_id,
+def _runtime_configuration_evidence_message(
+    evidence: RuntimeConfigurationEvidence,
+) -> runtime_configuration_pb2.RuntimeConfigurationEvidence:
+    return runtime_configuration_pb2.RuntimeConfigurationEvidence(
+        revision_id=evidence.revision_id,
         digest=evidence.digest,
         desired_generation=evidence.desired_generation,
-        module_versions=dict(evidence.module_versions),
-        source_versions=dict(evidence.source_versions),
     )
 
 
@@ -1691,7 +1690,7 @@ __all__ = [
     "GrpcRunnerControlClient",
     "RunnerControlStream",
     "RuntimeRunnerControlStreamClosed",
-    "runner_execution_policy_evidence_from_message",
+    "runner_runtime_configuration_evidence_from_message",
     "runner_event_from_message",
     "runner_state_report_from_message",
     "runner_transfer_cancel_from_message",

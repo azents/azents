@@ -79,8 +79,10 @@ class AioDockerApi(DockerApi):
                     "NetworkMode": spec.network,
                     "AutoRemove": False,
                     "Memory": spec.memory_bytes,
+                    "MemoryReservation": spec.memory_reservation_bytes,
                     "CpuQuota": spec.cpu_quota,
                     "CpuPeriod": spec.cpu_period,
+                    "CpuShares": spec.cpu_shares,
                     "Binds": [
                         f"{bind.host_path}:{bind.container_path}" for bind in spec.binds
                     ],

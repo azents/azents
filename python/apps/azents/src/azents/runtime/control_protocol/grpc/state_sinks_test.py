@@ -7,13 +7,13 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
-from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 from azents_runtime_control.provider import (
     RuntimeProviderObservedState as SharedProviderState,
 )
 from azents_runtime_control.provider import RuntimeProviderReport
 from azents_runtime_control.runner import RunnerStateReport
 from azents_runtime_control.runner import RuntimeRunnerState as SharedRunnerState
+from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -111,7 +111,9 @@ async def test_provider_running_report_clears_start_timeout_failure(
             diagnostic={},
             reported_at=datetime(2026, 5, 25, tzinfo=UTC),
             terminal_delete_acknowledged=False,
-            execution_policy=_execution_policy_evidence(command.desired_generation),
+            runtime_configuration=_runtime_configuration_evidence(
+                command.desired_generation
+            ),
         )
     )
 
@@ -149,13 +151,13 @@ async def test_provider_report_ignores_finalized_runtime(
             diagnostic={},
             reported_at=datetime(2026, 7, 30, tzinfo=UTC),
             terminal_delete_acknowledged=False,
-            execution_policy=_execution_policy_evidence(),
+            runtime_configuration=_runtime_configuration_evidence(),
         )
     )
 
     transport_match = cast(
         AsyncMock,
-        profile_repository.configuration_transport_evidence_matches_current,
+        profile_repository.configuration_evidence_matches_current,
     )
     transport_match.assert_not_awaited()
 
@@ -192,7 +194,7 @@ async def test_provider_report_rejects_bound_runtime_provider_mismatch(
                 diagnostic={},
                 reported_at=datetime.now(UTC),
                 terminal_delete_acknowledged=False,
-                execution_policy=_execution_policy_evidence(),
+                runtime_configuration=_runtime_configuration_evidence(),
             )
         )
 
@@ -225,7 +227,7 @@ async def test_provider_terminal_delete_acknowledgement_clears_runtime_path(
             diagnostic={},
             reported_at=datetime(2026, 7, 21, tzinfo=UTC),
             terminal_delete_acknowledged=True,
-            execution_policy=_execution_policy_evidence(),
+            runtime_configuration=_runtime_configuration_evidence(),
         )
     )
 
@@ -493,11 +495,11 @@ async def test_runner_state_sink_fences_generation_changed_during_validation(
         assert command is not None
         return False
 
-    transport_match = cast(
+    evidence_record = cast(
         AsyncMock,
-        profile_repository.configuration_transport_evidence_matches_current,
+        profile_repository.record_runner_configuration_evidence,
     )
-    transport_match.side_effect = replace_generation
+    evidence_record.side_effect = replace_generation
     sink = RuntimeRunnerStateRepositorySink(
         repo,
         profile_repository,
@@ -607,25 +609,25 @@ def _report(
         diagnostic=diagnostic or {},
         workspace_path=workspace_path,
         reported_at=datetime(2026, 5, 25, tzinfo=UTC),
-        execution_policy=_execution_policy_evidence(policy_desired_generation),
+        runtime_configuration=_runtime_configuration_evidence(
+            policy_desired_generation
+        ),
     )
 
 
 def _profile_repository() -> RuntimeProfileRepository:
     repository = Mock(spec=RuntimeProfileRepository)
-    repository.configuration_transport_evidence_matches_current = AsyncMock(
-        return_value=True
-    )
+    repository.record_provider_configuration_evidence = AsyncMock(return_value=Mock())
+    repository.record_runner_configuration_evidence = AsyncMock(return_value=Mock())
+    repository.configuration_evidence_matches_current = AsyncMock(return_value=True)
     return cast(RuntimeProfileRepository, repository)
 
 
-def _execution_policy_evidence(
+def _runtime_configuration_evidence(
     desired_generation: int = 0,
-) -> RuntimeExecutionPolicyEvidence:
-    return RuntimeExecutionPolicyEvidence(
-        snapshot_id="snapshot-1",
+) -> RuntimeConfigurationEvidence:
+    return RuntimeConfigurationEvidence(
+        revision_id="revision-1",
         digest="d" * 64,
         desired_generation=desired_generation,
-        module_versions={"docker": 1, "runtime.resources": 1},
-        source_versions={"profile": 1, "workspace": 1, "agent": 1},
     )

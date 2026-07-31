@@ -91,7 +91,6 @@ async def _main() -> None:
             "provider_id": settings.provider_id,
             "connection_id": settings.connection_id,
             "control_endpoint": settings.control_endpoint,
-            "docker_network": settings.docker_network,
             "host_data_root": str(settings.host_data_root),
         },
     )
@@ -117,7 +116,6 @@ async def _run_control_loop(
         DockerRuntimeProviderConfig(
             provider_id=settings.provider_id,
             host_data_root=settings.host_data_root,
-            docker_network=settings.docker_network,
             runner_env=settings.runner_env,
             workspace_mount_path=settings.workspace_path,
             tmp_mount_path=settings.tmp_path,
@@ -210,7 +208,6 @@ class ProviderSettings:
             "AZ_RUNTIME_CONTROL_ALLOW_INSECURE"
         )
         self.provider_id = _required_env("AZ_RUNTIME_PROVIDER_ID")
-        self.docker_network = _required_env("AZ_RUNTIME_PROVIDER_DOCKER_NETWORK")
         self.host_data_root = Path(_required_env("AZ_RUNTIME_PROVIDER_HOST_DATA_ROOT"))
         self.workspace_path = os.environ.get(
             "AZ_RUNTIME_PROVIDER_WORKSPACE_PATH",

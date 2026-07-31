@@ -295,20 +295,14 @@ class RuntimeControlProtocolService:
             "command_type": command.command_type.value,
             "reset_final_desired_state": command.reset_final_desired_state,
             "payload": command.payload,
-            "execution_policy": {
-                "snapshot_id": command.execution_policy.evidence.snapshot_id,
-                "digest": command.execution_policy.evidence.digest,
+            "runtime_configuration": {
+                "revision_id": command.runtime_configuration.evidence.revision_id,
+                "digest": command.runtime_configuration.evidence.digest,
                 "desired_generation": (
-                    command.execution_policy.evidence.desired_generation
+                    command.runtime_configuration.evidence.desired_generation
                 ),
-                "module_versions": dict(
-                    command.execution_policy.evidence.module_versions
-                ),
-                "source_versions": dict(
-                    command.execution_policy.evidence.source_versions
-                ),
-                "effective_policy_json": (
-                    command.execution_policy.effective_policy_json
+                "resolved_configuration_json": (
+                    command.runtime_configuration.resolved_configuration_json
                 ),
             },
         }

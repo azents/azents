@@ -47,6 +47,8 @@ reportUnknownMemberType = "none"
 reportMissingTypeStubs = "none"
 exclude = [
     ".venv",
+    "src/azents_runtime_control/proto/runtime_configuration_pb2.py",
+    "src/azents_runtime_control/proto/runtime_configuration_pb2_grpc.py",
     "src/azents_runtime_control/proto/runtime_provider_control_pb2.py",
     "src/azents_runtime_control/proto/runtime_provider_control_pb2_grpc.py",
     "src/azents_runtime_control/proto/runtime_runner_control_pb2.py",

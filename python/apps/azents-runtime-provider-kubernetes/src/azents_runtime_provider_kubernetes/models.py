@@ -4,9 +4,9 @@ import dataclasses
 import enum
 from datetime import datetime
 
-from azents_runtime_control.execution_policy import (
-    RuntimeExecutionPolicyEnvelope,
-    RuntimeExecutionPolicyEvidence,
+from azents_runtime_control.runtime_configuration import (
+    RuntimeConfigurationEnvelope,
+    RuntimeConfigurationEvidence,
 )
 
 
@@ -73,7 +73,7 @@ class RuntimeLifecycleCommand:
     runner_image: str
     auth: RuntimeContainerAuth
     reset_final_desired_state: RuntimeDesiredState | None
-    execution_policy: RuntimeExecutionPolicyEnvelope
+    runtime_configuration: RuntimeConfigurationEnvelope
 
 
 @dataclasses.dataclass(frozen=True)
@@ -91,7 +91,7 @@ class RuntimeProviderReport:
     diagnostic: dict[str, str]
     reported_at: datetime
     terminal_delete_acknowledged: bool
-    execution_policy: RuntimeExecutionPolicyEvidence
+    runtime_configuration: RuntimeConfigurationEvidence
 
 
 @dataclasses.dataclass(frozen=True)

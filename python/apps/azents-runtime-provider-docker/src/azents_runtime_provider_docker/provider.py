@@ -1,7 +1,6 @@
 """Docker implementation of the Agent Runtime Provider lifecycle."""
 
 import dataclasses
-import json
 import logging
 import os
 import re
@@ -11,9 +10,10 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
-from azents_runtime_control.execution_policy import (
-    RuntimeExecutionPolicyEvidence,
-    validate_standard_execution_policy_envelope,
+from azents_runtime_control.runtime_configuration import (
+    DockerContainerProfileV1,
+    RuntimeConfigurationEvidence,
+    parse_runtime_configuration_envelope,
 )
 
 from azents_runtime_provider_docker.docker_api import (
@@ -31,8 +31,6 @@ from azents_runtime_provider_docker.models import (
     RuntimeProviderReport,
 )
 
-_CONTAINER_MEMORY_BYTES = 2 * 1024 * 1024 * 1024
-_CONTAINER_CPU_QUOTA = 100_000
 _CONTAINER_CPU_PERIOD = 100_000
 _CONTAINER_PREFIX = "azents-runtime-"
 _IMAGE_GENERATION = "agent-runtime-docker-v1"
@@ -54,10 +52,8 @@ _LABEL_DESIRED_GENERATION = "azents/desired-generation"
 _LABEL_PROVIDER_GENERATION = "azents/provider-generation"
 _LABEL_WORKSPACE_PATH = "azents/workspace-path"
 _LABEL_IMAGE_GENERATION = "azents/image-generation"
-_LABEL_POLICY_SNAPSHOT_ID = "azents/execution-policy-snapshot-id"
-_LABEL_POLICY_DIGEST = "azents/execution-policy-digest"
-_LABEL_POLICY_MODULE_VERSIONS = "azents/execution-policy-module-versions"
-_LABEL_POLICY_SOURCE_VERSIONS = "azents/execution-policy-source-versions"
+_LABEL_CONFIGURATION_REVISION_ID = "azents/runtime-configuration-revision-id"
+_LABEL_CONFIGURATION_DIGEST = "azents/runtime-configuration-digest"
 
 _ENV_CONTROL_ENDPOINT = "AZ_RUNTIME_CONTROL_ENDPOINT"
 _ENV_TRANSFER_ENDPOINT = "AZ_RUNTIME_TRANSFER_ENDPOINT"
@@ -72,11 +68,9 @@ _ENV_DESIRED_GENERATION = "AZ_RUNTIME_DESIRED_GENERATION"
 _ENV_RUNNER_AUTH_TOKEN = "AZ_RUNTIME_RUNNER_AUTH_TOKEN"
 _ENV_RUNNER_AUTH_CREDENTIAL_ID = "AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"
 _ENV_WORKSPACE_PATH = "AZ_AGENT_WORKSPACE_PATH"
-_ENV_POLICY_SNAPSHOT_ID = "AZ_RUNTIME_EXECUTION_POLICY_SNAPSHOT_ID"
-_ENV_POLICY_DIGEST = "AZ_RUNTIME_EXECUTION_POLICY_DIGEST"
-_ENV_POLICY_DESIRED_GENERATION = "AZ_RUNTIME_EXECUTION_POLICY_DESIRED_GENERATION"
-_ENV_POLICY_MODULE_VERSIONS = "AZ_RUNTIME_EXECUTION_POLICY_MODULE_VERSIONS"
-_ENV_POLICY_SOURCE_VERSIONS = "AZ_RUNTIME_EXECUTION_POLICY_SOURCE_VERSIONS"
+_ENV_CONFIGURATION_REVISION_ID = "AZ_RUNTIME_CONFIGURATION_REVISION_ID"
+_ENV_CONFIGURATION_DIGEST = "AZ_RUNTIME_CONFIGURATION_DIGEST"
+_ENV_CONFIGURATION_DESIRED_GENERATION = "AZ_RUNTIME_CONFIGURATION_DESIRED_GENERATION"
 RUNNER_LIMIT_ENV_NAMES = (
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_OPERATIONS_PER_SESSION",
     "AZ_RUNTIME_RUNNER_MAX_CONCURRENT_SYSTEM_OPERATIONS",
@@ -103,13 +97,16 @@ class InvalidResetFinalDesiredState(ValueError):
     """Reset command did not provide an explicit final desired state."""
 
 
+class UnsupportedRuntimeConfiguration(ValueError):
+    """Resolved configuration cannot be enforced by the Docker Provider."""
+
+
 @dataclasses.dataclass(frozen=True)
 class DockerRuntimeProviderConfig:
     """Configuration for a single Docker Runtime Provider process."""
 
     provider_id: str
     host_data_root: Path
-    docker_network: str
     runner_env: Mapping[str, str]
     workspace_mount_path: str = "/workspace/agent"
     tmp_mount_path: str = "/tmp/agent"
@@ -141,7 +138,6 @@ class DockerRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Start or create the Runtime container while preserving workspace data."""
-        self._validate_command(command)
         await self._ensure_container(command, replace=False)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.START,
@@ -172,7 +168,6 @@ class DockerRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Recreate the Runtime container while preserving workspace data."""
-        self._validate_command(command)
         await self._ensure_container(command, replace=True)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.RESTART,
@@ -293,7 +288,7 @@ class DockerRuntimeProvider:
         *,
         replace: bool,
     ) -> None:
-        self._validate_command(command)
+        profile = self._validate_command(command)
         container_name = _container_name(command.identity.runtime_id)
         container = await self._docker.get_container(container_name)
         if container is not None and (
@@ -302,14 +297,30 @@ class DockerRuntimeProvider:
             await self._docker.remove_container(container_name)
             container = None
         self._ensure_workspace_dirs(command.identity.runtime_id)
-        await self._docker.ensure_network(self._config.docker_network)
+        if profile.network_name is None:
+            raise UnsupportedRuntimeConfiguration(
+                "Docker Container Profile requires a Provider-managed network name."
+            )
+        await self._docker.ensure_network(profile.network_name)
         await self._docker.ensure_image(command.runner_image)
         if container is None:
-            await self._docker.create_container(self._container_spec(command))
+            await self._docker.create_container(
+                self._container_spec(command, profile=profile)
+            )
         await self._docker.start_container(container_name)
 
-    def _container_spec(self, command: RuntimeLifecycleCommand) -> DockerContainerSpec:
+    def _container_spec(
+        self,
+        command: RuntimeLifecycleCommand,
+        *,
+        profile: DockerContainerProfileV1,
+    ) -> DockerContainerSpec:
         labels = self._labels(command)
+        if profile.network_name is None:
+            raise UnsupportedRuntimeConfiguration(
+                "Docker Container Profile requires a Provider-managed network name."
+            )
+        resources = profile.runner_resources
         return DockerContainerSpec(
             name=_container_name(command.identity.runtime_id),
             image=command.runner_image,
@@ -318,10 +329,12 @@ class DockerRuntimeProvider:
             env=self._env(command),
             labels=labels,
             binds=self._binds(command.identity.runtime_id),
-            network=self._config.docker_network,
-            memory_bytes=_CONTAINER_MEMORY_BYTES,
-            cpu_quota=_CONTAINER_CPU_QUOTA,
+            network=profile.network_name,
+            memory_bytes=resources.memory_limit_bytes,
+            memory_reservation_bytes=resources.memory_reservation_bytes,
+            cpu_quota=_cpu_quota(resources.cpu_limit_millicores),
             cpu_period=_CONTAINER_CPU_PERIOD,
+            cpu_shares=_cpu_shares(resources.cpu_reservation_millicores),
             extra_hosts=(_CONTROL_HOST_ALIAS,),
         )
 
@@ -349,10 +362,10 @@ class DockerRuntimeProvider:
         for key, value in self._runner_auth_env(command).items():
             if env.get(key) != value:
                 return False
-        for key, value in self._policy_labels(command).items():
+        for key, value in self._configuration_labels(command).items():
             if labels.get(key) != value:
                 return False
-        for key, value in self._policy_env(command).items():
+        for key, value in self._configuration_env(command).items():
             if env.get(key) != value:
                 return False
         managed_runner_env = {
@@ -368,7 +381,7 @@ class DockerRuntimeProvider:
             _LABEL_DESIRED_GENERATION: str(command.desired_generation),
             _LABEL_PROVIDER_GENERATION: str(command.provider_generation),
             _LABEL_IMAGE_GENERATION: _IMAGE_GENERATION,
-            **self._policy_labels(command),
+            **self._configuration_labels(command),
         }
 
     def _stable_labels(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
@@ -386,7 +399,7 @@ class DockerRuntimeProvider:
         return {
             **self._stable_env(command),
             **self._runner_auth_env(command),
-            **self._policy_env(command),
+            **self._configuration_env(command),
             _ENV_PROVIDER_GENERATION: str(command.provider_generation),
         }
 
@@ -416,23 +429,25 @@ class DockerRuntimeProvider:
         ).lower()
         return env
 
-    def _policy_labels(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
-        evidence = command.execution_policy.evidence
+    def _configuration_labels(
+        self,
+        command: RuntimeLifecycleCommand,
+    ) -> dict[str, str]:
+        evidence = command.runtime_configuration.evidence
         return {
-            _LABEL_POLICY_SNAPSHOT_ID: evidence.snapshot_id,
-            _LABEL_POLICY_DIGEST: evidence.digest,
-            _LABEL_POLICY_MODULE_VERSIONS: _canonical_mapping(evidence.module_versions),
-            _LABEL_POLICY_SOURCE_VERSIONS: _canonical_mapping(evidence.source_versions),
+            _LABEL_CONFIGURATION_REVISION_ID: evidence.revision_id,
+            _LABEL_CONFIGURATION_DIGEST: evidence.digest,
         }
 
-    def _policy_env(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
-        evidence = command.execution_policy.evidence
+    def _configuration_env(
+        self,
+        command: RuntimeLifecycleCommand,
+    ) -> dict[str, str]:
+        evidence = command.runtime_configuration.evidence
         return {
-            _ENV_POLICY_SNAPSHOT_ID: evidence.snapshot_id,
-            _ENV_POLICY_DIGEST: evidence.digest,
-            _ENV_POLICY_DESIRED_GENERATION: str(evidence.desired_generation),
-            _ENV_POLICY_MODULE_VERSIONS: _canonical_mapping(evidence.module_versions),
-            _ENV_POLICY_SOURCE_VERSIONS: _canonical_mapping(evidence.source_versions),
+            _ENV_CONFIGURATION_REVISION_ID: evidence.revision_id,
+            _ENV_CONFIGURATION_DIGEST: evidence.digest,
+            _ENV_CONFIGURATION_DESIRED_GENERATION: str(evidence.desired_generation),
         }
 
     def _binds(self, runtime_id: str) -> tuple[DockerBindMount, ...]:
@@ -467,7 +482,7 @@ class DockerRuntimeProvider:
             diagnostic={},
             reported_at=datetime.now(UTC),
             terminal_delete_acknowledged=False,
-            execution_policy=command.execution_policy.evidence,
+            runtime_configuration=command.runtime_configuration.evidence,
         )
 
     def _report_from_container(
@@ -492,7 +507,7 @@ class DockerRuntimeProvider:
             diagnostic={"source": "docker_container"},
             reported_at=datetime.now(UTC),
             terminal_delete_acknowledged=False,
-            execution_policy=_policy_evidence_from_metadata(
+            runtime_configuration=_configuration_evidence_from_metadata(
                 container.labels,
                 desired_generation=_int_label(
                     container,
@@ -501,11 +516,25 @@ class DockerRuntimeProvider:
             ),
         )
 
-    def _validate_command(self, command: RuntimeLifecycleCommand) -> None:
-        validate_standard_execution_policy_envelope(
-            command.execution_policy,
+    def _validate_command(
+        self,
+        command: RuntimeLifecycleCommand,
+    ) -> DockerContainerProfileV1:
+        configuration = parse_runtime_configuration_envelope(
+            command.runtime_configuration,
             desired_generation=command.desired_generation,
+            expected_provider_kind="docker",
         )
+        if configuration.provider.logical_id != self._config.provider_id:
+            raise UnsupportedRuntimeConfiguration(
+                "Runtime configuration is bound to a different Docker Provider."
+            )
+        profile = configuration.effective_profile
+        if not isinstance(profile, DockerContainerProfileV1):
+            raise UnsupportedRuntimeConfiguration(
+                "Docker Runtime Provider requires a Docker Container Profile."
+            )
+        return profile
 
     def _runtime_root(self, runtime_id: str) -> Path:
         if not _RUNTIME_ID_RE.fullmatch(runtime_id):
@@ -581,41 +610,29 @@ def _int_label(container: DockerContainerInfo, key: str) -> int:
         return 0
 
 
-def _canonical_mapping(values: Mapping[str, int]) -> str:
-    return json.dumps(dict(values), sort_keys=True, separators=(",", ":"))
-
-
-def _policy_evidence_from_metadata(
+def _configuration_evidence_from_metadata(
     values: Mapping[str, str],
     *,
     desired_generation: int,
-) -> RuntimeExecutionPolicyEvidence:
-    snapshot_id = values.get(_LABEL_POLICY_SNAPSHOT_ID)
-    digest = values.get(_LABEL_POLICY_DIGEST)
-    module_versions = values.get(_LABEL_POLICY_MODULE_VERSIONS)
-    source_versions = values.get(_LABEL_POLICY_SOURCE_VERSIONS)
-    if (
-        snapshot_id is None
-        or digest is None
-        or module_versions is None
-        or source_versions is None
-    ):
-        raise ValueError("Runtime execution-policy metadata is incomplete.")
-    try:
-        parsed_modules = json.loads(module_versions)
-        parsed_sources = json.loads(source_versions)
-        if not isinstance(parsed_modules, dict) or not isinstance(parsed_sources, dict):
-            raise ValueError("Runtime execution-policy metadata is invalid.")
-        return RuntimeExecutionPolicyEvidence(
-            snapshot_id=str(snapshot_id),
-            digest=str(digest),
-            desired_generation=desired_generation,
-            module_versions={
-                str(key): int(value) for key, value in parsed_modules.items()
-            },
-            source_versions={
-                str(key): int(value) for key, value in parsed_sources.items()
-            },
-        )
-    except (TypeError, ValueError, json.JSONDecodeError) as error:
-        raise ValueError("Runtime execution-policy metadata is invalid.") from error
+) -> RuntimeConfigurationEvidence:
+    revision_id = values.get(_LABEL_CONFIGURATION_REVISION_ID)
+    digest = values.get(_LABEL_CONFIGURATION_DIGEST)
+    if revision_id is None or digest is None:
+        raise ValueError("Runtime configuration metadata is incomplete.")
+    return RuntimeConfigurationEvidence(
+        revision_id=revision_id,
+        digest=digest,
+        desired_generation=desired_generation,
+    )
+
+
+def _cpu_quota(limit_millicores: int | None) -> int | None:
+    if limit_millicores is None:
+        return None
+    return max(1, limit_millicores * _CONTAINER_CPU_PERIOD // 1000)
+
+
+def _cpu_shares(reservation_millicores: int | None) -> int | None:
+    if reservation_millicores is None:
+        return None
+    return max(2, reservation_millicores * 1024 // 1000)

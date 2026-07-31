@@ -1,6 +1,7 @@
 """Runtime Provider policy persistence data contracts."""
 
 import datetime
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,6 +10,17 @@ from azents.core.enums import (
     RuntimeProviderConfigRevisionState,
     RuntimeProviderConfigValidationStatus,
 )
+
+
+@dataclass(frozen=True)
+class LegacyRuntimeExecutionPolicyEvidence:
+    """Legacy snapshot evidence isolated from the active control protocol."""
+
+    snapshot_id: str
+    digest: str
+    desired_generation: int
+    module_versions: Mapping[str, int]
+    source_versions: Mapping[str, int]
 
 
 @dataclass(frozen=True)

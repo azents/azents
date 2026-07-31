@@ -11,12 +11,12 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Protocol, TypeAlias
 
-from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 from azents_runtime_control.runner_transfer import (
     RunnerTransferCancel,
     RunnerTransferIntent,
     RunnerTransferResult,
 )
+from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 
 JsonValue: TypeAlias = (
     None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
@@ -63,7 +63,7 @@ class RunnerRegistration:
     workspace_path: str
     metadata: Mapping[str, JsonValue]
     auth_credential_id: str
-    execution_policy: RuntimeExecutionPolicyEvidence
+    runtime_configuration: RuntimeConfigurationEvidence
 
 
 @dataclasses.dataclass(frozen=True)
@@ -91,7 +91,7 @@ class RunnerStateReport:
     diagnostic: Mapping[str, JsonValue]
     workspace_path: str
     reported_at: datetime
-    execution_policy: RuntimeExecutionPolicyEvidence
+    runtime_configuration: RuntimeConfigurationEvidence
 
 
 @dataclasses.dataclass(frozen=True)
@@ -734,7 +734,7 @@ class RunnerRunLoop:
                 diagnostic=self._state_diagnostic(),
                 workspace_path=self._registration.workspace_path,
                 reported_at=self._clock(),
-                execution_policy=self._registration.execution_policy,
+                runtime_configuration=self._registration.runtime_configuration,
             )
         )
 

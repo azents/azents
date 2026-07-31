@@ -11,7 +11,7 @@ from pytest import MonkeyPatch
 from azents_runtime_runner.main import (
     RunnerLimitConfig,
     StructuredLogFormatter,
-    _execution_policy_evidence_from_env,
+    _runtime_configuration_evidence_from_env,
     run_runtime_runner,
     runner_limit_config_from_env,
 )
@@ -50,27 +50,18 @@ async def test_runner_requires_auth_token(
         await run_runtime_runner()
 
 
-def test_runner_reads_provider_injected_policy_evidence(
+def test_runner_reads_provider_injected_configuration_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("AZ_RUNTIME_EXECUTION_POLICY_SNAPSHOT_ID", "snapshot-1")
-    monkeypatch.setenv("AZ_RUNTIME_EXECUTION_POLICY_DIGEST", "a" * 64)
-    monkeypatch.setenv("AZ_RUNTIME_EXECUTION_POLICY_DESIRED_GENERATION", "3")
-    monkeypatch.setenv(
-        "AZ_RUNTIME_EXECUTION_POLICY_MODULE_VERSIONS",
-        json.dumps({"docker": 1, "runtime.resources": 1}),
-    )
-    monkeypatch.setenv(
-        "AZ_RUNTIME_EXECUTION_POLICY_SOURCE_VERSIONS",
-        json.dumps({"profile": 2, "workspace": 3, "agent": 4}),
-    )
+    monkeypatch.setenv("AZ_RUNTIME_CONFIGURATION_REVISION_ID", "revision-1")
+    monkeypatch.setenv("AZ_RUNTIME_CONFIGURATION_DIGEST", "a" * 64)
+    monkeypatch.setenv("AZ_RUNTIME_CONFIGURATION_DESIRED_GENERATION", "3")
 
-    evidence = _execution_policy_evidence_from_env()
+    evidence = _runtime_configuration_evidence_from_env()
 
-    assert evidence is not None
-    assert evidence.snapshot_id == "snapshot-1"
+    assert evidence.revision_id == "revision-1"
+    assert evidence.digest == "a" * 64
     assert evidence.desired_generation == 3
-    assert evidence.source_versions["agent"] == 4
 
 
 @pytest.mark.asyncio

@@ -9,9 +9,9 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Protocol, TypeAlias, assert_never
 
-from azents_runtime_control.execution_policy import (
-    RuntimeExecutionPolicyEnvelope,
-    RuntimeExecutionPolicyEvidence,
+from azents_runtime_control.runtime_configuration import (
+    RuntimeConfigurationEnvelope,
+    RuntimeConfigurationEvidence,
 )
 
 JsonValue: TypeAlias = (
@@ -83,7 +83,7 @@ class RuntimeLifecycleCommand:
     runner_image: str
     auth: RuntimeContainerAuth
     reset_final_desired_state: RuntimeDesiredState | None
-    execution_policy: RuntimeExecutionPolicyEnvelope
+    runtime_configuration: RuntimeConfigurationEnvelope
 
 
 @dataclasses.dataclass(frozen=True)
@@ -101,7 +101,7 @@ class RuntimeProviderReport:
     diagnostic: Mapping[str, str]
     reported_at: datetime
     terminal_delete_acknowledged: bool
-    execution_policy: RuntimeExecutionPolicyEvidence
+    runtime_configuration: RuntimeConfigurationEvidence
 
 
 @dataclasses.dataclass(frozen=True)

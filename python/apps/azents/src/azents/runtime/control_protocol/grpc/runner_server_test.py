@@ -12,6 +12,7 @@ from typing import NoReturn
 import grpc
 import pytest
 from azents_runtime_control.proto import (
+    runtime_configuration_pb2,
     runtime_runner_control_pb2,
     runtime_runner_transfer_pb2,
 )
@@ -74,7 +75,7 @@ class FakeStateSink:
         self,
         registration: RuntimeRunnerRegistration,
     ) -> bool:
-        """Record and validate Runner execution-policy evidence."""
+        """Record and validate Runner configuration evidence."""
         self.registrations.append(registration)
         return self.registration_valid
 
@@ -415,7 +416,7 @@ async def test_runner_grpc_registers_and_acks_heartbeat() -> None:
     assert heartbeat_ack.heartbeat_ack.monotonic_sequence == 7
     assert sink.reports[-1].runner_state is SharedRunnerState.UNKNOWN
     assert sink.reports[-1].diagnostic["reason"] == "runner_stream_closed"
-    assert sink.registrations[0].execution_policy.snapshot_id == "snapshot-1"
+    assert sink.registrations[0].runtime_configuration.revision_id == "revision-1"
 
 
 @pytest.mark.asyncio
@@ -431,7 +432,7 @@ async def test_runner_grpc_rejects_registration_policy_mismatch() -> None:
 
     with pytest.raises(RuntimeError, match="FAILED_PRECONDITION"):
         await anext(stream)
-    assert sink.registrations[0].execution_policy.snapshot_id == "snapshot-1"
+    assert sink.registrations[0].runtime_configuration.revision_id == "revision-1"
     assert sink.reports == []
 
 
@@ -1796,7 +1797,7 @@ def _register_message(
             health="ok",
             workspace_path="/workspace/agent",
             auth_credential_id="credential-1",
-            execution_policy=_execution_policy_evidence_message(),
+            runtime_configuration=_runtime_configuration_evidence_message(),
         ),
     )
 
@@ -1838,23 +1839,17 @@ def _state_report_message() -> runtime_runner_control_pb2.RunnerStateReport:
         health="ok",
         workspace_path="/workspace/agent",
         reported_at=_timestamp(_now()),
-        execution_policy=_execution_policy_evidence_message(),
+        runtime_configuration=_runtime_configuration_evidence_message(),
     )
 
 
-def _execution_policy_evidence_message() -> (
-    runtime_runner_control_pb2.RunnerExecutionPolicyEvidence
+def _runtime_configuration_evidence_message() -> (
+    runtime_configuration_pb2.RuntimeConfigurationEvidence
 ):
-    return runtime_runner_control_pb2.RunnerExecutionPolicyEvidence(
-        snapshot_id="snapshot-1",
+    return runtime_configuration_pb2.RuntimeConfigurationEvidence(
+        revision_id="revision-1",
         digest="d" * 64,
         desired_generation=1,
-        module_versions={"docker": 1, "runtime.resources": 1},
-        source_versions={
-            "profile": 1,
-            "workspace": 1,
-            "agent": 1,
-        },
     )
 
 

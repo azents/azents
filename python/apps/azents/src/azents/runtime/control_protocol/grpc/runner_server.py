@@ -14,7 +14,7 @@ from typing import Protocol
 import grpc
 from azents_runtime_control.grpc_runner_client import (
     runner_event_from_message,
-    runner_execution_policy_evidence_from_message,
+    runner_runtime_configuration_evidence_from_message,
     runner_state_report_from_message,
     runner_transfer_result_from_message,
 )
@@ -155,7 +155,7 @@ class RuntimeRunnerControlGrpcServicer(
         if not await self._state_sink.validate_runner_registration(registration):
             await context.abort(
                 grpc.StatusCode.FAILED_PRECONDITION,
-                "Runner execution-policy evidence does not match the current target",
+                "Runner configuration evidence does not match the current target",
             )
             raise AssertionError("unreachable")
         try:
@@ -273,7 +273,7 @@ class RuntimeRunnerControlGrpcServicer(
                     },
                     workspace_path=registration.workspace_path,
                     reported_at=datetime.now(UTC),
-                    execution_policy=registration.execution_policy,
+                    runtime_configuration=registration.runtime_configuration,
                 )
             )
         except Exception:
@@ -870,8 +870,8 @@ def _registration(
     credential_id: str,
 ) -> RuntimeRunnerRegistration:
     register = message.register
-    if not register.HasField("execution_policy"):
-        raise ValueError("Runner registration execution-policy evidence is required.")
+    if not register.HasField("runtime_configuration"):
+        raise ValueError("Runner registration configuration evidence is required.")
     return RuntimeRunnerRegistration(
         runtime_id=runtime_id,
         runner_id=register.runner_id,
@@ -881,8 +881,8 @@ def _registration(
         workspace_path=register.workspace_path,
         metadata=dict(register.metadata),
         auth_credential_id=credential_id,
-        execution_policy=runner_execution_policy_evidence_from_message(
-            register.execution_policy
+        runtime_configuration=runner_runtime_configuration_evidence_from_message(
+            register.runtime_configuration
         ),
         connection_id=message.connection_id,
         owner_replica_id=owner_replica_id,
