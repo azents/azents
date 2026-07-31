@@ -69,8 +69,9 @@ class FakeState:
             self.files: dict[str, dict[str, object]] = {}
             self.uploads: dict[str, dict[str, object]] = {}
             self.history_pages: list[list[dict[str, object]]] = []
-            self.socket_envelopes: list[dict[str, object]] = []
-            self.socket_disconnect_reason: str | None = None
+            self.socket_sessions: list[dict[str, object]] = [
+                {"envelopes": [], "disconnect_reason": None}
+            ]
             self.request_counts: dict[str, int] = {}
             self.requests: list[dict[str, object]] = []
             self.deliveries: list[dict[str, object]] = []
@@ -98,8 +99,7 @@ class FakeState:
             "view_scenarios",
             "files",
             "history_pages",
-            "socket_envelopes",
-            "socket_disconnect_reason",
+            "socket_sessions",
         }
         if set(payload) - allowed:
             raise ValueError("Unsupported Slack fake configuration field.")
@@ -165,17 +165,9 @@ class FakeState:
             history_pages = payload.get("history_pages")
             if history_pages is not None:
                 self.history_pages = _object_pages(history_pages)
-            socket_envelopes = payload.get("socket_envelopes")
-            if socket_envelopes is not None:
-                self.socket_envelopes = _object_list(socket_envelopes)
-            if "socket_disconnect_reason" in payload:
-                disconnect_reason = payload["socket_disconnect_reason"]
-                if disconnect_reason is not None and not isinstance(
-                    disconnect_reason,
-                    str,
-                ):
-                    raise ValueError("socket_disconnect_reason must be a string.")
-                self.socket_disconnect_reason = disconnect_reason
+            socket_sessions = payload.get("socket_sessions")
+            if socket_sessions is not None:
+                self.socket_sessions = _socket_sessions(socket_sessions)
             self.request_counts = {}
             self.requests = []
             self.deliveries = []
@@ -301,7 +293,7 @@ class FakeState:
                     "connections": self.socket_connections,
                     "envelope_ids": list(self.socket_envelope_ids),
                     "acknowledgements": list(self.socket_acknowledgements),
-                    "disconnect_reason": self.socket_disconnect_reason,
+                    "configured_sessions": len(self.socket_sessions),
                 },
             }
 
@@ -919,9 +911,15 @@ class SlackWebSocketHandler(socketserver.BaseRequestHandler):
             ).encode()
         )
         with self.state.lock:
+            session_index = min(
+                self.state.socket_connections,
+                len(self.state.socket_sessions) - 1,
+            )
             self.state.socket_connections += 1
-            envelopes = list(self.state.socket_envelopes)
-            disconnect_reason = self.state.socket_disconnect_reason
+            session = self.state.socket_sessions[session_index]
+            envelopes = _object_list(session.get("envelopes"))
+            disconnect_reason = session.get("disconnect_reason")
+            assert disconnect_reason is None or isinstance(disconnect_reason, str)
         _send_websocket_text(request, json.dumps({"type": "hello"}))
         for envelope in envelopes:
             envelope_id = envelope.get("envelope_id")
@@ -956,6 +954,17 @@ class SlackWebSocketHandler(socketserver.BaseRequestHandler):
                     separators=(",", ":"),
                 ),
             )
+            return
+        while True:
+            try:
+                if not _receive_websocket_text(request):
+                    return
+            except TimeoutError:
+                continue
+            except ConnectionError:
+                return
+            except OSError:
+                return
 
 
 class ThreadingSocketServer(socketserver.ThreadingTCPServer):
@@ -982,6 +991,28 @@ def _object_list_or_empty(value: object) -> list[dict[str, object]]:
         return _object_list(value)
     except ValueError:
         return []
+
+
+def _socket_sessions(value: object) -> list[dict[str, object]]:
+    """Validate bounded per-connection Socket Mode fake behavior."""
+    sessions = _object_list(value)
+    if not sessions:
+        raise ValueError("socket_sessions must contain at least one session.")
+    result: list[dict[str, object]] = []
+    for session in sessions:
+        if set(session) - {"envelopes", "disconnect_reason"}:
+            raise ValueError("Unsupported Socket Mode session field.")
+        envelopes = _object_list(session.get("envelopes"))
+        disconnect_reason = session.get("disconnect_reason")
+        if disconnect_reason is not None and not isinstance(disconnect_reason, str):
+            raise ValueError("Socket Mode disconnect reason must be a string.")
+        result.append(
+            {
+                "envelopes": envelopes,
+                "disconnect_reason": disconnect_reason,
+            }
+        )
+    return result
 
 
 def _form_value(key: str, values: list[str]) -> object:

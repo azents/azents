@@ -13,6 +13,10 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/management.py
   - python/apps/azents/src/azents/services/external_channel/discord_activation.py
   - python/apps/azents/src/azents/services/external_channel/discord_gateway_manager.py
+  - python/apps/azents/src/azents/services/external_channel/slack_sdk_client.py
+  - python/apps/azents/src/azents/services/external_channel/slack_socket.py
+  - python/apps/azents/src/azents/services/external_channel/socket_manager.py
+  - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
   - python/apps/azents/src/azents/services/external_channel/access.py
   - python/apps/azents/src/azents/services/session_lifecycle/orchestrator.py
@@ -23,8 +27,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-07-30
-spec_version: 19
+last_verified_at: 2026-07-31
+spec_version: 20
 ---
 
 # External Channel Lifecycle
@@ -121,7 +125,17 @@ results are generation-fenced so they cannot overwrite a newer edit or disconnec
 Discord Gateway credential and non-reconnectable intent or close-code failures
 atomically record the fenced gap, release the current Gateway lease, and move only
 connection health to `reconnect_required`; they preserve route relationships,
-bindings, and work. Recoverable transport failures retain their gap-and-retry path.
+bindings, and work. During SDK-owned recovery, `disconnect` records a fenced degraded
+gap and `ready` or `resumed` marks the same lease active and clears the gap. Azents does
+not run a second Gateway reconnect or Resume loop.
+
+Slack Socket Mode keeps one SDK lifecycle per current fenced lease. SDK endpoint
+replacement records a degraded gap, successful establishment marks active, and
+terminal App-token rejection moves only connection health to `reconnect_required`.
+Recoverable endpoint, close, refresh, and stale-session transitions remain inside the
+SDK lifecycle. Lease loss or shutdown closes the SDK client before authority is
+released.
+
 Discord callback and Gateway authority are released during disconnect after terminal
 local state commits; provider cleanup failure remains a visible post-commit outcome.
 
@@ -187,7 +201,10 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
-- **2026-07-30** (spec_version 19) — Removed pending-context and waiting-hydration
+- **2026-07-31** (spec_version 20) — Made Slack and Discord typed SDK lifecycle
+  callbacks the fenced connection-health authority while leaving recoverable
+  connection mechanics inside each provider SDK.
+- **2026-07-31** (spec_version 19) — Removed pending-context and waiting-hydration
   lifecycle state, made Allow replay synchronous through immutable conversation
   positions, and preserved accepted batches/history across terminal lifecycle
   transitions.

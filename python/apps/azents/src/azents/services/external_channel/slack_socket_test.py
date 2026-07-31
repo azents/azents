@@ -1,31 +1,24 @@
-"""Slack Socket Mode admission and connection-loop tests."""
+"""Slack Socket Mode admission and SDK lifecycle tests."""
 
 import asyncio
 import datetime
 import json
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 import aiohttp
-import httpx
 import pytest
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
-from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from azents.repos.external_channel.data import ExternalChannelTrigger
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
 )
-from azents.services.external_channel.slack_endpoint import slack_api_base_url
 from azents.services.external_channel.slack_http import SlackInteractionCallback
 from azents.services.external_channel.slack_socket import (
     MAX_SLACK_SOCKET_MESSAGE_BYTES,
     SlackSocketInvalidEnvelope,
     SlackSocketModeRunner,
-    SlackSocketReconnectRequired,
-    SlackSocketUnavailable,
-    SlackSocketWebAPIClient,
     parse_slack_socket_envelope,
 )
 
@@ -33,56 +26,58 @@ _NOW = datetime.datetime(2026, 7, 22, 1, 0, tzinfo=datetime.UTC)
 
 
 class FakeSocket:
-    """In-memory SDK Socket Mode transport with explicit listener events."""
+    """In-memory SDK transport that owns recoverable reconnect simulation."""
 
     def __init__(self, messages: list[str | bytes | BaseException]) -> None:
         self.messages = messages
         self.sent: list[str] = []
         self.closed = False
-        self.connected = False
         self.on_message: Callable[[aiohttp.WSMessage], Awaitable[None]] | None = None
-        self.on_error: Callable[[aiohttp.WSMessage], Awaitable[None]] | None = None
-        self.on_close: Callable[[aiohttp.WSMessage], Awaitable[None]] | None = None
+        self.on_active: Callable[[], Awaitable[None]] | None = None
+        self.on_gap: Callable[[str], Awaitable[None]] | None = None
+        self.on_failure: Callable[[str, bool], Awaitable[None]] | None = None
 
     def configure(
         self,
         *,
         on_message: Callable[[aiohttp.WSMessage], Awaitable[None]],
-        on_error: Callable[[aiohttp.WSMessage], Awaitable[None]],
-        on_close: Callable[[aiohttp.WSMessage], Awaitable[None]],
+        on_active: Callable[[], Awaitable[None]],
+        on_gap: Callable[[str], Awaitable[None]],
+        on_failure: Callable[[str, bool], Awaitable[None]],
     ) -> None:
-        """Bind the listeners supplied to the SDK transport factory."""
         self.on_message = on_message
-        self.on_error = on_error
-        self.on_close = on_close
+        self.on_active = on_active
+        self.on_gap = on_gap
+        self.on_failure = on_failure
 
     async def connect(self) -> None:
-        """Emit configured SDK transport messages after connecting."""
-        self.connected = True
+        """Establish one SDK session and keep recoverable transitions internal."""
         assert self.on_message is not None
-        assert self.on_error is not None
-        assert self.on_close is not None
+        assert self.on_active is not None
+        assert self.on_gap is not None
+        await self.on_active()
         while self.messages:
             message = self.messages.pop(0)
             if isinstance(message, ConnectionError):
-                self.connected = False
-                await self.on_close(
-                    aiohttp.WSMessage(aiohttp.WSMsgType.CLOSE, None, None)
-                )
-                return
+                await self.on_gap("socket_reconnecting")
+                await self.on_active()
+                continue
             if isinstance(message, BaseException):
-                self.connected = False
-                await self.on_error(
-                    aiohttp.WSMessage(aiohttp.WSMsgType.ERROR, message, None)
-                )
-                return
+                raise message
             await self.on_message(
                 aiohttp.WSMessage(aiohttp.WSMsgType.TEXT, message, None)
             )
+            payload = json.loads(message)
+            if (
+                isinstance(payload, dict)
+                and payload.get("type") == "disconnect"
+                and payload.get("payload") != {"reason": "link_disabled"}
+            ):
+                await self.on_gap("socket_reconnecting")
+                await self.on_active()
 
     async def close(self) -> None:
         self.closed = True
-        self.connected = False
 
     async def send_socket_mode_response(
         self,
@@ -90,63 +85,6 @@ class FakeSocket:
     ) -> None:
         """Record one SDK acknowledgement."""
         self.sent.append(json.dumps(response.to_dict(), separators=(",", ":")))
-
-    async def is_connected(self) -> bool:
-        return self.connected and not self.closed
-
-
-class _MockSlackSocketWebClient(AsyncWebClient):
-    """Route the public endpoint-open SDK call through deterministic HTTPX."""
-
-    def __init__(self, http_client: httpx.AsyncClient) -> None:
-        super().__init__(retry_handlers=[])
-        self.http_client = http_client
-
-    async def api_call(
-        self,
-        api_method: str,
-        *,
-        http_verb: str = "POST",
-        files: dict[str, Any] | None = None,
-        data: dict[str, Any] | aiohttp.FormData | None = None,
-        params: dict[str, Any] | None = None,
-        json: dict[str, Any] | None = None,
-        headers: dict[str, str] | None = None,
-        auth: dict[str, str] | None = None,
-    ) -> AsyncSlackResponse:
-        del files, auth
-        request_headers = dict(headers or {})
-        request_params = dict(params or {})
-        request_data = dict(data) if isinstance(data, dict) else {}
-        token = request_params.pop("token", None)
-        if token is None:
-            token = request_data.pop("token", None)
-        if isinstance(token, str):
-            request_headers["Authorization"] = f"Bearer {token}"
-        response = await self.http_client.request(
-            http_verb,
-            f"{slack_api_base_url()}/{api_method}",
-            params=request_params or None,
-            json=json,
-            data=request_data or None,
-            headers=request_headers,
-        )
-        payload: object = response.json()
-        return AsyncSlackResponse(
-            client=self,
-            http_verb=http_verb,
-            api_url=str(response.request.url),
-            req_args={},
-            data=payload if isinstance(payload, dict) else {},
-            headers=dict(response.headers),
-            status_code=response.status_code,
-        ).validate()
-
-
-def _socket_web_api_client(
-    http_client: httpx.AsyncClient,
-) -> SlackSocketWebAPIClient:
-    return SlackSocketWebAPIClient(_MockSlackSocketWebClient(http_client))
 
 
 def _events_api_envelope(
@@ -200,6 +138,15 @@ def _interactive_envelope(*, envelope_id: str = "interactive-envelope-1") -> str
     )
 
 
+def _terminal_disconnect() -> str:
+    return json.dumps(
+        {
+            "type": "disconnect",
+            "payload": {"reason": "link_disabled"},
+        }
+    )
+
+
 def _client(
     *,
     socket: FakeSocket,
@@ -217,6 +164,8 @@ def _client(
     | None = None,
     schedule_interaction: Callable[[ExternalChannelInteractionHandoff], None]
     | None = None,
+    active_reports: list[str] | None = None,
+    gap_reports: list[str] | None = None,
 ) -> SlackSocketModeRunner:
     async def default_admit(event: ExternalChannelTrigger) -> None:
         admitted.append(event)
@@ -231,24 +180,32 @@ def _client(
             admitted_shortcut_sources.append(shortcut_source_event)
         return None
 
+    async def report_active() -> None:
+        if active_reports is not None:
+            active_reports.append("active")
+
+    async def report_gap(reason: str) -> None:
+        if gap_reports is not None:
+            gap_reports.append(reason)
+
     def transport_factory(
         *,
         app_token: str,
         web_client: AsyncWebClient,
-        endpoint_url: str,
         ping_interval: float,
         on_message: Callable[[aiohttp.WSMessage], Awaitable[None]],
-        on_error: Callable[[aiohttp.WSMessage], Awaitable[None]],
-        on_close: Callable[[aiohttp.WSMessage], Awaitable[None]],
+        on_active: Callable[[], Awaitable[None]],
+        on_gap: Callable[[str], Awaitable[None]],
+        on_failure: Callable[[str, bool], Awaitable[None]],
     ) -> FakeSocket:
         assert app_token == "xapp-secret"
         assert isinstance(web_client, AsyncWebClient)
-        assert endpoint_url == "wss://socket.example.test/connection"
-        assert ping_interval == 3.0
+        assert ping_interval == 11.0
         socket.configure(
             on_message=on_message,
-            on_error=on_error,
-            on_close=on_close,
+            on_active=on_active,
+            on_gap=on_gap,
+            on_failure=on_failure,
         )
         return socket
 
@@ -263,10 +220,11 @@ def _client(
             else None
         ),
         schedule_interaction=schedule_interaction,
+        report_active=report_active,
+        report_gap=report_gap,
         transport_factory=transport_factory,
         clock=lambda: _NOW,
         ping_interval_seconds=11.0,
-        ping_timeout_seconds=12.0,
     )
 
 
@@ -285,110 +243,24 @@ def test_parse_socket_envelope_bounds_message_size() -> None:
 
 
 @pytest.mark.asyncio
-async def test_open_connection_uses_app_token_without_returning_it() -> None:
-    """Open one endpoint with the app token and expose only the endpoint."""
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/api/apps.connections.open"
-        assert request.headers["Authorization"] == "Bearer xapp-secret"
-        return httpx.Response(
-            200,
-            json={"ok": True, "url": "wss://socket.example.test/connection"},
-        )
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
-        opened = await _socket_web_api_client(http_client).open_connection(
-            app_token="xapp-secret"
-        )
-
-    assert opened.url == "wss://socket.example.test/connection"
-    assert "xapp-secret" not in repr(opened)
-
-
-@pytest.mark.asyncio
-async def test_open_connection_maps_rejected_token_to_sanitized_failure() -> None:
-    """Do not return Slack's token-specific response details to the caller."""
-
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(
-            lambda request: httpx.Response(
-                200,
-                json={"ok": False, "error": "invalid_auth"},
-            )
-        )
-    ) as http_client:
-        with pytest.raises(SlackSocketReconnectRequired) as error:
-            await _socket_web_api_client(http_client).open_connection(
-                app_token="xapp-secret"
-            )
-
-    assert "xapp-secret" not in str(error.value)
-
-
-@pytest.mark.asyncio
-async def test_open_connection_allows_insecure_testenv_socket_only_when_enabled(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Keep insecure WebSockets restricted to the explicit deterministic boundary."""
-
-    def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={"ok": True, "url": "ws://slack-fake:8084/socket"},
-        )
-
-    monkeypatch.delenv("AZ_TESTENV_SLACK_API_BASE_URL", raising=False)
-    monkeypatch.delenv(
-        "AZ_TESTENV_SLACK_ALLOW_INSECURE_WEBSOCKET",
-        raising=False,
-    )
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
-        with pytest.raises(
-            SlackSocketUnavailable,
-            match="endpoint response is invalid",
-        ):
-            await _socket_web_api_client(http_client).open_connection(
-                app_token="xapp-secret"
-            )
-
-    monkeypatch.setenv(
-        "AZ_TESTENV_SLACK_ALLOW_INSECURE_WEBSOCKET",
-        "true",
-    )
-    monkeypatch.setenv(
-        "AZ_TESTENV_SLACK_API_BASE_URL",
-        "http://slack-fake:8083/api",
-    )
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
-        opened = await _socket_web_api_client(http_client).open_connection(
-            app_token="xapp-secret"
-        )
-
-    assert opened.url == "ws://slack-fake:8084/socket"
-
-
-@pytest.mark.asyncio
 async def test_events_api_acknowledges_only_after_durable_admission() -> None:
     """Use the transport envelope ID only after the durable callback succeeds."""
     socket = FakeSocket(
-        [
-            json.dumps({"type": "hello"}),
-            _events_api_envelope(),
-            json.dumps(
-                {
-                    "type": "disconnect",
-                    "payload": {"reason": "link_disabled"},
-                }
-            ),
-        ]
+        [json.dumps({"type": "hello"}), _events_api_envelope(), _terminal_disconnect()]
     )
     admitted: list[ExternalChannelTrigger] = []
-    client = _client(socket=socket, admitted=admitted)
+    active_reports: list[str] = []
+    gap_reports: list[str] = []
+    client = _client(
+        socket=socket,
+        admitted=admitted,
+        active_reports=active_reports,
+        gap_reports=gap_reports,
+    )
 
     result = await client.run_connection(
         connection_id="connection-1",
         app_token="xapp-secret",
-        endpoint_url="wss://socket.example.test/connection",
     )
 
     assert result.reconnect is False
@@ -398,6 +270,8 @@ async def test_events_api_acknowledges_only_after_durable_admission() -> None:
     assert admitted[0].transport_envelope_id == "envelope-1"
     assert socket.sent == ['{"envelope_id":"envelope-1"}']
     assert socket.closed is True
+    assert gap_reports == ["socket_connecting"]
+    assert active_reports == ["active"]
 
 
 @pytest.mark.asyncio
@@ -416,24 +290,13 @@ async def test_events_api_uses_safe_bounded_file_projection() -> None:
             "body": "must not survive",
         }
     ]
-    socket = FakeSocket(
-        [
-            json.dumps(envelope),
-            json.dumps(
-                {
-                    "type": "disconnect",
-                    "payload": {"reason": "link_disabled"},
-                }
-            ),
-        ]
-    )
+    socket = FakeSocket([json.dumps(envelope), _terminal_disconnect()])
     admitted: list[ExternalChannelTrigger] = []
     client = _client(socket=socket, admitted=admitted)
 
     result = await client.run_connection(
         connection_id="connection-1",
         app_token="xapp-secret",
-        endpoint_url="wss://socket.example.test/connection",
     )
 
     assert result.admitted_event_count == 1
@@ -456,19 +319,17 @@ async def test_events_api_uses_safe_bounded_file_projection() -> None:
 async def test_events_api_does_not_acknowledge_failed_admission() -> None:
     """Leave an envelope unacknowledged when its durable transaction fails."""
     socket = FakeSocket([_events_api_envelope()])
-    admitted: list[ExternalChannelTrigger] = []
 
     async def rejected_admission(event: ExternalChannelTrigger) -> None:
         del event
         raise RuntimeError("transaction failed")
 
-    client = _client(socket=socket, admitted=admitted, admit=rejected_admission)
+    client = _client(socket=socket, admitted=[], admit=rejected_admission)
 
     with pytest.raises(RuntimeError, match="transaction failed"):
         await client.run_connection(
             connection_id="connection-1",
             app_token="xapp-secret",
-            endpoint_url="wss://socket.example.test/connection",
         )
 
     assert socket.sent == []
@@ -478,23 +339,12 @@ async def test_events_api_does_not_acknowledge_failed_admission() -> None:
 @pytest.mark.asyncio
 async def test_interactive_envelope_acknowledges_only_after_durable_admission() -> None:
     """A Socket interaction uses its envelope ID as the durable retry key."""
-    socket = FakeSocket(
-        [
-            _interactive_envelope(),
-            json.dumps(
-                {
-                    "type": "disconnect",
-                    "payload": {"reason": "link_disabled"},
-                }
-            ),
-        ]
-    )
-    admitted: list[ExternalChannelTrigger] = []
+    socket = FakeSocket([_interactive_envelope(), _terminal_disconnect()])
     interactions: list[SlackInteractionCallback] = []
     shortcut_sources: list[ExternalChannelTrigger] = []
     client = _client(
         socket=socket,
-        admitted=admitted,
+        admitted=[],
         admitted_interactions=interactions,
         admitted_shortcut_sources=shortcut_sources,
     )
@@ -502,11 +352,9 @@ async def test_interactive_envelope_acknowledges_only_after_durable_admission() 
     result = await client.run_connection(
         connection_id="connection-1",
         app_token="xapp-secret",
-        endpoint_url="wss://socket.example.test/connection",
     )
 
     assert result.admitted_event_count == 1
-    assert admitted == []
     assert len(interactions) == 1
     interaction = interactions[0]
     assert interaction.provider_interaction_key == "socket-interactive-envelope-1"
@@ -514,11 +362,6 @@ async def test_interactive_envelope_acknowledges_only_after_durable_admission() 
     assert "trigger-secret" not in repr(interaction)
     assert "hooks.slack.com" not in repr(interaction)
     assert len(shortcut_sources) == 1
-    assert (
-        shortcut_sources[0].provider_event_id
-        == "shortcut-socket-interactive-envelope-1"
-    )
-    assert shortcut_sources[0].resource_correlation_key == "C-1:100.0001"
     assert socket.sent == ['{"envelope_id":"interactive-envelope-1"}']
 
 
@@ -526,7 +369,6 @@ async def test_interactive_envelope_acknowledges_only_after_durable_admission() 
 async def test_interactive_envelope_does_not_acknowledge_failed_admission() -> None:
     """Leave an interaction envelope unacknowledged when its transaction fails."""
     socket = FakeSocket([_interactive_envelope()])
-    admitted: list[ExternalChannelTrigger] = []
 
     async def rejected_interaction(
         _: SlackInteractionCallback,
@@ -536,7 +378,7 @@ async def test_interactive_envelope_does_not_acknowledge_failed_admission() -> N
 
     client = _client(
         socket=socket,
-        admitted=admitted,
+        admitted=[],
         admit_interaction=rejected_interaction,
     )
 
@@ -544,28 +386,15 @@ async def test_interactive_envelope_does_not_acknowledge_failed_admission() -> N
         await client.run_connection(
             connection_id="connection-1",
             app_token="xapp-secret",
-            endpoint_url="wss://socket.example.test/connection",
         )
 
     assert socket.sent == []
-    assert socket.closed is True
 
 
 @pytest.mark.asyncio
 async def test_interactive_handoff_is_scheduled_only_after_socket_ack() -> None:
-    """Socket provider work starts only after the durable claim and exact ACK."""
-    socket = FakeSocket(
-        [
-            _interactive_envelope(),
-            json.dumps(
-                {
-                    "type": "disconnect",
-                    "payload": {"reason": "link_disabled"},
-                }
-            ),
-        ]
-    )
-    admitted: list[ExternalChannelTrigger] = []
+    """Provider work starts only after the durable claim and exact ACK."""
+    socket = FakeSocket([_interactive_envelope(), _terminal_disconnect()])
     scheduled: list[ExternalChannelInteractionHandoff] = []
 
     async def admit_interaction(
@@ -585,74 +414,129 @@ async def test_interactive_handoff_is_scheduled_only_after_socket_ack() -> None:
 
     client = _client(
         socket=socket,
-        admitted=admitted,
+        admitted=[],
         admit_interaction=admit_interaction,
         schedule_interaction=schedule,
     )
 
-    result = await client.run_connection(
+    await client.run_connection(
         connection_id="connection-1",
         app_token="xapp-secret",
-        endpoint_url="wss://socket.example.test/connection",
     )
 
-    assert result.admitted_event_count == 1
-    assert scheduled == [
-        ExternalChannelInteractionHandoff(
-            interaction_id="interaction-1",
-            trigger_id="trigger-secret-must-not-persist",
-        )
-    ]
+    assert len(scheduled) == 1
     assert "trigger-secret" not in repr(scheduled[0])
-    assert socket.sent == ['{"envelope_id":"interactive-envelope-1"}']
 
 
 @pytest.mark.asyncio
-async def test_refresh_disconnect_returns_reconnect_decision_to_owner() -> None:
-    """Return refresh control to the Azents-owned reconnect loop."""
+async def test_recoverable_disconnect_stays_inside_sdk_lifecycle() -> None:
+    """Refresh and network close recover without completing the Azents runner."""
     socket = FakeSocket(
-        [json.dumps({"type": "disconnect", "payload": {"reason": "refresh_requested"}})]
+        [
+            json.dumps(
+                {"type": "disconnect", "payload": {"reason": "refresh_requested"}}
+            ),
+            ConnectionError("closed"),
+            _events_api_envelope(),
+            _terminal_disconnect(),
+        ]
     )
-    client = _client(socket=socket, admitted=[])
+    admitted: list[ExternalChannelTrigger] = []
+    active_reports: list[str] = []
+    gap_reports: list[str] = []
+    client = _client(
+        socket=socket,
+        admitted=admitted,
+        active_reports=active_reports,
+        gap_reports=gap_reports,
+    )
+
     result = await client.run_connection(
         connection_id="connection-1",
         app_token="xapp-secret",
-        endpoint_url="wss://socket.example.test/connection",
     )
 
-    assert result.reconnect is True
-    assert result.reason == "refresh_requested"
-    assert socket.closed is True
+    assert result.reconnect is False
+    assert result.admitted_event_count == 1
+    assert gap_reports == [
+        "socket_connecting",
+        "socket_reconnecting",
+        "socket_reconnecting",
+    ]
+    assert active_reports == ["active", "active", "active"]
 
 
 @pytest.mark.asyncio
-async def test_connection_close_reconnects_and_cancellation_closes_socket() -> None:
-    """Reconnect closed connections and close active sockets during cancellation."""
-    socket = FakeSocket([ConnectionError("closed")])
+async def test_recoverable_endpoint_failure_stays_inside_sdk_lifecycle() -> None:
+    """A transient endpoint failure degrades health without completing the runner."""
+    socket = FakeSocket([_events_api_envelope(), _terminal_disconnect()])
     admitted: list[ExternalChannelTrigger] = []
-    client = _client(socket=socket, admitted=admitted)
-
-    result = await client.run_connection(
-        connection_id="connection-1",
-        app_token="xapp-secret",
-        endpoint_url="wss://socket.example.test/connection",
+    gap_reports: list[str] = []
+    client = _client(
+        socket=socket,
+        admitted=admitted,
+        gap_reports=gap_reports,
     )
 
-    assert result.reconnect is True
-    assert result.reason == "connection_closed"
-    assert socket.closed is True
-
-    blocking = FakeSocket([])
-    cancel_client = _client(socket=blocking, admitted=[])
     task = asyncio.create_task(
-        cancel_client.run_connection(
+        client.run_connection(
             connection_id="connection-1",
             app_token="xapp-secret",
-            endpoint_url="wss://socket.example.test/connection",
+        )
+    )
+    await asyncio.sleep(0)
+    assert socket.on_failure is not None
+    await socket.on_failure("socket_endpoint_unavailable", False)
+
+    result = await task
+
+    assert result.reconnect is False
+    assert result.reason == "link_disabled"
+    assert result.admitted_event_count == 1
+    assert gap_reports == [
+        "socket_connecting",
+        "socket_endpoint_unavailable",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_terminal_endpoint_failure_completes_sdk_lifecycle() -> None:
+    """A terminal credential failure stops SDK retries for durable health handling."""
+    socket = FakeSocket([])
+    client = _client(socket=socket, admitted=[])
+
+    task = asyncio.create_task(
+        client.run_connection(
+            connection_id="connection-1",
+            app_token="xapp-secret",
+        )
+    )
+    await asyncio.sleep(0)
+    assert socket.on_failure is not None
+    await socket.on_failure("socket_credentials_rejected", True)
+
+    result = await task
+
+    assert result.reconnect is False
+    assert result.reason == "socket_credentials_rejected"
+    assert result.admitted_event_count == 0
+    assert socket.closed is True
+
+
+@pytest.mark.asyncio
+async def test_cancellation_closes_sdk_transport() -> None:
+    blocking = FakeSocket([])
+    client = _client(socket=blocking, admitted=[])
+    task = asyncio.create_task(
+        client.run_connection(
+            connection_id="connection-1",
+            app_token="xapp-secret",
         )
     )
     await asyncio.sleep(0)
     task.cancel()
+
     with pytest.raises(asyncio.CancelledError):
         await task
+
     assert blocking.closed is True

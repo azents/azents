@@ -44,6 +44,10 @@ class _ShutdownRequested(Exception):
     """Internal sentinel representing Worker shutdown request."""
 
 
+class _SocketManagerStopped(RuntimeError):
+    """The required Slack Socket manager stopped before Worker shutdown."""
+
+
 @dataclasses.dataclass(frozen=True)
 class _ActiveSessionRunner:
     """Session runner execution handle owned by AgentWorker."""
@@ -116,12 +120,19 @@ class AgentWorker:
         socket_manager_task = asyncio.create_task(
             self.socket_manager.run(shutdown_event)
         )
+        socket_manager_failure_observed = False
         try:
             while not shutdown_event.is_set():
                 try:
-                    messages = await self._receive_or_shutdown(shutdown_event)
+                    messages = await self._receive_or_shutdown(
+                        shutdown_event,
+                        socket_manager_task,
+                    )
                 except _ShutdownRequested:
                     break
+                except _SocketManagerStopped:
+                    socket_manager_failure_observed = True
+                    raise
                 except Exception:
                     logger.exception(
                         "Failed to receive message, retrying",
@@ -179,7 +190,8 @@ class AgentWorker:
             except asyncio.CancelledError:
                 pass
             except Exception:
-                logger.exception("Slack Socket manager failed on shutdown")
+                if not socket_manager_failure_observed:
+                    logger.exception("Slack Socket manager failed on shutdown")
             await asyncio.gather(
                 *(r.shutdown() for r in runners.values()),
                 return_exceptions=True,
@@ -194,9 +206,11 @@ class AgentWorker:
         self.shutdown_event.set()
 
     async def _receive_or_shutdown(
-        self, shutdown_event: asyncio.Event
+        self,
+        shutdown_event: asyncio.Event,
+        socket_manager_task: asyncio.Task[None],
     ) -> list[WorkerSignal]:
-        """Wait for message receive or shutdown.
+        """Wait for message receive, shutdown, or transport-manager failure.
 
         When shutdown_event is set, exit immediately regardless of message receipt.
         shutdown takes priority even if messages were already received — those messages
@@ -211,18 +225,33 @@ class AgentWorker:
 
         receive_task = asyncio.ensure_future(self.broker.receive_messages())
         shutdown_task = asyncio.ensure_future(shutdown_event.wait())
-        done, pending = await asyncio.wait(
-            [receive_task, shutdown_task],
+        done, _ = await asyncio.wait(
+            [receive_task, shutdown_task, socket_manager_task],
             return_when=asyncio.FIRST_COMPLETED,
         )
-        for p in pending:
-            p.cancel()
-        if pending:
-            for p in pending:
+        transient_tasks = (receive_task, shutdown_task)
+        for task in transient_tasks:
+            if task not in done:
+                task.cancel()
+        for task in transient_tasks:
+            if task not in done:
                 with contextlib.suppress(asyncio.CancelledError):
-                    await p
+                    await task
 
         if shutdown_task in done:
             raise _ShutdownRequested
+
+        if socket_manager_task in done:
+            if socket_manager_task.cancelled():
+                raise _SocketManagerStopped(
+                    "Slack Socket manager stopped unexpectedly."
+                )
+            try:
+                socket_manager_task.result()
+            except Exception as error:
+                raise _SocketManagerStopped(
+                    "Slack Socket manager stopped unexpectedly."
+                ) from error
+            raise _SocketManagerStopped("Slack Socket manager stopped unexpectedly.")
 
         return receive_task.result()

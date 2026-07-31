@@ -23,8 +23,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-07-30
-spec_version: 13
+last_verified_at: 2026-07-31
+spec_version: 14
 ---
 
 # E2E Primary Test Strategy
@@ -124,8 +124,9 @@ Always-on required CI does not depend on external credentials.
   REST failure outcomes, and multipart redaction.
 - The deterministic External Channel module covers Slack HTTP, Slack Socket Mode, and
   Discord Gateway synchronous admission; durable admission before acknowledgement;
-  eager or reused thread targeting; bound continuation; mixed-author bounded history;
-  duplicate convergence; access replay; and content-free evidence.
+  SDK-owned Slack endpoint replacement; Discord Identify-to-Resume recovery; eager or
+  reused thread targeting; bound continuation; mixed-author bounded history; duplicate
+  convergence; access replay; and content-free evidence.
 - Backend contract tests run both independent in-memory conversation locks and two
   clients against a real Redis container. Memory replicas may overlap and converge at
   the PostgreSQL position fence; Redis replicas serialize the same scope; unavailable
@@ -177,6 +178,8 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-07-31** — v14. Added deterministic Slack Socket endpoint-replacement and
+  Discord Gateway Resume verification through provider fakes and public product paths.
 - **2026-07-30** — v13. Added the post-contraction Slack HTTP, Slack Socket,
   Discord Gateway, Redis/memory coordination, provider-history, sanitized evidence,
   and Runtime file-transfer validation matrix.

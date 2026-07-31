@@ -33,12 +33,13 @@ from azents.services.external_channel.discord_events import (
 )
 from azents.services.external_channel.discord_gateway import (
     DiscordGatewayClient,
-    DiscordGatewayConnectionResult,
     DiscordGatewayCredentialError,
     DiscordGatewayError,
     DiscordGatewayIntentsError,
+    DiscordGatewayLifecycleState,
     DiscordGatewayMessageEvent,
     DiscordGatewayRunner,
+    DiscordGatewayTerminalError,
 )
 from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionReason,
@@ -55,9 +56,6 @@ logger = logging.getLogger(__name__)
 _POLL_INTERVAL = datetime.timedelta(seconds=5)
 _LEASE_DURATION = datetime.timedelta(seconds=45)
 _RENEW_INTERVAL = datetime.timedelta(seconds=15)
-_RECONNECT_DELAY = datetime.timedelta(seconds=5)
-_RATE_LIMIT_RECONNECT_DELAY = datetime.timedelta(minutes=1)
-_MAX_RECONNECT_DELAY = datetime.timedelta(minutes=5)
 _EVENT_RETRY_DELAY_SECONDS = 1.0
 
 
@@ -98,7 +96,6 @@ class DiscordGatewayManagerService:
     poll_interval: datetime.timedelta = _POLL_INTERVAL
     lease_duration: datetime.timedelta = _LEASE_DURATION
     renew_interval: datetime.timedelta = _RENEW_INTERVAL
-    reconnect_delay: datetime.timedelta = _RECONNECT_DELAY
     config: Annotated[Config | None, Depends(get_config)] = None
 
     async def run(self, shutdown_event: asyncio.Event) -> None:
@@ -152,7 +149,6 @@ class DiscordGatewayManagerService:
             return
         lease = claim.lease
         lease_released = False
-        reconnect_attempts = 0
         try:
             configuration = await self._owned_configuration(
                 connection_id=connection_id,
@@ -165,43 +161,15 @@ class DiscordGatewayManagerService:
                 raise DiscordGatewayCredentialError(
                     "Discord Guild identity is unavailable."
                 )
-            while not shutdown_event.is_set():
-                result = await self._run_connection_with_lease(
-                    connection_id=connection_id,
-                    lease=lease,
-                    bot_token=credentials.bot_token,
-                    provider_app_id=configuration.provider_app_id,
-                    target_guild_id=configuration.provider_tenant_id,
-                    configuration_generation=(configuration.configuration_generation),
-                    shutdown_event=shutdown_event,
-                )
-                if result is None:
-                    return
-                if not result.reconnect:
-                    await self._mark_reconnect_required(
-                        connection_id=connection_id,
-                        lease=lease,
-                        reason=result.reason,
-                    )
-                    lease_released = True
-                    return
-                reconnect_attempts += 1
-                if not await self._record_gap(
-                    connection_id=connection_id,
-                    lease=lease,
-                    reason=result.reason,
-                ):
-                    return
-                if not await self._sleep_or_shutdown(
-                    shutdown_event,
-                    connection_id=connection_id,
-                    lease=lease,
-                    delay=self._reconnect_delay(
-                        reason=result.reason,
-                        attempt=reconnect_attempts,
-                    ),
-                ):
-                    return
+            await self._run_connection_with_lease(
+                connection_id=connection_id,
+                lease=lease,
+                bot_token=credentials.bot_token,
+                provider_app_id=configuration.provider_app_id,
+                target_guild_id=configuration.provider_tenant_id,
+                configuration_generation=configuration.configuration_generation,
+                shutdown_event=shutdown_event,
+            )
         except asyncio.CancelledError:
             await asyncio.shield(
                 self._release(connection_id=connection_id, lease=lease)
@@ -224,6 +192,13 @@ class DiscordGatewayManagerService:
                 reason="intents_disallowed",
             )
             lease_released = True
+        except DiscordGatewayTerminalError as error:
+            await self._mark_reconnect_required(
+                connection_id=connection_id,
+                lease=lease,
+                reason=error.reason,
+            )
+            lease_released = True
         except DiscordGatewayError:
             await self._record_gap(
                 connection_id=connection_id,
@@ -244,7 +219,7 @@ class DiscordGatewayManagerService:
         target_guild_id: str,
         configuration_generation: int,
         shutdown_event: asyncio.Event,
-    ) -> DiscordGatewayConnectionResult | None:
+    ) -> None:
         connection_task = asyncio.create_task(
             self.gateway_client.run_connection(
                 bot_token=bot_token,
@@ -257,6 +232,11 @@ class DiscordGatewayManagerService:
                     configuration_generation=configuration_generation,
                     event=event,
                 ),
+                handle_lifecycle=lambda state: self._handle_gateway_lifecycle(
+                    connection_id=connection_id,
+                    lease=lease,
+                    state=state,
+                ),
             )
         )
         shutdown_task = asyncio.create_task(shutdown_event.wait())
@@ -268,14 +248,17 @@ class DiscordGatewayManagerService:
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 if connection_task in done:
-                    return connection_task.result()
+                    connection_task.result()
+                    raise DiscordGatewayError(
+                        "Discord Gateway client stopped unexpectedly."
+                    )
                 if shutdown_task in done or not await self._renew(
                     connection_id=connection_id,
                     lease=lease,
                 ):
                     connection_task.cancel()
                     await asyncio.gather(connection_task, return_exceptions=True)
-                    return None
+                    return
         finally:
             shutdown_task.cancel()
             await asyncio.gather(shutdown_task, return_exceptions=True)
@@ -348,6 +331,23 @@ class DiscordGatewayManagerService:
             )
             await session.commit()
             return recorded
+
+    async def _mark_active(
+        self,
+        *,
+        connection_id: str,
+        lease: ExternalChannelIngressLease,
+    ) -> bool:
+        async with self.session_manager() as session:
+            active = await self.repository.mark_discord_gateway_active(
+                session,
+                connection_id=connection_id,
+                lease_owner=self.manager_id,
+                lease_generation=lease.lease_generation,
+                now=_utc_now(),
+            )
+            await session.commit()
+            return active
 
     async def _release(
         self,
@@ -445,52 +445,29 @@ class DiscordGatewayManagerService:
                 )
             await asyncio.sleep(min(_EVENT_RETRY_DELAY_SECONDS, remaining_seconds))
 
-    async def _sleep_or_shutdown(
+    async def _handle_gateway_lifecycle(
         self,
-        shutdown_event: asyncio.Event,
         *,
         connection_id: str,
         lease: ExternalChannelIngressLease,
-        delay: datetime.timedelta,
-    ) -> bool:
-        """Wait with periodic lease renewal during reconnect backoff."""
-        deadline = asyncio.get_running_loop().time() + delay.total_seconds()
-        while not shutdown_event.is_set():
-            remaining_seconds = deadline - asyncio.get_running_loop().time()
-            if remaining_seconds <= 0:
-                return True
-            try:
-                await asyncio.wait_for(
-                    shutdown_event.wait(),
-                    timeout=min(
-                        remaining_seconds,
-                        self.renew_interval.total_seconds(),
-                    ),
-                )
-            except TimeoutError:
-                if asyncio.get_running_loop().time() >= deadline:
-                    return True
-                if not await self._renew(
-                    connection_id=connection_id,
-                    lease=lease,
-                ):
-                    return False
-        return False
-
-    def _reconnect_delay(
-        self,
-        *,
-        reason: str,
-        attempt: int,
-    ) -> datetime.timedelta:
-        """Return bounded exponential backoff for one reconnect outcome."""
-        base_delay = self.reconnect_delay
-        if reason == "gateway_rate_limited":
-            base_delay = max(base_delay, _RATE_LIMIT_RECONNECT_DELAY)
-        return min(
-            base_delay * 2 ** (attempt - 1),
-            _MAX_RECONNECT_DELAY,
-        )
+        state: DiscordGatewayLifecycleState,
+    ) -> None:
+        """Project typed SDK connection state through the current lease fence."""
+        if state == "disconnected":
+            changed = await self._record_gap(
+                connection_id=connection_id,
+                lease=lease,
+                reason="gateway_disconnected",
+            )
+        else:
+            changed = await self._mark_active(
+                connection_id=connection_id,
+                lease=lease,
+            )
+        if not changed:
+            raise DiscordGatewayLeaseLost(
+                "Discord Gateway lifecycle authority is stale."
+            )
 
     def _credentials(self, ciphertext: str | None) -> DiscordConnectionCredentials:
         if ciphertext is None:

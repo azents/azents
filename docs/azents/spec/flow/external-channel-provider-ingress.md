@@ -47,8 +47,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-07-30
-spec_version: 18
+last_verified_at: 2026-07-31
+spec_version: 19
 ---
 
 # External Channel Provider Ingress
@@ -73,8 +73,8 @@ Slack sends HTTP callbacks to the single fixed endpoint
    lookup, durable admission, or Agent side effects.
 3. An ordinary event uses untrusted `(api_app_id, team_id)` payload identity to select
    exactly one active or degraded HTTP connection.
-4. The adapter validates Slack timestamp freshness and the raw-body HMAC signature
-   against that candidate's encrypted Signing Secret.
+4. The adapter uses the Slack SDK signature verifier to validate timestamp freshness
+   and the raw-body HMAC signature against that candidate's encrypted Signing Secret.
 5. The fully parsed event identity must match the selected connection before the
    authenticated request is projected into a typed, content-free trigger locator.
 6. Original message triggers enter synchronous conversation ingestion. Provider
@@ -141,27 +141,28 @@ and one admission can select at most once.
 
 ## Socket Mode Admission
 
-A connection-selected Socket worker acquires a fenced lease before opening
-`apps.connections.open` with the app-level token. The WebSocket client projects Events
-API envelopes through the same synchronous typed ingestion service and sends the exact
-envelope acknowledgement only after the service returns a non-retryable outcome.
-Retryable ingestion remains unacknowledged.
+A connection-selected Socket worker acquires a fenced lease before creating one public
+aiohttp `SocketModeClient` with SDK automatic reconnect enabled. The SDK owns
+`apps.connections.open`, secure endpoint selection and replacement, WebSocket
+establishment, Ping/Pong, stale-session detection, frame receipt, queue dispatch, and
+recoverable reconnect for that lease lifetime.
 
-Endpoint minting uses the public high-level `AsyncWebClient.apps_connections_open`
-method with SDK retries disabled. Each minted endpoint is assigned to a public aiohttp
-`SocketModeClient` with SDK automatic reconnect disabled. The SDK client owns the
-WebSocket handshake, Ping/Pong, frame receive loop, and response transmission. Its
-public message callback passes bounded text envelopes to Azents, where public
-`SocketModeRequest` and `SocketModeResponse` types validate structure and construct the
-acknowledgement. Azents owns durable admission, admission-before-acknowledgement
-ordering, lease-fenced connect/close policy, normalized reconnect decisions, and gap
-persistence.
+The SDK direct message callback remains the serial admission boundary. It passes bounded
+text envelopes to Azents, where public `SocketModeRequest` and `SocketModeResponse`
+types validate structure and construct the acknowledgement. Events API and interaction
+envelopes enter the same synchronous durable services as HTTP, and the exact envelope
+acknowledgement is sent only after a non-retryable outcome. Retryable ingestion remains
+unacknowledged. The SDK queue remains enabled without Azents message listeners so it
+can process provider `disconnect` controls and perform endpoint replacement.
 
-Socket refresh/reconnect reasons are normalized. Invalid authentication moves the
-connection to `reconnect_required` without changing its route catalog. Socket-only gap
-reasons are persisted for operators. Lease owner and expiry fence heartbeat, renew,
-release, gap, and active-state writes. Shutdown and cancellation close the socket and
-release ownership without exposing tokens.
+An SDK connection establishment marks the current fenced lease active and clears its
+gap. Endpoint replacement entry and transient endpoint acquisition failure record a
+bounded degraded gap without completing the Azents runner. Invalid authentication
+stops the current SDK lifecycle and moves only the connection to
+`reconnect_required`; route catalog and historical state remain. Lease owner and
+expiry fence heartbeat, renewal, admission, acknowledgement, release, gap, and active
+writes. Shutdown, cancellation, or lease loss closes the SDK client before releasing
+ownership.
 
 Production permits only secure Slack endpoints. Test-only HTTP and insecure WebSocket overrides require explicit `AZ_TESTENV_SLACK_*` configuration.
 
@@ -178,19 +179,16 @@ does not inspect Gateway frames, opcodes, session IDs, sequence numbers, Resume 
 raw payload dictionaries, or private SDK state, and it does not persist or inject an
 SDK Resume checkpoint across processes.
 
-Ingress consumes the SDK's typed `Message`, `RawMessageUpdateEvent`, and
-`RawMessageDeleteEvent` callbacks. Update admission reads the public typed `message`
-projection rather than the event's raw data dictionary. Delete admission uses only the
-typed message, channel, and Guild identifiers. Cache misses resolve channel or thread
-identity through public `Client.get_channel` and `Client.fetch_channel` methods.
-Callbacks are serialized per connection, and a callback failure closes the high-level
-client so it cannot be logged and ignored while the lease continues.
+Ingress consumes eligible target-Guild typed `Message` callbacks for normal
+conversation ingestion. Message identity derives from Guild, channel, thread, and
+message identity; the current lease/configuration/App-claim fence protects synchronous
+admission without exposing Gateway transport state. Message and lifecycle callbacks
+are serialized per connection, and a callback failure closes the high-level client so
+it cannot be logged and ignored while the lease continues.
 
-The Worker accepts only eligible target-Guild message-create callbacks for normal
-conversation ingestion. Typed update/delete callbacks do not create or rewrite Session
-input. Message-create identity derives from Guild, channel, thread, and message
-identity; the current lease/configuration/App-claim fence protects synchronous
-admission without exposing Gateway transport state.
+Typed `on_disconnect` records a fenced degraded gap. Typed `on_ready` and `on_resumed`
+mark the same current lease active and clear its gap. A stale callback fails the client
+and cannot mutate a newer lease.
 
 Credential failures and Gateway outcomes that cannot reconnect terminalize the current
 fenced lease in one transaction: they record the reason, release that lease, and move
@@ -199,7 +197,9 @@ validated configuration edit reactivates the connection. Recoverable Gateway and
 network failures retain the normal gap-and-retry behavior.
 
 Production Gateway transport is selected and validated by `discord.py`; Azents does
-not provide a custom Gateway endpoint override.
+not change SDK endpoint state in production. Deterministic provider tests may apply one
+explicit test-only endpoint context and must restore the SDK globals when the client
+closes.
 
 ## Synchronous Conversation Ingestion
 
@@ -295,8 +295,18 @@ Slack SDK clients use dedicated non-propagating loggers so SDK diagnostics canno
 serialize provider request parameters, response bodies, or Socket endpoint details
 into application logs.
 
+The Agent Worker includes its Slack Socket manager task in the foreground supervision
+boundary. Unexpected manager return, cancellation, or failure terminates the Worker
+instead of leaving readiness alive without Socket supervision. Customer-specific
+terminal configuration remains durable connection-local health and does not by itself
+make the shared Worker unready.
+
 ## Changelog
 
+- **2026-07-31** (spec_version 19) — Delegated Slack Socket endpoint acquisition,
+  queue control, stale detection, and recoverable reconnect to the SDK; added fenced
+  Slack and Discord typed lifecycle health; moved Slack HTTP verification to the SDK
+  verifier; and made the Slack manager part of Worker foreground supervision.
 - **2026-07-30** (spec_version 18) — Replaced durable event admission,
   background processing, hydration, pending context, and waiting activation with
   synchronous typed message ingestion, provider-history authority, PostgreSQL

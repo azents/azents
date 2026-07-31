@@ -1,17 +1,20 @@
 """High-level discord.py Gateway integration."""
 
 import asyncio
+import contextlib
 import dataclasses
-from collections.abc import Awaitable, Callable
+import threading
+from collections.abc import Awaitable, Callable, Iterator
 from typing import Literal, Protocol, TypeGuard
 
 import discord
 from discord.gateway import DiscordWebSocket
 from discord.http import Route
+from yarl import URL
 
 from azents.services.external_channel.discord_endpoint import (
-    discord_api_base_url,
-    discord_gateway_url,
+    discord_test_api_base_url,
+    discord_test_gateway_url,
 )
 
 DISCORD_GATEWAY_INTENTS = 1 | 512 | 32768
@@ -20,6 +23,7 @@ type DiscordMessageChannel = (
     discord.TextChannel | discord.Thread | discord.VoiceChannel | discord.StageChannel
 )
 type DiscordGatewayMessageEventType = Literal["message_create"]
+type DiscordGatewayLifecycleState = Literal["disconnected", "ready", "resumed"]
 
 
 class DiscordGatewayError(RuntimeError):
@@ -34,12 +38,12 @@ class DiscordGatewayIntentsError(DiscordGatewayError):
     """Discord rejected the Gateway intents required by the connection."""
 
 
-@dataclasses.dataclass(frozen=True)
-class DiscordGatewayConnectionResult:
-    """Reason one high-level discord.py client stopped."""
+class DiscordGatewayTerminalError(DiscordGatewayError):
+    """The SDK rejected reconnecting the current Gateway configuration."""
 
-    reconnect: bool
-    reason: str
+    def __init__(self, reason: str) -> None:
+        super().__init__("Discord Gateway requires operator reconnection.")
+        self.reason = reason
 
 
 @dataclasses.dataclass(frozen=True)
@@ -55,10 +59,11 @@ type DiscordGatewayEventHandler = Callable[
     [DiscordGatewayMessageEvent],
     Awaitable[None],
 ]
-type DiscordGatewayEventFactory = Callable[
-    [],
-    Awaitable[DiscordGatewayMessageEvent],
+type DiscordGatewayLifecycleHandler = Callable[
+    [DiscordGatewayLifecycleState],
+    Awaitable[None],
 ]
+type DiscordGatewayCallback = Callable[[], Awaitable[None]]
 
 
 class DiscordGatewayRunner(Protocol):
@@ -70,7 +75,8 @@ class DiscordGatewayRunner(Protocol):
         bot_token: str,
         target_guild_id: str,
         handle_event: DiscordGatewayEventHandler,
-    ) -> DiscordGatewayConnectionResult:
+        handle_lifecycle: DiscordGatewayLifecycleHandler,
+    ) -> None:
         """Run until the SDK client closes or a terminal failure occurs."""
         ...
 
@@ -83,6 +89,7 @@ class _DiscordLibraryClient(discord.Client):
         *,
         target_guild_id: int,
         handle_event: DiscordGatewayEventHandler,
+        handle_lifecycle: DiscordGatewayLifecycleHandler,
     ) -> None:
         intents = discord.Intents.none()
         intents.guilds = True
@@ -95,6 +102,7 @@ class _DiscordLibraryClient(discord.Client):
         )
         self.target_guild_id = target_guild_id
         self.handle_event = handle_event
+        self.handle_lifecycle = handle_lifecycle
         self.event_lock = asyncio.Lock()
         self.event_error: Exception | None = None
 
@@ -103,24 +111,37 @@ class _DiscordLibraryClient(discord.Client):
         if message.guild is None or message.guild.id != self.target_guild_id:
             return
 
-        async def event_factory() -> DiscordGatewayMessageEvent:
+        async def emit_message() -> None:
             channel = await self._resolve_guild_channel(message.channel)
-            return DiscordGatewayMessageEvent(
-                event_type="message_create",
-                channel=channel,
-                message=message,
+            await self.handle_event(
+                DiscordGatewayMessageEvent(
+                    event_type="message_create",
+                    channel=channel,
+                    message=message,
+                )
             )
 
-        await self._emit(event_factory)
+        await self._emit(emit_message)
 
-    async def _emit(self, event_factory: DiscordGatewayEventFactory) -> None:
-        """Serialize typed resolution and admission; close on any failure."""
+    async def on_disconnect(self) -> None:
+        """Project one SDK disconnect lifecycle callback."""
+        await self._emit(lambda: self.handle_lifecycle("disconnected"))
+
+    async def on_ready(self) -> None:
+        """Project one SDK ready lifecycle callback."""
+        await self._emit(lambda: self.handle_lifecycle("ready"))
+
+    async def on_resumed(self) -> None:
+        """Project one SDK resumed lifecycle callback."""
+        await self._emit(lambda: self.handle_lifecycle("resumed"))
+
+    async def _emit(self, callback: DiscordGatewayCallback) -> None:
+        """Serialize typed SDK callbacks and close on any failure."""
         async with self.event_lock:
             if self.event_error is not None:
                 return
             try:
-                event = await event_factory()
-                await self.handle_event(event)
+                await callback()
             except asyncio.CancelledError:
                 raise
             except Exception as error:
@@ -158,23 +179,17 @@ class DiscordGatewayClient:
         bot_token: str,
         target_guild_id: str,
         handle_event: DiscordGatewayEventHandler,
-    ) -> DiscordGatewayConnectionResult:
+        handle_lifecycle: DiscordGatewayLifecycleHandler,
+    ) -> None:
         """Let discord.py own discovery, heartbeat, reconnect, and Resume."""
         if not target_guild_id.isdigit():
             raise DiscordGatewayError("Discord Guild identity is invalid.")
-        Route.BASE = discord_api_base_url()
-        DiscordWebSocket.DEFAULT_GATEWAY = type(DiscordWebSocket.DEFAULT_GATEWAY)(
-            discord_gateway_url()
-        )
         client = _DiscordLibraryClient(
             target_guild_id=int(target_guild_id),
             handle_event=handle_event,
+            handle_lifecycle=handle_lifecycle,
         )
-        result = DiscordGatewayConnectionResult(
-            reconnect=True,
-            reason="gateway_client_closed",
-        )
-        try:
+        with _discord_test_endpoint_override():
             try:
                 await client.start(bot_token, reconnect=True)
             except discord.LoginFailure as error:
@@ -186,27 +201,79 @@ class DiscordGatewayClient:
                     "Discord rejected the required Message Content intent."
                 ) from error
             except discord.ConnectionClosed as error:
-                result = _closed_connection_result(error)
+                raise DiscordGatewayTerminalError(
+                    _closed_connection_reason(error)
+                ) from error
             except (
                 discord.GatewayNotFound,
                 discord.HTTPException,
                 discord.InvalidData,
                 OSError,
             ) as error:
-                result = DiscordGatewayConnectionResult(
-                    reconnect=True,
-                    reason=_transport_failure_reason(error),
-                )
-        finally:
-            if not client.is_closed():
-                await client.close()
+                raise DiscordGatewayError(
+                    "Discord Gateway transport is unavailable."
+                ) from error
+            finally:
+                if not client.is_closed():
+                    await client.close()
         if client.event_error is not None:
             if isinstance(client.event_error, DiscordGatewayError):
                 raise client.event_error
             raise DiscordGatewayError(
                 "Discord typed callback processing failed."
             ) from client.event_error
-        return result
+        raise DiscordGatewayError("Discord Gateway client stopped unexpectedly.")
+
+
+@dataclasses.dataclass
+class _DiscordTestEndpointState:
+    """Reference-counted deterministic endpoint state."""
+
+    lock: threading.Lock = dataclasses.field(default_factory=threading.Lock)
+    depth: int = 0
+    originals: tuple[str, URL] | None = None
+    values: tuple[str | None, str | None] | None = None
+
+
+_test_endpoint_state = _DiscordTestEndpointState()
+
+
+@contextlib.contextmanager
+def _discord_test_endpoint_override() -> Iterator[None]:
+    """Temporarily apply explicit deterministic endpoints with reference counting."""
+    api_base_url = discord_test_api_base_url()
+    gateway_url = discord_test_gateway_url()
+    if api_base_url is None and gateway_url is None:
+        yield
+        return
+
+    configured = (api_base_url, gateway_url)
+    state = _test_endpoint_state
+    with state.lock:
+        if state.depth == 0:
+            state.originals = (Route.BASE, DiscordWebSocket.DEFAULT_GATEWAY)
+            state.values = configured
+            if api_base_url is not None:
+                Route.BASE = api_base_url
+            if gateway_url is not None:
+                DiscordWebSocket.DEFAULT_GATEWAY = type(
+                    DiscordWebSocket.DEFAULT_GATEWAY
+                )(gateway_url)
+        elif state.values != configured:
+            raise DiscordGatewayError(
+                "Discord deterministic endpoint configuration changed while active."
+            )
+        state.depth += 1
+    try:
+        yield
+    finally:
+        with state.lock:
+            state.depth -= 1
+            if state.depth == 0:
+                assert state.originals is not None
+                Route.BASE, DiscordWebSocket.DEFAULT_GATEWAY = state.originals
+                state.originals = None
+                state.values = None
 
 
 def _is_message_channel(channel: object) -> TypeGuard[DiscordMessageChannel]:
@@ -221,33 +288,11 @@ def _is_message_channel(channel: object) -> TypeGuard[DiscordMessageChannel]:
     )
 
 
-def _closed_connection_result(
-    error: discord.ConnectionClosed,
-) -> DiscordGatewayConnectionResult:
-    """Classify public SDK close outcomes for manager lifecycle handling."""
+def _closed_connection_reason(error: discord.ConnectionClosed) -> str:
+    """Classify one SDK-declared non-recoverable close without provider details."""
     terminal_reasons = {
         4004: "gateway_credentials_rejected",
         4013: "intents_invalid",
         4014: "intents_disallowed",
     }
-    reason = terminal_reasons.get(error.code)
-    if reason is not None:
-        return DiscordGatewayConnectionResult(reconnect=False, reason=reason)
-    return DiscordGatewayConnectionResult(
-        reconnect=True,
-        reason="connection_closed",
-    )
-
-
-def _transport_failure_reason(
-    error: (
-        discord.GatewayNotFound | discord.HTTPException | discord.InvalidData | OSError
-    ),
-) -> str:
-    """Classify public SDK failures without exposing provider details."""
-    if isinstance(error, discord.HTTPException) and error.status == 429:
-        return "gateway_rate_limited"
-    cause = error.__cause__
-    if isinstance(cause, discord.HTTPException) and cause.status == 429:
-        return "gateway_rate_limited"
-    return "gateway_transport_unavailable"
+    return terminal_reasons.get(error.code, "gateway_connection_rejected")

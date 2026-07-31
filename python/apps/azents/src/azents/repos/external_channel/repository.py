@@ -808,7 +808,20 @@ class ExternalChannelRepository:
     ) -> bool:
         """Record a gap only for the current fenced Discord Gateway owner."""
         result = await session.execute(
-            sa.update(RDBExternalChannelIngressLease)
+            sa.select(
+                RDBExternalChannelConnection,
+                RDBExternalChannelIngressLease,
+            )
+            .join(
+                RDBExternalChannelIngressLease,
+                RDBExternalChannelIngressLease.connection_id
+                == RDBExternalChannelConnection.id,
+            )
+            .join(
+                RDBExternalChannelAppClaim,
+                RDBExternalChannelAppClaim.connection_id
+                == RDBExternalChannelConnection.id,
+            )
             .where(
                 _discord_gateway_lease_fence(
                     connection_id=connection_id,
@@ -817,10 +830,64 @@ class ExternalChannelRepository:
                     now=now,
                 )
             )
-            .values(gap_detected_at=now, gap_reason=reason, heartbeat_at=now)
-            .returning(RDBExternalChannelIngressLease.id)
+            .with_for_update()
         )
-        return result.scalar_one_or_none() is not None
+        owned = result.tuples().one_or_none()
+        if owned is None:
+            return False
+        connection, lease = owned
+        connection.status = ExternalChannelConnectionStatus.DEGRADED
+        lease.gap_detected_at = now
+        lease.gap_reason = reason
+        lease.heartbeat_at = now
+        await session.flush()
+        return True
+
+    async def mark_discord_gateway_active(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        lease_owner: str,
+        lease_generation: int,
+        now: datetime.datetime,
+    ) -> bool:
+        """Mark one current Discord Gateway lease active and clear its gap."""
+        result = await session.execute(
+            sa.select(
+                RDBExternalChannelConnection,
+                RDBExternalChannelIngressLease,
+            )
+            .join(
+                RDBExternalChannelIngressLease,
+                RDBExternalChannelIngressLease.connection_id
+                == RDBExternalChannelConnection.id,
+            )
+            .join(
+                RDBExternalChannelAppClaim,
+                RDBExternalChannelAppClaim.connection_id
+                == RDBExternalChannelConnection.id,
+            )
+            .where(
+                _discord_gateway_lease_fence(
+                    connection_id=connection_id,
+                    lease_owner=lease_owner,
+                    lease_generation=lease_generation,
+                    now=now,
+                )
+            )
+            .with_for_update()
+        )
+        owned = result.tuples().one_or_none()
+        if owned is None:
+            return False
+        connection, lease = owned
+        connection.status = ExternalChannelConnectionStatus.ACTIVE
+        lease.gap_detected_at = None
+        lease.gap_reason = None
+        lease.heartbeat_at = now
+        await session.flush()
+        return True
 
     async def mark_discord_gateway_reconnect_required(
         self,

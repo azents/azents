@@ -718,26 +718,30 @@ def test_slack_fake_websocket_captures_acknowledgement_after_envelope() -> None:
     state = FakeState()
     state.configure(
         {
-            "socket_envelopes": [
+            "socket_sessions": [
                 {
-                    "envelope_id": "Env-1",
-                    "type": "events_api",
-                    "payload": {
-                        "type": "event_callback",
-                        "event_id": "Ev-1",
-                        "api_app_id": "A-E2E",
-                        "team_id": "T-E2E",
-                        "event": {
-                            "type": "app_mention",
-                            "channel": "C-E2E",
-                            "user": "U-E2E",
-                            "text": "content excluded from evidence",
-                            "ts": "1721600000.000100",
-                        },
-                    },
+                    "envelopes": [
+                        {
+                            "envelope_id": "Env-1",
+                            "type": "events_api",
+                            "payload": {
+                                "type": "event_callback",
+                                "event_id": "Ev-1",
+                                "api_app_id": "A-E2E",
+                                "team_id": "T-E2E",
+                                "event": {
+                                    "type": "app_mention",
+                                    "channel": "C-E2E",
+                                    "user": "U-E2E",
+                                    "text": "content excluded from evidence",
+                                    "ts": "1721600000.000100",
+                                },
+                            },
+                        }
+                    ],
+                    "disconnect_reason": "link_disabled",
                 }
             ],
-            "socket_disconnect_reason": "link_disabled",
         }
     )
 

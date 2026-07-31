@@ -721,6 +721,125 @@ class TestExternalChannelRepository:
         assert lease.gap_reason == "gateway_credentials_invalid"
         assert await repo.list_discord_gateway_connection_ids(rdb_session) == []
 
+    async def test_discord_gateway_gap_and_active_transitions_are_fenced(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Project Gateway lifecycle health only from the current durable owner."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "discord-gateway-lifecycle-transition",
+        )
+        repo = ExternalChannelRepository()
+        connection = await repo.create_connection(
+            rdb_session,
+            _connection_create(workspace_id).model_copy(
+                update={
+                    "provider": ExternalChannelProvider.DISCORD,
+                    "ingress_profile": (
+                        ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP
+                    ),
+                    "provider_app_id": "discord-app-lifecycle-1",
+                    "provider_tenant_id": None,
+                    "provider_config": {"target_guild_id": "guild-lifecycle-1"},
+                }
+            ),
+        )
+        prepared = await repo.prepare_discord_callback(
+            rdb_session,
+            connection_id=connection.id,
+            expected_encrypted_credentials="ciphertext-only",
+            expected_configuration_generation=connection.configuration_generation,
+            provider_app_id="discord-app-lifecycle-1",
+            interaction_public_key="a" * 64,
+            callback_selector_hash="lifecycle-selector-hash",
+        )
+        assert prepared is True
+        activated = await repo.activate_discord_connection(
+            rdb_session,
+            connection_id=connection.id,
+            expected_encrypted_credentials="ciphertext-only",
+            expected_configuration_generation=connection.configuration_generation,
+            provider_app_id="discord-app-lifecycle-1",
+            provider_tenant_id="guild-lifecycle-1",
+            provider_bot_user_id=None,
+            interaction_public_key="a" * 64,
+            message_command_id="123456789012345678",
+            capabilities=_discord_capabilities(),
+            callback_selector_hash="lifecycle-selector-hash",
+            checked_at=_at(1),
+        )
+        assert activated is not None
+        claim = await repo.claim_discord_gateway_lease(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-current",
+            now=_at(2),
+            lease_until=_at(10),
+        )
+        assert claim is not None
+
+        stale_gap = await repo.record_discord_gateway_gap(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-stale",
+            lease_generation=claim.lease.lease_generation,
+            now=_at(3),
+            reason="gateway_disconnected",
+        )
+        gap_recorded = await repo.record_discord_gateway_gap(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-current",
+            lease_generation=claim.lease.lease_generation,
+            now=_at(3),
+            reason="gateway_disconnected",
+        )
+        degraded = await repo.get_connection(
+            rdb_session,
+            connection_id=connection.id,
+        )
+        degraded_lease = await rdb_session.scalar(
+            sa.select(RDBExternalChannelIngressLease).where(
+                RDBExternalChannelIngressLease.connection_id == connection.id
+            )
+        )
+
+        assert stale_gap is False
+        assert gap_recorded is True
+        assert degraded is not None
+        assert degraded.status is ExternalChannelConnectionStatus.DEGRADED
+        assert degraded_lease is not None
+        assert degraded_lease.gap_detected_at == _at(3)
+        assert degraded_lease.gap_reason == "gateway_disconnected"
+
+        stale_active = await repo.mark_discord_gateway_active(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-stale",
+            lease_generation=claim.lease.lease_generation,
+            now=_at(4),
+        )
+        marked_active = await repo.mark_discord_gateway_active(
+            rdb_session,
+            connection_id=connection.id,
+            lease_owner="manager-current",
+            lease_generation=claim.lease.lease_generation,
+            now=_at(4),
+        )
+        recovered = await repo.get_connection(
+            rdb_session,
+            connection_id=connection.id,
+        )
+
+        assert stale_active is False
+        assert marked_active is True
+        assert recovered is not None
+        assert recovered.status is ExternalChannelConnectionStatus.ACTIVE
+        await rdb_session.refresh(degraded_lease)
+        assert degraded_lease.gap_detected_at is None
+        assert degraded_lease.gap_reason is None
+
     async def test_socket_lease_fences_owner_and_reclaims_after_expiry(
         self,
         rdb_session: AsyncSession,

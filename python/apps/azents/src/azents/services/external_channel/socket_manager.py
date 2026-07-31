@@ -58,9 +58,7 @@ from azents.services.external_channel.slack_socket import (
     SlackSocketError,
     SlackSocketInvalidEnvelope,
     SlackSocketModeRunner,
-    SlackSocketReconnectRequired,
     SlackSocketRetryableIngestion,
-    SlackSocketWebAPIClient,
 )
 from azents.services.external_channel.transport_ingestion import (
     ExternalChannelTransportIngestionService,
@@ -71,7 +69,6 @@ from azents.services.external_channel.transport_ingestion import (
 _DEFAULT_POLL_INTERVAL = datetime.timedelta(seconds=5)
 _DEFAULT_LEASE_DURATION = datetime.timedelta(seconds=45)
 _DEFAULT_RENEW_INTERVAL = datetime.timedelta(seconds=15)
-_DEFAULT_RECONNECT_DELAY = datetime.timedelta(seconds=1)
 logger = logging.getLogger(__name__)
 
 
@@ -119,7 +116,6 @@ class SlackSocketManagerService:
     poll_interval: datetime.timedelta = _DEFAULT_POLL_INTERVAL
     lease_duration: datetime.timedelta = _DEFAULT_LEASE_DURATION
     renew_interval: datetime.timedelta = _DEFAULT_RENEW_INTERVAL
-    reconnect_delay: datetime.timedelta = _DEFAULT_RECONNECT_DELAY
     config: Annotated[Config | None, Depends(get_config)] = None
 
     async def run(self, shutdown_event: asyncio.Event) -> None:
@@ -184,7 +180,6 @@ class SlackSocketManagerService:
             if credentials.app_token is None:
                 raise SlackSocketCredentialError
             web_client = create_slack_web_client()
-            web_api_client = SlackSocketWebAPIClient(web_client)
 
             async def admit_owned(event: ExternalChannelTrigger) -> object:
                 return await self._handle_owned_event(
@@ -268,54 +263,57 @@ class SlackSocketManagerService:
                 )
                 task.add_done_callback(_log_interaction_task_failure)
 
+            async def report_active() -> None:
+                if not await self._mark_active(connection_id):
+                    raise SlackSocketInvalidEnvelope(
+                        "Slack Socket connection is no longer authorized."
+                    )
+
+            async def report_gap(reason: str) -> None:
+                if not await self._record_gap(connection_id, reason):
+                    raise SlackSocketInvalidEnvelope(
+                        "Slack Socket connection is no longer authorized."
+                    )
+
             client = SlackSocketModeRunner(
                 web_client=web_client,
                 admit_event=admit_owned,
                 admit_interaction=admit_owned_interaction,
                 schedule_interaction=schedule_owned_interaction,
+                report_active=report_active,
+                report_gap=report_gap,
             )
-            while not shutdown_event.is_set():
-                opened = await web_api_client.open_connection(
-                    app_token=credentials.app_token
+            try:
+                result = await self._run_connection_with_lease(
+                    client=client,
+                    connection_id=connection_id,
+                    app_token=credentials.app_token,
+                    shutdown_event=shutdown_event,
                 )
-                if not await self._mark_active(connection_id):
-                    return
-                try:
-                    result = await self._run_connection_with_lease(
-                        client=client,
-                        connection_id=connection_id,
-                        app_token=credentials.app_token,
-                        endpoint_url=opened.url,
-                        shutdown_event=shutdown_event,
-                    )
-                except SlackSocketRetryableIngestion:
-                    if not await self._record_gap(
-                        connection_id,
-                        "socket_ingestion_retryable",
-                    ):
-                        return
-                    await self._sleep_or_shutdown(shutdown_event)
-                    continue
-                if result is None:
-                    await self._release(
-                        connection_id,
-                        reason="socket_manager_shutdown",
-                        status=ExternalChannelConnectionStatus.DEGRADED,
-                    )
-                    return
-                if not result.reconnect:
-                    await self._release(
-                        connection_id,
-                        reason=result.reason,
-                        status=ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
-                    )
-                    return
-                if not await self._record_gap(connection_id, result.reason):
-                    return
-                await self._sleep_or_shutdown(shutdown_event)
+            except SlackSocketRetryableIngestion:
+                await self._release(
+                    connection_id,
+                    reason="socket_ingestion_retryable",
+                    status=ExternalChannelConnectionStatus.DEGRADED,
+                )
+                return
+            if result is None:
+                await self._release(
+                    connection_id,
+                    reason="socket_manager_shutdown",
+                    status=ExternalChannelConnectionStatus.DEGRADED,
+                )
+                return
+            if not result.reconnect:
+                await self._release(
+                    connection_id,
+                    reason=result.reason,
+                    status=ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
+                )
+                return
             await self._release(
                 connection_id,
-                reason="socket_manager_shutdown",
+                reason=result.reason,
                 status=ExternalChannelConnectionStatus.DEGRADED,
             )
         except asyncio.CancelledError:
@@ -327,12 +325,6 @@ class SlackSocketManagerService:
                 )
             )
             raise
-        except SlackSocketReconnectRequired:
-            await self._release(
-                connection_id,
-                reason="socket_credentials_rejected",
-                status=ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
-            )
         except SlackSocketCredentialError:
             await self._release(
                 connection_id,
@@ -427,14 +419,12 @@ class SlackSocketManagerService:
         client: SlackSocketModeRunner,
         connection_id: str,
         app_token: str,
-        endpoint_url: str,
         shutdown_event: asyncio.Event,
     ) -> SlackSocketConnectionResult | None:
         connection_task = asyncio.create_task(
             client.run_connection(
                 connection_id=connection_id,
                 app_token=app_token,
-                endpoint_url=endpoint_url,
             )
         )
         shutdown_task = asyncio.create_task(shutdown_event.wait())
@@ -540,15 +530,6 @@ class SlackSocketManagerService:
                 )
             await session.commit()
             return released
-
-    async def _sleep_or_shutdown(self, shutdown_event: asyncio.Event) -> None:
-        try:
-            await asyncio.wait_for(
-                shutdown_event.wait(),
-                timeout=self.reconnect_delay.total_seconds(),
-            )
-        except asyncio.TimeoutError:
-            return
 
 
 def _required_ciphertext(

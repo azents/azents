@@ -2180,14 +2180,14 @@ def test_external_channel_file_transfer_journey(
     assert "selected-input.txt" not in rendered_provider_state
 
 
-def test_socket_mode_acknowledges_and_preserves_route_for_disabled_link(
+def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     azents_engine_worker_container: Container,
     slack_provider_fake_url: str,
 ) -> None:
-    """Exercise durable ACK and reconnect health without removing Agent routing."""
+    """Exercise SDK reconnect, durable ACK, and route-preserving terminal health."""
     del azents_engine_worker_container
     installation_suffix = unique()
     socket_app_id = f"A-SOCKET-{installation_suffix}"
@@ -2209,6 +2209,22 @@ def test_socket_mode_acknowledges_and_preserves_route_for_disabled_link(
             "ts": root_timestamp,
         },
     }
+    socket_sessions: list[dict[str, object]] = [
+        {
+            "envelopes": [],
+            "disconnect_reason": "refresh_requested",
+        },
+        {
+            "envelopes": [
+                {
+                    "envelope_id": envelope_id,
+                    "type": "events_api",
+                    "payload": socket_payload,
+                }
+            ],
+            "disconnect_reason": "link_disabled",
+        },
+    ]
     requests.post(
         f"{slack_provider_fake_url}/__testenv/reset",
         timeout=5,
@@ -2227,14 +2243,7 @@ def test_socket_mode_acknowledges_and_preserves_route_for_disabled_link(
                     }
                 ]
             ],
-            "socket_envelopes": [
-                {
-                    "envelope_id": envelope_id,
-                    "type": "events_api",
-                    "payload": socket_payload,
-                }
-            ],
-            "socket_disconnect_reason": "link_disabled",
+            "socket_sessions": socket_sessions,
         },
         timeout=5,
     ).raise_for_status()
@@ -2316,7 +2325,8 @@ def test_socket_mode_acknowledges_and_preserves_route_for_disabled_link(
     provider_state = _provider_state(slack_provider_fake_url)
     socket_state = provider_state["socket"]
     assert isinstance(socket_state, dict)
-    assert socket_state["connections"] == 1
+    assert socket_state["connections"] == 2
+    assert socket_state["configured_sessions"] == 2
     assert "xapp-e2e-private" not in str(provider_state)
 
 
@@ -2616,6 +2626,7 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
                     "payload": provider_message,
                 },
             ],
+            "gateway_scenarios": ["reconnect", "open"],
         },
         timeout=5,
     ).raise_for_status()
@@ -2678,11 +2689,11 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
                         _discord_provider_state(discord_provider_fake_url)["gateway"],
                     )["connections"],
                 )
-                >= 1
+                >= 2
             ),
             timeout=45,
             interval=0.2,
-            message="Discord Gateway Worker did not connect to the provider fake",
+            message="Discord Gateway Worker did not resume with the provider fake",
         )
         session, binding = cast(
             tuple[Any, Any],
@@ -2716,10 +2727,9 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
     # Thread reconciliation runs before create; canonical history runs after create.
     assert request_counts["get_message"] >= 2
     gateway = cast(dict[str, object], state["gateway"])
-    assert cast(int, gateway["connections"]) >= 1
+    assert cast(int, gateway["connections"]) >= 2
     initial_opcodes = cast(list[object], gateway["initial_opcodes"])
-    assert initial_opcodes
-    assert set(initial_opcodes) == {2}
+    assert initial_opcodes[:2] == [2, 6]
     dispatches = cast(list[object], gateway["dispatches"])
     assert {"event_type": "GUILD_CREATE", "sequence": 2} in dispatches
     assert {"event_type": "MESSAGE_CREATE", "sequence": 3} in dispatches
