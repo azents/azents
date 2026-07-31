@@ -15,7 +15,6 @@ import {
 } from "@mantine/core";
 import {
   IconAdjustments,
-  IconBox,
   IconBrain,
   IconChevronRight,
   IconFolder,
@@ -144,7 +143,6 @@ export function AgentSettingsHub({
   automaticProjectsCount,
 }: AgentSettingsHubProps): React.ReactElement {
   const t = useTranslations("workspace.agents.settingsHub");
-  const runtimeT = useTranslations("workspace.runtimeExecution.agentPage");
   const basePath = `/w/${handle}/agents/${agent.id}/settings`;
 
   const sections: SettingsSection[] = [
@@ -178,13 +176,6 @@ export function AgentSettingsHub({
           value: agent.shell_enabled
             ? t("values.shellEnabled")
             : t("values.shellDisabled"),
-        },
-        {
-          href: `${basePath}/execution`,
-          icon: <IconBox size={rem(18)} />,
-          label: runtimeT("hubLabel"),
-          description: runtimeT("hubDescription"),
-          value: null,
         },
         {
           href: `${basePath}/memory`,

@@ -5,10 +5,16 @@ import datetime
 import sqlalchemy as sa
 from azcommon.datetime import tznow
 from azcommon.uuid import uuid7
+from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.runtime_execution_policy import (
+    digest_runtime_execution_policy,
+    standard_runtime_execution_policy,
+)
 from azents.core.runtime_profile import (
+    RuntimeConfigurationResolutionStatus,
     RuntimeProfileLifecycle,
     RuntimeReconcileSourceKind,
     RuntimeReconcileTaskStatus,
@@ -17,6 +23,7 @@ from azents.core.runtime_profile import (
     RuntimeRecreationTargetKind,
 )
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.runtime_profile import (
     RDBRuntimeConfigurationReconcileTask,
     RDBRuntimeConfigurationRevision,
@@ -368,6 +375,51 @@ class RuntimeProfileRepository:
         """Fetch one immutable Runtime configuration revision."""
         rdb = await session.get(RDBRuntimeConfigurationRevision, revision_id)
         return self._build_configuration_revision(rdb) if rdb is not None else None
+
+    async def configuration_transport_evidence_matches_current(
+        self,
+        session: AsyncSession,
+        *,
+        runtime_id: str,
+        provider_id: str,
+        evidence: RuntimeExecutionPolicyEvidence,
+    ) -> bool:
+        """Validate the Phase-2 transport envelope without claiming adoption."""
+        revision = await self._current_configuration_evidence(
+            session,
+            runtime_id=runtime_id,
+            provider_id=provider_id,
+            evidence=evidence,
+        )
+        return revision is not None
+
+    async def _current_configuration_evidence(
+        self,
+        session: AsyncSession,
+        *,
+        runtime_id: str,
+        provider_id: str,
+        evidence: RuntimeExecutionPolicyEvidence,
+    ) -> RuntimeConfigurationRevision | None:
+        runtime_statement = sa.select(RDBAgentRuntime).where(
+            RDBAgentRuntime.id == runtime_id,
+            RDBAgentRuntime.runtime_provider_resource_id == provider_id,
+            RDBAgentRuntime.desired_runtime_configuration_revision_id
+            == evidence.snapshot_id,
+            RDBAgentRuntime.desired_generation == evidence.desired_generation,
+        )
+        runtime = (await session.execute(runtime_statement)).scalar_one_or_none()
+        if runtime is None:
+            return None
+        revision_statement = sa.select(RDBRuntimeConfigurationRevision).where(
+            RDBRuntimeConfigurationRevision.id == evidence.snapshot_id,
+            RDBRuntimeConfigurationRevision.runtime_id == runtime_id,
+            RDBRuntimeConfigurationRevision.provider_id == provider_id,
+        )
+        revision = (await session.execute(revision_statement)).scalar_one_or_none()
+        if revision is None or not _configuration_evidence_matches(revision, evidence):
+            return None
+        return self._build_configuration_revision(revision)
 
     async def enqueue_reconcile_task(
         self,
@@ -888,3 +940,25 @@ class RuntimeProfileRepository:
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,
         )
+
+
+def _configuration_evidence_matches(
+    revision: RDBRuntimeConfigurationRevision,
+    evidence: RuntimeExecutionPolicyEvidence,
+) -> bool:
+    """Validate the transitional transport envelope against one revision."""
+    return (
+        revision.id == evidence.snapshot_id
+        and revision.target_desired_generation == evidence.desired_generation
+        and revision.resolution_status is RuntimeConfigurationResolutionStatus.READY
+        and revision.resolved_configuration is not None
+        and evidence.digest
+        == digest_runtime_execution_policy(standard_runtime_execution_policy())
+        and dict(evidence.module_versions) == {"docker": 1, "runtime.resources": 1}
+        and dict(evidence.source_versions)
+        == {
+            "profile": revision.infrastructure_profile_version,
+            "workspace": revision.workspace_runtime_profile_version,
+            "agent": revision.agent_selection_version,
+        }
+    )

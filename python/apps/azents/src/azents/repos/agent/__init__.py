@@ -103,9 +103,15 @@ class AgentRepository:
         session: AsyncSession,
         agent_id: str,
     ) -> Agent | None:
-        """Fetch one Agent while serializing Runtime Provider selection."""
+        """Fetch one Agent while serializing Runtime Profile selection."""
         result = await session.execute(
-            sa.select(RDBAgent).where(RDBAgent.id == agent_id).with_for_update()
+            sa.select(RDBAgent)
+            .where(RDBAgent.id == agent_id)
+            # SQLAlchemy renders key_share=True as PostgreSQL
+            # ``FOR NO KEY UPDATE`` unless read=True is also supplied. This
+            # blocks selection-column updates while allowing FK KEY SHARE
+            # locks taken by independent Runtime-state writes.
+            .with_for_update(key_share=True)
         )
         rdb_agent = result.scalar_one_or_none()
         if rdb_agent is None:

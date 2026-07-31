@@ -90,6 +90,7 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 
+from support.runtime_profiles import create_workspace_runtime_profile
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
@@ -117,7 +118,7 @@ def _create_agent(
     admin_api_client: azentsadminclient.ApiClient,
     public_server_url: str,
     *,
-    runtime_provider_id: str | None,
+    runtime_profile_provider_id: str | None,
     shell_enabled: bool,
 ) -> tuple[str, str, str, str]:
     """Create an authenticated workspace administrator and one active Agent."""
@@ -126,7 +127,7 @@ def _create_agent(
         admin_api_client,
         public_server_url,
         agent_count=1,
-        runtime_provider_id=runtime_provider_id,
+        runtime_profile_provider_id=runtime_profile_provider_id,
         shell_enabled=shell_enabled,
     )
     return token, email, handle, agent_ids[0]
@@ -168,7 +169,7 @@ def _create_workspace_agents(
     public_server_url: str,
     *,
     agent_count: int,
-    runtime_provider_id: str | None,
+    runtime_profile_provider_id: str | None,
     shell_enabled: bool,
 ) -> tuple[str, str, str, list[str]]:
     """Create one Workspace owner and a deterministic active Agent catalog."""
@@ -207,6 +208,16 @@ def _create_workspace_agents(
         handle,
         integration.id,
     )
+    runtime_profile_id = (
+        create_workspace_runtime_profile(
+            public_api_client,
+            token=token,
+            workspace_handle=handle,
+            provider_id=runtime_profile_provider_id,
+        )
+        if runtime_profile_provider_id is not None
+        else None
+    )
     agent_api = AgentV1Api(public_api_client)
     agent_ids = [
         agent_api.agent_v1_create_agent(
@@ -216,7 +227,7 @@ def _create_workspace_agents(
                 model_selection=model_selection,
                 lightweight_model_selection=model_selection,
                 type=AgentType.PUBLIC,
-                runtime_provider_id=runtime_provider_id,
+                runtime_profile_id=runtime_profile_id,
                 shell_enabled=shell_enabled,
             ),
             _headers=headers,
@@ -634,7 +645,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id=None,
+        runtime_profile_provider_id=None,
         shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
@@ -914,7 +925,7 @@ def test_connection_update_and_repeated_disconnect(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id=None,
+        runtime_profile_provider_id=None,
         shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
@@ -1006,7 +1017,7 @@ def test_multi_app_workspace_management_default_and_disconnect_journey(
         admin_api_client,
         azents_public_server_url,
         agent_count=2,
-        runtime_provider_id=None,
+        runtime_profile_provider_id=None,
         shell_enabled=False,
     )
     manager_token = _invite_workspace_user(
@@ -1199,7 +1210,7 @@ def test_multi_app_workspace_management_default_and_disconnect_journey(
         admin_api_client,
         azents_public_server_url,
         agent_count=1,
-        runtime_provider_id=None,
+        runtime_profile_provider_id=None,
         shell_enabled=False,
     )
     with pytest.raises(ApiException) as foreign_error:
@@ -1277,7 +1288,7 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
         admin_api_client,
         azents_public_server_url,
         agent_count=2,
-        runtime_provider_id=None,
+        runtime_profile_provider_id=None,
         shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {owner_token}"}
@@ -1531,7 +1542,7 @@ def test_provider_native_channel_work_progress_journey(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id=None,
+        runtime_profile_provider_id=None,
         shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
@@ -1900,7 +1911,7 @@ def test_external_channel_file_transfer_journey(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id="system-docker",
+        runtime_profile_provider_id="system-docker",
         shell_enabled=True,
     )
     _wait_for_runtime_runner_ready(
@@ -2251,7 +2262,7 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id=None,
+        runtime_profile_provider_id=None,
         shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
@@ -2348,7 +2359,7 @@ def test_connection_management_web_surface_uses_redacted_operational_state(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id=None,
+        runtime_profile_provider_id=None,
         shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
@@ -2445,7 +2456,7 @@ def test_discord_single_activation_and_interaction_journey(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id=None,
+        runtime_profile_provider_id=None,
         shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
@@ -2634,7 +2645,7 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id=None,
+        runtime_profile_provider_id=None,
         shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {token}"}
@@ -2776,7 +2787,7 @@ def test_discord_message_command_selector_and_component_journey(
         admin_api_client,
         azents_public_server_url,
         agent_count=2,
-        runtime_provider_id=None,
+        runtime_profile_provider_id=None,
         shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {owner_token}"}
@@ -2982,7 +2993,7 @@ def test_discord_multi_management_and_lifecycle_journey(
         admin_api_client,
         azents_public_server_url,
         agent_count=2,
-        runtime_provider_id=None,
+        runtime_profile_provider_id=None,
         shell_enabled=False,
     )
     headers = {"Authorization": f"Bearer {owner_token}"}

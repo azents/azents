@@ -26,9 +26,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeFailurePatch
-from azents.repos.runtime_provider_policy.repository import (
-    RuntimeProviderPolicyRepository,
-)
+from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.runtime.control_protocol.data import RuntimeRunnerRegistration
 
 
@@ -39,9 +37,9 @@ class RuntimeProviderReportRepositorySink:
     runtime_repository: Annotated[
         AgentRuntimeRepository, Depends(AgentRuntimeRepository)
     ]
-    policy_repository: Annotated[
-        RuntimeProviderPolicyRepository,
-        Depends(RuntimeProviderPolicyRepository),
+    profile_repository: Annotated[
+        RuntimeProfileRepository,
+        Depends(RuntimeProfileRepository),
     ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -54,7 +52,10 @@ class RuntimeProviderReportRepositorySink:
                 session, report.runtime_id
             )
             if runtime is None:
-                raise ValueError(f"AgentRuntime not found: {report.runtime_id}")
+                # Providers can retain a stale observation after terminal Runtime
+                # finalization. The Provider stream is shared, so an orphan report
+                # must not interrupt reports and commands for active Runtimes.
+                return
             if not await self.runtime_repository.provider_report_matches_binding(
                 session,
                 runtime_id=report.runtime_id,
@@ -87,12 +88,12 @@ class RuntimeProviderReportRepositorySink:
                 )
                 return
 
-            policy_failure = await self._record_provider_policy_evidence(
+            configuration_failure = await self._validate_configuration_transport(
                 session,
                 runtime=runtime,
                 report=report,
             )
-            failure = policy_failure or _provider_workspace_failure(
+            failure = configuration_failure or _provider_workspace_failure(
                 workspace_path=report.workspace_path,
                 desired_generation=runtime.desired_generation,
             )
@@ -117,7 +118,7 @@ class RuntimeProviderReportRepositorySink:
                 RuntimeProviderConnectionState.CONNECTED,
             )
 
-    async def _record_provider_policy_evidence(
+    async def _validate_configuration_transport(
         self,
         session: AsyncSession,
         *,
@@ -126,23 +127,22 @@ class RuntimeProviderReportRepositorySink:
     ) -> AgentRuntimeFailurePatch | None:
         provider_id = runtime.runtime_provider_resource_id
         if provider_id is None:
-            return _policy_failure(
+            return _configuration_failure(
                 runtime.desired_generation,
-                "RUNTIME_POLICY_PROVIDER_BINDING_MISSING",
+                "RUNTIME_CONFIGURATION_PROVIDER_BINDING_MISSING",
             )
-        recorded = (
-            await self.policy_repository.record_provider_execution_policy_evidence(
-                session,
-                runtime_id=report.runtime_id,
-                provider_id=provider_id,
-                evidence=report.execution_policy,
-                acknowledged_at=report.reported_at,
-            )
+        matches = await (
+            self.profile_repository.configuration_transport_evidence_matches_current
+        )(
+            session,
+            runtime_id=report.runtime_id,
+            provider_id=provider_id,
+            evidence=report.execution_policy,
         )
-        if recorded is None:
-            return _policy_failure(
+        if not matches:
+            return _configuration_failure(
                 runtime.desired_generation,
-                "RUNTIME_POLICY_PROVIDER_EVIDENCE_MISMATCH",
+                "RUNTIME_CONFIGURATION_PROVIDER_EVIDENCE_MISMATCH",
             )
         return None
 
@@ -154,9 +154,9 @@ class RuntimeRunnerStateRepositorySink:
     runtime_repository: Annotated[
         AgentRuntimeRepository, Depends(AgentRuntimeRepository)
     ]
-    policy_repository: Annotated[
-        RuntimeProviderPolicyRepository,
-        Depends(RuntimeProviderPolicyRepository),
+    profile_repository: Annotated[
+        RuntimeProfileRepository,
+        Depends(RuntimeProfileRepository),
     ]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -166,7 +166,7 @@ class RuntimeRunnerStateRepositorySink:
         self,
         registration: RuntimeRunnerRegistration,
     ) -> bool:
-        """Validate registration evidence against the exact current target."""
+        """Validate registration evidence against the current transport target."""
         async with self.session_manager() as session:
             runtime = await self.runtime_repository.get_by_id(
                 session,
@@ -174,13 +174,13 @@ class RuntimeRunnerStateRepositorySink:
             )
             if runtime is None or runtime.runtime_provider_resource_id is None:
                 return False
-            matches = (
-                await self.policy_repository.execution_policy_evidence_matches_current(
-                    session,
-                    runtime_id=runtime.id,
-                    provider_id=runtime.runtime_provider_resource_id,
-                    evidence=registration.execution_policy,
-                )
+            matches = await (
+                self.profile_repository.configuration_transport_evidence_matches_current
+            )(
+                session,
+                runtime_id=runtime.id,
+                provider_id=runtime.runtime_provider_resource_id,
+                evidence=registration.execution_policy,
             )
             return matches
 
@@ -201,6 +201,9 @@ class RuntimeRunnerStateRepositorySink:
                     report.runtime_id,
                     RuntimeRunnerState.DISCONNECTED,
                     report.runner_generation,
+                    expected_desired_generation=(
+                        report.execution_policy.desired_generation
+                    ),
                     failure=None,
                 )
                 return
@@ -217,13 +220,13 @@ class RuntimeRunnerStateRepositorySink:
                     state=report.runner_state,
                     desired_generation=runtime.desired_generation,
                 )
-            policy_failure = await self._record_runner_policy_evidence(
+            configuration_failure = await self._validate_configuration_transport(
                 session,
                 runtime=runtime,
                 report=report,
             )
-            if policy_failure is not None:
-                failure = policy_failure
+            if configuration_failure is not None:
+                failure = configuration_failure
             if failure is not None:
                 runner_state = RuntimeRunnerState.FAILED
 
@@ -232,10 +235,13 @@ class RuntimeRunnerStateRepositorySink:
                 report.runtime_id,
                 runner_state,
                 report.runner_generation,
+                expected_desired_generation=(
+                    report.execution_policy.desired_generation
+                ),
                 failure=failure,
             )
 
-    async def _record_runner_policy_evidence(
+    async def _validate_configuration_transport(
         self,
         session: AsyncSession,
         *,
@@ -244,21 +250,22 @@ class RuntimeRunnerStateRepositorySink:
     ) -> AgentRuntimeFailurePatch | None:
         provider_id = runtime.runtime_provider_resource_id
         if provider_id is None:
-            return _policy_failure(
+            return _configuration_failure(
                 runtime.desired_generation,
-                "RUNTIME_POLICY_PROVIDER_BINDING_MISSING",
+                "RUNTIME_CONFIGURATION_PROVIDER_BINDING_MISSING",
             )
-        recorded = await self.policy_repository.record_runner_execution_policy_evidence(
+        matches = await (
+            self.profile_repository.configuration_transport_evidence_matches_current
+        )(
             session,
             runtime_id=report.runtime_id,
             provider_id=provider_id,
             evidence=report.execution_policy,
-            observed_at=report.reported_at,
         )
-        if recorded is None:
-            return _policy_failure(
+        if not matches:
+            return _configuration_failure(
                 runtime.desired_generation,
-                "RUNTIME_POLICY_RUNNER_EVIDENCE_MISMATCH",
+                "RUNTIME_CONFIGURATION_RUNNER_EVIDENCE_MISMATCH",
             )
         return None
 
@@ -291,14 +298,14 @@ def _workspace_failure(
     return None
 
 
-def _policy_failure(
+def _configuration_failure(
     desired_generation: int,
     code: str,
 ) -> AgentRuntimeFailurePatch:
     return AgentRuntimeFailurePatch(
         generation=desired_generation,
         code=code,
-        message="Runtime execution-policy evidence is missing or does not match.",
+        message="Runtime configuration evidence is missing or does not match.",
     )
 
 

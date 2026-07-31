@@ -12,7 +12,6 @@ import {
   IconLayoutGrid,
   IconPlugConnected,
   IconSettings,
-  IconShieldCog,
   IconTool,
   IconUserEdit,
   IconUsers,
@@ -41,7 +40,6 @@ export function WorkspaceSidebar({
   const isToolkits = pathname.startsWith(`${basePath}/toolkits`);
   const isExternalChannels = pathname.startsWith(`${basePath}/integrations`);
   const isSettings = pathname === `${basePath}/settings`;
-  const isRuntimeExecution = pathname === `${basePath}/runtime-execution`;
   const isProfile = pathname === `${basePath}/profile`;
 
   return (
@@ -96,14 +94,6 @@ export function WorkspaceSidebar({
         label={t("integrations")}
         leftSection={<IconPlugConnected size={18} />}
         active={isExternalChannels}
-        onClick={onNavigate}
-      />
-      <NavLink
-        component={Link}
-        href={`${basePath}/runtime-execution`}
-        label={t("runtimeExecution")}
-        leftSection={<IconShieldCog size={18} />}
-        active={isRuntimeExecution}
         onClick={onNavigate}
       />
       <NavLink

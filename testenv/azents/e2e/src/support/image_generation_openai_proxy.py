@@ -119,6 +119,53 @@ _EXTERNAL_CHANNEL_FILE_OUTPUT_PATHS = (
     "/workspace/agent/external-summary.txt",
     "/workspace/agent/external-details.txt",
 )
+_APPLY_PATCH_SUCCESS_MESSAGE = "Apply patch E2E success"
+_APPLY_PATCH_SUCCESS_CALL_ID = "call_apply_patch_success"
+_APPLY_PATCH_SUCCESS_INSPECT_CALL_ID = "call_apply_patch_success_inspect"
+_APPLY_PATCH_SUCCESS_INPUT = """*** Base Path: /workspace/agent/apply-patch-e2e
+*** Begin Patch
+*** Update File: source.txt
+@@
+-alpha
++ALPHA
+ keep-one
+@@
+ keep-two
+-omega
++OMEGA
+*** Add File: added.txt
++first
++second
+*** Delete File: legacy.txt
+*** End Patch"""
+_APPLY_PATCH_SUCCESS_INSPECT_ARGUMENTS: dict[str, object] = {
+    "command": (
+        "base=/workspace/agent/apply-patch-e2e; echo 'source<<'; "
+        "cat \"$base/source.txt\"; echo '>>'; echo 'added<<'; "
+        "cat \"$base/added.txt\"; echo '>>'; "
+        "test ! -e \"$base/legacy.txt\" && echo 'legacy=missing'"
+    ),
+    "yield_time_ms": 10000,
+    "max_output_bytes": 2000,
+}
+_APPLY_PATCH_TRAVERSAL_MESSAGE = "Apply patch E2E reject traversal"
+_APPLY_PATCH_TRAVERSAL_CALL_ID = "call_apply_patch_traversal"
+_APPLY_PATCH_TRAVERSAL_INSPECT_CALL_ID = "call_apply_patch_traversal_inspect"
+_APPLY_PATCH_TRAVERSAL_INPUT = """*** Base Path: /workspace/agent/apply-patch-e2e
+*** Begin Patch
+*** Add File: ../apply-patch-escaped.txt
++TRAVERSAL_SECRET
+*** End Patch"""
+_APPLY_PATCH_TRAVERSAL_INSPECT_ARGUMENTS: dict[str, object] = {
+    "command": (
+        "base=/workspace/agent/apply-patch-e2e; "
+        "test ! -e /workspace/agent/apply-patch-escaped.txt && "
+        "echo 'escape=missing'; "
+        'source=$(paste -sd, "$base/source.txt"); echo "source=$source"'
+    ),
+    "yield_time_ms": 10000,
+    "max_output_bytes": 1000,
+}
 
 
 def _last_user_text(request: dict[str, object]) -> str | None:
@@ -166,6 +213,25 @@ def _request_has_named_tool(request: dict[str, object], name: str) -> bool:
     return False
 
 
+def _request_has_named_tool_type(
+    request: dict[str, object],
+    *,
+    name: str,
+    tool_type: str,
+) -> bool:
+    """Return whether a request exposes one named tool with the exact dialect."""
+    tools = request.get("tools")
+    if not isinstance(tools, list):
+        return False
+    for raw_tool in cast(list[object], tools):
+        if not isinstance(raw_tool, dict):
+            continue
+        tool = cast(dict[str, object], raw_tool)
+        if tool.get("name") == name and tool.get("type") == tool_type:
+            return True
+    return False
+
+
 def request_has_tool_output(value: object, call_id: str) -> bool:
     """Find one completed tool output in nested Responses or Chat input."""
     if isinstance(value, dict):
@@ -186,6 +252,70 @@ def request_has_tool_output(value: object, call_id: str) -> bool:
             for child in cast(list[object], value)
         )
     return False
+
+
+def apply_patch_scenario(request: dict[str, object]) -> str | None:
+    """Return the current deterministic apply-patch scenario."""
+    user_text = _last_user_text(request)
+    if user_text == _APPLY_PATCH_SUCCESS_MESSAGE:
+        return "success"
+    if user_text == _APPLY_PATCH_TRAVERSAL_MESSAGE:
+        return "traversal"
+
+    input_value = request.get("input", request.get("messages"))
+    message_scenarios: list[str] = []
+
+    def visit_message(value: object) -> None:
+        if isinstance(value, str):
+            if value == _APPLY_PATCH_SUCCESS_MESSAGE:
+                message_scenarios.append("success")
+            elif value == _APPLY_PATCH_TRAVERSAL_MESSAGE:
+                message_scenarios.append("traversal")
+            return
+        if isinstance(value, list):
+            for child in cast(list[object], value):
+                visit_message(child)
+            return
+        if isinstance(value, dict):
+            for child in cast(dict[str, object], value).values():
+                visit_message(child)
+
+    visit_message(input_value)
+    if message_scenarios:
+        return message_scenarios[-1]
+
+    previous_response_id = request.get("previous_response_id")
+    response_scenarios = {
+        "resp_apply_patch_success": "success",
+        "resp_apply_patch_success_inspect": "success",
+        "resp_apply_patch_success_verified": "success",
+        "resp_apply_patch_traversal": "traversal",
+        "resp_apply_patch_traversal_inspect": "traversal",
+        "resp_apply_patch_traversal_verified": "traversal",
+    }
+    if isinstance(previous_response_id, str):
+        scenario = response_scenarios.get(previous_response_id)
+        if scenario is not None:
+            return scenario
+
+    call_scenarios = {
+        _APPLY_PATCH_SUCCESS_CALL_ID: "success",
+        _APPLY_PATCH_SUCCESS_INSPECT_CALL_ID: "success",
+        _APPLY_PATCH_TRAVERSAL_CALL_ID: "traversal",
+        _APPLY_PATCH_TRAVERSAL_INSPECT_CALL_ID: "traversal",
+    }
+    if not isinstance(input_value, list):
+        return None
+    for raw_item in reversed(cast(list[object], input_value)):
+        if not isinstance(raw_item, dict):
+            continue
+        item = cast(dict[str, object], raw_item)
+        call_id = item.get("call_id", item.get("tool_call_id"))
+        if isinstance(call_id, str):
+            scenario = call_scenarios.get(call_id)
+            if scenario is not None:
+                return scenario
+    return None
 
 
 def external_channel_file_tool_output_evidence(
@@ -436,6 +566,69 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path == "/v1/responses" and user_text == _PROMPT:
             self._write_image_generation_response(request)
             return
+        patch_scenario = apply_patch_scenario(request)
+        if self.path == "/v1/responses" and patch_scenario == "success":
+            if request_has_tool_output(
+                request,
+                _APPLY_PATCH_SUCCESS_INSPECT_CALL_ID,
+            ):
+                self._write_text_response(
+                    request,
+                    "Apply patch E2E success verified.",
+                    response_id="resp_apply_patch_success_verified",
+                )
+                return
+            if request_has_tool_output(request, _APPLY_PATCH_SUCCESS_CALL_ID):
+                self._write_function_call_response(
+                    request,
+                    call_id=_APPLY_PATCH_SUCCESS_INSPECT_CALL_ID,
+                    name="exec_command",
+                    arguments=_APPLY_PATCH_SUCCESS_INSPECT_ARGUMENTS,
+                )
+                return
+            if _request_has_named_tool_type(
+                request,
+                name="apply_patch",
+                tool_type="custom",
+            ):
+                self._write_custom_tool_call_response(
+                    request,
+                    call_id=_APPLY_PATCH_SUCCESS_CALL_ID,
+                    name="apply_patch",
+                    input_value=_APPLY_PATCH_SUCCESS_INPUT,
+                )
+                return
+        if self.path == "/v1/responses" and patch_scenario == "traversal":
+            if request_has_tool_output(
+                request,
+                _APPLY_PATCH_TRAVERSAL_INSPECT_CALL_ID,
+            ):
+                self._write_text_response(
+                    request,
+                    "Apply patch E2E traversal rejection verified.",
+                    response_id="resp_apply_patch_traversal_verified",
+                )
+                return
+            if request_has_tool_output(request, _APPLY_PATCH_TRAVERSAL_CALL_ID):
+                self._write_function_call_response(
+                    request,
+                    call_id=_APPLY_PATCH_TRAVERSAL_INSPECT_CALL_ID,
+                    name="exec_command",
+                    arguments=_APPLY_PATCH_TRAVERSAL_INSPECT_ARGUMENTS,
+                )
+                return
+            if _request_has_named_tool_type(
+                request,
+                name="apply_patch",
+                tool_type="custom",
+            ):
+                self._write_custom_tool_call_response(
+                    request,
+                    call_id=_APPLY_PATCH_TRAVERSAL_CALL_ID,
+                    name="apply_patch",
+                    input_value=_APPLY_PATCH_TRAVERSAL_INPUT,
+                )
+                return
         serialized = json.dumps(request, ensure_ascii=False)
         if _EXTERNAL_CHANNEL_FILE_MARKER in serialized or bool(
             external_channel_file_locators(request)
@@ -1511,6 +1704,76 @@ class _Handler(BaseHTTPRequestHandler):
                 {
                     "type": "response.completed",
                     "sequence_number": 4,
+                    "response": response,
+                },
+            ]
+        )
+
+    def _write_custom_tool_call_response(
+        self,
+        request: dict[str, object],
+        *,
+        call_id: str,
+        name: str,
+        input_value: str,
+    ) -> None:
+        """Write one deterministic Responses plaintext custom-tool call."""
+        model_value = request.get("model")
+        model = model_value if isinstance(model_value, str) else "gpt-5.5"
+        response_id = f"resp_{call_id.removeprefix('call_')}"
+        item_id = f"ctc_{call_id.removeprefix('call_')}"
+        custom_item: dict[str, object] = {
+            "id": item_id,
+            "type": "custom_tool_call",
+            "call_id": call_id,
+            "name": name,
+            "input": input_value,
+        }
+        response = self._response(
+            request=request,
+            response_id=response_id,
+            model=model,
+            output=[custom_item],
+        )
+        if request.get("stream") is not True:
+            self._write_json(200, response)
+            return
+        self._write_sse(
+            [
+                {
+                    "type": "response.created",
+                    "sequence_number": 0,
+                    "response": {**response, "status": "in_progress", "output": []},
+                },
+                {
+                    "type": "response.output_item.added",
+                    "sequence_number": 1,
+                    "output_index": 0,
+                    "item": {**custom_item, "input": ""},
+                },
+                {
+                    "type": "response.custom_tool_call_input.delta",
+                    "sequence_number": 2,
+                    "output_index": 0,
+                    "item_id": item_id,
+                    "delta": input_value,
+                },
+                {
+                    "type": "response.custom_tool_call_input.done",
+                    "sequence_number": 3,
+                    "output_index": 0,
+                    "item_id": item_id,
+                    "input": input_value,
+                },
+                {
+                    "type": "response.output_item.done",
+                    "sequence_number": 4,
+                    "output_index": 0,
+                    "item": custom_item,
+                },
+                {
+                    "type": "response.completed",
+                    "sequence_number": 5,
                     "response": response,
                 },
             ]

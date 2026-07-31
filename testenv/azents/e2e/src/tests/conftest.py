@@ -1187,6 +1187,12 @@ def azents_runtime_provider_docker_container(
                     access_token=system_bootstrap_evidence.access_token,
                     provider_id=_RUNTIME_PROVIDER_ID,
                 )
+                _create_e2e_docker_infrastructure_profile(
+                    admin_server_url=azents_admin_server_url,
+                    access_token=system_bootstrap_evidence.access_token,
+                    provider_id=_RUNTIME_PROVIDER_ID,
+                    network_name=container_network.name,
+                )
                 yield container
                 _log_sanitized_server_output(
                     container,
@@ -1289,6 +1295,52 @@ def _wait_for_runtime_provider_contract(
     pytest.fail(
         f"runtime provider {provider_id} contract did not become current: {last_error}"
     )
+
+
+def _create_e2e_docker_infrastructure_profile(
+    *,
+    admin_server_url: str,
+    access_token: str,
+    provider_id: str,
+    network_name: str,
+) -> None:
+    """Create the selectable Docker Profile used by Runtime Provider journeys."""
+    response = requests.post(
+        (
+            f"{admin_server_url}/runtime-provider/v1/providers/"
+            f"{provider_id}/container-profiles"
+        ),
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={
+            "display_name": "E2E Docker Container",
+            "description": "Deterministic Docker Profile for Runtime Provider E2E.",
+            "lifecycle": "active",
+            "spec": {
+                "profile_kind": "docker_container",
+                "contract_family": "docker.container-profile",
+                "schema_version": 1,
+                "runner_resources": {
+                    "cpu_reservation_millicores": None,
+                    "cpu_limit_millicores": None,
+                    "memory_reservation_bytes": None,
+                    "memory_limit_bytes": None,
+                },
+                "network_name": network_name,
+            },
+        },
+        timeout=10,
+    )
+    if response.status_code != 201:
+        pytest.fail(
+            "failed to create E2E Docker infrastructure Profile: "
+            f"HTTP {response.status_code}: {response.text}"
+        )
+    payload = _JSON_OBJECT_ADAPTER.validate_python(response.json())
+    if payload.get("compatible") is not True:
+        pytest.fail(
+            "E2E Docker infrastructure Profile is not compatible: "
+            f"{payload.get('compatibility_reason_code')!r}"
+        )
 
 
 @pytest.fixture(scope="session")

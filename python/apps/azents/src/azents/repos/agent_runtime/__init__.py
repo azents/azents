@@ -797,9 +797,10 @@ class AgentRuntimeRepository:
         runner_state: RuntimeRunnerState,
         runner_generation: int,
         *,
+        expected_desired_generation: int,
         failure: AgentRuntimeFailurePatch | None = None,
     ) -> AgentRuntime | None:
-        """Store Runner state."""
+        """Store Runner state only for the expected desired generation."""
         changed = sa.or_(
             RDBAgentRuntime.runner_state != runner_state,
             RDBAgentRuntime.runner_generation != runner_generation,
@@ -827,6 +828,7 @@ class AgentRuntimeRepository:
             sa.update(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
+                RDBAgentRuntime.desired_generation == expected_desired_generation,
                 RDBAgentRuntime.runner_generation <= runner_generation,
                 RDBAgentRuntime.terminal_delete_acknowledged_generation.is_distinct_from(
                     RDBAgentRuntime.desired_generation

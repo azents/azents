@@ -5,6 +5,7 @@ import datetime
 import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
+from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -14,6 +15,10 @@ from azents.core.enums import (
     RuntimeProviderLifecycleState,
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
+)
+from azents.core.runtime_execution_policy import (
+    digest_runtime_execution_policy,
+    standard_runtime_execution_policy,
 )
 from azents.core.runtime_profile import (
     RuntimeConfigurationResolutionStatus,
@@ -34,6 +39,7 @@ from azents.rdb.models.runtime_profile import (
     RDBRuntimeRecreationOperationItem,
 )
 from azents.rdb.session import SessionManager
+from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.runtime_provider.data import RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_policy.data import (
@@ -197,6 +203,154 @@ async def test_profile_ownership_and_optimistic_replacement(
                     actor_workspace_user_id=None,
                 ),
             )
+
+
+async def test_configuration_transport_evidence_does_not_promote_revision(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Phase-2 transport evidence validates without claiming Profile adoption."""
+    repository = RuntimeProfileRepository()
+    runtime_repository = AgentRuntimeRepository()
+    async with rdb_session_manager() as session:
+        provider_id = await _create_provider(
+            session,
+            logical_id="configuration-evidence-provider",
+        )
+        contract = await RuntimeProviderPolicyRepository().create_contract(
+            session,
+            create=RuntimeProviderContractRevisionCreate(
+                provider_id=provider_id,
+                digest="e" * 64,
+                implementation_version="1",
+                protocol_version="1",
+                contract={},
+                compatibility={},
+            ),
+        )
+        workspace_repository = WorkspaceRepository()
+        workspace_result = await workspace_repository.create(
+            session,
+            WorkspaceCreate(
+                name="Configuration evidence",
+                handle="configuration-evidence",
+            ),
+        )
+        assert isinstance(workspace_result, Success)
+        workspace_id = await workspace_repository.resolve_id(
+            session,
+            "configuration-evidence",
+        )
+        assert workspace_id is not None
+        infrastructure = await repository.create_infrastructure_profile(
+            session,
+            create=_infrastructure_create(provider_id),
+        )
+        workspace_profile = await repository.create_workspace_runtime_profile(
+            session,
+            create=WorkspaceRuntimeProfileCreate(
+                workspace_id=workspace_id,
+                provider_id=provider_id,
+                infrastructure_profile_id=infrastructure.id,
+                display_name="Evidence Profile",
+                description="Configuration evidence Profile",
+                lifecycle=RuntimeProfileLifecycle.ACTIVE,
+                policy={"schema_version": 1, "network_restriction": None},
+                digest="f" * 64,
+                actor_workspace_user_id=None,
+            ),
+        )
+        integration = RDBLLMProviderIntegration(
+            workspace_id=workspace_id,
+            provider=LLMProvider.ANTHROPIC,
+            name="configuration-evidence-integration",
+            encrypted_credentials="encrypted-test-value",
+            config=None,
+        )
+        session.add(integration)
+        await session.flush()
+        selection = make_test_model_selection_dict(
+            integration_id=integration.id,
+            provider=LLMProvider.ANTHROPIC,
+            model_identifier="configuration-evidence-model",
+        )
+        agent = RDBAgent(
+            workspace_id=workspace_id,
+            name="Configuration evidence Agent",
+            model_selection=selection,
+            lightweight_model_selection=selection,
+        )
+        session.add(agent)
+        await session.flush()
+        runtime = await runtime_repository.ensure_for_agent(session, agent.id)
+        revision = await repository.create_configuration_revision(
+            session,
+            create=RuntimeConfigurationRevisionCreate(
+                runtime_id=runtime.id,
+                provider_id=provider_id,
+                provider_capability_revision_id=contract.id,
+                infrastructure_profile_id=infrastructure.id,
+                infrastructure_profile_version=infrastructure.version,
+                workspace_runtime_profile_id=workspace_profile.id,
+                workspace_runtime_profile_version=workspace_profile.version,
+                agent_selection_version=1,
+                resolution_status=RuntimeConfigurationResolutionStatus.READY,
+                reason_code=None,
+                required_capabilities=(),
+                missing_capabilities=(),
+                resolved_configuration={"schema_version": 1},
+                source_trace={},
+                digest="d" * 64,
+                target_desired_generation=runtime.desired_generation,
+            ),
+        )
+        await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(
+                runtime_provider_resource_id=provider_id,
+                desired_runtime_configuration_revision_id=revision.id,
+            )
+        )
+        evidence = RuntimeExecutionPolicyEvidence(
+            snapshot_id=revision.id,
+            digest=digest_runtime_execution_policy(standard_runtime_execution_policy()),
+            desired_generation=runtime.desired_generation,
+            module_versions={"docker": 1, "runtime.resources": 1},
+            source_versions={"profile": 1, "workspace": 1, "agent": 1},
+        )
+        stale_evidence = RuntimeExecutionPolicyEvidence(
+            snapshot_id=revision.id,
+            digest=evidence.digest,
+            desired_generation=runtime.desired_generation,
+            module_versions=evidence.module_versions,
+            source_versions={"profile": 1, "workspace": 1, "agent": 2},
+        )
+
+        assert not await repository.configuration_transport_evidence_matches_current(
+            session,
+            runtime_id=runtime.id,
+            provider_id=provider_id,
+            evidence=stale_evidence,
+        )
+        assert await repository.configuration_transport_evidence_matches_current(
+            session,
+            runtime_id=runtime.id,
+            provider_id=provider_id,
+            evidence=evidence,
+        )
+        persisted_revision = await repository.get_configuration_revision(
+            session,
+            revision_id=revision.id,
+        )
+        persisted_runtime = await runtime_repository.get_by_id(session, runtime.id)
+
+        assert persisted_revision is not None
+        assert persisted_revision.provider_reported_digest is None
+        assert persisted_revision.runner_reported_digest is None
+        assert persisted_revision.provider_acknowledged_at is None
+        assert persisted_revision.runtime_observed_at is None
+        assert persisted_runtime is not None
+        assert persisted_runtime.applied_runtime_configuration_revision_id is None
 
 
 async def test_reconcile_enqueue_is_idempotent_and_claimed_once(

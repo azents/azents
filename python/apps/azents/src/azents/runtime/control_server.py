@@ -287,12 +287,12 @@ async def runtime_control_server_lifespan(
     )
     provider_sink = RuntimeProviderReportRepositorySink(
         runtime_repository=runtime_repository,
-        policy_repository=policy_repository,
+        profile_repository=profile_repository,
         session_manager=session_manager,
     )
     runner_sink = RuntimeRunnerStateRepositorySink(
         runtime_repository=runtime_repository,
-        policy_repository=policy_repository,
+        profile_repository=profile_repository,
         session_manager=session_manager,
     )
     runner_credential_verifier = RuntimeRunnerCredentialVerifier(
@@ -305,7 +305,7 @@ async def runtime_control_server_lifespan(
     )
     reconciler = RuntimeLifecycleReconciler(
         runtime_repository=runtime_repository,
-        policy_repository=policy_repository,
+        profile_repository=profile_repository,
         session_manager=session_manager,
         coordination_store=coordination_store,
         control_protocol=control_protocol,

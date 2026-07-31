@@ -2,7 +2,7 @@ import copy
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, TypeGuard
 
 import sqlalchemy as sa
 from alembic import op
@@ -34,6 +34,21 @@ _STANDARD_POLICY: dict[str, Any] = {
     },
 }
 _EMPTY_WORKSPACE_POLICY = {"schema_version": 1, "network_restriction": None}
+_REQUIRED_PROVIDER_LIFECYCLE_OPERATIONS = {
+    "start",
+    "stop",
+    "restart",
+    "reset",
+    "observe",
+    "terminal_delete",
+}
+_DOCKER_NUMERIC_CONSTRAINT_PATHS = {
+    "runner_resources.cpu_reservation_millicores",
+    "runner_resources.cpu_limit_millicores",
+    "runner_resources.memory_reservation_bytes",
+    "runner_resources.memory_limit_bytes",
+}
+_DOCKER_STRING_CONSTRAINT_PATHS = {"network_name"}
 
 
 def upgrade() -> None:
@@ -436,8 +451,13 @@ def _convert_legacy_agent_selections(connection: sa.Connection) -> None:
                 SELECT
                     provider.id,
                     provider.kind,
+                    provider.scope,
+                    provider.enabled,
+                    provider.lifecycle_state,
+                    provider.admin_version,
                     provider.current_contract_revision_id,
-                    capability.digest AS capability_digest
+                    capability.digest AS capability_digest,
+                    capability.contract AS capability_contract
                 FROM runtime_providers AS provider
                 LEFT JOIN runtime_provider_contract_revisions AS capability
                     ON capability.id = provider.current_contract_revision_id
@@ -623,6 +643,10 @@ def _convert_legacy_agent_selections(connection: sa.Connection) -> None:
                 provider_id=provider_id,
                 provider_logical_id=logical_provider_id,
                 provider_kind=str(provider["kind"]),
+                provider_scope=str(provider["scope"]),
+                provider_enabled=bool(provider["enabled"]),
+                provider_lifecycle_state=str(provider["lifecycle_state"]),
+                provider_admin_version=int(provider["admin_version"]),
                 capability_revision_id=(
                     str(provider["current_contract_revision_id"])
                     if provider["current_contract_revision_id"] is not None
@@ -633,6 +657,7 @@ def _convert_legacy_agent_selections(connection: sa.Connection) -> None:
                     if provider["capability_digest"] is not None
                     else None
                 ),
+                capability_contract=provider["capability_contract"],
                 infrastructure_id=infrastructure_id,
                 infrastructure_version=1,
                 infrastructure_digest=spec_digest,
@@ -672,8 +697,13 @@ def _attach_migrated_runtime_configuration(
     provider_id: str,
     provider_logical_id: str,
     provider_kind: str,
+    provider_scope: str,
+    provider_enabled: bool,
+    provider_lifecycle_state: str,
+    provider_admin_version: int,
     capability_revision_id: str | None,
     capability_digest: str | None,
+    capability_contract: object,
     infrastructure_id: str,
     infrastructure_version: int,
     infrastructure_digest: str,
@@ -688,17 +718,18 @@ def _attach_migrated_runtime_configuration(
     required_capabilities: list[str],
     legacy_applied_snapshot_id: str | None,
 ) -> None:
-    if provider_kind != "docker":
-        status = "blocked"
-        reason_code = "legacy_provider_configuration_required"
-        resolved_configuration = None
-    elif capability_revision_id is None:
-        status = "blocked"
-        reason_code = "provider_capability_unavailable"
-        resolved_configuration = None
-    else:
+    reason_code, missing_capabilities = _migrated_configuration_blocker(
+        provider_kind=provider_kind,
+        provider_scope=provider_scope,
+        provider_enabled=provider_enabled,
+        provider_lifecycle_state=provider_lifecycle_state,
+        capability_revision_id=capability_revision_id,
+        capability_contract=capability_contract,
+        spec=spec,
+        required_capabilities=required_capabilities,
+    )
+    if reason_code is None:
         status = "ready"
-        reason_code = None
         resolved_configuration = {
             "schema_version": 1,
             "provider": {
@@ -720,9 +751,13 @@ def _attach_migrated_runtime_configuration(
             },
             "effective_profile": spec,
         }
+    else:
+        status = "blocked"
+        resolved_configuration = None
     source_trace = {
         "migration": "legacy_runtime_profile_cutover",
         "agent_selection_version": selection_version,
+        "provider_admin_version": provider_admin_version,
         "execution_profile_version": legacy_execution_profile_version,
         "workspace_policy_version": legacy_workspace_policy_version,
         "provider_capability_revision_id": capability_revision_id,
@@ -737,7 +772,7 @@ def _attach_migrated_runtime_configuration(
         {
             "status": status,
             "reason_code": reason_code,
-            "missing_capabilities": [],
+            "missing_capabilities": missing_capabilities,
             "resolved_configuration": resolved_configuration,
             "source_trace": source_trace,
         }
@@ -786,7 +821,7 @@ def _attach_migrated_runtime_configuration(
                 CAST(:resolution_status AS runtime_configuration_resolution_status),
                 :reason_code,
                 CAST(:required_capabilities AS jsonb),
-                CAST('[]' AS jsonb),
+                CAST(:missing_capabilities AS jsonb),
                 CAST(:resolved_configuration AS jsonb),
                 CAST(:source_trace AS jsonb),
                 :digest,
@@ -816,6 +851,7 @@ def _attach_migrated_runtime_configuration(
             "resolution_status": status,
             "reason_code": reason_code,
             "required_capabilities": _canonical_json(required_capabilities),
+            "missing_capabilities": _canonical_json(missing_capabilities),
             "resolved_configuration": (
                 _canonical_json(resolved_configuration)
                 if resolved_configuration is not None
@@ -858,6 +894,165 @@ def _attach_migrated_runtime_configuration(
             "revision_id": revision_id,
         },
     )
+
+
+def _migrated_configuration_blocker(
+    *,
+    provider_kind: str,
+    provider_scope: str,
+    provider_enabled: bool,
+    provider_lifecycle_state: str,
+    capability_revision_id: str | None,
+    capability_contract: object,
+    spec: Mapping[str, Any],
+    required_capabilities: list[str],
+) -> tuple[str | None, list[str]]:
+    if provider_scope != "system":
+        return "provider_scope_unsupported", []
+    if provider_lifecycle_state != "active":
+        return "provider_not_active", []
+    if not provider_enabled:
+        return "provider_disabled", []
+    if provider_kind != "docker":
+        return "legacy_provider_configuration_required", []
+    if capability_revision_id is None:
+        return "provider_capability_unavailable", []
+
+    contract = _validated_provider_contract(
+        capability_contract,
+        provider_kind=provider_kind,
+    )
+    if contract is None:
+        return "provider_capability_invalid", []
+    supports = contract["profile_contracts"]
+    if not isinstance(supports, list):
+        return "provider_capability_invalid", []
+    support = next(
+        (
+            candidate
+            for candidate in supports
+            if isinstance(candidate, Mapping)
+            and candidate.get("profile_kind") == spec.get("profile_kind")
+            and candidate.get("contract_family") == spec.get("contract_family")
+        ),
+        None,
+    )
+    if support is None:
+        return "profile_contract_unsupported", []
+
+    schema_versions = support.get("schema_versions")
+    if not _is_json_sequence(schema_versions) or any(
+        not isinstance(version, int) or isinstance(version, bool) or version < 1
+        for version in schema_versions
+    ):
+        return "provider_capability_invalid", []
+    if spec.get("schema_version") not in schema_versions:
+        return "profile_schema_version_unsupported", []
+
+    capabilities = support.get("capabilities")
+    if not _is_json_sequence(capabilities) or any(
+        not isinstance(capability, str) or not capability for capability in capabilities
+    ):
+        return "provider_capability_invalid", []
+    supported_capabilities = {
+        capability for capability in capabilities if isinstance(capability, str)
+    }
+    missing = sorted(set(required_capabilities) - supported_capabilities)
+    if missing:
+        return "profile_capability_missing", missing
+
+    constraint_reason = _docker_constraint_reason(
+        support.get("constraints"),
+        spec=spec,
+    )
+    return constraint_reason, []
+
+
+def _validated_provider_contract(
+    payload: object,
+    *,
+    provider_kind: str,
+) -> Mapping[str, Any] | None:
+    contract = _as_object(payload)
+    schema_version = contract.get("schema_version")
+    if (
+        not isinstance(schema_version, int)
+        or isinstance(schema_version, bool)
+        or schema_version < 1
+        or contract.get("implementation_key") != provider_kind
+        or not _non_empty_string(contract.get("implementation_version"))
+        or not _non_empty_string(contract.get("protocol_version"))
+    ):
+        return None
+
+    operations = contract.get("core_lifecycle_operations")
+    optional_capabilities = contract.get("optional_capabilities")
+    persistence = contract.get("persistence")
+    configuration_fields = contract.get("configuration_fields")
+    profile_contracts = contract.get("profile_contracts")
+    if (
+        not _is_json_sequence(operations)
+        or any(not _non_empty_string(operation) for operation in operations)
+        or not _REQUIRED_PROVIDER_LIFECYCLE_OPERATIONS.issubset(set(operations))
+        or not _is_json_sequence(optional_capabilities)
+        or any(
+            not _non_empty_string(capability) for capability in optional_capabilities
+        )
+        or not isinstance(persistence, Mapping)
+        or persistence.get("kind") not in {"persistent", "ephemeral"}
+        or not isinstance(persistence.get("reset_destroys_workspace"), bool)
+        or not isinstance(persistence.get("terminal_delete_destroys_workspace"), bool)
+        or not _is_json_sequence(configuration_fields)
+        or len(configuration_fields) != 0
+        or contract.get("execution_policy") is not None
+        or not _is_json_sequence(profile_contracts)
+    ):
+        return None
+    return contract
+
+
+def _docker_constraint_reason(
+    payload: object,
+    *,
+    spec: Mapping[str, Any],
+) -> str | None:
+    constraints = _as_object(payload)
+    maximums = _as_object(constraints.get("maximums"))
+    allowed_values = _as_object(constraints.get("allowed_values"))
+    if (
+        set(maximums) - _DOCKER_NUMERIC_CONSTRAINT_PATHS
+        or set(allowed_values) - _DOCKER_STRING_CONSTRAINT_PATHS
+    ):
+        return "provider_capability_invalid"
+
+    resources = _as_object(spec.get("runner_resources"))
+    for path, maximum in maximums.items():
+        if not isinstance(maximum, int) or isinstance(maximum, bool) or maximum < 1:
+            return "provider_capability_invalid"
+        value = resources.get(path.removeprefix("runner_resources."))
+        if isinstance(value, int) and not isinstance(value, bool) and value > maximum:
+            return "profile_constraint_exceeded"
+
+    for path, values in allowed_values.items():
+        if not _is_json_sequence(values) or any(
+            not _non_empty_string(value) for value in values
+        ):
+            return "provider_capability_invalid"
+        value = spec.get(path)
+        if isinstance(value, str) and value not in values:
+            return "profile_value_unsupported"
+    return None
+
+
+def _is_json_sequence(value: object) -> TypeGuard[Sequence[object]]:
+    return isinstance(value, Sequence) and not isinstance(
+        value,
+        str | bytes | bytearray,
+    )
+
+
+def _non_empty_string(value: object) -> bool:
+    return isinstance(value, str) and bool(value)
 
 
 def _resolve_legacy_policy(

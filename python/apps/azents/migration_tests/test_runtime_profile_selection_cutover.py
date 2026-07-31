@@ -1,5 +1,7 @@
 """Migration tests for Workspace-owned Runtime Profile selection cutover."""
 
+import copy
+import json
 from collections.abc import Mapping
 
 import pytest
@@ -16,6 +18,43 @@ _PROVIDER_ID = "provider-runtime-cutover"
 _PROVIDER_LOGICAL_ID = "system-docker-runtime-cutover"
 _CONTRACT_ID = "contract-runtime-cutover"
 _PROFILE_ID = "legacy-profile-runtime-cutover"
+_DOCKER_CONTRACT: dict[str, object] = {
+    "schema_version": 1,
+    "implementation_key": "docker",
+    "implementation_version": "1.0.0",
+    "protocol_version": "agent-runtime-provider-docker-v1",
+    "core_lifecycle_operations": [
+        "start",
+        "stop",
+        "restart",
+        "reset",
+        "observe",
+        "terminal_delete",
+    ],
+    "optional_capabilities": [],
+    "persistence": {
+        "kind": "persistent",
+        "reset_destroys_workspace": True,
+        "terminal_delete_destroys_workspace": True,
+    },
+    "configuration_fields": [],
+    "profile_contracts": [
+        {
+            "profile_kind": "docker_container",
+            "contract_family": "docker.container-profile",
+            "schema_versions": [1],
+            "capabilities": [
+                "docker.container-profile",
+                "runtime.resources",
+                "workspace.host-directory",
+            ],
+            "constraints": {
+                "maximums": {},
+                "allowed_values": {},
+            },
+        }
+    ],
+}
 
 _PROFILE_POLICY = """
 {
@@ -61,7 +100,13 @@ _AGENT_RESTRICTION = """
 """
 
 
-def _seed_legacy_selection(connection: sa.Connection) -> None:
+def _seed_legacy_selection(
+    connection: sa.Connection,
+    *,
+    provider_enabled: bool = True,
+    provider_lifecycle_state: str = "active",
+    provider_contract: Mapping[str, object] = _DOCKER_CONTRACT,
+) -> None:
     """Insert one complete pre-cutover Agent selection and effective policy."""
     connection.execute(
         sa.text(
@@ -82,11 +127,18 @@ def _seed_legacy_selection(connection: sa.Connection) -> None:
             )
             VALUES (
                 :id, :provider_id, 'system', 'docker', 'Docker cutover',
-                'admin', true, 'active', 'platform_wide', 0, '{}'::jsonb
+                'admin', :enabled,
+                CAST(:lifecycle_state AS runtime_provider_lifecycle_state),
+                'platform_wide', 0, '{}'::jsonb
             )
             """
         ),
-        {"id": _PROVIDER_ID, "provider_id": _PROVIDER_LOGICAL_ID},
+        {
+            "id": _PROVIDER_ID,
+            "provider_id": _PROVIDER_LOGICAL_ID,
+            "enabled": provider_enabled,
+            "lifecycle_state": provider_lifecycle_state,
+        },
     )
     connection.execute(
         sa.text(
@@ -98,7 +150,7 @@ def _seed_legacy_selection(connection: sa.Connection) -> None:
             VALUES (
                 :id, :provider_id, :digest, '1.0.0',
                 'agent-runtime-provider-docker-v1',
-                '{"schema_version": 1}'::jsonb,
+                CAST(:contract AS jsonb),
                 '{"compatible": true}'::jsonb
             )
             """
@@ -107,6 +159,7 @@ def _seed_legacy_selection(connection: sa.Connection) -> None:
             "id": _CONTRACT_ID,
             "provider_id": _PROVIDER_ID,
             "digest": "1" * 64,
+            "contract": json.dumps(provider_contract),
         },
     )
     connection.execute(
@@ -364,6 +417,104 @@ def test_runtime_profile_cutover_preserves_effective_selection(
         assert restored_provider == _PROVIDER_LOGICAL_ID
 
 
+def test_runtime_profile_cutover_blocks_malformed_provider_capability(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """Malformed current advertisement cannot become a ready configuration."""
+    alembic_runner.migrate_up_to(_PARENT_REVISION)
+    with alembic_engine.begin() as connection:
+        _seed_legacy_selection(
+            connection,
+            provider_contract={"schema_version": 1},
+        )
+
+    alembic_runner.migrate_up_to(_REVISION)
+
+    _assert_migrated_revision_blocked(
+        alembic_engine,
+        reason_code="provider_capability_invalid",
+    )
+
+
+def test_runtime_profile_cutover_blocks_unsupported_provider_configuration_fields(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """Unsupported contract sections cannot bypass migration validation."""
+    contract = copy.deepcopy(_DOCKER_CONTRACT)
+    contract["configuration_fields"] = [{}]
+    alembic_runner.migrate_up_to(_PARENT_REVISION)
+    with alembic_engine.begin() as connection:
+        _seed_legacy_selection(connection, provider_contract=contract)
+
+    alembic_runner.migrate_up_to(_REVISION)
+
+    _assert_migrated_revision_blocked(
+        alembic_engine,
+        reason_code="provider_capability_invalid",
+    )
+
+
+def test_runtime_profile_cutover_blocks_missing_provider_capability(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """A current advertisement must provide every generated Profile capability."""
+    contract = copy.deepcopy(_DOCKER_CONTRACT)
+    profile_contracts = contract["profile_contracts"]
+    assert isinstance(profile_contracts, list)
+    profile_contract = profile_contracts[0]
+    assert isinstance(profile_contract, dict)
+    profile_contract["capabilities"] = [
+        "docker.container-profile",
+        "runtime.resources",
+    ]
+    alembic_runner.migrate_up_to(_PARENT_REVISION)
+    with alembic_engine.begin() as connection:
+        _seed_legacy_selection(connection, provider_contract=contract)
+
+    alembic_runner.migrate_up_to(_REVISION)
+
+    _assert_migrated_revision_blocked(
+        alembic_engine,
+        reason_code="profile_capability_missing",
+        missing_capabilities=["workspace.host-directory"],
+    )
+
+
+@pytest.mark.parametrize(
+    ("provider_enabled", "provider_lifecycle_state", "reason_code"),
+    [
+        (False, "active", "provider_disabled"),
+        (True, "decommissioning", "provider_not_active"),
+    ],
+)
+def test_runtime_profile_cutover_blocks_unavailable_provider(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+    *,
+    provider_enabled: bool,
+    provider_lifecycle_state: str,
+    reason_code: str,
+) -> None:
+    """Administrative Provider availability remains fail closed during cutover."""
+    alembic_runner.migrate_up_to(_PARENT_REVISION)
+    with alembic_engine.begin() as connection:
+        _seed_legacy_selection(
+            connection,
+            provider_enabled=provider_enabled,
+            provider_lifecycle_state=provider_lifecycle_state,
+        )
+
+    alembic_runner.migrate_up_to(_REVISION)
+
+    _assert_migrated_revision_blocked(
+        alembic_engine,
+        reason_code=reason_code,
+    )
+
+
 def test_runtime_profile_cutover_rejects_missing_selected_provider(
     alembic_runner: MigrationContext,
     alembic_engine: Engine,
@@ -486,3 +637,36 @@ def test_runtime_profile_cutover_downgrade_rejects_unrepresentable_revision(
 
     with pytest.raises(RuntimeError, match="Cannot downgrade"):
         alembic_runner.migrate_down_to(_PARENT_REVISION)
+
+
+def _assert_migrated_revision_blocked(
+    engine: Engine,
+    *,
+    reason_code: str,
+    missing_capabilities: list[str] | None = None,
+) -> None:
+    with engine.connect() as connection:
+        revision = (
+            connection.execute(
+                sa.text(
+                    """
+                    SELECT revision.resolution_status,
+                           revision.reason_code,
+                           revision.missing_capabilities,
+                           revision.resolved_configuration
+                    FROM agent_runtimes AS runtime
+                    JOIN runtime_configuration_revisions AS revision
+                      ON revision.id =
+                         runtime.desired_runtime_configuration_revision_id
+                    WHERE runtime.id = :runtime_id
+                    """
+                ),
+                {"runtime_id": _RUNTIME_ID},
+            )
+            .mappings()
+            .one()
+        )
+    assert revision["resolution_status"] == "blocked"
+    assert revision["reason_code"] == reason_code
+    assert revision["missing_capabilities"] == (missing_capabilities or [])
+    assert revision["resolved_configuration"] is None
