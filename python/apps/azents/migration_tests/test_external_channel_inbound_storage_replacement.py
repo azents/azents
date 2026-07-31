@@ -7,7 +7,9 @@ import sqlalchemy as sa
 from pytest_alembic.runner import MigrationContext
 from sqlalchemy.engine import Engine
 
-_PARENT_REVISION = "d307822ec9d7"
+_REPAIR_PARENT_REVISION = "d307822ec9d7"
+_REPAIR_REVISION = "699b38c35430"
+_PARENT_REVISION = _REPAIR_REVISION
 _REVISION = "7f4c2a9d1b6e"
 _RETIRED_TABLES = {
     "external_channel_messages",
@@ -189,6 +191,29 @@ def _seed_parent_graph(connection: sa.Connection) -> None:
     connection.execute(
         sa.text(
             """
+            INSERT INTO external_channel_message_revisions (
+                id, message_id, revision_key, revision_kind, normalized_body,
+                attachment_metadata, reference_mappings
+            )
+            VALUES (
+                'replace-revision', 'replace-message', 'v1', 'original',
+                'Replacement message', '{}'::jsonb, '{}'::jsonb
+            )
+            """
+        )
+    )
+    connection.execute(
+        sa.text(
+            """
+            UPDATE external_channel_messages
+            SET current_revision_id = 'replace-revision'
+            WHERE id = 'replace-message'
+            """
+        )
+    )
+    connection.execute(
+        sa.text(
+            """
             INSERT INTO external_channel_bindings (
                 id, resource_id, route_id, agent_session_id, status
             )
@@ -214,6 +239,19 @@ def _seed_parent_graph(connection: sa.Connection) -> None:
                 '00000000000000000001.000001', 'replace-connection',
                 'replace-position', '00000000000000000000.000000',
                 '00000000000000000001.000001', 'dispatched'
+            )
+            """
+        )
+    )
+    connection.execute(
+        sa.text(
+            """
+            INSERT INTO external_channel_invocation_batch_items (
+                id, batch_id, message_revision_id, sequence, provider_position
+            )
+            VALUES (
+                'replace-batch-item', 'replace-batch', 'replace-revision', 0,
+                '00000000000000000001.000001'
             )
             """
         )
@@ -271,6 +309,130 @@ def _seed_parent_graph(connection: sa.Connection) -> None:
             """
         )
     )
+
+
+def _seed_promoted_event(connection: sa.Connection) -> None:
+    """Record complete durable promotion evidence for the seeded batch."""
+    connection.execute(
+        sa.text(
+            """
+            UPDATE external_channel_conversation_positions
+            SET read_through_position = '00000000000000000001.000001'
+            WHERE id = 'replace-position'
+            """
+        )
+    )
+    connection.execute(
+        sa.text(
+            """
+            INSERT INTO events (
+                id, session_id, kind, payload, external_id, model_order
+            )
+            VALUES (
+                'replace-event',
+                'replace-session',
+                'external_channel_message',
+                jsonb_build_object(
+                    'binding_id', 'replace-binding',
+                    'invocation_batch_id', 'replace-batch',
+                    'external_message_id', 'replace-message',
+                    'revision_id', 'replace-revision',
+                    'projection_root_id',
+                        'external-channel:replace-binding:replace-message'
+                ),
+                'external-channel:replace-binding:replace-message',
+                1
+            )
+            """
+        )
+    )
+
+
+def test_repair_terminalizes_fully_promoted_undispatched_wake(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """Allow cutover after exact durable events prove mailbox promotion."""
+    alembic_runner.migrate_up_to(_REPAIR_PARENT_REVISION)
+    with alembic_engine.begin() as connection:
+        _seed_parent_graph(connection)
+        connection.execute(
+            sa.text(
+                """
+                UPDATE external_channel_invocation_batches
+                SET wake_dispatch_status = 'pending'
+                WHERE id = 'replace-batch'
+                """
+            )
+        )
+        _seed_promoted_event(connection)
+
+    alembic_runner.migrate_up_to(_REPAIR_REVISION)
+
+    with alembic_engine.connect() as connection:
+        wake = (
+            connection.execute(
+                sa.text(
+                    """
+                    SELECT wake_dispatch_status::text, wake_dispatch_claimed_at
+                    FROM external_channel_invocation_batches
+                    WHERE id = 'replace-batch'
+                    """
+                )
+            )
+            .tuples()
+            .one()
+        )
+        assert wake == ("dispatched", None)
+
+    alembic_runner.migrate_up_to(_REVISION)
+    assert _RETIRED_TABLES.isdisjoint(sa.inspect(alembic_engine).get_table_names())
+
+
+def test_repair_leaves_unproven_undispatched_wake_blocking_cutover(
+    alembic_runner: MigrationContext,
+    alembic_engine: Engine,
+) -> None:
+    """Keep fail-closed behavior when one retained revision lacks an event."""
+    alembic_runner.migrate_up_to(_REPAIR_PARENT_REVISION)
+    with alembic_engine.begin() as connection:
+        _seed_parent_graph(connection)
+        connection.execute(
+            sa.text(
+                """
+                UPDATE external_channel_invocation_batches
+                SET wake_dispatch_status = 'pending'
+                WHERE id = 'replace-batch'
+                """
+            )
+        )
+        connection.execute(
+            sa.text(
+                """
+                UPDATE external_channel_conversation_positions
+                SET read_through_position = '00000000000000000001.000001'
+                WHERE id = 'replace-position'
+                """
+            )
+        )
+
+    alembic_runner.migrate_up_to(_REPAIR_REVISION)
+
+    with alembic_engine.connect() as connection:
+        assert (
+            connection.scalar(
+                sa.text(
+                    """
+                    SELECT wake_dispatch_status::text
+                    FROM external_channel_invocation_batches
+                    WHERE id = 'replace-batch'
+                    """
+                )
+            )
+            == "pending"
+        )
+    with pytest.raises(RuntimeError, match="invocation_wake_undispatched=1"):
+        alembic_runner.migrate_up_to(_REVISION)
 
 
 def test_replacement_backfills_replay_identity_and_open_selector(
