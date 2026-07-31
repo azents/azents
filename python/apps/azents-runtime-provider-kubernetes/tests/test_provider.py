@@ -6,13 +6,6 @@ from datetime import UTC, datetime
 from typing import cast
 
 import pytest
-from azents_runtime_control.execution_policy import (
-    JsonValue,
-    RuntimeExecutionPolicyEnvelope,
-    RuntimeExecutionPolicyEvidence,
-    canonical_effective_policy_json,
-    digest_effective_policy,
-)
 from azents_runtime_control.provider import (
     RuntimeContainerAuth as ControlRuntimeContainerAuth,
 )
@@ -27,6 +20,12 @@ from azents_runtime_control.provider import (
 )
 from azents_runtime_control.provider import (
     RuntimeProviderObservedState as ControlRuntimeProviderObservedState,
+)
+from azents_runtime_control.runtime_configuration import (
+    JsonValue,
+    RuntimeConfigurationEnvelope,
+    RuntimeConfigurationEvidence,
+    canonical_runtime_configuration_json,
 )
 
 from azents_runtime_provider_kubernetes.kubernetes_api import (
@@ -63,7 +62,7 @@ from azents_runtime_provider_kubernetes.provider import (
     InvalidWorkspacePath,
     KubernetesRuntimeProvider,
     KubernetesRuntimeProviderConfig,
-    UnsupportedExecutionPolicy,
+    UnsupportedRuntimeConfiguration,
 )
 from azents_runtime_provider_kubernetes.runtime_control import (
     KubernetesRuntimeControlAdapter,
@@ -238,13 +237,6 @@ def _provider_with_runner_env(
         KubernetesRuntimeProviderConfig(
             provider_id="provider-k8s",
             namespace="azents-runtime",
-            storage_class_name="gp3",
-            pvc_storage_request="20Gi",
-            runner_resources=ContainerResources(
-                requests={"cpu": "500m", "memory": "1Gi"},
-                limits={"cpu": "1500m", "memory": "2Gi"},
-                claims=None,
-            ),
             runner_env=runner_env,
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
@@ -273,7 +265,7 @@ def _command(
     runner_image: str = _RUNNER_IMAGE,
     runner_auth_token: str = "runner-token-1",
     runner_auth_credential_id: str = "runner-credential-1",
-    execution_policy: RuntimeExecutionPolicyEnvelope | None = None,
+    runtime_configuration: RuntimeConfigurationEnvelope | None = None,
 ) -> RuntimeLifecycleCommand:
     return RuntimeLifecycleCommand(
         command_type=command_type,
@@ -294,8 +286,8 @@ def _command(
             allow_insecure_control=True,
         ),
         reset_final_desired_state=final_desired_state,
-        execution_policy=execution_policy
-        or _execution_policy(desired_generation=desired_generation),
+        runtime_configuration=runtime_configuration
+        or _runtime_configuration(desired_generation=desired_generation),
     )
 
 
@@ -321,7 +313,7 @@ def _control_command(
             allow_insecure_control=True,
         ),
         reset_final_desired_state=None,
-        execution_policy=_execution_policy(),
+        runtime_configuration=_runtime_configuration(),
     )
 
 
@@ -343,8 +335,8 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     assert "AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY" not in env
     assert container.working_dir == "/workspace/agent"
     assert container.resources == ContainerResources(
-        requests={"cpu": "500m", "memory": "1Gi"},
-        limits={"cpu": "1500m", "memory": "2Gi"},
+        requests={"cpu": "500m", "memory": "1073741824"},
+        limits={"cpu": "1500m", "memory": "2147483648"},
         claims=None,
     )
     assert env["AZ_AGENT_WORKSPACE_PATH"] == "/workspace/agent"
@@ -352,7 +344,8 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     assert env["AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"] == "runner-credential-1"
     assert pod.metadata.annotations["azents/workspace-path"] == "/workspace/agent"
     assert (
-        pod.metadata.annotations["azents/execution-policy-snapshot-id"] == "snapshot-1"
+        pod.metadata.annotations["azents/runtime-configuration-revision-id"]
+        == "revision-1"
     )
     assert pod.spec.service_account_name is None
     assert pod.spec.automount_service_account_token is False
@@ -377,7 +370,7 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     assert container.security_context.capabilities_add == ()
     assert container.security_context.capabilities_drop == ("ALL",)
     assert pvc.spec.storage_class_name == "gp3"
-    assert pvc.spec.storage_request == "20Gi"
+    assert pvc.spec.storage_request == "21474836480"
     assert "azents/workspace-path" not in pod.metadata.labels
     assert "azents/workspace-path" not in pvc.metadata.labels
     assert pod.metadata.annotations["azents/workspace-path"] == "/workspace/agent"
@@ -394,7 +387,7 @@ async def test_start_expands_pvc_but_defers_shrink_until_reset() -> None:
         _command(
             RuntimeLifecycleCommandType.START,
             desired_generation=1,
-            execution_policy=_execution_policy(
+            runtime_configuration=_runtime_configuration(
                 desired_generation=1,
                 persistent_storage_bytes=10_737_418_240,
             ),
@@ -406,7 +399,7 @@ async def test_start_expands_pvc_but_defers_shrink_until_reset() -> None:
         _command(
             RuntimeLifecycleCommandType.START,
             desired_generation=2,
-            execution_policy=_execution_policy(
+            runtime_configuration=_runtime_configuration(
                 desired_generation=2,
                 persistent_storage_bytes=21_474_836_480,
             ),
@@ -414,7 +407,7 @@ async def test_start_expands_pvc_but_defers_shrink_until_reset() -> None:
     )
     assert api.pvcs[pvc_key].spec.storage_request == "21474836480"
 
-    shrink_policy = _execution_policy(
+    shrink_policy = _runtime_configuration(
         desired_generation=3,
         persistent_storage_bytes=5_368_709_120,
     )
@@ -422,7 +415,7 @@ async def test_start_expands_pvc_but_defers_shrink_until_reset() -> None:
         _command(
             RuntimeLifecycleCommandType.START,
             desired_generation=3,
-            execution_policy=shrink_policy,
+            runtime_configuration=shrink_policy,
         )
     )
     assert api.pvcs[pvc_key].spec.storage_request == "21474836480"
@@ -432,7 +425,7 @@ async def test_start_expands_pvc_but_defers_shrink_until_reset() -> None:
             RuntimeLifecycleCommandType.RESET,
             final_desired_state=RuntimeDesiredState.STOPPED,
             desired_generation=3,
-            execution_policy=shrink_policy,
+            runtime_configuration=shrink_policy,
         )
     )
     assert api.pvcs[pvc_key].spec.storage_request == "5368709120"
@@ -472,66 +465,32 @@ async def test_start_replaces_pod_when_runner_limit_is_removed() -> None:
 @pytest.mark.asyncio
 async def test_start_allows_omitted_runner_resources() -> None:
     api = FakeKubernetesApi()
-    provider = KubernetesRuntimeProvider(
-        api,
-        KubernetesRuntimeProviderConfig(
-            provider_id="system-kubernetes",
-            namespace="azents-runtime",
-            storage_class_name="gp3",
-            pvc_storage_request="20Gi",
-            runner_resources=None,
-            runner_env={},
-            engine_image=_ENGINE_IMAGE,
-            runtime_control_namespace="azents",
-            runtime_control_labels={
-                "app.kubernetes.io/component": "runtime-control",
-            },
-            runtime_control_port=8030,
-        ),
-    )
+    provider = _provider(api)
 
-    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            runtime_configuration=_runtime_configuration(omit_runner_resources=True),
+        )
+    )
 
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
     assert pod.spec.containers[0].resources is None
 
 
 @pytest.mark.asyncio
-async def test_start_preserves_generic_runner_resource_requirements() -> None:
+async def test_start_uses_profile_runner_resources() -> None:
     api = FakeKubernetesApi()
-    resources = ContainerResources(
-        requests={
-            "cpu": "500m",
-            "ephemeral-storage": "1Gi",
-        },
-        limits={
-            "memory": "2Gi",
-            "nvidia.com/gpu": 1,
-        },
-        claims=None,
-    )
-    provider = KubernetesRuntimeProvider(
-        api,
-        KubernetesRuntimeProviderConfig(
-            provider_id="system-kubernetes",
-            namespace="azents-runtime",
-            storage_class_name="gp3",
-            pvc_storage_request="20Gi",
-            runner_resources=resources,
-            runner_env={},
-            engine_image=_ENGINE_IMAGE,
-            runtime_control_namespace="azents",
-            runtime_control_labels={
-                "app.kubernetes.io/component": "runtime-control",
-            },
-            runtime_control_port=8030,
-        ),
-    )
+    provider = _provider(api)
 
     await provider.start(_command(RuntimeLifecycleCommandType.START))
 
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
-    assert pod.spec.containers[0].resources == resources
+    assert pod.spec.containers[0].resources == ContainerResources(
+        requests={"cpu": "500m", "memory": "1073741824"},
+        limits={"cpu": "1500m", "memory": "2147483648"},
+        claims=None,
+    )
 
 
 @pytest.mark.asyncio
@@ -544,25 +503,11 @@ async def test_start_reuses_pod_with_kubernetes_default_tolerations() -> None:
         value="azents",
         effect="NoSchedule",
     )
-    provider = KubernetesRuntimeProvider(
-        api,
-        KubernetesRuntimeProviderConfig(
-            provider_id="system-kubernetes",
-            namespace="azents-runtime",
-            storage_class_name="gp3",
-            pvc_storage_request="20Gi",
-            runner_resources=None,
-            runner_env={},
-            engine_image=_ENGINE_IMAGE,
-            runtime_control_namespace="azents",
-            runtime_control_labels={
-                "app.kubernetes.io/component": "runtime-control",
-            },
-            runtime_control_port=8030,
-            pod_tolerations=(configured_toleration,),
-        ),
+    provider = _provider(api)
+    command = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(configured_scheduling=True),
     )
-    command = _command(RuntimeLifecycleCommandType.START)
     await provider.start(command)
     pod_key = ("azents-runtime", "azents-runtime-runtime-1")
     pod = api.pods[pod_key]
@@ -647,7 +592,7 @@ async def test_start_reuses_pod_with_canonicalized_kubernetes_quantities() -> No
     provider = _provider(api)
     command = _command(
         RuntimeLifecycleCommandType.START,
-        execution_policy=_execution_policy(
+        runtime_configuration=_runtime_configuration(
             docker_enabled=True,
             cpu_request_millicores=500,
             memory_request_bytes=1_073_741_824,
@@ -677,7 +622,6 @@ async def test_start_reuses_pod_with_canonicalized_kubernetes_quantities() -> No
                             **engine.resources.limits,
                             "cpu": "1",
                             "memory": "2Gi",
-                            "ephemeral-storage": "10Gi",
                         },
                     ),
                 ),
@@ -904,13 +848,6 @@ async def test_start_applies_configured_pod_annotations() -> None:
         KubernetesRuntimeProviderConfig(
             provider_id="system-kubernetes",
             namespace="azents-runtime",
-            storage_class_name="gp3",
-            pvc_storage_request="20Gi",
-            runner_resources=ContainerResources(
-                requests={"cpu": "500m", "memory": "1Gi"},
-                limits={"cpu": "1500m", "memory": "2Gi"},
-                claims=None,
-            ),
             runner_env={},
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
@@ -922,51 +859,35 @@ async def test_start_applies_configured_pod_annotations() -> None:
         ),
     )
 
-    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            runtime_configuration=_runtime_configuration(
+                provider_logical_id="system-kubernetes",
+            ),
+        )
+    )
 
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
     assert pod.metadata.annotations["descheduler/no-evict"] == "true"
     assert pod.metadata.annotations["azents/workspace-path"] == "/workspace/agent"
     assert (
-        pod.metadata.annotations["azents/execution-policy-snapshot-id"] == "snapshot-1"
+        pod.metadata.annotations["azents/runtime-configuration-revision-id"]
+        == "revision-1"
     )
 
 
 @pytest.mark.asyncio
-async def test_start_applies_configured_runtime_pod_scheduling() -> None:
+async def test_start_applies_profile_runtime_pod_scheduling() -> None:
     api = FakeKubernetesApi()
-    provider = KubernetesRuntimeProvider(
-        api,
-        KubernetesRuntimeProviderConfig(
-            provider_id="system-kubernetes",
-            namespace="azents-runtime",
-            storage_class_name="gp3",
-            pvc_storage_request="20Gi",
-            runner_resources=ContainerResources(
-                requests={"cpu": "500m", "memory": "1Gi"},
-                limits={"cpu": "1500m", "memory": "2Gi"},
-                claims=None,
-            ),
-            runner_env={},
-            engine_image=_ENGINE_IMAGE,
-            runtime_control_namespace="azents",
-            runtime_control_labels={
-                "app.kubernetes.io/component": "runtime-control",
-            },
-            runtime_control_port=8030,
-            pod_node_selector={"azents.azents.io/runtime-isolation": "true"},
-            pod_tolerations=(
-                Toleration(
-                    key="azents.azents.io/runtime-isolation",
-                    operator="Equal",
-                    value="true",
-                    effect="NoSchedule",
-                ),
-            ),
-        ),
-    )
+    provider = _provider(api)
 
-    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            runtime_configuration=_runtime_configuration(isolated_scheduling=True),
+        )
+    )
 
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
     assert pod.spec.node_selector == {"azents.azents.io/runtime-isolation": "true"}
@@ -988,9 +909,6 @@ async def test_start_applies_configured_runtime_pod_image_pull_secrets() -> None
         KubernetesRuntimeProviderConfig(
             provider_id="system-kubernetes",
             namespace="azents-runtime",
-            storage_class_name="gp3",
-            pvc_storage_request="20Gi",
-            runner_resources=None,
             runner_env={},
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
@@ -1002,7 +920,14 @@ async def test_start_applies_configured_runtime_pod_image_pull_secrets() -> None
         ),
     )
 
-    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            runtime_configuration=_runtime_configuration(
+                provider_logical_id="system-kubernetes",
+            ),
+        )
+    )
 
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
     assert pod.spec.image_pull_secrets == (
@@ -1018,9 +943,6 @@ async def test_start_replaces_pod_when_image_pull_secrets_change() -> None:
         KubernetesRuntimeProviderConfig(
             provider_id="system-kubernetes",
             namespace="azents-runtime",
-            storage_class_name="gp3",
-            pvc_storage_request="20Gi",
-            runner_resources=None,
             runner_env={},
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
@@ -1035,9 +957,6 @@ async def test_start_replaces_pod_when_image_pull_secrets_change() -> None:
         KubernetesRuntimeProviderConfig(
             provider_id="system-kubernetes",
             namespace="azents-runtime",
-            storage_class_name="gp3",
-            pvc_storage_request="20Gi",
-            runner_resources=None,
             runner_env={},
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
@@ -1048,9 +967,14 @@ async def test_start_replaces_pod_when_image_pull_secrets_change() -> None:
             image_pull_secrets=(LocalObjectReference(name="ecr-pull-secret"),),
         ),
     )
-    await old_provider.start(_command(RuntimeLifecycleCommandType.START))
-
-    await new_provider.start(_command(RuntimeLifecycleCommandType.START))
+    command = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=_runtime_configuration(
+            provider_logical_id="system-kubernetes",
+        ),
+    )
+    await old_provider.start(command)
+    await new_provider.start(command)
 
     assert api.deleted_pods == ["azents-runtime-runtime-1"]
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
@@ -1259,7 +1183,7 @@ async def test_observe_known_runtimes_reports_pod_and_pvc() -> None:
             allow_insecure_control=True,
         ),
         reset_final_desired_state=None,
-        execution_policy=_execution_policy(),
+        runtime_configuration=_runtime_configuration(),
     )
     await provider.start(command_2)
     await api.delete_pod("azents-runtime-runtime-2", "azents-runtime")
@@ -1288,10 +1212,8 @@ async def test_legacy_resources_are_skipped_until_command_replaces_them() -> Non
     for resource in (pod, pvc):
         annotations = cast(dict[str, str], resource.metadata.annotations)
         for key in (
-            "azents/execution-policy-snapshot-id",
-            "azents/execution-policy-digest",
-            "azents/execution-policy-module-versions",
-            "azents/execution-policy-source-versions",
+            "azents/runtime-configuration-revision-id",
+            "azents/runtime-configuration-digest",
         ):
             annotations.pop(key)
     api.watch_events.append(PodWatchEvent(event_type="MODIFIED", pod=pod))
@@ -1301,11 +1223,11 @@ async def test_legacy_resources_are_skipped_until_command_replaces_them() -> Non
 
     result = await provider.start(command)
 
-    assert result.report.execution_policy == command.execution_policy.evidence
+    assert result.report.runtime_configuration == command.runtime_configuration.evidence
     replaced = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
     assert (
-        replaced.metadata.annotations["azents/execution-policy-snapshot-id"]
-        == "snapshot-1"
+        replaced.metadata.annotations["azents/runtime-configuration-revision-id"]
+        == "revision-1"
     )
 
 
@@ -1335,13 +1257,6 @@ def test_invalid_workspace_path_is_rejected() -> None:
             KubernetesRuntimeProviderConfig(
                 provider_id="provider-k8s",
                 namespace="azents-runtime",
-                storage_class_name="gp3",
-                pvc_storage_request="20Gi",
-                runner_resources=ContainerResources(
-                    requests={"cpu": "500m", "memory": "1Gi"},
-                    limits={"cpu": "1500m", "memory": "2Gi"},
-                    claims=None,
-                ),
                 runner_env={},
                 engine_image=_ENGINE_IMAGE,
                 runtime_control_namespace="azents",
@@ -1364,27 +1279,28 @@ async def test_reset_requires_explicit_final_desired_state() -> None:
 
 
 @pytest.mark.asyncio
-async def test_standard_policy_evidence_is_persisted_and_reported() -> None:
+async def test_runtime_configuration_evidence_is_persisted_and_reported() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
-    policy = _execution_policy()
+    configuration = _runtime_configuration()
 
     result = await provider.start(
-        _command(RuntimeLifecycleCommandType.START, execution_policy=policy)
+        _command(RuntimeLifecycleCommandType.START, runtime_configuration=configuration)
     )
 
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
     assert (
-        pod.metadata.annotations["azents/execution-policy-snapshot-id"] == "snapshot-1"
+        pod.metadata.annotations["azents/runtime-configuration-revision-id"]
+        == "revision-1"
     )
-    assert result.report.execution_policy == policy.evidence
+    assert result.report.runtime_configuration == configuration.evidence
 
 
 @pytest.mark.asyncio
-async def test_docker_policy_exposes_private_dind_socket_directly() -> None:
+async def test_dind_profile_exposes_private_engine_socket_directly() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
-    execution_policy = _execution_policy(
+    runtime_configuration = _runtime_configuration(
         docker_enabled=True,
         cpu_request_millicores=500,
         memory_request_bytes=1_073_741_824,
@@ -1393,7 +1309,7 @@ async def test_docker_policy_exposes_private_dind_socket_directly() -> None:
     await provider.start(
         _command(
             RuntimeLifecycleCommandType.START,
-            execution_policy=execution_policy,
+            runtime_configuration=runtime_configuration,
         )
     )
 
@@ -1413,12 +1329,10 @@ async def test_docker_policy_exposes_private_dind_socket_directly() -> None:
         requests={
             "cpu": "500m",
             "memory": "1073741824",
-            "ephemeral-storage": "10737418240",
         },
         limits={
             "cpu": "1",
             "memory": "2147483648",
-            "ephemeral-storage": "10737418240",
         },
         claims=None,
     )
@@ -1482,7 +1396,9 @@ async def test_docker_policy_exposes_private_dind_socket_directly() -> None:
         ("azents-runtime", "azents-runtime-runtime-1-execution")
     ]
     assert (
-        network_policy.spec.pod_selector.match_labels["azents/execution-policy-managed"]
+        network_policy.spec.pod_selector.match_labels[
+            "azents/runtime-configuration-managed"
+        ]
         == "true"
     )
     assert network_policy.spec.pod_selector.match_labels[
@@ -1521,7 +1437,7 @@ async def test_direct_network_policy_is_bounded_by_deployment_hard_cap() -> None
     await provider.start(
         _command(
             RuntimeLifecycleCommandType.START,
-            execution_policy=_execution_policy(),
+            runtime_configuration=_runtime_configuration(),
         )
     )
 
@@ -1529,26 +1445,68 @@ async def test_direct_network_policy_is_bounded_by_deployment_hard_cap() -> None
         ("azents-runtime", "azents-runtime-runtime-1-execution")
     ]
     optional_rules = network_policy.spec.egress[2:]
-    ipv4 = optional_rules[0].peers[0].ip_block
-    assert ipv4 is not None
-    assert ipv4.cidr == "0.0.0.0/0"
-    assert ipv4.except_cidrs == ("10.0.0.0/8",)
-    exception = optional_rules[2].peers[0].ip_block
-    assert exception is not None
-    assert exception.cidr == "10.10.0.0/16"
-    assert optional_rules[-1] == extra_egress
+    assert optional_rules == (extra_egress,)
+
+
+def test_provider_rejects_extra_ip_egress_outside_network_hard_cap() -> None:
+    extra_egress = NetworkPolicyEgressRule(
+        peers=(
+            NetworkPolicyPeer(
+                namespace_selector=None,
+                pod_selector=None,
+                ip_block=IpBlock(
+                    cidr="0.0.0.0/0",
+                    except_cidrs=(),
+                ),
+            ),
+        ),
+        ports=(),
+    )
+
+    with pytest.raises(
+        UnsupportedRuntimeConfiguration,
+        match="exceeds the network hard cap",
+    ):
+        _provider(
+            FakeKubernetesApi(),
+            network_hard_cap_allowed_cidrs=("10.10.0.0/16",),
+            network_hard_cap_extra_egress=(extra_egress,),
+        )
+
+
+def test_provider_rejects_extra_ip_egress_that_bypasses_denied_hard_cap() -> None:
+    extra_egress = NetworkPolicyEgressRule(
+        peers=(
+            NetworkPolicyPeer(
+                namespace_selector=None,
+                pod_selector=None,
+                ip_block=IpBlock(
+                    cidr="10.10.0.0/16",
+                    except_cidrs=(),
+                ),
+            ),
+        ),
+        ports=(),
+    )
+
+    with pytest.raises(
+        UnsupportedRuntimeConfiguration,
+        match="bypasses a denied network hard cap",
+    ):
+        _provider(
+            FakeKubernetesApi(),
+            network_hard_cap_denied_cidrs=("10.10.1.0/24",),
+            network_hard_cap_extra_egress=(extra_egress,),
+        )
 
 
 def test_provider_rejects_mutable_engine_image() -> None:
-    with pytest.raises(UnsupportedExecutionPolicy, match="immutable sha256"):
+    with pytest.raises(UnsupportedRuntimeConfiguration, match="immutable sha256"):
         KubernetesRuntimeProvider(
             FakeKubernetesApi(),
             KubernetesRuntimeProviderConfig(
                 provider_id="provider-k8s",
                 namespace="azents-runtime",
-                storage_class_name="gp3",
-                pvc_storage_request="20Gi",
-                runner_resources=None,
                 runner_env={},
                 engine_image="repo/engine:latest",
                 runtime_control_namespace="azents",
@@ -1561,16 +1519,16 @@ def test_provider_rejects_mutable_engine_image() -> None:
 
 
 @pytest.mark.asyncio
-async def test_authority_policy_rejects_mutable_runner_image_before_mutation() -> None:
+async def test_dind_profile_rejects_mutable_runner_image_before_mutation() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
 
-    with pytest.raises(UnsupportedExecutionPolicy, match="Runner image"):
+    with pytest.raises(UnsupportedRuntimeConfiguration, match="Runner image"):
         await provider.start(
             _command(
                 RuntimeLifecycleCommandType.START,
                 runner_image="repo/runner:latest",
-                execution_policy=_execution_policy(docker_enabled=True),
+                runtime_configuration=_runtime_configuration(docker_enabled=True),
             )
         )
 
@@ -1595,7 +1553,7 @@ async def test_new_network_policy_does_not_select_old_pod_when_replacement_fails
                 RuntimeLifecycleCommandType.START,
                 desired_generation=2,
                 provider_generation=8,
-                execution_policy=_execution_policy(
+                runtime_configuration=_runtime_configuration(
                     desired_generation=2,
                 ),
             )
@@ -1620,17 +1578,15 @@ async def test_new_network_policy_does_not_select_old_pod_when_replacement_fails
 
 
 @pytest.mark.asyncio
-async def test_invalid_container_execution_policy_fails_before_resource_mutation() -> (
-    None
-):
+async def test_invalid_dind_configuration_fails_before_resource_mutation() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
 
-    with pytest.raises(ValueError, match="storage mode"):
+    with pytest.raises(ValueError, match="docker_storage_bytes"):
         await provider.start(
             _command(
                 RuntimeLifecycleCommandType.START,
-                execution_policy=_execution_policy(
+                runtime_configuration=_runtime_configuration(
                     docker_enabled=True,
                     bounded=False,
                 ),
@@ -1642,58 +1598,138 @@ async def test_invalid_container_execution_policy_fails_before_resource_mutation
     assert api.network_policies == {}
 
 
-def _execution_policy(
+@pytest.mark.asyncio
+async def test_configuration_bound_to_another_provider_is_rejected() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+
+    with pytest.raises(UnsupportedRuntimeConfiguration, match="different Kubernetes"):
+        await provider.start(
+            _command(
+                RuntimeLifecycleCommandType.START,
+                runtime_configuration=_runtime_configuration(
+                    provider_logical_id="provider-k8s-other",
+                ),
+            )
+        )
+
+    assert api.pods == {}
+    assert api.pvcs == {}
+    assert api.network_policies == {}
+
+
+def _runtime_configuration(
     *,
     docker_enabled: bool = False,
     desired_generation: int = 1,
+    provider_logical_id: str = "provider-k8s",
     bounded: bool = True,
+    omit_runner_resources: bool = False,
+    configured_scheduling: bool = False,
+    isolated_scheduling: bool = False,
     cpu_request_millicores: int | None = None,
     cpu_limit_millicores: int = 1000,
     memory_request_bytes: int | None = None,
     memory_limit_bytes: int = 2_147_483_648,
     ephemeral_storage_bytes: int = 10_737_418_240,
     persistent_storage_bytes: int | None = None,
-) -> RuntimeExecutionPolicyEnvelope:
+) -> RuntimeConfigurationEnvelope:
     docker_configured = docker_enabled and bounded
-    policy: dict[str, JsonValue] = {
+    effective_profile: dict[str, JsonValue] = {
+        "profile_kind": "kubernetes_pod",
+        "contract_family": "kubernetes.pod-profile",
         "schema_version": 1,
-        "docker": {
-            "module_id": "docker",
-            "version": 1,
-            "enabled": docker_enabled,
-            "storage_mode": "ephemeral" if docker_configured else "none",
-            "storage_capacity_bytes": (8_589_934_592 if docker_configured else None),
+        "runner_resources": {
+            "cpu_request_millicores": None if omit_runner_resources else 500,
+            "cpu_limit_millicores": None if omit_runner_resources else 1500,
+            "memory_request_bytes": (None if omit_runner_resources else 1_073_741_824),
+            "memory_limit_bytes": (None if omit_runner_resources else 2_147_483_648),
         },
-        "resources": {
-            "module_id": "runtime.resources",
-            "version": 1,
-            "cpu_request_millicores": (
-                cpu_request_millicores if docker_configured else None
+        "workspace_volume": {
+            "storage_class_name": "gp3",
+            "storage_request_bytes": (
+                persistent_storage_bytes
+                if persistent_storage_bytes is not None
+                else 21_474_836_480
             ),
-            "cpu_limit_millicores": (
-                cpu_limit_millicores if docker_configured else None
-            ),
-            "memory_request_bytes": (
-                memory_request_bytes if docker_configured else None
-            ),
-            "memory_limit_bytes": (memory_limit_bytes if docker_configured else None),
-            "ephemeral_storage_bytes": (
-                ephemeral_storage_bytes if docker_configured else None
-            ),
-            "persistent_storage_bytes": persistent_storage_bytes,
         },
-    }
-    return RuntimeExecutionPolicyEnvelope(
-        evidence=RuntimeExecutionPolicyEvidence(
-            snapshot_id="snapshot-1",
-            digest=digest_effective_policy(policy),
-            desired_generation=desired_generation,
-            module_versions={"docker": 1, "runtime.resources": 1},
-            source_versions={
-                "profile": 1,
-                "workspace": 1,
-                "agent": 1,
-            },
+        "network_policy": {"allowed_cidrs": [], "denied_cidrs": []},
+        "service_account_name": None,
+        "scheduling": {
+            "node_selector": (
+                {"azents.azents.io/runtime-isolation": "true"}
+                if isolated_scheduling
+                else {}
+            ),
+            "tolerations": (
+                [
+                    {
+                        "key": "azents.azents.io/runtime-isolation",
+                        "operator": "Equal",
+                        "value": "true",
+                        "effect": "NoSchedule",
+                        "toleration_seconds": None,
+                    }
+                ]
+                if isolated_scheduling
+                else (
+                    [
+                        {
+                            "key": "runtime",
+                            "operator": "Equal",
+                            "value": "azents",
+                            "effect": "NoSchedule",
+                            "toleration_seconds": None,
+                        }
+                    ]
+                    if configured_scheduling
+                    else []
+                )
+            ),
+        },
+        "dind": (
+            {
+                "engine_resources": {
+                    "cpu_request_millicores": cpu_request_millicores,
+                    "cpu_limit_millicores": cpu_limit_millicores,
+                    "memory_request_bytes": memory_request_bytes,
+                    "memory_limit_bytes": memory_limit_bytes,
+                },
+                "docker_storage_bytes": (8_589_934_592 if docker_configured else None),
+                "shared_temporary_storage_bytes": (
+                    ephemeral_storage_bytes if docker_configured else None
+                ),
+            }
+            if docker_enabled
+            else None
         ),
-        effective_policy_json=canonical_effective_policy_json(policy),
+    }
+    configuration: dict[str, JsonValue] = {
+        "schema_version": 1,
+        "provider": {
+            "id": "provider-resource-1",
+            "logical_id": provider_logical_id,
+            "kind": "kubernetes",
+            "capability_revision_id": "capability-1",
+            "capability_digest": "a" * 64,
+        },
+        "infrastructure_profile": {
+            "id": "infrastructure-1",
+            "version": 1,
+            "digest": "b" * 64,
+        },
+        "workspace_runtime_profile": {
+            "id": "workspace-profile-1",
+            "version": 1,
+            "digest": "c" * 64,
+        },
+        "effective_profile": effective_profile,
+    }
+    return RuntimeConfigurationEnvelope(
+        evidence=RuntimeConfigurationEvidence(
+            revision_id="revision-1",
+            digest="d" * 64,
+            desired_generation=desired_generation,
+        ),
+        resolved_configuration_json=canonical_runtime_configuration_json(configuration),
     )

@@ -5,13 +5,14 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from azents_runtime_control.execution_policy import (
-    RuntimeExecutionPolicyEnvelope,
-    RuntimeExecutionPolicyEvidence,
-    parse_execution_policy_envelope,
-)
 from azents_runtime_control.provider import (
     RuntimeLifecycleCommandType as RuntimeProviderCommandType,
+)
+from azents_runtime_control.runtime_configuration import (
+    RuntimeConfigurationEnvelope,
+    RuntimeConfigurationEvidence,
+    canonical_runtime_configuration_json,
+    parse_runtime_configuration_envelope,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,15 +21,10 @@ from azents.core.enums import (
     RuntimeLifecycleCommandType,
     RuntimeProviderConnectionState,
 )
-from azents.core.runtime_execution_policy import (
-    canonical_runtime_execution_policy_json,
-    digest_runtime_execution_policy,
-    standard_runtime_execution_policy,
-)
+from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeFailurePatch
-from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
@@ -252,7 +248,7 @@ class RuntimeLifecycleReconciler:
             desired_generation=runtime.desired_generation,
         )
         try:
-            execution_policy = await self._configuration_envelope(runtime)
+            runtime_configuration = await self._runtime_configuration(runtime)
         except ValueError as error:
             await self._record_failure(
                 runtime,
@@ -286,7 +282,7 @@ class RuntimeLifecycleReconciler:
                     },
                 },
                 deadline_at=created_at + self._config.provider_command_deadline,
-                execution_policy=execution_policy,
+                runtime_configuration=runtime_configuration,
             ),
             created_at=created_at,
         )
@@ -343,20 +339,20 @@ class RuntimeLifecycleReconciler:
             return False
         raise AssertionError(f"unexpected dispatch result: {result!r}")
 
-    async def _configuration_envelope(
+    async def _runtime_configuration(
         self,
         runtime: AgentRuntime,
-    ) -> RuntimeExecutionPolicyEnvelope:
+    ) -> RuntimeConfigurationEnvelope:
         revision_id = runtime.desired_runtime_configuration_revision_id
         if revision_id is None:
-            raise ValueError("Runtime configuration revision is missing.")
+            raise ValueError("Runtime configuration target revision is missing.")
         async with self._session_manager() as session:
             revision = await self._profile_repository.get_configuration_revision(
                 session,
                 revision_id=revision_id,
             )
         if revision is None:
-            raise ValueError("Runtime configuration revision is missing.")
+            raise ValueError("Runtime configuration target revision is missing.")
         if revision.runtime_id != runtime.id:
             raise ValueError("Runtime configuration revision ownership is invalid.")
         if (
@@ -366,22 +362,53 @@ class RuntimeLifecycleReconciler:
             raise ValueError("Runtime configuration Provider binding is invalid.")
         if revision.target_desired_generation != runtime.desired_generation:
             raise ValueError("Runtime configuration target generation is stale.")
+        if revision.resolution_status is not RuntimeConfigurationResolutionStatus.READY:
+            raise ValueError("Runtime configuration target revision is blocked.")
         if revision.resolved_configuration is None:
-            raise ValueError("Runtime configuration document is missing.")
-        standard_policy = standard_runtime_execution_policy()
-        envelope = RuntimeExecutionPolicyEnvelope(
-            evidence=_configuration_transport_evidence(
-                revision,
-                policy_digest=digest_runtime_execution_policy(standard_policy),
+            raise ValueError("Runtime configuration target document is missing.")
+        envelope = RuntimeConfigurationEnvelope(
+            evidence=RuntimeConfigurationEvidence(
+                revision_id=revision.id,
+                digest=revision.digest,
+                desired_generation=revision.target_desired_generation,
             ),
-            effective_policy_json=canonical_runtime_execution_policy_json(
-                standard_policy
+            resolved_configuration_json=canonical_runtime_configuration_json(
+                revision.resolved_configuration
             ),
         )
-        parse_execution_policy_envelope(
+        configuration = parse_runtime_configuration_envelope(
             envelope,
             desired_generation=runtime.desired_generation,
+            expected_provider_kind=None,
         )
+        if (
+            configuration.provider.id != revision.provider_id
+            or configuration.provider.logical_id != runtime.runtime_provider_id
+            or configuration.provider.capability_revision_id
+            != revision.provider_capability_revision_id
+        ):
+            raise ValueError("Runtime configuration Provider reference is invalid.")
+        if (
+            revision.infrastructure_profile_id != runtime.infrastructure_profile_id
+            or configuration.infrastructure_profile.id
+            != revision.infrastructure_profile_id
+            or configuration.infrastructure_profile.version
+            != revision.infrastructure_profile_version
+        ):
+            raise ValueError(
+                "Runtime configuration Infrastructure Profile reference is invalid."
+            )
+        if (
+            revision.workspace_runtime_profile_id
+            != runtime.workspace_runtime_profile_id
+            or configuration.workspace_runtime_profile.id
+            != revision.workspace_runtime_profile_id
+            or configuration.workspace_runtime_profile.version
+            != revision.workspace_runtime_profile_version
+        ):
+            raise ValueError(
+                "Runtime configuration Workspace Runtime Profile reference is invalid."
+            )
         return envelope
 
     async def _record_failure(
@@ -423,21 +450,3 @@ def _provider_command_type(
     if runtime.last_lifecycle_command is None:
         return None
     return RuntimeProviderCommandType(runtime.last_lifecycle_command.value)
-
-
-def _configuration_transport_evidence(
-    revision: RuntimeConfigurationRevision,
-    *,
-    policy_digest: str,
-) -> RuntimeExecutionPolicyEvidence:
-    return RuntimeExecutionPolicyEvidence(
-        snapshot_id=revision.id,
-        digest=policy_digest,
-        desired_generation=revision.target_desired_generation,
-        module_versions={"docker": 1, "runtime.resources": 1},
-        source_versions={
-            "profile": revision.infrastructure_profile_version,
-            "workspace": revision.workspace_runtime_profile_version,
-            "agent": revision.agent_selection_version,
-        },
-    )

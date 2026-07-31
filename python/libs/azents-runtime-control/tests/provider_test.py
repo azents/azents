@@ -6,10 +6,6 @@ from datetime import UTC, datetime
 
 import pytest
 
-from azents_runtime_control.execution_policy import (
-    RuntimeExecutionPolicyEnvelope,
-    RuntimeExecutionPolicyEvidence,
-)
 from azents_runtime_control.provider import (
     ProviderCommandCompletion,
     ProviderCommandEnvelope,
@@ -27,6 +23,11 @@ from azents_runtime_control.provider import (
     RuntimeProviderLifecycle,
     RuntimeProviderObservedState,
     RuntimeProviderReport,
+)
+from azents_runtime_control.runtime_configuration import (
+    RuntimeConfigurationEnvelope,
+    RuntimeConfigurationEvidence,
+    canonical_runtime_configuration_json,
 )
 
 
@@ -342,7 +343,7 @@ def _command(command_type: RuntimeLifecycleCommandType) -> RuntimeLifecycleComma
             allow_insecure_control=True,
         ),
         reset_final_desired_state=RuntimeDesiredState.RUNNING,
-        execution_policy=_execution_policy(),
+        runtime_configuration=_runtime_configuration(),
     )
 
 
@@ -362,22 +363,49 @@ def _report(command: RuntimeLifecycleCommand) -> RuntimeProviderReport:
         terminal_delete_acknowledged=(
             command.command_type is RuntimeLifecycleCommandType.TERMINAL_DELETE
         ),
-        execution_policy=command.execution_policy.evidence,
+        runtime_configuration=command.runtime_configuration.evidence,
     )
 
 
-def _execution_policy() -> RuntimeExecutionPolicyEnvelope:
-    return RuntimeExecutionPolicyEnvelope(
-        evidence=RuntimeExecutionPolicyEvidence(
-            snapshot_id="snapshot-1",
+def _runtime_configuration() -> RuntimeConfigurationEnvelope:
+    return RuntimeConfigurationEnvelope(
+        evidence=RuntimeConfigurationEvidence(
+            revision_id="revision-1",
             digest="d" * 64,
             desired_generation=3,
-            module_versions={"docker": 1, "runtime.resources": 1},
-            source_versions={
-                "profile": 1,
-                "workspace": 1,
-                "agent": 1,
-            },
         ),
-        effective_policy_json="{}",
+        resolved_configuration_json=canonical_runtime_configuration_json(
+            {
+                "schema_version": 1,
+                "provider": {
+                    "id": "provider-resource-1",
+                    "logical_id": "provider-1",
+                    "kind": "docker",
+                    "capability_revision_id": "capability-1",
+                    "capability_digest": "a" * 64,
+                },
+                "infrastructure_profile": {
+                    "id": "infrastructure-1",
+                    "version": 1,
+                    "digest": "b" * 64,
+                },
+                "workspace_runtime_profile": {
+                    "id": "workspace-profile-1",
+                    "version": 1,
+                    "digest": "c" * 64,
+                },
+                "effective_profile": {
+                    "profile_kind": "docker_container",
+                    "contract_family": "docker.container-profile",
+                    "schema_version": 1,
+                    "runner_resources": {
+                        "cpu_reservation_millicores": None,
+                        "cpu_limit_millicores": None,
+                        "memory_reservation_bytes": None,
+                        "memory_limit_bytes": None,
+                    },
+                    "network_name": None,
+                },
+            }
+        ),
     )

@@ -88,7 +88,7 @@ class RuntimeProviderReportRepositorySink:
                 )
                 return
 
-            configuration_failure = await self._validate_configuration_transport(
+            configuration_failure = await self._record_provider_configuration_evidence(
                 session,
                 runtime=runtime,
                 report=report,
@@ -118,7 +118,7 @@ class RuntimeProviderReportRepositorySink:
                 RuntimeProviderConnectionState.CONNECTED,
             )
 
-    async def _validate_configuration_transport(
+    async def _record_provider_configuration_evidence(
         self,
         session: AsyncSession,
         *,
@@ -131,15 +131,14 @@ class RuntimeProviderReportRepositorySink:
                 runtime.desired_generation,
                 "RUNTIME_CONFIGURATION_PROVIDER_BINDING_MISSING",
             )
-        matches = await (
-            self.profile_repository.configuration_transport_evidence_matches_current
-        )(
+        recorded = await self.profile_repository.record_provider_configuration_evidence(
             session,
             runtime_id=report.runtime_id,
             provider_id=provider_id,
-            evidence=report.execution_policy,
+            evidence=report.runtime_configuration,
+            acknowledged_at=report.reported_at,
         )
-        if not matches:
+        if recorded is None:
             return _configuration_failure(
                 runtime.desired_generation,
                 "RUNTIME_CONFIGURATION_PROVIDER_EVIDENCE_MISMATCH",
@@ -174,13 +173,13 @@ class RuntimeRunnerStateRepositorySink:
             )
             if runtime is None or runtime.runtime_provider_resource_id is None:
                 return False
-            matches = await (
-                self.profile_repository.configuration_transport_evidence_matches_current
-            )(
-                session,
-                runtime_id=runtime.id,
-                provider_id=runtime.runtime_provider_resource_id,
-                evidence=registration.execution_policy,
+            matches = (
+                await self.profile_repository.configuration_evidence_matches_current(
+                    session,
+                    runtime_id=runtime.id,
+                    provider_id=runtime.runtime_provider_resource_id,
+                    evidence=registration.runtime_configuration,
+                )
             )
             return matches
 
@@ -202,12 +201,15 @@ class RuntimeRunnerStateRepositorySink:
                     RuntimeRunnerState.DISCONNECTED,
                     report.runner_generation,
                     expected_desired_generation=(
-                        report.execution_policy.desired_generation
+                        report.runtime_configuration.desired_generation
                     ),
                     failure=None,
                 )
                 return
-            if report.execution_policy.desired_generation != runtime.desired_generation:
+            if (
+                report.runtime_configuration.desired_generation
+                != runtime.desired_generation
+            ):
                 return
             failure = _workspace_failure(
                 provider_workspace_path=runtime.workspace_path,
@@ -220,7 +222,7 @@ class RuntimeRunnerStateRepositorySink:
                     state=report.runner_state,
                     desired_generation=runtime.desired_generation,
                 )
-            configuration_failure = await self._validate_configuration_transport(
+            configuration_failure = await self._record_runner_configuration_evidence(
                 session,
                 runtime=runtime,
                 report=report,
@@ -236,12 +238,12 @@ class RuntimeRunnerStateRepositorySink:
                 runner_state,
                 report.runner_generation,
                 expected_desired_generation=(
-                    report.execution_policy.desired_generation
+                    report.runtime_configuration.desired_generation
                 ),
                 failure=failure,
             )
 
-    async def _validate_configuration_transport(
+    async def _record_runner_configuration_evidence(
         self,
         session: AsyncSession,
         *,
@@ -254,15 +256,14 @@ class RuntimeRunnerStateRepositorySink:
                 runtime.desired_generation,
                 "RUNTIME_CONFIGURATION_PROVIDER_BINDING_MISSING",
             )
-        matches = await (
-            self.profile_repository.configuration_transport_evidence_matches_current
-        )(
+        recorded = await self.profile_repository.record_runner_configuration_evidence(
             session,
             runtime_id=report.runtime_id,
             provider_id=provider_id,
-            evidence=report.execution_policy,
+            evidence=report.runtime_configuration,
+            observed_at=report.reported_at,
         )
-        if not matches:
+        if recorded is None:
             return _configuration_failure(
                 runtime.desired_generation,
                 "RUNTIME_CONFIGURATION_RUNNER_EVIDENCE_MISMATCH",

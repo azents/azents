@@ -10,7 +10,6 @@ from typing import TypedDict
 
 import pytest
 
-from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 from azents_runtime_control.runner import (
     RunnerControlClient,
     RunnerOperationCancel,
@@ -29,6 +28,7 @@ from azents_runtime_control.runner_transfer import (
     RunnerTransferIntent,
     RunnerTransferResult,
 )
+from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 
 
 class FakeRunnerControlClient(RunnerControlClient):
@@ -691,16 +691,10 @@ def _registration() -> RunnerRegistration:
         workspace_path="/workspace/agent",
         metadata=metadata,
         auth_credential_id="credential-1",
-        execution_policy=RuntimeExecutionPolicyEvidence(
-            snapshot_id="snapshot-1",
+        runtime_configuration=RuntimeConfigurationEvidence(
+            revision_id="revision-1",
             digest="d" * 64,
             desired_generation=5,
-            module_versions={"docker": 1, "runtime.resources": 1},
-            source_versions={
-                "profile": 1,
-                "workspace": 1,
-                "agent": 1,
-            },
         ),
     )
 

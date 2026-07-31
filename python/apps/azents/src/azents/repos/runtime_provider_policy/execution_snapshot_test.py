@@ -5,7 +5,6 @@
 import datetime
 from unittest.mock import AsyncMock, Mock
 
-from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import RuntimePolicySnapshotApplicationState
@@ -16,7 +15,7 @@ from azents.core.runtime_execution_policy import (
     standard_runtime_execution_policy,
 )
 
-from .data import RuntimePolicySnapshot
+from .data import LegacyRuntimeExecutionPolicyEvidence, RuntimePolicySnapshot
 from .repository import (
     RuntimeProviderPolicyRepository,
     _snapshot_evidence_matches,
@@ -83,8 +82,8 @@ def _evidence(
     desired_generation: int = 7,
     module_versions: dict[str, int] | None = None,
     source_versions: dict[str, int] | None = None,
-) -> RuntimeExecutionPolicyEvidence:
-    return RuntimeExecutionPolicyEvidence(
+) -> LegacyRuntimeExecutionPolicyEvidence:
+    return LegacyRuntimeExecutionPolicyEvidence(
         snapshot_id=snapshot_id,
         digest=digest,
         desired_generation=desired_generation,

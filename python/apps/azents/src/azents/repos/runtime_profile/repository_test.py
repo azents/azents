@@ -5,7 +5,7 @@ import datetime
 import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
-from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
+from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -15,10 +15,6 @@ from azents.core.enums import (
     RuntimeProviderLifecycleState,
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
-)
-from azents.core.runtime_execution_policy import (
-    digest_runtime_execution_policy,
-    standard_runtime_execution_policy,
 )
 from azents.core.runtime_profile import (
     RuntimeConfigurationResolutionStatus,
@@ -205,10 +201,10 @@ async def test_profile_ownership_and_optimistic_replacement(
             )
 
 
-async def test_configuration_transport_evidence_does_not_promote_revision(
+async def test_configuration_evidence_promotes_after_provider_and_runner_ack(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """Phase-2 transport evidence validates without claiming Profile adoption."""
+    """Applied configuration advances only after exact Provider and Runner evidence."""
     repository = RuntimeProfileRepository()
     runtime_repository = AgentRuntimeRepository()
     async with rdb_session_manager() as session:
@@ -303,6 +299,27 @@ async def test_configuration_transport_evidence_does_not_promote_revision(
                 target_desired_generation=runtime.desired_generation,
             ),
         )
+        blocked_revision = await repository.create_configuration_revision(
+            session,
+            create=RuntimeConfigurationRevisionCreate(
+                runtime_id=runtime.id,
+                provider_id=provider_id,
+                provider_capability_revision_id=contract.id,
+                infrastructure_profile_id=infrastructure.id,
+                infrastructure_profile_version=infrastructure.version,
+                workspace_runtime_profile_id=workspace_profile.id,
+                workspace_runtime_profile_version=workspace_profile.version,
+                agent_selection_version=2,
+                resolution_status=RuntimeConfigurationResolutionStatus.BLOCKED,
+                reason_code="MISSING_CAPABILITY",
+                required_capabilities=("network_policy",),
+                missing_capabilities=("network_policy",),
+                resolved_configuration=None,
+                source_trace={},
+                digest="c" * 64,
+                target_desired_generation=runtime.desired_generation,
+            ),
+        )
         await session.execute(
             sa.update(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime.id)
@@ -311,46 +328,84 @@ async def test_configuration_transport_evidence_does_not_promote_revision(
                 desired_runtime_configuration_revision_id=revision.id,
             )
         )
-        evidence = RuntimeExecutionPolicyEvidence(
-            snapshot_id=revision.id,
-            digest=digest_runtime_execution_policy(standard_runtime_execution_policy()),
+        evidence = RuntimeConfigurationEvidence(
+            revision_id=revision.id,
+            digest=revision.digest,
             desired_generation=runtime.desired_generation,
-            module_versions={"docker": 1, "runtime.resources": 1},
-            source_versions={"profile": 1, "workspace": 1, "agent": 1},
         )
-        stale_evidence = RuntimeExecutionPolicyEvidence(
-            snapshot_id=revision.id,
-            digest=evidence.digest,
+        stale_evidence = RuntimeConfigurationEvidence(
+            revision_id=revision.id,
+            digest="0" * 64,
             desired_generation=runtime.desired_generation,
-            module_versions=evidence.module_versions,
-            source_versions={"profile": 1, "workspace": 1, "agent": 2},
         )
 
-        assert not await repository.configuration_transport_evidence_matches_current(
+        assert not await repository.configuration_evidence_matches_current(
             session,
             runtime_id=runtime.id,
             provider_id=provider_id,
             evidence=stale_evidence,
         )
-        assert await repository.configuration_transport_evidence_matches_current(
+        assert await repository.configuration_evidence_matches_current(
             session,
             runtime_id=runtime.id,
             provider_id=provider_id,
             evidence=evidence,
         )
-        persisted_revision = await repository.get_configuration_revision(
+        await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(
+                desired_runtime_configuration_revision_id=blocked_revision.id,
+            )
+        )
+        assert not await repository.configuration_evidence_matches_current(
             session,
-            revision_id=revision.id,
+            runtime_id=runtime.id,
+            provider_id=provider_id,
+            evidence=evidence,
+        )
+        await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(
+                desired_runtime_configuration_revision_id=revision.id,
+            )
+        )
+        acknowledged_at = datetime.datetime(2026, 7, 30, tzinfo=datetime.UTC)
+        provider_revision = await repository.record_provider_configuration_evidence(
+            session,
+            runtime_id=runtime.id,
+            provider_id=provider_id,
+            evidence=evidence,
+            acknowledged_at=acknowledged_at,
+        )
+        provider_runtime = await runtime_repository.get_by_id(session, runtime.id)
+        assert provider_revision is not None
+        assert provider_revision.provider_reported_digest == evidence.digest
+        assert provider_revision.runner_reported_digest is None
+        assert provider_revision.provider_acknowledged_at == acknowledged_at
+        assert provider_runtime is not None
+        assert provider_runtime.applied_runtime_configuration_revision_id is None
+
+        observed_at = datetime.datetime(2026, 7, 30, 0, 0, 1, tzinfo=datetime.UTC)
+        persisted_revision = await repository.record_runner_configuration_evidence(
+            session,
+            runtime_id=runtime.id,
+            provider_id=provider_id,
+            evidence=evidence,
+            observed_at=observed_at,
         )
         persisted_runtime = await runtime_repository.get_by_id(session, runtime.id)
 
         assert persisted_revision is not None
-        assert persisted_revision.provider_reported_digest is None
-        assert persisted_revision.runner_reported_digest is None
-        assert persisted_revision.provider_acknowledged_at is None
-        assert persisted_revision.runtime_observed_at is None
+        assert persisted_revision.provider_reported_digest == evidence.digest
+        assert persisted_revision.runner_reported_digest == evidence.digest
+        assert persisted_revision.provider_acknowledged_at == acknowledged_at
+        assert persisted_revision.runtime_observed_at == observed_at
         assert persisted_runtime is not None
-        assert persisted_runtime.applied_runtime_configuration_revision_id is None
+        assert (
+            persisted_runtime.applied_runtime_configuration_revision_id == revision.id
+        )
 
 
 async def test_reconcile_enqueue_is_idempotent_and_claimed_once(

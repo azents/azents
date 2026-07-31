@@ -13,7 +13,6 @@ _REQUIRED_ENV = {
     "AZ_RUNTIME_CONTROL_ENDPOINT": "control:8020",
     "AZ_RUNTIME_CONTROL_ALLOW_INSECURE": "true",
     "AZ_RUNTIME_PROVIDER_ID": "provider-docker",
-    "AZ_RUNTIME_PROVIDER_DOCKER_NETWORK": "azents-runtime",
     "AZ_RUNTIME_PROVIDER_HOST_DATA_ROOT": "/tmp/azents",
     "AZ_RUNTIME_PROVIDER_CREDENTIAL": "test-provider-credential",
 }

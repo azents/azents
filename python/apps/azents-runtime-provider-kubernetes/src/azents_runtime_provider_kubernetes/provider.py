@@ -2,7 +2,6 @@
 
 import dataclasses
 import ipaddress
-import json
 import logging
 import re
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -10,11 +9,14 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import PurePosixPath
 
-from azents_runtime_control.execution_policy import (
-    RuntimeExecutionPolicy,
-    RuntimeExecutionPolicyEvidence,
-    RuntimeExecutionStorageMode,
-    parse_execution_policy_envelope,
+from azents_runtime_control.runtime_configuration import (
+    KubernetesContainerResources as ResolvedKubernetesContainerResources,
+)
+from azents_runtime_control.runtime_configuration import (
+    KubernetesPodProfileV1,
+    RuntimeConfigurationEvidence,
+    RuntimeNetworkPolicy,
+    parse_runtime_configuration_envelope,
 )
 
 from azents_runtime_provider_kubernetes.kubernetes_api import (
@@ -103,12 +105,10 @@ _LABEL_AGENT_ID = "azents/agent-id"
 _LABEL_WORKSPACE_ID = "azents/workspace-id"
 _LABEL_DESIRED_GENERATION = "azents/desired-generation"
 _LABEL_PROVIDER_GENERATION = "azents/provider-generation"
-_LABEL_EXECUTION_POLICY_MANAGED = "azents/execution-policy-managed"
+_LABEL_CONFIGURATION_MANAGED = "azents/runtime-configuration-managed"
 _ANNOTATION_WORKSPACE_PATH = "azents/workspace-path"
-_ANNOTATION_POLICY_SNAPSHOT_ID = "azents/execution-policy-snapshot-id"
-_ANNOTATION_POLICY_DIGEST = "azents/execution-policy-digest"
-_ANNOTATION_POLICY_MODULE_VERSIONS = "azents/execution-policy-module-versions"
-_ANNOTATION_POLICY_SOURCE_VERSIONS = "azents/execution-policy-source-versions"
+_ANNOTATION_CONFIGURATION_REVISION_ID = "azents/runtime-configuration-revision-id"
+_ANNOTATION_CONFIGURATION_DIGEST = "azents/runtime-configuration-digest"
 _LABEL_IMAGE_GENERATION = "azents/image-generation"
 
 _ENV_CONTROL_ENDPOINT = "AZ_RUNTIME_CONTROL_ENDPOINT"
@@ -124,11 +124,9 @@ _ENV_DESIRED_GENERATION = "AZ_RUNTIME_DESIRED_GENERATION"
 _ENV_RUNNER_AUTH_TOKEN = "AZ_RUNTIME_RUNNER_AUTH_TOKEN"
 _ENV_RUNNER_AUTH_CREDENTIAL_ID = "AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"
 _ENV_WORKSPACE_PATH = "AZ_AGENT_WORKSPACE_PATH"
-_ENV_POLICY_SNAPSHOT_ID = "AZ_RUNTIME_EXECUTION_POLICY_SNAPSHOT_ID"
-_ENV_POLICY_DIGEST = "AZ_RUNTIME_EXECUTION_POLICY_DIGEST"
-_ENV_POLICY_DESIRED_GENERATION = "AZ_RUNTIME_EXECUTION_POLICY_DESIRED_GENERATION"
-_ENV_POLICY_MODULE_VERSIONS = "AZ_RUNTIME_EXECUTION_POLICY_MODULE_VERSIONS"
-_ENV_POLICY_SOURCE_VERSIONS = "AZ_RUNTIME_EXECUTION_POLICY_SOURCE_VERSIONS"
+_ENV_CONFIGURATION_REVISION_ID = "AZ_RUNTIME_CONFIGURATION_REVISION_ID"
+_ENV_CONFIGURATION_DIGEST = "AZ_RUNTIME_CONFIGURATION_DIGEST"
+_ENV_CONFIGURATION_DESIRED_GENERATION = "AZ_RUNTIME_CONFIGURATION_DESIRED_GENERATION"
 _ENV_DOCKER_HOST = "DOCKER_HOST"
 _ENV_TESTCONTAINERS_HOST_OVERRIDE = "TESTCONTAINERS_HOST_OVERRIDE"
 _ENV_TESTCONTAINERS_CONNECTION_MODE = "TESTCONTAINERS_CONNECTION_MODE"
@@ -160,8 +158,8 @@ class InvalidResetFinalDesiredState(ValueError):
     """Reset command did not provide an explicit final desired state."""
 
 
-class UnsupportedExecutionPolicy(ValueError):
-    """Effective policy cannot be enforced by this Provider phase."""
+class UnsupportedRuntimeConfiguration(ValueError):
+    """Resolved configuration cannot be enforced by this Provider."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -170,9 +168,6 @@ class KubernetesRuntimeProviderConfig:
 
     provider_id: str
     namespace: str
-    storage_class_name: str
-    pvc_storage_request: str
-    runner_resources: ContainerResources | None
     runner_env: Mapping[str, str]
     engine_image: str
     runtime_control_namespace: str
@@ -183,8 +178,6 @@ class KubernetesRuntimeProviderConfig:
     network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...] = ()
     image_pull_secrets: tuple[LocalObjectReference, ...] = ()
     pod_annotations: Mapping[str, str] = dataclasses.field(default_factory=dict)
-    pod_node_selector: Mapping[str, str] = dataclasses.field(default_factory=dict)
-    pod_tolerations: tuple[Toleration, ...] = ()
     workspace_mount_path: str = "/workspace/agent"
 
 
@@ -212,6 +205,7 @@ class KubernetesRuntimeProvider:
             *config.network_hard_cap_denied_cidrs,
         ):
             _ip_network(cidr)
+        _validate_network_hard_cap_extra_egress(config)
         _immutable_image_reference(config.engine_image, "engine image")
         self._api = api
         self._config = config
@@ -229,7 +223,7 @@ class KubernetesRuntimeProvider:
             extra=_log_context(command, self._config),
         )
         await self._ensure_pvc(command, policy)
-        await self._ensure_network_policy(command)
+        await self._ensure_network_policy(command, policy)
         await self._ensure_pod(command, policy, replace=False)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.START,
@@ -270,7 +264,7 @@ class KubernetesRuntimeProvider:
             extra=_log_context(command, self._config),
         )
         await self._ensure_pvc(command, policy)
-        await self._ensure_network_policy(command)
+        await self._ensure_network_policy(command, policy)
         await self._ensure_pod(command, policy, replace=True)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.RESTART,
@@ -310,7 +304,7 @@ class KubernetesRuntimeProvider:
         )
         await self._ensure_pvc(command, policy)
         if command.reset_final_desired_state is RuntimeDesiredState.RUNNING:
-            await self._ensure_network_policy(command)
+            await self._ensure_network_policy(command, policy)
             await self._ensure_pod(command, policy, replace=False)
             report = await self.observe(command)
         else:
@@ -366,7 +360,7 @@ class KubernetesRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeProviderReport:
         """Observe one Runtime Pod/PVC/NetworkPolicy resource set."""
-        self._validate_command(command)
+        policy = self._validate_command(command)
         pod = await self._api.get_pod(
             _pod_name(command.identity.runtime_id),
             self._config.namespace,
@@ -389,7 +383,10 @@ class KubernetesRuntimeProvider:
             _network_policy_name(command.identity.runtime_id),
             self._config.namespace,
         )
-        if network_policy is None or network_policy != self._network_policy(command):
+        if network_policy is None or network_policy != self._network_policy(
+            command,
+            policy,
+        ):
             return self._report(
                 command,
                 observed_state=RuntimeProviderObservedState.STARTING,
@@ -480,7 +477,7 @@ class KubernetesRuntimeProvider:
     async def _ensure_pvc(
         self,
         command: RuntimeLifecycleCommand,
-        policy: RuntimeExecutionPolicy,
+        policy: KubernetesPodProfileV1,
     ) -> None:
         desired = self._pvc(command, policy)
         existing = await self._api.get_pvc(
@@ -515,8 +512,9 @@ class KubernetesRuntimeProvider:
     async def _ensure_network_policy(
         self,
         command: RuntimeLifecycleCommand,
+        policy: KubernetesPodProfileV1,
     ) -> None:
-        network_policy = self._network_policy(command)
+        network_policy = self._network_policy(command, policy)
         _LOGGER.info(
             "Kubernetes Runtime ensuring NetworkPolicy",
             extra={
@@ -529,7 +527,7 @@ class KubernetesRuntimeProvider:
     async def _ensure_pod(
         self,
         command: RuntimeLifecycleCommand,
-        policy: RuntimeExecutionPolicy,
+        policy: KubernetesPodProfileV1,
         *,
         replace: bool,
     ) -> None:
@@ -574,7 +572,7 @@ class KubernetesRuntimeProvider:
         self,
         pod: PodResource,
         command: RuntimeLifecycleCommand,
-        policy: RuntimeExecutionPolicy,
+        policy: KubernetesPodProfileV1,
     ) -> bool:
         if _pod_blocks_recreate(pod):
             return False
@@ -598,22 +596,29 @@ class KubernetesRuntimeProvider:
             return False
         if pod.spec.security_context != expected.spec.security_context:
             return False
-        if pod.spec.service_account_name not in {None, "default"}:
+        expected_service_account = expected.spec.service_account_name
+        if expected_service_account is None:
+            if pod.spec.service_account_name not in {None, "default"}:
+                return False
+        elif pod.spec.service_account_name != expected_service_account:
             return False
-        if pod.spec.automount_service_account_token:
+        if (
+            pod.spec.automount_service_account_token
+            != expected.spec.automount_service_account_token
+        ):
             return False
         if dict(pod.spec.node_selector) != dict(expected.spec.node_selector):
             return False
-        if not set(self._config.pod_tolerations).issubset(set(pod.spec.tolerations)):
+        if not set(expected.spec.tolerations).issubset(set(pod.spec.tolerations)):
             return False
         return True
 
     def _pvc(
         self,
         command: RuntimeLifecycleCommand,
-        policy: RuntimeExecutionPolicy,
+        policy: KubernetesPodProfileV1,
     ) -> PersistentVolumeClaimResource:
-        persistent_storage_bytes = policy.resources.persistent_storage_bytes
+        volume = policy.workspace_volume
         return PersistentVolumeClaimResource(
             metadata=ObjectMeta(
                 name=_pvc_name(command.identity.runtime_id),
@@ -621,32 +626,22 @@ class KubernetesRuntimeProvider:
                 labels=self._labels(command),
                 annotations={
                     **self._base_annotations(),
-                    **self._policy_annotations(command),
+                    **self._configuration_annotations(command),
                 },
             ),
             spec=PersistentVolumeClaimSpec(
-                storage_class_name=self._config.storage_class_name,
+                storage_class_name=volume.storage_class_name,
                 access_modes=("ReadWriteOnce",),
-                storage_request=(
-                    str(persistent_storage_bytes)
-                    if persistent_storage_bytes is not None
-                    else self._config.pvc_storage_request
-                ),
+                storage_request=str(volume.storage_request_bytes),
             ),
         )
 
     def _pod(
         self,
         command: RuntimeLifecycleCommand,
-        policy: RuntimeExecutionPolicy,
+        policy: KubernetesPodProfileV1,
     ) -> PodResource:
-        docker_enabled = policy.docker.enabled
-        docker_storage_capacity = policy.docker.storage_capacity_bytes
-        runtime_ephemeral_storage = policy.resources.ephemeral_storage_bytes
-        if docker_enabled and docker_storage_capacity is None:
-            raise AssertionError("Docker storage capacity is required")
-        if docker_enabled and runtime_ephemeral_storage is None:
-            raise AssertionError("Runtime ephemeral storage is required")
+        dind = policy.dind
         return PodResource(
             metadata=ObjectMeta(
                 name=_pod_name(command.identity.runtime_id),
@@ -655,12 +650,21 @@ class KubernetesRuntimeProvider:
                 annotations=self._pod_annotations(command),
             ),
             spec=PodSpec(
-                service_account_name=None,
+                service_account_name=policy.service_account_name,
                 automount_service_account_token=False,
                 image_pull_secrets=self._config.image_pull_secrets,
                 security_context=self._pod_security_context(),
-                node_selector=self._config.pod_node_selector,
-                tolerations=self._config.pod_tolerations,
+                node_selector=policy.scheduling.node_selector,
+                tolerations=tuple(
+                    Toleration(
+                        key=item.key,
+                        operator=item.operator,
+                        value=item.value,
+                        effect=item.effect,
+                        toleration_seconds=item.toleration_seconds,
+                    )
+                    for item in policy.scheduling.tolerations
+                ),
                 containers=self._containers(command, policy),
                 volumes=(
                     PersistentVolumeClaimVolume(
@@ -677,15 +681,15 @@ class KubernetesRuntimeProvider:
                             EmptyDirVolume(
                                 name=_SHARED_TMP_VOLUME_NAME,
                                 medium=None,
-                                size_limit=str(runtime_ephemeral_storage),
+                                size_limit=str(dind.shared_temporary_storage_bytes),
                             ),
                             EmptyDirVolume(
                                 name=_ENGINE_STORAGE_VOLUME_NAME,
                                 medium=None,
-                                size_limit=str(docker_storage_capacity),
+                                size_limit=str(dind.docker_storage_bytes),
                             ),
                         )
-                        if docker_enabled
+                        if dind is not None
                         else ()
                     ),
                 ),
@@ -695,7 +699,7 @@ class KubernetesRuntimeProvider:
     def _containers(
         self,
         command: RuntimeLifecycleCommand,
-        policy: RuntimeExecutionPolicy,
+        policy: KubernetesPodProfileV1,
     ) -> tuple[ContainerSpec, ...]:
         runner_mounts = [
             VolumeMount(
@@ -704,10 +708,9 @@ class KubernetesRuntimeProvider:
                 read_only=False,
             )
         ]
-        docker_enabled = policy.docker.enabled
+        dind = policy.dind
         runner_env = self._env(command)
-        docker_resources = _docker_resources(policy) if docker_enabled else None
-        if docker_enabled:
+        if dind is not None:
             runner_mounts.append(
                 VolumeMount(
                     name=_ENGINE_SOCKET_VOLUME_NAME,
@@ -732,7 +735,7 @@ class KubernetesRuntimeProvider:
             command=None,
             args=(),
             working_dir=self._workspace_mount_path,
-            resources=self._config.runner_resources,
+            resources=_container_resources(policy.runner_resources),
             security_context=_unprivileged_security_context(
                 uid=_RUNNER_UID,
                 gid=_RUNNER_GID,
@@ -743,10 +746,8 @@ class KubernetesRuntimeProvider:
             ),
             volume_mounts=tuple(runner_mounts),
         )
-        if not docker_enabled:
+        if dind is None:
             return (runner,)
-        if docker_resources is None:
-            raise AssertionError("Docker resources are required")
         engine = ContainerSpec(
             name=_ENGINE_CONTAINER_NAME,
             image=self._config.engine_image,
@@ -757,7 +758,7 @@ class KubernetesRuntimeProvider:
                 f"--group={_ENGINE_SOCKET_GROUP}",
             ),
             working_dir="/",
-            resources=docker_resources,
+            resources=_container_resources(dind.engine_resources),
             security_context=_engine_security_context(),
             readiness_probe=_engine_probe(),
             env=(),
@@ -789,13 +790,14 @@ class KubernetesRuntimeProvider:
     def _network_policy(
         self,
         command: RuntimeLifecycleCommand,
+        policy: KubernetesPodProfileV1,
     ) -> NetworkPolicyResource:
         return NetworkPolicyResource(
             metadata=ObjectMeta(
                 name=_network_policy_name(command.identity.runtime_id),
                 namespace=self._config.namespace,
                 labels=self._labels(command),
-                annotations=self._policy_annotations(command),
+                annotations=self._configuration_annotations(command),
             ),
             spec=NetworkPolicySpec(
                 pod_selector=LabelSelector(
@@ -804,7 +806,7 @@ class KubernetesRuntimeProvider:
                         _LABEL_RUNTIME_ID: command.identity.runtime_id,
                         _LABEL_DESIRED_GENERATION: str(command.desired_generation),
                         _LABEL_PROVIDER_GENERATION: str(command.provider_generation),
-                        _LABEL_EXECUTION_POLICY_MANAGED: "true",
+                        _LABEL_CONFIGURATION_MANAGED: "true",
                     }
                 ),
                 policy_types=("Ingress", "Egress"),
@@ -812,7 +814,10 @@ class KubernetesRuntimeProvider:
                 egress=(
                     _dns_egress_rule(),
                     _runtime_control_egress_rule(self._config),
-                    *_permitted_egress_rules(self._config),
+                    *_permitted_egress_rules(
+                        self._config,
+                        policy.network_policy,
+                    ),
                 ),
             ),
         )
@@ -831,7 +836,7 @@ class KubernetesRuntimeProvider:
             _LABEL_DESIRED_GENERATION: str(command.desired_generation),
             _LABEL_PROVIDER_GENERATION: str(command.provider_generation),
             _LABEL_IMAGE_GENERATION: _IMAGE_GENERATION,
-            _LABEL_EXECUTION_POLICY_MANAGED: "true",
+            _LABEL_CONFIGURATION_MANAGED: "true",
         }
 
     def _stable_labels(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
@@ -851,7 +856,7 @@ class KubernetesRuntimeProvider:
         return {
             **self._config.pod_annotations,
             **self._base_annotations(),
-            **self._policy_annotations(command),
+            **self._configuration_annotations(command),
         }
 
     def _env(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
@@ -859,7 +864,7 @@ class KubernetesRuntimeProvider:
             **self._stable_env(command),
             **self._runner_env,
             **self._runner_auth_env(command),
-            **self._policy_env(command),
+            **self._configuration_env(command),
             _ENV_PROVIDER_GENERATION: str(command.provider_generation),
         }
 
@@ -888,30 +893,22 @@ class KubernetesRuntimeProvider:
         ).lower()
         return env
 
-    def _policy_annotations(
+    def _configuration_annotations(
         self,
         command: RuntimeLifecycleCommand,
     ) -> dict[str, str]:
-        evidence = command.execution_policy.evidence
+        evidence = command.runtime_configuration.evidence
         return {
-            _ANNOTATION_POLICY_SNAPSHOT_ID: evidence.snapshot_id,
-            _ANNOTATION_POLICY_DIGEST: evidence.digest,
-            _ANNOTATION_POLICY_MODULE_VERSIONS: _canonical_mapping(
-                evidence.module_versions
-            ),
-            _ANNOTATION_POLICY_SOURCE_VERSIONS: _canonical_mapping(
-                evidence.source_versions
-            ),
+            _ANNOTATION_CONFIGURATION_REVISION_ID: evidence.revision_id,
+            _ANNOTATION_CONFIGURATION_DIGEST: evidence.digest,
         }
 
-    def _policy_env(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
-        evidence = command.execution_policy.evidence
+    def _configuration_env(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
+        evidence = command.runtime_configuration.evidence
         return {
-            _ENV_POLICY_SNAPSHOT_ID: evidence.snapshot_id,
-            _ENV_POLICY_DIGEST: evidence.digest,
-            _ENV_POLICY_DESIRED_GENERATION: str(evidence.desired_generation),
-            _ENV_POLICY_MODULE_VERSIONS: _canonical_mapping(evidence.module_versions),
-            _ENV_POLICY_SOURCE_VERSIONS: _canonical_mapping(evidence.source_versions),
+            _ENV_CONFIGURATION_REVISION_ID: evidence.revision_id,
+            _ENV_CONFIGURATION_DIGEST: evidence.digest,
+            _ENV_CONFIGURATION_DESIRED_GENERATION: str(evidence.desired_generation),
         }
 
     def _report(
@@ -934,7 +931,7 @@ class KubernetesRuntimeProvider:
             diagnostic={},
             reported_at=datetime.now(UTC),
             terminal_delete_acknowledged=False,
-            execution_policy=command.execution_policy.evidence,
+            runtime_configuration=command.runtime_configuration.evidence,
         )
 
     def _report_from_pod(self, pod: PodResource) -> RuntimeProviderReport:
@@ -959,7 +956,7 @@ class KubernetesRuntimeProvider:
             diagnostic={"source": "pod"},
             reported_at=datetime.now(UTC),
             terminal_delete_acknowledged=False,
-            execution_policy=_policy_evidence_from_metadata(
+            runtime_configuration=_configuration_evidence_from_metadata(
                 pod.metadata.annotations,
                 desired_generation=_int_label(
                     pod.metadata.labels,
@@ -996,7 +993,7 @@ class KubernetesRuntimeProvider:
                 diagnostic={"source": "pod_watch", "event_type": event.event_type},
                 reported_at=datetime.now(UTC),
                 terminal_delete_acknowledged=False,
-                execution_policy=_policy_evidence_from_metadata(
+                runtime_configuration=_configuration_evidence_from_metadata(
                     event.pod.metadata.annotations,
                     desired_generation=_int_label(
                         event.pod.metadata.labels,
@@ -1033,7 +1030,7 @@ class KubernetesRuntimeProvider:
             diagnostic={"source": "pvc"},
             reported_at=datetime.now(UTC),
             terminal_delete_acknowledged=False,
-            execution_policy=_policy_evidence_from_metadata(
+            runtime_configuration=_configuration_evidence_from_metadata(
                 pvc.metadata.annotations,
                 desired_generation=_int_label(
                     pvc.metadata.labels,
@@ -1045,23 +1042,23 @@ class KubernetesRuntimeProvider:
     def _validate_command(
         self,
         command: RuntimeLifecycleCommand,
-    ) -> RuntimeExecutionPolicy:
-        policy = parse_execution_policy_envelope(
-            command.execution_policy,
+    ) -> KubernetesPodProfileV1:
+        configuration = parse_runtime_configuration_envelope(
+            command.runtime_configuration,
             desired_generation=command.desired_generation,
+            expected_provider_kind="kubernetes",
         )
-        if policy.docker.enabled:
-            _immutable_image_reference(command.runner_image, "Runner image")
-            _docker_resources(policy)
-            if policy.docker.storage_mode is not RuntimeExecutionStorageMode.EPHEMERAL:
-                raise UnsupportedExecutionPolicy(
-                    "Kubernetes Runtime Provider supports ephemeral Docker "
-                    "storage only."
-                )
-        elif policy.docker.storage_mode is not RuntimeExecutionStorageMode.NONE:
-            raise UnsupportedExecutionPolicy(
-                "Docker storage requires Docker to be enabled."
+        if configuration.provider.logical_id != self._config.provider_id:
+            raise UnsupportedRuntimeConfiguration(
+                "Runtime configuration is bound to a different Kubernetes Provider."
             )
+        policy = configuration.effective_profile
+        if not isinstance(policy, KubernetesPodProfileV1):
+            raise UnsupportedRuntimeConfiguration(
+                "Kubernetes Runtime Provider requires a Kubernetes Pod Profile."
+            )
+        if policy.dind is not None:
+            _immutable_image_reference(command.runner_image, "Runner image")
         return policy
 
 
@@ -1119,33 +1116,25 @@ def _engine_probe() -> Probe:
 
 def _immutable_image_reference(value: str, name: str) -> str:
     if not _IMMUTABLE_IMAGE_RE.fullmatch(value):
-        raise UnsupportedExecutionPolicy(
+        raise UnsupportedRuntimeConfiguration(
             f"{name} must use an immutable sha256 digest reference."
         )
     return value
 
 
-def _docker_resources(
-    policy: RuntimeExecutionPolicy,
-) -> ContainerResources:
-    resources = policy.resources
-    cpu_request_millicores = resources.cpu_request_millicores
-    cpu_limit_millicores = resources.cpu_limit_millicores
-    memory_request_bytes = resources.memory_request_bytes
-    memory_limit_bytes = resources.memory_limit_bytes
-    ephemeral_storage_bytes = resources.ephemeral_storage_bytes
-    if ephemeral_storage_bytes is None:
-        raise AssertionError("execution ephemeral storage is required")
+def _container_resources(
+    resources: ResolvedKubernetesContainerResources,
+) -> ContainerResources | None:
     requests = _kubernetes_resource_values(
-        cpu_millicores=cpu_request_millicores,
-        memory_bytes=memory_request_bytes,
-        ephemeral_storage_bytes=ephemeral_storage_bytes,
+        cpu_millicores=resources.cpu_request_millicores,
+        memory_bytes=resources.memory_request_bytes,
     )
     limits = _kubernetes_resource_values(
-        cpu_millicores=cpu_limit_millicores,
-        memory_bytes=memory_limit_bytes,
-        ephemeral_storage_bytes=ephemeral_storage_bytes,
+        cpu_millicores=resources.cpu_limit_millicores,
+        memory_bytes=resources.memory_limit_bytes,
     )
+    if not requests and not limits:
+        return None
     return ContainerResources(
         requests=requests,
         limits=limits,
@@ -1157,9 +1146,8 @@ def _kubernetes_resource_values(
     *,
     cpu_millicores: int | None,
     memory_bytes: int | None,
-    ephemeral_storage_bytes: int,
 ) -> dict[str, str]:
-    values = {"ephemeral-storage": str(ephemeral_storage_bytes)}
+    values: dict[str, str] = {}
     if cpu_millicores is not None and cpu_millicores > 0:
         values["cpu"] = _canonical_millicores(cpu_millicores)
     if memory_bytes is not None and memory_bytes > 0:
@@ -1213,26 +1201,97 @@ def _runtime_control_egress_rule(
 
 def _permitted_egress_rules(
     config: KubernetesRuntimeProviderConfig,
+    policy: RuntimeNetworkPolicy,
 ) -> tuple[NetworkPolicyEgressRule, ...]:
-    hard_cap_denied = tuple(
+    denied = tuple(_ip_network(value) for value in policy.denied_cidrs) + tuple(
         _ip_network(value) for value in config.network_hard_cap_denied_cidrs
     )
     hard_cap_allowed = tuple(
         _ip_network(value) for value in config.network_hard_cap_allowed_cidrs
     )
+    requested = tuple(_ip_network(value) for value in policy.allowed_cidrs)
+    if not requested:
+        requested = (
+            ipaddress.ip_network("0.0.0.0/0"),
+            ipaddress.ip_network("::/0"),
+        )
+    allowed = (
+        tuple(
+            intersection
+            for requested_network in requested
+            for hard_cap_network in hard_cap_allowed
+            if (
+                intersection := _network_intersection(
+                    requested_network,
+                    hard_cap_network,
+                )
+            )
+            is not None
+        )
+        if hard_cap_allowed
+        else requested
+    )
     rules: list[NetworkPolicyEgressRule] = []
-    for internet in (
-        ipaddress.ip_network("0.0.0.0/0"),
-        ipaddress.ip_network("::/0"),
-    ):
-        rule = _bounded_ip_block_rule(internet, denied=hard_cap_denied)
-        if rule is not None:
-            rules.append(rule)
-    for allowed in hard_cap_allowed:
-        rule = _bounded_ip_block_rule(allowed, denied=())
+    for network in allowed:
+        rule = _bounded_ip_block_rule(network, denied=denied)
         if rule is not None:
             rules.append(rule)
     return (*rules, *config.network_hard_cap_extra_egress)
+
+
+def _validate_network_hard_cap_extra_egress(
+    config: KubernetesRuntimeProviderConfig,
+) -> None:
+    allowed = tuple(
+        _ip_network(value) for value in config.network_hard_cap_allowed_cidrs
+    )
+    denied = tuple(_ip_network(value) for value in config.network_hard_cap_denied_cidrs)
+    for rule in config.network_hard_cap_extra_egress:
+        for peer in rule.peers:
+            if peer.ip_block is None:
+                continue
+            network = _ip_network(peer.ip_block.cidr)
+            exceptions = tuple(
+                _ip_network(value) for value in peer.ip_block.except_cidrs
+            )
+            if any(
+                exception == network or not _subnet_of_same_family(exception, network)
+                for exception in exceptions
+            ):
+                raise UnsupportedRuntimeConfiguration(
+                    "Provider extra egress IPBlock exceptions must be strict "
+                    "subnets of their CIDR."
+                )
+            if allowed and not any(
+                _subnet_of_same_family(network, allowed_network)
+                for allowed_network in allowed
+            ):
+                raise UnsupportedRuntimeConfiguration(
+                    "Provider extra egress IPBlock exceeds the network hard cap."
+                )
+            for denied_network in denied:
+                overlap = _network_intersection(network, denied_network)
+                if overlap is None:
+                    continue
+                if not any(
+                    _subnet_of_same_family(overlap, exception)
+                    for exception in exceptions
+                ):
+                    raise UnsupportedRuntimeConfiguration(
+                        "Provider extra egress IPBlock bypasses a denied network "
+                        "hard cap."
+                    )
+
+
+def _network_intersection(
+    left: ipaddress.IPv4Network | ipaddress.IPv6Network,
+    right: ipaddress.IPv4Network | ipaddress.IPv6Network,
+) -> ipaddress.IPv4Network | ipaddress.IPv6Network | None:
+    if _subnet_of_same_family(left, right):
+        return left
+    if _subnet_of_same_family(right, left):
+        return right
+    return None
 
 
 def _bounded_ip_block_rule(
@@ -1276,7 +1335,7 @@ def _ip_network(value: str) -> ipaddress.IPv4Network | ipaddress.IPv6Network:
     try:
         return ipaddress.ip_network(value, strict=False)
     except ValueError as error:
-        raise UnsupportedExecutionPolicy(
+        raise UnsupportedRuntimeConfiguration(
             "Kubernetes NetworkPolicy destinations must be IP CIDRs."
         ) from error
 
@@ -1508,41 +1567,17 @@ def _int_label(labels: Mapping[str, str], key: str) -> int:
         return 0
 
 
-def _canonical_mapping(values: Mapping[str, int]) -> str:
-    return json.dumps(dict(values), sort_keys=True, separators=(",", ":"))
-
-
-def _policy_evidence_from_metadata(
+def _configuration_evidence_from_metadata(
     values: Mapping[str, str],
     *,
     desired_generation: int,
-) -> RuntimeExecutionPolicyEvidence:
-    snapshot_id = values.get(_ANNOTATION_POLICY_SNAPSHOT_ID)
-    digest = values.get(_ANNOTATION_POLICY_DIGEST)
-    module_versions = values.get(_ANNOTATION_POLICY_MODULE_VERSIONS)
-    source_versions = values.get(_ANNOTATION_POLICY_SOURCE_VERSIONS)
-    if (
-        snapshot_id is None
-        or digest is None
-        or module_versions is None
-        or source_versions is None
-    ):
-        raise ValueError("Runtime execution-policy metadata is incomplete.")
-    try:
-        parsed_modules = json.loads(module_versions)
-        parsed_sources = json.loads(source_versions)
-        if not isinstance(parsed_modules, dict) or not isinstance(parsed_sources, dict):
-            raise ValueError("Runtime execution-policy metadata is invalid.")
-        return RuntimeExecutionPolicyEvidence(
-            snapshot_id=str(snapshot_id),
-            digest=str(digest),
-            desired_generation=desired_generation,
-            module_versions={
-                str(key): int(value) for key, value in parsed_modules.items()
-            },
-            source_versions={
-                str(key): int(value) for key, value in parsed_sources.items()
-            },
-        )
-    except (TypeError, ValueError, json.JSONDecodeError) as error:
-        raise ValueError("Runtime execution-policy metadata is invalid.") from error
+) -> RuntimeConfigurationEvidence:
+    revision_id = values.get(_ANNOTATION_CONFIGURATION_REVISION_ID)
+    digest = values.get(_ANNOTATION_CONFIGURATION_DIGEST)
+    if revision_id is None or digest is None:
+        raise ValueError("Runtime configuration metadata is incomplete.")
+    return RuntimeConfigurationEvidence(
+        revision_id=revision_id,
+        digest=digest,
+        desired_generation=desired_generation,
+    )

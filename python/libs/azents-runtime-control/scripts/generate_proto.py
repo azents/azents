@@ -36,6 +36,11 @@ def main() -> None:
         / "azents"
         / "runtime_control"
         / "v1"
+        / "runtime_configuration.proto",
+        proto_root
+        / "azents"
+        / "runtime_control"
+        / "v1"
         / "runtime_provider_control.proto",
         proto_root
         / "azents"

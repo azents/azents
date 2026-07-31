@@ -4,12 +4,12 @@ import dataclasses
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from azents_runtime_control.execution_policy import (
-    RuntimeExecutionPolicyEnvelope,
-    RuntimeExecutionPolicyEvidence,
-)
 from azents_runtime_control.provider import (
     RuntimeLifecycleCommandType as RuntimeProviderCommandType,
+)
+from azents_runtime_control.runtime_configuration import (
+    RuntimeConfigurationEnvelope,
+    RuntimeConfigurationEvidence,
 )
 
 from azents.runtime.control_protocol.data import (
@@ -132,7 +132,7 @@ async def test_dispatch_provider_command_uses_provider_generation_fence() -> Non
             reset_final_desired_state=None,
             payload={"reason": "user"},
             deadline_at=now + timedelta(seconds=30),
-            execution_policy=_execution_policy(),
+            runtime_configuration=_runtime_configuration(),
         ),
         created_at=now,
     )
@@ -240,7 +240,7 @@ async def test_provider_reconnect_skips_previous_generation_requests() -> None:
             reset_final_desired_state=None,
             payload={"reason": "user"},
             deadline_at=now + timedelta(seconds=30),
-            execution_policy=_execution_policy(),
+            runtime_configuration=_runtime_configuration(),
         ),
         created_at=now,
     )
@@ -637,26 +637,20 @@ def _runner_registration() -> RuntimeRunnerRegistration:
         workspace_path="/workspace/agent",
         metadata={"image": "runner:v1"},
         auth_credential_id="credential-1",
-        execution_policy=_execution_policy().evidence,
+        runtime_configuration=_runtime_configuration().evidence,
         connection_id="runner-connection-1",
         owner_replica_id="control-a",
     )
 
 
-def _execution_policy() -> RuntimeExecutionPolicyEnvelope:
-    return RuntimeExecutionPolicyEnvelope(
-        evidence=RuntimeExecutionPolicyEvidence(
-            snapshot_id="snapshot-1",
+def _runtime_configuration() -> RuntimeConfigurationEnvelope:
+    return RuntimeConfigurationEnvelope(
+        evidence=RuntimeConfigurationEvidence(
+            revision_id="revision-1",
             digest="d" * 64,
             desired_generation=3,
-            module_versions={"docker": 1, "runtime.resources": 1},
-            source_versions={
-                "profile": 1,
-                "workspace": 1,
-                "agent": 1,
-            },
         ),
-        effective_policy_json="{}",
+        resolved_configuration_json="{}",
     )
 
 

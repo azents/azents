@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 import pytest
 from google.protobuf import timestamp_pb2
 
-from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 from azents_runtime_control.grpc_runner_client import (
     GrpcRunnerControlClient,
     RuntimeRunnerControlStreamClosed,
@@ -24,6 +23,7 @@ from azents_runtime_control.runner import (
     RunnerRegistration,
     RuntimeRunnerEventType,
 )
+from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 
 
 @pytest.mark.asyncio
@@ -731,17 +731,15 @@ def _registration() -> RunnerRegistration:
         workspace_path="/workspace/agent",
         metadata={"workspace_path_source": "provider"},
         auth_credential_id="credential-1",
-        execution_policy=_execution_policy_evidence(),
+        runtime_configuration=_runtime_configuration_evidence(),
     )
 
 
-def _execution_policy_evidence() -> RuntimeExecutionPolicyEvidence:
-    return RuntimeExecutionPolicyEvidence(
-        snapshot_id="snapshot-1",
+def _runtime_configuration_evidence() -> RuntimeConfigurationEvidence:
+    return RuntimeConfigurationEvidence(
+        revision_id="revision-1",
         digest="d" * 64,
         desired_generation=5,
-        module_versions={"docker": 1, "runtime.resources": 1},
-        source_versions={"profile": 1, "workspace": 1, "agent": 1},
     )
 
 

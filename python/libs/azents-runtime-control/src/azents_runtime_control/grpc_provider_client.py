@@ -12,15 +12,12 @@ from typing import Protocol, cast
 import grpc
 from google.protobuf import json_format, struct_pb2, timestamp_pb2
 
-from azents_runtime_control.execution_policy import (
-    RuntimeExecutionPolicyEnvelope,
-    RuntimeExecutionPolicyEvidence,
-)
 from azents_runtime_control.grpc_tls import (
     GrpcClientTlsConfig,
     create_grpc_aio_channel,
 )
 from azents_runtime_control.proto import (
+    runtime_configuration_pb2,
     runtime_provider_control_pb2,
     runtime_provider_control_pb2_grpc,
 )
@@ -38,6 +35,10 @@ from azents_runtime_control.provider import (
     RuntimeLifecycleCommandType,
     RuntimeProviderObservedState,
     RuntimeProviderReport,
+)
+from azents_runtime_control.runtime_configuration import (
+    RuntimeConfigurationEnvelope,
+    RuntimeConfigurationEvidence,
 )
 
 
@@ -376,8 +377,8 @@ def _accepted(
 def _command(
     message: runtime_provider_control_pb2.ProviderCommand,
 ) -> RuntimeLifecycleCommand:
-    if not message.HasField("execution_policy"):
-        raise ValueError("Runtime execution-policy envelope is required.")
+    if not message.HasField("runtime_configuration"):
+        raise ValueError("Runtime configuration envelope is required.")
     payload = json_value_from_struct(message.payload)
     return RuntimeLifecycleCommand(
         command_type=RuntimeLifecycleCommandType(message.command_type),
@@ -400,7 +401,9 @@ def _command(
         reset_final_desired_state=_optional_desired_state(
             message.reset_final_desired_state
         ),
-        execution_policy=_execution_policy_envelope(message.execution_policy),
+        runtime_configuration=_runtime_configuration_envelope(
+            message.runtime_configuration
+        ),
     )
 
 
@@ -465,8 +468,8 @@ def _report_message(
         reported_at=_timestamp(report.reported_at),
         terminal_delete_acknowledged=report.terminal_delete_acknowledged,
     )
-    message.execution_policy.CopyFrom(
-        _execution_policy_evidence_message(report.execution_policy)
+    message.runtime_configuration.CopyFrom(
+        _runtime_configuration_evidence_message(report.runtime_configuration)
     )
     return message
 
@@ -493,8 +496,8 @@ def _completion_message(
 def provider_report_from_message(
     message: runtime_provider_control_pb2.RuntimeProviderReport,
 ) -> RuntimeProviderReport:
-    if not message.HasField("execution_policy"):
-        raise ValueError("Runtime Provider execution-policy evidence is required.")
+    if not message.HasField("runtime_configuration"):
+        raise ValueError("Runtime Provider configuration evidence is required.")
     return RuntimeProviderReport(
         runtime_id=message.runtime_id,
         provider_id=message.provider_id,
@@ -507,40 +510,38 @@ def provider_report_from_message(
         diagnostic=dict(message.diagnostic),
         reported_at=_datetime(message.reported_at),
         terminal_delete_acknowledged=message.terminal_delete_acknowledged,
-        execution_policy=_execution_policy_evidence(message.execution_policy),
+        runtime_configuration=_runtime_configuration_evidence(
+            message.runtime_configuration
+        ),
     )
 
 
-def _execution_policy_envelope(
-    message: runtime_provider_control_pb2.RuntimeExecutionPolicyEnvelope,
-) -> RuntimeExecutionPolicyEnvelope:
-    return RuntimeExecutionPolicyEnvelope(
-        evidence=_execution_policy_evidence(message.evidence),
-        effective_policy_json=message.effective_policy_json,
+def _runtime_configuration_envelope(
+    message: runtime_configuration_pb2.RuntimeConfigurationEnvelope,
+) -> RuntimeConfigurationEnvelope:
+    return RuntimeConfigurationEnvelope(
+        evidence=_runtime_configuration_evidence(message.evidence),
+        resolved_configuration_json=message.resolved_configuration_json,
     )
 
 
-def _execution_policy_evidence(
-    message: runtime_provider_control_pb2.RuntimeExecutionPolicyEvidence,
-) -> RuntimeExecutionPolicyEvidence:
-    return RuntimeExecutionPolicyEvidence(
-        snapshot_id=message.snapshot_id,
+def _runtime_configuration_evidence(
+    message: runtime_configuration_pb2.RuntimeConfigurationEvidence,
+) -> RuntimeConfigurationEvidence:
+    return RuntimeConfigurationEvidence(
+        revision_id=message.revision_id,
         digest=message.digest,
         desired_generation=message.desired_generation,
-        module_versions=dict(message.module_versions),
-        source_versions=dict(message.source_versions),
     )
 
 
-def _execution_policy_evidence_message(
-    evidence: RuntimeExecutionPolicyEvidence,
-) -> runtime_provider_control_pb2.RuntimeExecutionPolicyEvidence:
-    return runtime_provider_control_pb2.RuntimeExecutionPolicyEvidence(
-        snapshot_id=evidence.snapshot_id,
+def _runtime_configuration_evidence_message(
+    evidence: RuntimeConfigurationEvidence,
+) -> runtime_configuration_pb2.RuntimeConfigurationEvidence:
+    return runtime_configuration_pb2.RuntimeConfigurationEvidence(
+        revision_id=evidence.revision_id,
         digest=evidence.digest,
         desired_generation=evidence.desired_generation,
-        module_versions=dict(evidence.module_versions),
-        source_versions=dict(evidence.source_versions),
     )
 
 

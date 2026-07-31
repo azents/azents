@@ -10,25 +10,27 @@ from datetime import UTC, datetime
 import pytest
 from google.protobuf import struct_pb2
 
-from azents_runtime_control.execution_policy import (
-    JsonValue,
-    RuntimeExecutionPolicyEvidence,
-    canonical_effective_policy_json,
-    digest_effective_policy,
-    validate_standard_execution_policy_envelope,
-)
 from azents_runtime_control.grpc_provider_client import (
     PROVIDER_AUTH_METHOD_AZENTS_ISSUED_TOKEN,
     PROVIDER_AUTH_METHOD_KUBERNETES_SERVICE_ACCOUNT,
     GrpcProviderControlClient,
     RuntimeProviderControlStreamClosed,
 )
-from azents_runtime_control.proto import runtime_provider_control_pb2
+from azents_runtime_control.proto import (
+    runtime_configuration_pb2,
+    runtime_provider_control_pb2,
+)
 from azents_runtime_control.provider import (
     ProviderCommandCompletion,
     ProviderRegistration,
     RuntimeProviderObservedState,
     RuntimeProviderReport,
+)
+from azents_runtime_control.runtime_configuration import (
+    JsonValue,
+    RuntimeConfigurationEvidence,
+    canonical_runtime_configuration_json,
+    parse_runtime_configuration_envelope,
 )
 
 
@@ -58,7 +60,7 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
         command_payload.update(
             {"auth": {"runner_auth_credential_id": "runner-credential-1"}}
         )
-        execution_policy = _execution_policy_document()
+        runtime_configuration = _runtime_configuration_document()
         yield runtime_provider_control_pb2.ControlMessage(
             request_id="req-1",
             provider_command=runtime_provider_control_pb2.ProviderCommand(
@@ -73,20 +75,14 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
                 transfer_endpoint="runtime-transfer:8030",
                 runner_auth_token="runner-token",
                 payload=command_payload,
-                execution_policy=runtime_provider_control_pb2.RuntimeExecutionPolicyEnvelope(
-                    evidence=runtime_provider_control_pb2.RuntimeExecutionPolicyEvidence(
-                        snapshot_id="snapshot-1",
-                        digest=digest_effective_policy(execution_policy),
+                runtime_configuration=runtime_configuration_pb2.RuntimeConfigurationEnvelope(
+                    evidence=runtime_configuration_pb2.RuntimeConfigurationEvidence(
+                        revision_id="revision-1",
+                        digest="d" * 64,
                         desired_generation=5,
-                        module_versions={"docker": 1, "runtime.resources": 1},
-                        source_versions={
-                            "profile": 1,
-                            "workspace": 1,
-                            "agent": 1,
-                        },
                     ),
-                    effective_policy_json=canonical_effective_policy_json(
-                        execution_policy
+                    resolved_configuration_json=canonical_runtime_configuration_json(
+                        runtime_configuration
                     ),
                 ),
             ),
@@ -127,10 +123,12 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
     assert command.command.auth.transfer_endpoint == "runtime-transfer:8030"
     assert command.command.auth.runner_auth_token == "runner-token"
     assert command.command.auth.runner_auth_credential_id == "runner-credential-1"
-    validate_standard_execution_policy_envelope(
-        command.command.execution_policy,
+    parsed = parse_runtime_configuration_envelope(
+        command.command.runtime_configuration,
         desired_generation=5,
+        expected_provider_kind="docker",
     )
+    assert parsed.provider.logical_id == "provider-1"
     assert await client.heartbeat_provider(
         provider_id="provider-1",
         generation=accepted.generation,
@@ -270,39 +268,49 @@ def _report() -> RuntimeProviderReport:
         diagnostic={},
         reported_at=_now(),
         terminal_delete_acknowledged=False,
-        execution_policy=_execution_policy_evidence(),
+        runtime_configuration=_runtime_configuration_evidence(),
     )
 
 
-def _execution_policy_evidence() -> RuntimeExecutionPolicyEvidence:
-    return RuntimeExecutionPolicyEvidence(
-        snapshot_id="snapshot-1",
+def _runtime_configuration_evidence() -> RuntimeConfigurationEvidence:
+    return RuntimeConfigurationEvidence(
+        revision_id="revision-1",
         digest="d" * 64,
         desired_generation=5,
-        module_versions={"docker": 1, "runtime.resources": 1},
-        source_versions={"profile": 1, "workspace": 1, "agent": 1},
     )
 
 
-def _execution_policy_document() -> dict[str, JsonValue]:
+def _runtime_configuration_document() -> dict[str, JsonValue]:
     return {
         "schema_version": 1,
-        "docker": {
-            "module_id": "docker",
-            "version": 1,
-            "enabled": False,
-            "storage_mode": "none",
-            "storage_capacity_bytes": None,
+        "provider": {
+            "id": "provider-resource-1",
+            "logical_id": "provider-1",
+            "kind": "docker",
+            "capability_revision_id": "capability-1",
+            "capability_digest": "a" * 64,
         },
-        "resources": {
-            "module_id": "runtime.resources",
+        "infrastructure_profile": {
+            "id": "infrastructure-1",
             "version": 1,
-            "cpu_request_millicores": None,
-            "cpu_limit_millicores": None,
-            "memory_request_bytes": None,
-            "memory_limit_bytes": None,
-            "ephemeral_storage_bytes": None,
-            "persistent_storage_bytes": None,
+            "digest": "b" * 64,
+        },
+        "workspace_runtime_profile": {
+            "id": "workspace-profile-1",
+            "version": 1,
+            "digest": "c" * 64,
+        },
+        "effective_profile": {
+            "profile_kind": "docker_container",
+            "contract_family": "docker.container-profile",
+            "schema_version": 1,
+            "runner_resources": {
+                "cpu_reservation_millicores": None,
+                "cpu_limit_millicores": None,
+                "memory_reservation_bytes": None,
+                "memory_limit_bytes": None,
+            },
+            "network_name": "azents",
         },
     }
 
