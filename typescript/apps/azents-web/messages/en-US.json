@@ -1923,11 +1923,13 @@
       "workspaceTab": "Agent Runtime",
       "settingsTab": "Settings",
       "settingsTitle": "Runtime settings",
-      "settingsSubtitle": "Manage the current agent runtime lifecycle.",
-      "configurationTitle": "Runtime configuration",
+      "settingsSubtitle": "Start, stop, and check the status of this runtime.",
+      "configurationTitle": "Runtime status",
       "configurationLoading": "Loading runtime configuration…",
-      "configurationDesired": "Desired revision",
-      "configurationApplied": "Applied revision",
+      "configurationTechnicalDetails": "Technical details",
+      "configurationCurrent": "Current configuration",
+      "configurationDesired": "New configuration",
+      "configurationApplied": "Currently applied configuration",
       "configurationNoDesired": "No desired configuration has been resolved.",
       "configurationNoApplied": "No configuration has been applied to a runtime.",
       "configurationEvidence": {
@@ -1939,24 +1941,24 @@
       },
       "configurationStatus": {
         "profile_required": {
-          "label": "Profile required",
-          "description": "Select a runtime profile before this agent can create a runtime."
+          "label": "Setup required",
+          "description": "Choose an environment before using the runtime."
         },
         "configuration_blocked": {
-          "label": "Configuration blocked",
-          "description": "The selected profile cannot resolve against the provider's current capabilities."
+          "label": "Needs attention",
+          "description": "The selected runtime configuration is not currently available. Check the settings."
         },
         "configured_not_created": {
-          "label": "Ready to create",
-          "description": "The desired configuration is valid, but no runtime has been created from it yet."
+          "label": "Ready to start",
+          "description": "Setup is complete. The configuration will be applied when the runtime starts."
         },
         "waiting_for_recreation": {
-          "label": "Recreation required",
-          "description": "The desired revision differs from the applied revision. The runtime keeps its applied configuration until explicit recreation completes."
+          "label": "Update required",
+          "description": "Recreate the runtime to apply the new configuration."
         },
         "applied": {
-          "label": "Applied",
-          "description": "Provider acknowledgement and runner evidence match the desired revision."
+          "label": "Healthy",
+          "description": "The runtime is using the latest configuration and is ready to use."
         }
       },
       "stopRuntimeDescription": "Stop the running runtime pod without deleting workspace files.",

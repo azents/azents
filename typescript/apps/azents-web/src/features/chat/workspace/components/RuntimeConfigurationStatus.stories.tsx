@@ -1,5 +1,7 @@
-import { rem } from "@mantine/core";
+import { Box, rem } from "@mantine/core";
+import { NextIntlClientProvider } from "next-intl";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import koMessages from "../../../../../messages/ko-KR.json";
 import { RuntimeConfigurationStatus } from "./RuntimeConfigurationStatus";
 import type { RuntimeConfigurationRevisionResponse } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
@@ -28,7 +30,6 @@ const desiredRevision: RuntimeConfigurationRevisionResponse = {
 
 const appliedRevision: RuntimeConfigurationRevisionResponse = {
   ...desiredRevision,
-  id: "runtime-configuration-revision-applied",
   provider_reported_digest: desiredRevision.digest,
   runner_reported_digest: desiredRevision.digest,
   provider_acknowledged_at: "2026-07-31T06:01:00Z",
@@ -131,4 +132,30 @@ export const Applied = {
       },
     },
   },
+} satisfies Story;
+
+export const MobileApplied = {
+  args: Applied.args,
+  decorators: [
+    (Story) => (
+      <NextIntlClientProvider locale="ko-KR" messages={koMessages}>
+        <Box maw={rem(360)} mx="auto">
+          <Story />
+        </Box>
+      </NextIntlClientProvider>
+    ),
+  ],
+} satisfies Story;
+
+export const MobileWaitingForRecreation = {
+  args: WaitingForRecreation.args,
+  decorators: [
+    (Story) => (
+      <NextIntlClientProvider locale="ko-KR" messages={koMessages}>
+        <Box maw={rem(360)} mx="auto">
+          <Story />
+        </Box>
+      </NextIntlClientProvider>
+    ),
+  ],
 } satisfies Story;

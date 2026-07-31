@@ -1923,11 +1923,13 @@
       "workspaceTab": "Agent Runtime",
       "settingsTab": "Paramètres",
       "settingsTitle": "Paramètres du runtime",
-      "settingsSubtitle": "Gérez le cycle de vie du runtime de l’agent actuel.",
-      "configurationTitle": "Configuration du runtime",
+      "settingsSubtitle": "Démarrez, arrêtez et vérifiez l’état de ce runtime.",
+      "configurationTitle": "État du runtime",
       "configurationLoading": "Chargement de la configuration du runtime…",
-      "configurationDesired": "Révision souhaitée",
-      "configurationApplied": "Révision appliquée",
+      "configurationTechnicalDetails": "Détails techniques",
+      "configurationCurrent": "Configuration actuelle",
+      "configurationDesired": "Nouvelle configuration",
+      "configurationApplied": "Configuration actuellement appliquée",
       "configurationNoDesired": "Aucune configuration souhaitée n’a été résolue.",
       "configurationNoApplied": "Aucune configuration n’a été appliquée à un runtime.",
       "configurationEvidence": {
@@ -1939,24 +1941,24 @@
       },
       "configurationStatus": {
         "profile_required": {
-          "label": "Profil requis",
-          "description": "Sélectionnez un profil du runtime avant que cet agent puisse créer un runtime."
+          "label": "Configuration requise",
+          "description": "Choisissez un environnement avant d’utiliser le runtime."
         },
         "configuration_blocked": {
-          "label": "Configuration bloquée",
-          "description": "Le profil sélectionné ne peut pas être résolu avec les capacités actuelles du fournisseur."
+          "label": "Vérification requise",
+          "description": "La configuration du runtime sélectionnée n’est pas disponible actuellement. Vérifiez les paramètres."
         },
         "configured_not_created": {
-          "label": "Prêt à créer",
-          "description": "La configuration souhaitée est valide, mais aucun runtime n’a encore été créé à partir de celle-ci."
+          "label": "Prêt à démarrer",
+          "description": "La configuration est terminée. Elle sera appliquée au démarrage du runtime."
         },
         "waiting_for_recreation": {
-          "label": "Recréation requise",
-          "description": "La révision souhaitée diffère de la révision appliquée. Le runtime conserve sa configuration appliquée jusqu’à la fin d’une recréation explicite."
+          "label": "Mise à jour requise",
+          "description": "Recréez le runtime pour appliquer la nouvelle configuration."
         },
         "applied": {
-          "label": "Appliquée",
-          "description": "L’accusé de réception du fournisseur et les preuves du runner correspondent à la révision souhaitée."
+          "label": "Opérationnel",
+          "description": "Le runtime utilise la dernière configuration et est prêt à l’emploi."
         }
       },
       "stopRuntimeDescription": "Arrêtez le pod du runtime en cours sans supprimer les fichiers de l’espace de travail.",

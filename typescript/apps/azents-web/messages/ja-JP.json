@@ -1923,11 +1923,13 @@
       "workspaceTab": "Agent Runtime",
       "settingsTab": "設定",
       "settingsTitle": "Runtime 設定",
-      "settingsSubtitle": "現在の Agent Runtime lifecycle を管理します。",
-      "configurationTitle": "ランタイム構成",
+      "settingsSubtitle": "Runtime の起動、停止、状態を管理します。",
+      "configurationTitle": "ランタイムの状態",
       "configurationLoading": "ランタイム構成を読み込んでいます…",
-      "configurationDesired": "期待するリビジョン",
-      "configurationApplied": "適用済みリビジョン",
+      "configurationTechnicalDetails": "技術情報",
+      "configurationCurrent": "現在の構成",
+      "configurationDesired": "新しい構成",
+      "configurationApplied": "現在適用中の構成",
       "configurationNoDesired": "解決済みの期待する構成はありません。",
       "configurationNoApplied": "ランタイムに適用された構成はありません。",
       "configurationEvidence": {
@@ -1939,24 +1941,24 @@
       },
       "configurationStatus": {
         "profile_required": {
-          "label": "Profile が必要",
-          "description": "この Agent が Runtime を作成するには、Runtime Profile を選択してください。"
+          "label": "設定が必要",
+          "description": "Runtime を使用するには、まず実行環境を選択してください。"
         },
         "configuration_blocked": {
-          "label": "構成がブロックされています",
-          "description": "選択した Profile を Provider の現在の capability で解決できません。"
+          "label": "確認が必要",
+          "description": "選択した Runtime 設定は現在使用できません。設定を確認してください。"
         },
         "configured_not_created": {
-          "label": "作成準備完了",
-          "description": "目的の構成は有効ですが、この構成から作成された Runtime はまだありません。"
+          "label": "起動準備完了",
+          "description": "設定が完了しました。Runtime を起動すると適用されます。"
         },
         "waiting_for_recreation": {
-          "label": "再作成が必要",
-          "description": "目的の revision と適用済み revision が異なります。明示的な再作成が完了するまで、Runtime は適用済みの構成を維持します。"
+          "label": "適用が必要",
+          "description": "新しい設定を適用するには、Runtime を再作成してください。"
         },
         "applied": {
-          "label": "適用済み",
-          "description": "Provider の確認と Runner の証拠が目的の revision と一致しています。"
+          "label": "正常",
+          "description": "最新の設定が適用され、Runtime を使用できます。"
         }
       },
       "stopRuntimeDescription": "Workspace ファイルを削除せずに、実行中の Runtime pod を停止します。",
