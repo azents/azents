@@ -11,6 +11,7 @@ import { invitationRouter } from "./invitation";
 import { joinRequestRouter } from "./joinRequest";
 import { llmProviderIntegrationRouter } from "./llm-provider-integration";
 import { memberProfileRouter } from "./member-profile";
+import { runtimeProfileRouter } from "./runtime-profile";
 import { securityRouter } from "./security";
 import { toolkitRouter } from "./toolkit";
 import { userRouter } from "./user";
@@ -27,6 +28,7 @@ export const appRouter = router({
   joinRequest: joinRequestRouter,
   llmProviderIntegration: llmProviderIntegrationRouter,
   memberProfile: memberProfileRouter,
+  runtimeProfile: runtimeProfileRouter,
   security: securityRouter,
   toolkit: toolkitRouter,
   user: userRouter,

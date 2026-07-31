@@ -60,6 +60,14 @@ const readyServerState: AgentWorkspaceServerState = {
 const readyState: WorkspacePanelState = {
   type: "SERVER",
   server: readyServerState,
+  runtimeConfiguration: {
+    type: "LOADED",
+    configuration: {
+      status: "applied",
+      desired: null,
+      applied: null,
+    },
+  },
   manifest: {
     root: "/workspace/agent",
     cwd: "/workspace/agent/project",

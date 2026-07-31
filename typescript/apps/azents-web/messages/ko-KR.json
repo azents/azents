@@ -296,6 +296,7 @@
     "llmSettings": {
       "headline": "LLM 연동 관리",
       "description": "이 워크스페이스에서 사용할 LLM 프로바이더의 API 키와 인증 정보를 관리합니다.",
+      "runtimeProfiles": "런타임 프로필",
       "addIntegration": "연동 추가",
       "empty": "아직 설정된 연동이 없습니다.",
       "loadError": "연동 목록을 불러오지 못했습니다.",
@@ -558,6 +559,71 @@
         "statusError": "디바이스 인증 상태: {status}."
       }
     },
+    "runtimeProfiles": {
+      "headline": "런타임 프로필",
+      "description": "이 워크스페이스의 에이전트가 사용할 완전한 런타임 구성을 관리합니다.",
+      "backToSettings": "LLM 연동",
+      "addProfile": "프로필 추가",
+      "noInfrastructureTitle": "사용 가능한 Provider Profile이 없습니다",
+      "noInfrastructureDescription": "이 워크스페이스에서 Runtime Profile을 만들려면 플랫폼 관리자가 호환되는 Pod Profile 또는 Container Profile을 제공해야 합니다.",
+      "defaultTitle": "새 에이전트 기본값",
+      "defaultDescription": "런타임 프로필을 명시하지 않고 새 에이전트를 만들 때 한 번 복사됩니다.",
+      "defaultPlaceholder": "기본 프로필 없음",
+      "emptyTitle": "런타임 프로필이 없습니다",
+      "emptyDescription": "에이전트가 사용할 정확한 프로바이더와 인프라를 지정하려면 런타임 프로필을 만드세요.",
+      "nameColumn": "프로필",
+      "infrastructureColumn": "Provider Profile",
+      "statusColumn": "상태",
+      "versionColumn": "버전",
+      "actionsColumn": "작업",
+      "defaultBadge": "기본값",
+      "noDescription": "설명 없음",
+      "available": "사용 가능",
+      "unavailable": "사용 불가",
+      "active": "활성",
+      "disabled": "비활성",
+      "edit": "수정",
+      "recreate": "런타임 재생성",
+      "operationLoading": "재생성 진행 상태를 불러오는 중…",
+      "operationTitle": "런타임 재생성",
+      "operationCounts": "성공 {succeeded} · 실행 중 {running} · 실패 {failed} · 건너뜀 {skipped} · 전체 {total}",
+      "operationItemNoDetail": "추가 정보가 없습니다.",
+      "createTitle": "런타임 프로필 추가",
+      "editTitle": "런타임 프로필 수정",
+      "nameLabel": "이름",
+      "descriptionLabel": "설명",
+      "infrastructureLabel": "Provider의 Pod / Container Profile",
+      "infrastructureDescription": "선택한 Provider와 Profile을 정확히 사용하며 대체 경로는 적용하지 않습니다.",
+      "lifecycleLabel": "수명 주기",
+      "allowedCidrsLabel": "허용 CIDR",
+      "deniedCidrsLabel": "차단 CIDR",
+      "cidrsDescription": "한 줄에 CIDR 하나를 입력하세요. 워크스페이스 규칙은 프로바이더 정책을 더 제한할 수만 있습니다.",
+      "cancel": "취소",
+      "save": "저장",
+      "availabilityReasons": {
+        "workspaceProfileDisabled": "이 Runtime Profile은 비활성 상태입니다.",
+        "providerUnavailable": "선택한 Runtime Provider를 현재 이 워크스페이스에서 사용할 수 없습니다.",
+        "infrastructureProfileUnavailable": "선택한 Provider Profile이 비활성 상태이거나 사용할 수 없습니다.",
+        "workspacePolicyInvalid": "워크스페이스 네트워크 제한이 이 Provider Profile에 유효하지 않습니다.",
+        "profileIncompatible": "선택한 Provider Profile이 Provider의 현재 capability와 호환되지 않습니다.",
+        "unknown": "현재 Runtime 구성을 사용할 수 없습니다."
+      },
+      "missingCapabilities": "누락된 capability: {capabilities}",
+      "operationStatus": {
+        "pending": "대기 중",
+        "running": "실행 중",
+        "completed": "완료",
+        "completed_with_failures": "일부 실패로 완료",
+        "failed": "실패"
+      },
+      "operationItemStatus": {
+        "pending": "대기 중",
+        "running": "실행 중",
+        "succeeded": "성공",
+        "skipped": "건너뜀",
+        "failed": "실패"
+      }
+    },
     "agents": {
       "headline": "에이전트",
       "description": "워크스페이스에서 사용할 AI 에이전트를 관리합니다",
@@ -579,6 +645,12 @@
       "namePlaceholder": "예: 고객 응대 에이전트",
       "descriptionLabel": "설명",
       "descriptionPlaceholder": "이 에이전트의 역할을 간단히 설명하세요",
+      "runtimeProfileLabel": "런타임 프로필",
+      "runtimeProfileDescription": "이 에이전트가 사용할 전체 프로바이더 및 인프라 구성을 선택합니다. 에이전트 생성 시 비워 두면 워크스페이스 기본값을 복사합니다.",
+      "runtimeProfilePlaceholder": "워크스페이스 기본값 사용",
+      "runtimeProfileLoading": "런타임 프로필을 불러오는 중…",
+      "runtimeProfileUnavailableTitle": "선택한 런타임 프로필을 사용할 수 없습니다",
+      "runtimeProfileUnavailableDescription": "선택은 유지되지만 새 런타임 생성은 차단됩니다: {reason}",
       "integrationLabel": "LLM 연동",
       "integrationPlaceholder": "연동을 선택하세요",
       "providerPlaceholder": "Provider를 선택하세요",
@@ -1184,6 +1256,14 @@
           "session": "세션 접근",
           "agent": "에이전트 접근"
         }
+      },
+      "runtimeProfileAvailabilityReasons": {
+        "workspaceProfileDisabled": "이 Runtime Profile은 비활성 상태입니다.",
+        "providerUnavailable": "이 Profile의 Runtime Provider를 현재 사용할 수 없습니다.",
+        "infrastructureProfileUnavailable": "이 Profile이 참조하는 Provider Profile이 비활성 상태이거나 사용할 수 없습니다.",
+        "workspacePolicyInvalid": "워크스페이스 네트워크 제한이 유효하지 않습니다.",
+        "profileIncompatible": "Provider Profile이 Provider의 현재 capability와 호환되지 않습니다.",
+        "unknown": "현재 Runtime 구성을 사용할 수 없습니다."
       }
     },
     "toolkits": {
@@ -1844,6 +1924,41 @@
       "settingsTab": "설정",
       "settingsTitle": "Runtime 설정",
       "settingsSubtitle": "현재 Agent Runtime lifecycle을 관리합니다.",
+      "configurationTitle": "런타임 구성",
+      "configurationLoading": "런타임 구성을 불러오는 중…",
+      "configurationDesired": "원하는 리비전",
+      "configurationApplied": "적용된 리비전",
+      "configurationNoDesired": "확정된 원하는 구성이 없습니다.",
+      "configurationNoApplied": "런타임에 적용된 구성이 없습니다.",
+      "configurationEvidence": {
+        "revision": "Revision",
+        "profile": "Runtime Profile",
+        "infrastructure": "인프라",
+        "generation": "Generation",
+        "digest": "Digest"
+      },
+      "configurationStatus": {
+        "profile_required": {
+          "label": "Profile 필요",
+          "description": "이 Agent가 Runtime을 생성하려면 먼저 Runtime Profile을 선택해야 합니다."
+        },
+        "configuration_blocked": {
+          "label": "구성 차단됨",
+          "description": "선택한 Profile을 Provider의 현재 capability로 확정할 수 없습니다."
+        },
+        "configured_not_created": {
+          "label": "생성 준비됨",
+          "description": "원하는 구성은 유효하지만 이 구성으로 생성된 Runtime은 아직 없습니다."
+        },
+        "waiting_for_recreation": {
+          "label": "재생성 필요",
+          "description": "원하는 revision과 적용된 revision이 다릅니다. 명시적 재생성이 완료될 때까지 현재 Runtime은 적용된 구성을 유지합니다."
+        },
+        "applied": {
+          "label": "적용됨",
+          "description": "Provider 승인과 Runner 증거가 원하는 revision과 일치합니다."
+        }
+      },
       "stopRuntimeDescription": "Workspace 파일을 삭제하지 않고 실행 중인 Runtime pod를 종료합니다.",
       "runtimeNotRunningHint": "Runtime이 실행 중이 아니므로 종료할 항목이 없습니다.",
       "runtimeControlUnavailableHint": "현재 Runtime control을 사용할 수 없습니다.",
@@ -1952,7 +2067,16 @@
         "missing": "없음",
         "unavailable": "사용 불가",
         "error": "오류"
-      }
+      },
+      "configurationReasons": {
+        "sourceMismatch": "저장된 Runtime Profile 참조가 하나의 정확한 Provider 경로를 구성하지 않습니다.",
+        "profileDisabled": "선택한 Runtime Profile 또는 Provider Profile이 비활성 상태입니다.",
+        "providerUnavailable": "지정된 Runtime Provider가 비활성, 연결 끊김 또는 이 워크스페이스에서 사용 불가 상태입니다.",
+        "capabilityUnavailable": "Provider의 현재 capability로 선택한 Profile을 충족할 수 없습니다.",
+        "profileInvalid": "선택한 Profile 문서가 유효하지 않습니다.",
+        "unknown": "원하는 Runtime 구성을 확정할 수 없습니다."
+      },
+      "configurationMissingCapabilities": "누락된 capability: {capabilities}"
     },
     "toolCall": {
       "preparing": "명령어 작성 중...",

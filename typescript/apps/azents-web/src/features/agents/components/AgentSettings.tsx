@@ -23,6 +23,7 @@ import type {
   AgentAdminResponse,
   AgentResponse,
   WorkspaceModelSettingsResponse,
+  WorkspaceRuntimeProfileResponse,
 } from "@azents/public-client";
 
 type AgentSettingsSection =
@@ -43,6 +44,8 @@ interface AgentSettingsProps {
   providerOptions: ProviderIntegrationOption[];
   modelOptions: ModelSelectionOption[];
   workspaceModelSettings: WorkspaceModelSettingsResponse | null;
+  runtimeProfiles: WorkspaceRuntimeProfileResponse[];
+  runtimeProfilesLoading: boolean;
   catalogStates: ReadonlyMap<string, ModelCatalogState>;
   modelsLoading: boolean;
   members: MemberItem[];

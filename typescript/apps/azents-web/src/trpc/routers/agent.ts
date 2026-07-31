@@ -147,6 +147,7 @@ export const agentRouter = router({
         system_prompt: z.string().optional(),
         enabled: z.boolean().optional(),
         type: agentTypeEnum.optional(),
+        runtime_profile_id: z.string().min(1).nullable().optional(),
         shell_enabled: z.boolean().optional(),
         memory_enabled: z.boolean().optional(),
         tool_search_enabled: z.boolean().optional(),
@@ -173,6 +174,7 @@ export const agentRouter = router({
             system_prompt: input.system_prompt ?? null,
             enabled: input.enabled ?? true,
             type: input.type ?? "public",
+            runtime_profile_id: input.runtime_profile_id ?? null,
             shell_enabled: input.shell_enabled,
             memory_enabled: input.memory_enabled,
             tool_search_enabled: input.tool_search_enabled,
@@ -212,6 +214,12 @@ export const agentRouter = router({
         system_prompt: z.string().nullable().optional(),
         enabled: z.boolean().optional(),
         type: agentTypeEnum.optional(),
+        runtime_profile_id: z.string().min(1).nullable().optional(),
+        expected_runtime_profile_selection_version: z
+          .number()
+          .int()
+          .positive()
+          .optional(),
         shell_enabled: z.boolean().optional(),
         memory_enabled: z.boolean().optional(),
         tool_search_enabled: z.boolean().optional(),
@@ -250,6 +258,13 @@ export const agentRouter = router({
             system_prompt: input.system_prompt,
             enabled: input.enabled,
             type: input.type,
+            ...("runtime_profile_id" in input
+              ? {
+                  runtime_profile_id: input.runtime_profile_id,
+                  expected_runtime_profile_selection_version:
+                    input.expected_runtime_profile_selection_version,
+                }
+              : {}),
             shell_enabled: input.shell_enabled,
             memory_enabled: input.memory_enabled,
             tool_search_enabled: input.tool_search_enabled,

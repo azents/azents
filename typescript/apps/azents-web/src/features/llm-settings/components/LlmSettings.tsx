@@ -25,6 +25,7 @@ import {
 } from "@mantine/core";
 import { IconEdit, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
+import Link from "next/link";
 import { IntegrationFormModal } from "./IntegrationFormModal";
 import { KimiConnectionStatusBadge } from "./KimiOAuthConnectionCard";
 import { WorkspaceModelSettingsCard } from "./WorkspaceModelSettingsCard";
@@ -146,14 +147,23 @@ export function LlmSettings(props: LlmSettingsProps): React.ReactElement {
       <Stack gap="lg">
         <Group justify="space-between">
           <Title order={3}>{t("headline")}</Title>
-          {canManage && (
+          <Group gap="sm">
             <Button
-              leftSection={<IconPlus size={rem(16)} />}
-              onClick={onOpenCreate}
+              component={Link}
+              href={`/w/${props.handle}/settings/runtime-profiles`}
+              variant="default"
             >
-              {t("addIntegration")}
+              {t("runtimeProfiles")}
             </Button>
-          )}
+            {canManage && (
+              <Button
+                leftSection={<IconPlus size={rem(16)} />}
+                onClick={onOpenCreate}
+              >
+                {t("addIntegration")}
+              </Button>
+            )}
+          </Group>
         </Group>
 
         <Text c="dimmed" size="sm">

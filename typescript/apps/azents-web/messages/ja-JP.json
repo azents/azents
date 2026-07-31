@@ -296,6 +296,7 @@
     "llmSettings": {
       "headline": "LLM連携管理",
       "description": "このワークスペースで使用するLLMプロバイダーのAPIキーと認証情報を管理します。",
+      "runtimeProfiles": "ランタイムプロファイル",
       "addIntegration": "連携を追加",
       "empty": "設定された連携はまだありません。",
       "loadError": "連携の読み込みに失敗しました。",
@@ -558,6 +559,71 @@
         "statusError": "デバイス認証は {status} です。"
       }
     },
+    "runtimeProfiles": {
+      "headline": "ランタイムプロファイル",
+      "description": "このワークスペースのエージェントが使用する完全なランタイム構成を管理します。",
+      "backToSettings": "LLM連携",
+      "addProfile": "プロファイルを追加",
+      "noInfrastructureTitle": "利用可能なProvider Profileがありません",
+      "noInfrastructureDescription": "このワークスペースでRuntime Profileを作成するには、プラットフォーム管理者が互換性のあるPod ProfileまたはContainer Profileを公開する必要があります。",
+      "defaultTitle": "新規エージェントの既定値",
+      "defaultDescription": "ランタイムプロファイルを明示せずに新しいエージェントを作成したとき、一度だけコピーされます。",
+      "defaultPlaceholder": "既定のプロファイルなし",
+      "emptyTitle": "ランタイムプロファイルがありません",
+      "emptyDescription": "エージェントが使用する正確なプロバイダーとインフラストラクチャを指定するランタイムプロファイルを作成してください。",
+      "nameColumn": "プロファイル",
+      "infrastructureColumn": "Provider Profile",
+      "statusColumn": "状態",
+      "versionColumn": "バージョン",
+      "actionsColumn": "操作",
+      "defaultBadge": "既定",
+      "noDescription": "説明なし",
+      "available": "利用可能",
+      "unavailable": "利用不可",
+      "active": "有効",
+      "disabled": "無効",
+      "edit": "編集",
+      "recreate": "ランタイムを再作成",
+      "operationLoading": "再作成の進行状況を読み込んでいます…",
+      "operationTitle": "ランタイムの再作成",
+      "operationCounts": "成功 {succeeded} · 実行中 {running} · 失敗 {failed} · スキップ {skipped} · 合計 {total}",
+      "operationItemNoDetail": "追加情報はありません。",
+      "createTitle": "ランタイムプロファイルを追加",
+      "editTitle": "ランタイムプロファイルを編集",
+      "nameLabel": "名前",
+      "descriptionLabel": "説明",
+      "infrastructureLabel": "ProviderのPod / Container Profile",
+      "infrastructureDescription": "選択したProviderとProfileを正確に使用し、フォールバックは行いません。",
+      "lifecycleLabel": "ライフサイクル",
+      "allowedCidrsLabel": "許可するCIDR",
+      "deniedCidrsLabel": "拒否するCIDR",
+      "cidrsDescription": "1行に1つのCIDRを入力してください。ワークスペースの規則はプロバイダーのポリシーをさらに制限することだけができます。",
+      "cancel": "キャンセル",
+      "save": "保存",
+      "availabilityReasons": {
+        "workspaceProfileDisabled": "このRuntime Profileは無効です。",
+        "providerUnavailable": "選択したRuntime Providerは現在このワークスペースで利用できません。",
+        "infrastructureProfileUnavailable": "選択したProvider Profileは無効または利用不可です。",
+        "workspacePolicyInvalid": "ワークスペースのネットワーク制限が、このProvider Profileでは無効です。",
+        "profileIncompatible": "選択したProvider Profileは、Providerの現在のcapabilityと互換性がありません。",
+        "unknown": "現在のRuntime構成は利用できません。"
+      },
+      "missingCapabilities": "不足しているcapability: {capabilities}",
+      "operationStatus": {
+        "pending": "待機中",
+        "running": "実行中",
+        "completed": "完了",
+        "completed_with_failures": "一部失敗で完了",
+        "failed": "失敗"
+      },
+      "operationItemStatus": {
+        "pending": "待機中",
+        "running": "実行中",
+        "succeeded": "成功",
+        "skipped": "スキップ",
+        "failed": "失敗"
+      }
+    },
     "agents": {
       "headline": "エージェント",
       "description": "ワークスペースで使用するAIエージェントを管理します",
@@ -579,6 +645,12 @@
       "namePlaceholder": "例：カスタマーサポートエージェント",
       "descriptionLabel": "説明",
       "descriptionPlaceholder": "このエージェントの役割を簡単に説明してください",
+      "runtimeProfileLabel": "ランタイムプロファイル",
+      "runtimeProfileDescription": "このエージェントが使用する完全なプロバイダーおよびインフラストラクチャ構成を選択します。作成時に空欄にすると、ワークスペースの既定値がコピーされます。",
+      "runtimeProfilePlaceholder": "ワークスペースの既定値を使用",
+      "runtimeProfileLoading": "ランタイムプロファイルを読み込んでいます…",
+      "runtimeProfileUnavailableTitle": "選択したランタイムプロファイルは利用できません",
+      "runtimeProfileUnavailableDescription": "選択は保持されますが、新しいランタイムの作成はブロックされます: {reason}",
       "integrationLabel": "LLM連携",
       "integrationPlaceholder": "連携を選択してください",
       "providerPlaceholder": "Provider を選択してください",
@@ -1184,6 +1256,14 @@
           "session": "セッションアクセス",
           "agent": "エージェントアクセス"
         }
+      },
+      "runtimeProfileAvailabilityReasons": {
+        "workspaceProfileDisabled": "このRuntime Profileは無効です。",
+        "providerUnavailable": "このProfileのRuntime Providerは現在利用できません。",
+        "infrastructureProfileUnavailable": "このProfileが参照するProvider Profileは無効または利用不可です。",
+        "workspacePolicyInvalid": "ワークスペースのネットワーク制限が無効です。",
+        "profileIncompatible": "Provider ProfileがProviderの現在のcapabilityと互換性がありません。",
+        "unknown": "現在のRuntime構成は利用できません。"
       }
     },
     "toolkits": {
@@ -1844,6 +1924,41 @@
       "settingsTab": "設定",
       "settingsTitle": "Runtime 設定",
       "settingsSubtitle": "現在の Agent Runtime lifecycle を管理します。",
+      "configurationTitle": "ランタイム構成",
+      "configurationLoading": "ランタイム構成を読み込んでいます…",
+      "configurationDesired": "期待するリビジョン",
+      "configurationApplied": "適用済みリビジョン",
+      "configurationNoDesired": "解決済みの期待する構成はありません。",
+      "configurationNoApplied": "ランタイムに適用された構成はありません。",
+      "configurationEvidence": {
+        "revision": "Revision",
+        "profile": "Runtime Profile",
+        "infrastructure": "インフラストラクチャ",
+        "generation": "Generation",
+        "digest": "Digest"
+      },
+      "configurationStatus": {
+        "profile_required": {
+          "label": "Profile が必要",
+          "description": "この Agent が Runtime を作成するには、Runtime Profile を選択してください。"
+        },
+        "configuration_blocked": {
+          "label": "構成がブロックされています",
+          "description": "選択した Profile を Provider の現在の capability で解決できません。"
+        },
+        "configured_not_created": {
+          "label": "作成準備完了",
+          "description": "目的の構成は有効ですが、この構成から作成された Runtime はまだありません。"
+        },
+        "waiting_for_recreation": {
+          "label": "再作成が必要",
+          "description": "目的の revision と適用済み revision が異なります。明示的な再作成が完了するまで、Runtime は適用済みの構成を維持します。"
+        },
+        "applied": {
+          "label": "適用済み",
+          "description": "Provider の確認と Runner の証拠が目的の revision と一致しています。"
+        }
+      },
       "stopRuntimeDescription": "Workspace ファイルを削除せずに、実行中の Runtime pod を停止します。",
       "runtimeNotRunningHint": "Runtime が実行されていないため、停止する項目はありません。",
       "runtimeControlUnavailableHint": "現在 Runtime control は利用できません。",
@@ -1952,7 +2067,16 @@
         "missing": "見つかりません",
         "unavailable": "利用不可",
         "error": "エラー"
-      }
+      },
+      "configurationReasons": {
+        "sourceMismatch": "保存されているRuntime Profileの参照が、単一の正確なProvider経路を構成していません。",
+        "profileDisabled": "選択したRuntime ProfileまたはProvider Profileが無効です。",
+        "providerUnavailable": "指定されたRuntime Providerは無効、切断中、またはこのワークスペースで利用不可です。",
+        "capabilityUnavailable": "Providerの現在のcapabilityでは、選択したProfileを満たせません。",
+        "profileInvalid": "選択したProfileの定義が無効です。",
+        "unknown": "目的のRuntime構成を解決できませんでした。"
+      },
+      "configurationMissingCapabilities": "不足しているcapability: {capabilities}"
     },
     "toolCall": {
       "preparing": "コマンドを作成中…",

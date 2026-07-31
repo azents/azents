@@ -17,6 +17,7 @@ import {
 } from "@mantine/core";
 import { IconCircleCheck, IconCircleX, IconServer } from "@tabler/icons-react";
 import { MasterDetailLayout } from "@/shared/components/MasterDetailLayout";
+import { InfrastructureProfilesSectionContainer } from "../containers/InfrastructureProfilesSectionContainer";
 import { runtimeProviderReadiness } from "../runtimeProviderPresentation";
 import type {
   RuntimeProviderAuthAuditState,
@@ -429,6 +430,13 @@ function ProviderDetail({
       </Stack>
 
       <ContractSection provider={provider} state={contractState} />
+
+      <Divider />
+      <InfrastructureProfilesSectionContainer
+        providerId={provider.provider_id}
+        providerKind={provider.kind}
+        providerVersion={provider.admin_version}
+      />
 
       <Divider />
       <AuthenticationSection
