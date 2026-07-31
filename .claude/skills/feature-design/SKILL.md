@@ -154,6 +154,8 @@ Capture:
 - current behavior and the gap from each requirement;
 - relevant ownership and lifecycle boundaries;
 - reusable components and integrations;
+- existing implementation, contracts, state, tests, fixtures, configuration, and
+  documentation that the change supersedes or makes obsolete;
 - likely API, event, persistence, security, and migration impact;
 - constraints that affect feasibility; and
 - the initial design-decision backlog.
@@ -233,6 +235,23 @@ Include, as applicable:
 - alternatives considered; and
 - assumptions and unresolved risks.
 
+Every primary Design must include this section:
+
+```markdown
+## Removal and Replacement
+
+| Existing unit or behavior | Why it becomes obsolete | Replacement or remaining authority | Removal boundary | Absence verification |
+| --- | --- | --- | --- | --- |
+| ... | ... | ... | ... | ... |
+```
+
+Cover obsolete code, contracts, state, tests, fixtures, configuration,
+documentation, and generated surfaces as applicable. A replacement may be
+`None` when the behavior disappears entirely. Use an explicit `None` finding
+only after system-grounded analysis finds no removal obligations. Treat every
+identified removal as part of the design deliverable rather than optional later
+cleanup.
+
 Finish the full draft before reopening discussion. Record contradictions or unknowns as candidate blockers and continue using explicit assumptions. After the draft is complete, reopen only points that meet the blocker criteria.
 
 For a design blocker, update the ADR before revising the design. For a requirement blocker, return to the user and update Requirements before the ADR or design.
@@ -246,6 +265,10 @@ Validate the complete draft against the real repository and product constraints.
 - current code paths, ownership, and lifecycle state;
 - current specs and relevant historical ADRs/designs;
 - API, event, persistence, migration, and compatibility impact;
+- whether every removal has a credible call-site, dependency, data, migration,
+  test, fixture, generated-artifact, and spec cleanup path as applicable;
+- whether absence verification proves that no superseded path remains as an
+  unapproved second authority or compatibility fallback;
 - retries, pagination, concurrency, and failure modes;
 - security, permissions, and operational risks;
 - existing component and integration reuse; and
@@ -275,6 +298,7 @@ Summarize:
 - the Requirements document and short ID;
 - accepted ADR decisions and rejected alternatives;
 - validated system and data boundaries;
+- planned removals, replacement authorities, and absence evidence;
 - requirement-level feasibility evidence;
 - remaining non-blocking risks and assumptions;
 - implementation phases or why one focused PR is sufficient;
@@ -314,6 +338,8 @@ For final output, use:
 - Primary scenario: <scenario>
 - Key decisions:
   - <decision and rationale>
+- Removal and replacement:
+  - <obsolete unit, replacement authority, removal boundary, and absence evidence>
 - Feasibility:
   - <requirement-level evidence>
 - Remaining non-blockers:

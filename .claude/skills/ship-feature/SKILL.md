@@ -55,6 +55,9 @@ Before implementation:
 - Identify the approved Requirements, accepted ADR, and approved primary Design.
 - Confirm all three use the same canonical snapshot ID and basename.
 - Confirm the design traces every requirement through accepted ADR decisions or explicit conventional implementation choices.
+- Confirm the Design includes `Removal and Replacement` and that every removal
+  obligation has a defined boundary and absence-verification path, or records an
+  explicit `None` finding.
 - Confirm non-goals and boundaries.
 - Read relevant specs under `docs/azents/spec/`.
 - Read relevant ADRs only for rationale or hard constraints.
@@ -89,7 +92,9 @@ The plan must include:
 - PR phases, dependencies, and integration boundaries
 - Implementation ownership, independent reviewer, and context checkpoints
 - Data/API/runtime changes, test strategy, E2E matrix, and fixture prerequisites
-- Blockers, external actions, spec impact, rollout, and cleanup
+- Design removal obligations mapped to owning phases, prerequisites, and absence
+  verification
+- Blockers, external actions, spec impact, rollout, and plan cleanup
 
 Do not put file-by-file implementation details for every phase in the multi-phase
 plan. Every implementation PR must add its own phase execution plan before code
@@ -115,6 +120,8 @@ Use this required structure:
 - Deliverables: `<observable outcomes>`
 - Non-goals: `<explicit exclusions>`
 - Interfaces: `<contracts fixed before implementation>`
+- Removal obligations: `<Design removal items owned by this phase, or None>`
+- Absence verification: `<proof that removed units are no longer referenced or authoritative>`
 
 | Workstream | Owner | Owned paths | Depends on | Output | Validation |
 | --- | --- | --- | --- | --- | --- |
@@ -163,7 +170,8 @@ For each implementation phase:
 
 1. Create the stacked branch, read project rules, and write the phase plan.
 2. Confirm workstream ownership, dependencies, paths, and interfaces.
-3. Implement the workstreams and integrate them in dependency order.
+3. Implement the workstreams and their assigned Design removal obligations, then
+   integrate them in dependency order.
 4. Update specs when the phase changes current behavior and cannot wait for spec
    promotion. Remove unrelated or later-phase changes.
 5. Have each owner run focused checks and directly request review from the exact
@@ -180,6 +188,9 @@ For each implementation phase:
 9. Record the phase checkpoint, commit, and open the PR before the next phase.
 
 Keep each phase reviewable. Do not mix unrelated refactors, cleanup, or future phases.
+Design-required removal is implementation scope, not unrelated cleanup. Assign it
+to the phase that activates its replacement or to an explicit later phase when a
+dependency requires the old path to remain temporarily.
 
 ## Phase 3: Validation PR
 
@@ -194,6 +205,8 @@ Include:
 - Fixture/prerequisite validation results
 - Any failures found and the fixes applied
 - A strict comparison table between implemented behavior and current specs, including missing implementation or spec drift
+- A strict comparison between the Design removal obligations and the integrated
+  code, including absence evidence and any old path that remains
 
 If validation finds a bug, address it in the validation PR or responsible
 earlier phase and run affected checks. Repeat only validation entries whose
@@ -229,6 +242,8 @@ plans remain. The source of truth becomes:
 - Actual code
 
 Cleanup PRs should only remove stale plan documents and related references. Do not mix behavior changes or refactors.
+All Design-required implementation removals must already be complete in their
+owning implementation phases.
 
 ## Stacked PR operations
 
@@ -252,6 +267,7 @@ When starting the shipping workflow, report:
 - Design: `<path>`
 - Multi-phase implementation plan: `<path under the documentation plans directory>`
 - Implementation ownership and reviewer: `<owners and exact reviewer>`
+- Removal obligations: `<summary mapped to owning phases>`
 - Stack prefix: `{feature-name}`
 - Planned PRs:
   1. Design
@@ -270,6 +286,7 @@ For each completed phase, report:
 - PR URL
 - Branch/base and phase plan
 - Completed scope and scope-drift result
+- Completed removals and absence evidence
 - Execution roles, handoffs, and next-phase context decision
 - Review, re-review, and final validation results
 - Next stacked branch
