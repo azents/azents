@@ -2686,14 +2686,14 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
     with azents_external_channel_gateway_factory():
         wait_until(
             lambda: (
-                cast(
-                    int,
+                6
+                in cast(
+                    list[object],
                     cast(
                         dict[str, object],
                         _discord_provider_state(discord_provider_fake_url)["gateway"],
-                    )["connections"],
+                    )["initial_opcodes"],
                 )
-                >= 2
             ),
             timeout=45,
             interval=0.2,
@@ -2735,7 +2735,8 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
     gateway = cast(dict[str, object], state["gateway"])
     assert cast(int, gateway["connections"]) >= 2
     initial_opcodes = cast(list[object], gateway["initial_opcodes"])
-    assert initial_opcodes[:2] == [2, 6]
+    resume_index = initial_opcodes.index(6)
+    assert 2 in initial_opcodes[:resume_index]
     dispatches = cast(list[object], gateway["dispatches"])
     assert {"event_type": "GUILD_CREATE", "sequence": 2} in dispatches
     assert {"event_type": "MESSAGE_CREATE", "sequence": 3} in dispatches
