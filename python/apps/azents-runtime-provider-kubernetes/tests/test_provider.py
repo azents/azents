@@ -1388,33 +1388,43 @@ async def test_direct_network_policy_is_bounded_by_deployment_hard_cap() -> None
     assert optional_rules == (extra_egress,)
 
 
-def test_provider_rejects_extra_ip_egress_outside_network_hard_cap() -> None:
+@pytest.mark.asyncio
+async def test_platform_extra_ip_egress_is_part_of_provider_boundary() -> None:
+    api = FakeKubernetesApi()
     extra_egress = NetworkPolicyEgressRule(
         peers=(
             NetworkPolicyPeer(
                 namespace_selector=None,
                 pod_selector=None,
                 ip_block=IpBlock(
-                    cidr="0.0.0.0/0",
+                    cidr="192.168.68.144/32",
                     except_cidrs=(),
                 ),
             ),
         ),
-        ports=(),
+        ports=(NetworkPolicyPort(protocol="TCP", port=443),),
     )
 
-    with pytest.raises(
-        UnsupportedRuntimeConfiguration,
-        match="exceeds the network hard cap",
-    ):
-        _provider(
-            FakeKubernetesApi(),
-            network_hard_cap_allowed_cidrs=("10.10.0.0/16",),
-            network_hard_cap_extra_egress=(extra_egress,),
+    provider = _provider(
+        api,
+        network_hard_cap_denied_cidrs=("192.168.0.0/16",),
+        network_hard_cap_extra_egress=(extra_egress,),
+    )
+
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            runtime_configuration=_runtime_configuration(),
         )
+    )
+
+    network_policy = api.network_policies[
+        ("azents-runtime", "azents-runtime-runtime-1-execution")
+    ]
+    assert extra_egress in network_policy.spec.egress
 
 
-def test_provider_rejects_extra_ip_egress_that_bypasses_denied_hard_cap() -> None:
+def test_provider_rejects_invalid_extra_ip_egress_exception() -> None:
     extra_egress = NetworkPolicyEgressRule(
         peers=(
             NetworkPolicyPeer(
@@ -1422,7 +1432,7 @@ def test_provider_rejects_extra_ip_egress_that_bypasses_denied_hard_cap() -> Non
                 pod_selector=None,
                 ip_block=IpBlock(
                     cidr="10.10.0.0/16",
-                    except_cidrs=(),
+                    except_cidrs=("10.10.0.0/16",),
                 ),
             ),
         ),
@@ -1431,11 +1441,10 @@ def test_provider_rejects_extra_ip_egress_that_bypasses_denied_hard_cap() -> Non
 
     with pytest.raises(
         UnsupportedRuntimeConfiguration,
-        match="bypasses a denied network hard cap",
+        match="exceptions must be strict subnets",
     ):
         _provider(
             FakeKubernetesApi(),
-            network_hard_cap_denied_cidrs=("10.10.1.0/24",),
             network_hard_cap_extra_egress=(extra_egress,),
         )
 

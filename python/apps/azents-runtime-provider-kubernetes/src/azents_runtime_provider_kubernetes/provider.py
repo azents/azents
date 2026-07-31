@@ -205,7 +205,7 @@ class KubernetesRuntimeProvider:
             *config.network_hard_cap_denied_cidrs,
         ):
             _ip_network(cidr)
-        _validate_network_hard_cap_extra_egress(config)
+        _validate_extra_egress_ip_blocks(config.network_hard_cap_extra_egress)
         _immutable_image_reference(config.engine_image, "engine image")
         self._api = api
         self._config = config
@@ -1335,14 +1335,11 @@ def _permitted_egress_rules(
     return (*rules, *config.network_hard_cap_extra_egress)
 
 
-def _validate_network_hard_cap_extra_egress(
-    config: KubernetesRuntimeProviderConfig,
+def _validate_extra_egress_ip_blocks(
+    rules: tuple[NetworkPolicyEgressRule, ...],
 ) -> None:
-    allowed = tuple(
-        _ip_network(value) for value in config.network_hard_cap_allowed_cidrs
-    )
-    denied = tuple(_ip_network(value) for value in config.network_hard_cap_denied_cidrs)
-    for rule in config.network_hard_cap_extra_egress:
+    """Validate Platform-owned extra egress IPBlock syntax."""
+    for rule in rules:
         for peer in rule.peers:
             if peer.ip_block is None:
                 continue
@@ -1358,25 +1355,6 @@ def _validate_network_hard_cap_extra_egress(
                     "Provider extra egress IPBlock exceptions must be strict "
                     "subnets of their CIDR."
                 )
-            if allowed and not any(
-                _subnet_of_same_family(network, allowed_network)
-                for allowed_network in allowed
-            ):
-                raise UnsupportedRuntimeConfiguration(
-                    "Provider extra egress IPBlock exceeds the network hard cap."
-                )
-            for denied_network in denied:
-                overlap = _network_intersection(network, denied_network)
-                if overlap is None:
-                    continue
-                if not any(
-                    _subnet_of_same_family(overlap, exception)
-                    for exception in exceptions
-                ):
-                    raise UnsupportedRuntimeConfiguration(
-                        "Provider extra egress IPBlock bypasses a denied network "
-                        "hard cap."
-                    )
 
 
 def _network_intersection(
