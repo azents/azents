@@ -1,12 +1,12 @@
 "use client";
 
 import {
+  Accordion,
   Alert,
   Badge,
   Group,
   Loader,
   Paper,
-  SimpleGrid,
   Stack,
   Text,
 } from "@mantine/core";
@@ -84,71 +84,65 @@ function revisionEvidence(
 function RevisionPanel({
   title,
   revision,
-  empty,
 }: {
   title: string;
-  revision: RuntimeConfigurationRevisionResponse | null;
-  empty: string;
+  revision: RuntimeConfigurationRevisionResponse;
 }): React.ReactElement {
   const t = useTranslations("chat.workspacePanel");
 
   return (
     <Paper withBorder p="sm" radius="md">
       <Stack gap="xs">
-        <Text size="xs" fw={700} tt="uppercase" c="dimmed">
+        <Text size="sm" fw={600}>
           {title}
         </Text>
-        {revision === null ? (
-          <Text size="sm" c="dimmed">
-            {empty}
-          </Text>
-        ) : (
-          <>
-            {revisionEvidence(revision).map((item) => (
-              <Group
-                key={item.label}
-                justify="space-between"
-                align="flex-start"
-                gap="sm"
-                wrap="nowrap"
+        {revisionEvidence(revision).map((item) => (
+          <Stack key={item.label} gap={0}>
+            <Text size="xs" fw={500}>
+              {t(item.label)}
+            </Text>
+            <Text
+              size="xs"
+              ff="monospace"
+              style={{
+                overflowWrap: "anywhere",
+                wordBreak: "break-word",
+              }}
+            >
+              {item.value}
+            </Text>
+          </Stack>
+        ))}
+        {revision.reason_code !== null && (
+          <Alert color="red" p="xs">
+            <Stack gap="xs">
+              <Text size="xs">
+                {t(
+                  `configurationReasons.${configurationReason(
+                    revision.reason_code,
+                  )}`,
+                )}
+              </Text>
+              <Text
+                size="xs"
+                ff="monospace"
+                style={{ overflowWrap: "anywhere" }}
               >
-                <Text size="xs" c="dimmed">
-                  {t(item.label)}
-                </Text>
+                {revision.reason_code}
+              </Text>
+              {revision.missing_capabilities.length > 0 && (
                 <Text
                   size="xs"
                   ff="monospace"
-                  ta="right"
                   style={{ overflowWrap: "anywhere" }}
                 >
-                  {item.value}
+                  {t("configurationMissingCapabilities", {
+                    capabilities: revision.missing_capabilities.join(", "),
+                  })}
                 </Text>
-              </Group>
-            ))}
-            {revision.reason_code !== null && (
-              <Alert color="red" p="xs">
-                <Stack gap={2}>
-                  <Text size="xs">
-                    {t(
-                      `configurationReasons.${configurationReason(
-                        revision.reason_code,
-                      )}`,
-                    )}
-                  </Text>
-                  <Text size="xs" c="dimmed" ff="monospace">
-                    {revision.reason_code}
-                  </Text>
-                  {revision.missing_capabilities.length > 0 && (
-                    <Text size="xs" c="dimmed" ff="monospace">
-                      {t("configurationMissingCapabilities", {
-                        capabilities: revision.missing_capabilities.join(", "),
-                      })}
-                    </Text>
-                  )}
-                </Stack>
-              </Alert>
-            )}
-          </>
+              )}
+            </Stack>
+          </Alert>
         )}
       </Stack>
     </Paper>
@@ -176,44 +170,63 @@ export function RuntimeConfigurationStatus({
   }
 
   const { configuration } = state;
-  const statusColor =
-    configuration.status === "applied"
-      ? "green"
-      : configuration.status === "waiting_for_recreation"
-        ? "yellow"
-        : configuration.status === "configured_not_created"
-          ? "blue"
-          : "red";
+  const hasTechnicalDetails =
+    configuration.desired !== null || configuration.applied !== null;
 
   return (
-    <Paper withBorder p="md" radius="md">
+    <Paper withBorder p={{ base: "sm", sm: "md" }} radius="md">
       <Stack gap="md">
-        <Group justify="space-between" align="flex-start" gap="md">
-          <Stack gap="xs">
+        <Stack gap="xs">
+          <Group justify="space-between" align="center" gap="sm">
             <Text size="sm" fw={700}>
               {t("configurationTitle")}
             </Text>
-            <Text size="xs" c="dimmed">
-              {t(`configurationStatus.${configuration.status}.description`)}
-            </Text>
-          </Stack>
-          <Badge color={statusColor} variant="light">
-            {t(`configurationStatus.${configuration.status}.label`)}
-          </Badge>
-        </Group>
+            <Badge variant="default">
+              {t(`configurationStatus.${configuration.status}.label`)}
+            </Badge>
+          </Group>
+          <Text size="sm">
+            {t(`configurationStatus.${configuration.status}.description`)}
+          </Text>
+        </Stack>
 
-        <SimpleGrid cols={{ base: 1, sm: 2 }}>
-          <RevisionPanel
-            title={t("configurationDesired")}
-            revision={configuration.desired}
-            empty={t("configurationNoDesired")}
-          />
-          <RevisionPanel
-            title={t("configurationApplied")}
-            revision={configuration.applied}
-            empty={t("configurationNoApplied")}
-          />
-        </SimpleGrid>
+        {hasTechnicalDetails && (
+          <Accordion variant="contained" radius="md">
+            <Accordion.Item value="technical-details">
+              <Accordion.Control>
+                <Text size="sm" fw={600}>
+                  {t("configurationTechnicalDetails")}
+                </Text>
+              </Accordion.Control>
+              <Accordion.Panel>
+                <Stack gap="sm">
+                  {configuration.status === "applied" &&
+                  configuration.applied !== null ? (
+                    <RevisionPanel
+                      title={t("configurationCurrent")}
+                      revision={configuration.applied}
+                    />
+                  ) : (
+                    <>
+                      {configuration.desired !== null && (
+                        <RevisionPanel
+                          title={t("configurationDesired")}
+                          revision={configuration.desired}
+                        />
+                      )}
+                      {configuration.applied !== null && (
+                        <RevisionPanel
+                          title={t("configurationApplied")}
+                          revision={configuration.applied}
+                        />
+                      )}
+                    </>
+                  )}
+                </Stack>
+              </Accordion.Panel>
+            </Accordion.Item>
+          </Accordion>
+        )}
       </Stack>
     </Paper>
   );
