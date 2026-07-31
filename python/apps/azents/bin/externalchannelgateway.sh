@@ -14,4 +14,4 @@ if [ -f "${revision_file}" ]; then
     fi
 fi
 
-exec python src/cli/discordgatewayworker.py
+exec python src/cli/externalchannelgateway.py

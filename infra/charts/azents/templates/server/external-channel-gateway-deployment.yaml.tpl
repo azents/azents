@@ -2,10 +2,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: discord-gateway
+  name: external-channel-gateway
   namespace: {{ include "azents.serverNamespace" . | quote }}
   labels:
-    {{- include "azents.componentLabels" (dict "root" . "component" "discord-gateway") | nindent 4 }}
+    {{- include "azents.componentLabels" (dict "root" . "component" "external-channel-gateway") | nindent 4 }}
     app.kubernetes.io/part-of: "azents"
 spec:
   replicas: 1
@@ -13,20 +13,20 @@ spec:
     matchLabels:
       app.kubernetes.io/name: {{ include "azents.name" . | quote }}
       app.kubernetes.io/instance: {{ .Release.Name | quote }}
-      app.kubernetes.io/component: "discord-gateway"
+      app.kubernetes.io/component: "external-channel-gateway"
   template:
     metadata:
       labels:
-        {{- include "azents.componentLabels" (dict "root" . "component" "discord-gateway") | nindent 8 }}
+        {{- include "azents.componentLabels" (dict "root" . "component" "external-channel-gateway") | nindent 8 }}
         app.kubernetes.io/part-of: "azents"
     spec:
       terminationGracePeriodSeconds: 60
       serviceAccountName: {{ include "azents.serverServiceAccountName" . | quote }}
       containers:
-        - name: discord-gateway
+        - name: external-channel-gateway
           image: {{ include "azents.serverImage" . | quote }}
           imagePullPolicy: {{ .Values.server.image.pullPolicy | quote }}
-          command: ["./bin/discordgatewayworker.sh"]
+          command: ["./bin/externalchannelgateway.sh"]
           envFrom:
             - configMapRef:
                 name: {{ include "azents.serverConfigMapName" . | quote }}
@@ -43,7 +43,7 @@ spec:
             httpGet:
               path: /readyz
               port: 8013
-          {{- with .Values.server.discordGateway.resources }}
+          {{- with .Values.server.externalChannelGateway.resources }}
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}

@@ -16,6 +16,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/slack_sdk_client.py
   - python/apps/azents/src/azents/services/external_channel/slack_socket.py
   - python/apps/azents/src/azents/services/external_channel/socket_manager.py
+  - python/apps/azents/src/azents/services/external_channel/gateway_runtime.py
   - python/apps/azents/src/azents/services/external_channel/slack_blocks.py
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
   - python/apps/azents/src/azents/services/external_channel/discord_http.py
@@ -42,7 +43,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/services/external_channel/provider.py
   - python/apps/azents/src/azents/services/external_channel/slack_endpoint.py
-  - python/apps/azents/src/azents/worker/worker.py
+  - python/apps/azents/src/cli/externalchannelgateway.py
   - testenv/azents/e2e/src/support/slack_provider_fake.py
   - testenv/azents/e2e/src/support/discord_provider_fake.py
   - testenv/azents/e2e/src/tests/azents/public/test_external_channels.py
@@ -50,7 +51,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-07-31
-spec_version: 20
+spec_version: 21
 ---
 
 # External Channel Provider Ingress
@@ -144,8 +145,8 @@ preserve any selected route, and one interaction can select at most once.
 
 ## Socket Mode Admission
 
-A connection-selected Socket worker acquires a fenced lease before creating one public
-aiohttp `SocketModeClient` with SDK automatic reconnect enabled. The SDK owns
+The External Channel Gateway's Slack manager acquires a fenced lease before creating
+one public aiohttp `SocketModeClient` with SDK automatic reconnect enabled. The SDK owns
 `apps.connections.open`, secure endpoint selection and replacement, WebSocket
 establishment, Ping/Pong, stale-session detection, frame receipt, queue dispatch, and
 recoverable reconnect for that lease lifetime.
@@ -171,12 +172,13 @@ Production permits only secure Slack endpoints. Test-only HTTP and insecure WebS
 
 ## Discord Gateway Admission
 
-The dedicated Discord Gateway Worker, rather than an Agent Worker, owns Gateway
-protocol sessions. It claims a configured Discord connection with a lease owner,
-configuration generation, App-claim generation, and lease generation. A stale claim
-cannot renew, admit, record a gap, or release newer authority.
+The provider-neutral External Channel Gateway's Discord manager owns Gateway protocol
+sessions beside the Slack Socket manager. It claims a configured Discord connection
+with a lease owner, configuration generation, App-claim generation, and lease
+generation. A stale claim cannot renew, admit, record a gap, or release newer
+authority.
 
-The Worker uses only the public high-level `discord.py` client API. `Client.start`
+The manager uses only the public high-level `discord.py` client API. `Client.start`
 owns Gateway discovery, Identify, heartbeat, reconnect, and in-process Resume. Azents
 does not inspect Gateway frames, opcodes, session IDs, sequence numbers, Resume URLs,
 raw payload dictionaries, or private SDK state, and it does not persist or inject an
@@ -298,14 +300,18 @@ Slack SDK clients use dedicated non-propagating loggers so SDK diagnostics canno
 serialize provider request parameters, response bodies, or Socket endpoint details
 into application logs.
 
-The Agent Worker includes its Slack Socket manager task in the foreground supervision
-boundary. Unexpected manager return, cancellation, or failure terminates the Worker
-instead of leaving readiness alive without Socket supervision. Customer-specific
-terminal configuration remains durable connection-local health and does not by itself
-make the shared Worker unready.
+The External Channel Gateway supervises Slack Socket and Discord Gateway manager loops
+as required process dependencies. Unexpected top-level return, cancellation, or failure
+terminates the gateway instead of leaving readiness alive without one transport class.
+Customer-specific terminal configuration remains durable connection-local health and
+does not by itself make the shared gateway unready. General Agent Workers own Session
+execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-07-31** (spec_version 21) — Moved Slack Socket Mode and Discord Gateway
+  managers into one provider-neutral External Channel Gateway runtime, removed Socket
+  supervision from Agent Workers, and preserved direct shared-ingestion calls.
 - **2026-07-31** (spec_version 20) — Replaced conversation admissions,
   provider-message/revision storage, invocation batches, and wake dispatch with
   interaction/access replay boundaries and one canonical mailbox item; file keys now

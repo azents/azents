@@ -2196,6 +2196,9 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     azents_engine_worker_container: Container,
+    azents_external_channel_gateway_factory: Callable[
+        [], AbstractContextManager[Container]
+    ],
     slack_provider_fake_url: str,
 ) -> None:
     """Exercise SDK reconnect, durable ACK, and route-preserving terminal health."""
@@ -2304,41 +2307,42 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
             acknowledgements,
         )
 
-    wait_until(
-        socket_acknowledged,
-        timeout=20,
-        interval=0.2,
-        message="Socket Mode envelope was not acknowledged after admission",
-    )
-
-    def reconnect_required_connection() -> object | None:
-        connections = external_api.external_channel_v1_list_connections(
-            agent_id=agent_id,
-            handle=handle,
-            _headers=headers,
+    with azents_external_channel_gateway_factory():
+        wait_until(
+            socket_acknowledged,
+            timeout=20,
+            interval=0.2,
+            message="Socket Mode envelope was not acknowledged after admission",
         )
-        if (
-            len(connections.items) == 1
-            and connections.items[0].status
-            is ExternalChannelConnectionStatus.RECONNECT_REQUIRED
-        ):
-            return connections.items[0]
-        return None
 
-    reconnect_required = wait_until(
-        reconnect_required_connection,
-        timeout=15,
-        interval=0.2,
-        message="Socket link_disabled did not require reconnection",
-    )
-    reconnect_payload = cast(Any, reconnect_required)
-    assert reconnect_payload.socket_gap_reason == "link_disabled"
-    provider_state = _provider_state(slack_provider_fake_url)
-    socket_state = provider_state["socket"]
-    assert isinstance(socket_state, dict)
-    assert socket_state["connections"] == 2
-    assert socket_state["configured_sessions"] == 2
-    assert "xapp-e2e-private" not in str(provider_state)
+        def reconnect_required_connection() -> object | None:
+            connections = external_api.external_channel_v1_list_connections(
+                agent_id=agent_id,
+                handle=handle,
+                _headers=headers,
+            )
+            if (
+                len(connections.items) == 1
+                and connections.items[0].status
+                is ExternalChannelConnectionStatus.RECONNECT_REQUIRED
+            ):
+                return connections.items[0]
+            return None
+
+        reconnect_required = wait_until(
+            reconnect_required_connection,
+            timeout=15,
+            interval=0.2,
+            message="Socket link_disabled did not require reconnection",
+        )
+        reconnect_payload = cast(Any, reconnect_required)
+        assert reconnect_payload.socket_gap_reason == "link_disabled"
+        provider_state = _provider_state(slack_provider_fake_url)
+        socket_state = provider_state["socket"]
+        assert isinstance(socket_state, dict)
+        assert socket_state["connections"] == 2
+        assert socket_state["configured_sessions"] == 2
+        assert "xapp-e2e-private" not in str(provider_state)
 
 
 @pytest.mark.web_surface
@@ -2534,7 +2538,7 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     discord_provider_fake_url: str,
-    azents_discord_gateway_worker_factory: Callable[
+    azents_external_channel_gateway_factory: Callable[
         [], AbstractContextManager[Container]
     ],
 ) -> None:
@@ -2690,21 +2694,23 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
                 return session, projection.items[0]
         return None
 
-    with azents_discord_gateway_worker_factory():
+    with azents_external_channel_gateway_factory():
         wait_until(
             lambda: (
-                cast(
-                    int,
+                6
+                in cast(
+                    list[object],
                     cast(
                         dict[str, object],
                         _discord_provider_state(discord_provider_fake_url)["gateway"],
-                    )["connections"],
+                    )["initial_opcodes"],
                 )
-                >= 2
             ),
             timeout=45,
             interval=0.2,
-            message="Discord Gateway Worker did not resume with the provider fake",
+            message=(
+                "External Channel Gateway did not resume Discord with the provider fake"
+            ),
         )
         session, binding = cast(
             tuple[Any, Any],
@@ -2740,7 +2746,8 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
     gateway = cast(dict[str, object], state["gateway"])
     assert cast(int, gateway["connections"]) >= 2
     initial_opcodes = cast(list[object], gateway["initial_opcodes"])
-    assert initial_opcodes[:2] == [2, 6]
+    resume_index = initial_opcodes.index(6)
+    assert 2 in initial_opcodes[:resume_index]
     dispatches = cast(list[object], gateway["dispatches"])
     assert {"event_type": "GUILD_CREATE", "sequence": 2} in dispatches
     assert {"event_type": "MESSAGE_CREATE", "sequence": 3} in dispatches

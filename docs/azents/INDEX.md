@@ -17,7 +17,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-31 | 59 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-29 | 134 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-31 | 30 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-31 | 31 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-28 | 13 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
@@ -39,8 +39,8 @@ Design documents are accumulated records and are not listed individually in this
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-31 | 13 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-31 | 24 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-31 | 21 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-31 | 20 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-31 | 22 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-31 | 21 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-30 | 36 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
@@ -48,7 +48,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-26 | 11 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-24 | 25 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-31 | 14 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-31 | 15 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-07-18 | 3 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-07-19 | 6 |
 
@@ -172,6 +172,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent Runtime and Session Foundation Historical Requirements Reconstruction](requirements/foundation-260504-foundation.md) | foundation-260504 | 2026-05-04 | 2026-05-04 |
 | [Split FunctionCallItem.output into a Separate FunctionCallOutputItem Historical Requirements Reconstruction](requirements/function-260429-function-call-output-item.md) | function-260429 | 2026-04-29 | 2026-04-29 |
 | [GA4 stdio MCP -> Native Toolkit Migration Historical Requirements Reconstruction](requirements/ga4-260401-ga4-toolkit.md) | ga4-260401 | 2026-04-01 | 2026-04-01 |
+| [Consistent Persistent Provider Ingress Requirements](requirements/gateway-260731-consistent-provider-ingress.md) | gateway-260731 | 2026-07-31 | - |
 | [GCP Toolkit — Google Hosted Remote MCP Historical Requirements Reconstruction](requirements/gcp-260326-gcp-observability-toolkit.md) | gcp-260326 | 2026-03-26 | 2026-03-26 |
 | [Materialize Provider-Generated Images as File Resources Historical Requirements Reconstruction](requirements/generated-260717-generated-images-as-file-resources.md) | generated-260717 | 2026-07-17 | - |
 | [Use Generic Native Adapter Request Types Historical Requirements Reconstruction](requirements/generic-260716-generic-adapter-request-types.md) | generic-260716 | 2026-07-16 | - |
@@ -522,6 +523,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Agent Runtime and Session Foundation Historical Decision Reconstruction](adr/foundation-260504-foundation.md)
 - [Split FunctionCallItem.output into a Separate FunctionCallOutputItem](adr/function-260429-function-call-output-item.md)
 - [GA4 stdio MCP -> Native Toolkit Migration Historical Decision Reconstruction](adr/ga4-260401-ga4-toolkit.md)
+- [Consistent Persistent Provider Ingress](adr/gateway-260731-consistent-provider-ingress.md)
 - [GCP Toolkit — Google Hosted Remote MCP Historical Decision Reconstruction](adr/gcp-260326-gcp-observability-toolkit.md)
 - [Materialize Provider-Generated Images as File Resources](adr/generated-260717-generated-images-as-file-resources.md)
 - [Use Generic Native Adapter Request Types](adr/generic-260716-generic-adapter-request-types.md)
