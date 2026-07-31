@@ -620,6 +620,74 @@ async def test_observe_running_pod_reports_running() -> None:
 
 
 @pytest.mark.asyncio
+async def test_verified_running_pod_watch_does_not_regress_to_starting() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    command = _command(RuntimeLifecycleCommandType.START)
+    await provider.start(command)
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pod = dataclasses.replace(
+        api.pods[pod_key],
+        status=PodStatus(phase="Running", ready=True),
+    )
+    api.pods[pod_key] = pod
+    api.watch_events.append(PodWatchEvent(event_type="MODIFIED", pod=pod))
+
+    reports = [report async for report in provider.watch_known_runtimes()]
+
+    assert reports[0].observed_state is RuntimeProviderObservedState.RUNNING
+    assert reports[0].reason == "pod_running"
+
+
+@pytest.mark.asyncio
+async def test_running_pod_watch_fails_closed_after_provider_restart() -> None:
+    api = FakeKubernetesApi()
+    command = _command(RuntimeLifecycleCommandType.START)
+    await _provider(api).start(command)
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pod = dataclasses.replace(
+        api.pods[pod_key],
+        status=PodStatus(phase="Running", ready=True),
+    )
+    api.pods[pod_key] = pod
+    api.watch_events.append(PodWatchEvent(event_type="MODIFIED", pod=pod))
+    restarted_provider = _provider(api)
+
+    reports = [report async for report in restarted_provider.watch_known_runtimes()]
+
+    assert reports[0].observed_state is RuntimeProviderObservedState.STARTING
+    assert reports[0].reason == "network_policy_not_ready"
+
+
+@pytest.mark.asyncio
+async def test_running_pod_watch_revalidates_verified_network_policy() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pod = dataclasses.replace(
+        api.pods[pod_key],
+        status=PodStatus(phase="Running", ready=True),
+    )
+    api.pods[pod_key] = pod
+    network_policy_key = (
+        "azents-runtime",
+        "azents-runtime-runtime-1-execution",
+    )
+    network_policy = api.network_policies[network_policy_key]
+    api.network_policies[network_policy_key] = dataclasses.replace(
+        network_policy,
+        spec=dataclasses.replace(network_policy.spec, egress=()),
+    )
+    api.watch_events.append(PodWatchEvent(event_type="MODIFIED", pod=pod))
+
+    reports = [report async for report in provider.watch_known_runtimes()]
+
+    assert reports[0].observed_state is RuntimeProviderObservedState.STARTING
+    assert reports[0].reason == "network_policy_not_ready"
+
+
+@pytest.mark.asyncio
 async def test_broadened_network_policy_is_not_ready_in_observe_or_failover() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)

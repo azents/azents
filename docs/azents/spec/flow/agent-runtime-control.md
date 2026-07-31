@@ -35,7 +35,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
 last_verified_at: 2026-07-31
-spec_version: 44
+spec_version: 45
 ---
 
 # Agent Runtime Control
@@ -184,6 +184,14 @@ create an evidence-mismatch failure for the new target. Stale reports must not o
 path, observed state, configuration evidence, runner availability, or current failure fields.
 
 Provider report framing always uses the generation accepted for the current Control stream. A Provider reconnect or leader failover may observe backend resources whose labels contain an older Provider generation; those labels are historical command metadata and must be replaced with the current connection generation before initial resync reports, watch reports, or command completion reports are sent to Control.
+
+The Kubernetes Provider treats a Pod watch report as `running` only after a command for the same
+Provider generation, desired generation, configuration revision, and digest has verified the exact
+NetworkPolicy. Every later watch report re-reads that NetworkPolicy and keeps the verified state only
+while it still matches. Provider restart, configuration change, workload deletion, or policy drift
+removes that trust and reports `starting` until a command verifies the current policy again. An
+unverified watch report must not race a verified command report and leave a Ready Runtime
+indefinitely preparing.
 
 Control periodically dispatches idempotent Provider `start` commands for running Runtimes and read-only Provider `observe` commands for stopped-desired Runtimes whose Provider state has not yet converged to `stopped`. Periodic `start` revalidates the desired Runner image and Provider-managed workload configuration, reuses an equivalent workload, and replaces only a drifted workload while preserving Agent Workspace storage. The live Provider connection registry, rather than a cached per-Runtime connection flag, gates dispatch; periodic attempts are durably throttled while a Provider is unavailable, and a successful dispatch refreshes the cached connection flag. Start timeout evaluation happens only after the current reconciliation pass has checked that live registry and only for a desired generation already dispatched to its Provider, so a Control rollout cannot convert a stale durable `connected` flag into a false `START_TIMEOUT`. This converges Runner image/configuration drift after deployment and closes gaps when a backend deletion event is missed during Provider reconnect or leader handoff. A current-generation Provider `stopped` report also converges durable Runner state to `disconnected`; the stopped backend is authoritative that no Runner remains available. Kubernetes Pod replacement treats deletion as asynchronous: the Provider must not apply the replacement under the same name until the old Pod is no longer observable, avoiding immutable-field PATCH failures during restart.
 
@@ -430,6 +438,8 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-07-31** (spec_version 45) — Defined generation/configuration-fenced NetworkPolicy trust for
+  Pod watch reports so verified Ready state cannot regress through an unverified watch race.
 - **2026-07-31** (spec_version 44) — Replaced policy snapshots and Apply with exact desired/applied
   Runtime configuration revisions, current-capability authority, Provider acknowledgement plus
   ordinary Runner evidence, one-action reconciliation, and explicit storage-preserving recreation.
