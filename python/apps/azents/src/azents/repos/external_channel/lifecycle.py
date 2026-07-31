@@ -16,10 +16,10 @@ from azents.core.enums import (
     ExternalChannelBindingStatus,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
-    ExternalChannelConversationAdmissionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
+    ExternalChannelInteractionStatus,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelRouteCatalogStatus,
@@ -39,10 +39,8 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelBlock,
     RDBExternalChannelChannelDefault,
     RDBExternalChannelConnection,
-    RDBExternalChannelConversationAdmission,
     RDBExternalChannelDeliveryAttempt,
-    RDBExternalChannelInvocationBatch,
-    RDBExternalChannelInvocationBatchItem,
+    RDBExternalChannelInteraction,
     RDBExternalChannelResource,
     RDBExternalChannelWork,
     RDBExternalChannelWorkProjectionPart,
@@ -292,18 +290,6 @@ class ExternalChannelLifecycleRepository:
             session_ids=session_ids,
             binding_ids=binding_ids,
         )
-        batch_ids = list(
-            (
-                await session.scalars(
-                    sa.select(RDBExternalChannelInvocationBatch.id)
-                    .where(
-                        RDBExternalChannelInvocationBatch.binding_id.in_(binding_ids)
-                    )
-                    .order_by(RDBExternalChannelInvocationBatch.id)
-                    .with_for_update()
-                )
-            ).all()
-        )
         deleted_delivery_attempt_count = await self._delete(
             session,
             RDBExternalChannelDeliveryAttempt,
@@ -340,16 +326,6 @@ class ExternalChannelLifecycleRepository:
             RDBExternalChannelAccessRequest,
             RDBExternalChannelAccessRequest.id.in_(access_request_ids),
         )
-        deleted_invocation_batch_item_count = await self._delete(
-            session,
-            RDBExternalChannelInvocationBatchItem,
-            RDBExternalChannelInvocationBatchItem.batch_id.in_(batch_ids),
-        )
-        deleted_invocation_batch_count = await self._delete(
-            session,
-            RDBExternalChannelInvocationBatch,
-            RDBExternalChannelInvocationBatch.id.in_(batch_ids),
-        )
         deleted_work_count = await self._delete(
             session,
             RDBExternalChannelWork,
@@ -367,8 +343,6 @@ class ExternalChannelLifecycleRepository:
             deleted_session_grant_count=deleted_session_grant_count,
             preserved_agent_grant_reference_count=preserved_agent_grant_reference_count,
             deleted_access_request_count=deleted_access_request_count,
-            deleted_invocation_batch_item_count=deleted_invocation_batch_item_count,
-            deleted_invocation_batch_count=deleted_invocation_batch_count,
             deleted_work_count=deleted_work_count,
             deleted_binding_count=deleted_binding_count,
         )
@@ -426,11 +400,6 @@ class ExternalChannelLifecycleRepository:
                     == ExternalChannelAccessGrantScope.SESSION,
                     RDBExternalChannelAccessGrant.agent_session_id.in_(session_ids),
                 ),
-            ),
-            remaining_invocation_batch_count=await self._count(
-                session,
-                RDBExternalChannelInvocationBatch,
-                RDBExternalChannelInvocationBatch.binding_id.in_(binding_ids),
             ),
         )
         if any(verification.model_dump().values()):
@@ -519,17 +488,10 @@ class ExternalChannelLifecycleRepository:
             ),
             open_admission_count=await self._count(
                 session,
-                RDBExternalChannelConversationAdmission,
-                sa.and_(
-                    RDBExternalChannelConversationAdmission.connection_id
-                    == connection.id,
-                    RDBExternalChannelConversationAdmission.status.in_(
-                        (
-                            ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
-                            ExternalChannelConversationAdmissionStatus.SELECTED,
-                            ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
-                        )
-                    ),
+                RDBExternalChannelInteraction,
+                _open_selector_condition(
+                    connection_id=connection.id,
+                    route_id=None,
                 ),
             ),
             pending_access_request_count=await self._count(
@@ -607,21 +569,17 @@ class ExternalChannelLifecycleRepository:
                 )
             ).all()
         )
-        admissions = list(
+        selector_interactions = list(
             (
                 await session.scalars(
-                    sa.select(RDBExternalChannelConversationAdmission)
+                    sa.select(RDBExternalChannelInteraction)
                     .where(
-                        RDBExternalChannelConversationAdmission.selected_route_id
-                        == route.id,
-                        RDBExternalChannelConversationAdmission.status.in_(
-                            (
-                                ExternalChannelConversationAdmissionStatus.SELECTED,
-                                ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
-                            )
-                        ),
+                        _open_selector_condition(
+                            connection_id=connection.id,
+                            route_id=route.id,
+                        )
                     )
-                    .order_by(RDBExternalChannelConversationAdmission.id)
+                    .order_by(RDBExternalChannelInteraction.id)
                     .with_for_update()
                 )
             ).all()
@@ -664,8 +622,8 @@ class ExternalChannelLifecycleRepository:
                 invalidation_reason="relationship_removed",
             )
         )
-        for admission in admissions:
-            admission.status = ExternalChannelConversationAdmissionStatus.EXPIRED
+        for interaction in selector_interactions:
+            interaction.status = ExternalChannelInteractionStatus.EXPIRED
         for request in access_requests:
             request.status = ExternalChannelAccessRequestStatus.EXPIRED
             request.decision_summary = "The External Channel relationship was removed."
@@ -816,22 +774,17 @@ class ExternalChannelLifecycleRepository:
                 )
             ).all()
         )
-        admissions = list(
+        selector_interactions = list(
             (
                 await session.scalars(
-                    sa.select(RDBExternalChannelConversationAdmission)
+                    sa.select(RDBExternalChannelInteraction)
                     .where(
-                        RDBExternalChannelConversationAdmission.connection_id
-                        == connection.id,
-                        RDBExternalChannelConversationAdmission.status.in_(
-                            (
-                                ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
-                                ExternalChannelConversationAdmissionStatus.SELECTED,
-                                ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
-                            )
-                        ),
+                        _open_selector_condition(
+                            connection_id=connection.id,
+                            route_id=None,
+                        )
                     )
-                    .order_by(RDBExternalChannelConversationAdmission.id)
+                    .order_by(RDBExternalChannelInteraction.id)
                     .with_for_update()
                 )
             ).all()
@@ -877,8 +830,8 @@ class ExternalChannelLifecycleRepository:
                 invalidation_reason=reason,
             ),
         )
-        for admission in admissions:
-            admission.status = ExternalChannelConversationAdmissionStatus.EXPIRED
+        for interaction in selector_interactions:
+            interaction.status = ExternalChannelInteractionStatus.EXPIRED
         for request in access_requests:
             request.status = ExternalChannelAccessRequestStatus.EXPIRED
             request.decision_summary = (
@@ -920,7 +873,7 @@ class ExternalChannelLifecycleRepository:
         return ExternalChannelMultiConnectionDisconnect(
             disconnected_route_count=disconnected_route_count,
             invalidated_default_count=invalidated_default_count,
-            expired_admission_count=len(admissions),
+            expired_admission_count=len(selector_interactions),
             expired_access_request_count=len(access_requests),
             unavailable_resource_count=unavailable_resource_count,
             disconnected_binding_count=len(bindings),
@@ -1114,16 +1067,10 @@ class ExternalChannelLifecycleRepository:
             bound_resource_count=bound_resource_count,
             open_admission_count=await self._count(
                 session,
-                RDBExternalChannelConversationAdmission,
-                sa.and_(
-                    RDBExternalChannelConversationAdmission.selected_route_id
-                    == route_id,
-                    RDBExternalChannelConversationAdmission.status.in_(
-                        (
-                            ExternalChannelConversationAdmissionStatus.SELECTED,
-                            ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
-                        )
-                    ),
+                RDBExternalChannelInteraction,
+                _open_selector_condition(
+                    connection_id=None,
+                    route_id=route_id,
                 ),
             ),
             pending_access_request_count=await self._count(
@@ -1545,6 +1492,35 @@ class ExternalChannelLifecycleRepository:
         """Apply one terminal transition and return its affected row count."""
         result = await session.execute(statement.returning(sa.literal(1)))
         return len(result.scalars().all())
+
+
+def _open_selector_condition(
+    *,
+    connection_id: str | None,
+    route_id: str | None,
+) -> sa.ColumnElement[bool]:
+    """Match nonterminal interaction-owned selector state."""
+    conditions: list[sa.ColumnElement[bool]] = [
+        RDBExternalChannelInteraction.projection.op("?")("agent_selector"),
+        RDBExternalChannelInteraction.status.in_(
+            (
+                ExternalChannelInteractionStatus.ACCEPTED,
+                ExternalChannelInteractionStatus.PROCESSING,
+                ExternalChannelInteractionStatus.COMPLETED,
+            )
+        ),
+        RDBExternalChannelInteraction.expires_at > sa.func.now(),
+    ]
+    if connection_id is not None:
+        conditions.append(RDBExternalChannelInteraction.connection_id == connection_id)
+    if route_id is not None:
+        conditions.append(
+            RDBExternalChannelInteraction.projection["agent_selector"][
+                "selected_route_id"
+            ].as_string()
+            == route_id
+        )
+    return sa.and_(*conditions)
 
 
 def _provider_payload(

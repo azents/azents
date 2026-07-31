@@ -87,7 +87,7 @@ class _Repository:
                 if self.admission is not None
                 else ExternalChannelIngestionReason.HISTORY_UNAVAILABLE
             ),
-            batch_id="batch-1" if self.admission is not None else None,
+            mailbox_item_id="batch-1" if self.admission is not None else None,
             control_delivery_attempt_id=None,
             connection_id=None,
         )
@@ -145,14 +145,14 @@ class _RetryThenAcceptRepository(_Repository):
             return ExternalChannelIngestionOutcome(
                 kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                 reason=ExternalChannelIngestionReason.HISTORY_UNAVAILABLE,
-                batch_id=None,
+                mailbox_item_id=None,
                 control_delivery_attempt_id=None,
                 connection_id=None,
             )
         return ExternalChannelIngestionOutcome(
             kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
             reason=ExternalChannelIngestionReason.ACCEPTED,
-            batch_id="batch-1",
+            mailbox_item_id="batch-1",
             control_delivery_attempt_id=None,
             connection_id=None,
         )
@@ -169,7 +169,7 @@ class _StaleAuthorityRepository(_Repository):
         return ExternalChannelIngestionOutcome(
             kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
             reason=ExternalChannelIngestionReason.INGRESS_AUTHORITY_STALE,
-            batch_id=None,
+            mailbox_item_id=None,
             control_delivery_attempt_id=None,
             connection_id=None,
         )

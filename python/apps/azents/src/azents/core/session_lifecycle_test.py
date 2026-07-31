@@ -211,14 +211,6 @@ def test_external_channel_participant_declares_session_owned_foundation_state() 
             SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
         ),
         (
-            "external_channel_invocation_batches",
-            SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
-        ),
-        (
-            "external_channel_invocation_batch_items",
-            SessionLifecycleResourceClassification.PURE_DATABASE_CHILD,
-        ),
-        (
             "external_channel_access_requests",
             SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
         ),

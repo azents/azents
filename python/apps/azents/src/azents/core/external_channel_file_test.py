@@ -115,7 +115,7 @@ def test_file_locator_round_trips_escaped_components() -> None:
 
     encoded = locator.encode()
 
-    assert encoded == "external-file:v1:slack:binding%3Aone:file%2Fone%3Atwo"
+    assert encoded == "external-file:v1:slack:binding%3Aone:::file%2Fone%3Atwo"
     assert ExternalChannelFileLocator.parse(encoded) == locator
 
 
@@ -124,9 +124,10 @@ def test_file_locator_round_trips_escaped_components() -> None:
     [
         "",
         "external-file:v2:slack:binding:file",
-        "external-file:v1:unknown:binding:file",
-        "external-file:v1:slack::file",
-        "external-file:v1:slack:binding:",
+        "external-file:v1:unknown:binding:::file",
+        "external-file:v1:slack::::file",
+        "external-file:v1:slack:binding:::",
+        "external-file:v1:discord:binding:::file",
     ],
 )
 def test_file_locator_rejects_malformed_values(value: str) -> None:
@@ -160,14 +161,49 @@ def test_add_file_locators_returns_detached_enriched_metadata() -> None:
     enriched = add_external_channel_file_locators(
         metadata,
         binding_id="binding-1",
+        provider_message_key="slack:T1:C1:1.000001",
     )
 
     assert enriched is not metadata
     assert external_channel_file_metadata_items(enriched)[0]["file"] == (
-        "external-file:v1:slack:binding-1:F123"
+        "external-file:v1:slack:binding-1:::F123"
     )
     assert "file" not in external_channel_file_metadata_items(enriched)[1]
     assert "file" not in external_channel_file_metadata_items(metadata)[0]
+
+
+@pytest.mark.parametrize(
+    "provider_message_key",
+    [
+        None,
+        "",
+        "discord-thread:message-1",
+        "discord:guild-1",
+        "discord:guild-1:message-1:extra",
+        "slack:guild-1:message-1",
+    ],
+)
+def test_add_file_locators_rejects_malformed_discord_message_key(
+    provider_message_key: str | None,
+) -> None:
+    """Discord file locators require canonical provider message coordinates."""
+    metadata: dict[str, object] = {
+        "files": [
+            {
+                "provider": "discord",
+                "provider_file_id": "attachment-1",
+                "source_channel_id": "channel-1",
+            }
+        ]
+    }
+
+    enriched = add_external_channel_file_locators(
+        metadata,
+        binding_id="binding-1",
+        provider_message_key=provider_message_key,
+    )
+
+    assert "file" not in external_channel_file_metadata_items(enriched)[0]
 
 
 def test_file_metadata_rejects_unbounded_text() -> None:

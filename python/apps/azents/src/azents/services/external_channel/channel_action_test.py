@@ -1089,6 +1089,58 @@ async def test_discord_approval_control_delivery_uses_text_create() -> None:
 
 
 @pytest.mark.asyncio
+async def test_slack_selector_control_uses_interaction_identity() -> None:
+    """A committed selector control carries only its retained interaction ID."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "operation": ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            "request_payload": {
+                "control_kind": "agent_selector",
+                "tenant_id": "T1",
+                "channel_id": "C1",
+                "thread_ts": "1.000001",
+                "selector_interaction_id": "selector-1",
+            },
+        }
+    )
+
+    class _SelectorSlackClient(_SlackClient):
+        async def post_blocks(self, **kwargs: object) -> SlackControlMessageResult:
+            self.events.append("provider")
+            blocks = cast(list[dict[str, object]], kwargs["blocks"])
+            actions = cast(list[dict[str, object]], blocks[1]["elements"])
+            assert actions[0]["value"] == "selector-1"
+            assert "conversation_admission_id" not in repository.target.request_payload
+            return self._result()
+
+    service = _service(
+        events,
+        repository,
+        _SelectorSlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key="slack:T1:C1:2.000001",
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+    )
+
+    await service.attempt_delivery("delivery-1")
+
+    assert repository.finished == [
+        (
+            ExternalChannelDeliveryStatus.DELIVERED,
+            "slack:T1:C1:2.000001",
+            None,
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_slack_session_link_control_reaches_provider() -> None:
     """A committed Slack Session link is delivered as validated blocks."""
     events: list[str] = []

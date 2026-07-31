@@ -317,15 +317,17 @@ class ExternalChannelFileTransferService:
                     staging_configuration=staging_configuration,
                 )
             case ExternalChannelProvider.DISCORD:
-                source_identity = await self._discord_file_source(
-                    resource_id=target.resource_id,
-                    provider_tenant_id=target.provider_tenant_id,
-                    resource_labels=target.resource_labels,
-                    provider_file_id=locator.provider_file_id,
-                )
+                channel_id = locator.provider_channel_id
+                message_id = locator.provider_message_id
+                if not _discord_snowflake(channel_id) or not _discord_snowflake(
+                    message_id
+                ):
+                    raise ExternalChannelFileTransferError(
+                        "Discord attachment source is unavailable."
+                    )
                 return await self._download_discord(
                     bot_token=credentials.bot_token,
-                    source_identity=source_identity,
+                    source_identity=(channel_id, message_id),
                     provider_file_id=locator.provider_file_id,
                     expected_size_bytes=expected_size_bytes,
                     path=path,
@@ -499,64 +501,6 @@ class ExternalChannelFileTransferService:
             media_type=metadata.media_type,
             bytes_written=declared_size,
         )
-
-    async def _discord_file_source(
-        self,
-        *,
-        resource_id: str,
-        provider_tenant_id: str | None,
-        resource_labels: dict[str, object] | None,
-        provider_file_id: str,
-    ) -> tuple[str, str]:
-        """Resolve a locator only to its retained source message and channel."""
-        if not _discord_snowflake(provider_tenant_id) or not _discord_snowflake(
-            provider_file_id
-        ):
-            raise ExternalChannelFileTransferError(
-                "Discord attachment identity is unavailable."
-            )
-        async with self.session_manager() as session:
-            source = await self.repository.get_file_source(
-                session,
-                resource_id=resource_id,
-                provider_file_id=provider_file_id,
-            )
-        if source is None:
-            raise ExternalChannelFileTransferError(
-                "Discord attachment is not retained by the active conversation."
-            )
-        channel_id = source.provider_channel_id
-        if not _discord_snowflake(channel_id):
-            raise ExternalChannelFileTransferError(
-                "Discord attachment source channel is unavailable."
-            )
-        identity = _discord_message_identity(source.provider_message_key)
-        if identity is None:
-            raise ExternalChannelFileTransferError(
-                "Discord attachment source message is unavailable."
-            )
-        source_tenant_id, message_id = identity
-        if source_tenant_id != provider_tenant_id:
-            raise ExternalChannelFileTransferError(
-                "Discord attachment source does not match the active Guild."
-            )
-        if (
-            source.metadata.get("provider") != ExternalChannelProvider.DISCORD.value
-            or source.metadata.get("provider_file_id") != provider_file_id
-            or source.metadata.get("source_channel_id") != channel_id
-        ):
-            raise ExternalChannelFileTransferError(
-                "Discord attachment source identity is unavailable."
-            )
-        if not _discord_resource_source_allowed(
-            resource_labels=resource_labels,
-            provider_tenant_id=provider_tenant_id,
-            channel_id=channel_id,
-        ):
-            raise ExternalChannelFileTransferError(
-                "Discord attachment source does not match the active conversation."
-            )
-        return channel_id, message_id
 
     async def _download_discord(
         self,
@@ -742,17 +686,14 @@ class ExternalChannelFileTransferService:
             raise ExternalChannelFileTransferError(
                 "External Channel binding changed before file transfer completed."
             )
-        current_source_identity = await self._discord_file_source(
-            resource_id=current.resource_id,
-            provider_tenant_id=current.provider_tenant_id,
-            resource_labels=current.resource_labels,
-            provider_file_id=locator.provider_file_id,
-        )
-        if current_source_identity != source_identity:
+        if (
+            locator.provider_channel_id,
+            locator.provider_message_id,
+        ) != source_identity:
             raise ExternalChannelFileTransferError(
                 "Discord attachment source changed before transfer completed."
             )
-        channel_id, message_id = current_source_identity
+        channel_id, message_id = source_identity
         info = await self.discord_client.fetch_attachment_download_info(
             bot_token=bot_token,
             channel_id=channel_id,
@@ -1006,46 +947,9 @@ class ExternalChannelFileTransferService:
             ) from None
 
 
-def _discord_message_identity(provider_message_key: str) -> tuple[str, str] | None:
-    """Extract Guild and message snowflakes from a canonical Discord message key."""
-    provider, separator, remainder = provider_message_key.partition(":")
-    if provider != "discord" or not separator:
-        return None
-    tenant_id, separator, message_id = remainder.partition(":")
-    if (
-        not separator
-        or not _discord_snowflake(tenant_id)
-        or not _discord_snowflake(message_id)
-    ):
-        return None
-    return tenant_id, message_id
-
-
 def _discord_snowflake(value: object) -> TypeGuard[str]:
     """Return whether a provider identifier is a non-blank Discord snowflake."""
     return isinstance(value, str) and value.isdigit()
-
-
-def _discord_resource_source_allowed(
-    *,
-    resource_labels: dict[str, object] | None,
-    provider_tenant_id: str,
-    channel_id: str,
-) -> bool:
-    """Bind the retained source channel to the active Discord conversation."""
-    if not isinstance(resource_labels, dict):
-        return False
-    if (
-        resource_labels.get("provider") != ExternalChannelProvider.DISCORD.value
-        or resource_labels.get("guild_id") != provider_tenant_id
-    ):
-        return False
-    allowed_channels = {
-        value
-        for key in ("thread_id", "parent_channel_id")
-        if isinstance((value := resource_labels.get(key)), str)
-    }
-    return channel_id in allowed_channels
 
 
 def _validate_discord_attachment_metadata(

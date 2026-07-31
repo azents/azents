@@ -32,7 +32,9 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/ingestion.py
   - python/apps/azents/src/azents/services/external_channel/ingestion_history.py
   - python/apps/azents/src/azents/services/external_channel/ingestion_replay.py
-  - python/apps/azents/src/azents/services/external_channel/ingestion_store.py
+  - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
+  - python/apps/azents/src/azents/services/external_channel/mailbox_wake.py
+  - python/apps/azents/src/azents/services/external_channel/selector_state.py
   - python/apps/azents/src/azents/services/external_channel/transport_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/connection_revocation.py
   - python/apps/azents/src/azents/services/external_channel/provider_control.py
@@ -48,7 +50,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-07-31
-spec_version: 19
+spec_version: 20
 ---
 
 # External Channel Provider Ingress
@@ -78,8 +80,9 @@ Slack sends HTTP callbacks to the single fixed endpoint
 5. The fully parsed event identity must match the selected connection before the
    authenticated request is projected into a typed, content-free trigger locator.
 6. Original message triggers enter synchronous conversation ingestion. Provider
-   history is read, and durable Session input, wake state, and provider-control intent
-   are committed before acknowledgement. Any returned control delivery is scheduled
+   history is read, and one canonical mailbox input plus provider-control intent are
+   committed before acknowledgement. The mailbox item is also pending wake-recovery
+   identity. Any returned control delivery is scheduled
    as a post-acknowledgement background attempt.
 7. Success is acknowledged only for a completed non-retryable outcome. A retryable
    coordination, history, position, or wake failure remains unacknowledged so the
@@ -89,9 +92,9 @@ Payload App/Team identity is an index key, not authentication. Missing, unknown,
 ambiguous candidates fail closed, and ordinary events never pass admission without
 successful HMAC verification.
 
-Duplicate callbacks converge through conversation position and immutable
-binding/trigger batch identity and still receive a successful acknowledgement after
-any pending wake is recovered.
+Duplicate callbacks converge through conversation position and deterministic mailbox
+identity and still receive a successful acknowledgement after any pending wake is
+recovered.
 
 ## Discord Interaction Admission
 
@@ -107,15 +110,15 @@ retained.
 4. It verifies the submitted Application and Guild identities against the selected
    connection.
 5. A verified endpoint PING returns its provider acknowledgement without durable
-   admission.
+   interaction state.
 6. A supported Message Command, component, autocomplete, or modal interaction creates
-   or reuses one token-free durable interaction admission before its provider
+   or reuses one token-free durable interaction before its provider
    acknowledgement is returned. Message Commands materialize their selected source
    through the same canonical source-before-selection boundary; selector responses use
    signed compact component scope and return before any post-response control delivery.
 
 Unknown selectors, malformed bodies, invalid signatures, mismatched Application/Guild
-identity, and unsupported interaction types fail before durable admission. Discord
+identity, and unsupported interaction types fail before durable interaction state. Discord
 interaction tokens, raw bodies, and signatures remain request-local and are neither
 persisted nor replayed.
 
@@ -126,18 +129,18 @@ selection as Events API payloads. JSON events and form-encoded interactions are
 bounded before parsing and authenticated against the selected connection's Signing
 Secret.
 
-Message shortcuts retain the selected source message and metadata-only files in a
-durable conversation admission before acknowledgement. A Multi App mention with no
-valid channel default also creates one pending admission and a selector control. The
-provider trigger ID is carried only in the in-memory handoff needed for the immediate
-modal mutation; it is never persisted, logged, or replayed.
+Message shortcuts retain a content-free provider locator and conversation-position
+boundary in the owning interaction before acknowledgement. A Multi App mention with no
+valid channel default uses the same interaction-owned selector state and creates one
+selector control. The provider trigger ID is carried only in the in-memory handoff
+needed for the immediate modal mutation; it is never persisted, logged, or replayed.
 
 Block actions open a paged/searchable modal from the current available route catalog.
-Private metadata is signed and binds connection, resource, admission, initiating
+Private metadata is signed and binds connection, resource, interaction, initiating
 principal, original interaction, and page offset. Navigation and submission recheck
-that scope, admission expiry, route availability, Workspace boundary, and callback
+that scope, interaction expiry, route availability, Workspace boundary, and callback
 actor before any selection. Duplicate callbacks reuse the durable interaction claim,
-and one admission can select at most once.
+preserve any selected route, and one interaction can select at most once.
 
 ## Socket Mode Admission
 
@@ -214,7 +217,7 @@ the canonical message source nor a durable queue item.
    use owner-token fencing; Redis unavailability is a retryable failure and never
    switches implicitly to memory.
 2. A short preparation transaction revalidates ingress authority, creates or reads the
-   PostgreSQL conversation position, resolves existing binding/admission state, and
+   PostgreSQL conversation position, resolves existing binding/selector/access state, and
    returns the exclusive provider-history start position. It performs no provider I/O.
 3. The provider adapter reads an exclusive-start, inclusive-trigger history range
    outside any database transaction. It retains the newest 20 eligible visible
@@ -222,21 +225,20 @@ the canonical message source nor a durable queue item.
    was omitted. The connected Azents App/Bot is excluded; raw REST pages, callbacks,
    tokens, private URLs, and attachment bodies are not retained.
 4. A short final transaction locks and revalidates the same authority, conversation
-   position, resource, route, binding/admission, and access boundary. PostgreSQL
+   position, active resource, route, binding/selector, and access boundary. PostgreSQL
    compare-and-set restarts the read when another replica advanced the position.
-5. The transaction persists canonical provider-history messages and immutable accepted
-   revisions, creates or reuses the active binding and root Session, records immutable
-   invocation-batch membership, enqueues one wake-session mailbox item, establishes
-   initial Channel Work and provider-control intents, marks the Session running,
-   advances the position, and records recoverable wake-dispatch state atomically.
-6. After commit, the service claims the wake intent, sends routing-only
-   `SessionWakeUp(session_id)`, and marks dispatch complete. A crash or broker failure
-   resets or preserves recoverable state so duplicate transport delivery can complete
-   the same logical wake without creating another batch.
+5. The transaction creates or reuses the active binding and root Session, enqueues one
+   deterministic wake-session mailbox item containing the ordered provider-history
+   projection, establishes initial Channel Work and provider-control intents, marks the
+   Session running, and advances the position atomically.
+6. After commit, the service claims the pending mailbox item and sends routing-only
+   `SessionWakeUp(session_id)`. A crash or broker failure leaves that item recoverable,
+   so duplicate transport delivery can complete the same logical wake without creating
+   another Session input.
 
 An existing active binding wins route resolution. Otherwise Single uses its sole
 route, Multi uses one valid channel default, and unresolved Multi traffic creates an
-immutable selection boundary. Empty, removed, stale, or ambiguous catalogs never fall
+interaction-owned typed selection boundary. Empty, removed, stale, or ambiguous catalogs never fall
 back to an arbitrary Agent. An already-granted first invocation snapshots the Agent's
 current automatic Project policy through the shared root Session creation boundary;
 an existing binding keeps its prior snapshot.
@@ -245,7 +247,7 @@ Restricted access persists the trigger source plus immutable conversation-positi
 range-start, and trigger-position replay authority and commits an approval-control
 intent without waking a Session. Allow invokes the same synchronous ingestion service
 with that durable replay boundary. Replay works whether the shared position is still
-before the trigger or has advanced, and converges on one batch and mailbox identity.
+before the trigger or has advanced, and converges on one mailbox identity.
 Deny, block, revocation, malformed triggers, and non-invoking edit/delete callbacks
 never release new Session input.
 
@@ -268,16 +270,17 @@ through the shared provider-control delivery fence.
 Slack HTTP, Socket Mode, and provider-history projection use the same bounded Slack
 `files[]` metadata. At most 20 entries are retained. Text fields are
 bounded, malformed or truncated items fail closed, and no private URL or file body enters
-the canonical revision or Agent context.
+the mailbox projection or Agent context.
 
 Direct hosted uploads with an ID, non-negative declared size, supported mode, visible
-access, and no external or Slack Connect classification receive a provider-neutral,
-binding-scoped `external-file:v1` locator. External files, Slack Connect files, sparse
+access, and no external or Slack Connect classification receive a provider-addressed
+`external-file:v1:<provider>:<binding>:<channel>:<message>:<file>` key. Slack leaves
+channel and message empty; Discord includes both. External files, Slack Connect files, sparse
 access-check records, unsupported modes, missing IDs, and invalid sizes remain visible
 with stable unsupported reasons but cannot be downloaded.
 
 The first Agent turn, replay, filters, compaction continuity, structured visible values,
-and token accounting render the same ordered metadata and opaque locators. Rendering an
+and token accounting render the same ordered metadata and direct keys. Rendering an
 attachment never materializes its bytes. Explicit download later rechecks active
 ownership, directional capability, `files.info` metadata, provider authorization,
 declared size, and actual streamed bytes.
@@ -303,6 +306,10 @@ make the shared Worker unready.
 
 ## Changelog
 
+- **2026-07-31** (spec_version 20) — Replaced conversation admissions,
+  provider-message/revision storage, invocation batches, and wake dispatch with
+  interaction/access replay boundaries and one canonical mailbox item; file keys now
+  carry direct provider coordinates.
 - **2026-07-31** (spec_version 19) — Delegated Slack Socket endpoint acquisition,
   queue control, stale detection, and recoverable reconnect to the SDK; added fenced
   Slack and Discord typed lifecycle health; moved Slack HTTP verification to the SDK

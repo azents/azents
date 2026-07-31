@@ -1,16 +1,11 @@
 """Tests for provider-neutral synchronous conversation ingestion."""
 
-import asyncio
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
-from types import SimpleNamespace
-from typing import Any, cast
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelConversationScopeKind,
@@ -39,11 +34,9 @@ from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionRequest,
     ExternalChannelIngressAuthority,
     ExternalChannelIngressAuthorityKind,
-    ExternalChannelInvocationWakeDispatcher,
     ExternalChannelReplayBoundary,
     ExternalChannelTriggerLocator,
     ExternalChannelWakeDispatchResult,
-    ExternalChannelWakeDispatchUnavailable,
 )
 
 
@@ -144,46 +137,14 @@ class _WakeDispatcher:
     async def dispatch(
         self,
         *,
-        batch_id: str,
+        mailbox_item_id: str,
         session_id: str,
         now: datetime.datetime,
         deadline: ExternalChannelOperationDeadline,
     ) -> ExternalChannelWakeDispatchResult:
         del now, deadline
-        self.calls.append((batch_id, session_id))
+        self.calls.append((mailbox_item_id, session_id))
         return self.results.pop(0)
-
-
-class _SessionContext(AbstractAsyncContextManager[AsyncSession]):
-    def __init__(self, session: AsyncSession) -> None:
-        self.session = session
-
-    async def __aenter__(self) -> AsyncSession:
-        return self.session
-
-    async def __aexit__(self, *args: object) -> None:
-        return None
-
-
-@dataclass
-class _SessionManager:
-    sessions: list[AsyncSession]
-
-    def __call__(self) -> AbstractAsyncContextManager[AsyncSession]:
-        return _SessionContext(self.sessions.pop(0))
-
-
-@dataclass
-class _BlockingBroker:
-    cancelled: bool = False
-
-    async def send_message(self, message: object) -> None:
-        del message
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            self.cancelled = True
-            raise
 
 
 def _message(
@@ -257,7 +218,8 @@ def _request(
             else ExternalChannelReplayBoundary(
                 connection_id="connection-1",
                 resource_id="resource-1",
-                source_message_id="message-1",
+                principal_id="principal-1",
+                trigger_provider_message_key="message-1",
                 conversation_position_id="position-1",
                 range_start_position="00000000000000000001",
                 trigger_position="00000000000000000002",
@@ -305,57 +267,6 @@ def test_ingress_authority_rejects_invalid_kind_profile_combinations(
         )
 
 
-async def test_wake_dispatch_timeout_resets_claim_for_retry() -> None:
-    claimed_session = MagicMock()
-    claimed_session.commit = AsyncMock()
-    reset_session = MagicMock()
-    reset_session.commit = AsyncMock()
-    repository = SimpleNamespace(
-        claim_invocation_wake_dispatch=AsyncMock(
-            return_value=(SimpleNamespace(id="batch-1"), True)
-        ),
-        reset_invocation_wake_dispatch=AsyncMock(),
-        mark_invocation_wake_dispatched=AsyncMock(),
-    )
-    agent_session_repository = SimpleNamespace(
-        mark_running_for_input_wakeup=AsyncMock()
-    )
-    broker = _BlockingBroker()
-    dispatcher = ExternalChannelInvocationWakeDispatcher(
-        session_manager=cast(
-            Any,
-            _SessionManager(
-                sessions=[
-                    cast(AsyncSession, claimed_session),
-                    cast(AsyncSession, reset_session),
-                ]
-            ),
-        ),
-        repository=cast(Any, repository),
-        agent_session_repository=cast(Any, agent_session_repository),
-        broker=cast(Any, broker),
-    )
-
-    with pytest.raises(ExternalChannelWakeDispatchUnavailable):
-        await dispatcher.dispatch(
-            batch_id="batch-1",
-            session_id="session-1",
-            now=datetime.datetime.now(datetime.UTC),
-            deadline=ExternalChannelOperationDeadline(
-                datetime.datetime.now(datetime.UTC)
-                + datetime.timedelta(milliseconds=10)
-            ),
-        )
-
-    assert broker.cancelled
-    repository.reset_invocation_wake_dispatch.assert_awaited_once_with(
-        reset_session,
-        batch_id="batch-1",
-    )
-    repository.mark_invocation_wake_dispatched.assert_not_awaited()
-    reset_session.commit.assert_awaited_once()
-
-
 async def test_ingestion_restarts_history_after_position_mismatch() -> None:
     lock = _Lock()
     history = _History()
@@ -365,14 +276,14 @@ async def test_ingestion_restarts_history_after_position_mismatch() -> None:
                 position_id="position-1",
                 exclusive_start_position="00000000000000000000",
                 immediate_outcome=None,
-                wake_batch_id=None,
+                wake_mailbox_item_id=None,
                 wake_session_id=None,
             ),
             ExternalChannelIngestionPreparation(
                 position_id="position-1",
                 exclusive_start_position="00000000000000000001",
                 immediate_outcome=None,
-                wake_batch_id=None,
+                wake_mailbox_item_id=None,
                 wake_session_id=None,
             ),
         ],
@@ -380,7 +291,7 @@ async def test_ingestion_restarts_history_after_position_mismatch() -> None:
             ExternalChannelIngestionAcceptance(
                 status="position_mismatch",
                 reason=ExternalChannelIngestionReason.POSITION_CHANGED,
-                batch_id=None,
+                mailbox_item_id=None,
                 session_id=None,
                 control_delivery_attempt_id=None,
                 connection_id=None,
@@ -388,7 +299,7 @@ async def test_ingestion_restarts_history_after_position_mismatch() -> None:
             ExternalChannelIngestionAcceptance(
                 status="accepted",
                 reason=ExternalChannelIngestionReason.ACCEPTED,
-                batch_id="batch-1",
+                mailbox_item_id="batch-1",
                 session_id="session-1",
                 control_delivery_attempt_id=None,
                 connection_id=None,
@@ -408,7 +319,7 @@ async def test_ingestion_restarts_history_after_position_mismatch() -> None:
     assert outcome == ExternalChannelIngestionOutcome(
         kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
         reason=ExternalChannelIngestionReason.ACCEPTED,
-        batch_id="batch-1",
+        mailbox_item_id="batch-1",
         control_delivery_attempt_id=None,
         connection_id=None,
     )
@@ -435,11 +346,11 @@ async def test_duplicate_recovers_pending_wake_without_history_read() -> None:
                     immediate_outcome=ExternalChannelIngestionOutcome(
                         kind=ExternalChannelIngestionOutcomeKind.DUPLICATE,
                         reason=ExternalChannelIngestionReason.DUPLICATE,
-                        batch_id="batch-1",
+                        mailbox_item_id="batch-1",
                         control_delivery_attempt_id=None,
                         connection_id=None,
                     ),
-                    wake_batch_id="batch-1",
+                    wake_mailbox_item_id="batch-1",
                     wake_session_id="session-1",
                 )
             ],
@@ -468,11 +379,11 @@ async def test_concurrent_wake_claim_is_retryable() -> None:
                     immediate_outcome=ExternalChannelIngestionOutcome(
                         kind=ExternalChannelIngestionOutcomeKind.DUPLICATE,
                         reason=ExternalChannelIngestionReason.DUPLICATE,
-                        batch_id="batch-1",
+                        mailbox_item_id="batch-1",
                         control_delivery_attempt_id=None,
                         connection_id=None,
                     ),
-                    wake_batch_id="batch-1",
+                    wake_mailbox_item_id="batch-1",
                     wake_session_id="session-1",
                 )
             ],
@@ -497,7 +408,7 @@ async def test_history_failure_returns_retryable_outcome() -> None:
                     position_id="position-1",
                     exclusive_start_position=None,
                     immediate_outcome=None,
-                    wake_batch_id=None,
+                    wake_mailbox_item_id=None,
                     wake_session_id=None,
                 )
             ],

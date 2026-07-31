@@ -138,7 +138,7 @@ class _AdmissionDouble:
             return ExternalChannelIngestionOutcome(
                 kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                 reason=ExternalChannelIngestionReason.HISTORY_UNAVAILABLE,
-                batch_id=None,
+                mailbox_item_id=None,
                 control_delivery_attempt_id=None,
                 connection_id=None,
             )
@@ -146,7 +146,7 @@ class _AdmissionDouble:
             return ExternalChannelIngestionOutcome(
                 kind=ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS,
                 reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
-                batch_id=None,
+                mailbox_item_id=None,
                 control_delivery_attempt_id="delivery-1",
                 connection_id=event.connection_id,
             )
@@ -164,7 +164,7 @@ class _AdmissionDouble:
         return ExternalChannelIngestionOutcome(
             kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
             reason=ExternalChannelIngestionReason.ACCEPTED,
-            batch_id="batch-1",
+            mailbox_item_id="batch-1",
             control_delivery_attempt_id=None,
             connection_id=None,
         )

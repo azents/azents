@@ -13,20 +13,15 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
-    ExternalChannelAccessRequestStatus,
     ExternalChannelAppMode,
     ExternalChannelBindingStatus,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
-    ExternalChannelConversationAdmissionOrigin,
-    ExternalChannelConversationAdmissionStatus,
-    ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
-    ExternalChannelMessageLifecycle,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
@@ -44,9 +39,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelBinding,
     RDBExternalChannelChannelDefault,
     RDBExternalChannelConnection,
-    RDBExternalChannelConversationAdmission,
     RDBExternalChannelDeliveryAttempt,
-    RDBExternalChannelResource,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.agent_session import AgentSessionRepository
@@ -58,16 +51,11 @@ from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from .data import (
-    ExternalChannelAccessRequestCreate,
     ExternalChannelAgentRouteCreate,
     ExternalChannelBindingCreate,
     ExternalChannelChannelDefaultCreate,
     ExternalChannelConnectionCreate,
-    ExternalChannelConversationAdmissionCreate,
-    ExternalChannelConversationPositionCreate,
     ExternalChannelInteractionCreate,
-    ExternalChannelMessage,
-    ExternalChannelMessageCreate,
     ExternalChannelPrincipalCreate,
     ExternalChannelResource,
     ExternalChannelResourceCreate,
@@ -198,32 +186,6 @@ async def _resource(
     )
 
 
-async def _message(
-    session: AsyncSession,
-    repo: ExternalChannelRepository,
-    *,
-    resource_id: str,
-    key: str,
-) -> ExternalChannelMessage:
-    """Create one source message suitable for a conversation admission."""
-    return await repo.create_message_idempotent(
-        session,
-        ExternalChannelMessageCreate(
-            resource_id=resource_id,
-            provider_message_key=key,
-            provider_position="1.000001",
-            principal_id=None,
-            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
-            current_revision_id=None,
-            original_url=None,
-            lifecycle=ExternalChannelMessageLifecycle.CURRENT,
-            pending_size=0,
-            provider_created_at=None,
-            provider_updated_at=None,
-        ),
-    )
-
-
 def _interaction_create(
     connection_id: str,
     *,
@@ -246,36 +208,6 @@ def _interaction_create(
         expires_at=_at(10),
         error_kind=None,
         error_summary=None,
-    )
-
-
-def _admission_create(
-    *,
-    connection_id: str,
-    resource_id: str,
-    source_message_id: str,
-    conversation_position_id: str,
-    initiating_principal_id: str | None = None,
-    selected_route_id: str | None = None,
-    interaction_id: str | None = None,
-    status: ExternalChannelConversationAdmissionStatus = (
-        ExternalChannelConversationAdmissionStatus.PENDING_SELECTION
-    ),
-) -> ExternalChannelConversationAdmissionCreate:
-    """Build a route-neutral conversation-admission creation payload."""
-    return ExternalChannelConversationAdmissionCreate(
-        connection_id=connection_id,
-        resource_id=resource_id,
-        source_message_id=source_message_id,
-        initiating_principal_id=initiating_principal_id,
-        origin=ExternalChannelConversationAdmissionOrigin.SHORTCUT,
-        status=status,
-        selected_route_id=selected_route_id,
-        interaction_id=interaction_id,
-        conversation_position_id=conversation_position_id,
-        range_start_position="00000000000000000000",
-        trigger_position="00000000000000000001",
-        expires_at=_at(20),
     )
 
 
@@ -518,235 +450,6 @@ async def test_interaction_admission_is_idempotent_and_validates_principal_bound
         )
 
 
-async def test_conversation_admission_preserves_retries_and_ownership_boundaries(
-    rdb_session: AsyncSession,
-) -> None:
-    """Open conflicts preserve valid retries but reject every foreign owner."""
-    workspace_id = await _workspace(rdb_session, "conversation-boundary")
-    agent = await _agent(rdb_session, workspace_id, "conversation")
-    repo = ExternalChannelRepository()
-    first_connection = await repo.create_connection(
-        rdb_session,
-        _connection_create(workspace_id, provider_app_id="A1", provider_tenant_id="T1"),
-    )
-    second_connection = await repo.create_connection(
-        rdb_session,
-        _connection_create(workspace_id, provider_app_id="A2", provider_tenant_id="T2"),
-    )
-    first_position = await repo.create_conversation_position_idempotent(
-        rdb_session,
-        ExternalChannelConversationPositionCreate(
-            connection_id=first_connection.id,
-            scope_kind=ExternalChannelConversationScopeKind.THREAD,
-            provider_channel_id="C1",
-            provider_thread_key="1.000001",
-            read_through_position=None,
-        ),
-    )
-    first_route = await repo.create_agent_route(
-        rdb_session,
-        _route_create(
-            first_connection.id, agent.id, mode=ExternalChannelAppMode.SINGLE
-        ),
-    )
-    second_route = await repo.create_agent_route(
-        rdb_session,
-        _route_create(
-            second_connection.id, agent.id, mode=ExternalChannelAppMode.SINGLE
-        ),
-    )
-    first_resource = await _resource(
-        rdb_session, repo, connection_id=first_connection.id, key="resource-1"
-    )
-    second_resource = await _resource(
-        rdb_session, repo, connection_id=second_connection.id, key="resource-2"
-    )
-    first_message = await _message(
-        rdb_session, repo, resource_id=first_resource.id, key="message-1"
-    )
-    second_message = await _message(
-        rdb_session, repo, resource_id=second_resource.id, key="message-2"
-    )
-    second_interaction = await repo.admit_interaction(
-        rdb_session,
-        _interaction_create(second_connection.id, key="interaction-2"),
-    )
-    first_principal = await repo.create_principal_idempotent(
-        rdb_session,
-        ExternalChannelPrincipalCreate(
-            provider=ExternalChannelProvider.SLACK,
-            provider_tenant_id="T1",
-            provider_user_id="U1",
-            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
-            display_name=None,
-            avatar_url=None,
-            profile=None,
-        ),
-    )
-    foreign_principal = await repo.create_principal_idempotent(
-        rdb_session,
-        ExternalChannelPrincipalCreate(
-            provider=ExternalChannelProvider.SLACK,
-            provider_tenant_id="T2",
-            provider_user_id="U2",
-            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
-            display_name=None,
-            avatar_url=None,
-            profile=None,
-        ),
-    )
-    create = _admission_create(
-        connection_id=first_connection.id,
-        resource_id=first_resource.id,
-        source_message_id=first_message.id,
-        conversation_position_id=first_position.id,
-        initiating_principal_id=first_principal.id,
-        selected_route_id=first_route.id,
-    )
-    first = await repo.create_conversation_admission_idempotent(rdb_session, create)
-    retry = await repo.create_conversation_admission_idempotent(
-        rdb_session,
-        create.model_copy(
-            update={
-                "origin": ExternalChannelConversationAdmissionOrigin.SINGLE_ROUTE,
-                "selected_route_id": None,
-            }
-        ),
-    )
-    assert retry.id == first.id
-    assert retry.origin is ExternalChannelConversationAdmissionOrigin.SHORTCUT
-    assert retry.selected_route_id == first_route.id
-
-    for invalid in (
-        _admission_create(
-            connection_id=first_connection.id,
-            resource_id=second_resource.id,
-            source_message_id=second_message.id,
-            conversation_position_id=first_position.id,
-        ),
-        _admission_create(
-            connection_id=first_connection.id,
-            resource_id=first_resource.id,
-            source_message_id=second_message.id,
-            conversation_position_id=first_position.id,
-        ),
-        _admission_create(
-            connection_id=first_connection.id,
-            resource_id=first_resource.id,
-            source_message_id=first_message.id,
-            conversation_position_id=first_position.id,
-            selected_route_id=second_route.id,
-        ),
-        _admission_create(
-            connection_id=first_connection.id,
-            resource_id=first_resource.id,
-            source_message_id=first_message.id,
-            conversation_position_id=first_position.id,
-            interaction_id=second_interaction.interaction.id,
-        ),
-        _admission_create(
-            connection_id=first_connection.id,
-            resource_id=first_resource.id,
-            source_message_id=first_message.id,
-            conversation_position_id=first_position.id,
-            initiating_principal_id=foreign_principal.id,
-            selected_route_id=first_route.id,
-        ),
-    ):
-        with pytest.raises(ValueError, match="does not match"):
-            await repo.create_conversation_admission_idempotent(rdb_session, invalid)
-
-    await rdb_session.execute(
-        sa.update(RDBExternalChannelConversationAdmission)
-        .where(RDBExternalChannelConversationAdmission.id == first.id)
-        .values(status=ExternalChannelConversationAdmissionStatus.BOUND)
-    )
-    for offset, status in enumerate(
-        (
-            ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
-            ExternalChannelConversationAdmissionStatus.SELECTED,
-            ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
-        ),
-        start=3,
-    ):
-        resource = await _resource(
-            rdb_session,
-            repo,
-            connection_id=first_connection.id,
-            key=f"open-status-{status.value}",
-        )
-        message = await _message(
-            rdb_session,
-            repo,
-            resource_id=resource.id,
-            key=f"open-message-{status.value}",
-        )
-        open_create = _admission_create(
-            connection_id=first_connection.id,
-            resource_id=resource.id,
-            source_message_id=message.id,
-            conversation_position_id=first_position.id,
-            initiating_principal_id=first_principal.id,
-            status=status,
-        )
-        open_admission = await repo.create_conversation_admission_idempotent(
-            rdb_session, open_create
-        )
-        with pytest.raises(IntegrityError):
-            async with rdb_session.begin_nested():
-                rdb_session.add(
-                    RDBExternalChannelConversationAdmission(
-                        connection_id=first_connection.id,
-                        resource_id=resource.id,
-                        source_message_id=message.id,
-                        initiating_principal_id=first_principal.id,
-                        origin=ExternalChannelConversationAdmissionOrigin.SHORTCUT,
-                        status=status,
-                        selected_route_id=None,
-                        interaction_id=None,
-                        conversation_position_id=first_position.id,
-                        range_start_position="00000000000000000000",
-                        trigger_position="00000000000000000001",
-                        expires_at=_at(20 + offset),
-                    )
-                )
-                await rdb_session.flush()
-        open_admission_rdb = await rdb_session.get(
-            RDBExternalChannelConversationAdmission,
-            open_admission.id,
-        )
-        assert open_admission_rdb is not None
-        open_admission_rdb.status = ExternalChannelConversationAdmissionStatus.BOUND
-        await rdb_session.flush()
-        later = await repo.create_conversation_admission_idempotent(
-            rdb_session,
-            open_create.model_copy(
-                update={
-                    "status": (
-                        ExternalChannelConversationAdmissionStatus.PENDING_SELECTION
-                    )
-                }
-            ),
-        )
-        assert later.id != open_admission.id
-        assert (
-            await rdb_session.scalar(
-                sa.select(sa.func.count())
-                .select_from(RDBExternalChannelConversationAdmission)
-                .where(
-                    RDBExternalChannelConversationAdmission.resource_id == resource.id,
-                    RDBExternalChannelConversationAdmission.status.in_(
-                        (
-                            ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
-                            ExternalChannelConversationAdmissionStatus.SELECTED,
-                            ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
-                        )
-                    ),
-                )
-            )
-        ) == 1
-
-
 async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bindings(
     rdb_session: AsyncSession,
 ) -> None:
@@ -920,7 +623,6 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
             disconnected_at=None,
             disconnect_reason=None,
         ),
-        expected_admission_id=None,
         expected_access_request_id=None,
     )
     with pytest.raises(ValueError, match="another route"):
@@ -934,7 +636,6 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
                 disconnected_at=None,
                 disconnect_reason=None,
             ),
-            expected_admission_id=None,
             expected_access_request_id=None,
         )
     duplicate_first_session = await AgentSessionRepository().create(
@@ -956,7 +657,6 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
                 disconnected_at=None,
                 disconnect_reason=None,
             ),
-            expected_admission_id=None,
             expected_access_request_id=None,
         )
     assert binding.route_id == first_route.id
@@ -1171,7 +871,6 @@ async def test_binding_creation_serializes_on_resource_lock(
             first = await repo.create_binding_idempotent(
                 first_session,
                 create,
-                expected_admission_id=None,
                 expected_access_request_id=None,
             )
             async with AsyncSession(
@@ -1182,7 +881,6 @@ async def test_binding_creation_serializes_on_resource_lock(
                     repo.create_binding_idempotent(
                         second_session,
                         create,
-                        expected_admission_id=None,
                         expected_access_request_id=None,
                     )
                 )
@@ -1265,7 +963,6 @@ async def test_provider_control_settlement_follows_lifecycle_lock_order(
                     disconnected_at=None,
                     disconnect_reason=None,
                 ),
-                expected_admission_id=None,
                 expected_access_request_id=None,
             )
             attempt = RDBExternalChannelDeliveryAttempt(
@@ -1526,7 +1223,6 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
             disconnected_at=None,
             disconnect_reason=None,
         ),
-        expected_admission_id=None,
         expected_access_request_id=None,
     )
     assert terminal_then_active.route_id == second_route.id
@@ -1780,269 +1476,6 @@ async def test_disconnect_lookup_uses_detached_single_route_snapshot(
             include_disconnected=True,
         )
         is None
-    )
-
-
-async def test_multi_route_removal_preserves_route_identity_and_other_routes(
-    rdb_session: AsyncSession,
-) -> None:
-    """Removing one Multi route terminalizes only its live routing projection."""
-    workspace_id = await _workspace(rdb_session, "multi-route-removal")
-    user = await UserRepository().create(
-        rdb_session,
-        UserCreate(email="multi-route-removal@example.com"),
-    )
-    first_agent = await _agent(rdb_session, workspace_id, "remove-first")
-    second_agent = await _agent(rdb_session, workspace_id, "remove-second")
-    repo = ExternalChannelRepository()
-    connection = RDBExternalChannelConnection(
-        **_connection_create(
-            workspace_id,
-            provider_app_id="AR",
-            provider_tenant_id="TR",
-        )
-        .model_copy(update={"app_mode": ExternalChannelAppMode.MULTI})
-        .model_dump()
-    )
-    rdb_session.add(connection)
-    await rdb_session.flush()
-    position = await repo.create_conversation_position_idempotent(
-        rdb_session,
-        ExternalChannelConversationPositionCreate(
-            connection_id=connection.id,
-            scope_kind=ExternalChannelConversationScopeKind.THREAD,
-            provider_channel_id="C-removal",
-            provider_thread_key="123.456",
-            read_through_position=None,
-        ),
-    )
-    first_route = await repo.create_agent_route(
-        rdb_session,
-        _route_create(connection.id, first_agent.id, mode=ExternalChannelAppMode.MULTI),
-    )
-    second_route = await repo.create_agent_route(
-        rdb_session,
-        _route_create(
-            connection.id,
-            second_agent.id,
-            mode=ExternalChannelAppMode.MULTI,
-        ),
-    )
-    await repo.create_channel_default(
-        rdb_session,
-        ExternalChannelChannelDefaultCreate(
-            connection_id=connection.id,
-            provider_channel_id="C-removal",
-            route_id=first_route.id,
-            status=ExternalChannelChannelDefaultStatus.ACTIVE,
-            configured_by_user_id=user.id,
-            invalidated_at=None,
-            invalidation_reason=None,
-        ),
-    )
-    resource = await _resource(
-        rdb_session,
-        repo,
-        connection_id=connection.id,
-        key="removal-resource",
-    )
-    stored_resource = await rdb_session.get(RDBExternalChannelResource, resource.id)
-    assert stored_resource is not None
-    stored_resource.labels = {
-        "channel_id": "C-removal",
-        "channel_name": "incident-room",
-        "thread_ts": "123.456",
-    }
-    agent_session = await AgentSessionRepository().create(
-        rdb_session,
-        AgentSessionCreate(
-            workspace_id=workspace_id,
-            agent_id=first_agent.id,
-            title=None,
-        ),
-    )
-    binding = await repo.create_binding_idempotent(
-        rdb_session,
-        ExternalChannelBindingCreate(
-            resource_id=resource.id,
-            route_id=first_route.id,
-            agent_session_id=agent_session.id,
-            status=ExternalChannelBindingStatus.ACTIVE,
-            disconnected_at=None,
-            disconnect_reason=None,
-        ),
-        expected_admission_id=None,
-        expected_access_request_id=None,
-    )
-    message = await _message(
-        rdb_session,
-        repo,
-        resource_id=resource.id,
-        key="removal-message",
-    )
-    admission = await repo.create_conversation_admission_idempotent(
-        rdb_session,
-        _admission_create(
-            connection_id=connection.id,
-            resource_id=resource.id,
-            source_message_id=message.id,
-            conversation_position_id=position.id,
-            selected_route_id=first_route.id,
-            status=ExternalChannelConversationAdmissionStatus.SELECTED,
-        ),
-    )
-    principal = await repo.create_principal_idempotent(
-        rdb_session,
-        ExternalChannelPrincipalCreate(
-            provider=ExternalChannelProvider.SLACK,
-            provider_tenant_id="TR",
-            provider_user_id="U-removal",
-            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
-            display_name=None,
-            avatar_url=None,
-            profile=None,
-        ),
-    )
-    request = await repo.create_access_request_idempotent(
-        rdb_session,
-        ExternalChannelAccessRequestCreate(
-            route_id=first_route.id,
-            resource_id=resource.id,
-            source_message_id=message.id,
-            principal_id=principal.id,
-            agent_session_id=None,
-            status=ExternalChannelAccessRequestStatus.PENDING,
-            decision_policy_snapshot={},
-            connection_id=connection.id,
-            conversation_position_id=position.id,
-            range_start_position="00000000000000000000",
-            trigger_position="00000000000000000001",
-            decided_by_user_id=None,
-            decision_summary=None,
-            expires_at=_at(50),
-            decided_at=None,
-        ),
-    )
-    control_attempt = RDBExternalChannelDeliveryAttempt(
-        origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-        origin_id=admission.id,
-        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-        request_payload={
-            "channel_id": "C-removal",
-            "thread_ts": "123.456",
-            "text": "Select an Agent.",
-        },
-        status=ExternalChannelDeliveryStatus.PENDING,
-        channel_action_id=None,
-        binding_id=None,
-        provider_message_key=None,
-        error_kind=None,
-        error_summary=None,
-        attempted_at=None,
-        completed_at=None,
-    )
-    rdb_session.add(control_attempt)
-    await rdb_session.flush()
-    work_repository = ExternalChannelWorkRepository()
-    assert await work_repository.start_delivery(
-        rdb_session,
-        delivery_attempt_id=control_attempt.id,
-        now=_at(20),
-    )
-
-    lifecycle = ExternalChannelLifecycleRepository()
-    connection_impact = await lifecycle.project_multi_connection_impact(
-        rdb_session,
-        connection_id=connection.id,
-    )
-    assert connection_impact is not None
-    assert connection_impact.generation == connection.updated_at
-    assert connection_impact.active_route_count == 2
-    assert connection_impact.active_default_count == 1
-    assert connection_impact.active_binding_count == 1
-    assert connection_impact.bound_resource_count == 1
-    assert connection_impact.open_admission_count == 1
-    assert connection_impact.pending_access_request_count == 1
-    assert [
-        item.provider_channel_id for item in connection_impact.affected_defaults
-    ] == ["C-removal"]
-    assert len(connection_impact.affected_bindings) == 1
-    assert connection_impact.affected_bindings[0].id == binding.id
-    assert connection_impact.affected_bindings[0].agent_session_id == agent_session.id
-    assert connection_impact.affected_bindings[0].channel_label == "incident-room"
-    assert connection_impact.affected_bindings[0].thread_label == "123.456"
-
-    result = await lifecycle.remove_multi_route(
-        rdb_session,
-        connection_id=connection.id,
-        route_id=first_route.id,
-        removed_by_user_id=user.id,
-        now=_at(30),
-    )
-
-    assert result is not None
-    assert result.impact.active_default_count == 1
-    assert result.impact.active_binding_count == 1
-    assert result.impact.open_admission_count == 1
-    assert result.impact.generation == connection.updated_at
-    assert [item.provider_channel_id for item in result.impact.affected_defaults] == [
-        "C-removal"
-    ]
-    assert [item.agent_session_id for item in result.impact.affected_bindings] == [
-        agent_session.id
-    ]
-    route = await rdb_session.get(RDBExternalChannelAgentRoute, first_route.id)
-    default = await rdb_session.scalar(
-        sa.select(RDBExternalChannelChannelDefault).where(
-            RDBExternalChannelChannelDefault.route_id == first_route.id
-        )
-    )
-    persisted_admission = await rdb_session.get(
-        RDBExternalChannelConversationAdmission,
-        admission.id,
-    )
-    persisted_request = await repo.get_access_request(
-        rdb_session,
-        access_request_id=request.id,
-    )
-    assert route is not None
-    assert route.id == first_route.id
-    assert route.catalog_status is ExternalChannelRouteCatalogStatus.REMOVED
-    assert route.agent_id is None
-    assert route.agent_id_snapshot == first_agent.id
-    assert default is not None
-    assert default.status is ExternalChannelChannelDefaultStatus.INVALIDATED
-    assert persisted_admission is not None
-    assert (
-        persisted_admission.status is ExternalChannelConversationAdmissionStatus.EXPIRED
-    )
-    assert persisted_request is not None
-    assert persisted_request.status is ExternalChannelAccessRequestStatus.EXPIRED
-    settlement = await work_repository.settle_delivery(
-        rdb_session,
-        delivery_attempt_id=control_attempt.id,
-        status=ExternalChannelDeliveryStatus.DELIVERED,
-        provider_message_key="slack:TR:C-removal:123.457",
-        error_kind=None,
-        error_summary=None,
-        now=_at(31),
-    )
-    assert settlement.status is ExternalChannelDeliveryStatus.UNKNOWN
-    assert control_attempt.error_kind == "delivery_authority_revoked_after_provider"
-    assert (
-        await rdb_session.get(RDBExternalChannelAgentRoute, second_route.id)
-    ) is not None
-    assert await ExternalChannelLifecycleRepository().reenable_multi_route(
-        rdb_session,
-        connection_id=connection.id,
-        route_id=first_route.id,
-    )
-    assert route.catalog_status is ExternalChannelRouteCatalogStatus.AVAILABLE
-    assert route.agent_id == first_agent.id
-    assert route.agent_id_snapshot == first_agent.id
-    assert default.status is ExternalChannelChannelDefaultStatus.INVALIDATED
-    assert (
-        persisted_admission.status is ExternalChannelConversationAdmissionStatus.EXPIRED
     )
 
 

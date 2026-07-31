@@ -31,7 +31,6 @@ from azents.core.enums import (
 )
 from azents.core.external_channel_file import (
     ExternalChannelOutboundFileManifest,
-    external_channel_file_metadata_items,
 )
 from azents.core.external_channel_progress import (
     ExternalChannelDesiredProgress,
@@ -51,10 +50,8 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelAgentRoute,
     RDBExternalChannelBinding,
     RDBExternalChannelConnection,
-    RDBExternalChannelConversationAdmission,
     RDBExternalChannelDeliveryAttempt,
-    RDBExternalChannelMessage,
-    RDBExternalChannelMessageRevision,
+    RDBExternalChannelInteraction,
     RDBExternalChannelResource,
     RDBExternalChannelWork,
     RDBExternalChannelWorkProjectionPart,
@@ -66,7 +63,6 @@ from azents.repos.external_channel.work_data import (
     ChannelWorkSnapshot,
     ChannelWorkTask,
     ExternalChannelFileAccessTarget,
-    ExternalChannelFileSource,
 )
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.external_channel.discord_delivery import (
@@ -111,6 +107,42 @@ class ProviderControlAttemptIdentity:
     operation: ExternalChannelDeliveryOperation
     binding_id: str | None
     channel_action_id: str | None
+
+
+@dataclass(frozen=True)
+class SelectorControlTarget:
+    """Interaction-owned selector delivery authority."""
+
+    connection_id: str
+    resource_id: str
+    route_id: str | None
+
+
+def _selector_control_target(
+    interaction: RDBExternalChannelInteraction | None,
+) -> SelectorControlTarget | None:
+    """Read the bounded selector authority retained by one interaction."""
+    if interaction is None:
+        return None
+    state = interaction.projection.get("agent_selector")
+    if not isinstance(state, dict):
+        return None
+    connection_id = state.get("connection_id")
+    resource_id = state.get("resource_id")
+    route_id = state.get("selected_route_id")
+    if (
+        not isinstance(connection_id, str)
+        or not connection_id
+        or not isinstance(resource_id, str)
+        or not resource_id
+        or (route_id is not None and not isinstance(route_id, str))
+    ):
+        return None
+    return SelectorControlTarget(
+        connection_id=connection_id,
+        resource_id=resource_id,
+        route_id=route_id,
+    )
 
 
 class ExternalChannelWorkRepository:
@@ -392,51 +424,6 @@ class ExternalChannelWorkRepository:
             capabilities=connection.capabilities,
             resource_labels=resource.labels,
         )
-
-    async def get_file_source(
-        self,
-        session: AsyncSession,
-        *,
-        resource_id: str,
-        provider_file_id: str,
-    ) -> ExternalChannelFileSource | None:
-        """Locate one retained attachment source within a bound resource."""
-        rows = await session.execute(
-            sa.select(
-                RDBExternalChannelMessage.provider_message_key,
-                RDBExternalChannelMessageRevision.attachment_metadata,
-            )
-            .join(
-                RDBExternalChannelMessageRevision,
-                RDBExternalChannelMessageRevision.message_id
-                == RDBExternalChannelMessage.id,
-            )
-            .where(
-                RDBExternalChannelMessage.resource_id == resource_id,
-                RDBExternalChannelMessageRevision.attachment_metadata.is_not(None),
-            )
-            .order_by(
-                RDBExternalChannelMessageRevision.created_at.desc(),
-                RDBExternalChannelMessageRevision.id.desc(),
-            )
-        )
-        for provider_message_key, attachment_metadata in rows:
-            if not isinstance(attachment_metadata, dict):
-                continue
-            for metadata in external_channel_file_metadata_items(attachment_metadata):
-                if metadata.get("provider_file_id") != provider_file_id:
-                    continue
-                provider_channel_id = metadata.get("source_channel_id")
-                return ExternalChannelFileSource(
-                    provider_message_key=provider_message_key,
-                    provider_channel_id=(
-                        provider_channel_id
-                        if isinstance(provider_channel_id, str) and provider_channel_id
-                        else None
-                    ),
-                    metadata=metadata,
-                )
-        return None
 
     async def list_active_work(
         self,
@@ -945,46 +932,34 @@ class ExternalChannelWorkRepository:
                 attempt.origin_type
                 is ExternalChannelDeliveryOriginType.MANAGER_OPERATION
             ):
-                admission_target = (
-                    await session.execute(
-                        sa.select(
-                            RDBExternalChannelConversationAdmission,
-                            RDBExternalChannelConnection,
-                            RDBAgent,
-                        )
-                        .join(
-                            RDBExternalChannelConnection,
-                            RDBExternalChannelConnection.id
-                            == RDBExternalChannelConversationAdmission.connection_id,
-                        )
-                        .outerjoin(
-                            RDBExternalChannelAgentRoute,
-                            sa.and_(
-                                RDBExternalChannelAgentRoute.id
-                                == (
-                                    RDBExternalChannelConversationAdmission.selected_route_id
-                                ),
-                                RDBExternalChannelAgentRoute.connection_id
-                                == (
-                                    RDBExternalChannelConversationAdmission.connection_id
-                                ),
-                            ),
-                        )
-                        .outerjoin(
-                            RDBAgent,
-                            RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
-                        )
-                        .where(
-                            RDBExternalChannelConversationAdmission.id
-                            == attempt.origin_id
-                        )
-                    )
-                ).one_or_none()
-                if admission_target is None:
+                interaction = await session.get(
+                    RDBExternalChannelInteraction,
+                    attempt.origin_id,
+                )
+                target = _selector_control_target(interaction)
+                if target is None:
                     return None
-                admission, connection, agent = admission_target
-                resource_id = admission.resource_id
-                connection_id = admission.connection_id
+                connection = await session.get(
+                    RDBExternalChannelConnection,
+                    target.connection_id,
+                )
+                if connection is None:
+                    return None
+                route = (
+                    None
+                    if target.route_id is None
+                    else await session.get(
+                        RDBExternalChannelAgentRoute,
+                        target.route_id,
+                    )
+                )
+                agent = (
+                    None
+                    if route is None or route.agent_id is None
+                    else await session.get(RDBAgent, route.agent_id)
+                )
+                resource_id = target.resource_id
+                connection_id = target.connection_id
             else:
                 return None
             return ChannelDeliveryTarget(
@@ -2048,18 +2023,21 @@ class ExternalChannelWorkRepository:
                 route_id=access_request_snapshot.route_id,
             )
         if identity.origin_type is ExternalChannelDeliveryOriginType.MANAGER_OPERATION:
-            admission_snapshot = await session.get(
-                RDBExternalChannelConversationAdmission,
+            interaction = await session.get(
+                RDBExternalChannelInteraction,
                 identity.origin_id,
+                populate_existing=True,
+                with_for_update=True,
             )
-            if admission_snapshot is None:
+            target = _selector_control_target(interaction)
+            if target is None:
                 return False
             return await self._unbound_provider_control_authority_current(
                 session,
                 identity=identity,
-                resource_id=admission_snapshot.resource_id,
-                connection_id=admission_snapshot.connection_id,
-                route_id=admission_snapshot.selected_route_id,
+                resource_id=target.resource_id,
+                connection_id=target.connection_id,
+                route_id=target.route_id,
             )
         return False
 
@@ -2130,16 +2108,17 @@ class ExternalChannelWorkRepository:
             identity.origin_type is ExternalChannelDeliveryOriginType.MANAGER_OPERATION
         ):
             origin = await session.get(
-                RDBExternalChannelConversationAdmission,
+                RDBExternalChannelInteraction,
                 identity.origin_id,
                 populate_existing=True,
                 with_for_update=True,
             )
+            selector_target = _selector_control_target(origin)
             origin_current = (
-                origin is not None
-                and origin.connection_id == connection.id
-                and origin.resource_id == resource_id
-                and origin.selected_route_id == route_id
+                selector_target is not None
+                and selector_target.connection_id == connection.id
+                and selector_target.resource_id == resource_id
+                and selector_target.route_id == route_id
             )
         else:
             return False

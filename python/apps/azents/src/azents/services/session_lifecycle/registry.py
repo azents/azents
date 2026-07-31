@@ -68,16 +68,6 @@ def get_session_lifecycle_registry() -> SessionLifecycleRegistry:
                         "test_session_lifecycle_external_channel",
                     ),
                     _database_resource(
-                        "external_channel_invocation_batches",
-                        SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
-                        "test_session_lifecycle_external_channel",
-                    ),
-                    _database_resource(
-                        "external_channel_invocation_batch_items",
-                        SessionLifecycleResourceClassification.PURE_DATABASE_CHILD,
-                        "test_session_lifecycle_external_channel",
-                    ),
-                    _database_resource(
                         "external_channel_access_requests",
                         SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
                         "test_session_lifecycle_external_channel",

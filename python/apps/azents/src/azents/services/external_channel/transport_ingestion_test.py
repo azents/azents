@@ -146,7 +146,7 @@ class _Ingestion:
         return ExternalChannelIngestionOutcome(
             kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
             reason=ExternalChannelIngestionReason.ACCEPTED,
-            batch_id="batch-1",
+            mailbox_item_id="batch-1",
             control_delivery_attempt_id=None,
             connection_id=None,
         )

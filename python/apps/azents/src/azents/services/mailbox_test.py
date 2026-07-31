@@ -69,7 +69,7 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.repos.external_channel.data import (
-    ExternalChannelInvocationProjectionItem,
+    ExternalChannelMailboxProjectionItem,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
@@ -2548,21 +2548,18 @@ class TestMailboxService:
 
 def _external_projection_item(
     **updates: object,
-) -> ExternalChannelInvocationProjectionItem:
+) -> ExternalChannelMailboxProjectionItem:
     """Build one valid projection item for malformed-boundary tests."""
-    item = ExternalChannelInvocationProjectionItem(
-        batch_id="batch-1",
+    item = ExternalChannelMailboxProjectionItem(
+        invocation_id="batch-1",
         binding_id="binding-1",
-        trigger_message_id="message-1",
+        trigger_provider_message_key="C123:1",
         context_omitted=False,
         sequence=0,
-        message_id="message-1",
-        revision_id="revision-1",
         revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
-        revision_body="hello",
+        body="hello",
         attachment_metadata={},
         reference_mappings=None,
-        provider_occurred_at=datetime.datetime(2026, 7, 22, tzinfo=datetime.UTC),
         resource_id="resource-1",
         provider_resource_key="C123",
         resource_type=ExternalChannelResourceType.THREAD,
@@ -2578,7 +2575,6 @@ def _external_projection_item(
         provider_created_at=datetime.datetime(2026, 7, 22, tzinfo=datetime.UTC),
         provider_updated_at=None,
         original_url=None,
-        correction_of_revision_id=None,
     )
     return item.model_copy(update=updates)
 
@@ -2643,22 +2639,19 @@ async def test_external_invocation_projection() -> None:
             session: AsyncSession,
             *,
             batch_id: str,
-        ) -> list[ExternalChannelInvocationProjectionItem]:
+        ) -> list[ExternalChannelMailboxProjectionItem]:
             del session
             assert batch_id == "batch-1"
-            first = ExternalChannelInvocationProjectionItem(
-                batch_id="batch-1",
+            first = ExternalChannelMailboxProjectionItem(
+                invocation_id="batch-1",
                 binding_id="binding-1",
-                trigger_message_id="message-2",
+                trigger_provider_message_key="C123:1.0:2",
                 context_omitted=True,
                 sequence=0,
-                message_id="message-1",
-                revision_id="revision-1",
                 revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
-                revision_body="Context",
+                body="Context",
                 attachment_metadata=source_attachment_metadata,
                 reference_mappings=None,
-                provider_occurred_at=at(1),
                 resource_id="resource-1",
                 provider_resource_key="C123:1.0",
                 resource_type=ExternalChannelResourceType.THREAD,
@@ -2674,19 +2667,15 @@ async def test_external_invocation_projection() -> None:
                 provider_created_at=at(1),
                 provider_updated_at=None,
                 original_url="https://slack.example/message",
-                correction_of_revision_id=None,
             )
             return [
                 first,
                 first.model_copy(
                     update={
                         "sequence": 1,
-                        "message_id": "message-2",
-                        "revision_id": "revision-2",
-                        "revision_body": "Invoke",
+                        "body": "Invoke",
                         "provider_message_key": "C123:1.0:2",
                         "provider_position": "2",
-                        "provider_occurred_at": at(2),
                         "provider_created_at": at(2),
                     }
                 ),
@@ -2737,8 +2726,8 @@ async def test_external_invocation_projection() -> None:
     assert outcome.turn_effect is TurnEffect.ELIGIBLE
     assert [item.external_id for item in outcome.promoted] == [
         "external-channel:buffer-1:context-omitted",
-        "external-channel:binding-1:message-1",
-        "external-channel:binding-1:message-2",
+        "external-channel:binding-1:C123:1.0:1",
+        "external-channel:binding-1:C123:1.0:2",
     ]
     assert [item.event_kind for item in outcome.promoted] == [
         EventKind.SYSTEM_REMINDER,
@@ -2764,13 +2753,13 @@ async def test_external_invocation_projection() -> None:
     projected_files = projected_metadata["files"]
     assert isinstance(projected_files, list)
     assert isinstance(projected_files[0], dict)
-    assert projected_files[0]["file"] == "external-file:v1:slack:binding-1:F123"
+    assert projected_files[0]["file"] == "external-file:v1:slack:binding-1:::F123"
     second_metadata = cast(
         dict[str, object], outcome.promoted[2].payload["attachment_metadata"]
     )
     second_files = cast(list[object], second_metadata["files"])
     second_file = cast(dict[str, object], second_files[0])
-    assert second_file["file"] == "external-file:v1:slack:binding-1:F123"
+    assert second_file["file"] == "external-file:v1:slack:binding-1:::F123"
     source_files = source_attachment_metadata["files"]
     assert isinstance(source_files, list)
     assert isinstance(source_files[0], dict)

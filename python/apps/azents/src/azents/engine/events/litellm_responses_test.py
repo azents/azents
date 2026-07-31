@@ -4352,7 +4352,7 @@ def test_litellm_lowerer_groups_contiguous_external_batch() -> None:
                             "declared_size": 1024,
                             "supported": True,
                             "unsupported_reason": None,
-                            "file": "external-file:v1:slack:binding-1:F123",
+                            "file": "external-file:v1:slack:binding-1:::F123",
                         }
                     ]
                 },
@@ -4372,7 +4372,7 @@ def test_litellm_lowerer_groups_contiguous_external_batch() -> None:
     assert content.startswith("Message Type: EXTERNAL_CHANNEL_TURN")
     assert content.index("Body: first") < content.index("Body: second")
     assert "Files:" in content
-    assert "File: external-file:v1:slack:binding-1:F123" in content
+    assert "File: external-file:v1:slack:binding-1:::F123" in content
 
 
 def test_litellm_lowerer_keeps_noncontiguous_batch_segments_in_order(

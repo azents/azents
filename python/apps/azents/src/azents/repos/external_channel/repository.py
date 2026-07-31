@@ -12,7 +12,6 @@ from pydantic import BaseModel
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -23,16 +22,12 @@ from azents.core.enums import (
     ExternalChannelBindingStatus,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
-    ExternalChannelConversationAdmissionStatus,
     ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
-    ExternalChannelInvocationWakeDispatchStatus,
-    ExternalChannelMessageLifecycle,
-    ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
@@ -54,15 +49,10 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelBlock,
     RDBExternalChannelChannelDefault,
     RDBExternalChannelConnection,
-    RDBExternalChannelConversationAdmission,
     RDBExternalChannelConversationPosition,
     RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelIngressLease,
     RDBExternalChannelInteraction,
-    RDBExternalChannelInvocationBatch,
-    RDBExternalChannelInvocationBatchItem,
-    RDBExternalChannelMessage,
-    RDBExternalChannelMessageRevision,
     RDBExternalChannelPrincipal,
     RDBExternalChannelResource,
     RDBExternalChannelWork,
@@ -87,8 +77,6 @@ from .data import (
     ExternalChannelConnection,
     ExternalChannelConnectionConfiguration,
     ExternalChannelConnectionCreate,
-    ExternalChannelConversationAdmission,
-    ExternalChannelConversationAdmissionCreate,
     ExternalChannelConversationPosition,
     ExternalChannelConversationPositionCreate,
     ExternalChannelDeliveryAttempt,
@@ -98,15 +86,6 @@ from .data import (
     ExternalChannelInteraction,
     ExternalChannelInteractionAdmission,
     ExternalChannelInteractionCreate,
-    ExternalChannelInvocationBatch,
-    ExternalChannelInvocationBatchCreate,
-    ExternalChannelInvocationBatchItem,
-    ExternalChannelInvocationBatchItemCreate,
-    ExternalChannelInvocationProjectionItem,
-    ExternalChannelMessage,
-    ExternalChannelMessageCreate,
-    ExternalChannelMessageRevision,
-    ExternalChannelMessageRevisionCreate,
     ExternalChannelPrincipal,
     ExternalChannelPrincipalCreate,
     ExternalChannelResource,
@@ -1261,26 +1240,6 @@ class ExternalChannelRepository:
                 )
             ).all()
         )
-        admissions = list(
-            (
-                await session.scalars(
-                    sa.select(RDBExternalChannelConversationAdmission)
-                    .where(
-                        RDBExternalChannelConversationAdmission.connection_id
-                        == connection_id,
-                        RDBExternalChannelConversationAdmission.status.in_(
-                            (
-                                ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
-                                ExternalChannelConversationAdmissionStatus.SELECTED,
-                                ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
-                            )
-                        ),
-                    )
-                    .order_by(RDBExternalChannelConversationAdmission.id)
-                    .with_for_update()
-                )
-            ).all()
-        )
         access_requests = list(
             (
                 await session.scalars(
@@ -1366,8 +1325,6 @@ class ExternalChannelRepository:
                 invalidation_reason=reason,
             )
         )
-        for admission in admissions:
-            admission.status = ExternalChannelConversationAdmissionStatus.EXPIRED
         for request in access_requests:
             request.status = ExternalChannelAccessRequestStatus.EXPIRED
             request.decision_summary = (
@@ -1695,94 +1652,26 @@ class ExternalChannelRepository:
         await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelInteraction.model_validate(rdb)
 
-    async def create_conversation_admission_idempotent(
+    async def replace_interaction_projection(
         self,
         session: AsyncSession,
-        create: ExternalChannelConversationAdmissionCreate,
-    ) -> ExternalChannelConversationAdmission:
-        """Create or return the open route-neutral admission for one resource."""
-        await self._validate_conversation_admission_owners(session, create)
-        rdb = await self._insert_or_lookup(
-            session,
-            RDBExternalChannelConversationAdmission,
-            create,
-            lambda: session.scalar(
-                sa.select(RDBExternalChannelConversationAdmission).where(
-                    RDBExternalChannelConversationAdmission.resource_id
-                    == create.resource_id,
-                    RDBExternalChannelConversationAdmission.status.in_(
-                        (
-                            "pending_selection",
-                            "selected",
-                            "awaiting_access",
-                        )
-                    ),
-                )
-            ),
+        *,
+        interaction_id: str,
+        projection: dict[str, Any],
+    ) -> ExternalChannelInteraction | None:
+        """Replace bounded interaction metadata under the interaction lock."""
+        validate_interaction_projection(projection)
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelInteraction)
+            .where(RDBExternalChannelInteraction.id == interaction_id)
+            .with_for_update()
         )
-        return ExternalChannelConversationAdmission.model_validate(rdb)
-
-    async def _validate_conversation_admission_owners(
-        self,
-        session: AsyncSession,
-        create: ExternalChannelConversationAdmissionCreate,
-    ) -> None:
-        """Reject foreign owners before an idempotent conflict can mask them."""
-        connection = await session.get(
-            RDBExternalChannelConnection,
-            create.connection_id,
-        )
-        resource = await session.get(
-            RDBExternalChannelResource,
-            create.resource_id,
-        )
-        source_message = await session.get(
-            RDBExternalChannelMessage,
-            create.source_message_id,
-        )
-        if (
-            connection is None
-            or resource is None
-            or resource.connection_id != connection.id
-        ):
-            raise ValueError(
-                "External Channel admission resource does not match connection."
-            )
-        if source_message is None or source_message.resource_id != resource.id:
-            raise ValueError(
-                "External Channel admission source message does not match resource."
-            )
-        if create.selected_route_id is not None:
-            route = await session.get(
-                RDBExternalChannelAgentRoute,
-                create.selected_route_id,
-            )
-            if route is None or route.connection_id != connection.id:
-                raise ValueError(
-                    "External Channel admission route does not match connection."
-                )
-        if create.interaction_id is not None:
-            interaction = await session.get(
-                RDBExternalChannelInteraction,
-                create.interaction_id,
-            )
-            if interaction is None or interaction.connection_id != connection.id:
-                raise ValueError(
-                    "External Channel admission interaction does not match connection."
-                )
-        if create.initiating_principal_id is not None:
-            principal = await session.get(
-                RDBExternalChannelPrincipal,
-                create.initiating_principal_id,
-            )
-            if (
-                principal is None
-                or principal.provider is not connection.provider
-                or principal.provider_tenant_id != connection.provider_tenant_id
-            ):
-                raise ValueError(
-                    "External Channel admission principal does not match connection."
-                )
+        if rdb is None:
+            return None
+        rdb.projection = projection
+        await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
+        return ExternalChannelInteraction.model_validate(rdb)
 
     async def create_channel_default(
         self,
@@ -2002,144 +1891,6 @@ class ExternalChannelRepository:
             )
             for route, agent_name in rows
         ]
-
-    async def lock_open_conversation_admission(
-        self,
-        session: AsyncSession,
-        *,
-        resource_id: str,
-    ) -> ExternalChannelConversationAdmission | None:
-        """Lock the one open routing admission for a resource."""
-        rdb = await session.scalar(
-            sa.select(RDBExternalChannelConversationAdmission)
-            .where(
-                RDBExternalChannelConversationAdmission.resource_id == resource_id,
-                RDBExternalChannelConversationAdmission.status.in_(
-                    (
-                        ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
-                        ExternalChannelConversationAdmissionStatus.SELECTED,
-                        ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
-                    )
-                ),
-            )
-            .with_for_update()
-        )
-        return self._as(ExternalChannelConversationAdmission, rdb)
-
-    async def get_open_conversation_admission(
-        self,
-        session: AsyncSession,
-        *,
-        resource_id: str,
-    ) -> ExternalChannelConversationAdmission | None:
-        """Fetch the open admission snapshot before canonical lock acquisition."""
-        rdb = await session.scalar(
-            sa.select(RDBExternalChannelConversationAdmission).where(
-                RDBExternalChannelConversationAdmission.resource_id == resource_id,
-                RDBExternalChannelConversationAdmission.status.in_(
-                    (
-                        ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
-                        ExternalChannelConversationAdmissionStatus.SELECTED,
-                        ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
-                    )
-                ),
-            )
-        )
-        return self._as(ExternalChannelConversationAdmission, rdb)
-
-    async def get_conversation_admission(
-        self,
-        session: AsyncSession,
-        *,
-        admission_id: str,
-    ) -> ExternalChannelConversationAdmission | None:
-        """Fetch one admission snapshot before canonical lock acquisition."""
-        return self._as(
-            ExternalChannelConversationAdmission,
-            await session.get(RDBExternalChannelConversationAdmission, admission_id),
-        )
-
-    async def transition_conversation_admission(
-        self,
-        session: AsyncSession,
-        *,
-        admission_id: str,
-        status: ExternalChannelConversationAdmissionStatus,
-        selected_route_id: str | None,
-    ) -> ExternalChannelConversationAdmission | None:
-        """Apply a routing transition without replacing a recorded route."""
-        rdb = await session.scalar(
-            sa.select(RDBExternalChannelConversationAdmission)
-            .where(RDBExternalChannelConversationAdmission.id == admission_id)
-            .with_for_update()
-        )
-        if rdb is None:
-            return None
-        allowed_transitions = {
-            ExternalChannelConversationAdmissionStatus.PENDING_SELECTION: {
-                ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
-                ExternalChannelConversationAdmissionStatus.SELECTED,
-                ExternalChannelConversationAdmissionStatus.EXPIRED,
-                ExternalChannelConversationAdmissionStatus.REJECTED,
-            },
-            ExternalChannelConversationAdmissionStatus.SELECTED: {
-                ExternalChannelConversationAdmissionStatus.SELECTED,
-                ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
-                ExternalChannelConversationAdmissionStatus.BOUND,
-                ExternalChannelConversationAdmissionStatus.EXPIRED,
-                ExternalChannelConversationAdmissionStatus.REJECTED,
-            },
-            ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS: {
-                ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
-                ExternalChannelConversationAdmissionStatus.BOUND,
-                ExternalChannelConversationAdmissionStatus.EXPIRED,
-                ExternalChannelConversationAdmissionStatus.REJECTED,
-            },
-            ExternalChannelConversationAdmissionStatus.BOUND: {
-                ExternalChannelConversationAdmissionStatus.BOUND,
-            },
-            ExternalChannelConversationAdmissionStatus.EXPIRED: {
-                ExternalChannelConversationAdmissionStatus.EXPIRED,
-            },
-            ExternalChannelConversationAdmissionStatus.REJECTED: {
-                ExternalChannelConversationAdmissionStatus.REJECTED,
-            },
-        }
-        if status not in allowed_transitions[rdb.status]:
-            raise ValueError(
-                "External Channel conversation admission transition is invalid."
-            )
-        if (
-            rdb.selected_route_id is not None
-            and selected_route_id is not None
-            and rdb.selected_route_id != selected_route_id
-        ):
-            raise ValueError(
-                "External Channel conversation admission route is immutable."
-            )
-        if (
-            status is ExternalChannelConversationAdmissionStatus.PENDING_SELECTION
-            and selected_route_id is not None
-        ):
-            raise ValueError(
-                "Pending-selection External Channel admissions cannot select a route."
-            )
-        if (
-            status
-            in (
-                ExternalChannelConversationAdmissionStatus.SELECTED,
-                ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
-                ExternalChannelConversationAdmissionStatus.BOUND,
-            )
-            and (selected_route_id or rdb.selected_route_id) is None
-        ):
-            raise ValueError("Selected External Channel admissions require a route.")
-        rdb.status = status
-        if rdb.selected_route_id is None:
-            rdb.selected_route_id = selected_route_id
-        await session.flush()
-        await session.refresh(rdb, attribute_names=["updated_at"])
-        return ExternalChannelConversationAdmission.model_validate(rdb)
 
     async def get_routable_route_by_binding_id(
         self,
@@ -2454,163 +2205,11 @@ class ExternalChannelRepository:
             await session.get(RDBExternalChannelPrincipal, principal_id),
         )
 
-    async def create_message_idempotent(
-        self,
-        session: AsyncSession,
-        create: ExternalChannelMessageCreate,
-    ) -> ExternalChannelMessage:
-        """Create or return a canonical external message."""
-        rdb = await self._insert_or_lookup(
-            session,
-            RDBExternalChannelMessage,
-            create,
-            lambda: session.scalar(
-                sa.select(RDBExternalChannelMessage).where(
-                    RDBExternalChannelMessage.resource_id == create.resource_id,
-                    RDBExternalChannelMessage.provider_message_key
-                    == create.provider_message_key,
-                )
-            ),
-        )
-        return ExternalChannelMessage.model_validate(rdb)
-
-    async def get_message(
-        self,
-        session: AsyncSession,
-        *,
-        message_id: str,
-    ) -> ExternalChannelMessage | None:
-        """Fetch one canonical external message."""
-        return self._as(
-            ExternalChannelMessage,
-            await session.get(RDBExternalChannelMessage, message_id),
-        )
-
-    async def get_message_by_provider_key(
-        self,
-        session: AsyncSession,
-        *,
-        resource_id: str,
-        provider_message_key: str,
-    ) -> ExternalChannelMessage | None:
-        """Fetch a resource-scoped provider message identity."""
-        rdb = await session.scalar(
-            sa.select(RDBExternalChannelMessage).where(
-                RDBExternalChannelMessage.resource_id == resource_id,
-                RDBExternalChannelMessage.provider_message_key == provider_message_key,
-            )
-        )
-        return self._as(ExternalChannelMessage, rdb)
-
-    async def update_message_identity_metadata(
-        self,
-        session: AsyncSession,
-        *,
-        message_id: str,
-        principal_id: str | None,
-        author_type: ExternalChannelPrincipalAuthorType,
-        lifecycle: ExternalChannelMessageLifecycle,
-        provider_created_at: datetime.datetime | None,
-        provider_updated_at: datetime.datetime | None,
-    ) -> ExternalChannelMessage | None:
-        """Update content-free message identity without admitting a revision."""
-        rdb = await session.scalar(
-            sa.select(RDBExternalChannelMessage)
-            .where(RDBExternalChannelMessage.id == message_id)
-            .with_for_update()
-        )
-        if rdb is None:
-            return None
-        rdb.principal_id = principal_id
-        rdb.author_type = author_type
-        rdb.lifecycle = lifecycle
-        if rdb.current_revision_id is None:
-            rdb.pending_size = 0
-            rdb.original_url = None
-        if provider_created_at is not None:
-            rdb.provider_created_at = provider_created_at
-        if provider_updated_at is not None:
-            rdb.provider_updated_at = provider_updated_at
-        await session.flush()
-        await session.refresh(rdb, attribute_names=["updated_at"])
-        return ExternalChannelMessage.model_validate(rdb)
-
-    async def create_message_revision_idempotent(
-        self,
-        session: AsyncSession,
-        create: ExternalChannelMessageRevisionCreate,
-    ) -> ExternalChannelMessageRevision:
-        """Create or return an immutable message revision."""
-        rdb = await self._insert_or_lookup(
-            session,
-            RDBExternalChannelMessageRevision,
-            create,
-            lambda: session.scalar(
-                sa.select(RDBExternalChannelMessageRevision).where(
-                    RDBExternalChannelMessageRevision.message_id == create.message_id,
-                    RDBExternalChannelMessageRevision.revision_key
-                    == create.revision_key,
-                )
-            ),
-        )
-        return ExternalChannelMessageRevision.model_validate(rdb)
-
-    async def apply_message_revision(
-        self,
-        session: AsyncSession,
-        *,
-        message_id: str,
-        revision_id: str,
-        principal_id: str | None,
-        author_type: ExternalChannelPrincipalAuthorType,
-        lifecycle: ExternalChannelMessageLifecycle,
-        pending_size: int,
-        provider_created_at: datetime.datetime | None,
-        provider_updated_at: datetime.datetime | None,
-        original_url: str | None,
-    ) -> ExternalChannelMessage | None:
-        """Make one non-stale immutable revision the provider-current state."""
-        rdb = await session.scalar(
-            sa.select(RDBExternalChannelMessage)
-            .where(RDBExternalChannelMessage.id == message_id)
-            .with_for_update()
-        )
-        if rdb is None:
-            return None
-        current_rank = _message_lifecycle_rank(rdb.lifecycle)
-        incoming_rank = _message_lifecycle_rank(lifecycle)
-        current_occurred_at = rdb.provider_updated_at or rdb.provider_created_at
-        incoming_occurred_at = provider_updated_at or provider_created_at
-        if incoming_rank < current_rank or (
-            incoming_rank == current_rank
-            and current_occurred_at is not None
-            and (
-                incoming_occurred_at is None
-                or incoming_occurred_at < current_occurred_at
-            )
-        ):
-            return ExternalChannelMessage.model_validate(rdb)
-        rdb.current_revision_id = revision_id
-        rdb.principal_id = principal_id
-        rdb.author_type = author_type
-        rdb.lifecycle = lifecycle
-        rdb.pending_size = pending_size
-        if provider_created_at is not None:
-            rdb.provider_created_at = provider_created_at
-        if provider_updated_at is not None:
-            rdb.provider_updated_at = provider_updated_at
-        if original_url is not None:
-            rdb.original_url = original_url
-        await session.flush()
-        await session.refresh(rdb, attribute_names=["updated_at"])
-        return ExternalChannelMessage.model_validate(rdb)
-
     async def create_binding_idempotent(
         self,
         session: AsyncSession,
         create: ExternalChannelBindingCreate,
         *,
-        expected_admission_id: str | None,
         expected_access_request_id: str | None,
     ) -> ExternalChannelBinding:
         """Create or return the active binding for one resource and route."""
@@ -2627,7 +2226,6 @@ class ExternalChannelRepository:
         await self._validate_binding_owners(
             session,
             create,
-            expected_admission_id=expected_admission_id,
             expected_access_request_id=expected_access_request_id,
         )
         if existing is not None:
@@ -2652,10 +2250,9 @@ class ExternalChannelRepository:
         session: AsyncSession,
         create: ExternalChannelBindingCreate,
         *,
-        expected_admission_id: str | None,
         expected_access_request_id: str | None,
     ) -> None:
-        """Validate owners and the durable admission/request authority."""
+        """Validate owners and any durable access-request authority."""
         resource = await session.get(RDBExternalChannelResource, create.resource_id)
         route = await session.get(RDBExternalChannelAgentRoute, create.route_id)
         agent_session = await session.get(RDBAgentSession, create.agent_session_id)
@@ -2678,25 +2275,6 @@ class ExternalChannelRepository:
             or agent_session.session_kind is not AgentSessionKind.ROOT
         ):
             raise ValueError("External Channel binding owners are incompatible.")
-        if expected_admission_id is not None:
-            admission = await session.scalar(
-                sa.select(RDBExternalChannelConversationAdmission)
-                .where(
-                    RDBExternalChannelConversationAdmission.id == expected_admission_id
-                )
-                .with_for_update()
-            )
-            if (
-                admission is None
-                or admission.resource_id != resource.id
-                or admission.selected_route_id != route.id
-                or admission.status
-                not in (
-                    ExternalChannelConversationAdmissionStatus.SELECTED,
-                    ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
-                )
-            ):
-                raise ValueError("External Channel binding admission is incompatible.")
         if expected_access_request_id is not None:
             request = await session.scalar(
                 sa.select(RDBExternalChannelAccessRequest)
@@ -2771,325 +2349,12 @@ class ExternalChannelRepository:
             await session.get(RDBExternalChannelBinding, binding_id),
         )
 
-    async def create_invocation_batch_idempotent(
-        self,
-        session: AsyncSession,
-        create: ExternalChannelInvocationBatchCreate,
-    ) -> ExternalChannelInvocationBatch:
-        """Create or return a binding-scoped trigger invocation batch."""
-        if create.connection_id is None:
-            connection_id = await session.scalar(
-                sa.select(RDBExternalChannelResource.connection_id)
-                .join(
-                    RDBExternalChannelBinding,
-                    RDBExternalChannelBinding.resource_id
-                    == RDBExternalChannelResource.id,
-                )
-                .where(RDBExternalChannelBinding.id == create.binding_id)
-            )
-            create = create.model_copy(update={"connection_id": connection_id})
-        rdb = await self._insert_or_lookup(
-            session,
-            RDBExternalChannelInvocationBatch,
-            create,
-            lambda: session.scalar(
-                sa.select(RDBExternalChannelInvocationBatch).where(
-                    RDBExternalChannelInvocationBatch.binding_id == create.binding_id,
-                    RDBExternalChannelInvocationBatch.trigger_message_id
-                    == create.trigger_message_id,
-                )
-            ),
-        )
-        return ExternalChannelInvocationBatch.model_validate(rdb)
-
-    async def get_invocation_batch(
-        self,
-        session: AsyncSession,
-        *,
-        binding_id: str,
-        trigger_message_id: str,
-    ) -> ExternalChannelInvocationBatch | None:
-        """Fetch an invocation identity independently from provider events."""
-        rdb = await session.scalar(
-            sa.select(RDBExternalChannelInvocationBatch).where(
-                RDBExternalChannelInvocationBatch.binding_id == binding_id,
-                RDBExternalChannelInvocationBatch.trigger_message_id
-                == trigger_message_id,
-            )
-        )
-        return self._as(ExternalChannelInvocationBatch, rdb)
-
-    async def lock_invocation_batch(
-        self,
-        session: AsyncSession,
-        *,
-        batch_id: str,
-    ) -> ExternalChannelInvocationBatch | None:
-        """Lock one invocation batch before linking its session input."""
-        rdb = await session.scalar(
-            sa.select(RDBExternalChannelInvocationBatch)
-            .where(RDBExternalChannelInvocationBatch.id == batch_id)
-            .with_for_update()
-        )
-        return self._as(ExternalChannelInvocationBatch, rdb)
-
-    async def claim_invocation_wake_dispatch(
-        self,
-        session: AsyncSession,
-        *,
-        batch_id: str,
-        now: datetime.datetime,
-        lease: datetime.timedelta = datetime.timedelta(minutes=1),
-    ) -> tuple[ExternalChannelInvocationBatch | None, bool]:
-        """Claim a pending or stale invocation wake dispatch."""
-        rdb = await session.scalar(
-            sa.select(RDBExternalChannelInvocationBatch)
-            .where(RDBExternalChannelInvocationBatch.id == batch_id)
-            .with_for_update()
-        )
-        if rdb is None:
-            return None, False
-        if (
-            rdb.wake_dispatch_status
-            is ExternalChannelInvocationWakeDispatchStatus.DISPATCHED
-        ):
-            return ExternalChannelInvocationBatch.model_validate(rdb), False
-        if (
-            rdb.wake_dispatch_status
-            is ExternalChannelInvocationWakeDispatchStatus.CLAIMED
-            and rdb.wake_dispatch_claimed_at is not None
-            and rdb.wake_dispatch_claimed_at > now - lease
-        ):
-            return ExternalChannelInvocationBatch.model_validate(rdb), False
-        rdb.wake_dispatch_status = ExternalChannelInvocationWakeDispatchStatus.CLAIMED
-        rdb.wake_dispatch_claimed_at = now
-        await session.flush()
-        return ExternalChannelInvocationBatch.model_validate(rdb), True
-
-    async def mark_invocation_wake_dispatched(
-        self,
-        session: AsyncSession,
-        *,
-        batch_id: str,
-        dispatched_at: datetime.datetime,
-    ) -> ExternalChannelInvocationBatch | None:
-        """Mark one claimed invocation wake as durably dispatched."""
-        del dispatched_at
-        rdb = await session.scalar(
-            sa.select(RDBExternalChannelInvocationBatch)
-            .where(RDBExternalChannelInvocationBatch.id == batch_id)
-            .with_for_update()
-        )
-        if rdb is None:
-            return None
-        if (
-            rdb.wake_dispatch_status
-            is ExternalChannelInvocationWakeDispatchStatus.DISPATCHED
-        ):
-            return ExternalChannelInvocationBatch.model_validate(rdb)
-        rdb.wake_dispatch_status = (
-            ExternalChannelInvocationWakeDispatchStatus.DISPATCHED
-        )
-        rdb.wake_dispatch_claimed_at = None
-        await session.flush()
-        return ExternalChannelInvocationBatch.model_validate(rdb)
-
-    async def reset_invocation_wake_dispatch(
-        self,
-        session: AsyncSession,
-        *,
-        batch_id: str,
-    ) -> ExternalChannelInvocationBatch | None:
-        """Return a claimed invocation wake to the pending state for retry."""
-        rdb = await session.scalar(
-            sa.select(RDBExternalChannelInvocationBatch)
-            .where(RDBExternalChannelInvocationBatch.id == batch_id)
-            .with_for_update()
-        )
-        if rdb is None:
-            return None
-        if (
-            rdb.wake_dispatch_status
-            is not ExternalChannelInvocationWakeDispatchStatus.DISPATCHED
-        ):
-            rdb.wake_dispatch_status = (
-                ExternalChannelInvocationWakeDispatchStatus.PENDING
-            )
-            rdb.wake_dispatch_claimed_at = None
-            await session.flush()
-        return ExternalChannelInvocationBatch.model_validate(rdb)
-
-    async def link_invocation_batch_mailbox_item(
-        self,
-        session: AsyncSession,
-        *,
-        batch_id: str,
-        mailbox_item_id: str,
-    ) -> ExternalChannelInvocationBatch | None:
-        """Link one batch to its idempotent reference-only MailboxItem."""
-        rdb = await session.scalar(
-            sa.select(RDBExternalChannelInvocationBatch)
-            .where(RDBExternalChannelInvocationBatch.id == batch_id)
-            .with_for_update()
-        )
-        if rdb is None:
-            return None
-        if rdb.mailbox_item_id is None:
-            rdb.mailbox_item_id = mailbox_item_id
-            await session.flush()
-        elif rdb.mailbox_item_id != mailbox_item_id:
-            raise ValueError("Invocation batch is linked to another MailboxItem.")
-        return ExternalChannelInvocationBatch.model_validate(rdb)
-
-    async def create_invocation_batch_item_idempotent(
-        self,
-        session: AsyncSession,
-        create: ExternalChannelInvocationBatchItemCreate,
-    ) -> ExternalChannelInvocationBatchItem:
-        """Create or return an immutable batch revision membership item."""
-        rdb = await self._insert_or_lookup(
-            session,
-            RDBExternalChannelInvocationBatchItem,
-            create,
-            lambda: session.scalar(
-                sa.select(RDBExternalChannelInvocationBatchItem).where(
-                    RDBExternalChannelInvocationBatchItem.batch_id == create.batch_id,
-                    RDBExternalChannelInvocationBatchItem.message_revision_id
-                    == create.message_revision_id,
-                )
-            ),
-        )
-        return ExternalChannelInvocationBatchItem.model_validate(rdb)
-
-    async def list_invocation_batch_revision_ids(
-        self,
-        session: AsyncSession,
-        *,
-        batch_id: str,
-    ) -> list[str]:
-        """List the immutable revision membership of one invocation batch."""
-        rows = await session.scalars(
-            sa.select(RDBExternalChannelInvocationBatchItem.message_revision_id)
-            .where(RDBExternalChannelInvocationBatchItem.batch_id == batch_id)
-            .order_by(
-                RDBExternalChannelInvocationBatchItem.sequence,
-                RDBExternalChannelInvocationBatchItem.id,
-            )
-        )
-        return list(rows)
-
-    async def list_invocation_projection_items(
-        self,
-        session: AsyncSession,
-        *,
-        batch_id: str,
-    ) -> list[ExternalChannelInvocationProjectionItem]:
-        """Load one invocation batch in immutable provider order."""
-        original_revision = aliased(RDBExternalChannelMessageRevision)
-        rows = await session.execute(
-            sa.select(
-                RDBExternalChannelInvocationBatch.id.label("batch_id"),
-                RDBExternalChannelInvocationBatch.binding_id,
-                RDBExternalChannelInvocationBatch.trigger_message_id,
-                RDBExternalChannelInvocationBatch.context_omitted,
-                RDBExternalChannelInvocationBatchItem.sequence,
-                RDBExternalChannelMessage.id.label("message_id"),
-                RDBExternalChannelMessageRevision.id.label("revision_id"),
-                RDBExternalChannelMessageRevision.revision_kind,
-                RDBExternalChannelMessageRevision.normalized_body.label(
-                    "revision_body"
-                ),
-                RDBExternalChannelMessageRevision.attachment_metadata,
-                RDBExternalChannelMessageRevision.reference_mappings,
-                RDBExternalChannelMessageRevision.provider_occurred_at,
-                RDBExternalChannelMessage.resource_id,
-                RDBExternalChannelResource.provider_resource_key,
-                RDBExternalChannelResource.resource_type,
-                RDBExternalChannelResource.labels.label("resource_labels"),
-                RDBExternalChannelConnection.provider,
-                RDBExternalChannelConnection.provider_tenant_id,
-                RDBExternalChannelMessage.provider_message_key,
-                RDBExternalChannelMessage.provider_position,
-                RDBExternalChannelMessage.principal_id,
-                RDBExternalChannelPrincipal.provider_user_id,
-                RDBExternalChannelPrincipal.display_name.label("sender_display_name"),
-                RDBExternalChannelMessage.author_type,
-                RDBExternalChannelMessage.provider_created_at,
-                RDBExternalChannelMessage.provider_updated_at,
-                RDBExternalChannelMessage.original_url,
-                sa.case(
-                    (
-                        RDBExternalChannelMessageRevision.revision_kind
-                        != ExternalChannelMessageRevisionKind.ORIGINAL,
-                        sa.select(original_revision.id)
-                        .where(
-                            original_revision.message_id
-                            == RDBExternalChannelMessage.id,
-                            original_revision.revision_kind
-                            == ExternalChannelMessageRevisionKind.ORIGINAL,
-                        )
-                        .order_by(
-                            original_revision.created_at,
-                            original_revision.id,
-                        )
-                        .limit(1)
-                        .scalar_subquery(),
-                    ),
-                    else_=None,
-                ).label("correction_of_revision_id"),
-            )
-            .select_from(RDBExternalChannelInvocationBatch)
-            .join(
-                RDBExternalChannelInvocationBatchItem,
-                RDBExternalChannelInvocationBatchItem.batch_id
-                == RDBExternalChannelInvocationBatch.id,
-            )
-            .join(
-                RDBExternalChannelMessageRevision,
-                RDBExternalChannelMessageRevision.id
-                == RDBExternalChannelInvocationBatchItem.message_revision_id,
-            )
-            .join(
-                RDBExternalChannelMessage,
-                RDBExternalChannelMessage.id
-                == RDBExternalChannelMessageRevision.message_id,
-            )
-            .join(
-                RDBExternalChannelBinding,
-                RDBExternalChannelBinding.id
-                == RDBExternalChannelInvocationBatch.binding_id,
-            )
-            .join(
-                RDBExternalChannelResource,
-                RDBExternalChannelResource.id == RDBExternalChannelBinding.resource_id,
-            )
-            .join(
-                RDBExternalChannelConnection,
-                RDBExternalChannelConnection.id
-                == RDBExternalChannelResource.connection_id,
-            )
-            .outerjoin(
-                RDBExternalChannelPrincipal,
-                RDBExternalChannelPrincipal.id
-                == RDBExternalChannelMessage.principal_id,
-            )
-            .where(RDBExternalChannelInvocationBatch.id == batch_id)
-            .order_by(
-                RDBExternalChannelInvocationBatchItem.sequence,
-                RDBExternalChannelInvocationBatchItem.id,
-            )
-        )
-        return [
-            ExternalChannelInvocationProjectionItem.model_validate(row)
-            for row in rows.mappings()
-        ]
-
     async def create_access_request_idempotent(
         self,
         session: AsyncSession,
         create: ExternalChannelAccessRequestCreate,
     ) -> ExternalChannelAccessRequest:
-        """Create or return an access request for a source message."""
+        """Create or return an access request for one provider trigger."""
         if create.connection_id is None:
             connection_id = await session.scalar(
                 sa.select(RDBExternalChannelResource.connection_id).where(
@@ -3104,8 +2369,8 @@ class ExternalChannelRepository:
             lambda: session.scalar(
                 sa.select(RDBExternalChannelAccessRequest).where(
                     RDBExternalChannelAccessRequest.route_id == create.route_id,
-                    RDBExternalChannelAccessRequest.source_message_id
-                    == create.source_message_id,
+                    RDBExternalChannelAccessRequest.trigger_provider_message_key
+                    == create.trigger_provider_message_key,
                 )
             ),
         )
@@ -3760,17 +3025,6 @@ class ExternalChannelRepository:
         if rdb is None:
             return None
         return model.model_validate(rdb)
-
-
-def _message_lifecycle_rank(
-    lifecycle: ExternalChannelMessageLifecycle,
-) -> int:
-    """Return monotonic provider lifecycle precedence."""
-    return {
-        ExternalChannelMessageLifecycle.CURRENT: 0,
-        ExternalChannelMessageLifecycle.EDITED: 1,
-        ExternalChannelMessageLifecycle.DELETED: 2,
-    }[lifecycle]
 
 
 def validate_interaction_projection(projection: dict[str, Any]) -> None:

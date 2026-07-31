@@ -7,7 +7,7 @@ from typing import cast
 import pytest
 
 from azents.core.config import Config
-from azents.repos.external_channel.data import ExternalChannelConversationAdmission
+from azents.repos.external_channel.data import ExternalChannelInteraction
 from azents.services.external_channel.discord_selector import (
     DiscordSelectorResponseService,
     build_discord_selector_custom_id,
@@ -53,7 +53,7 @@ class _SelectorDouble:
         )
         self.selection = ExternalChannelSelectorSelection(
             status="selected",
-            admission=ExternalChannelConversationAdmission.model_construct(
+            selector_interaction=ExternalChannelInteraction.model_construct(
                 id="admission-1"
             ),
             binding=None,
@@ -62,26 +62,28 @@ class _SelectorDouble:
     async def project_catalog(
         self,
         *,
-        admission_id: str,
+        selector_interaction_id: str,
         principal_id: str,
         search: str | None,
         offset: int,
         now: datetime.datetime,
     ) -> ExternalChannelSelectorCatalog:
         assert now == _NOW
-        self.catalog_calls.append((admission_id, principal_id, search, offset))
+        self.catalog_calls.append(
+            (selector_interaction_id, principal_id, search, offset)
+        )
         return self.catalog
 
     async def validate_discord_component_scope(
         self,
         *,
-        admission_id: str,
+        selector_interaction_id: str,
         principal_id: str,
         guild_id: str | None,
         channel_id: str | None,
         now: datetime.datetime,
     ) -> None:
-        assert (admission_id, principal_id, guild_id, channel_id, now) == (
+        assert (selector_interaction_id, principal_id, guild_id, channel_id, now) == (
             "admission-1",
             "principal-1",
             "guild-1",
@@ -92,13 +94,13 @@ class _SelectorDouble:
     async def select_route(
         self,
         *,
-        admission_id: str,
+        selector_interaction_id: str,
         principal_id: str,
         route_id: str,
         now: datetime.datetime,
     ) -> ExternalChannelSelectorSelection:
         assert now == _NOW
-        self.selection_calls.append((admission_id, principal_id, route_id))
+        self.selection_calls.append((selector_interaction_id, principal_id, route_id))
         return self.selection
 
 
@@ -118,21 +120,21 @@ class _ReplayDouble:
         self.outcome = outcome or ExternalChannelIngestionOutcome(
             kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
             reason=ExternalChannelIngestionReason.ACCEPTED,
-            batch_id=None,
+            mailbox_item_id=None,
             control_delivery_attempt_id=None,
             connection_id=None,
         )
         self.calls: list[tuple[str, str]] = []
 
-    async def replay_selected_admission(
+    async def replay_selected_interaction(
         self,
         *,
-        admission_id: str,
+        selector_interaction_id: str,
         principal_id: str,
         deadline: object,
     ) -> ExternalChannelIngestionOutcome:
         del deadline
-        self.calls.append((admission_id, principal_id))
+        self.calls.append((selector_interaction_id, principal_id))
         return self.outcome
 
 
@@ -165,7 +167,7 @@ def test_signed_component_scope_round_trips_and_rejects_tampering() -> None:
     """Compact Discord IDs fit the provider bound and fail closed when altered."""
     custom_id = build_discord_selector_custom_id(
         secret=_SECRET,
-        admission_id="admission-1",
+        selector_interaction_id="admission-1",
         action="next",
         offset=20,
     )
@@ -173,7 +175,7 @@ def test_signed_component_scope_round_trips_and_rejects_tampering() -> None:
     scope = parse_discord_selector_custom_id(custom_id=custom_id, secret=_SECRET)
 
     assert len(custom_id) <= 100
-    assert scope.admission_id == "admission-1"
+    assert scope.selector_interaction_id == "admission-1"
     assert scope.action == "next"
     assert scope.offset == 20
     with pytest.raises(ValueError, match="scope is invalid"):
@@ -189,7 +191,7 @@ async def test_initial_response_renders_bounded_selector_and_next_scope() -> Non
     selector = _SelectorDouble()
 
     response = await _service(selector).initial_response(
-        admission_id="admission-1",
+        selector_interaction_id="admission-1",
         principal_id="principal-1",
         now=_NOW,
     )
@@ -222,7 +224,7 @@ async def test_component_next_requeries_signed_offset() -> None:
     selector.catalog = ExternalChannelSelectorCatalog(candidates=(), next_offset=None)
     custom_id = build_discord_selector_custom_id(
         secret=_SECRET,
-        admission_id="admission-1",
+        selector_interaction_id="admission-1",
         action="next",
         offset=20,
     )
@@ -248,7 +250,7 @@ async def test_typed_component_selection_replays_shared_ingestion() -> None:
     selector = _SelectorDouble()
     selector.selection = ExternalChannelSelectorSelection(
         status="selected",
-        admission=ExternalChannelConversationAdmission.model_construct(
+        selector_interaction=ExternalChannelInteraction.model_construct(
             id="admission-1",
             connection_id="connection-1",
             conversation_position_id="position-1",
@@ -261,14 +263,14 @@ async def test_typed_component_selection_replays_shared_ingestion() -> None:
         ExternalChannelIngestionOutcome(
             kind=ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS,
             reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
-            batch_id=None,
+            mailbox_item_id=None,
             control_delivery_attempt_id="delivery-1",
             connection_id="connection-1",
         )
     )
     custom_id = build_discord_selector_custom_id(
         secret=_SECRET,
-        admission_id="admission-1",
+        selector_interaction_id="admission-1",
         action="select",
     )
 
@@ -297,7 +299,7 @@ async def test_component_selection_replays_durable_admission_once() -> None:
     replay = _ReplayDouble()
     custom_id = build_discord_selector_custom_id(
         secret=_SECRET,
-        admission_id="admission-1",
+        selector_interaction_id="admission-1",
         action="select",
     )
 

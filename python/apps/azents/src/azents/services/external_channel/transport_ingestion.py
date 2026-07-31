@@ -398,7 +398,7 @@ def _retryable_failure() -> ExternalChannelIngestionOutcome:
     return ExternalChannelIngestionOutcome(
         kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
         reason=ExternalChannelIngestionReason.HISTORY_UNAVAILABLE,
-        batch_id=None,
+        mailbox_item_id=None,
         control_delivery_attempt_id=None,
         connection_id=None,
     )
@@ -408,7 +408,7 @@ def _terminal_rejection() -> ExternalChannelIngestionOutcome:
     return ExternalChannelIngestionOutcome(
         kind=ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
         reason=ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE,
-        batch_id=None,
+        mailbox_item_id=None,
         control_delivery_attempt_id=None,
         connection_id=None,
     )

@@ -1,37 +1,51 @@
-"""Typed selector and access replay for synchronous conversation ingestion."""
+"""Typed access and selector replay for synchronous conversation ingestion."""
 
+import asyncio
 import dataclasses
 import datetime
+from collections.abc import AsyncIterator
 from typing import Annotated
 
+import httpx
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAccessRequestStatus,
-    ExternalChannelConversationAdmissionStatus,
+    ExternalChannelConnectionStatus,
+    ExternalChannelInteractionStatus,
+    ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
+    ExternalChannelResourceStatus,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelAccessRequest,
+    ExternalChannelConnection,
     ExternalChannelConnectionConfiguration,
-    ExternalChannelConversationAdmission,
     ExternalChannelConversationPosition,
-    ExternalChannelMessage,
     ExternalChannelPrincipal,
     ExternalChannelResource,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.services.external_channel.connection import (
+    get_external_channel_credentials_codec,
+)
 from azents.services.external_channel.conversation import (
     ExternalChannelConversationScope,
     ExternalChannelOperationDeadline,
 )
+from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
+from azents.services.external_channel.data import DiscordConnectionCredentials
+from azents.services.external_channel.discord_delivery import DiscordDeliveryClient
 from azents.services.external_channel.ingestion import (
     ExternalChannelConversationIngestionService,
     ExternalChannelIngestionOperation,
     ExternalChannelIngestionOutcome,
+    ExternalChannelIngestionOutcomeKind,
+    ExternalChannelIngestionReason,
     ExternalChannelIngestionRequest,
     ExternalChannelIngressAuthority,
     ExternalChannelIngressAuthorityKind,
@@ -41,8 +55,27 @@ from azents.services.external_channel.ingestion import (
 from azents.services.external_channel.ingestion_deps import (
     get_external_channel_conversation_ingestion_service,
 )
+from azents.services.external_channel.selector_state import (
+    selector_state_from_interaction,
+)
 
 _REPLAY_OPERATION_BUDGET = datetime.timedelta(seconds=30)
+
+
+async def get_replay_discord_http_client() -> AsyncIterator[httpx.AsyncClient]:
+    """Provide bounded Discord transport for replay thread provisioning."""
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=False) as client:
+        yield client
+
+
+def get_replay_discord_delivery_client(
+    http_client: Annotated[
+        httpx.AsyncClient,
+        Depends(get_replay_discord_http_client),
+    ],
+) -> DiscordDeliveryClient:
+    """Provide the Discord replay thread-provisioning adapter."""
+    return DiscordDeliveryClient(http_client)
 
 
 class ExternalChannelIngestionReplayUnavailable(ValueError):
@@ -67,16 +100,6 @@ def access_request_uses_typed_replay(
     )
 
 
-def admission_uses_typed_replay(
-    admission: ExternalChannelConversationAdmission,
-) -> bool:
-    """Return whether a selector admission carries any typed replay identity."""
-    return (
-        admission.conversation_position_id is not None
-        or admission.trigger_position is not None
-    )
-
-
 @dataclasses.dataclass(frozen=True)
 class _ReplaySource:
     """Content-free durable owners needed to reconstruct one replay."""
@@ -84,9 +107,9 @@ class _ReplaySource:
     configuration: ExternalChannelConnectionConfiguration
     position: ExternalChannelConversationPosition
     resource: ExternalChannelResource
-    message: ExternalChannelMessage
     principal: ExternalChannelPrincipal
     route_id: str
+    trigger_provider_message_key: str
     range_start_position: str | None
     trigger_position: str
 
@@ -102,6 +125,18 @@ class ExternalChannelIngestionReplayService:
     repository: Annotated[
         ExternalChannelRepository,
         Depends(ExternalChannelRepository),
+    ]
+    work_repository: Annotated[
+        ExternalChannelWorkRepository,
+        Depends(ExternalChannelWorkRepository),
+    ]
+    credentials_codec: Annotated[
+        ExternalChannelCredentialsCodec,
+        Depends(get_external_channel_credentials_codec),
+    ]
+    discord_client: Annotated[
+        DiscordDeliveryClient,
+        Depends(get_replay_discord_delivery_client),
     ]
     ingestion_service: Annotated[
         ExternalChannelConversationIngestionService,
@@ -135,63 +170,208 @@ class ExternalChannelIngestionReplayService:
                 connection_id=request.connection_id,
                 conversation_position_id=request.conversation_position_id,
                 resource_id=request.resource_id,
-                source_message_id=request.source_message_id,
                 principal_id=request.principal_id,
                 route_id=request.route_id,
+                trigger_provider_message_key=(request.trigger_provider_message_key),
                 range_start_position=request.range_start_position,
                 trigger_position=request.trigger_position,
             )
-        return await self.ingestion_service.ingest(
-            _build_request(
-                source,
-                operation=ExternalChannelIngestionOperation.ACCESS_ALLOW,
-                deadline=deadline,
-            )
+        return await self._ingest_source(
+            source,
+            operation=ExternalChannelIngestionOperation.ACCESS_ALLOW,
+            deadline=deadline,
+            provider_user_id=source.principal.provider_user_id,
         )
 
-    async def replay_selected_admission(
+    async def replay_selected_interaction(
         self,
         *,
-        admission_id: str,
+        selector_interaction_id: str,
         principal_id: str,
         deadline: ExternalChannelOperationDeadline,
     ) -> ExternalChannelIngestionOutcome:
-        """Replay one immutable selected route through its retained boundary."""
+        """Replay one immutable selected route through interaction-owned state."""
         async with self.session_manager() as session:
-            admission = await self.repository.get_conversation_admission(
+            interaction = await self.repository.lock_interaction(
                 session,
-                admission_id=admission_id,
+                interaction_id=selector_interaction_id,
             )
             if (
-                admission is None
-                or admission.status
-                is not ExternalChannelConversationAdmissionStatus.SELECTED
-                or admission.initiating_principal_id != principal_id
-                or admission.selected_route_id is None
-                or admission.conversation_position_id is None
-                or admission.trigger_position is None
+                interaction is None
+                or interaction.principal_id != principal_id
+                or interaction.status
+                in {
+                    ExternalChannelInteractionStatus.EXPIRED,
+                    ExternalChannelInteractionStatus.REJECTED,
+                    ExternalChannelInteractionStatus.FAILED,
+                }
             ):
+                raise ExternalChannelIngestionReplayUnavailable(
+                    "External Channel selector replay boundary is unavailable."
+                )
+            state = selector_state_from_interaction(interaction)
+            if state.principal_id != principal_id or state.selected_route_id is None:
                 raise ExternalChannelIngestionReplayUnavailable(
                     "External Channel selector replay boundary is unavailable."
                 )
             source = await self._load_source(
                 session,
-                connection_id=admission.connection_id,
-                conversation_position_id=admission.conversation_position_id,
-                resource_id=admission.resource_id,
-                source_message_id=admission.source_message_id,
-                principal_id=principal_id,
-                route_id=admission.selected_route_id,
-                range_start_position=admission.range_start_position,
-                trigger_position=admission.trigger_position,
+                connection_id=state.connection_id,
+                conversation_position_id=state.conversation_position_id,
+                resource_id=state.resource_id,
+                principal_id=state.principal_id,
+                route_id=state.selected_route_id,
+                trigger_provider_message_key=state.trigger_provider_message_key,
+                range_start_position=state.range_start_position,
+                trigger_position=state.trigger_position,
             )
+        return await self._ingest_source(
+            source,
+            operation=ExternalChannelIngestionOperation.SELECTOR_CONTINUATION,
+            deadline=deadline,
+            provider_user_id=None,
+        )
+
+    async def _ingest_source(
+        self,
+        source: _ReplaySource,
+        *,
+        operation: ExternalChannelIngestionOperation,
+        deadline: ExternalChannelOperationDeadline,
+        provider_user_id: str | None,
+    ) -> ExternalChannelIngestionOutcome:
+        delivery_thread_key = await self._resolve_delivery_thread_key(
+            source,
+            deadline=deadline,
+        )
+        if (
+            source.configuration.provider is ExternalChannelProvider.DISCORD
+            and delivery_thread_key is None
+        ):
+            return _retryable_failure()
         return await self.ingestion_service.ingest(
             _build_request(
                 source,
-                operation=ExternalChannelIngestionOperation.SELECTOR_CONTINUATION,
+                operation=operation,
                 deadline=deadline,
+                provider_user_id=provider_user_id,
+                delivery_thread_key=delivery_thread_key,
             )
         )
+
+    async def _resolve_delivery_thread_key(
+        self,
+        source: _ReplaySource,
+        *,
+        deadline: ExternalChannelOperationDeadline,
+    ) -> str | None:
+        configuration = source.configuration
+        initial = _delivery_thread_key(
+            provider=configuration.provider,
+            labels=source.resource.labels or {},
+            position=source.position,
+        )
+        if configuration.provider is not ExternalChannelProvider.DISCORD or initial:
+            return initial
+        async with self.session_manager() as session:
+            resource = await self._lock_discord_provisioning_authority(
+                session,
+                source=source,
+            )
+            await session.commit()
+        if resource is None:
+            return None
+        labels = resource.labels or {}
+        current = _delivery_thread_key(
+            provider=configuration.provider,
+            labels=labels,
+            position=source.position,
+        )
+        if current:
+            return current
+        tenant_id = configuration.provider_tenant_id
+        if tenant_id is None:
+            raise ExternalChannelIngestionReplayUnavailable(
+                "External Channel replay tenant is unavailable."
+            )
+        parent_channel_id = _provider_parent_channel_id(
+            provider=configuration.provider,
+            labels=labels,
+        )
+        root_message_id = _provider_message_id(
+            provider=configuration.provider,
+            tenant_id=tenant_id,
+            provider_message_key=source.trigger_provider_message_key,
+        )
+        encrypted_credentials = configuration.encrypted_credentials
+        if parent_channel_id is None or encrypted_credentials is None:
+            return None
+        credentials = self.credentials_codec.decrypt(encrypted_credentials)
+        if not isinstance(credentials, DiscordConnectionCredentials):
+            return None
+        try:
+            async with asyncio.timeout(deadline.remaining_seconds()):
+                result = await self.discord_client.ensure_thread(
+                    bot_token=credentials.bot_token,
+                    parent_channel_id=parent_channel_id,
+                    root_message_id=root_message_id,
+                )
+        except TimeoutError:
+            return None
+        if result.status != "delivered":
+            return None
+        resolved = _discord_thread_channel_id(result.provider_message_key)
+        if resolved is None:
+            return None
+        async with self.session_manager() as session:
+            resource = await self._lock_discord_provisioning_authority(
+                session,
+                source=source,
+            )
+            if resource is None:
+                await session.rollback()
+                return None
+            concurrent = _delivery_thread_key(
+                provider=configuration.provider,
+                labels=resource.labels or {},
+                position=source.position,
+            )
+            if concurrent:
+                await session.commit()
+                return concurrent
+            retained = await self.work_repository.record_discord_delivery_channel(
+                session,
+                resource_id=source.resource.id,
+                delivery_channel_id=resolved,
+            )
+            await session.commit()
+        return retained
+
+    async def _lock_discord_provisioning_authority(
+        self,
+        session: AsyncSession,
+        *,
+        source: _ReplaySource,
+    ) -> ExternalChannelResource | None:
+        configuration = source.configuration
+        connection = await self.repository.lock_connection_for_routing(
+            session,
+            connection_id=configuration.id,
+        )
+        resource = await self.repository.lock_resource(
+            session,
+            resource_id=source.resource.id,
+        )
+        if (
+            connection is None
+            or not _connection_matches_replay(configuration, connection)
+            or resource is None
+            or resource.connection_id != connection.id
+            or resource.status is not ExternalChannelResourceStatus.ACTIVE
+            or resource.provider_resource_key != source.resource.provider_resource_key
+        ):
+            return None
+        return resource
 
     async def _load_source(
         self,
@@ -200,9 +380,9 @@ class ExternalChannelIngestionReplayService:
         connection_id: str,
         conversation_position_id: str,
         resource_id: str,
-        source_message_id: str,
         principal_id: str,
         route_id: str,
+        trigger_provider_message_key: str,
         range_start_position: str | None,
         trigger_position: str,
     ) -> _ReplaySource:
@@ -218,10 +398,6 @@ class ExternalChannelIngestionReplayService:
             session,
             resource_id=resource_id,
         )
-        message = await self.repository.get_message(
-            session,
-            message_id=source_message_id,
-        )
         principal = await self.repository.get_principal(
             session,
             principal_id=principal_id,
@@ -230,15 +406,20 @@ class ExternalChannelIngestionReplayService:
         if (
             configuration is None
             or configuration.provider_tenant_id is None
+            or configuration.status
+            not in {
+                ExternalChannelConnectionStatus.ACTIVE,
+                ExternalChannelConnectionStatus.DEGRADED,
+            }
             or position is None
             or position.connection_id != connection_id
             or resource is None
             or resource.connection_id != connection_id
-            or message is None
-            or message.resource_id != resource_id
-            or message.provider_position != trigger_position
+            or resource.status is not ExternalChannelResourceStatus.ACTIVE
             or principal is None
-            or message.principal_id != principal.id
+            or principal.provider is not configuration.provider
+            or principal.provider_tenant_id != configuration.provider_tenant_id
+            or principal.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
             or route is None
             or route.connection_id != connection_id
         ):
@@ -249,9 +430,9 @@ class ExternalChannelIngestionReplayService:
             configuration=configuration,
             position=position,
             resource=resource,
-            message=message,
             principal=principal,
             route_id=route_id,
+            trigger_provider_message_key=trigger_provider_message_key,
             range_start_position=range_start_position,
             trigger_position=trigger_position,
         )
@@ -262,6 +443,8 @@ def _build_request(
     *,
     operation: ExternalChannelIngestionOperation,
     deadline: ExternalChannelOperationDeadline,
+    provider_user_id: str | None,
+    delivery_thread_key: str | None,
 ) -> ExternalChannelIngestionRequest:
     configuration = source.configuration
     tenant_id = configuration.provider_tenant_id
@@ -270,11 +453,6 @@ def _build_request(
             "External Channel replay tenant is unavailable."
         )
     labels = source.resource.labels or {}
-    delivery_thread_key = _delivery_thread_key(
-        provider=configuration.provider,
-        labels=labels,
-        position=source.position,
-    )
     locator = ExternalChannelTriggerLocator(
         connection_id=configuration.id,
         provider=configuration.provider,
@@ -287,14 +465,14 @@ def _build_request(
         provider_thread_key=source.position.provider_thread_key,
         delivery_thread_key=delivery_thread_key,
         provider_resource_key=source.resource.provider_resource_key,
-        trigger_provider_message_key=source.message.provider_message_key,
+        trigger_provider_message_key=source.trigger_provider_message_key,
         trigger_provider_message_id=_provider_message_id(
             provider=configuration.provider,
             tenant_id=tenant_id,
-            provider_message_key=source.message.provider_message_key,
+            provider_message_key=source.trigger_provider_message_key,
         ),
         trigger_position=source.trigger_position,
-        provider_user_id=source.principal.provider_user_id,
+        provider_user_id=provider_user_id,
         invocation=True,
     )
     return ExternalChannelIngestionRequest(
@@ -318,7 +496,8 @@ def _build_request(
         replay_boundary=ExternalChannelReplayBoundary(
             connection_id=configuration.id,
             resource_id=source.resource.id,
-            source_message_id=source.message.id,
+            principal_id=source.principal.id,
+            trigger_provider_message_key=source.trigger_provider_message_key,
             conversation_position_id=source.position.id,
             range_start_position=source.range_start_position,
             trigger_position=source.trigger_position,
@@ -361,11 +540,12 @@ def _delivery_thread_key(
     if provider is ExternalChannelProvider.SLACK:
         value = labels.get("thread_ts")
     else:
-        value = (
-            labels.get("delivery_channel_id")
-            or labels.get("thread_channel_id")
-            or labels.get("thread_id")
-        )
+        value = labels.get("delivery_channel_id") or labels.get("thread_channel_id")
+        if value is None:
+            thread_id = labels.get("thread_id")
+            root_message_id = labels.get("root_message_id")
+            if root_message_id is None or root_message_id != thread_id:
+                value = thread_id
     if isinstance(value, str) and value:
         return value
     return position.provider_thread_key
@@ -378,5 +558,45 @@ def _provider_parent_channel_id(
 ) -> str | None:
     if provider is ExternalChannelProvider.SLACK:
         return None
-    value = labels.get("parent_channel_id")
+    value = labels.get("parent_channel_id") or labels.get("channel_id")
     return value if isinstance(value, str) and value else None
+
+
+def _connection_matches_replay(
+    configuration: ExternalChannelConnectionConfiguration,
+    connection: ExternalChannelConnection,
+) -> bool:
+    capabilities = connection.capabilities or {}
+    return (
+        connection.provider is ExternalChannelProvider.DISCORD
+        and connection.provider is configuration.provider
+        and connection.status
+        in {
+            ExternalChannelConnectionStatus.ACTIVE,
+            ExternalChannelConnectionStatus.DEGRADED,
+        }
+        and connection.provider_tenant_id == configuration.provider_tenant_id
+        and connection.configuration_generation
+        == configuration.configuration_generation
+        and capabilities.get("post_messages") is True
+    )
+
+
+def _discord_thread_channel_id(provider_message_key: str | None) -> str | None:
+    if provider_message_key is None:
+        return None
+    prefix = "discord-thread:"
+    if not provider_message_key.startswith(prefix):
+        return None
+    thread_id = provider_message_key.removeprefix(prefix)
+    return thread_id if thread_id.isdigit() else None
+
+
+def _retryable_failure() -> ExternalChannelIngestionOutcome:
+    return ExternalChannelIngestionOutcome(
+        kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
+        reason=ExternalChannelIngestionReason.HISTORY_UNAVAILABLE,
+        mailbox_item_id=None,
+        control_delivery_attempt_id=None,
+        connection_id=None,
+    )

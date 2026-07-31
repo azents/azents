@@ -830,26 +830,6 @@ class ExternalChannelInteractionStatus(enum.StrEnum):
     FAILED = "failed"
 
 
-class ExternalChannelConversationAdmissionOrigin(enum.StrEnum):
-    """Route-resolution origin for an unbound conversation."""
-
-    SINGLE_ROUTE = "single_route"
-    CHANNEL_DEFAULT = "channel_default"
-    SHORTCUT = "shortcut"
-    MENTION_SELECTOR = "mention_selector"
-
-
-class ExternalChannelConversationAdmissionStatus(enum.StrEnum):
-    """Route-neutral conversation admission lifecycle."""
-
-    PENDING_SELECTION = "pending_selection"
-    SELECTED = "selected"
-    AWAITING_ACCESS = "awaiting_access"
-    BOUND = "bound"
-    EXPIRED = "expired"
-    REJECTED = "rejected"
-
-
 class ExternalChannelChannelDefaultStatus(enum.StrEnum):
     """Lifecycle state of a Multi App channel route default."""
 
@@ -901,14 +881,6 @@ class ExternalChannelBindingStatus(enum.StrEnum):
 
     ACTIVE = "active"
     DISCONNECTED = "disconnected"
-
-
-class ExternalChannelInvocationWakeDispatchStatus(enum.StrEnum):
-    """Durable broker wake-dispatch state for one invocation batch."""
-
-    PENDING = "pending"
-    CLAIMED = "claimed"
-    DISPATCHED = "dispatched"
 
 
 class ExternalChannelAccessRequestStatus(enum.StrEnum):
@@ -980,22 +952,6 @@ class ExternalChannelDeliveryStatus(enum.StrEnum):
     FAILED = "failed"
     UNKNOWN = "unknown"
     NOT_ATTEMPTED = "not_attempted"
-
-
-class ExternalChannelResourceProvisioningOperation(enum.StrEnum):
-    """Provider mutation required to make a canonical resource usable."""
-
-    THREAD_CREATE = "thread_create"
-
-
-class ExternalChannelResourceProvisioningStatus(enum.StrEnum):
-    """Durable outcome state for one resource provisioning operation."""
-
-    PENDING = "pending"
-    ATTEMPTING = "attempting"
-    DELIVERED = "delivered"
-    FAILED = "failed"
-    UNKNOWN = "unknown"
 
 
 class ExternalChannelWorkProjectionStatus(enum.StrEnum):

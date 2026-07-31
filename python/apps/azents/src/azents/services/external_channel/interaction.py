@@ -16,7 +16,6 @@ from azents.core.deps import get_config
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
-    ExternalChannelConversationAdmissionStatus,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
 )
@@ -24,7 +23,6 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
-    ExternalChannelConversationAdmission,
     ExternalChannelInteraction,
     ExternalChannelResource,
 )
@@ -49,6 +47,9 @@ from azents.services.external_channel.selector import (
     ExternalChannelSelectorCatalog,
     ExternalChannelSelectorService,
 )
+from azents.services.external_channel.selector_state import (
+    selector_state_from_interaction,
+)
 from azents.services.external_channel.slack_events import (
     SlackConversationClient,
     SlackInteractionView,
@@ -71,7 +72,7 @@ class ExternalChannelInteractionHandoff:
 
     interaction_id: str
     trigger_id: str | None = field(default=None, repr=False)
-    selector_admission_id: str | None = field(default=None, repr=False)
+    selector_interaction_id: str | None = field(default=None, repr=False)
     selector_metadata: str | None = field(default=None, repr=False)
     selected_route_id: str | None = field(default=None, repr=False)
     selector_navigation: str | None = field(default=None, repr=False)
@@ -86,7 +87,7 @@ class _SelectorMetadata:
 
     connection_id: str
     resource_id: str
-    admission_id: str
+    selector_interaction_id: str
     interaction_id: str
     principal_id: str
     offset: int
@@ -94,7 +95,7 @@ class _SelectorMetadata:
 
 @dataclass
 class ExternalChannelInteractionProcessor:
-    """Open one bounded selector modal from a committed interaction claim."""
+    """Open or submit one selector interaction after durable scope checks."""
 
     session_manager: Annotated[
         SessionManager[AsyncSession],
@@ -126,11 +127,8 @@ class ExternalChannelInteractionProcessor:
     ]
     config: Annotated[Config, Depends(get_config)]
 
-    async def process(
-        self,
-        handoff: ExternalChannelInteractionHandoff,
-    ) -> None:
-        """Open or submit one selector interaction after durable scope checks."""
+    async def process(self, handoff: ExternalChannelInteractionHandoff) -> None:
+        """Open, navigate, or submit one selector interaction."""
         now = datetime.datetime.now(datetime.UTC)
         if handoff.selector_navigation is not None:
             await self._process_selector_navigation(handoff, now=now)
@@ -143,14 +141,14 @@ class ExternalChannelInteractionProcessor:
             return
         if handoff.trigger_id is None:
             raise ValueError("Slack selector interaction is unavailable.")
-        interaction, configuration, resource, admission = await self._load_scope(
+        interaction, configuration, resource, selector = await self._load_scope(
             handoff,
             now=now,
         )
         principal_id = interaction.principal_id
         assert principal_id is not None
         catalog = await self.selector_service.project_catalog(
-            admission_id=admission.id,
+            selector_interaction_id=selector.id,
             principal_id=principal_id,
             search=None,
             offset=_SELECTOR_PAGE_OFFSET,
@@ -167,7 +165,7 @@ class ExternalChannelInteractionProcessor:
                 secret=self.config.auth.jwt.secret_key,
                 connection_id=configuration.id,
                 resource_id=resource.id,
-                admission_id=admission.id,
+                selector_interaction_id=selector.id,
                 interaction_id=interaction.id,
                 principal_id=principal_id,
                 offset=_SELECTOR_PAGE_OFFSET,
@@ -203,7 +201,7 @@ class ExternalChannelInteractionProcessor:
             interaction,
             configuration,
             _,
-            admission,
+            selector,
             metadata,
         ) = await self._load_submission_scope(handoff, now=now)
         if handoff.selector_navigation == "search":
@@ -214,7 +212,7 @@ class ExternalChannelInteractionProcessor:
             offset = metadata.offset + _SELECTOR_PAGE_SIZE
         assert interaction.principal_id is not None
         catalog = await self.selector_service.project_catalog(
-            admission_id=admission.id,
+            selector_interaction_id=selector.id,
             principal_id=interaction.principal_id,
             search=handoff.selector_search,
             offset=offset,
@@ -231,7 +229,7 @@ class ExternalChannelInteractionProcessor:
                 secret=self.config.auth.jwt.secret_key,
                 connection_id=configuration.id,
                 resource_id=metadata.resource_id,
-                admission_id=admission.id,
+                selector_interaction_id=selector.id,
                 interaction_id=metadata.interaction_id,
                 principal_id=interaction.principal_id,
                 offset=offset,
@@ -256,37 +254,26 @@ class ExternalChannelInteractionProcessor:
         now: datetime.datetime,
     ) -> None:
         """Revalidate a signed modal submission before applying one selection."""
-        interaction, _, _, admission, metadata = await self._load_submission_scope(
+        interaction, _, _, selector, metadata = await self._load_submission_scope(
             handoff,
             now=now,
         )
         assert interaction.principal_id is not None
         assert handoff.selected_route_id is not None
-        if (
-            admission.status
-            is ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS
-        ):
+        selection = await self.selector_service.select_route(
+            selector_interaction_id=selector.id,
+            principal_id=interaction.principal_id,
+            route_id=handoff.selected_route_id,
+            now=now,
+        )
+        if selection.status == "expired":
+            raise ValueError("Slack selector interaction expired.")
+        if selection.status == "already_bound":
             return
-        if admission.status is ExternalChannelConversationAdmissionStatus.SELECTED:
-            if admission.selected_route_id != handoff.selected_route_id:
-                raise ValueError("Slack selector route is immutable.")
-            selected_admission = admission
-        else:
-            selection = await self.selector_service.select_route(
-                admission_id=admission.id,
-                principal_id=interaction.principal_id,
-                route_id=handoff.selected_route_id,
-                now=now,
-            )
-            if selection.status == "expired":
-                raise ValueError("Slack selector admission expired.")
-            if selection.status == "already_bound":
-                return
-            selected_admission = selection.admission
-        if selected_admission.id != metadata.admission_id:
-            raise ValueError("Slack selector admission is unavailable.")
-        outcome = await self.ingestion_replay_service.replay_selected_admission(
-            admission_id=selected_admission.id,
+        if selection.selector_interaction.id != metadata.selector_interaction_id:
+            raise ValueError("Slack selector interaction is unavailable.")
+        outcome = await self.ingestion_replay_service.replay_selected_interaction(
+            selector_interaction_id=selection.selector_interaction.id,
             principal_id=interaction.principal_id,
             deadline=external_channel_replay_deadline(now=now),
         )
@@ -333,9 +320,9 @@ class ExternalChannelInteractionProcessor:
         ExternalChannelInteraction,
         ExternalChannelConnectionConfiguration,
         ExternalChannelResource,
-        ExternalChannelConversationAdmission,
+        ExternalChannelInteraction,
     ]:
-        """Reload all trusted durable owners before any selector provider I/O."""
+        """Reload trusted interaction and selector owners before provider I/O."""
         async with self.session_manager() as session:
             interaction = await self.repository.lock_interaction(
                 session,
@@ -345,7 +332,6 @@ class ExternalChannelInteractionProcessor:
                 interaction is None
                 or interaction.status is not ExternalChannelInteractionStatus.PROCESSING
                 or interaction.principal_id is None
-                or interaction.resource_correlation_key is None
                 or interaction.interaction_type
                 not in {
                     ExternalChannelInteractionType.SHORTCUT,
@@ -353,92 +339,19 @@ class ExternalChannelInteractionProcessor:
                 }
             ):
                 raise ValueError("Slack selector interaction is unavailable.")
-            configuration = await self.repository.get_connection_configuration(
+            selector_id = handoff.selector_interaction_id or interaction.id
+            selector = await self.repository.lock_interaction(
                 session,
-                connection_id=interaction.connection_id,
+                interaction_id=selector_id,
             )
-            if (
-                configuration is None
-                or configuration.status
-                not in {
-                    ExternalChannelConnectionStatus.ACTIVE,
-                    ExternalChannelConnectionStatus.DEGRADED,
-                }
-                or configuration.app_mode is not ExternalChannelAppMode.MULTI
-                or configuration.provider_tenant_id is None
-            ):
-                raise ValueError("Slack selector connection is unavailable.")
-            resource = await self._resource_for_interaction(
+            configuration, resource = await self._selector_owners(
                 session,
-                interaction=interaction,
-                configuration=configuration,
-            )
-            admission = await self._admission_for_interaction(
-                session,
-                interaction=interaction,
-                resource=resource,
-                handoff=handoff,
+                selector=selector,
+                principal_id=interaction.principal_id,
                 now=now,
             )
-            return interaction, configuration, resource, admission
-
-    async def _resource_for_interaction(
-        self,
-        session: AsyncSession,
-        *,
-        interaction: ExternalChannelInteraction,
-        configuration: ExternalChannelConnectionConfiguration,
-    ) -> ExternalChannelResource:
-        """Resolve the canonical retained Slack conversation from correlation only."""
-        assert interaction.resource_correlation_key is not None
-        channel_id, separator, thread_ts = (
-            interaction.resource_correlation_key.partition(":")
-        )
-        if not separator or not channel_id or not thread_ts:
-            raise ValueError("Slack selector resource is unavailable.")
-        resource = await self.repository.get_resource_by_provider_key(
-            session,
-            connection_id=configuration.id,
-            provider_resource_key=(
-                f"slack:{configuration.provider_tenant_id}:{channel_id}:{thread_ts}"
-            ),
-        )
-        if resource is None or resource.connection_id != configuration.id:
-            raise ValueError("Slack selector resource is unavailable.")
-        return resource
-
-    async def _admission_for_interaction(
-        self,
-        session: AsyncSession,
-        *,
-        interaction: ExternalChannelInteraction,
-        resource: ExternalChannelResource,
-        handoff: ExternalChannelInteractionHandoff,
-        now: datetime.datetime,
-    ) -> ExternalChannelConversationAdmission:
-        """Require one still-pending admission in the exact interaction scope."""
-        admission = (
-            await self.repository.get_conversation_admission(
-                session,
-                admission_id=handoff.selector_admission_id,
-            )
-            if handoff.selector_admission_id is not None
-            else await self.repository.get_open_conversation_admission(
-                session,
-                resource_id=resource.id,
-            )
-        )
-        if (
-            admission is None
-            or admission.connection_id != interaction.connection_id
-            or admission.resource_id != resource.id
-            or admission.initiating_principal_id != interaction.principal_id
-            or admission.status
-            is not ExternalChannelConversationAdmissionStatus.PENDING_SELECTION
-            or admission.expires_at <= now
-        ):
-            raise ValueError("Slack selector admission is unavailable.")
-        return admission
+            assert selector is not None
+            return interaction, configuration, resource, selector
 
     async def _load_submission_scope(
         self,
@@ -449,10 +362,10 @@ class ExternalChannelInteractionProcessor:
         ExternalChannelInteraction,
         ExternalChannelConnectionConfiguration,
         ExternalChannelResource,
-        ExternalChannelConversationAdmission,
+        ExternalChannelInteraction,
         _SelectorMetadata,
     ]:
-        """Join one transient submission to its signed, durable selector scope."""
+        """Join one transient submission to its signed selector interaction."""
         assert handoff.selector_metadata is not None
         metadata = _parse_selector_metadata(
             metadata=handoff.selector_metadata,
@@ -467,53 +380,25 @@ class ExternalChannelInteractionProcessor:
                 interaction is None
                 or interaction.status is not ExternalChannelInteractionStatus.PROCESSING
                 or interaction.principal_id is None
+                or interaction.principal_id != metadata.principal_id
                 or interaction.interaction_type
                 not in {
                     ExternalChannelInteractionType.BLOCK_ACTION,
                     ExternalChannelInteractionType.VIEW_SUBMISSION,
                 }
-                or interaction.connection_id != metadata.connection_id
-                or interaction.principal_id != metadata.principal_id
             ):
                 raise ValueError("Slack selector submission is unavailable.")
-            configuration = await self.repository.get_connection_configuration(
+            selector = await self.repository.lock_interaction(
                 session,
-                connection_id=interaction.connection_id,
+                interaction_id=metadata.selector_interaction_id,
             )
-            if (
-                configuration is None
-                or configuration.status
-                not in {
-                    ExternalChannelConnectionStatus.ACTIVE,
-                    ExternalChannelConnectionStatus.DEGRADED,
-                }
-                or configuration.app_mode is not ExternalChannelAppMode.MULTI
-            ):
-                raise ValueError("Slack selector connection is unavailable.")
-            resource = await self.repository.get_resource(
+            configuration, resource = await self._selector_owners(
                 session,
-                resource_id=metadata.resource_id,
+                selector=selector,
+                principal_id=interaction.principal_id,
+                now=now,
             )
-            if resource is None or resource.connection_id != configuration.id:
-                raise ValueError("Slack selector resource is unavailable.")
-            admission = await self.repository.get_conversation_admission(
-                session,
-                admission_id=metadata.admission_id,
-            )
-            if (
-                admission is None
-                or admission.connection_id != configuration.id
-                or admission.resource_id != resource.id
-                or admission.initiating_principal_id != interaction.principal_id
-                or admission.status
-                not in {
-                    ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
-                    ExternalChannelConversationAdmissionStatus.SELECTED,
-                    ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
-                }
-                or admission.expires_at <= now
-            ):
-                raise ValueError("Slack selector admission is unavailable.")
+            assert selector is not None
             opened = await self.repository.lock_interaction(
                 session,
                 interaction_id=metadata.interaction_id,
@@ -522,11 +407,6 @@ class ExternalChannelInteractionProcessor:
                 opened is None
                 or opened.connection_id != configuration.id
                 or opened.principal_id != interaction.principal_id
-                or opened.interaction_type
-                not in {
-                    ExternalChannelInteractionType.SHORTCUT,
-                    ExternalChannelInteractionType.BLOCK_ACTION,
-                }
                 or opened.status
                 not in {
                     ExternalChannelInteractionStatus.PROCESSING,
@@ -534,23 +414,61 @@ class ExternalChannelInteractionProcessor:
                 }
             ):
                 raise ValueError("Slack selector modal is unavailable.")
-            opened_resource = await self._resource_for_interaction(
-                session,
-                interaction=opened,
-                configuration=configuration,
-            )
-            if opened_resource.id != resource.id:
-                raise ValueError("Slack selector resource is unavailable.")
             verify_selector_metadata(
                 metadata=handoff.selector_metadata,
                 secret=self.config.auth.jwt.secret_key,
                 connection_id=configuration.id,
                 resource_id=resource.id,
-                admission_id=admission.id,
+                selector_interaction_id=selector.id,
                 interaction_id=opened.id,
                 principal_id=interaction.principal_id,
             )
-            return interaction, configuration, resource, admission, metadata
+            return interaction, configuration, resource, selector, metadata
+
+    async def _selector_owners(
+        self,
+        session: AsyncSession,
+        *,
+        selector: ExternalChannelInteraction | None,
+        principal_id: str,
+        now: datetime.datetime,
+    ) -> tuple[ExternalChannelConnectionConfiguration, ExternalChannelResource]:
+        if (
+            selector is None
+            or selector.principal_id != principal_id
+            or selector.expires_at <= now
+            or selector.status
+            in {
+                ExternalChannelInteractionStatus.EXPIRED,
+                ExternalChannelInteractionStatus.REJECTED,
+                ExternalChannelInteractionStatus.FAILED,
+            }
+        ):
+            raise ValueError("Slack selector interaction is unavailable.")
+        state = selector_state_from_interaction(selector)
+        if state.principal_id != principal_id:
+            raise ValueError("Slack selector interaction is unavailable.")
+        configuration = await self.repository.get_connection_configuration(
+            session,
+            connection_id=state.connection_id,
+        )
+        resource = await self.repository.get_resource(
+            session,
+            resource_id=state.resource_id,
+        )
+        if (
+            configuration is None
+            or configuration.status
+            not in {
+                ExternalChannelConnectionStatus.ACTIVE,
+                ExternalChannelConnectionStatus.DEGRADED,
+            }
+            or configuration.app_mode is not ExternalChannelAppMode.MULTI
+            or resource is None
+            or resource.connection_id != configuration.id
+        ):
+            raise ValueError("Slack selector interaction is unavailable.")
+        return configuration, resource
 
 
 def build_selector_metadata(
@@ -558,7 +476,7 @@ def build_selector_metadata(
     secret: str,
     connection_id: str,
     resource_id: str,
-    admission_id: str,
+    selector_interaction_id: str,
     interaction_id: str,
     principal_id: str,
     offset: int,
@@ -570,7 +488,7 @@ def build_selector_metadata(
         "v": _SELECTOR_METADATA_VERSION,
         "c": connection_id,
         "r": resource_id,
-        "a": admission_id,
+        "a": selector_interaction_id,
         "i": interaction_id,
         "p": principal_id,
         "o": offset,
@@ -594,7 +512,7 @@ def verify_selector_metadata(
     secret: str,
     connection_id: str,
     resource_id: str,
-    admission_id: str,
+    selector_interaction_id: str,
     interaction_id: str,
     principal_id: str,
 ) -> int:
@@ -603,7 +521,7 @@ def verify_selector_metadata(
     expected = {
         "connection_id": connection_id,
         "resource_id": resource_id,
-        "admission_id": admission_id,
+        "selector_interaction_id": selector_interaction_id,
         "interaction_id": interaction_id,
         "principal_id": principal_id,
     }
@@ -635,7 +553,7 @@ def _parse_selector_metadata(
     required = {
         "c": "connection_id",
         "r": "resource_id",
-        "a": "admission_id",
+        "a": "selector_interaction_id",
         "i": "interaction_id",
         "p": "principal_id",
     }

@@ -240,7 +240,7 @@ class SlackSocketManagerService:
                     ExternalChannelInteractionHandoff(
                         interaction_id=claim.interaction.id,
                         trigger_id=callback.trigger_id,
-                        selector_admission_id=callback.selector_admission_id,
+                        selector_interaction_id=callback.selector_interaction_id,
                         selector_metadata=callback.selector_metadata,
                         selected_route_id=callback.selected_route_id,
                         selector_navigation=callback.selector_navigation,

@@ -1,4 +1,4 @@
-"""Synchronous route-neutral materialization for admitted provider shortcuts."""
+"""Synchronous route-neutral materialization for provider shortcuts."""
 
 import datetime
 from dataclasses import dataclass
@@ -9,8 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAppMode,
-    ExternalChannelConversationAdmissionOrigin,
-    ExternalChannelConversationAdmissionStatus,
     ExternalChannelConversationScopeKind,
     ExternalChannelInteractionType,
     ExternalChannelProvider,
@@ -20,12 +18,8 @@ from azents.core.enums import (
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
-    ExternalChannelConversationAdmission,
-    ExternalChannelConversationAdmissionCreate,
     ExternalChannelConversationPositionCreate,
-    ExternalChannelMessageCreate,
-    ExternalChannelMessageRevisionCreate,
-    ExternalChannelPrincipalCreate,
+    ExternalChannelInteraction,
     ExternalChannelResourceCreate,
     ExternalChannelTrigger,
 )
@@ -33,25 +27,28 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.discord_events import (
     normalize_projected_discord_event,
 )
+from azents.services.external_channel.selector_state import (
+    ExternalChannelSelectorState,
+    projection_with_selector_state,
+    selector_state_from_interaction,
+)
 from azents.services.external_channel.slack_events import (
     SlackConnectionRevocation,
     SlackEventExcluded,
     normalize_projected_slack_event,
 )
 
-_SHORTCUT_ADMISSION_AGE = datetime.timedelta(days=7)
-
 
 @dataclass(frozen=True)
 class ExternalChannelShortcutSourceMaterialization:
-    """Canonical source/admission durable result available before modal opening."""
+    """Shortcut-owned selector state available before modal opening."""
 
-    admission: ExternalChannelConversationAdmission | None
+    selector_interaction: ExternalChannelInteraction | None
 
 
 @dataclass
 class ExternalChannelShortcutSourceService:
-    """Materialize a shortcut source without route selection or provider I/O."""
+    """Resolve a shortcut source and attach typed selector state to its interaction."""
 
     session_manager: Annotated[
         SessionManager[AsyncSession],
@@ -69,7 +66,7 @@ class ExternalChannelShortcutSourceService:
         interaction_id: str,
         now: datetime.datetime,
     ) -> ExternalChannelShortcutSourceMaterialization:
-        """Commit one canonical route-neutral source before claiming modal work."""
+        """Commit one content-free selector boundary before opening the modal."""
         async with self.session_manager() as session:
             interaction = await self.repository.lock_interaction(
                 session,
@@ -83,7 +80,7 @@ class ExternalChannelShortcutSourceService:
                 or interaction.principal_id is None
                 or shortcut_source_event.provider_tenant_id is None
             ):
-                raise ValueError("Slack shortcut source is unavailable.")
+                raise ValueError("Shortcut source is unavailable.")
             connection = await self.repository.lock_connection_for_routing(
                 session,
                 connection_id=shortcut_source_event.connection_id,
@@ -92,7 +89,7 @@ class ExternalChannelShortcutSourceService:
                 connection is None
                 or connection.app_mode is not ExternalChannelAppMode.MULTI
             ):
-                raise SlackEventExcluded("Slack shortcut selection is unavailable.")
+                raise SlackEventExcluded("Shortcut selection is unavailable.")
             if connection.provider is ExternalChannelProvider.SLACK:
                 normalized = normalize_projected_slack_event(
                     event_type=shortcut_source_event.event_type,
@@ -100,7 +97,7 @@ class ExternalChannelShortcutSourceService:
                     envelope=shortcut_source_event.envelope,
                 )
                 if isinstance(normalized, SlackConnectionRevocation):
-                    raise ValueError("Slack shortcut source is unavailable.")
+                    raise ValueError("Shortcut source is unavailable.")
                 provider_resource_key = normalized.provider_resource_key
                 thread_scope = normalized.root_thread_ts != normalized.message_ts
                 position_scope_kind = (
@@ -112,7 +109,7 @@ class ExternalChannelShortcutSourceService:
                 position_provider_thread_key = (
                     normalized.root_thread_ts if thread_scope else None
                 )
-                labels = {
+                labels: dict[str, object] = {
                     "provider": "slack",
                     "tenant_id": normalized.tenant_id,
                     "channel_id": normalized.channel_id,
@@ -160,7 +157,7 @@ class ExternalChannelShortcutSourceService:
                     ),
                 }
             else:
-                raise ValueError("External Channel shortcut provider is unavailable.")
+                raise ValueError("Shortcut provider is unavailable.")
             position = await self.repository.create_conversation_position_idempotent(
                 session,
                 ExternalChannelConversationPositionCreate(
@@ -192,98 +189,51 @@ class ExternalChannelShortcutSourceService:
                 resource is None
                 or resource.status is not ExternalChannelResourceStatus.ACTIVE
             ):
-                raise SlackEventExcluded("Slack shortcut source is unavailable.")
+                raise SlackEventExcluded("Shortcut source is unavailable.")
             binding = await self.repository.lock_active_binding_by_resource(
                 session,
                 resource_id=resource.id,
             )
-            admission = (
-                None
-                if binding is not None
-                else await self.repository.lock_open_conversation_admission(
-                    session,
-                    resource_id=resource.id,
+            if binding is not None:
+                await session.commit()
+                return ExternalChannelShortcutSourceMaterialization(
+                    selector_interaction=None
                 )
+            selector_state = ExternalChannelSelectorState(
+                connection_id=connection.id,
+                resource_id=resource.id,
+                principal_id=interaction.principal_id,
+                conversation_position_id=position.id,
+                trigger_provider_message_key=normalized.provider_message_key,
+                range_start_position=position.read_through_position,
+                trigger_position=normalized.provider_position,
+                selected_route_id=None,
             )
-            source_principal_id = None
-            if normalized.provider_user_id is not None:
-                source_principal = await self.repository.create_principal_idempotent(
-                    session,
-                    ExternalChannelPrincipalCreate(
-                        provider=connection.provider,
-                        provider_tenant_id=normalized.tenant_id,
-                        provider_user_id=normalized.provider_user_id,
-                        author_type=normalized.author_type,
-                        display_name=None,
-                        avatar_url=None,
-                        profile=None,
-                    ),
+            try:
+                existing_state = selector_state_from_interaction(interaction)
+            except ValueError:
+                existing_state = None
+            if existing_state is not None:
+                expected_state = selector_state.model_copy(
+                    update={"selected_route_id": existing_state.selected_route_id}
                 )
-                source_principal_id = source_principal.id
-            message = await self.repository.create_message_idempotent(
+                if existing_state != expected_state:
+                    raise ValueError("Shortcut selector state is incompatible.")
+                await session.commit()
+                return ExternalChannelShortcutSourceMaterialization(
+                    selector_interaction=interaction
+                )
+            updated = await self.repository.replace_interaction_projection(
                 session,
-                ExternalChannelMessageCreate(
-                    resource_id=resource.id,
-                    provider_message_key=normalized.provider_message_key,
-                    provider_position=normalized.provider_position,
-                    principal_id=source_principal_id,
-                    author_type=normalized.author_type,
-                    current_revision_id=None,
-                    original_url=None,
-                    lifecycle=normalized.lifecycle,
-                    pending_size=normalized.normalized_size,
-                    provider_created_at=normalized.provider_created_at,
-                    provider_updated_at=normalized.provider_updated_at,
+                interaction_id=interaction.id,
+                projection=projection_with_selector_state(
+                    interaction.projection,
+                    selector_state,
                 ),
             )
-            revision = await self.repository.create_message_revision_idempotent(
-                session,
-                ExternalChannelMessageRevisionCreate(
-                    message_id=message.id,
-                    revision_key=normalized.revision_key,
-                    revision_kind=normalized.revision_kind,
-                    normalized_body=normalized.normalized_body,
-                    attachment_metadata=normalized.attachment_metadata,
-                    reference_mappings=None,
-                    provider_occurred_at=(
-                        normalized.provider_updated_at or normalized.provider_created_at
-                    ),
-                ),
-            )
-            message = await self.repository.apply_message_revision(
-                session,
-                message_id=message.id,
-                revision_id=revision.id,
-                principal_id=source_principal_id,
-                author_type=normalized.author_type,
-                lifecycle=normalized.lifecycle,
-                pending_size=normalized.normalized_size,
-                provider_created_at=normalized.provider_created_at,
-                provider_updated_at=normalized.provider_updated_at,
-                original_url=None,
-            )
-            if message is None:
-                raise RuntimeError("Slack shortcut source disappeared.")
-            if binding is None and admission is None:
-                create = ExternalChannelConversationAdmissionCreate(
-                    connection_id=connection.id,
-                    resource_id=resource.id,
-                    source_message_id=message.id,
-                    initiating_principal_id=interaction.principal_id,
-                    origin=ExternalChannelConversationAdmissionOrigin.SHORTCUT,
-                    status=ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
-                    selected_route_id=None,
-                    interaction_id=interaction.id,
-                    conversation_position_id=position.id,
-                    range_start_position=position.read_through_position,
-                    trigger_position=normalized.provider_position,
-                    expires_at=now + _SHORTCUT_ADMISSION_AGE,
-                )
-                admission = (
-                    await self.repository.create_conversation_admission_idempotent(
-                        session,
-                        create,
-                    )
-                )
+            if updated is None:
+                raise RuntimeError("Shortcut interaction disappeared.")
             await session.commit()
-            return ExternalChannelShortcutSourceMaterialization(admission=admission)
+            return ExternalChannelShortcutSourceMaterialization(
+                selector_interaction=updated
+            )

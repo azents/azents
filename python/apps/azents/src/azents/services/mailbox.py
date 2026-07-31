@@ -66,7 +66,7 @@ from azents.repos.action_execution.data import ActionExecution, ActionExecutionC
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.external_channel.data import ExternalChannelInvocationProjectionItem
+from azents.repos.external_channel.data import ExternalChannelMailboxProjectionItem
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import (
@@ -86,9 +86,6 @@ logger = logging.getLogger(__name__)
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
 _CHAT_ACTION_ADAPTER = TypeAdapter(ChatAction)
 _AGENT_MESSAGE_ADAPTER = TypeAdapter(AgentMessagePayload)
-EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY = (
-    "external_channel_invocation_batch_id"
-)
 _EXTERNAL_CHANNEL_CONTEXT_OMITTED_REMINDER = (
     "Earlier messages from this external conversation were omitted. "
     "Only the newest 20 provider messages are included below."
@@ -366,6 +363,22 @@ class MailboxService:
     ) -> MailboxItem | None:
         """Fetch a pending MailboxItem by its durable acceptance identity."""
         return await self.mailbox_item_repository.get_by_id(session, buffer_id)
+
+    async def get_by_idempotency_key(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        kind: MailboxItemKind,
+        idempotency_key: str,
+    ) -> MailboxItem | None:
+        """Fetch one pending mailbox item by its producer identity."""
+        return await self.mailbox_item_repository.get_by_idempotency_key(
+            session,
+            session_id=session_id,
+            kind=kind,
+            idempotency_key=idempotency_key,
+        )
 
     async def delete_by_session_and_id(
         self,
@@ -1276,7 +1289,7 @@ class _AgentMessageMailboxProcessor:
 
 
 def build_external_channel_mailbox_payload(
-    items: Sequence[ExternalChannelInvocationProjectionItem],
+    items: Sequence[ExternalChannelMailboxProjectionItem],
 ) -> ExternalChannelInvocationMailboxPayload:
     """Materialize immutable External Channel message snapshots at admission."""
     if not items:
@@ -1308,9 +1321,11 @@ def build_external_channel_mailbox_payload(
             resource_label=_external_resource_label(item),
             resource_type=item.resource_type,
             binding_id=item.binding_id,
-            invocation_batch_id=item.batch_id,
-            external_message_id=item.message_id,
-            projection_root_id=f"external-channel:{item.binding_id}:{item.message_id}",
+            invocation_batch_id=item.invocation_id,
+            external_message_id=item.provider_message_key,
+            projection_root_id=(
+                f"external-channel:{item.binding_id}:{item.provider_message_key}"
+            ),
             provider_message_key=item.provider_message_key,
             provider_position=item.provider_position,
             principal_id=item.principal_id,
@@ -1319,13 +1334,14 @@ def build_external_channel_mailbox_payload(
             author_type=item.author_type,
             authorization=(
                 "authorized_invocation"
-                if item.message_id == item.trigger_message_id
+                if item.provider_message_key == item.trigger_provider_message_key
                 else "context_only"
             ),
-            body=item.revision_body,
+            body=item.body,
             attachment_metadata=add_external_channel_file_locators(
                 item.attachment_metadata or {},
                 binding_id=item.binding_id,
+                provider_message_key=item.provider_message_key,
             ),
             reference_mappings=_external_reference_mappings(item.reference_mappings),
             provider_created_at=item.provider_created_at,
@@ -1338,7 +1354,7 @@ def build_external_channel_mailbox_payload(
             MailboxPresentationItem(
                 item_key=f"external_channel:{item.sequence + sequence_offset}",
                 presentation_kind="external_channel_message",
-                content=item.revision_body or "",
+                content=item.body or "",
                 metadata={"external_channel_message": payload.model_dump(mode="json")},
             )
         )
@@ -1504,7 +1520,7 @@ def _turn_effect_for_promoted(
     return TurnEffect.NEUTRAL
 
 
-def _external_resource_label(item: ExternalChannelInvocationProjectionItem) -> str:
+def _external_resource_label(item: ExternalChannelMailboxProjectionItem) -> str:
     """Return the validated provider resource label for one projection item."""
     labels = item.resource_labels
     provider_resource_key = item.provider_resource_key

@@ -207,7 +207,6 @@ async def _setup_binding(session: AsyncSession) -> tuple[str, str]:
             disconnected_at=None,
             disconnect_reason=None,
         ),
-        expected_admission_id=None,
         expected_access_request_id=None,
     )
     await session.flush()
