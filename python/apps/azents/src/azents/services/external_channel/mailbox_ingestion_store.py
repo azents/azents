@@ -196,27 +196,19 @@ class ExternalChannelMailboxIngestionStore:
                 position=position,
                 now=now,
             )
-            open_activation = (
-                await self.repository.get_open_session_activation_by_position(
+            trigger_activation = (
+                await self.repository.get_session_activation_by_trigger(
                     session,
                     conversation_position_id=position.id,
+                    trigger_provider_message_key=(
+                        request.locator.trigger_provider_message_key
+                    ),
+                    trigger_position=request.locator.trigger_position,
                 )
             )
-            if open_activation is not None:
-                same_trigger = (
-                    open_activation.trigger_provider_message_key
-                    == request.locator.trigger_provider_message_key
-                    and open_activation.trigger_position
-                    == request.locator.trigger_position
-                )
-                if not same_trigger:
-                    await session.commit()
-                    return _immediate(
-                        ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
-                        ExternalChannelIngestionReason.POSITION_CHANGED,
-                    )
+            if trigger_activation is not None:
                 if (
-                    open_activation.state
+                    trigger_activation.state
                     is ExternalChannelSessionActivationState.BLOCKED
                 ):
                     await session.commit()
@@ -224,14 +216,45 @@ class ExternalChannelMailboxIngestionStore:
                         ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
                         ExternalChannelIngestionReason.INITIAL_DELIVERY_UNAVAILABLE,
                     )
+                if (
+                    trigger_activation.state
+                    is ExternalChannelSessionActivationState.ACTIVATED
+                ):
+                    await session.commit()
+                    return ExternalChannelIngestionPreparation(
+                        position_id=None,
+                        exclusive_start_position=None,
+                        activation_id=None,
+                        immediate_outcome=ExternalChannelIngestionOutcome(
+                            kind=ExternalChannelIngestionOutcomeKind.DUPLICATE,
+                            reason=ExternalChannelIngestionReason.DUPLICATE,
+                            mailbox_item_id=trigger_activation.mailbox_item_id,
+                            control_delivery_attempt_id=None,
+                            connection_id=None,
+                        ),
+                        wake_mailbox_item_id=trigger_activation.mailbox_item_id,
+                        wake_session_id=trigger_activation.agent_session_id,
+                    )
                 await session.commit()
                 return ExternalChannelIngestionPreparation(
                     position_id=position.id,
-                    exclusive_start_position=open_activation.range_start_position,
-                    activation_id=open_activation.id,
+                    exclusive_start_position=(trigger_activation.range_start_position),
+                    activation_id=trigger_activation.id,
                     immediate_outcome=None,
                     wake_mailbox_item_id=None,
                     wake_session_id=None,
+                )
+            open_activation = (
+                await self.repository.get_open_session_activation_by_position(
+                    session,
+                    conversation_position_id=position.id,
+                )
+            )
+            if open_activation is not None:
+                await session.commit()
+                return _immediate(
+                    ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
+                    ExternalChannelIngestionReason.POSITION_CHANGED,
                 )
             if (
                 request.operation is ExternalChannelIngestionOperation.CURRENT_TRIGGER

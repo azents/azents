@@ -2436,6 +2436,27 @@ class ExternalChannelRepository:
             )
         )
 
+    async def get_session_activation_by_trigger(
+        self,
+        session: AsyncSession,
+        *,
+        conversation_position_id: str,
+        trigger_provider_message_key: str,
+        trigger_position: str,
+    ) -> ExternalChannelSessionActivation | None:
+        """Fetch the activation retained for one canonical provider trigger."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelSessionActivation).where(
+                RDBExternalChannelSessionActivation.conversation_position_id
+                == conversation_position_id,
+                RDBExternalChannelSessionActivation.trigger_provider_message_key
+                == trigger_provider_message_key,
+                RDBExternalChannelSessionActivation.trigger_position
+                == trigger_position,
+            )
+        )
+        return self._as(ExternalChannelSessionActivation, rdb)
+
     async def get_open_session_activation_by_position(
         self,
         session: AsyncSession,

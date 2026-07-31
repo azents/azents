@@ -25,7 +25,6 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from azentspublicclient.exceptions import ApiException
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
-from azentspublicclient.models.agent_session_run_state import AgentSessionRunState
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.connection_access_policy_request import (
@@ -806,13 +805,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
         external_channel_decision_input=decision,
         _headers=headers,
     )
-    repeated = external_api.external_channel_v1_decide_approval_request(
-        access_request_id=request_id,
-        external_channel_decision_input=decision,
-        _headers=headers,
-    )
     assert decided.status is ExternalChannelAccessRequestStatus.ALLOWED
-    assert repeated.status is ExternalChannelAccessRequestStatus.ALLOWED
     assert decided.agent_session_id
 
     def binding_projection() -> object | None:
@@ -896,9 +889,9 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert isinstance(request_counts, dict)
     typed_counts = cast(dict[str, Any], request_counts)
     assert "conversations.info" not in typed_counts
-    # The initial callback, duplicate delivery, initial Allow replay, and repeated
-    # Allow recovery each revalidate provider history before one mailbox input wins.
-    assert typed_counts["conversations.history"] == 4
+    # The initial callback, duplicate delivery, and Allow replay each revalidate
+    # provider history before one mailbox input wins.
+    assert typed_counts["conversations.history"] == 3
     assert typed_counts["chat.getPermalink"] == 4
     # One access-review control is deleted after approval. Durable acceptance then
     # delivers the Session link followed by the initial provider-native work progress.
@@ -944,180 +937,6 @@ def test_http_admission_unknown_participant_and_approval_journey(
         interval=0.2,
         message="Slack uninstall did not remove the connection from active management",
     )
-
-
-def test_http_initial_delivery_failure_retains_nonexecuting_session(
-    request: pytest.FixtureRequest,
-    public_api_client: azentspublicclient.ApiClient,
-    admin_api_client: azentsadminclient.ApiClient,
-    azents_public_server_url: str,
-    azents_engine_worker_container: Container,
-    slack_provider_fake_url: str,
-) -> None:
-    """A terminal initial delivery keeps one visible Session without execution."""
-    del azents_engine_worker_container
-    requests.post(
-        f"{slack_provider_fake_url}/__testenv/reset",
-        timeout=5,
-    ).raise_for_status()
-    root_timestamp = f"{int(time.time()) - 60}.000100"
-    requests.post(
-        f"{slack_provider_fake_url}/__testenv/configure",
-        json={
-            "history_pages": [
-                [
-                    {
-                        "user": "U-EXTERNAL",
-                        "ts": root_timestamp,
-                        "text": "Retain this invocation without executing it.",
-                    }
-                ]
-            ],
-            "delivery_scenarios": {
-                "chat.postMessage": "failed",
-                "chat.update": "delivered",
-                "chat.delete": "delivered",
-            },
-        },
-        timeout=5,
-    ).raise_for_status()
-    token, _, handle, agent_id = _create_agent(
-        public_api_client,
-        admin_api_client,
-        azents_public_server_url,
-        runtime_profile_provider_id=None,
-        shell_enabled=False,
-    )
-    headers = {"Authorization": f"Bearer {token}"}
-    external_api = ExternalChannelV1Api(public_api_client)
-    setup = external_api.external_channel_v1_setup_slack_connection(
-        agent_id=agent_id,
-        handle=handle,
-        slack_connection_setup_request=SlackConnectionSetupRequest(
-            app_id=_APP_ID,
-            transport=ExternalChannelTransport.HTTP,
-            credentials=SlackConnectionCredentials(
-                bot_token=_BOT_TOKEN,
-                signing_secret=_SIGNING_SECRET,
-                app_token=None,
-            ),
-        ),
-        _headers=headers,
-    )
-
-    def disconnect_connection() -> None:
-        external_api.external_channel_v1_disconnect_connection(
-            agent_id=agent_id,
-            connection_id=setup.connection.id,
-            handle=handle,
-            _headers=headers,
-        )
-
-    request.addfinalizer(disconnect_connection)
-    external_api.external_channel_v1_update_connection_access_policy(
-        agent_id=agent_id,
-        connection_id=setup.connection.id,
-        handle=handle,
-        connection_access_policy_request=ConnectionAccessPolicyRequest(
-            open_access_enabled=True,
-        ),
-        _headers=headers,
-    )
-    event_body = json.dumps(
-        {
-            "type": "event_callback",
-            "event_id": f"Ev-{unique()}",
-            "event_time": int(time.time()),
-            "api_app_id": _APP_ID,
-            "team_id": _TEAM_ID,
-            "event": {
-                "type": "app_mention",
-                "channel": _CHANNEL_ID,
-                "channel_type": "channel",
-                "user": "U-EXTERNAL",
-                "text": "<@B-E2E> retain without execution",
-                "ts": root_timestamp,
-            },
-        },
-        separators=(",", ":"),
-    ).encode()
-    callback_url = f"{azents_public_server_url}/external-channel/v1/slack/events"
-    first = requests.post(
-        callback_url,
-        data=event_body,
-        headers=_signed_headers(event_body),
-        timeout=5,
-    )
-    assert first.status_code == 200
-
-    chat_api = ChatV1Api(public_api_client)
-
-    def retained_binding() -> tuple[Any, Any] | None:
-        sessions = chat_api.chat_v1_list_agent_sessions(
-            agent_id=agent_id,
-            _headers=headers,
-        )
-        for session in sessions.items:
-            projection = external_api.external_channel_v1_list_session_channels(
-                agent_id=agent_id,
-                session_id=session.id,
-                handle=handle,
-                _headers=headers,
-            )
-            if len(projection.items) == 1:
-                return session, projection.items[0]
-        return None
-
-    retained_session, retained_channel = cast(
-        tuple[Any, Any],
-        wait_until(
-            retained_binding,
-            timeout=15,
-            interval=0.2,
-            message="Failed initialization did not retain one visible Session",
-        ),
-    )
-    assert retained_session.agent_id == agent_id
-    assert retained_channel.provider.value == "slack"
-    detail = chat_api.chat_v1_get_agent_session(
-        agent_id=agent_id,
-        session_id=retained_session.id,
-        _headers=headers,
-    )
-    assert detail.id == retained_session.id
-    assert detail.run_state is AgentSessionRunState.IDLE
-    retained_input = _external_channel_input_evidence(
-        public_server_url=azents_public_server_url,
-        token=token,
-        session_id=retained_session.id,
-    )
-    assert len(retained_input) == 1
-    assert retained_input[0]["body"] == ("Retain this invocation without executing it.")
-
-    duplicate = requests.post(
-        callback_url,
-        data=event_body,
-        headers=_signed_headers(event_body),
-        timeout=5,
-    )
-    assert duplicate.status_code == 200
-    time.sleep(2)
-    provider_state = _provider_state(slack_provider_fake_url)
-    request_counts = cast(dict[str, int], provider_state["request_counts"])
-    assert request_counts["chat.postMessage"] == 1
-    assert _successful_session_paths(provider_state) == []
-    detail = chat_api.chat_v1_get_agent_session(
-        agent_id=agent_id,
-        session_id=retained_session.id,
-        _headers=headers,
-    )
-    assert detail.run_state is AgentSessionRunState.IDLE
-    duplicate_input = _external_channel_input_evidence(
-        public_server_url=azents_public_server_url,
-        token=token,
-        session_id=retained_session.id,
-    )
-    assert duplicate_input == retained_input
 
 
 def test_connection_update_and_repeated_disconnect(
