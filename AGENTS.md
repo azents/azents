@@ -40,6 +40,22 @@ Detailed coding rules live under `.claude/conventions/` and are indexed by `.cla
 - For infrastructure/Helm work, read `.claude/rules/infra-conventions.md`.
 - Do not bulk-read every convention body. Read only bodies whose title applies to the change.
 
+## Editing Strategy
+
+### Replace Incorrect Units Instead of Patching Them
+
+When an existing unit's responsibilities, control flow, or state model no longer match
+the intended behavior, replace that function, class, module, or similarly narrow
+surface instead of preserving the wrong structure with flags, branches, adapters, or
+incremental special cases.
+
+- Prefer a complete replacement when the expected behavior and acceptance checks are
+  clear enough to verify.
+- Preserve surrounding public contracts, call sites, migrations, and compatibility
+  boundaries unless the task explicitly changes them.
+- Do not minimize a diff by modifying a misunderstood implementation whose shape is
+  itself the defect.
+
 ## Development Environment
 
 ```console
