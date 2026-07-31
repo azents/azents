@@ -790,7 +790,7 @@
         "worker": {
           "$ref": "#/definitions/componentGate"
         },
-        "discordGateway": {
+        "externalChannelGateway": {
           "type": "object",
           "additionalProperties": false,
           "properties": {

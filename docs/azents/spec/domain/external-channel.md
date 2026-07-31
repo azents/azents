@@ -54,7 +54,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-31
-spec_version: 30
+spec_version: 31
 ---
 
 # External Channel
@@ -66,8 +66,10 @@ External Channels connect provider conversations to Azents Agents without treati
 Slack and Discord are supported providers. A Slack connection uses a manually
 configured Slack App and selects either signed HTTP callbacks or Socket Mode. A Discord
 connection uses a customer-owned Discord App, its Bot Token, one target Guild, a signed
-interaction callback, and a dedicated Gateway Worker. Both providers have an immutable
-App mode. A Single App is managed by one Agent's administrators and has exactly one
+interaction callback, and a Gateway session. A provider-neutral External Channel
+Gateway runtime owns both Slack Socket Mode and Discord Gateway connections. Both
+providers have an immutable App mode. A Single App is managed by one Agent's
+administrators and has exactly one
 Agent route. A Multi App is managed by Workspace Owners and Managers and may have zero
 or more Agent routes. One Agent may appear in several Apps, and one AgentSession may
 contain multiple independent bindings.
@@ -156,20 +158,20 @@ contain multiple independent bindings.
   configuration-derived state. Discord
   interaction tokens, callback URLs, raw interaction bodies, and signature values are
   never durable External Channel state.
-- The dedicated Discord Gateway Worker claims each connection through owner,
+- The External Channel Gateway's Discord manager claims each connection through owner,
   configuration-generation, App-claim-generation, and lease-generation fences.
   Heartbeats and lease renewal do not authorize durable mutation by themselves.
-  The Worker uses only public high-level `discord.py` APIs and typed SDK callbacks.
+  The manager uses only public high-level `discord.py` APIs and typed SDK callbacks.
   The SDK owns discovery, heartbeat, reconnect, and in-process Resume. Azents neither
   reads raw Gateway payloads/private SDK state nor persists a cross-process Gateway
   Resume checkpoint. Durable provider-event idempotency and the current
   lease/configuration/App-claim fence protect canonical admission.
 - Discord `ready`, `resumed`, and `disconnect` callbacks update active or degraded
   health only through the current lease fence. Slack Socket establishment and endpoint
-  replacement callbacks use the equivalent fenced active/gap transitions. An Agent
-  Worker treats unexpected Slack Socket manager completion as a process-level
-  supervision failure, while one customer configuration requiring reconnection remains
-  connection-local health.
+  replacement callbacks use the equivalent fenced active/gap transitions. One
+  provider-neutral gateway process supervises both required manager loops and exits if
+  either loop stops unexpectedly. One customer configuration requiring reconnection
+  remains connection-local health. General Agent Workers own neither provider socket.
 - Production Discord Gateway endpoint selection belongs to `discord.py`; Azents does
   not expose a custom or insecure Gateway endpoint override.
 - Inbound Slack and Discord attachments retain only bounded identifiers, filename, media
@@ -272,7 +274,8 @@ authority behind the same fences and requires reconnection. Replacing Discord
 credentials or App identity invalidates prior callback and Gateway authority before
 activation repeats. Dedicated Discord setup is available without a deployment-scoped
 provider rollout flag; Discord Multi App creation is subject to the shared Multi rollout
-gate. Every enabled Server deployment includes the dedicated Gateway Worker.
+gate. Every enabled Server deployment includes the provider-neutral External Channel
+Gateway.
 
 Slack validation first uses `auth.test` to resolve Team and Bot identity, then uses
 `bots.info` to verify that the Bot Token's actual App ID equals the configured App
@@ -305,6 +308,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-31** (spec_version 31) — Unified Slack Socket Mode and Discord Gateway
+  ownership in one provider-neutral External Channel Gateway runtime and removed
+  persistent transport ownership from general Agent Workers.
 - **2026-07-31** (spec_version 30) — Replaced provider message/revision,
   conversation-admission, invocation-batch, provisioning, and wake-dispatch ownership
   with content-free interaction/access replay boundaries and one canonical mailbox

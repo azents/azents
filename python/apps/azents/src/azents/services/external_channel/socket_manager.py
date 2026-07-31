@@ -78,7 +78,7 @@ class SlackSocketCredentialError(RuntimeError):
 
 @dataclasses.dataclass
 class SlackSocketManagerService:
-    """Own multiple Slack sockets in Agent Worker processes with DB fencing."""
+    """Own multiple Slack sockets in External Channel Gateway processes."""
 
     session_manager: Annotated[
         SessionManager[AsyncSession],

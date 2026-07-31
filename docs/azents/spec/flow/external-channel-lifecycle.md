@@ -16,6 +16,8 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/slack_sdk_client.py
   - python/apps/azents/src/azents/services/external_channel/slack_socket.py
   - python/apps/azents/src/azents/services/external_channel/socket_manager.py
+  - python/apps/azents/src/azents/services/external_channel/gateway_runtime.py
+  - python/apps/azents/src/cli/externalchannelgateway.py
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
   - python/apps/azents/src/azents/services/external_channel/access.py
@@ -28,7 +30,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-31
-spec_version: 21
+spec_version: 22
 ---
 
 # External Channel Lifecycle
@@ -73,8 +75,9 @@ provisional PING-only authority, then asks Discord to register the endpoint. A f
 registration of the endpoint or required Guild-scoped `Ask an Azents Agent` Message
 Command clears that provisional authority and moves the connection to
 `reconnect_required`; normal interactions are rejected until the final activation
-commit. The Gateway Worker can claim only the newly activated configuration; a stale
-worker cannot continue mutation after replacement or disconnect.
+commit. The External Channel Gateway's Discord manager can claim only the newly
+activated configuration; a stale manager cannot continue mutation after replacement
+or disconnect.
 Retrying a `reconnect_required` Discord connection restores `configuring` while it
 persists a new provisional selector and public key, so endpoint-verification PING can
 authenticate without admitting normal interactions.
@@ -134,6 +137,13 @@ terminal App-token rejection moves only connection health to `reconnect_required
 Recoverable endpoint, close, refresh, and stale-session transitions remain inside the
 SDK lifecycle. Lease loss or shutdown closes the SDK client before authority is
 released.
+
+One provider-neutral External Channel Gateway process supervises both persistent
+transport managers. General Agent Worker rollout, scaling, and broker consumption do
+not change Slack Socket or Discord Gateway ownership. A customer-specific terminal
+connection remains isolated durable health; unexpected completion of either required
+top-level manager stops the gateway process so Kubernetes cannot keep a partially
+supervised gateway ready.
 
 Discord callback and Gateway authority are released during disconnect after terminal
 local state commits; provider cleanup failure remains a visible post-commit outcome.
@@ -201,6 +211,9 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-07-31** (spec_version 22) — Unified Slack Socket Mode and Discord Gateway
+  lifecycle supervision in the provider-neutral External Channel Gateway and decoupled
+  persistent connections from Agent Worker lifecycle.
 - **2026-07-31** (spec_version 21) — Removed invocation-batch and provider-message
   lifecycle ownership; Session cleanup now covers retained External Channel roots while
   canonical mailbox and Session-event state follow their existing Session owners.

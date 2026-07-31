@@ -1011,7 +1011,7 @@ def azents_engine_worker_container(
 
 
 @pytest.fixture
-def azents_discord_gateway_worker_factory(
+def azents_external_channel_gateway_factory(
     container_network: Network,
     postgres_container: PostgresContainer,
     rustfs_container: DockerContainer,
@@ -1026,7 +1026,7 @@ def azents_discord_gateway_worker_factory(
     system_bootstrap_setup_token: str,
     discord_provider_fake_container: DockerContainer,
 ) -> Callable[[], AbstractContextManager[DockerContainer]]:
-    """Return a starter for a Gateway Worker after durable setup is complete."""
+    """Return a starter for persistent provider ingress after durable setup."""
     del azents_public_server_container, discord_provider_fake_container
 
     @contextmanager
@@ -1036,9 +1036,9 @@ def azents_discord_gateway_worker_factory(
                 image=azents_server_image,
                 docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
             )
-            .with_name(f"azents-discord-gateway-worker-{random_secret(4)}")
-            .with_network_aliases("azents-discord-gateway-worker")
-            .with_command(["./bin/discordgatewayworker.sh"])
+            .with_name(f"azents-external-channel-gateway-{random_secret(4)}")
+            .with_network_aliases("azents-external-channel-gateway")
+            .with_command(["./bin/externalchannelgateway.sh"])
             .with_exposed_ports(8013)
         )
         container = _configure_azents_server_container(
@@ -1054,11 +1054,11 @@ def azents_discord_gateway_worker_factory(
         ).with_env("AZ_WORKER_HEALTH_PORT", "8013")
 
         with container:
-            _wait_for_tcp_ready(container, 8013, "azents-discord-gateway-worker")
+            _wait_for_tcp_ready(container, 8013, "azents-external-channel-gateway")
             try:
                 yield container
             finally:
-                _log_server_output(container, "azents-discord-gateway-worker")
+                _log_server_output(container, "azents-external-channel-gateway")
 
     return start
 

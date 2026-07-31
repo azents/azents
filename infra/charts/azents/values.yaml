@@ -61,7 +61,7 @@ server:
   worker:
     enabled: true
     resources: {}
-  discordGateway:
+  externalChannelGateway:
     resources: {}
   scheduler:
     enabled: true

@@ -24,7 +24,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-07-31
-spec_version: 14
+spec_version: 15
 ---
 
 # E2E Primary Test Strategy
@@ -126,7 +126,9 @@ Always-on required CI does not depend on external credentials.
   Discord Gateway synchronous admission; durable admission before acknowledgement;
   SDK-owned Slack endpoint replacement; Discord Identify-to-Resume recovery; eager or
   reused thread targeting; bound continuation; mixed-author bounded history; duplicate
-  convergence; access replay; and content-free evidence.
+  convergence; access replay; and content-free evidence. Slack Socket and Discord
+  Gateway journeys start the same provider-neutral External Channel gateway fixture,
+  while the Agent Worker fixture remains responsible only for Session execution.
 - Backend contract tests run both independent in-memory conversation locks and two
   clients against a real Redis container. Memory replicas may overlap and converge at
   the PostgreSQL position fence; Redis replicas serialize the same scope; unavailable
@@ -178,6 +180,8 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-07-31** — v15. Replaced the Discord-only gateway fixture and Worker-owned
+  Slack Socket lifecycle with one provider-neutral External Channel gateway fixture.
 - **2026-07-31** — v14. Added deterministic Slack Socket endpoint-replacement and
   Discord Gateway Resume verification through provider fakes and public product paths.
 - **2026-07-30** — v13. Added the post-contraction Slack HTTP, Slack Socket,
