@@ -1,26 +1,13 @@
 """Runtime Provider policy persistence data contracts."""
 
 import datetime
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from azents.core.enums import (
-    RuntimePolicySnapshotApplicationState,
     RuntimeProviderConfigRevisionState,
     RuntimeProviderConfigValidationStatus,
 )
-
-
-@dataclass(frozen=True)
-class LegacyRuntimeExecutionPolicyEvidence:
-    """Legacy snapshot evidence isolated from the active control protocol."""
-
-    snapshot_id: str
-    digest: str
-    desired_generation: int
-    module_versions: Mapping[str, int]
-    source_versions: Mapping[str, int]
 
 
 @dataclass(frozen=True)
@@ -87,80 +74,3 @@ class RuntimeProviderConfigRevisionCreate:
     secret_metadata: dict[str, Any]
     created_by_user_id: str | None
     validation_request_id: str | None
-
-
-@dataclass(frozen=True)
-class AgentRuntimeProviderOverride:
-    """Versioned Agent-scoped Provider override document."""
-
-    agent_id: str
-    provider_id: str
-    contract_revision_id: str
-    version: int
-    config: dict[str, Any]
-    encrypted_secrets: str | None
-    secret_metadata: dict[str, Any]
-    validation_status: RuntimeProviderConfigValidationStatus
-    updated_by_user_id: str | None
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-
-
-@dataclass(frozen=True)
-class RuntimePolicySnapshot:
-    """Immutable effective Provider policy attached to a logical Runtime."""
-
-    id: str
-    runtime_id: str
-    provider_id: str
-    contract_revision_id: str
-    config_revision_id: str | None
-    override_provider_id: str | None
-    override_version: int | None
-    execution_profile_id: str | None
-    execution_profile_version: int | None
-    execution_workspace_version: int | None
-    execution_agent_version: int | None
-    resolved_execution_policy_json: str | None
-    execution_source_trace: dict[str, Any] | None
-    execution_provider_compatibility: dict[str, Any] | None
-    execution_target_digest: str | None
-    execution_reported_digest: str | None
-    resolved_config: dict[str, Any]
-    encrypted_secrets: str | None
-    secret_metadata: dict[str, Any]
-    source_trace: dict[str, Any]
-    digest: str
-    target_desired_generation: int
-    application_state: RuntimePolicySnapshotApplicationState
-    provider_acknowledged_at: datetime.datetime | None
-    runtime_observed_at: datetime.datetime | None
-    created_at: datetime.datetime
-
-
-@dataclass(frozen=True)
-class RuntimePolicySnapshotCreate:
-    """Complete values for an immutable Runtime policy snapshot."""
-
-    runtime_id: str
-    provider_id: str
-    contract_revision_id: str
-    config_revision_id: str | None
-    override_provider_id: str | None
-    override_version: int | None
-    execution_profile_id: str | None
-    execution_profile_version: int | None
-    execution_workspace_version: int | None
-    execution_agent_version: int | None
-    resolved_execution_policy_json: str | None
-    execution_source_trace: dict[str, Any] | None
-    execution_provider_compatibility: dict[str, Any] | None
-    execution_target_digest: str | None
-    execution_reported_digest: str | None
-    resolved_config: dict[str, Any]
-    encrypted_secrets: str | None
-    secret_metadata: dict[str, Any]
-    source_trace: dict[str, Any]
-    digest: str
-    target_desired_generation: int
-    application_state: RuntimePolicySnapshotApplicationState

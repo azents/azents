@@ -21,7 +21,11 @@ from azents.core.enums import (
     RuntimeLifecycleCommandType,
     RuntimeProviderConnectionState,
 )
-from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
+from azents.core.runtime_profile import (
+    RuntimeConfigurationApplicationImpact,
+    RuntimeConfigurationResolutionStatus,
+    classify_runtime_configuration_application,
+)
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeFailurePatch
@@ -113,14 +117,30 @@ class RuntimeLifecycleReconciler:
                     observe_interval=self._config.observe_interval,
                 )
             )
+            configuration_runtimes = (
+                await self._runtime_repository.find_configuration_adoption_candidates(
+                    session,
+                    limit=limit,
+                )
+            )
 
         dispatched = 0
         for runtime in runtimes:
             if await self._dispatch_runtime(runtime):
                 dispatched += 1
         lifecycle_runtime_ids = {runtime.id for runtime in runtimes}
-        for runtime in reconcile_runtimes:
+        configuration_runtime_ids: set[str] = set()
+        for runtime in configuration_runtimes:
             if runtime.id in lifecycle_runtime_ids:
+                continue
+            if await self._dispatch_configuration_adoption(runtime):
+                dispatched += 1
+                configuration_runtime_ids.add(runtime.id)
+        for runtime in reconcile_runtimes:
+            if (
+                runtime.id in lifecycle_runtime_ids
+                or runtime.id in configuration_runtime_ids
+            ):
                 continue
             if await self._dispatch_periodic_reconcile(runtime):
                 dispatched += 1
@@ -165,7 +185,14 @@ class RuntimeLifecycleReconciler:
             )
         command_type = (
             RuntimeProviderCommandType.START
-            if runtime.desired_state is RuntimeDesiredState.RUNNING
+            if (
+                runtime.desired_state is RuntimeDesiredState.RUNNING
+                and (
+                    runtime.applied_runtime_configuration_revision_id is None
+                    or runtime.desired_runtime_configuration_revision_id
+                    == runtime.applied_runtime_configuration_revision_id
+                )
+            )
             else RuntimeProviderCommandType.OBSERVE
         )
         return await self._dispatch_runtime_command(
@@ -173,6 +200,43 @@ class RuntimeLifecycleReconciler:
             command_type=command_type,
             claim_lifecycle=False,
         )
+
+    async def _dispatch_configuration_adoption(
+        self,
+        runtime: AgentRuntime,
+    ) -> bool:
+        desired_revision_id = runtime.desired_runtime_configuration_revision_id
+        applied_revision_id = runtime.applied_runtime_configuration_revision_id
+        if desired_revision_id is None or applied_revision_id is None:
+            return False
+        async with self._session_manager() as session:
+            desired = await self._profile_repository.get_configuration_revision(
+                session,
+                revision_id=desired_revision_id,
+            )
+            applied = await self._profile_repository.get_configuration_revision(
+                session,
+                revision_id=applied_revision_id,
+            )
+        if desired is None or applied is None:
+            return False
+        impact = classify_runtime_configuration_application(
+            desired_status=desired.resolution_status,
+            desired_configuration=desired.resolved_configuration,
+            applied_configuration=applied.resolved_configuration,
+        )
+        if impact is not RuntimeConfigurationApplicationImpact.IN_PLACE:
+            return False
+        if (
+            desired.provider_acknowledged_at is None
+            or desired.provider_reported_digest != desired.digest
+        ):
+            return await self._dispatch_runtime_command(
+                runtime,
+                command_type=RuntimeProviderCommandType.UPDATE_CONFIGURATION,
+                claim_lifecycle=False,
+            )
+        return False
 
     async def _dispatch_runtime_command(
         self,
@@ -248,7 +312,15 @@ class RuntimeLifecycleReconciler:
             desired_generation=runtime.desired_generation,
         )
         try:
-            runtime_configuration = await self._runtime_configuration(runtime)
+            runtime_configuration = await self._runtime_configuration(
+                runtime,
+                require_ready=command_type
+                not in {
+                    RuntimeProviderCommandType.STOP,
+                    RuntimeProviderCommandType.TERMINAL_DELETE,
+                    RuntimeProviderCommandType.OBSERVE,
+                },
+            )
         except ValueError as error:
             await self._record_failure(
                 runtime,
@@ -342,8 +414,17 @@ class RuntimeLifecycleReconciler:
     async def _runtime_configuration(
         self,
         runtime: AgentRuntime,
+        *,
+        require_ready: bool = True,
     ) -> RuntimeConfigurationEnvelope:
-        revision_id = runtime.desired_runtime_configuration_revision_id
+        revision_id = (
+            runtime.desired_runtime_configuration_revision_id
+            if require_ready
+            else (
+                runtime.applied_runtime_configuration_revision_id
+                or runtime.desired_runtime_configuration_revision_id
+            )
+        )
         if revision_id is None:
             raise ValueError("Runtime configuration target revision is missing.")
         async with self._session_manager() as session:
@@ -360,12 +441,16 @@ class RuntimeLifecycleReconciler:
             or revision.provider_id != runtime.runtime_provider_resource_id
         ):
             raise ValueError("Runtime configuration Provider binding is invalid.")
-        if revision.target_desired_generation != runtime.desired_generation:
-            raise ValueError("Runtime configuration target generation is stale.")
-        if revision.resolution_status is not RuntimeConfigurationResolutionStatus.READY:
-            raise ValueError("Runtime configuration target revision is blocked.")
-        if revision.resolved_configuration is None:
-            raise ValueError("Runtime configuration target document is missing.")
+        if require_ready:
+            if revision.target_desired_generation != runtime.desired_generation:
+                raise ValueError("Runtime configuration target generation is stale.")
+            if (
+                revision.resolution_status
+                is not RuntimeConfigurationResolutionStatus.READY
+            ):
+                raise ValueError("Runtime configuration target revision is blocked.")
+            if revision.resolved_configuration is None:
+                raise ValueError("Runtime configuration target document is missing.")
         envelope = RuntimeConfigurationEnvelope(
             evidence=RuntimeConfigurationEvidence(
                 revision_id=revision.id,
@@ -373,9 +458,11 @@ class RuntimeLifecycleReconciler:
                 desired_generation=revision.target_desired_generation,
             ),
             resolved_configuration_json=canonical_runtime_configuration_json(
-                revision.resolved_configuration
+                revision.resolved_configuration or {}
             ),
         )
+        if not require_ready:
+            return envelope
         configuration = parse_runtime_configuration_envelope(
             envelope,
             desired_generation=runtime.desired_generation,

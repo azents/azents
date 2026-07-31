@@ -235,9 +235,11 @@ Class | Method | HTTP request | Description
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_list_integrations**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_list_integrations) | **GET** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations | List Integrations
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_sync_integration_catalog**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_sync_integration_catalog) | **POST** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/catalog-sync | Sync Integration Catalog
 *LLMProviderIntegrationV1Api* | [**llm_provider_integration_v1_update_integration**](azentspublicclient/docs/LLMProviderIntegrationV1Api.md#llm_provider_integration_v1_update_integration) | **PATCH** /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id} | Update Integration
+*RuntimeProfileV1Api* | [**runtime_profile_v1_create_profile_recreation**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_create_profile_recreation) | **POST** /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id}/recreation-operations | Create Profile Recreation
 *RuntimeProfileV1Api* | [**runtime_profile_v1_create_workspace_runtime_profile**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_create_workspace_runtime_profile) | **POST** /runtime-profile/v1/workspaces/{handle}/profiles | Create Workspace Runtime Profile
 *RuntimeProfileV1Api* | [**runtime_profile_v1_get_workspace_runtime_profile**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_get_workspace_runtime_profile) | **GET** /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id} | Get Workspace Runtime Profile
 *RuntimeProfileV1Api* | [**runtime_profile_v1_get_workspace_runtime_profile_default**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_get_workspace_runtime_profile_default) | **GET** /runtime-profile/v1/workspaces/{handle}/default | Get Workspace Runtime Profile Default
+*RuntimeProfileV1Api* | [**runtime_profile_v1_get_workspace_runtime_profile_recreation**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_get_workspace_runtime_profile_recreation) | **GET** /runtime-profile/v1/workspaces/{handle}/recreation-operations/{operation_id} | Get Workspace Runtime Profile Recreation
 *RuntimeProfileV1Api* | [**runtime_profile_v1_list_selectable_infrastructure_profiles**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_list_selectable_infrastructure_profiles) | **GET** /runtime-profile/v1/workspaces/{handle}/infrastructure-profiles | List Selectable Infrastructure Profiles
 *RuntimeProfileV1Api* | [**runtime_profile_v1_list_workspace_runtime_profiles**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_list_workspace_runtime_profiles) | **GET** /runtime-profile/v1/workspaces/{handle}/profiles | List Workspace Runtime Profiles
 *RuntimeProfileV1Api* | [**runtime_profile_v1_replace_workspace_runtime_profile**](azentspublicclient/docs/RuntimeProfileV1Api.md#runtime_profile_v1_replace_workspace_runtime_profile) | **PUT** /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id} | Replace Workspace Runtime Profile
@@ -602,6 +604,12 @@ Class | Method | HTTP request | Description
  - [RuntimeProviderObservedState](azentspublicclient/docs/RuntimeProviderObservedState.md)
  - [RuntimeProviderOptionListResponse](azentspublicclient/docs/RuntimeProviderOptionListResponse.md)
  - [RuntimeProviderOptionResponse](azentspublicclient/docs/RuntimeProviderOptionResponse.md)
+ - [RuntimeRecreationCreateRequest](azentspublicclient/docs/RuntimeRecreationCreateRequest.md)
+ - [RuntimeRecreationItemResponse](azentspublicclient/docs/RuntimeRecreationItemResponse.md)
+ - [RuntimeRecreationItemStatus](azentspublicclient/docs/RuntimeRecreationItemStatus.md)
+ - [RuntimeRecreationOperationResponse](azentspublicclient/docs/RuntimeRecreationOperationResponse.md)
+ - [RuntimeRecreationOperationStatus](azentspublicclient/docs/RuntimeRecreationOperationStatus.md)
+ - [RuntimeRecreationTargetKind](azentspublicclient/docs/RuntimeRecreationTargetKind.md)
  - [RuntimeRunnerState](azentspublicclient/docs/RuntimeRunnerState.md)
  - [RuntimeSummary](azentspublicclient/docs/RuntimeSummary.md)
  - [Secrets](azentspublicclient/docs/Secrets.md)

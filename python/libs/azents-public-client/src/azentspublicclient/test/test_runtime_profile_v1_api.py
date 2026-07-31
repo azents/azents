@@ -26,6 +26,13 @@ class TestRuntimeProfileV1Api(unittest.TestCase):
     def tearDown(self) -> None:
         pass
 
+    def test_runtime_profile_v1_create_profile_recreation(self) -> None:
+        """Test case for runtime_profile_v1_create_profile_recreation
+
+        Create Profile Recreation
+        """
+        pass
+
     def test_runtime_profile_v1_create_workspace_runtime_profile(self) -> None:
         """Test case for runtime_profile_v1_create_workspace_runtime_profile
 
@@ -44,6 +51,13 @@ class TestRuntimeProfileV1Api(unittest.TestCase):
         """Test case for runtime_profile_v1_get_workspace_runtime_profile_default
 
         Get Workspace Runtime Profile Default
+        """
+        pass
+
+    def test_runtime_profile_v1_get_workspace_runtime_profile_recreation(self) -> None:
+        """Test case for runtime_profile_v1_get_workspace_runtime_profile_recreation
+
+        Get Workspace Runtime Profile Recreation
         """
         pass
 

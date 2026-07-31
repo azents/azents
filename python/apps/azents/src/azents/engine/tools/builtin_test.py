@@ -15,7 +15,6 @@ import pytest
 from azents.core.enums import (
     EventKind,
     RuntimeDesiredState,
-    RuntimeLifecycleCommandType,
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
     RuntimeRunnerState,
@@ -665,7 +664,7 @@ def _make_toolkit(
     runner_operations = _FakeRunnerOperations(storage_files)
     session_manager = _make_mock_session_manager()
     agent_runtime_repo = AsyncMock(spec=AgentRuntimeRepository)
-    execution_policy_application_service = AsyncMock()
+    agent_runtime_service = AsyncMock()
     agent_runtime_repo.get_by_agent_id.return_value = SimpleNamespace(
         id="runtime-1",
         desired_state=desired_state,
@@ -690,7 +689,7 @@ def _make_toolkit(
         runner_operations=cast(Any, runner_operations),
         session_manager=session_manager,
         agent_runtime_repo=agent_runtime_repo,
-        execution_policy_application_service=execution_policy_application_service,
+        agent_runtime_service=agent_runtime_service,
         project_repo=project_repo,
         agents_store=cast(Any, agents_store),
         server_to_runtime_transfer_service=server_to_runtime_transfer_service,
@@ -702,9 +701,7 @@ def _make_toolkit(
     toolkit.set_session_id(session_id)
     cast(Any, toolkit)._test_runner_operations = runner_operations
     cast(Any, toolkit)._test_agent_runtime_repo = agent_runtime_repo
-    cast(
-        Any, toolkit
-    )._test_execution_policy_application_service = execution_policy_application_service
+    cast(Any, toolkit)._test_agent_runtime_service = agent_runtime_service
     return toolkit
 
 
@@ -774,7 +771,7 @@ class TestBuiltinToolkitProviderResolve:
             session_manager=_make_mock_session_manager(),
             memory_repo=_make_mock_memory_repo(),
             agent_runtime_repo=agent_runtime_repo,
-            execution_policy_application_service=AsyncMock(),
+            agent_runtime_service=AsyncMock(),
             runner_operations=cast(
                 Any,
                 _FakeRunnerOperations(
@@ -1560,7 +1557,7 @@ async def test_runtime_file_storage_reads_one_bounded_range() -> None:
     storage = RuntimeRunnerFileStorage(
         runner_operations=cast(Any, runner_operations),
         agent_runtime_repo=_make_runtime_repo(),
-        execution_policy_application_service=AsyncMock(),
+        agent_runtime_service=AsyncMock(),
         session_manager=cast(Any, _make_mock_session_manager()),
         runtime_agent_id="agent-1",
         owner_session_id="session-1",
@@ -1588,7 +1585,7 @@ async def test_runtime_file_range_maps_runner_disconnect_to_storage_error() -> N
     storage = RuntimeRunnerFileStorage(
         runner_operations=cast(Any, runner_operations),
         agent_runtime_repo=_make_runtime_repo(),
-        execution_policy_application_service=AsyncMock(),
+        agent_runtime_service=AsyncMock(),
         session_manager=cast(Any, _make_mock_session_manager()),
         runtime_agent_id="agent-1",
         owner_session_id="session-1",
@@ -1614,7 +1611,7 @@ async def test_runtime_text_storage_maps_runner_decode_error() -> None:
     storage = RuntimeRunnerFileStorage(
         runner_operations=cast(Any, runner_operations),
         agent_runtime_repo=_make_runtime_repo(),
-        execution_policy_application_service=AsyncMock(),
+        agent_runtime_service=AsyncMock(),
         session_manager=cast(Any, _make_mock_session_manager()),
         runtime_agent_id="agent-1",
         owner_session_id="session-1",
@@ -2083,20 +2080,14 @@ class TestProcessToolHandler:
             runner_state=RuntimeRunnerState.UNKNOWN,
         )
         runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
-        application = cast(Any, toolkit)._test_execution_policy_application_service
+        runtime_service = cast(Any, toolkit)._test_agent_runtime_service
         state = await toolkit.update_context(_make_context())
         tool = _find_tool(state.tools, "exec_command")
 
         with pytest.raises(FunctionToolError, match="Runtime is still starting"):
             await tool.handler(json.dumps({"command": "ls"}))
 
-        application.target_lifecycle_command.assert_awaited_once_with(
-            agent_id="agent-1",
-            command_type=RuntimeLifecycleCommandType.START,
-            desired_state=RuntimeDesiredState.RUNNING,
-            reset_final_desired_state=None,
-            terminal_delete_requested=False,
-        )
+        runtime_service.ensure_started_for_agent.assert_awaited_once_with("agent-1")
         runtime_repo.set_desired_state.assert_not_awaited()
 
     @pytest.mark.asyncio

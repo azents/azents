@@ -13,6 +13,9 @@ from azents_runtime_control.runner import (
     RunnerStateReport as SharedRunnerStateReport,
 )
 from azents_runtime_control.runner import RuntimeRunnerState as SharedRunnerState
+from azents_runtime_control.runtime_configuration import (
+    RuntimeConfigurationEvidence,
+)
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -125,6 +128,8 @@ class RuntimeProviderReportRepositorySink:
         runtime: AgentRuntime,
         report: SharedRuntimeProviderReport,
     ) -> AgentRuntimeFailurePatch | None:
+        if report.observed_state is not SharedProviderObservedState.RUNNING:
+            return None
         provider_id = runtime.runtime_provider_resource_id
         if provider_id is None:
             return _configuration_failure(
@@ -139,6 +144,13 @@ class RuntimeProviderReportRepositorySink:
             acknowledged_at=report.reported_at,
         )
         if recorded is None:
+            if await self.profile_repository.configuration_evidence_matches_applied(
+                session,
+                runtime_id=runtime.id,
+                provider_id=provider_id,
+                evidence=report.runtime_configuration,
+            ):
+                return None
             return _configuration_failure(
                 runtime.desired_generation,
                 "RUNTIME_CONFIGURATION_PROVIDER_EVIDENCE_MISMATCH",
@@ -173,7 +185,7 @@ class RuntimeRunnerStateRepositorySink:
             )
             if runtime is None or runtime.runtime_provider_resource_id is None:
                 return False
-            matches = (
+            matches_current = (
                 await self.profile_repository.configuration_evidence_matches_current(
                     session,
                     runtime_id=runtime.id,
@@ -181,7 +193,57 @@ class RuntimeRunnerStateRepositorySink:
                     evidence=registration.runtime_configuration,
                 )
             )
-            return matches
+            if matches_current:
+                return True
+            return await self._runner_evidence_matches_applied(
+                session,
+                runtime=runtime,
+                evidence=registration.runtime_configuration,
+            )
+
+    async def configuration_evidence_for_runner_heartbeat(
+        self,
+        *,
+        runtime_id: str,
+    ) -> RuntimeConfigurationEvidence | None:
+        """Return pending exact evidence after Provider acknowledgement."""
+        async with self.session_manager() as session:
+            runtime = await self.runtime_repository.get_by_id(session, runtime_id)
+            if runtime is None or runtime.runtime_provider_resource_id is None:
+                return None
+            revision_id = runtime.desired_runtime_configuration_revision_id
+            if (
+                revision_id is None
+                or revision_id == runtime.applied_runtime_configuration_revision_id
+            ):
+                return None
+            revision = await self.profile_repository.get_configuration_revision(
+                session,
+                revision_id=revision_id,
+            )
+            if revision is None:
+                return None
+            evidence = RuntimeConfigurationEvidence(
+                revision_id=revision.id,
+                digest=revision.digest,
+                desired_generation=revision.target_desired_generation,
+            )
+            if not (
+                await self.profile_repository.configuration_evidence_matches_current(
+                    session,
+                    runtime_id=runtime.id,
+                    provider_id=runtime.runtime_provider_resource_id,
+                    evidence=evidence,
+                )
+            ):
+                return None
+            if (
+                revision.provider_acknowledged_at is None
+                or revision.provider_reported_digest != revision.digest
+                or revision.runner_reported_digest == revision.digest
+            ):
+                return None
+            return evidence
 
     async def record_runner_state(self, report: SharedRunnerStateReport) -> None:
         """Persist one Runner report, validating it against Provider metadata."""
@@ -264,11 +326,35 @@ class RuntimeRunnerStateRepositorySink:
             observed_at=report.reported_at,
         )
         if recorded is None:
+            if await self._runner_evidence_matches_applied(
+                session,
+                runtime=runtime,
+                evidence=report.runtime_configuration,
+            ):
+                return None
             return _configuration_failure(
                 runtime.desired_generation,
                 "RUNTIME_CONFIGURATION_RUNNER_EVIDENCE_MISMATCH",
             )
         return None
+
+    async def _runner_evidence_matches_applied(
+        self,
+        session: AsyncSession,
+        *,
+        runtime: AgentRuntime,
+        evidence: RuntimeConfigurationEvidence,
+    ) -> bool:
+        provider_id = runtime.runtime_provider_resource_id
+        applied_revision_id = runtime.applied_runtime_configuration_revision_id
+        if provider_id is None or applied_revision_id is None:
+            return False
+        return await self.profile_repository.configuration_evidence_matches_applied(
+            session,
+            runtime_id=runtime.id,
+            provider_id=provider_id,
+            evidence=evidence,
+        )
 
 
 def _workspace_failure(

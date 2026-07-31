@@ -19,8 +19,6 @@ from azents.core.enums import (
     AgentDecommissionStatus,
     AgentSessionRunState,
     AgentSessionStatus,
-    RuntimeDesiredState,
-    RuntimeLifecycleCommandType,
 )
 from azents.core.s3.deps import get_s3_service
 from azents.core.session_lifecycle import (
@@ -40,10 +38,8 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.exchange_file import ExchangeFileRepository
+from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
-from azents.services.runtime_execution_policy.application_service import (
-    RuntimeExecutionPolicyApplicationService,
-)
 from azents.services.session_lifecycle.orchestrator import (
     SessionLifecycleOrchestrator,
 )
@@ -98,8 +94,8 @@ class AgentDecommissionService:
     runtime_repository: Annotated[
         AgentRuntimeRepository, Depends(AgentRuntimeRepository)
     ]
-    execution_policy_application_service: Annotated[
-        RuntimeExecutionPolicyApplicationService,
+    agent_runtime_service: Annotated[
+        AgentRuntimeService,
         Depends(),
     ]
     exchange_file_repository: Annotated[
@@ -369,12 +365,8 @@ class AgentDecommissionService:
                 job.agent_id,
             )
         if runtime is not None and runtime.runtime_provider_resource_id is not None:
-            await self.execution_policy_application_service.target_lifecycle_command(
-                agent_id=job.agent_id,
-                command_type=RuntimeLifecycleCommandType.STOP,
-                desired_state=RuntimeDesiredState.STOPPED,
-                reset_final_desired_state=None,
-                terminal_delete_requested=True,
+            await self.agent_runtime_service.request_terminal_delete_for_agent(
+                job.agent_id
             )
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, job.agent_id)

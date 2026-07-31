@@ -7,19 +7,12 @@ from typing import cast
 
 import pytest
 from azents_runtime_control.provider import (
-    RuntimeContainerAuth as ControlRuntimeContainerAuth,
-)
-from azents_runtime_control.provider import (
-    RuntimeIdentity as ControlRuntimeIdentity,
-)
-from azents_runtime_control.provider import (
-    RuntimeLifecycleCommand as ControlRuntimeLifecycleCommand,
-)
-from azents_runtime_control.provider import (
-    RuntimeLifecycleCommandType as ControlRuntimeLifecycleCommandType,
-)
-from azents_runtime_control.provider import (
-    RuntimeProviderObservedState as ControlRuntimeProviderObservedState,
+    RuntimeContainerAuth,
+    RuntimeDesiredState,
+    RuntimeIdentity,
+    RuntimeLifecycleCommand,
+    RuntimeLifecycleCommandType,
+    RuntimeProviderObservedState,
 )
 from azents_runtime_control.runtime_configuration import (
     JsonValue,
@@ -34,14 +27,6 @@ from azents_runtime_provider_docker.docker_api import (
     DockerContainerSpec,
     DockerContainerState,
 )
-from azents_runtime_provider_docker.models import (
-    RuntimeContainerAuth,
-    RuntimeDesiredState,
-    RuntimeIdentity,
-    RuntimeLifecycleCommand,
-    RuntimeLifecycleCommandType,
-    RuntimeProviderObservedState,
-)
 from azents_runtime_provider_docker.provider import (
     RUNNER_LIMIT_ENV_NAMES,
     DockerRuntimeProvider,
@@ -50,7 +35,6 @@ from azents_runtime_provider_docker.provider import (
     InvalidWorkspacePath,
     UnsupportedRuntimeConfiguration,
 )
-from azents_runtime_provider_docker.runtime_control import DockerRuntimeControlAdapter
 
 
 @dataclasses.dataclass
@@ -175,32 +159,6 @@ def _command(
         reset_final_desired_state=final_desired_state,
         runtime_configuration=runtime_configuration
         or _runtime_configuration(desired_generation=desired_generation),
-    )
-
-
-def _control_command(
-    command_type: ControlRuntimeLifecycleCommandType,
-) -> ControlRuntimeLifecycleCommand:
-    return ControlRuntimeLifecycleCommand(
-        command_type=command_type,
-        identity=ControlRuntimeIdentity(
-            runtime_id="runtime-1",
-            agent_id="agent-1",
-            workspace_id="workspace-1",
-        ),
-        desired_generation=1,
-        provider_generation=7,
-        runner_image="runner:latest",
-        auth=ControlRuntimeContainerAuth(
-            control_endpoint="runtime-control:8020",
-            transfer_endpoint="runtime-transfer:8030",
-            runner_auth_token="runner-token-1",
-            runner_auth_credential_id="runner-credential-1",
-            control_tls_ca_pem=None,
-            allow_insecure_control=True,
-        ),
-        reset_final_desired_state=None,
-        runtime_configuration=_runtime_configuration(),
     )
 
 
@@ -370,20 +328,28 @@ async def test_start_reuses_container_when_runner_image_and_config_are_unchanged
 
 
 @pytest.mark.asyncio
-async def test_runtime_control_adapter_reports_provider_workspace_path(
+async def test_configuration_update_requires_recreation_without_mutation(
     tmp_path: Path,
 ) -> None:
     docker = FakeDockerApi()
     provider = _provider(tmp_path, docker)
-    adapter = DockerRuntimeControlAdapter(provider)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    container = docker.containers["azents-runtime-runtime-1"]
+    networks = list(docker.networks)
+    images = list(docker.images)
 
-    result = await adapter.start(
-        _control_command(ControlRuntimeLifecycleCommandType.START)
-    )
+    with pytest.raises(
+        UnsupportedRuntimeConfiguration,
+        match="configuration changes require recreation",
+    ):
+        await provider.update_configuration(
+            _command(RuntimeLifecycleCommandType.UPDATE_CONFIGURATION)
+        )
 
-    assert result.report.observed_state is ControlRuntimeProviderObservedState.RUNNING
-    assert result.report.workspace_path == "/workspace/agent"
-    assert "azents-runtime-runtime-1" in docker.containers
+    assert docker.containers["azents-runtime-runtime-1"] is container
+    assert docker.removed == []
+    assert docker.networks == networks
+    assert docker.images == images
 
 
 @pytest.mark.asyncio

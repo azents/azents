@@ -10,6 +10,14 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
+from azents_runtime_control.provider import (
+    RuntimeDesiredState,
+    RuntimeLifecycleCommand,
+    RuntimeLifecycleCommandType,
+    RuntimeLifecycleResult,
+    RuntimeProviderObservedState,
+    RuntimeProviderReport,
+)
 from azents_runtime_control.runtime_configuration import (
     DockerContainerProfileV1,
     RuntimeConfigurationEvidence,
@@ -21,14 +29,6 @@ from azents_runtime_provider_docker.docker_api import (
     DockerBindMount,
     DockerContainerInfo,
     DockerContainerSpec,
-)
-from azents_runtime_provider_docker.models import (
-    RuntimeDesiredState,
-    RuntimeLifecycleCommand,
-    RuntimeLifecycleCommandType,
-    RuntimeLifecycleResult,
-    RuntimeProviderObservedState,
-    RuntimeProviderReport,
 )
 
 _CONTAINER_CPU_PERIOD = 100_000
@@ -149,7 +149,6 @@ class DockerRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Stop the Runtime container without deleting workspace data."""
-        self._validate_command(command)
         await self._docker.remove_container(
             _container_name(command.identity.runtime_id)
         )
@@ -202,12 +201,20 @@ class DockerRuntimeProvider:
             report=report,
         )
 
+    async def update_configuration(
+        self,
+        command: RuntimeLifecycleCommand,
+    ) -> RuntimeLifecycleResult:
+        """Reject unsupported in-place Docker configuration changes."""
+        raise UnsupportedRuntimeConfiguration(
+            "Docker Runtime configuration changes require recreation."
+        )
+
     async def terminal_delete(
         self,
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Remove the Runtime container and all Provider-owned host data."""
-        self._validate_command(command)
         await self._docker.remove_container(
             _container_name(command.identity.runtime_id)
         )

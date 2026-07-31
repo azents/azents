@@ -358,6 +358,12 @@ __all__ = [
     "RuntimeProviderObservedState",
     "RuntimeProviderOptionListResponse",
     "RuntimeProviderOptionResponse",
+    "RuntimeRecreationCreateRequest",
+    "RuntimeRecreationItemResponse",
+    "RuntimeRecreationItemStatus",
+    "RuntimeRecreationOperationResponse",
+    "RuntimeRecreationOperationStatus",
+    "RuntimeRecreationTargetKind",
     "RuntimeRunnerState",
     "RuntimeSummary",
     "Secrets",
@@ -788,6 +794,12 @@ from azentspublicclient.models.runtime_provider_credential_exchange_response imp
 from azentspublicclient.models.runtime_provider_observed_state import RuntimeProviderObservedState as RuntimeProviderObservedState
 from azentspublicclient.models.runtime_provider_option_list_response import RuntimeProviderOptionListResponse as RuntimeProviderOptionListResponse
 from azentspublicclient.models.runtime_provider_option_response import RuntimeProviderOptionResponse as RuntimeProviderOptionResponse
+from azentspublicclient.models.runtime_recreation_create_request import RuntimeRecreationCreateRequest as RuntimeRecreationCreateRequest
+from azentspublicclient.models.runtime_recreation_item_response import RuntimeRecreationItemResponse as RuntimeRecreationItemResponse
+from azentspublicclient.models.runtime_recreation_item_status import RuntimeRecreationItemStatus as RuntimeRecreationItemStatus
+from azentspublicclient.models.runtime_recreation_operation_response import RuntimeRecreationOperationResponse as RuntimeRecreationOperationResponse
+from azentspublicclient.models.runtime_recreation_operation_status import RuntimeRecreationOperationStatus as RuntimeRecreationOperationStatus
+from azentspublicclient.models.runtime_recreation_target_kind import RuntimeRecreationTargetKind as RuntimeRecreationTargetKind
 from azentspublicclient.models.runtime_runner_state import RuntimeRunnerState as RuntimeRunnerState
 from azentspublicclient.models.runtime_summary import RuntimeSummary as RuntimeSummary
 from azentspublicclient.models.secrets import Secrets as Secrets

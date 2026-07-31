@@ -219,6 +219,7 @@ class RuntimeRecreationOperationItem:
     expected_configuration_revision_id: str
     status: RuntimeRecreationItemStatus
     attempt: int
+    dispatched_generation: int | None
     failure_code: str | None
     failure_message: str | None
     created_at: datetime.datetime

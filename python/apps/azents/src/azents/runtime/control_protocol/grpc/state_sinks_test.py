@@ -69,6 +69,165 @@ async def test_runner_state_sink_rejects_missing_provider_workspace_path(
     assert runtime.failure_code == "PROVIDER_WORKSPACE_PATH_MISSING"
 
 
+async def test_runner_heartbeat_configuration_waits_for_provider_ack(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    runtime_repository = Mock(spec=AgentRuntimeRepository)
+    cast(AsyncMock, runtime_repository.get_by_id).return_value = Mock(
+        id="runtime-1",
+        runtime_provider_resource_id="provider-1",
+        desired_runtime_configuration_revision_id="revision-2",
+        applied_runtime_configuration_revision_id="revision-1",
+    )
+    profile_repository = Mock(spec=RuntimeProfileRepository)
+    cast(
+        AsyncMock,
+        profile_repository.get_configuration_revision,
+    ).return_value = Mock(
+        id="revision-2",
+        digest="e" * 64,
+        target_desired_generation=5,
+        provider_acknowledged_at=None,
+        provider_reported_digest=None,
+        runner_reported_digest=None,
+    )
+    cast(
+        AsyncMock,
+        profile_repository.configuration_evidence_matches_current,
+    ).return_value = True
+    sink = RuntimeRunnerStateRepositorySink(
+        cast(AgentRuntimeRepository, runtime_repository),
+        cast(RuntimeProfileRepository, profile_repository),
+        rdb_session_manager,
+    )
+
+    evidence = await sink.configuration_evidence_for_runner_heartbeat(
+        runtime_id="runtime-1"
+    )
+
+    assert evidence is None
+
+
+async def test_runner_heartbeat_configuration_stops_after_runner_report(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    runtime_repository = Mock(spec=AgentRuntimeRepository)
+    cast(AsyncMock, runtime_repository.get_by_id).return_value = Mock(
+        id="runtime-1",
+        runtime_provider_resource_id="provider-1",
+        desired_runtime_configuration_revision_id="revision-2",
+        applied_runtime_configuration_revision_id="revision-1",
+    )
+    revision = Mock(
+        id="revision-2",
+        digest="e" * 64,
+        target_desired_generation=5,
+        provider_acknowledged_at=datetime(2026, 7, 31, tzinfo=UTC),
+        provider_reported_digest="e" * 64,
+        runner_reported_digest=None,
+    )
+    profile_repository = Mock(spec=RuntimeProfileRepository)
+    cast(
+        AsyncMock,
+        profile_repository.get_configuration_revision,
+    ).return_value = revision
+    cast(
+        AsyncMock,
+        profile_repository.configuration_evidence_matches_current,
+    ).return_value = True
+    sink = RuntimeRunnerStateRepositorySink(
+        cast(AgentRuntimeRepository, runtime_repository),
+        cast(RuntimeProfileRepository, profile_repository),
+        rdb_session_manager,
+    )
+
+    evidence = await sink.configuration_evidence_for_runner_heartbeat(
+        runtime_id="runtime-1"
+    )
+    revision.runner_reported_digest = "e" * 64
+    acknowledged = await sink.configuration_evidence_for_runner_heartbeat(
+        runtime_id="runtime-1"
+    )
+
+    assert evidence == RuntimeConfigurationEvidence(
+        revision_id="revision-2",
+        digest="e" * 64,
+        desired_generation=5,
+    )
+    assert acknowledged is None
+
+
+async def test_runner_heartbeat_configuration_rejects_stale_current_target(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Evidence read before a target race is fenced by the current pointer."""
+    runtime_repository = Mock(spec=AgentRuntimeRepository)
+    cast(AsyncMock, runtime_repository.get_by_id).return_value = Mock(
+        id="runtime-1",
+        runtime_provider_resource_id="provider-1",
+        desired_runtime_configuration_revision_id="revision-2",
+        applied_runtime_configuration_revision_id="revision-1",
+    )
+    profile_repository = Mock(spec=RuntimeProfileRepository)
+    cast(
+        AsyncMock,
+        profile_repository.get_configuration_revision,
+    ).return_value = Mock(
+        id="revision-2",
+        digest="e" * 64,
+        target_desired_generation=5,
+        provider_acknowledged_at=datetime(2026, 7, 31, tzinfo=UTC),
+        provider_reported_digest="e" * 64,
+        runner_reported_digest=None,
+    )
+    current_match = cast(
+        AsyncMock,
+        profile_repository.configuration_evidence_matches_current,
+    )
+    current_match.return_value = False
+    sink = RuntimeRunnerStateRepositorySink(
+        cast(AgentRuntimeRepository, runtime_repository),
+        cast(RuntimeProfileRepository, profile_repository),
+        rdb_session_manager,
+    )
+
+    evidence = await sink.configuration_evidence_for_runner_heartbeat(
+        runtime_id="runtime-1"
+    )
+
+    assert evidence is None
+    current_match.assert_awaited_once()
+
+
+async def test_runner_heartbeat_configuration_skips_already_applied_target(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """No heartbeat evidence is emitted after the applied pointer catches up."""
+    runtime_repository = Mock(spec=AgentRuntimeRepository)
+    cast(AsyncMock, runtime_repository.get_by_id).return_value = Mock(
+        id="runtime-1",
+        runtime_provider_resource_id="provider-1",
+        desired_runtime_configuration_revision_id="revision-2",
+        applied_runtime_configuration_revision_id="revision-2",
+    )
+    profile_repository = Mock(spec=RuntimeProfileRepository)
+    sink = RuntimeRunnerStateRepositorySink(
+        cast(AgentRuntimeRepository, runtime_repository),
+        cast(RuntimeProfileRepository, profile_repository),
+        rdb_session_manager,
+    )
+
+    evidence = await sink.configuration_evidence_for_runner_heartbeat(
+        runtime_id="runtime-1"
+    )
+
+    assert evidence is None
+    cast(
+        AsyncMock,
+        profile_repository.get_configuration_revision,
+    ).assert_not_awaited()
+
+
 async def test_provider_running_report_clears_start_timeout_failure(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
@@ -124,6 +283,59 @@ async def test_provider_running_report_clears_start_timeout_failure(
     assert runtime.failure_generation is None
     assert runtime.failure_code is None
     assert runtime.failure_message is None
+
+
+async def test_provider_starting_report_does_not_acknowledge_configuration(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Only a ready Provider report can unlock Runner evidence delivery."""
+    runtime_repository = Mock(spec=AgentRuntimeRepository)
+    runtime = Mock(
+        id="runtime-1",
+        runtime_provider_resource_id="provider-1",
+        desired_generation=3,
+    )
+    cast(AsyncMock, runtime_repository.get_by_id).return_value = runtime
+    cast(
+        AsyncMock,
+        runtime_repository.provider_report_matches_binding,
+    ).return_value = True
+    cast(
+        AsyncMock,
+        runtime_repository.record_provider_observed_state,
+    ).return_value = runtime
+    cast(
+        AsyncMock,
+        runtime_repository.record_provider_connection_state,
+    ).return_value = runtime
+    profile_repository = _profile_repository()
+    sink = RuntimeProviderReportRepositorySink(
+        cast(AgentRuntimeRepository, runtime_repository),
+        profile_repository,
+        rdb_session_manager,
+    )
+
+    await sink.record_provider_report(
+        RuntimeProviderReport(
+            runtime_id="runtime-1",
+            provider_id="system-kubernetes",
+            provider_generation=1,
+            observed_state=SharedProviderState.STARTING,
+            observed_desired_generation=3,
+            provider_runtime_id="pod-runtime",
+            workspace_path="/workspace/agent",
+            reason="pod_starting",
+            diagnostic={},
+            reported_at=datetime(2026, 7, 31, tzinfo=UTC),
+            terminal_delete_acknowledged=False,
+            runtime_configuration=_runtime_configuration_evidence(3),
+        )
+    )
+
+    cast(
+        AsyncMock,
+        profile_repository.record_provider_configuration_evidence,
+    ).assert_not_awaited()
 
 
 async def test_provider_report_ignores_finalized_runtime(

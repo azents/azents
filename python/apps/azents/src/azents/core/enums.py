@@ -627,15 +627,6 @@ class RuntimeProviderBindingOrigin(enum.StrEnum):
     MIGRATION = "migration"
 
 
-class RuntimePolicySnapshotApplicationState(enum.StrEnum):
-    """Provider application projection for one immutable Runtime policy snapshot."""
-
-    PENDING = "pending"
-    APPLIED = "applied"
-    DIVERGENT = "divergent"
-    LEGACY_UNVERIFIED = "legacy_unverified"
-
-
 class SnapshotKind(enum.StrEnum):
     """Snapshot creation reason.
 

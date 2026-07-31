@@ -119,6 +119,13 @@ class FakeLifecycle(RuntimeProviderLifecycle):
         """Reset a Runtime."""
         return await self._result(command)
 
+    async def update_configuration(
+        self,
+        command: RuntimeLifecycleCommand,
+    ) -> RuntimeLifecycleResult:
+        """Update one Runtime configuration in place."""
+        return await self._result(command)
+
     async def terminal_delete(
         self,
         command: RuntimeLifecycleCommand,

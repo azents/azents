@@ -403,6 +403,37 @@ class RuntimeProfileRepository:
             evidence=evidence,
         )
 
+    async def configuration_evidence_matches_applied(
+        self,
+        session: AsyncSession,
+        *,
+        runtime_id: str,
+        provider_id: str,
+        evidence: RuntimeConfigurationEvidence,
+    ) -> bool:
+        """Return whether evidence identifies the exact applied revision."""
+        runtime_result = await session.execute(
+            sa.select(RDBAgentRuntime.id).where(
+                RDBAgentRuntime.id == runtime_id,
+                RDBAgentRuntime.runtime_provider_resource_id == provider_id,
+                RDBAgentRuntime.applied_runtime_configuration_revision_id
+                == evidence.revision_id,
+                RDBAgentRuntime.desired_generation == evidence.desired_generation,
+            )
+        )
+        if runtime_result.scalar_one_or_none() is None:
+            return False
+        revision = await self.get_configuration_revision(
+            session,
+            revision_id=evidence.revision_id,
+        )
+        return revision is not None and _configuration_evidence_matches(
+            revision,
+            runtime_id=runtime_id,
+            provider_id=provider_id,
+            evidence=evidence,
+        )
+
     async def record_provider_configuration_evidence(
         self,
         session: AsyncSession,
@@ -864,6 +895,44 @@ class RuntimeProfileRepository:
         await session.flush()
         return self._build_recreation_operation(rdb)
 
+    async def get_recreation_target_version(
+        self,
+        session: AsyncSession,
+        *,
+        target_kind: RuntimeRecreationTargetKind,
+        target_id: str,
+        for_share: bool,
+    ) -> str | None:
+        """Read one recreation target version, optionally blocking mutations."""
+        if target_kind is RuntimeRecreationTargetKind.PROVIDER:
+            statement = sa.select(
+                RDBRuntimeProvider.admin_version,
+                RDBRuntimeProvider.current_contract_revision_id,
+            ).where(RDBRuntimeProvider.id == target_id)
+        elif target_kind is RuntimeRecreationTargetKind.INFRASTRUCTURE_PROFILE:
+            statement = sa.select(RDBRuntimeInfrastructureProfile.version).where(
+                RDBRuntimeInfrastructureProfile.id == target_id
+            )
+        elif target_kind is RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE:
+            statement = sa.select(RDBWorkspaceRuntimeProfile.version).where(
+                RDBWorkspaceRuntimeProfile.id == target_id
+            )
+        else:
+            raise AssertionError(f"Unsupported recreation target kind: {target_kind}")
+        if for_share:
+            statement = statement.with_for_update(read=True)
+        result = await session.execute(statement)
+        row = result.one_or_none()
+        if row is None:
+            return None
+        if target_kind is RuntimeRecreationTargetKind.PROVIDER:
+            admin_version, capability_revision_id = row
+            return _provider_recreation_target_version(
+                admin_version=admin_version,
+                capability_revision_id=capability_revision_id,
+            )
+        return str(row[0])
+
     async def add_recreation_items(
         self,
         session: AsyncSession,
@@ -889,6 +958,7 @@ class RuntimeProfileRepository:
                 expected_configuration_revision_id=revision_id,
                 status=RuntimeRecreationItemStatus.PENDING,
                 attempt=0,
+                dispatched_generation=None,
                 failure_code=None,
                 failure_message=None,
             )
@@ -948,6 +1018,294 @@ class RuntimeProfileRepository:
         operation.running_count += len(items)
         await session.flush()
         return [self._build_recreation_item(item) for item in items]
+
+    async def list_recreation_target_items(
+        self,
+        session: AsyncSession,
+        *,
+        target_kind: RuntimeRecreationTargetKind,
+        target_id: str,
+    ) -> list[tuple[str, str]]:
+        """Snapshot configured physical Runtimes under one exact authority target."""
+        statement = (
+            sa.select(
+                RDBAgentRuntime.id,
+                RDBAgentRuntime.desired_runtime_configuration_revision_id,
+            )
+            .where(
+                RDBAgentRuntime.desired_runtime_configuration_revision_id.is_not(None),
+                RDBAgentRuntime.applied_runtime_configuration_revision_id.is_not(None),
+            )
+            .order_by(RDBAgentRuntime.id)
+        )
+        if target_kind is RuntimeRecreationTargetKind.PROVIDER:
+            statement = statement.where(
+                RDBAgentRuntime.runtime_provider_resource_id == target_id
+            )
+        elif target_kind is RuntimeRecreationTargetKind.INFRASTRUCTURE_PROFILE:
+            statement = statement.where(
+                RDBAgentRuntime.infrastructure_profile_id == target_id
+            )
+        elif target_kind is RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE:
+            statement = statement.where(
+                RDBAgentRuntime.workspace_runtime_profile_id == target_id
+            )
+        else:
+            raise AssertionError(f"Unsupported recreation target kind: {target_kind}")
+        result = await session.execute(statement)
+        return [
+            (runtime_id, revision_id)
+            for runtime_id, revision_id in result.tuples()
+            if revision_id is not None
+        ]
+
+    async def get_recreation_operation(
+        self,
+        session: AsyncSession,
+        *,
+        operation_id: str,
+    ) -> RuntimeRecreationOperation | None:
+        """Fetch one durable recreation operation."""
+        rdb = await session.get(RDBRuntimeRecreationOperation, operation_id)
+        return self._build_recreation_operation(rdb) if rdb is not None else None
+
+    async def list_active_recreation_operation_ids(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int,
+    ) -> list[str]:
+        """List pending or running operations in stable creation order."""
+        if limit < 1:
+            raise ValueError("Recreation operation limit must be positive.")
+        result = await session.execute(
+            sa.select(RDBRuntimeRecreationOperation.id)
+            .where(
+                RDBRuntimeRecreationOperation.status.in_(
+                    (
+                        RuntimeRecreationOperationStatus.PENDING,
+                        RuntimeRecreationOperationStatus.RUNNING,
+                    )
+                )
+            )
+            .order_by(
+                RDBRuntimeRecreationOperation.created_at,
+                RDBRuntimeRecreationOperation.id,
+            )
+            .limit(limit)
+        )
+        return list(result.scalars())
+
+    async def list_recreation_items(
+        self,
+        session: AsyncSession,
+        *,
+        operation_id: str,
+        offset: int,
+        limit: int,
+        statuses: tuple[RuntimeRecreationItemStatus, ...] | None = None,
+    ) -> list[RuntimeRecreationOperationItem]:
+        """List bounded operation items, optionally filtered by status."""
+        if offset < 0 or limit < 1:
+            raise ValueError("Recreation item pagination is invalid.")
+        statement = (
+            sa.select(RDBRuntimeRecreationOperationItem)
+            .where(RDBRuntimeRecreationOperationItem.operation_id == operation_id)
+            .order_by(RDBRuntimeRecreationOperationItem.id)
+            .offset(offset)
+            .limit(limit)
+        )
+        if statuses is not None:
+            statement = statement.where(
+                RDBRuntimeRecreationOperationItem.status.in_(statuses)
+            )
+        result = await session.execute(statement)
+        return [self._build_recreation_item(item) for item in result.scalars()]
+
+    async def complete_empty_recreation_operation(
+        self,
+        session: AsyncSession,
+        *,
+        operation_id: str,
+    ) -> bool:
+        """Complete a sealed operation whose stable target set is empty."""
+        result = await session.execute(
+            sa.update(RDBRuntimeRecreationOperation)
+            .where(
+                RDBRuntimeRecreationOperation.id == operation_id,
+                RDBRuntimeRecreationOperation.status
+                == RuntimeRecreationOperationStatus.PENDING,
+                RDBRuntimeRecreationOperation.total_count == 0,
+            )
+            .values(
+                status=RuntimeRecreationOperationStatus.COMPLETED,
+                started_at=sa.func.now(),
+                completed_at=sa.func.now(),
+            )
+            .returning(RDBRuntimeRecreationOperation.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def lock_recreation_item(
+        self,
+        session: AsyncSession,
+        *,
+        item_id: str,
+        expected_attempt: int,
+    ) -> RuntimeRecreationOperationItem | None:
+        """Lock one exact running attempt without waiting on a peer worker."""
+        result = await session.execute(
+            sa.select(RDBRuntimeRecreationOperationItem)
+            .where(
+                RDBRuntimeRecreationOperationItem.id == item_id,
+                RDBRuntimeRecreationOperationItem.status
+                == RuntimeRecreationItemStatus.RUNNING,
+                RDBRuntimeRecreationOperationItem.attempt == expected_attempt,
+            )
+            .with_for_update(skip_locked=True)
+        )
+        item = result.scalar_one_or_none()
+        return self._build_recreation_item(item) if item is not None else None
+
+    async def update_recreation_item_dispatch(
+        self,
+        session: AsyncSession,
+        *,
+        item_id: str,
+        expected_attempt: int,
+        configuration_revision_id: str,
+        dispatched_generation: int,
+    ) -> bool:
+        """Record exact evidence for one generation-fenced restart dispatch."""
+        result = await session.execute(
+            sa.update(RDBRuntimeRecreationOperationItem)
+            .where(
+                RDBRuntimeRecreationOperationItem.id == item_id,
+                RDBRuntimeRecreationOperationItem.status
+                == RuntimeRecreationItemStatus.RUNNING,
+                RDBRuntimeRecreationOperationItem.attempt == expected_attempt,
+            )
+            .values(
+                expected_configuration_revision_id=configuration_revision_id,
+                dispatched_generation=dispatched_generation,
+                failure_code=None,
+                failure_message=None,
+                updated_at=sa.func.now(),
+            )
+            .returning(RDBRuntimeRecreationOperationItem.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def finish_recreation_item(
+        self,
+        session: AsyncSession,
+        *,
+        item_id: str,
+        expected_attempt: int,
+        status: RuntimeRecreationItemStatus,
+        failure_code: str | None,
+        failure_message: str | None,
+    ) -> bool:
+        """Finish one running item and atomically advance aggregate counts."""
+        if status not in {
+            RuntimeRecreationItemStatus.SUCCEEDED,
+            RuntimeRecreationItemStatus.SKIPPED,
+            RuntimeRecreationItemStatus.FAILED,
+        }:
+            raise ValueError("Recreation item terminal status is required.")
+        item = await session.scalar(
+            sa.select(RDBRuntimeRecreationOperationItem)
+            .where(
+                RDBRuntimeRecreationOperationItem.id == item_id,
+                RDBRuntimeRecreationOperationItem.status
+                == RuntimeRecreationItemStatus.RUNNING,
+                RDBRuntimeRecreationOperationItem.attempt == expected_attempt,
+            )
+            .with_for_update()
+        )
+        if item is None:
+            return False
+        operation = await session.get(
+            RDBRuntimeRecreationOperation,
+            item.operation_id,
+            with_for_update=True,
+        )
+        if operation is None:
+            return False
+        item.status = status
+        item.failure_code = failure_code
+        item.failure_message = failure_message
+        item.updated_at = tznow()
+        operation.running_count -= 1
+        if status is RuntimeRecreationItemStatus.SUCCEEDED:
+            operation.succeeded_count += 1
+        elif status is RuntimeRecreationItemStatus.SKIPPED:
+            operation.skipped_count += 1
+        else:
+            operation.failed_count += 1
+        self._complete_recreation_operation_if_finished(operation)
+        await session.flush()
+        return True
+
+    async def retry_recreation_item(
+        self,
+        session: AsyncSession,
+        *,
+        item_id: str,
+        expected_attempt: int,
+        maximum_attempts: int,
+        failure_code: str,
+        failure_message: str,
+    ) -> bool:
+        """Requeue a running item or fail it after bounded attempts."""
+        if maximum_attempts < 1:
+            raise ValueError("Recreation maximum attempts must be positive.")
+        item = await session.scalar(
+            sa.select(RDBRuntimeRecreationOperationItem)
+            .where(
+                RDBRuntimeRecreationOperationItem.id == item_id,
+                RDBRuntimeRecreationOperationItem.status
+                == RuntimeRecreationItemStatus.RUNNING,
+                RDBRuntimeRecreationOperationItem.attempt == expected_attempt,
+            )
+            .with_for_update()
+        )
+        if item is None:
+            return False
+        operation = await session.get(
+            RDBRuntimeRecreationOperation,
+            item.operation_id,
+            with_for_update=True,
+        )
+        if operation is None:
+            return False
+        operation.running_count -= 1
+        item.dispatched_generation = None
+        item.failure_code = failure_code
+        item.failure_message = failure_message
+        item.updated_at = tznow()
+        if item.attempt >= maximum_attempts:
+            item.status = RuntimeRecreationItemStatus.FAILED
+            operation.failed_count += 1
+            self._complete_recreation_operation_if_finished(operation)
+        else:
+            item.status = RuntimeRecreationItemStatus.PENDING
+            operation.pending_count += 1
+        await session.flush()
+        return True
+
+    @staticmethod
+    def _complete_recreation_operation_if_finished(
+        operation: RDBRuntimeRecreationOperation,
+    ) -> None:
+        if operation.pending_count != 0 or operation.running_count != 0:
+            return
+        operation.status = (
+            RuntimeRecreationOperationStatus.COMPLETED_WITH_FAILURES
+            if operation.failed_count
+            else RuntimeRecreationOperationStatus.COMPLETED
+        )
+        operation.completed_at = tznow()
 
     @staticmethod
     def _build_infrastructure_profile(
@@ -1075,6 +1433,7 @@ class RuntimeProfileRepository:
             expected_configuration_revision_id=(rdb.expected_configuration_revision_id),
             status=rdb.status,
             attempt=rdb.attempt,
+            dispatched_generation=rdb.dispatched_generation,
             failure_code=rdb.failure_code,
             failure_message=rdb.failure_message,
             created_at=rdb.created_at,
@@ -1098,3 +1457,11 @@ def _configuration_evidence_matches(
         and revision.resolution_status is RuntimeConfigurationResolutionStatus.READY
         and revision.resolved_configuration is not None
     )
+
+
+def _provider_recreation_target_version(
+    *,
+    admin_version: int,
+    capability_revision_id: str | None,
+) -> str:
+    return f"{admin_version}:{capability_revision_id or '-'}"

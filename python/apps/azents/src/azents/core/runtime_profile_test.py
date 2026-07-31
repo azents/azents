@@ -5,13 +5,17 @@ import pytest
 from azents.core.runtime_profile import (
     DockerContainerProfileSpecV1,
     DockerContainerResources,
+    JsonValue,
     KubernetesContainerResources,
     KubernetesPodProfileSpecV1,
     KubernetesSchedulingModule,
     KubernetesWorkspaceVolume,
+    RuntimeConfigurationApplicationImpact,
+    RuntimeConfigurationResolutionStatus,
     RuntimeInfrastructureProfileKind,
     RuntimeNetworkPolicyModule,
     WorkspaceRuntimeProfilePolicyV1,
+    classify_runtime_configuration_application,
     compose_workspace_runtime_profile,
 )
 
@@ -107,3 +111,121 @@ def test_docker_profile_rejects_workspace_network_restriction() -> None:
                 ),
             ),
         )
+
+
+def _resolved_configuration(
+    effective_profile: dict[str, JsonValue],
+    *,
+    provider_kind: str = "kubernetes",
+) -> dict[str, JsonValue]:
+    return {
+        "schema_version": 1,
+        "provider": {
+            "id": "provider-1",
+            "logical_id": "provider-logical-1",
+            "kind": provider_kind,
+            "capability_revision_id": "capability-1",
+            "capability_digest": "a" * 64,
+        },
+        "infrastructure_profile": {
+            "id": "infrastructure-1",
+            "version": 1,
+            "digest": "b" * 64,
+        },
+        "workspace_runtime_profile": {
+            "id": "workspace-profile-1",
+            "version": 1,
+            "digest": "c" * 64,
+        },
+        "effective_profile": effective_profile,
+    }
+
+
+def test_runtime_configuration_impact_allows_kubernetes_network_only_update() -> None:
+    """Kubernetes NetworkPolicy-only changes can adopt without recreation."""
+    applied_profile: dict[str, JsonValue] = _kubernetes_spec().model_dump(mode="json")
+    desired_profile: dict[str, JsonValue] = {
+        **applied_profile,
+        "network_policy": {
+            "allowed_cidrs": ["10.2.0.0/16"],
+            "denied_cidrs": ["10.2.1.0/24"],
+        },
+    }
+    applied = _resolved_configuration(applied_profile)
+    desired = _resolved_configuration(desired_profile)
+    desired["workspace_runtime_profile"] = {
+        "id": "workspace-profile-1",
+        "version": 2,
+        "digest": "d" * 64,
+    }
+
+    assert (
+        classify_runtime_configuration_application(
+            desired_status=RuntimeConfigurationResolutionStatus.READY,
+            desired_configuration=desired,
+            applied_configuration=applied,
+        )
+        is RuntimeConfigurationApplicationImpact.IN_PLACE
+    )
+
+
+def test_runtime_configuration_impact_requires_recreation_for_pod_change() -> None:
+    """PodSpec changes remain waiting for explicit recreation."""
+    applied_profile: dict[str, JsonValue] = _kubernetes_spec().model_dump(mode="json")
+    desired_profile: dict[str, JsonValue] = {
+        **applied_profile,
+        "service_account_name": "runtime-service-account",
+    }
+
+    assert (
+        classify_runtime_configuration_application(
+            desired_status=RuntimeConfigurationResolutionStatus.READY,
+            desired_configuration=_resolved_configuration(desired_profile),
+            applied_configuration=_resolved_configuration(applied_profile),
+        )
+        is RuntimeConfigurationApplicationImpact.RECREATE
+    )
+
+
+def test_runtime_configuration_impact_requires_recreation_for_docker_change() -> None:
+    """Docker configuration changes require explicit recreation in v1."""
+    applied_profile: dict[str, JsonValue] = {
+        "profile_kind": "docker_container",
+        "contract_family": "docker.container-profile",
+        "schema_version": 1,
+        "runner_resources": {},
+        "network_name": "runtime-a",
+    }
+    desired_profile: dict[str, JsonValue] = {
+        **applied_profile,
+        "network_name": "runtime-b",
+    }
+
+    assert (
+        classify_runtime_configuration_application(
+            desired_status=RuntimeConfigurationResolutionStatus.READY,
+            desired_configuration=_resolved_configuration(
+                desired_profile,
+                provider_kind="docker",
+            ),
+            applied_configuration=_resolved_configuration(
+                applied_profile,
+                provider_kind="docker",
+            ),
+        )
+        is RuntimeConfigurationApplicationImpact.RECREATE
+    )
+
+
+def test_runtime_configuration_impact_preserves_blocked_applied_runtime() -> None:
+    """Blocked desired configuration never replaces the applied incarnation."""
+    assert (
+        classify_runtime_configuration_application(
+            desired_status=RuntimeConfigurationResolutionStatus.BLOCKED,
+            desired_configuration=None,
+            applied_configuration=_resolved_configuration(
+                _kubernetes_spec().model_dump(mode="json")
+            ),
+        )
+        is RuntimeConfigurationApplicationImpact.BLOCKED
+    )

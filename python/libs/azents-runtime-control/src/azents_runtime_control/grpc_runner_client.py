@@ -26,6 +26,7 @@ from azents_runtime_control.runner import (
     JsonValue,
     RunnerBodyChunk,
     RunnerControlClient,
+    RunnerHeartbeatAcknowledgement,
     RunnerOperationCancel,
     RunnerOperationCancelHandler,
     RunnerOperationEnvelope,
@@ -96,7 +97,9 @@ class GrpcRunnerControlClient(RunnerControlClient):
         self._operation_cancel_handler: RunnerOperationCancelHandler | None = None
         self._transfer_intent_handler: RunnerTransferIntentHandler | None = None
         self._transfer_cancel_handler: RunnerTransferCancelHandler | None = None
-        self._pending_heartbeat_acks: dict[str, asyncio.Future[bool]] = {}
+        self._pending_heartbeat_acks: dict[
+            str, asyncio.Future[RunnerHeartbeatAcknowledgement]
+        ] = {}
         self._pending_operation_start_acks: dict[str, asyncio.Future[bool]] = {}
         self._accepted: asyncio.Future[RunnerRegistrationAccepted] | None = None
         self._receiver_task: asyncio.Task[None] | None = None
@@ -183,8 +186,8 @@ class GrpcRunnerControlClient(RunnerControlClient):
         runtime_id: str,
         generation: int,
         heartbeat_at: datetime,
-    ) -> bool:
-        """Send a heartbeat and wait for the matching ack."""
+    ) -> RunnerHeartbeatAcknowledgement:
+        """Send a heartbeat and wait for optional configuration evidence."""
         del runtime_id, heartbeat_at
         self._heartbeat_sequence += 1
         request_id = f"heartbeat:{self._heartbeat_sequence}"
@@ -335,7 +338,18 @@ class GrpcRunnerControlClient(RunnerControlClient):
         if payload == "heartbeat_ack":
             future = self._pending_heartbeat_acks.get(message.request_id)
             if future is not None and not future.done():
-                future.set_result(True)
+                future.set_result(
+                    RunnerHeartbeatAcknowledgement(
+                        accepted=True,
+                        runtime_configuration=(
+                            _runtime_configuration_evidence(
+                                message.heartbeat_ack.runtime_configuration
+                            )
+                            if message.heartbeat_ack.HasField("runtime_configuration")
+                            else None
+                        ),
+                    )
+                )
             return
         if payload == "operation_start_ack":
             future = self._pending_operation_start_acks.get(message.request_id)
@@ -544,6 +558,13 @@ def runner_runtime_configuration_evidence_from_message(
 ) -> RuntimeConfigurationEvidence:
     """Deserialize required Runner configuration evidence."""
     return _runtime_configuration_evidence(message)
+
+
+def runner_runtime_configuration_evidence_to_message(
+    evidence: RuntimeConfigurationEvidence,
+) -> runtime_configuration_pb2.RuntimeConfigurationEvidence:
+    """Serialize required Runner configuration evidence."""
+    return _runtime_configuration_evidence_message(evidence)
 
 
 def _runtime_configuration_evidence_message(

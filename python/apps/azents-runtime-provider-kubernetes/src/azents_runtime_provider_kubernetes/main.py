@@ -42,9 +42,6 @@ from azents_runtime_provider_kubernetes.provider import (
     KubernetesRuntimeProvider,
     KubernetesRuntimeProviderConfig,
 )
-from azents_runtime_provider_kubernetes.runtime_control import (
-    KubernetesRuntimeControlAdapter,
-)
 
 _PROTOCOL_VERSION = "agent-runtime-provider-kubernetes-v1"
 _CONFIG_SCHEMA_VERSION = "agent-runtime-provider-kubernetes-v1"
@@ -166,7 +163,6 @@ async def _run_control_loop(
             workspace_mount_path=settings.workspace_path,
         ),
     )
-    lifecycle = KubernetesRuntimeControlAdapter(provider)
     registration = ProviderRegistration(
         provider_id=settings.provider_id,
         provider_type="kubernetes",
@@ -203,7 +199,7 @@ async def _run_control_loop(
         )
         run_loop = ProviderRunLoop(
             client=control_client,
-            lifecycle=lifecycle,
+            lifecycle=provider,
             registration=registration,
             connection_id=control_connection_id,
             consumer_id=f"{control_connection_id}:provider",
@@ -213,7 +209,7 @@ async def _run_control_loop(
             _set_readiness(settings.readiness_file, ready=True)
             watch_task = asyncio.create_task(
                 _report_pod_watch_events(
-                    lifecycle,
+                    provider,
                     run_loop,
                     stop=stop,
                 ),
@@ -283,7 +279,7 @@ def create_provider_control_client(
 
 
 async def _report_pod_watch_events(
-    lifecycle: KubernetesRuntimeControlAdapter,
+    lifecycle: KubernetesRuntimeProvider,
     run_loop: ProviderRunLoop,
     *,
     stop: asyncio.Event,

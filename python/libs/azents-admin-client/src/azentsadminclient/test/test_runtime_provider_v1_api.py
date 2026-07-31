@@ -40,10 +40,31 @@ class TestRuntimeProviderV1Api(unittest.TestCase):
         """
         pass
 
+    def test_runtime_provider_v1_create_container_profile_recreation(self) -> None:
+        """Test case for runtime_provider_v1_create_container_profile_recreation
+
+        Create Container Profile Recreation
+        """
+        pass
+
     def test_runtime_provider_v1_create_pod_profile(self) -> None:
         """Test case for runtime_provider_v1_create_pod_profile
 
         Create Pod Profile
+        """
+        pass
+
+    def test_runtime_provider_v1_create_pod_profile_recreation(self) -> None:
+        """Test case for runtime_provider_v1_create_pod_profile_recreation
+
+        Create Pod Profile Recreation
+        """
+        pass
+
+    def test_runtime_provider_v1_create_provider_recreation(self) -> None:
+        """Test case for runtime_provider_v1_create_provider_recreation
+
+        Create Provider Recreation
         """
         pass
 
@@ -58,6 +79,13 @@ class TestRuntimeProviderV1Api(unittest.TestCase):
         """Test case for runtime_provider_v1_get_container_profile
 
         Get Container Profile
+        """
+        pass
+
+    def test_runtime_provider_v1_get_platform_recreation(self) -> None:
+        """Test case for runtime_provider_v1_get_platform_recreation
+
+        Get Platform Recreation
         """
         pass
 

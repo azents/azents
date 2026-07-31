@@ -7,19 +7,12 @@ from typing import cast
 
 import pytest
 from azents_runtime_control.provider import (
-    RuntimeContainerAuth as ControlRuntimeContainerAuth,
-)
-from azents_runtime_control.provider import (
-    RuntimeIdentity as ControlRuntimeIdentity,
-)
-from azents_runtime_control.provider import (
-    RuntimeLifecycleCommand as ControlRuntimeLifecycleCommand,
-)
-from azents_runtime_control.provider import (
-    RuntimeLifecycleCommandType as ControlRuntimeLifecycleCommandType,
-)
-from azents_runtime_control.provider import (
-    RuntimeProviderObservedState as ControlRuntimeProviderObservedState,
+    RuntimeContainerAuth,
+    RuntimeDesiredState,
+    RuntimeIdentity,
+    RuntimeLifecycleCommand,
+    RuntimeLifecycleCommandType,
+    RuntimeProviderObservedState,
 )
 from azents_runtime_control.runtime_configuration import (
     JsonValue,
@@ -47,14 +40,6 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     PodWatchEvent,
     Toleration,
 )
-from azents_runtime_provider_kubernetes.models import (
-    RuntimeContainerAuth,
-    RuntimeDesiredState,
-    RuntimeIdentity,
-    RuntimeLifecycleCommand,
-    RuntimeLifecycleCommandType,
-    RuntimeProviderObservedState,
-)
 from azents_runtime_provider_kubernetes.provider import (
     RUNNER_LIMIT_ENV_NAMES,
     InvalidResetFinalDesiredState,
@@ -63,9 +48,6 @@ from azents_runtime_provider_kubernetes.provider import (
     KubernetesRuntimeProvider,
     KubernetesRuntimeProviderConfig,
     UnsupportedRuntimeConfiguration,
-)
-from azents_runtime_provider_kubernetes.runtime_control import (
-    KubernetesRuntimeControlAdapter,
 )
 
 _RUNNER_IMAGE = f"repo/runner:phase5@sha256:{'a' * 64}"
@@ -288,32 +270,6 @@ def _command(
         reset_final_desired_state=final_desired_state,
         runtime_configuration=runtime_configuration
         or _runtime_configuration(desired_generation=desired_generation),
-    )
-
-
-def _control_command(
-    command_type: ControlRuntimeLifecycleCommandType,
-) -> ControlRuntimeLifecycleCommand:
-    return ControlRuntimeLifecycleCommand(
-        command_type=command_type,
-        identity=ControlRuntimeIdentity(
-            runtime_id="runtime-1",
-            agent_id="agent-1",
-            workspace_id="workspace-1",
-        ),
-        desired_generation=1,
-        provider_generation=7,
-        runner_image=_RUNNER_IMAGE,
-        auth=ControlRuntimeContainerAuth(
-            control_endpoint="runtime-control:8020",
-            transfer_endpoint="runtime-transfer:8030",
-            runner_auth_token="runner-token-1",
-            runner_auth_credential_id="runner-credential-1",
-            control_tls_ca_pem=None,
-            allow_insecure_control=True,
-        ),
-        reset_final_desired_state=None,
-        runtime_configuration=_runtime_configuration(),
     )
 
 
@@ -643,21 +599,6 @@ async def test_start_reuses_pod_with_canonicalized_kubernetes_quantities() -> No
     await provider.start(command)
 
     assert api.deleted_pods == []
-
-
-@pytest.mark.asyncio
-async def test_runtime_control_adapter_reports_provider_workspace_path() -> None:
-    api = FakeKubernetesApi()
-    provider = _provider(api)
-    adapter = KubernetesRuntimeControlAdapter(provider)
-
-    result = await adapter.start(
-        _control_command(ControlRuntimeLifecycleCommandType.START)
-    )
-
-    assert result.report.observed_state is ControlRuntimeProviderObservedState.STARTING
-    assert result.report.workspace_path == "/workspace/agent"
-    assert ("azents-runtime", "azents-runtime-runtime-1") in api.pods
 
 
 @pytest.mark.asyncio
@@ -1401,12 +1342,11 @@ async def test_dind_profile_exposes_private_engine_socket_directly() -> None:
         ]
         == "true"
     )
-    assert network_policy.spec.pod_selector.match_labels[
-        "azents/desired-generation"
-    ] == str(1)
-    assert network_policy.spec.pod_selector.match_labels[
-        "azents/provider-generation"
-    ] == str(7)
+    assert network_policy.spec.pod_selector.match_labels == {
+        "azents/managed-by": "azents-runtime-provider-kubernetes",
+        "azents/runtime-id": "runtime-1",
+        "azents/runtime-configuration-managed": "true",
+    }
     assert len(network_policy.spec.egress) == 4
 
 
@@ -1538,9 +1478,7 @@ async def test_dind_profile_rejects_mutable_runner_image_before_mutation() -> No
 
 
 @pytest.mark.asyncio
-async def test_new_network_policy_does_not_select_old_pod_when_replacement_fails() -> (
-    None
-):
+async def test_network_policy_keeps_stable_selector_when_replacement_fails() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
     await provider.start(_command(RuntimeLifecycleCommandType.START))
@@ -1564,17 +1502,54 @@ async def test_new_network_policy_does_not_select_old_pod_when_replacement_fails
         ("azents-runtime", "azents-runtime-runtime-1-execution")
     ]
     selector = network_policy.spec.pod_selector.match_labels
-    assert selector["azents/desired-generation"] == "2"
-    assert selector["azents/provider-generation"] == "8"
+    assert selector == {
+        "azents/managed-by": "azents-runtime-provider-kubernetes",
+        "azents/runtime-id": "runtime-1",
+        "azents/runtime-configuration-managed": "true",
+    }
     assert old_pod.metadata.labels["azents/desired-generation"] == "1"
     assert old_pod.metadata.labels["azents/provider-generation"] == "7"
-    assert any(
-        selector[key] != old_pod.metadata.labels.get(key)
-        for key in (
-            "azents/desired-generation",
-            "azents/provider-generation",
+    assert all(
+        old_pod.metadata.labels.get(key) == value for key, value in selector.items()
+    )
+
+
+@pytest.mark.asyncio
+async def test_configuration_update_changes_only_network_policy() -> None:
+    """Network-only adoption preserves the existing Pod and PVC."""
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pvc_key = ("azents-runtime", "azents-runtime-runtime-1-workspace")
+    policy_key = ("azents-runtime", "azents-runtime-runtime-1-execution")
+    original_pod = api.pods[pod_key]
+    original_pvc = api.pvcs[pvc_key]
+    applied_pod_count = len(api.applied_pods)
+    updated_configuration = _runtime_configuration(
+        allowed_cidrs=["10.20.0.0/16"],
+        denied_cidrs=["10.20.1.0/24"],
+        revision_id="revision-2",
+        digest="e" * 64,
+    )
+
+    result = await provider.update_configuration(
+        _command(
+            RuntimeLifecycleCommandType.UPDATE_CONFIGURATION,
+            runtime_configuration=updated_configuration,
         )
     )
+
+    assert api.pods[pod_key] is original_pod
+    assert api.pvcs[pvc_key] is original_pvc
+    assert len(api.applied_pods) == applied_pod_count
+    assert api.deleted_pods == []
+    assert api.deleted_pvcs == []
+    policy = api.network_policies[policy_key]
+    assert policy.metadata.annotations["azents/runtime-configuration-revision-id"] == (
+        "revision-2"
+    )
+    assert result.report.runtime_configuration == updated_configuration.evidence
 
 
 @pytest.mark.asyncio
@@ -1633,8 +1608,20 @@ def _runtime_configuration(
     memory_limit_bytes: int = 2_147_483_648,
     ephemeral_storage_bytes: int = 10_737_418_240,
     persistent_storage_bytes: int | None = None,
+    allowed_cidrs: list[str] | None = None,
+    denied_cidrs: list[str] | None = None,
+    revision_id: str = "revision-1",
+    digest: str = "d" * 64,
 ) -> RuntimeConfigurationEnvelope:
     docker_configured = docker_enabled and bounded
+    allowed_cidr_values: list[JsonValue] = []
+    allowed_cidr_values.extend(allowed_cidrs or [])
+    denied_cidr_values: list[JsonValue] = []
+    denied_cidr_values.extend(denied_cidrs or [])
+    network_policy: dict[str, JsonValue] = {
+        "allowed_cidrs": allowed_cidr_values,
+        "denied_cidrs": denied_cidr_values,
+    }
     effective_profile: dict[str, JsonValue] = {
         "profile_kind": "kubernetes_pod",
         "contract_family": "kubernetes.pod-profile",
@@ -1653,7 +1640,7 @@ def _runtime_configuration(
                 else 21_474_836_480
             ),
         },
-        "network_policy": {"allowed_cidrs": [], "denied_cidrs": []},
+        "network_policy": network_policy,
         "service_account_name": None,
         "scheduling": {
             "node_selector": (
@@ -1727,8 +1714,8 @@ def _runtime_configuration(
     }
     return RuntimeConfigurationEnvelope(
         evidence=RuntimeConfigurationEvidence(
-            revision_id="revision-1",
-            digest="d" * 64,
+            revision_id=revision_id,
+            digest=digest,
             desired_generation=desired_generation,
         ),
         resolved_configuration_json=canonical_runtime_configuration_json(configuration),

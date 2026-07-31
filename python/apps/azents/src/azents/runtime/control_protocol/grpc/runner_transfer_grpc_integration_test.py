@@ -97,6 +97,14 @@ class _StateSink:
         del registration
         return True
 
+    async def configuration_evidence_for_runner_heartbeat(
+        self,
+        *,
+        runtime_id: str,
+    ) -> None:
+        del runtime_id
+        return None
+
 
 class _TransferResultSink:
     async def handle(self, result: object, *, request_id: str) -> None:

@@ -9,6 +9,14 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import PurePosixPath
 
+from azents_runtime_control.provider import (
+    RuntimeDesiredState,
+    RuntimeLifecycleCommand,
+    RuntimeLifecycleCommandType,
+    RuntimeLifecycleResult,
+    RuntimeProviderObservedState,
+    RuntimeProviderReport,
+)
 from azents_runtime_control.runtime_configuration import (
     KubernetesContainerResources as ResolvedKubernetesContainerResources,
 )
@@ -49,14 +57,6 @@ from azents_runtime_provider_kubernetes.kubernetes_api import (
     Probe,
     Toleration,
     VolumeMount,
-)
-from azents_runtime_provider_kubernetes.models import (
-    RuntimeDesiredState,
-    RuntimeLifecycleCommand,
-    RuntimeLifecycleCommandType,
-    RuntimeLifecycleResult,
-    RuntimeProviderObservedState,
-    RuntimeProviderReport,
 )
 
 _RUNTIME_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -235,7 +235,6 @@ class KubernetesRuntimeProvider:
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Delete the Runtime Pod and policy while preserving its PVC."""
-        self._validate_command(command)
         _LOGGER.info(
             "Kubernetes Runtime stop requested",
             extra=_log_context(command, self._config),
@@ -319,12 +318,46 @@ class KubernetesRuntimeProvider:
             report=report,
         )
 
+    async def update_configuration(
+        self,
+        command: RuntimeLifecycleCommand,
+    ) -> RuntimeLifecycleResult:
+        """Apply a NetworkPolicy-only update without replacing Pod or PVC."""
+        policy = self._validate_command(command)
+        pod = await self._api.get_pod(
+            _pod_name(command.identity.runtime_id),
+            self._config.namespace,
+        )
+        pvc = await self._api.get_pvc(
+            _pvc_name(command.identity.runtime_id),
+            self._config.namespace,
+        )
+        if (
+            pod is None
+            or pvc is None
+            or not self._pod_in_place_compatible(pod, command, policy)
+            or not self._pvc_in_place_compatible(pvc, command, policy)
+        ):
+            raise UnsupportedRuntimeConfiguration(
+                "Runtime configuration requires Kubernetes resource recreation."
+            )
+        await self._ensure_network_policy(command, policy)
+        observed_state, reason = _observed_state(pod)
+        return RuntimeLifecycleResult(
+            command_type=RuntimeLifecycleCommandType.UPDATE_CONFIGURATION,
+            report=self._report(
+                command,
+                observed_state=observed_state,
+                reason=f"network_policy_updated:{reason}",
+                provider_runtime_id=pod.metadata.name,
+            ),
+        )
+
     async def terminal_delete(
         self,
         command: RuntimeLifecycleCommand,
     ) -> RuntimeLifecycleResult:
         """Delete the Runtime Pod, policy, and PVC without recreating them."""
-        self._validate_command(command)
         _LOGGER.info(
             "Kubernetes Runtime terminal deletion requested",
             extra=_log_context(command, self._config),
@@ -613,6 +646,71 @@ class KubernetesRuntimeProvider:
             return False
         return True
 
+    def _pod_in_place_compatible(
+        self,
+        pod: PodResource,
+        command: RuntimeLifecycleCommand,
+        policy: KubernetesPodProfileV1,
+    ) -> bool:
+        if _pod_blocks_recreate(pod):
+            return False
+        expected = self._pod(command, policy)
+        ignored_labels = {
+            _LABEL_DESIRED_GENERATION,
+            _LABEL_PROVIDER_GENERATION,
+        }
+        for key, value in expected.metadata.labels.items():
+            if key not in ignored_labels and pod.metadata.labels.get(key) != value:
+                return False
+        ignored_annotations = {
+            _ANNOTATION_CONFIGURATION_REVISION_ID,
+            _ANNOTATION_CONFIGURATION_DIGEST,
+        }
+        for key, value in expected.metadata.annotations.items():
+            if (
+                key not in ignored_annotations
+                and pod.metadata.annotations.get(key) != value
+            ):
+                return False
+        if not _container_specs_equal_for_in_place(
+            pod.spec.containers,
+            expected.spec.containers,
+        ):
+            return False
+        if not _pod_volumes_equal(pod.spec.volumes, expected.spec.volumes):
+            return False
+        if pod.spec.image_pull_secrets != expected.spec.image_pull_secrets:
+            return False
+        if pod.spec.security_context != expected.spec.security_context:
+            return False
+        expected_service_account = expected.spec.service_account_name
+        if expected_service_account is None:
+            if pod.spec.service_account_name not in {None, "default"}:
+                return False
+        elif pod.spec.service_account_name != expected_service_account:
+            return False
+        if (
+            pod.spec.automount_service_account_token
+            != expected.spec.automount_service_account_token
+        ):
+            return False
+        if dict(pod.spec.node_selector) != dict(expected.spec.node_selector):
+            return False
+        return set(expected.spec.tolerations).issubset(set(pod.spec.tolerations))
+
+    def _pvc_in_place_compatible(
+        self,
+        pvc: PersistentVolumeClaimResource,
+        command: RuntimeLifecycleCommand,
+        policy: KubernetesPodProfileV1,
+    ) -> bool:
+        expected = self._pvc(command, policy)
+        return (
+            pvc.spec.storage_class_name == expected.spec.storage_class_name
+            and _quantity_value(pvc.spec.storage_request)
+            == _quantity_value(expected.spec.storage_request)
+        )
+
     def _pvc(
         self,
         command: RuntimeLifecycleCommand,
@@ -804,8 +902,6 @@ class KubernetesRuntimeProvider:
                     match_labels={
                         _LABEL_MANAGED_BY: "azents-runtime-provider-kubernetes",
                         _LABEL_RUNTIME_ID: command.identity.runtime_id,
-                        _LABEL_DESIRED_GENERATION: str(command.desired_generation),
-                        _LABEL_PROVIDER_GENERATION: str(command.provider_generation),
                         _LABEL_CONFIGURATION_MANAGED: "true",
                     }
                 ),
@@ -1381,6 +1477,52 @@ def _container_specs_equal(
     return all(
         dataclasses.replace(actual_container, resources=None)
         == dataclasses.replace(expected_container, resources=None)
+        and _container_resources_equal(
+            actual_container.resources,
+            expected_container.resources,
+        )
+        for actual_container, expected_container in zip(
+            actual,
+            expected,
+            strict=True,
+        )
+    )
+
+
+def _container_specs_equal_for_in_place(
+    actual: Sequence[ContainerSpec],
+    expected: Sequence[ContainerSpec],
+) -> bool:
+    if len(actual) != len(expected):
+        return False
+    dynamic_env_names = {
+        _ENV_DESIRED_GENERATION,
+        _ENV_PROVIDER_GENERATION,
+        _ENV_RUNNER_AUTH_TOKEN,
+        _ENV_RUNNER_AUTH_CREDENTIAL_ID,
+        _ENV_CONFIGURATION_REVISION_ID,
+        _ENV_CONFIGURATION_DIGEST,
+        _ENV_CONFIGURATION_DESIRED_GENERATION,
+    }
+    return all(
+        dataclasses.replace(
+            actual_container,
+            resources=None,
+            env=tuple(
+                item
+                for item in actual_container.env
+                if item.name not in dynamic_env_names
+            ),
+        )
+        == dataclasses.replace(
+            expected_container,
+            resources=None,
+            env=tuple(
+                item
+                for item in expected_container.env
+                if item.name not in dynamic_env_names
+            ),
+        )
         and _container_resources_equal(
             actual_container.resources,
             expected_container.resources,

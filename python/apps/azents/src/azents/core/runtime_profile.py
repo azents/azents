@@ -41,6 +41,15 @@ class RuntimeConfigurationResolutionStatus(enum.StrEnum):
     BLOCKED = "blocked"
 
 
+class RuntimeConfigurationApplicationImpact(enum.StrEnum):
+    """Physical action required to adopt one desired Runtime configuration."""
+
+    BLOCKED = "blocked"
+    CREATE = "create"
+    IN_PLACE = "in_place"
+    RECREATE = "recreate"
+
+
 class RuntimeReconcileTaskStatus(enum.StrEnum):
     """Durable desired-configuration reconciliation state."""
 
@@ -385,6 +394,75 @@ def compose_workspace_runtime_profile(
     return canonicalize_runtime_profile_document(effective)
 
 
+def classify_runtime_configuration_application(
+    *,
+    desired_status: RuntimeConfigurationResolutionStatus,
+    desired_configuration: dict[str, JsonValue] | None,
+    applied_configuration: dict[str, JsonValue] | None,
+) -> RuntimeConfigurationApplicationImpact:
+    """Classify exact desired-versus-applied physical Runtime adoption."""
+    if (
+        desired_status is RuntimeConfigurationResolutionStatus.BLOCKED
+        or desired_configuration is None
+    ):
+        return RuntimeConfigurationApplicationImpact.BLOCKED
+    if applied_configuration is None:
+        return RuntimeConfigurationApplicationImpact.CREATE
+    if desired_configuration == applied_configuration:
+        return RuntimeConfigurationApplicationImpact.IN_PLACE
+
+    desired_provider = _configuration_section(desired_configuration, "provider")
+    applied_provider = _configuration_section(applied_configuration, "provider")
+    if desired_provider != applied_provider:
+        return RuntimeConfigurationApplicationImpact.RECREATE
+    if desired_provider.get("kind") != "kubernetes":
+        return RuntimeConfigurationApplicationImpact.RECREATE
+    if desired_configuration.get("schema_version") != applied_configuration.get(
+        "schema_version"
+    ):
+        return RuntimeConfigurationApplicationImpact.RECREATE
+
+    for section_name in (
+        "infrastructure_profile",
+        "workspace_runtime_profile",
+    ):
+        desired_section = _configuration_section(
+            desired_configuration,
+            section_name,
+        )
+        applied_section = _configuration_section(
+            applied_configuration,
+            section_name,
+        )
+        if _without_keys(desired_section, {"version", "digest"}) != _without_keys(
+            applied_section,
+            {"version", "digest"},
+        ):
+            return RuntimeConfigurationApplicationImpact.RECREATE
+
+    desired_profile = _configuration_section(
+        desired_configuration,
+        "effective_profile",
+    )
+    applied_profile = _configuration_section(
+        applied_configuration,
+        "effective_profile",
+    )
+    if (
+        desired_profile.get("profile_kind")
+        != RuntimeInfrastructureProfileKind.KUBERNETES_POD
+        or applied_profile.get("profile_kind")
+        != RuntimeInfrastructureProfileKind.KUBERNETES_POD
+    ):
+        return RuntimeConfigurationApplicationImpact.RECREATE
+    if _without_keys(desired_profile, {"network_policy"}) != _without_keys(
+        applied_profile,
+        {"network_policy"},
+    ):
+        return RuntimeConfigurationApplicationImpact.RECREATE
+    return RuntimeConfigurationApplicationImpact.IN_PLACE
+
+
 def required_runtime_profile_capabilities(
     spec: RuntimeInfrastructureProfileSpec,
 ) -> frozenset[str]:
@@ -544,6 +622,23 @@ def _profile_value_at_path(
             raise AssertionError("Profile constraint path traversed a non-model value.")
         value = getattr(value, segment)
     return value
+
+
+def _configuration_section(
+    configuration: dict[str, JsonValue],
+    key: str,
+) -> dict[str, JsonValue]:
+    value = configuration.get(key)
+    if not isinstance(value, dict):
+        return {}
+    return value
+
+
+def _without_keys(
+    value: dict[str, JsonValue],
+    keys: set[str],
+) -> dict[str, JsonValue]:
+    return {key: item for key, item in value.items() if key not in keys}
 
 
 def canonicalize_runtime_profile_document(

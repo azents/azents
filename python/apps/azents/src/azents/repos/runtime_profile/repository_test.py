@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     LLMProvider,
+    RuntimeDesiredState,
+    RuntimeLifecycleCommandType,
     RuntimeProviderAvailabilityMode,
     RuntimeProviderKind,
     RuntimeProviderLifecycleState,
@@ -407,6 +409,39 @@ async def test_configuration_evidence_promotes_after_provider_and_runner_ack(
             persisted_runtime.applied_runtime_configuration_revision_id == revision.id
         )
 
+        command = await runtime_repository.set_desired_state_if_ready(
+            session,
+            runtime.id,
+            RuntimeLifecycleCommandType.RESTART,
+            RuntimeDesiredState.RUNNING,
+            expected_configuration_revision_id=revision.id,
+        )
+
+        assert command is not None
+        assert command.desired_generation == runtime.desired_generation + 1
+        assert command.runtime.desired_runtime_configuration_revision_id != revision.id
+        next_revision_id = command.runtime.desired_runtime_configuration_revision_id
+        assert next_revision_id is not None
+        next_revision = await repository.get_configuration_revision(
+            session,
+            revision_id=next_revision_id,
+        )
+        assert next_revision is not None
+        assert next_revision.digest == revision.digest
+        assert next_revision.target_desired_generation == command.desired_generation
+        assert next_revision.provider_reported_digest is None
+        assert next_revision.runner_reported_digest is None
+        assert (
+            await runtime_repository.set_desired_state_if_ready(
+                session,
+                runtime.id,
+                RuntimeLifecycleCommandType.RESTART,
+                RuntimeDesiredState.RUNNING,
+                expected_configuration_revision_id=revision.id,
+            )
+            is None
+        )
+
 
 async def test_reconcile_enqueue_is_idempotent_and_claimed_once(
     rdb_session_manager: SessionManager[AsyncSession],
@@ -644,6 +679,28 @@ async def test_recreation_claim_respects_existing_global_concurrency(
                 actor_workspace_user_id=None,
             ),
         )
+        provider_target_version = await repository.get_recreation_target_version(
+            session,
+            target_kind=RuntimeRecreationTargetKind.PROVIDER,
+            target_id=provider_id,
+            for_share=True,
+        )
+        infrastructure_target_version = await repository.get_recreation_target_version(
+            session,
+            target_kind=RuntimeRecreationTargetKind.INFRASTRUCTURE_PROFILE,
+            target_id=infrastructure.id,
+            for_share=True,
+        )
+        workspace_target_version = await repository.get_recreation_target_version(
+            session,
+            target_kind=RuntimeRecreationTargetKind.WORKSPACE_RUNTIME_PROFILE,
+            target_id=workspace_profile.id,
+            for_share=True,
+        )
+        assert provider_target_version is not None
+        assert provider_target_version.endswith(f":{contract.id}")
+        assert infrastructure_target_version == str(infrastructure.version)
+        assert workspace_target_version == str(workspace_profile.version)
         integration = RDBLLMProviderIntegration(
             workspace_id=workspace_id,
             provider=LLMProvider.ANTHROPIC,
@@ -733,7 +790,64 @@ async def test_recreation_claim_respects_existing_global_concurrency(
 
         assert len(claimed) == 1
         assert claimed[0].status is RuntimeRecreationItemStatus.RUNNING
+        locked = await repository.lock_recreation_item(
+            session,
+            item_id=claimed[0].id,
+            expected_attempt=claimed[0].attempt,
+        )
+        assert locked == claimed[0]
         rdb_operation = await session.get(RDBRuntimeRecreationOperation, operation.id)
         assert rdb_operation is not None
         assert rdb_operation.pending_count == 1
         assert rdb_operation.running_count == 2
+
+        assert await repository.update_recreation_item_dispatch(
+            session,
+            item_id=claimed[0].id,
+            expected_attempt=claimed[0].attempt,
+            configuration_revision_id=claimed[0].expected_configuration_revision_id,
+            dispatched_generation=1,
+        )
+        assert await repository.finish_recreation_item(
+            session,
+            item_id=claimed[0].id,
+            expected_attempt=claimed[0].attempt,
+            status=RuntimeRecreationItemStatus.SUCCEEDED,
+            failure_code=None,
+            failure_message=None,
+        )
+        assert await repository.finish_recreation_item(
+            session,
+            item_id=created_items[0].id,
+            expected_attempt=0,
+            status=RuntimeRecreationItemStatus.SKIPPED,
+            failure_code="runtime_not_running",
+            failure_message="Runtime is stopped.",
+        )
+        final_claim = await repository.claim_recreation_items(
+            session,
+            operation_id=operation.id,
+            limit=10,
+        )
+        assert len(final_claim) == 1
+        assert await repository.finish_recreation_item(
+            session,
+            item_id=final_claim[0].id,
+            expected_attempt=final_claim[0].attempt,
+            status=RuntimeRecreationItemStatus.FAILED,
+            failure_code="provider_failed",
+            failure_message="Provider failed.",
+        )
+        completed = await repository.get_recreation_operation(
+            session,
+            operation_id=operation.id,
+        )
+        assert completed is not None
+        assert (
+            completed.status is RuntimeRecreationOperationStatus.COMPLETED_WITH_FAILURES
+        )
+        assert completed.pending_count == 0
+        assert completed.running_count == 0
+        assert completed.succeeded_count == 1
+        assert completed.skipped_count == 1
+        assert completed.failed_count == 1

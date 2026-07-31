@@ -108,6 +108,12 @@ __all__ = [
     "RuntimeProviderListResponse",
     "RuntimeProviderPolicyUpdateRequest",
     "RuntimeProviderResponse",
+    "RuntimeRecreationCreateRequest",
+    "RuntimeRecreationItemResponse",
+    "RuntimeRecreationItemStatus",
+    "RuntimeRecreationOperationResponse",
+    "RuntimeRecreationOperationStatus",
+    "RuntimeRecreationTargetKind",
     "SentryDiagnostics",
     "SignupTokenDeliveryMethod",
     "SignupTokenListResponse",
@@ -252,6 +258,12 @@ from azentsadminclient.models.runtime_provider_lifecycle_state import RuntimePro
 from azentsadminclient.models.runtime_provider_list_response import RuntimeProviderListResponse as RuntimeProviderListResponse
 from azentsadminclient.models.runtime_provider_policy_update_request import RuntimeProviderPolicyUpdateRequest as RuntimeProviderPolicyUpdateRequest
 from azentsadminclient.models.runtime_provider_response import RuntimeProviderResponse as RuntimeProviderResponse
+from azentsadminclient.models.runtime_recreation_create_request import RuntimeRecreationCreateRequest as RuntimeRecreationCreateRequest
+from azentsadminclient.models.runtime_recreation_item_response import RuntimeRecreationItemResponse as RuntimeRecreationItemResponse
+from azentsadminclient.models.runtime_recreation_item_status import RuntimeRecreationItemStatus as RuntimeRecreationItemStatus
+from azentsadminclient.models.runtime_recreation_operation_response import RuntimeRecreationOperationResponse as RuntimeRecreationOperationResponse
+from azentsadminclient.models.runtime_recreation_operation_status import RuntimeRecreationOperationStatus as RuntimeRecreationOperationStatus
+from azentsadminclient.models.runtime_recreation_target_kind import RuntimeRecreationTargetKind as RuntimeRecreationTargetKind
 from azentsadminclient.models.sentry_diagnostics import SentryDiagnostics as SentryDiagnostics
 from azentsadminclient.models.signup_token_delivery_method import SignupTokenDeliveryMethod as SignupTokenDeliveryMethod
 from azentsadminclient.models.signup_token_list_response import SignupTokenListResponse as SignupTokenListResponse

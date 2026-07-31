@@ -13,8 +13,6 @@ from azents.core.enums import (
     AgentDecommissionStatus,
     AgentSessionRunState,
     AgentSessionStatus,
-    RuntimeDesiredState,
-    RuntimeLifecycleCommandType,
 )
 from azents.core.session_lifecycle import SessionLifecycleTransitionContext
 from azents.repos.agent_decommission.data import AgentDecommissionJob
@@ -456,15 +454,18 @@ class _BoundRuntimeRepositoryDouble:
         return self.runtime
 
 
-class _ExecutionPolicyApplicationDouble:
-    """Capture terminal deletion targeting through the policy application path."""
+class _AgentRuntimeServiceDouble:
+    """Capture terminal deletion targeting through the Runtime Profile path."""
 
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
-    async def target_lifecycle_command(self, **kwargs: object) -> SimpleNamespace:
+    async def request_terminal_delete_for_agent(
+        self,
+        agent_id: str,
+    ) -> SimpleNamespace:
         """Record the exact terminal lifecycle target."""
-        self.calls.append(kwargs)
+        self.calls.append({"agent_id": agent_id})
         return SimpleNamespace(desired_generation=3)
 
 
@@ -500,7 +501,7 @@ async def test_decommission_cleanup_removes_external_agent_roots_first() -> None
 async def test_decommission_targets_terminal_delete_from_resource_binding() -> None:
     """Terminal deletion uses the immutable Provider resource binding."""
     events: list[str] = []
-    application = _ExecutionPolicyApplicationDouble()
+    runtime_service = _AgentRuntimeServiceDouble()
     service = object.__new__(AgentDecommissionService)
     service.session_manager = _transaction_manager
     service.agent_repository = _AgentRepositoryDouble()  # type: ignore[assignment]
@@ -509,7 +510,7 @@ async def test_decommission_targets_terminal_delete_from_resource_binding() -> N
     )
     service.exchange_file_repository = _ExchangeFileRepositoryDouble(events)  # type: ignore[assignment]
     service.runtime_repository = _BoundRuntimeRepositoryDouble()  # type: ignore[assignment]
-    service.execution_policy_application_service = application  # type: ignore[assignment]
+    service.agent_runtime_service = runtime_service  # type: ignore[assignment]
     service.decommission_repository = _DecommissionStatusRepositoryDouble()  # type: ignore[assignment]
 
     await service._cleanup_agent_external_roots(  # pyright: ignore[reportPrivateUsage]  # Pin terminal deletion fencing.
@@ -517,12 +518,4 @@ async def test_decommission_targets_terminal_delete_from_resource_binding() -> N
         lease_owner="scheduler-1",
     )
 
-    assert application.calls == [
-        {
-            "agent_id": "agent-decommission",
-            "command_type": RuntimeLifecycleCommandType.STOP,
-            "desired_state": RuntimeDesiredState.STOPPED,
-            "reset_final_desired_state": None,
-            "terminal_delete_requested": True,
-        }
-    ]
+    assert runtime_service.calls == [{"agent_id": "agent-decommission"}]

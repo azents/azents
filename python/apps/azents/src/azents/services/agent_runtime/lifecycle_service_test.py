@@ -41,7 +41,6 @@ def _runtime(
         workspace_id="workspace-id",
         agent_id="agent-id",
         runtime_provider_id=None,
-        provider_config=None,
         desired_state=desired_state,
         desired_generation=desired_generation,
         last_lifecycle_command=None,

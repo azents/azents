@@ -3,14 +3,9 @@
 import pytest
 from pydantic import ValidationError
 
-from azents.core.runtime_execution_policy import (
-    RuntimeExecutionModuleId,
-    RuntimeExecutionStorageMode,
-)
 from azents.core.runtime_provider_contract import (
     RuntimeProviderCapabilityContract,
     canonicalize_runtime_provider_contract,
-    runtime_execution_capabilities_from_provider_contract,
 )
 
 
@@ -39,38 +34,33 @@ def _contract() -> RuntimeProviderCapabilityContract:
                 "terminal_delete_destroys_workspace": True,
             },
             "configuration_fields": [],
-            "execution_policy": {
-                "schema_version": 1,
-                "supported_modules": [
-                    {"module_id": "docker", "version": 1},
-                    {"module_id": "runtime.resources", "version": 1},
-                ],
-                "storage_modes": ["none", "ephemeral"],
-                "resource_maxima": None,
-            },
+            "profile_contracts": [
+                {
+                    "profile_kind": "kubernetes_pod",
+                    "contract_family": "kubernetes.pod-profile",
+                    "schema_versions": [2, 1],
+                    "capabilities": [
+                        "runtime.resources",
+                        "kubernetes.pod-profile",
+                    ],
+                    "constraints": {},
+                }
+            ],
         }
     )
 
 
-def test_contract_accepts_complete_v1_docker_capability() -> None:
+def test_contract_accepts_profile_capability() -> None:
     contract = _contract()
 
-    assert contract.execution_policy is not None
-    assert {
-        module.module_id for module in contract.execution_policy.supported_modules
-    } == {
-        RuntimeExecutionModuleId.DOCKER,
-        RuntimeExecutionModuleId.RESOURCES,
-    }
+    assert contract.profile_contracts[0].contract_family == "kubernetes.pod-profile"
 
 
-def test_contract_rejects_removed_execution_capability_fields() -> None:
+def test_contract_rejects_removed_execution_policy_branch() -> None:
     payload = _contract().model_dump(mode="json")
-    execution_policy = payload["execution_policy"]
-    assert isinstance(execution_policy, dict)
-    execution_policy["privileged_engine"] = True
+    payload["execution_policy"] = {"schema_version": 1}
 
-    with pytest.raises(ValidationError, match="privileged_engine"):
+    with pytest.raises(ValidationError, match="execution_policy"):
         RuntimeProviderCapabilityContract.model_validate(payload)
 
 
@@ -83,33 +73,12 @@ def test_contract_canonicalization_sorts_set_backed_fields() -> None:
     )
 
     assert first.digest == second.digest
-    execution_policy = first.canonical_json["execution_policy"]
-    assert isinstance(execution_policy, dict)
-    assert execution_policy["supported_modules"] == [
-        {"module_id": "docker", "version": 1},
-        {"module_id": "runtime.resources", "version": 1},
+    profile_contracts = first.canonical_json["profile_contracts"]
+    assert isinstance(profile_contracts, list)
+    profile_contract = profile_contracts[0]
+    assert isinstance(profile_contract, dict)
+    assert profile_contract["schema_versions"] == [1, 2]
+    assert profile_contract["capabilities"] == [
+        "kubernetes.pod-profile",
+        "runtime.resources",
     ]
-
-
-def test_execution_capabilities_project_only_declared_support() -> None:
-    capabilities = runtime_execution_capabilities_from_provider_contract(_contract())
-
-    assert {module.module_id for module in capabilities.supported_modules} == {
-        RuntimeExecutionModuleId.DOCKER,
-        RuntimeExecutionModuleId.RESOURCES,
-    }
-    assert capabilities.storage_modes == {
-        RuntimeExecutionStorageMode.NONE,
-        RuntimeExecutionStorageMode.EPHEMERAL,
-    }
-
-
-def test_contract_without_execution_policy_is_fail_closed() -> None:
-    payload = _contract().model_dump(mode="json")
-    payload["execution_policy"] = None
-    contract = RuntimeProviderCapabilityContract.model_validate(payload)
-
-    capabilities = runtime_execution_capabilities_from_provider_contract(contract)
-
-    assert capabilities.supported_modules == frozenset()
-    assert capabilities.storage_modes == {RuntimeExecutionStorageMode.NONE}

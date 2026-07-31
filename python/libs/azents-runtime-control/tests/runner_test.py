@@ -12,6 +12,7 @@ import pytest
 
 from azents_runtime_control.runner import (
     RunnerControlClient,
+    RunnerHeartbeatAcknowledgement,
     RunnerOperationCancel,
     RunnerOperationEnvelope,
     RunnerOperationEvent,
@@ -53,6 +54,7 @@ class FakeRunnerControlClient(RunnerControlClient):
         self.transfer_cancel_handler: (
             Callable[[RunnerTransferCancel], Awaitable[None]] | None
         ) = None
+        self.heartbeat_runtime_configuration: RuntimeConfigurationEvidence | None = None
         self.transfer_results: list[RunnerTransferResult] = []
 
     def set_operation_handler(
@@ -106,11 +108,14 @@ class FakeRunnerControlClient(RunnerControlClient):
         runtime_id: str,
         generation: int,
         heartbeat_at: datetime,
-    ) -> bool:
+    ) -> RunnerHeartbeatAcknowledgement:
         """Record a heartbeat."""
         del heartbeat_at
         self.heartbeats.append((runtime_id, generation))
-        return True
+        return RunnerHeartbeatAcknowledgement(
+            accepted=True,
+            runtime_configuration=self.heartbeat_runtime_configuration,
+        )
 
     async def report_runner_state(self, report: RunnerStateReport) -> None:
         """Record one Runner state report."""
@@ -179,6 +184,60 @@ class BlockingOperations(RuntimeRunnerOperations):
     def release(self, request_id: str) -> None:
         """Release one operation."""
         self._release_events.setdefault(request_id, asyncio.Event()).set()
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_adopts_configuration_and_reports_evidence() -> None:
+    """Heartbeat evidence adoption immediately emits the exact state report."""
+    client = FakeRunnerControlClient()
+    loop = _loop(client, BlockingOperations())
+    await loop.start()
+    evidence = RuntimeConfigurationEvidence(
+        revision_id="revision-2",
+        digest="e" * 64,
+        desired_generation=5,
+    )
+    client.heartbeat_runtime_configuration = evidence
+
+    await loop.run_once(block_ms=0)
+
+    assert client.reports[-1].runtime_configuration == evidence
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_rejects_mismatched_configuration_generation() -> None:
+    """Mismatched desired-generation evidence never mutates Runner state."""
+    client = FakeRunnerControlClient()
+    loop = _loop(client, BlockingOperations())
+    await loop.start()
+    original = client.reports[-1].runtime_configuration
+    client.heartbeat_runtime_configuration = RuntimeConfigurationEvidence(
+        revision_id="revision-2",
+        digest="e" * 64,
+        desired_generation=6,
+    )
+
+    await loop.run_once(block_ms=0)
+
+    assert client.reports[-1].runtime_configuration == original
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_rejects_invalid_configuration_evidence() -> None:
+    """Malformed exact evidence never mutates Runner state."""
+    client = FakeRunnerControlClient()
+    loop = _loop(client, BlockingOperations())
+    await loop.start()
+    original = client.reports[-1].runtime_configuration
+    client.heartbeat_runtime_configuration = RuntimeConfigurationEvidence(
+        revision_id="revision-2",
+        digest="invalid",
+        desired_generation=5,
+    )
+
+    await loop.run_once(block_ms=0)
+
+    assert client.reports[-1].runtime_configuration == original
 
 
 @pytest.mark.asyncio
