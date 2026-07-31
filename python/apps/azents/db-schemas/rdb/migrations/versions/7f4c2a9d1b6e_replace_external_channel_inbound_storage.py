@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import RowMapping
 
 revision: str = "7f4c2a9d1b6e"
-down_revision: str | Sequence[str] | None = "d307822ec9d7"
+down_revision: str | Sequence[str] | None = "699b38c35430"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
