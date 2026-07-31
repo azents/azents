@@ -1,7 +1,7 @@
 ---
 title: "azents documentation structure"
 created: 2026-02-25
-updated: 2026-07-24
+updated: 2026-07-31
 tags: [documentation, process]
 ---
 # azents Documentation Structure
@@ -144,6 +144,12 @@ tags: [backend, engine]
 - Current system behavior always belongs in `spec/`. Changes to design rationale should be recorded in a new Requirements, design, or ADR document when needed.
 - `implemented` is the date when the design was implemented.
 - After `implemented` is set, do not modify the design document. Record later changes in `spec/` or a new Requirements/design/ADR document.
+- Every new primary Design must include a `## Removal and Replacement` section that
+  identifies obsolete implementation, contracts, state, tests, fixtures,
+  configuration, documentation, and generated surfaces as applicable. Record
+  why each item becomes obsolete, its replacement or remaining authority, its
+  removal boundary, and absence verification. Use an explicit `None` finding
+  only after system-grounded analysis finds no removal obligations.
 - Azents feature designs must include a `## Test Strategy` section. Product behavior verification should be E2E-first. Use testenv only as fallback/diagnostic support when E2E is difficult or spot diagnosis is needed.
 - `Test Strategy` must describe the E2E primary verification matrix, E2E plan, whether testenv fixture/prerequisite support is needed and why, fixture/seed requirements, credential/prerequisite snapshot requirements, evidence format, CI execution policy, and skip/fail criteria for optional/live tests. If product behavior verification has no E2E coverage and only testenv support, explain why.
 
