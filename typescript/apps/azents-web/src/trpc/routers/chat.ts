@@ -4,6 +4,7 @@
  * WebSocket for attachment ticket issue, message history fetch.
  */
 import {
+  agentRuntimeV1GetAgentRuntime,
   agentRuntimeV1ResetAgentRuntime,
   agentRuntimeV1RestartAgentRuntime,
   agentRuntimeV1StartAgentRuntime,
@@ -935,6 +936,26 @@ export const chatRouter = router({
           401: "UNAUTHORIZED",
           403: "FORBIDDEN",
           404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  getAgentRuntime: publicProcedure
+    .input(z.object({ handle: z.string().min(1), agentId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await agentRuntimeV1GetAgentRuntime({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
         });
       }
     }),

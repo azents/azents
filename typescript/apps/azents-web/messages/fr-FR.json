@@ -296,6 +296,7 @@
     "llmSettings": {
       "headline": "Intégrations LLM",
       "description": "Gérez les clés API et les identifiants des fournisseurs LLM utilisés dans cet espace de travail.",
+      "runtimeProfiles": "Profils d’exécution",
       "addIntegration": "Ajouter une intégration",
       "empty": "Aucune intégration configurée.",
       "loadError": "Impossible de charger les intégrations.",
@@ -558,6 +559,71 @@
         "statusError": "Autorisation appareil {status}."
       }
     },
+    "runtimeProfiles": {
+      "headline": "Profils d’exécution",
+      "description": "Gérez les configurations d’exécution complètes utilisées par les agents de cet espace de travail.",
+      "backToSettings": "Intégrations LLM",
+      "addProfile": "Ajouter un profil",
+      "noInfrastructureTitle": "Aucun profil fournisseur disponible",
+      "noInfrastructureDescription": "Un administrateur de la plateforme doit publier un profil Pod ou un profil de conteneur compatible avant que cet espace de travail puisse créer un profil d’exécution.",
+      "defaultTitle": "Valeur par défaut des nouveaux agents",
+      "defaultDescription": "Copiée une seule fois lorsqu’un agent est créé sans profil d’exécution explicite.",
+      "defaultPlaceholder": "Aucun profil par défaut",
+      "emptyTitle": "Aucun profil d’exécution",
+      "emptyDescription": "Créez un profil d’exécution pour attribuer aux agents un fournisseur et une infrastructure précis.",
+      "nameColumn": "Profil",
+      "infrastructureColumn": "Profil fournisseur",
+      "statusColumn": "État",
+      "versionColumn": "Version",
+      "actionsColumn": "Actions",
+      "defaultBadge": "Par défaut",
+      "noDescription": "Aucune description",
+      "available": "Disponible",
+      "unavailable": "Indisponible",
+      "active": "Actif",
+      "disabled": "Désactivé",
+      "edit": "Modifier",
+      "recreate": "Recréer les environnements",
+      "operationLoading": "Chargement de la progression de la recréation…",
+      "operationTitle": "Recréation des environnements",
+      "operationCounts": "{succeeded} réussis · {running} en cours · {failed} échoués · {skipped} ignorés · {total} au total",
+      "operationItemNoDetail": "Aucun détail supplémentaire.",
+      "createTitle": "Ajouter un profil d’exécution",
+      "editTitle": "Modifier le profil d’exécution",
+      "nameLabel": "Nom",
+      "descriptionLabel": "Description",
+      "infrastructureLabel": "Profil Pod ou conteneur du fournisseur",
+      "infrastructureDescription": "Ce fournisseur et ce profil précis seront utilisés, sans solution de repli.",
+      "lifecycleLabel": "Cycle de vie",
+      "allowedCidrsLabel": "CIDR autorisés",
+      "deniedCidrsLabel": "CIDR refusés",
+      "cidrsDescription": "Saisissez un CIDR par ligne. Les règles de l’espace de travail peuvent uniquement restreindre la politique du fournisseur.",
+      "cancel": "Annuler",
+      "save": "Enregistrer",
+      "availabilityReasons": {
+        "workspaceProfileDisabled": "Ce profil d’exécution est désactivé.",
+        "providerUnavailable": "Le fournisseur d’exécution sélectionné n’est actuellement pas disponible pour cet espace de travail.",
+        "infrastructureProfileUnavailable": "Le profil fournisseur sélectionné est désactivé ou indisponible.",
+        "workspacePolicyInvalid": "Les restrictions réseau de l’espace de travail ne sont pas valides pour ce profil fournisseur.",
+        "profileIncompatible": "Le profil fournisseur sélectionné est incompatible avec les capacités actuelles du fournisseur.",
+        "unknown": "La configuration d’exécution actuelle est indisponible."
+      },
+      "missingCapabilities": "Capacités manquantes : {capabilities}",
+      "operationStatus": {
+        "pending": "En attente",
+        "running": "En cours",
+        "completed": "Terminée",
+        "completed_with_failures": "Terminée avec des échecs",
+        "failed": "Échouée"
+      },
+      "operationItemStatus": {
+        "pending": "En attente",
+        "running": "En cours",
+        "succeeded": "Réussi",
+        "skipped": "Ignoré",
+        "failed": "Échoué"
+      }
+    },
     "agents": {
       "headline": "Agents",
       "description": "Gérez les agents IA de votre espace de travail",
@@ -579,6 +645,12 @@
       "namePlaceholder": "ex : Agent support client",
       "descriptionLabel": "Description",
       "descriptionPlaceholder": "Décrivez brièvement le rôle de cet agent",
+      "runtimeProfileLabel": "Profil d’exécution",
+      "runtimeProfileDescription": "Choisissez la configuration complète du fournisseur et de l’infrastructure pour cet agent. Laissez ce champ vide lors de la création pour copier la valeur par défaut de l’espace de travail.",
+      "runtimeProfilePlaceholder": "Utiliser la valeur par défaut de l’espace de travail",
+      "runtimeProfileLoading": "Chargement des profils d’exécution…",
+      "runtimeProfileUnavailableTitle": "Le profil d’exécution sélectionné est indisponible",
+      "runtimeProfileUnavailableDescription": "La sélection est conservée, mais la création d’un nouvel environnement est bloquée : {reason}",
       "integrationLabel": "Intégration LLM",
       "integrationPlaceholder": "Sélectionnez une intégration",
       "providerPlaceholder": "Sélectionnez un provider",
@@ -1184,6 +1256,14 @@
           "session": "Accès à la session",
           "agent": "Accès à l’agent"
         }
+      },
+      "runtimeProfileAvailabilityReasons": {
+        "workspaceProfileDisabled": "Ce profil d’exécution est désactivé.",
+        "providerUnavailable": "Son fournisseur d’exécution est actuellement indisponible.",
+        "infrastructureProfileUnavailable": "Son profil fournisseur est désactivé ou indisponible.",
+        "workspacePolicyInvalid": "Ses restrictions réseau d’espace de travail sont invalides.",
+        "profileIncompatible": "Son profil fournisseur est incompatible avec les capacités actuelles du fournisseur.",
+        "unknown": "La configuration d’exécution actuelle est indisponible."
       }
     },
     "toolkits": {
@@ -1844,6 +1924,41 @@
       "settingsTab": "Paramètres",
       "settingsTitle": "Paramètres du runtime",
       "settingsSubtitle": "Gérez le cycle de vie du runtime de l’agent actuel.",
+      "configurationTitle": "Configuration du runtime",
+      "configurationLoading": "Chargement de la configuration du runtime…",
+      "configurationDesired": "Révision souhaitée",
+      "configurationApplied": "Révision appliquée",
+      "configurationNoDesired": "Aucune configuration souhaitée n’a été résolue.",
+      "configurationNoApplied": "Aucune configuration n’a été appliquée à un runtime.",
+      "configurationEvidence": {
+        "revision": "Révision",
+        "profile": "Profil du runtime",
+        "infrastructure": "Infrastructure",
+        "generation": "Génération",
+        "digest": "Empreinte"
+      },
+      "configurationStatus": {
+        "profile_required": {
+          "label": "Profil requis",
+          "description": "Sélectionnez un profil du runtime avant que cet agent puisse créer un runtime."
+        },
+        "configuration_blocked": {
+          "label": "Configuration bloquée",
+          "description": "Le profil sélectionné ne peut pas être résolu avec les capacités actuelles du fournisseur."
+        },
+        "configured_not_created": {
+          "label": "Prêt à créer",
+          "description": "La configuration souhaitée est valide, mais aucun runtime n’a encore été créé à partir de celle-ci."
+        },
+        "waiting_for_recreation": {
+          "label": "Recréation requise",
+          "description": "La révision souhaitée diffère de la révision appliquée. Le runtime conserve sa configuration appliquée jusqu’à la fin d’une recréation explicite."
+        },
+        "applied": {
+          "label": "Appliquée",
+          "description": "L’accusé de réception du fournisseur et les preuves du runner correspondent à la révision souhaitée."
+        }
+      },
       "stopRuntimeDescription": "Arrêtez le pod du runtime en cours sans supprimer les fichiers de l’espace de travail.",
       "runtimeNotRunningHint": "Le runtime n’est pas en cours d’exécution, il n’y a donc rien à arrêter.",
       "runtimeControlUnavailableHint": "Le contrôle du runtime est actuellement indisponible.",
@@ -1952,7 +2067,16 @@
         "missing": "Manquant",
         "unavailable": "Indisponible",
         "error": "Erreur"
-      }
+      },
+      "configurationReasons": {
+        "sourceMismatch": "Les références enregistrées ne forment pas un chemin fournisseur unique et exact.",
+        "profileDisabled": "Un profil d’exécution ou un profil fournisseur sélectionné est désactivé.",
+        "providerUnavailable": "Le fournisseur d’exécution exact est désactivé, déconnecté ou indisponible pour cet espace de travail.",
+        "capabilityUnavailable": "Les capacités actuelles du fournisseur ne permettent pas de satisfaire le profil sélectionné.",
+        "profileInvalid": "Le document du profil sélectionné est invalide.",
+        "unknown": "La configuration d’exécution souhaitée n’a pas pu être résolue."
+      },
+      "configurationMissingCapabilities": "Capacités manquantes : {capabilities}"
     },
     "toolCall": {
       "preparing": "Rédaction de la commande...",

@@ -37,6 +37,7 @@ export const agentFormSchema = z
     main_model_label: z.string().nullable(),
     lightweight_model_label: z.string().nullable(),
     system_prompt: z.string().optional(),
+    runtime_profile_id: z.string().nullable(),
     type: z.enum(["public", "private"]),
     enabled: z.boolean(),
     reasoning_effort: z

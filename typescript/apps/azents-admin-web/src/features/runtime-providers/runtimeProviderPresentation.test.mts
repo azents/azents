@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runtimeProviderReadiness } from "./runtimeProviderPresentation.ts";
+import {
+  infrastructureProfileKindForProvider,
+  runtimeProviderReadiness,
+} from "./runtimeProviderPresentation.ts";
 
 const activeProvider = {
   enabled: true,
@@ -23,4 +26,16 @@ void test("missing current advertisement is pending", () => {
     }),
     { color: "yellow", label: "Contract pending" },
   );
+});
+
+void test("provider kind selects exactly one infrastructure Profile kind", () => {
+  assert.equal(
+    infrastructureProfileKindForProvider("kubernetes"),
+    "kubernetes_pod",
+  );
+  assert.equal(
+    infrastructureProfileKindForProvider("docker"),
+    "docker_container",
+  );
+  assert.equal(infrastructureProfileKindForProvider("custom"), null);
 });

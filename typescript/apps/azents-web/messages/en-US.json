@@ -296,6 +296,7 @@
     "llmSettings": {
       "headline": "LLM Integrations",
       "description": "Manage API keys and credentials for LLM providers used in this workspace.",
+      "runtimeProfiles": "Runtime profiles",
       "addIntegration": "Add integration",
       "empty": "No integrations configured yet.",
       "loadError": "Failed to load integrations.",
@@ -558,6 +559,71 @@
         "statusError": "Device authorization {status}."
       }
     },
+    "runtimeProfiles": {
+      "headline": "Runtime profiles",
+      "description": "Define complete runtime choices for agents in this workspace.",
+      "backToSettings": "LLM integrations",
+      "addProfile": "Add profile",
+      "noInfrastructureTitle": "No Provider profiles available",
+      "noInfrastructureDescription": "A platform administrator must publish a compatible Pod Profile or Container Profile before this workspace can create a Runtime Profile.",
+      "defaultTitle": "New agent default",
+      "defaultDescription": "Copied once when a new agent is created without an explicit runtime profile.",
+      "defaultPlaceholder": "No default profile",
+      "emptyTitle": "No runtime profiles",
+      "emptyDescription": "Create a runtime profile to give agents an exact provider and infrastructure choice.",
+      "nameColumn": "Profile",
+      "infrastructureColumn": "Provider profile",
+      "statusColumn": "Status",
+      "versionColumn": "Version",
+      "actionsColumn": "Actions",
+      "defaultBadge": "Default",
+      "noDescription": "No description",
+      "available": "Available",
+      "unavailable": "Unavailable",
+      "active": "Active",
+      "disabled": "Disabled",
+      "edit": "Edit",
+      "recreate": "Recreate runtimes",
+      "operationLoading": "Loading recreation progress…",
+      "operationTitle": "Runtime recreation",
+      "operationCounts": "{succeeded} succeeded · {running} running · {failed} failed · {skipped} skipped · {total} total",
+      "operationItemNoDetail": "No additional detail.",
+      "createTitle": "Add runtime profile",
+      "editTitle": "Edit runtime profile",
+      "nameLabel": "Name",
+      "descriptionLabel": "Description",
+      "infrastructureLabel": "Provider Pod or Container Profile",
+      "infrastructureDescription": "This exact Provider and Profile will be used. No fallback is applied.",
+      "lifecycleLabel": "Lifecycle",
+      "allowedCidrsLabel": "Allowed CIDRs",
+      "deniedCidrsLabel": "Denied CIDRs",
+      "cidrsDescription": "Enter one CIDR per line. Workspace rules can only narrow provider policy.",
+      "cancel": "Cancel",
+      "save": "Save",
+      "availabilityReasons": {
+        "workspaceProfileDisabled": "This Runtime Profile is disabled.",
+        "providerUnavailable": "The selected Runtime Provider is not currently available to this Workspace.",
+        "infrastructureProfileUnavailable": "The selected Provider Profile is disabled or unavailable.",
+        "workspacePolicyInvalid": "The Workspace network restrictions are invalid for this Provider Profile.",
+        "profileIncompatible": "The selected Provider Profile is incompatible with the Provider's current capabilities.",
+        "unknown": "The current Runtime configuration is unavailable."
+      },
+      "missingCapabilities": "Missing capabilities: {capabilities}",
+      "operationStatus": {
+        "pending": "Pending",
+        "running": "Running",
+        "completed": "Completed",
+        "completed_with_failures": "Completed with failures",
+        "failed": "Failed"
+      },
+      "operationItemStatus": {
+        "pending": "Pending",
+        "running": "Running",
+        "succeeded": "Succeeded",
+        "skipped": "Skipped",
+        "failed": "Failed"
+      }
+    },
     "agents": {
       "headline": "Agents",
       "description": "Manage AI agents for your workspace",
@@ -579,6 +645,12 @@
       "namePlaceholder": "e.g. Customer Support Agent",
       "descriptionLabel": "Description",
       "descriptionPlaceholder": "Briefly describe what this agent does",
+      "runtimeProfileLabel": "Runtime profile",
+      "runtimeProfileDescription": "Choose the complete provider and infrastructure configuration for this agent. Leave empty to copy the workspace default when creating the agent.",
+      "runtimeProfilePlaceholder": "Use workspace default",
+      "runtimeProfileLoading": "Loading runtime profiles…",
+      "runtimeProfileUnavailableTitle": "Selected runtime profile is unavailable",
+      "runtimeProfileUnavailableDescription": "The selection is preserved, but new runtime creation is blocked: {reason}",
       "integrationLabel": "LLM Integration",
       "integrationPlaceholder": "Select an integration",
       "providerPlaceholder": "Select a provider",
@@ -1184,6 +1256,14 @@
           "session": "Session access",
           "agent": "Agent access"
         }
+      },
+      "runtimeProfileAvailabilityReasons": {
+        "workspaceProfileDisabled": "This Runtime Profile is disabled.",
+        "providerUnavailable": "Its Runtime Provider is not currently available.",
+        "infrastructureProfileUnavailable": "Its Provider Profile is disabled or unavailable.",
+        "workspacePolicyInvalid": "Its Workspace network restrictions are invalid.",
+        "profileIncompatible": "Its Provider Profile is incompatible with the Provider's current capabilities.",
+        "unknown": "The current Runtime configuration is unavailable."
       }
     },
     "toolkits": {
@@ -1844,6 +1924,41 @@
       "settingsTab": "Settings",
       "settingsTitle": "Runtime settings",
       "settingsSubtitle": "Manage the current agent runtime lifecycle.",
+      "configurationTitle": "Runtime configuration",
+      "configurationLoading": "Loading runtime configuration…",
+      "configurationDesired": "Desired revision",
+      "configurationApplied": "Applied revision",
+      "configurationNoDesired": "No desired configuration has been resolved.",
+      "configurationNoApplied": "No configuration has been applied to a runtime.",
+      "configurationEvidence": {
+        "revision": "Revision",
+        "profile": "Runtime profile",
+        "infrastructure": "Infrastructure",
+        "generation": "Generation",
+        "digest": "Digest"
+      },
+      "configurationStatus": {
+        "profile_required": {
+          "label": "Profile required",
+          "description": "Select a runtime profile before this agent can create a runtime."
+        },
+        "configuration_blocked": {
+          "label": "Configuration blocked",
+          "description": "The selected profile cannot resolve against the provider's current capabilities."
+        },
+        "configured_not_created": {
+          "label": "Ready to create",
+          "description": "The desired configuration is valid, but no runtime has been created from it yet."
+        },
+        "waiting_for_recreation": {
+          "label": "Recreation required",
+          "description": "The desired revision differs from the applied revision. The runtime keeps its applied configuration until explicit recreation completes."
+        },
+        "applied": {
+          "label": "Applied",
+          "description": "Provider acknowledgement and runner evidence match the desired revision."
+        }
+      },
       "stopRuntimeDescription": "Stop the running runtime pod without deleting workspace files.",
       "runtimeNotRunningHint": "The runtime is not running, so there is nothing to stop.",
       "runtimeControlUnavailableHint": "Runtime control is currently unavailable.",
@@ -1952,7 +2067,16 @@
         "missing": "Missing",
         "unavailable": "Unavailable",
         "error": "Error"
-      }
+      },
+      "configurationReasons": {
+        "sourceMismatch": "The stored Runtime Profile references do not form one exact Provider path.",
+        "profileDisabled": "A selected Runtime Profile or Provider Profile is disabled.",
+        "providerUnavailable": "The exact Runtime Provider is disabled, disconnected, or unavailable to this Workspace.",
+        "capabilityUnavailable": "The Provider's current capabilities cannot satisfy the selected Profile.",
+        "profileInvalid": "The selected Profile document is invalid.",
+        "unknown": "The desired Runtime configuration could not be resolved."
+      },
+      "configurationMissingCapabilities": "Missing capabilities: {capabilities}"
     },
     "toolCall": {
       "preparing": "Writing command...",

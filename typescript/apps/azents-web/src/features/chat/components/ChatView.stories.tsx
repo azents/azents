@@ -79,6 +79,14 @@ const readyWorkspaceState: WorkspacePanelState = {
       },
     },
   },
+  runtimeConfiguration: {
+    type: "LOADED",
+    configuration: {
+      status: "applied",
+      desired: null,
+      applied: null,
+    },
+  },
   manifest: {
     root: "/workspace/agent",
     cwd: "/workspace/agent/project",

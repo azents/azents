@@ -39,7 +39,7 @@ export function WorkspaceSidebar({
   const isMembers = pathname === `${basePath}/members`;
   const isToolkits = pathname.startsWith(`${basePath}/toolkits`);
   const isExternalChannels = pathname.startsWith(`${basePath}/integrations`);
-  const isSettings = pathname === `${basePath}/settings`;
+  const isSettings = pathname.startsWith(`${basePath}/settings`);
   const isProfile = pathname === `${basePath}/profile`;
 
   return (

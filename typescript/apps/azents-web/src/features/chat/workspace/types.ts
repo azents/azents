@@ -1,4 +1,5 @@
 import type {
+  AgentRuntimeConfigurationStatusResponse,
   AgentWorkspaceDirectoryResponse,
   AgentWorkspaceEntryResponse,
   AgentWorkspaceFileResponse,
@@ -12,6 +13,14 @@ import type {
 } from "@azents/public-client";
 
 export type AgentWorkspaceServerState = AgentWorkspaceResponse;
+
+export type RuntimeConfigurationState =
+  | { type: "LOADING" }
+  | { type: "ERROR"; message: string }
+  | {
+      type: "LOADED";
+      configuration: AgentRuntimeConfigurationStatusResponse;
+    };
 
 export type WorkspaceEntryCapabilities = {
   open: boolean;
@@ -137,6 +146,7 @@ export type WorkspacePanelState =
   | {
       type: "SERVER";
       server: AgentWorkspaceServerState;
+      runtimeConfiguration: RuntimeConfigurationState;
       manifest: WorkspaceManifest | null;
       projectBrowserManifest?: WorkspaceProjectBrowserManifest | null;
       browserMode?: WorkspaceBrowserMode;

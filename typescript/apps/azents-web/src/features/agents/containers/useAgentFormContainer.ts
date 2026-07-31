@@ -28,6 +28,7 @@ import type {
   LlmProviderIntegrationResponse,
   ModelParameters,
   WorkspaceModelSettingsResponse,
+  WorkspaceRuntimeProfileResponse,
 } from "@azents/public-client";
 
 export interface AgentFormContainerProps {
@@ -53,6 +54,8 @@ export interface AgentFormContainerOutput {
   providerOptions: ProviderIntegrationOption[];
   modelOptions: ModelSelectionOption[];
   workspaceModelSettings: WorkspaceModelSettingsResponse | null;
+  runtimeProfiles: WorkspaceRuntimeProfileResponse[];
+  runtimeProfilesLoading: boolean;
   catalogStates: ReadonlyMap<string, ModelCatalogState>;
   modelsLoading: boolean;
   members: MemberItem[];
@@ -93,6 +96,10 @@ export function useAgentFormContainer(
   });
   const workspaceModelSettingsQuery = trpc.workspaceModelSettings.get.useQuery({
     handle,
+  });
+  const runtimeProfilesQuery = trpc.runtimeProfile.list.useQuery({
+    handle,
+    includeDisabled: true,
   });
   const membersQuery = trpc.workspaceMember.list.useQuery({ handle });
   const adminsQuery = trpc.agent.listAdmins.useQuery(
@@ -149,6 +156,10 @@ export function useAgentFormContainer(
   const modelOptions = useMemo<ModelSelectionOption[]>(() => [], []);
 
   const modelsLoading = integrationsQuery.isLoading;
+  const runtimeProfiles = useMemo(
+    () => runtimeProfilesQuery.data?.items ?? [],
+    [runtimeProfilesQuery.data],
+  );
 
   const members = useMemo(
     () => membersQuery.data?.items ?? [],
@@ -219,7 +230,9 @@ export function useAgentFormContainer(
         values.lightweight_model_label,
         values.selectable_model_options,
       );
-      if (isEditMode && agentId) {
+      if (agentId && formState.type === "EDIT") {
+        const runtimeProfileSelectionChanged =
+          values.runtime_profile_id !== formState.agent.runtime_profile_id;
         updateMutation.mutate({
           handle,
           agentId,
@@ -231,6 +244,13 @@ export function useAgentFormContainer(
           model_parameters: modelParameters,
           system_prompt: values.system_prompt ?? null,
           type: values.type,
+          ...(runtimeProfileSelectionChanged
+            ? {
+                runtime_profile_id: values.runtime_profile_id,
+                expected_runtime_profile_selection_version:
+                  formState.agent.runtime_profile_selection_version,
+              }
+            : {}),
           enabled: values.enabled,
           shell_enabled: values.shell_enabled,
           memory_enabled: values.memory_enabled,
@@ -253,6 +273,7 @@ export function useAgentFormContainer(
           model_parameters: modelParameters,
           system_prompt: values.system_prompt,
           type: values.type,
+          runtime_profile_id: values.runtime_profile_id,
           enabled: values.enabled,
           shell_enabled: values.shell_enabled,
           memory_enabled: values.memory_enabled,
@@ -266,7 +287,7 @@ export function useAgentFormContainer(
         });
       }
     },
-    [handle, agentId, isEditMode, createMutation, updateMutation],
+    [handle, agentId, createMutation, formState, updateMutation],
   );
 
   const onSyncCatalog = useCallback(
@@ -309,6 +330,8 @@ export function useAgentFormContainer(
     providerOptions,
     modelOptions,
     workspaceModelSettings: workspaceModelSettingsQuery.data ?? null,
+    runtimeProfiles,
+    runtimeProfilesLoading: runtimeProfilesQuery.isLoading,
     catalogStates,
     modelsLoading,
     members,

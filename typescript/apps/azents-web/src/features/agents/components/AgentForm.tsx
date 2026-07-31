@@ -30,6 +30,7 @@ import { IconArrowLeft } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { runtimeProfileAvailabilityReason } from "@/features/runtime-profiles/runtimeProfilePresentation";
 import {
   normalizeReasoningEffort,
   reasoningEffortLevels,
@@ -53,6 +54,7 @@ import type { AdminListState, AgentFormState, MutationState } from "../types";
 import type {
   AgentAdminResponse,
   WorkspaceModelSettingsResponse,
+  WorkspaceRuntimeProfileResponse,
 } from "@azents/public-client";
 
 export type AgentFormSection =
@@ -71,6 +73,8 @@ interface AgentFormProps {
   providerOptions: ProviderIntegrationOption[];
   modelOptions: ModelSelectionOption[];
   workspaceModelSettings: WorkspaceModelSettingsResponse | null;
+  runtimeProfiles: WorkspaceRuntimeProfileResponse[];
+  runtimeProfilesLoading: boolean;
   catalogStates: ReadonlyMap<string, ModelCatalogState>;
   modelsLoading: boolean;
   members: MemberItem[];
@@ -96,6 +100,8 @@ export function AgentForm({
   members,
   providerOptions,
   workspaceModelSettings,
+  runtimeProfiles,
+  runtimeProfilesLoading,
   onSyncCatalog,
   onSubmit,
   onAddAdmin,
@@ -119,6 +125,7 @@ export function AgentForm({
       main_model_label: null,
       lightweight_model_label: null,
       system_prompt: "",
+      runtime_profile_id: null,
       type: "public",
       enabled: true,
       reasoning_effort: null,
@@ -173,6 +180,7 @@ export function AgentForm({
         main_model_label: agent.main_model_label,
         lightweight_model_label: agent.lightweight_model_label,
         system_prompt: agent.system_prompt ?? "",
+        runtime_profile_id: agent.runtime_profile_id,
         type: agent.type,
         enabled: agent.enabled,
         reasoning_effort: defaultReasoningEffort,
@@ -239,6 +247,19 @@ export function AgentForm({
     () => selectedModelEffortLevels.map((value) => ({ value, label: value })),
     [selectedModelEffortLevels],
   );
+  const runtimeProfileOptions = useMemo(
+    () =>
+      runtimeProfiles.map((profile) => ({
+        value: profile.id,
+        label: profile.display_name,
+        disabled: !profile.available || profile.lifecycle === "disabled",
+      })),
+    [runtimeProfiles],
+  );
+  const selectedRuntimeProfile =
+    runtimeProfiles.find(
+      (profile) => profile.id === form.values.runtime_profile_id,
+    ) ?? null;
 
   useEffect(() => {
     const normalizedEffort = normalizeReasoningEffort(
@@ -329,6 +350,46 @@ export function AgentForm({
               {...form.getInputProps("description")}
             />
           )}
+
+          {showProfile && (
+            <Select
+              label={t("runtimeProfileLabel")}
+              description={t("runtimeProfileDescription")}
+              placeholder={
+                runtimeProfilesLoading
+                  ? t("runtimeProfileLoading")
+                  : t("runtimeProfilePlaceholder")
+              }
+              data={runtimeProfileOptions}
+              clearable
+              searchable
+              disabled={runtimeProfilesLoading}
+              value={form.values.runtime_profile_id}
+              onChange={(value) =>
+                form.setFieldValue("runtime_profile_id", value)
+              }
+              error={form.errors.runtime_profile_id}
+            />
+          )}
+
+          {showProfile &&
+            selectedRuntimeProfile !== null &&
+            !selectedRuntimeProfile.available && (
+              <Alert color="red" title={t("runtimeProfileUnavailableTitle")}>
+                {t("runtimeProfileUnavailableDescription", {
+                  reason: t(
+                    `runtimeProfileAvailabilityReasons.${runtimeProfileAvailabilityReason(
+                      selectedRuntimeProfile.availability_reason_code,
+                    )}`,
+                  ),
+                })}
+                {selectedRuntimeProfile.availability_reason_code !== null && (
+                  <Text size="xs" c="dimmed" ff="monospace" mt="xs">
+                    {selectedRuntimeProfile.availability_reason_code}
+                  </Text>
+                )}
+              </Alert>
+            )}
 
           {showModel && (
             <SelectableModelOptionsEditor
