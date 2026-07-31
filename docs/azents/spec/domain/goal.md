@@ -16,8 +16,8 @@ code_paths:
   - python/apps/azents/src/azents/services/chat/**
   - python/apps/azents/src/azents/api/public/chat/v1/**
   - typescript/apps/azents-web/src/features/chat/**
-last_verified_at: 2026-07-28
-spec_version: 13
+last_verified_at: 2026-07-31
+spec_version: 14
 ---
 
 # Goal Domain Spec
@@ -123,11 +123,11 @@ with neither pending mailbox item nor an actionable transcript tail is ignored.
 Goal control events are not user-authored chat messages. The UI must not expose them as editable or
 deletable user bubbles.
 
-`goal_continuation` is the common durable event kind for idle-hook continuation
-input. Metadata identifies whether it came from Goal or another provider such as
-External Channel.
+`goal_continuation` is the dedicated durable event kind for Goal idle-hook
+continuation input. Other idle-hook providers use their own mailbox and event
+kinds.
 
-Common event shape:
+Event shape:
 
 - kind: `goal_continuation`
 - source: promoted from a `goal_continuation` mailbox envelope
@@ -135,7 +135,7 @@ Common event shape:
 - content: continuation input content returned by the idle hook
 - attachments: empty list
 
-Goal-provider metadata:
+Metadata:
 
   - `source=goal`
   - `provider_slug=goal`
@@ -143,12 +143,6 @@ Goal-provider metadata:
   - `goal_status=<Goal status snapshot>`
   - `goal_created_at=<Goal created_at snapshot>`
   - `goal_updated_at=<Goal updated_at snapshot>`
-
-External Channel provider metadata:
-
-  - `source=external_channel`
-  - `provider_slug=external_channel`
-  - `active_bindings=<comma-separated binding IDs>`
 
 `goal_updated` event:
 
@@ -205,9 +199,8 @@ Goal snapshot section.
 
 Lowering rules:
 
-- `EventKind.GOAL_CONTINUATION` selects its reminder from metadata. `source=external_channel`
-  lowers as an External Channel Work continuation; Goal metadata lowers as a user-role compatible
-  reminder to keep pursuing the active session Goal.
+- `EventKind.GOAL_CONTINUATION` always lowers as a user-role compatible reminder
+  to keep pursuing the active session Goal.
 - The continuation prompt includes the Goal objective and treats continuation content as internal
   control input, not as a new user message.
 - `EventKind.GOAL_UPDATED` lowers as a reminder that the active Goal was updated by the user.
@@ -242,8 +235,9 @@ Goal continuation/update:
 - Do not display as a user-authored message.
 - Pending state uses the typed Goal continuation projection with common reduced emphasis; any delete
   affordance follows existing mailbox mutation authorization rather than presentation visibility.
-- A `goal_continuation` carrying `source=external_channel` uses a Channel Work continuation label
-  and channel/message icon. Goal-sourced continuation retains the Goal label and target icon.
+- Goal continuation uses the Goal label and target icon. External Channel
+  continuation is a separate event and presentation contract owned by the
+  External Channel domain.
 
 Goal briefing:
 
@@ -268,6 +262,8 @@ Primary checks:
 
 ## Changelog
 
+- **2026-07-31** (spec_version 14) — Made `goal_continuation` Goal-only and
+  removed metadata-based External Channel lowering and presentation.
 - **2026-07-28** (spec_version 13) — Reduced External Channel idle-continuation metadata to actionable active binding handles.
 - **2026-07-23** (spec_version 11) — Documented provider-specific `goal_continuation` metadata, lowering, and External Channel UI presentation.
 - **2026-07-16** (spec_version 9) — Clarified that actionable direct Goal control events can start a run without a pending InputBuffer.

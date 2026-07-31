@@ -1257,6 +1257,19 @@ function mapEvents(
           },
         });
       }
+      case "external_channel_continuation": {
+        return upsertMessageByMergeKey(messages, {
+          id: event.id,
+          role: "external_channel_continuation",
+          content: null,
+          createdAt: event.created_at,
+          status: "complete",
+          metadata: {
+            ...eventMetadata(event),
+            ...continuationMetadata(payload.metadata),
+          },
+        });
+      }
       case "goal_updated": {
         const metadata = isRecord(payload.metadata) ? payload.metadata : {};
         return [
@@ -1368,6 +1381,7 @@ function shouldRemovePendingBufferForEvent(event: ChatEventResponse): boolean {
     case "user_message":
     case "action_message":
     case "goal_continuation":
+    case "external_channel_continuation":
     case "goal_updated":
     case "system_error":
       return true;

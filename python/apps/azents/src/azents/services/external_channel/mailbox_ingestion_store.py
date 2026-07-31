@@ -14,6 +14,7 @@ from azents.core.deps import get_config
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionStartReason,
+    AgentSessionStatus,
     ExternalChannelAccessRequestStatus,
     ExternalChannelAppMode,
     ExternalChannelConversationScopeKind,
@@ -27,6 +28,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
+    ExternalChannelSessionActivationState,
     MailboxItemKind,
     MailboxSchedulingMode,
 )
@@ -55,6 +57,8 @@ from azents.repos.external_channel.data import (
     ExternalChannelPrincipalCreate,
     ExternalChannelResource,
     ExternalChannelResourceCreate,
+    ExternalChannelSessionActivationCreate,
+    ExternalChannelSessionActivationDeliveryCreate,
     ExternalChannelWork,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
@@ -66,14 +70,14 @@ from azents.services.external_channel.discord_selector_scope import (
 )
 from azents.services.external_channel.ingestion import (
     ExternalChannelCanonicalHistoryMessage,
-    ExternalChannelIngestionAcceptance,
+    ExternalChannelIngestionActivation,
+    ExternalChannelIngestionAdmission,
     ExternalChannelIngestionOperation,
     ExternalChannelIngestionOutcome,
     ExternalChannelIngestionOutcomeKind,
     ExternalChannelIngestionPreparation,
     ExternalChannelIngestionReason,
     ExternalChannelIngestionRequest,
-    ExternalChannelIngestionStage,
     ExternalChannelIngressAuthorityKind,
 )
 from azents.services.external_channel.selector_state import (
@@ -192,6 +196,66 @@ class ExternalChannelMailboxIngestionStore:
                 position=position,
                 now=now,
             )
+            trigger_activation = (
+                await self.repository.get_session_activation_by_trigger(
+                    session,
+                    conversation_position_id=position.id,
+                    trigger_provider_message_key=(
+                        request.locator.trigger_provider_message_key
+                    ),
+                    trigger_position=request.locator.trigger_position,
+                )
+            )
+            if trigger_activation is not None:
+                if (
+                    trigger_activation.state
+                    is ExternalChannelSessionActivationState.BLOCKED
+                ):
+                    await session.commit()
+                    return _immediate(
+                        ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
+                        ExternalChannelIngestionReason.INITIAL_DELIVERY_UNAVAILABLE,
+                    )
+                if (
+                    trigger_activation.state
+                    is ExternalChannelSessionActivationState.ACTIVATED
+                ):
+                    await session.commit()
+                    return ExternalChannelIngestionPreparation(
+                        position_id=None,
+                        exclusive_start_position=None,
+                        activation_id=None,
+                        immediate_outcome=ExternalChannelIngestionOutcome(
+                            kind=ExternalChannelIngestionOutcomeKind.DUPLICATE,
+                            reason=ExternalChannelIngestionReason.DUPLICATE,
+                            mailbox_item_id=trigger_activation.mailbox_item_id,
+                            control_delivery_attempt_id=None,
+                            connection_id=None,
+                        ),
+                        wake_mailbox_item_id=trigger_activation.mailbox_item_id,
+                        wake_session_id=trigger_activation.agent_session_id,
+                    )
+                await session.commit()
+                return ExternalChannelIngestionPreparation(
+                    position_id=position.id,
+                    exclusive_start_position=(trigger_activation.range_start_position),
+                    activation_id=trigger_activation.id,
+                    immediate_outcome=None,
+                    wake_mailbox_item_id=None,
+                    wake_session_id=None,
+                )
+            open_activation = (
+                await self.repository.get_open_session_activation_by_position(
+                    session,
+                    conversation_position_id=position.id,
+                )
+            )
+            if open_activation is not None:
+                await session.commit()
+                return _immediate(
+                    ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
+                    ExternalChannelIngestionReason.POSITION_CHANGED,
+                )
             if (
                 request.operation is ExternalChannelIngestionOperation.CURRENT_TRIGGER
                 and position.read_through_position is not None
@@ -216,6 +280,7 @@ class ExternalChannelMailboxIngestionStore:
                 return ExternalChannelIngestionPreparation(
                     position_id=None,
                     exclusive_start_position=None,
+                    activation_id=None,
                     immediate_outcome=ExternalChannelIngestionOutcome(
                         kind=ExternalChannelIngestionOutcomeKind.DUPLICATE,
                         reason=ExternalChannelIngestionReason.DUPLICATE,
@@ -238,19 +303,20 @@ class ExternalChannelMailboxIngestionStore:
             return ExternalChannelIngestionPreparation(
                 position_id=position.id,
                 exclusive_start_position=start,
+                activation_id=None,
                 immediate_outcome=None,
                 wake_mailbox_item_id=None,
                 wake_session_id=None,
             )
 
-    async def stage(
+    async def admit(
         self,
         *,
         request: ExternalChannelIngestionRequest,
         preparation: ExternalChannelIngestionPreparation,
         history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
-    ) -> ExternalChannelIngestionStage:
-        """Commit binding and initial provider-delivery intents."""
+    ) -> ExternalChannelIngestionAdmission:
+        """Commit binding, canonical mailbox input, and delivery intents."""
         now = _utc_now()
         async with self.session_manager() as session:
             connection = await self._lock_authority(session, request=request, now=now)
@@ -279,6 +345,28 @@ class ExternalChannelMailboxIngestionStore:
             ):
                 await session.rollback()
                 return _position_mismatch()
+            open_activation = (
+                await self.repository.get_open_session_activation_by_position(
+                    session,
+                    conversation_position_id=position.id,
+                )
+            )
+            if open_activation is not None and (
+                open_activation.trigger_provider_message_key
+                != request.locator.trigger_provider_message_key
+                or open_activation.trigger_position != request.locator.trigger_position
+            ):
+                await session.rollback()
+                return _position_mismatch()
+            if (
+                open_activation is not None
+                and open_activation.state
+                is ExternalChannelSessionActivationState.BLOCKED
+            ):
+                await session.commit()
+                return _rejected(
+                    ExternalChannelIngestionReason.INITIAL_DELIVERY_UNAVAILABLE
+                )
             trigger = history.trigger
             if (
                 trigger.provider_message_key
@@ -332,11 +420,13 @@ class ExternalChannelMailboxIngestionStore:
                     selector_id=selector.id,
                 )
                 await session.commit()
-                return ExternalChannelIngestionStage(
+                return ExternalChannelIngestionAdmission(
                     status="awaiting_selection",
                     reason=ExternalChannelIngestionReason.SELECTION_REQUIRED,
+                    activation_id=None,
                     binding_id=None,
                     session_id=None,
+                    mailbox_item_id=None,
                     required_delivery_attempt_ids=(),
                     control_delivery_attempt_id=delivery_id,
                     connection_id=connection.id if delivery_id is not None else None,
@@ -402,11 +492,13 @@ class ExternalChannelMailboxIngestionStore:
                     now=now,
                 )
                 await session.commit()
-                return ExternalChannelIngestionStage(
+                return ExternalChannelIngestionAdmission(
                     status="awaiting_access",
                     reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
+                    activation_id=None,
                     binding_id=None,
                     session_id=None,
+                    mailbox_item_id=None,
                     required_delivery_attempt_ids=(),
                     control_delivery_attempt_id=delivery_id,
                     connection_id=connection.id if delivery_id is not None else None,
@@ -436,37 +528,116 @@ class ExternalChannelMailboxIngestionStore:
                 binding=binding,
                 work=work,
             )
+            idempotency_key = _mailbox_idempotency_key(
+                request=request,
+                position_id=position.id,
+            )
+            projection = _invocation_projection(
+                request=request,
+                history=history,
+                resource=resource,
+                binding=binding,
+                trigger_principal_id=conversation.principal_id,
+                invocation_id=idempotency_key,
+            )
+            enqueue = await self.mailbox_service.enqueue(
+                session,
+                MailboxEnqueue(
+                    session_id=binding.agent_session_id,
+                    kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
+                    scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+                    requested_model_target_label=None,
+                    requested_reasoning_effort=None,
+                    sender_user_id=None,
+                    content="",
+                    idempotency_key=idempotency_key,
+                    metadata={},
+                    attachments=[],
+                    file_parts=[],
+                    action=None,
+                    payload=build_external_channel_mailbox_payload(projection),
+                ),
+            )
+            activation = await self.repository.create_session_activation_idempotent(
+                session,
+                ExternalChannelSessionActivationCreate(
+                    connection_id=connection.id,
+                    conversation_position_id=position.id,
+                    binding_id=binding.id,
+                    agent_session_id=binding.agent_session_id,
+                    trigger_provider_message_key=(
+                        request.locator.trigger_provider_message_key
+                    ),
+                    trigger_position=request.locator.trigger_position,
+                    range_start_position=preparation.exclusive_start_position,
+                    state=ExternalChannelSessionActivationState.INITIALIZING,
+                    mailbox_item_id=enqueue.mailbox_item.id,
+                    failure_kind=None,
+                    failure_summary=None,
+                    activated_at=None,
+                    blocked_at=None,
+                ),
+            )
+            if (
+                preparation.activation_id is not None
+                and activation.id != preparation.activation_id
+            ):
+                raise ValueError("External Channel activation identity changed.")
+            required_delivery_attempt_ids = (session_link_id, *progress_ids)
+            for ordinal, delivery_attempt_id in enumerate(
+                required_delivery_attempt_ids
+            ):
+                await self.repository.create_session_activation_delivery_idempotent(
+                    session,
+                    ExternalChannelSessionActivationDeliveryCreate(
+                        activation_id=activation.id,
+                        ordinal=ordinal,
+                        delivery_attempt_id=delivery_attempt_id,
+                    ),
+                )
+            linked_deliveries = (
+                await self.repository.list_session_activation_deliveries(
+                    session,
+                    activation_id=activation.id,
+                )
+            )
             await session.commit()
-            return ExternalChannelIngestionStage(
+            return ExternalChannelIngestionAdmission(
                 status="ready",
                 reason=ExternalChannelIngestionReason.ACCEPTED,
+                activation_id=activation.id,
                 binding_id=binding.id,
                 session_id=binding.agent_session_id,
-                required_delivery_attempt_ids=(session_link_id, *progress_ids),
+                mailbox_item_id=activation.mailbox_item_id,
+                required_delivery_attempt_ids=tuple(
+                    delivery.delivery_attempt_id for delivery in linked_deliveries
+                ),
                 control_delivery_attempt_id=None,
                 connection_id=None,
             )
 
-    async def finalize(
+    async def activate(
         self,
         *,
         request: ExternalChannelIngestionRequest,
         preparation: ExternalChannelIngestionPreparation,
         history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
-        stage: ExternalChannelIngestionStage,
-    ) -> ExternalChannelIngestionAcceptance:
-        """Atomically enqueue provider history after initial delivery succeeds."""
+        stage: ExternalChannelIngestionAdmission,
+    ) -> ExternalChannelIngestionActivation:
+        """Atomically activate retained provider history after delivery succeeds."""
         if (
             stage.status != "ready"
+            or stage.activation_id is None
             or stage.binding_id is None
             or stage.session_id is None
+            or stage.mailbox_item_id is None
         ):
             raise ValueError("External Channel ready stage is unavailable.")
         now = _utc_now()
         async with self.session_manager() as session:
             connection = await self._lock_authority(session, request=request, now=now)
             if connection is None:
-                return _acceptance_rejected(
+                return _activation_rejected(
                     ExternalChannelIngestionReason.INGRESS_AUTHORITY_STALE
                 )
             if preparation.position_id is None:
@@ -476,7 +647,7 @@ class ExternalChannelMailboxIngestionStore:
                 position_id=preparation.position_id,
             )
             if position is None or position.connection_id != connection.id:
-                return _acceptance_rejected(
+                return _activation_rejected(
                     ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
                 )
             replay_after_position = (
@@ -491,21 +662,43 @@ class ExternalChannelMailboxIngestionStore:
                 != preparation.exclusive_start_position
             ):
                 await session.rollback()
-                return _acceptance_position_mismatch()
-            resource = await self.repository.get_resource_by_provider_key(
+                return _activation_position_mismatch()
+            resource_snapshot = await self.repository.get_resource_by_provider_key(
                 session,
                 connection_id=connection.id,
                 provider_resource_key=request.locator.provider_resource_key,
             )
+            resource = (
+                None
+                if resource_snapshot is None
+                else await self.repository.lock_resource(
+                    session,
+                    resource_id=resource_snapshot.id,
+                )
+            )
             if (
                 resource is None
+                or resource.connection_id != connection.id
+                or resource.provider_resource_key
+                != request.locator.provider_resource_key
                 or resource.status is not ExternalChannelResourceStatus.ACTIVE
                 or not self._replay_source_matches(
                     request=request,
                     resource=resource,
                 )
             ):
-                return _acceptance_rejected(
+                return _activation_rejected(
+                    ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
+                )
+            agent_session = await self.agent_session_repository.lock_by_id(
+                session,
+                stage.session_id,
+            )
+            if (
+                agent_session is None
+                or agent_session.status is not AgentSessionStatus.ACTIVE
+            ):
+                return _activation_rejected(
                     ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
                 )
             conversation = await self._resolve_conversation(
@@ -522,8 +715,39 @@ class ExternalChannelMailboxIngestionStore:
                 or conversation.binding.id != stage.binding_id
                 or conversation.binding.agent_session_id != stage.session_id
             ):
-                return _acceptance_rejected(
+                return _activation_rejected(
                     ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
+                )
+            activation = await self.repository.lock_session_activation(
+                session,
+                activation_id=stage.activation_id,
+            )
+            if (
+                activation is None
+                or activation.connection_id != connection.id
+                or activation.conversation_position_id != position.id
+                or activation.binding_id != conversation.binding.id
+                or activation.agent_session_id != conversation.binding.agent_session_id
+                or activation.mailbox_item_id != stage.mailbox_item_id
+                or activation.trigger_provider_message_key
+                != request.locator.trigger_provider_message_key
+                or activation.trigger_position != request.locator.trigger_position
+            ):
+                return _activation_rejected(
+                    ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
+                )
+            if activation.state is ExternalChannelSessionActivationState.BLOCKED:
+                return _activation_rejected(
+                    ExternalChannelIngestionReason.INITIAL_DELIVERY_UNAVAILABLE
+                )
+            if activation.state is ExternalChannelSessionActivationState.ACTIVATED:
+                return ExternalChannelIngestionActivation(
+                    status="duplicate",
+                    reason=ExternalChannelIngestionReason.DUPLICATE,
+                    mailbox_item_id=activation.mailbox_item_id,
+                    session_id=activation.agent_session_id,
+                    control_delivery_attempt_id=None,
+                    connection_id=None,
                 )
             agent_id = conversation.route.require_active_agent_id()
             if (
@@ -534,7 +758,7 @@ class ExternalChannelMailboxIngestionStore:
                 )
                 is not None
             ):
-                return _acceptance_rejected(
+                return _activation_rejected(
                     ExternalChannelIngestionReason.AUTHOR_NOT_ELIGIBLE
                 )
             grant = await self.repository.get_active_access_grant(
@@ -544,7 +768,7 @@ class ExternalChannelMailboxIngestionStore:
                 agent_session_id=conversation.binding.agent_session_id,
             )
             if grant is None and not _route_has_automatic_access(conversation.route):
-                return _acceptance_rejected(
+                return _activation_rejected(
                     ExternalChannelIngestionReason.ACCESS_REQUIRED
                 )
             for delivery_attempt_id in stage.required_delivery_attempt_ids:
@@ -557,39 +781,22 @@ class ExternalChannelMailboxIngestionStore:
                     or attempt.binding_id != conversation.binding.id
                     or attempt.status is not ExternalChannelDeliveryStatus.DELIVERED
                 ):
-                    return _acceptance_rejected(
+                    return _activation_rejected(
                         ExternalChannelIngestionReason.INITIAL_DELIVERY_UNAVAILABLE
                     )
-            idempotency_key = _mailbox_idempotency_key(
-                request=request,
-                position_id=position.id,
+            linked_deliveries = (
+                await self.repository.list_session_activation_deliveries(
+                    session,
+                    activation_id=activation.id,
+                )
             )
-            projection = _invocation_projection(
-                request=request,
-                history=history,
-                resource=resource,
-                binding=conversation.binding,
-                trigger_principal_id=conversation.principal_id,
-                invocation_id=idempotency_key,
-            )
-            enqueue = await self.mailbox_service.enqueue(
-                session,
-                MailboxEnqueue(
-                    session_id=conversation.binding.agent_session_id,
-                    kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
-                    scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
-                    requested_model_target_label=None,
-                    requested_reasoning_effort=None,
-                    sender_user_id=None,
-                    content="",
-                    idempotency_key=idempotency_key,
-                    metadata={},
-                    attachments=[],
-                    file_parts=[],
-                    action=None,
-                    payload=build_external_channel_mailbox_payload(projection),
-                ),
-            )
+            if (
+                tuple(delivery.delivery_attempt_id for delivery in linked_deliveries)
+                != stage.required_delivery_attempt_ids
+            ):
+                return _activation_rejected(
+                    ExternalChannelIngestionReason.INITIAL_DELIVERY_UNAVAILABLE
+                )
             await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,
                 conversation.binding.agent_session_id,
@@ -604,7 +811,7 @@ class ExternalChannelMailboxIngestionStore:
                 )
                 if not advanced:
                     await session.rollback()
-                    return _acceptance_position_mismatch()
+                    return _activation_position_mismatch()
             await self._initialize_thread_position(
                 session,
                 request=request,
@@ -612,19 +819,52 @@ class ExternalChannelMailboxIngestionStore:
                 parent_position=position,
                 trigger_position=history.trigger_position,
             )
+            activated = await self.repository.activate_session_activation(
+                session,
+                activation_id=activation.id,
+                mailbox_item_id=activation.mailbox_item_id,
+                activated_at=now,
+            )
+            if activated is None:
+                await session.rollback()
+                return _activation_position_mismatch()
             await session.commit()
-            return ExternalChannelIngestionAcceptance(
-                status="accepted" if enqueue.created else "duplicate",
-                reason=(
-                    ExternalChannelIngestionReason.ACCEPTED
-                    if enqueue.created
-                    else ExternalChannelIngestionReason.DUPLICATE
-                ),
-                mailbox_item_id=enqueue.mailbox_item.id,
+            return ExternalChannelIngestionActivation(
+                status="accepted",
+                reason=ExternalChannelIngestionReason.ACCEPTED,
+                mailbox_item_id=activation.mailbox_item_id,
                 session_id=conversation.binding.agent_session_id,
                 control_delivery_attempt_id=None,
                 connection_id=None,
             )
+
+    async def block(
+        self,
+        *,
+        stage: ExternalChannelIngestionAdmission,
+        reason: ExternalChannelIngestionReason,
+    ) -> None:
+        """Block one Session activation after terminal initialization."""
+        if stage.status != "ready" or stage.activation_id is None:
+            raise ValueError("External Channel ready activation is unavailable.")
+        async with self.session_manager() as session:
+            activation = await self.repository.lock_session_activation(
+                session,
+                activation_id=stage.activation_id,
+            )
+            if activation is None:
+                raise ValueError("External Channel activation disappeared.")
+            if activation.state is ExternalChannelSessionActivationState.INITIALIZING:
+                await self.repository.block_session_activation(
+                    session,
+                    activation_id=activation.id,
+                    failure_kind=reason.value,
+                    failure_summary=(
+                        "External Channel initialization became non-recoverable."
+                    ),
+                    blocked_at=_utc_now(),
+                )
+            await session.commit()
 
     async def _resolve_resource(
         self,
@@ -1133,7 +1373,7 @@ class ExternalChannelMailboxIngestionStore:
         )
         if workspace is None:
             raise RuntimeError("External Channel Workspace disappeared.")
-        session_url = _session_url(
+        session_url = build_external_channel_session_url(
             self.config.web_url,
             workspace.handle,
             route.require_active_agent_id(),
@@ -1295,13 +1535,15 @@ class ExternalChannelMailboxIngestionStore:
         self,
         session: AsyncSession,
         reason: ExternalChannelIngestionReason,
-    ) -> ExternalChannelIngestionStage:
+    ) -> ExternalChannelIngestionAdmission:
         await session.commit()
-        return ExternalChannelIngestionStage(
+        return ExternalChannelIngestionAdmission(
             status="ignored",
             reason=reason,
+            activation_id=None,
             binding_id=None,
             session_id=None,
+            mailbox_item_id=None,
             required_delivery_attempt_ids=(),
             control_delivery_attempt_id=None,
             connection_id=None,
@@ -1458,6 +1700,7 @@ def _immediate(
     return ExternalChannelIngestionPreparation(
         position_id=None,
         exclusive_start_position=None,
+        activation_id=None,
         immediate_outcome=ExternalChannelIngestionOutcome(
             kind=kind,
             reason=reason,
@@ -1470,7 +1713,7 @@ def _immediate(
     )
 
 
-def _position_mismatch() -> ExternalChannelIngestionStage:
+def _position_mismatch() -> ExternalChannelIngestionAdmission:
     return _rejected(
         ExternalChannelIngestionReason.POSITION_CHANGED,
         status="position_mismatch",
@@ -1481,31 +1724,33 @@ def _rejected(
     reason: ExternalChannelIngestionReason,
     *,
     status: str = "terminal_rejection",
-) -> ExternalChannelIngestionStage:
-    return ExternalChannelIngestionStage(
+) -> ExternalChannelIngestionAdmission:
+    return ExternalChannelIngestionAdmission(
         status=status,  # type: ignore[arg-type]
         reason=reason,
+        activation_id=None,
         binding_id=None,
         session_id=None,
+        mailbox_item_id=None,
         required_delivery_attempt_ids=(),
         control_delivery_attempt_id=None,
         connection_id=None,
     )
 
 
-def _acceptance_position_mismatch() -> ExternalChannelIngestionAcceptance:
-    return _acceptance_rejected(
+def _activation_position_mismatch() -> ExternalChannelIngestionActivation:
+    return _activation_rejected(
         ExternalChannelIngestionReason.POSITION_CHANGED,
         status="position_mismatch",
     )
 
 
-def _acceptance_rejected(
+def _activation_rejected(
     reason: ExternalChannelIngestionReason,
     *,
     status: str = "terminal_rejection",
-) -> ExternalChannelIngestionAcceptance:
-    return ExternalChannelIngestionAcceptance(
+) -> ExternalChannelIngestionActivation:
+    return ExternalChannelIngestionActivation(
         status=status,  # type: ignore[arg-type]
         reason=reason,
         mailbox_item_id=None,
@@ -1532,7 +1777,7 @@ def _approval_url(web_url: str, access_request_id: str) -> str | None:
     )
 
 
-def _session_url(
+def build_external_channel_session_url(
     web_url: str,
     workspace_handle: str,
     agent_id: str,
@@ -1542,8 +1787,8 @@ def _session_url(
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return None
     path = (
-        f"/{quote(workspace_handle)}/agents/{quote(agent_id)}"
-        f"/sessions/{quote(session_id)}"
+        f"/w/{quote(workspace_handle, safe='')}/agents/{quote(agent_id, safe='')}"
+        f"/sessions/{quote(session_id, safe='')}"
     )
     return urlunparse(parsed._replace(path=path, query="", fragment=""))
 

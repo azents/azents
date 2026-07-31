@@ -2,7 +2,7 @@
 
 import dataclasses
 from collections.abc import Sequence
-from typing import Annotated
+from typing import Annotated, assert_never
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +14,8 @@ from azents.engine.hooks.dispatcher import (
     RuntimeHookProviderRef,
 )
 from azents.engine.hooks.types import (
+    ExternalChannelSessionContinuationInput,
+    GoalSessionContinuationInput,
     SessionContinuationInput,
     SessionIdleHookContext,
 )
@@ -194,12 +196,19 @@ class IdleContinuationService:
         continuation: SessionContinuationInput,
     ) -> MailboxEnqueue:
         """Convert one hook continuation to pending input."""
+        match continuation:
+            case GoalSessionContinuationInput():
+                mailbox_kind = MailboxItemKind.GOAL_CONTINUATION
+            case ExternalChannelSessionContinuationInput():
+                mailbox_kind = MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION
+            case _:
+                assert_never(continuation)
         metadata: dict[str, JSONValue] = dict(continuation.metadata)
         if continuation.hook_provider_slug is not None:
             metadata["provider_slug"] = continuation.hook_provider_slug
         return MailboxEnqueue(
             session_id=session_id,
-            kind=MailboxItemKind.GOAL_CONTINUATION,
+            kind=mailbox_kind,
             scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
             requested_model_target_label=None,
             requested_reasoning_effort=None,

@@ -29,23 +29,30 @@ export function ActivityMessageRow({
   event,
 }: ActivityMessageRowProps): ReactElement | null {
   const t = useTranslations("chat");
-  if (event.kind !== "goal-control" && event.kind !== "other") {
+  if (
+    event.kind !== "goal-control" &&
+    event.kind !== "external-channel-continuation" &&
+    event.kind !== "other"
+  ) {
     return null;
   }
 
   const continuation = continuationPresentation(event.message);
   const label =
-    event.kind === "goal-control"
-      ? event.message?.role === "goal_continuation"
-        ? t(continuation.labelKey)
-        : t("goalUpdatedIndicator")
-      : (activityPreview(event.message?.content ?? "") ?? t("agentFallback"));
+    event.kind === "external-channel-continuation"
+      ? t("externalChannelContinuationIndicator")
+      : event.kind === "goal-control"
+        ? event.message?.role === "goal_continuation"
+          ? t(continuation.labelKey)
+          : t("goalUpdatedIndicator")
+        : (activityPreview(event.message?.content ?? "") ?? t("agentFallback"));
 
   return (
     <ActivityRow
       ariaLabel={label}
       icon={
-        event.kind === "goal-control" ? (
+        event.kind === "goal-control" ||
+        event.kind === "external-channel-continuation" ? (
           continuation.icon === "channel" ? (
             <IconMessageCircle aria-hidden="true" size={activityRowIconSize} />
           ) : (

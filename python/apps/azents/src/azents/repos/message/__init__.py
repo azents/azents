@@ -84,7 +84,11 @@ def _validate_payload(row: RDBEvent) -> EventPayload:
             return CompactionMarkerPayload.model_validate(row.payload)
         case EventKind.COMPACTION_SUMMARY:
             return CompactionSummaryPayload.model_validate(row.payload)
-        case EventKind.GOAL_CONTINUATION | EventKind.GOAL_UPDATED:
+        case (
+            EventKind.GOAL_CONTINUATION
+            | EventKind.EXTERNAL_CHANNEL_CONTINUATION
+            | EventKind.GOAL_UPDATED
+        ):
             return UserMessagePayload.model_validate(row.payload)
         case EventKind.ACTION_MESSAGE:
             return ActionMessagePayload.model_validate(row.payload)

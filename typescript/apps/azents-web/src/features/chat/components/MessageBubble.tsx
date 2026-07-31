@@ -518,7 +518,10 @@ export const MessageBubble = memo(function MessageBubble({
   const senderLabel =
     sender.type === "AVAILABLE" ? sender.name : t("senderUnavailable");
 
-  if (message.role === "goal_continuation") {
+  if (
+    message.role === "goal_continuation" ||
+    message.role === "external_channel_continuation"
+  ) {
     const continuation = continuationPresentation(message);
     return (
       <Box opacity={dimmed ? 0.45 : 1}>

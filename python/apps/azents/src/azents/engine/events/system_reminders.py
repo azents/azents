@@ -96,10 +96,10 @@ def format_goal_updated_reminder(goal_objective: str | None) -> str:
     )
 
 
-def format_idle_continuation_reminder(metadata: dict[str, str]) -> str:
-    """Render a provider-specific idle continuation reminder."""
-    if metadata.get("source") != "external_channel":
-        return format_goal_continuation_reminder(metadata.get("goal_objective"))
+def format_external_channel_continuation_reminder(
+    metadata: dict[str, str],
+) -> str:
+    """Render an External Channel continuation as model input prompt."""
     handles = metadata.get("active_bindings")
     data = (
         ()

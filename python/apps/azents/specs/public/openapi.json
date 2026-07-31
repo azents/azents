@@ -17129,6 +17129,7 @@
         "enum": [
           "user_message",
           "goal_continuation",
+          "external_channel_continuation",
           "goal_updated",
           "action_message",
           "agent_message",
@@ -22438,6 +22439,36 @@
         "title": "PendingMailboxEnvelope",
         "description": "Stable pending mailbox envelope projection."
       },
+      "PendingMailboxExternalChannelContinuationPresentation": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "external_channel_continuation",
+            "title": "Type"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "requested_inference_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RequestedInferenceProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "content"
+        ],
+        "title": "PendingMailboxExternalChannelContinuationPresentation",
+        "description": "Safe pending External Channel continuation presentation."
+      },
       "PendingMailboxExternalChannelPresentation": {
         "properties": {
           "type": {
@@ -22591,6 +22622,9 @@
                 "$ref": "#/components/schemas/PendingMailboxGoalContinuationPresentation"
               },
               {
+                "$ref": "#/components/schemas/PendingMailboxExternalChannelContinuationPresentation"
+              },
+              {
                 "$ref": "#/components/schemas/PendingMailboxAgentMessagePresentation"
               },
               {
@@ -22606,6 +22640,7 @@
               "mapping": {
                 "action_message": "#/components/schemas/PendingMailboxActionPresentation",
                 "agent_message": "#/components/schemas/PendingMailboxAgentMessagePresentation",
+                "external_channel_continuation": "#/components/schemas/PendingMailboxExternalChannelContinuationPresentation",
                 "external_channel_message": "#/components/schemas/PendingMailboxExternalChannelPresentation",
                 "goal_continuation": "#/components/schemas/PendingMailboxGoalContinuationPresentation",
                 "user_message": "#/components/schemas/PendingMailboxUserMessagePresentation"

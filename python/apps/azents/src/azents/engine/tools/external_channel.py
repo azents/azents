@@ -33,8 +33,8 @@ from azents.core.tools import (
 from azents.engine.hooks.types import (
     CompactionSummaryHookContext,
     CompactionSummaryReplace,
+    ExternalChannelSessionContinuationInput,
     RuntimeHooks,
-    SessionContinuationInput,
     SessionIdleHookContext,
     SessionIdleResult,
 )
@@ -356,7 +356,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
         handles = [work.binding_id for work in works]
         return SessionIdleResult(
             continuations=[
-                SessionContinuationInput(
+                ExternalChannelSessionContinuationInput(
                     content="",
                     metadata={
                         "source": "external_channel",

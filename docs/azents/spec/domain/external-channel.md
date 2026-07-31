@@ -54,7 +54,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-31
-spec_version: 32
+spec_version: 34
 ---
 
 # External Channel
@@ -79,7 +79,7 @@ contain multiple independent bindings.
 - Connection and route records are Workspace/Agent administration state.
 - Provider resources, principals, conversation positions, access requests, and
   selector interactions retain only routing, authorization, and replay identity.
-- Bindings, Channel Work, channel actions, and delivery attempts are Session lifecycle resources.
+- Bindings, Session activations, Channel Work, channel actions, and delivery attempts are Session lifecycle resources.
 - Credentials are encrypted at rest and decrypted only inside provider adapters. Public APIs, generated clients, prompts, events, logs, UI state, and test evidence expose only redacted credential status.
 - Provider history is the inbound content authority. One accepted history range becomes
   one canonical mailbox item and then contiguous Session events with provider, resource,
@@ -91,6 +91,11 @@ contain multiple independent bindings.
 - External Channel wake-ups are routing-only `SessionWakeUp(session_id)` notifications.
   The canonical mailbox item is the accepted-input and wake-recovery identity; provider
   content is never carried by the broker.
+- Unfinished Channel Work uses the dedicated
+  `external_channel_continuation` hook input, mailbox kind, event kind, model
+  reminder, public projection, and UI presentation. It never reuses
+  `goal_continuation`, so active Goal state cannot reinterpret or recursively
+  re-trigger Channel work.
 - Foreign keys are restrictive across lifecycle roots. AgentSession deletion cannot cascade away provider or audit roots before lifecycle cleanup and verification complete.
 
 ## Core Records
@@ -104,8 +109,9 @@ contain multiple independent bindings.
 | Resource | One provider conversation: a Slack thread or Discord root/thread, with provider labels, availability, latest activity, and any provisioned delivery-thread identity. Discord labels separately retain source channel, parent channel, root message, existing thread, and provisioned delivery thread identities. |
 | Conversation position | Durable read-through position for one connection-scoped parent channel or thread. PostgreSQL position compare-and-set is the ordering authority across retries and replicas. |
 | Principal | Provider tenant/user identity and author category. It is not an Azents User or WorkspaceUser. |
-| Binding | Persistent link from one route/resource to one AgentSession. `disconnected_at IS NULL` identifies the current connected relationship; a non-null timestamp is its terminal boundary. A new authorized conversation stages the binding before required provider initialization and mailbox admission. |
-| Mailbox item and Session events | One deterministic mailbox item contains the ordered immutable provider-history projection for an accepted trigger. Mailbox identity owns input idempotency and pending wake recovery. Promotion creates the canonical External Channel Session events; no parallel provider-message, revision, invocation-batch, or wake-dispatch record exists. |
+| Binding | Persistent link from one route/resource to one AgentSession. `disconnected_at IS NULL` identifies the current connected relationship; a non-null timestamp is its terminal boundary. A new authorized conversation commits the binding and a real idle Session before provider initialization. |
+| Session activation | Durable admission-progress and execution-gate authority for one conversation-position trigger. It owns the exact binding, Session, trigger boundary, canonical mailbox identity, ordered required delivery attempts, and terminal initialization state without copying provider content. |
+| Mailbox item and Session events | One deterministic mailbox item contains the ordered immutable provider-history projection before provider initialization starts. Mailbox identity owns input idempotency and pending wake recovery, but an External Channel item is not promotable while its activation is `initializing` or `blocked`. Promotion after activation creates the canonical External Channel Session events; no parallel provider-message, revision, invocation-batch, or wake-dispatch record exists. |
 | Access request/grant/block | Opaque approval request with a content-free provider locator and conversation-position replay boundary, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
 | Channel Work/action/delivery | Binding-scoped durable current-work title and ordered provider-neutral tasks with stable identities, status, optional details, optional output, and labeled URL sources; one work-cycle-owned desired progress state and provider identity; one atomic explicit action; and persisted provider intents/outcomes. File-bearing replies retain only bounded Runtime source manifests and delivery phase evidence. Management derives projection state from the latest progress operation belonging to the current work cycle. |
 
@@ -188,10 +194,15 @@ contain multiple independent bindings.
   verified object before Runtime delivery. Any metadata, response-header, or body-size
   mismatch fails closed without a Runtime destination commit; provider URLs and bytes
   remain outside durable External Channel state.
-- Initial synchronous binding acceptance stages the binding, Session, one separate
-  Session navigation intent, and one checking work projection. It settles the Session
-  navigation and every initial progress delivery in order before mailbox admission,
-  position advancement, Session running transition, and wake-up. Slack lowers work through its
+- Initial synchronous binding acceptance commits the binding, real idle Session,
+  canonical non-promotable mailbox input, durable Session activation, one separate
+  Session navigation intent, and one checking work projection. The activation
+  explicitly links the mailbox item plus Session navigation and every initial progress
+  delivery in stable order. It settles those deliveries before one transaction
+  activates the retained input, advances the position, and marks the Session running.
+  Broker wake follows that commit using the mailbox item as its recovery identity.
+  Failed or unknown required delivery retains the input but blocks the activation
+  without promotion, running transition, or wake-up. Slack lowers work through its
   retained Tracker message; Discord lowers each work snapshot to one retained compact
   Embed Tracker. The Embed title carries the current-work title, while its bounded
   description carries the status summary, every ordered task title and status marker,
@@ -314,6 +325,12 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-31** (spec_version 34) — Added the dedicated External Channel
+  continuation contract across runtime, persistence, model lowering, API, and UI.
+- **2026-07-31** (spec_version 33) — Added durable ordered Session activation
+  authority for binding, Session navigation, Tracker, mailbox, and running/wake
+  admission, including non-executing blocked outcomes and canonical `/w` Session
+  navigation.
 - **2026-07-31** (spec_version 32) — Made `disconnected_at` the only binding
   connectedness authority, ordered required Session/progress delivery before mailbox
   admission and wake, and removed transient ingress health from outbound REST

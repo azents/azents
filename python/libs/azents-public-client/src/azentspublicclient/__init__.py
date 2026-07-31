@@ -312,6 +312,7 @@ __all__ = [
     "PendingMailboxActionPresentation",
     "PendingMailboxAgentMessagePresentation",
     "PendingMailboxEnvelope",
+    "PendingMailboxExternalChannelContinuationPresentation",
     "PendingMailboxExternalChannelPresentation",
     "PendingMailboxGoalContinuationPresentation",
     "PendingMailboxItem",
@@ -747,6 +748,7 @@ from azentspublicclient.models.password_login_response import PasswordLoginRespo
 from azentspublicclient.models.pending_mailbox_action_presentation import PendingMailboxActionPresentation as PendingMailboxActionPresentation
 from azentspublicclient.models.pending_mailbox_agent_message_presentation import PendingMailboxAgentMessagePresentation as PendingMailboxAgentMessagePresentation
 from azentspublicclient.models.pending_mailbox_envelope import PendingMailboxEnvelope as PendingMailboxEnvelope
+from azentspublicclient.models.pending_mailbox_external_channel_continuation_presentation import PendingMailboxExternalChannelContinuationPresentation as PendingMailboxExternalChannelContinuationPresentation
 from azentspublicclient.models.pending_mailbox_external_channel_presentation import PendingMailboxExternalChannelPresentation as PendingMailboxExternalChannelPresentation
 from azentspublicclient.models.pending_mailbox_goal_continuation_presentation import PendingMailboxGoalContinuationPresentation as PendingMailboxGoalContinuationPresentation
 from azentspublicclient.models.pending_mailbox_item import PendingMailboxItem as PendingMailboxItem

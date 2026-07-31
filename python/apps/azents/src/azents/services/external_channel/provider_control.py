@@ -19,6 +19,9 @@ from azents.services.external_channel.channel_action import (
 from azents.services.external_channel.conversation import (
     ExternalChannelOperationDeadline,
 )
+from azents.services.external_channel.ingestion import (
+    ExternalChannelRequiredDeliveryResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -127,12 +130,12 @@ class ExternalChannelProviderControlService:
         *,
         delivery_attempt_id: str,
         deadline: ExternalChannelOperationDeadline,
-    ) -> bool:
-        """Synchronously settle one required delivery before mailbox acceptance."""
+    ) -> ExternalChannelRequiredDeliveryResult:
+        """Synchronously settle one required delivery before Session activation."""
         while True:
             remaining = deadline.remaining_seconds()
             if remaining <= 0:
-                return False
+                return "pending"
             async with self.session_manager() as session:
                 status = await self.repository.get_delivery_status(
                     session,
@@ -140,7 +143,7 @@ class ExternalChannelProviderControlService:
                 )
             match status:
                 case ExternalChannelDeliveryStatus.DELIVERED:
-                    return True
+                    return "delivered"
                 case ExternalChannelDeliveryStatus.PENDING:
                     try:
                         async with asyncio.timeout(remaining):
@@ -148,7 +151,7 @@ class ExternalChannelProviderControlService:
                                 delivery_attempt_id
                             )
                     except TimeoutError:
-                        return False
+                        return "pending"
                 case ExternalChannelDeliveryStatus.ATTEMPTING:
                     await asyncio.sleep(min(0.01, remaining))
                 case (
@@ -157,7 +160,7 @@ class ExternalChannelProviderControlService:
                     | ExternalChannelDeliveryStatus.NOT_ATTEMPTED
                     | None
                 ):
-                    return False
+                    return "terminal_failure"
 
 
 def get_external_channel_provider_control_service(

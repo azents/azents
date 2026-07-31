@@ -35,7 +35,7 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
 last_verified_at: 2026-07-31
-spec_version: 14
+spec_version: 15
 ---
 
 # External Channel Authorization
@@ -142,13 +142,14 @@ service re-reads provider history outside a database transaction. If the shared
 position is still before the trigger, it reads forward normally; if another accepted
 invocation advanced past the trigger, it reuses the saved range start and exact trigger
 boundary. It then reuses the committed binding, stages deterministic Session-link and
-initial-progress delivery identities, settles every required delivery outside a
-database transaction, and admits the deterministic mailbox item only after all are
-durably delivered. Both position cases converge on one mailbox item and logical wake.
+initial-progress delivery identities, commits the deterministic canonical mailbox item
+and durable activation, and then settles every required delivery outside a database
+transaction. Both position cases converge on one mailbox item and logical wake.
 Repeating a compatible Allow may perform the same provider-history replay to recover a
 post-commit failure, but mailbox identity prevents another Session input or execution.
 Replay failure never reverts the already committed access decision or binding, and it
-does not admit mailbox input while required provider initialization is incomplete.
+keeps the retained mailbox input non-promotable while required provider initialization
+is incomplete or terminally blocked.
 This durable replay remains available while connection ingress health is `active`,
 `degraded`, or `reconnect_required`; `configuring`, `disconnecting`, and `disconnected`
 connections cannot start it. Transient Gateway or Socket recovery therefore does not
@@ -174,6 +175,9 @@ Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-07-31** (spec_version 15) — Retained the canonical replay mailbox item before
+  required provider initialization and made durable activation state gate promotion,
+  running transition, and wake recovery.
 - **2026-07-31** (spec_version 14) — Replaced binding active/inactive state with
   terminal `disconnected_at` authority and made Allow replay settle durable
   Session-link and initial-progress deliveries before mailbox admission.

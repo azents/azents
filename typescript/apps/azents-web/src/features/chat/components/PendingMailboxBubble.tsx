@@ -13,6 +13,7 @@ import {
 import {
   IconBrandDiscord,
   IconBrandSlack,
+  IconMessageCircle,
   IconTargetArrow,
   IconTrash,
 } from "@tabler/icons-react";
@@ -94,6 +95,30 @@ export function PendingMailboxBubble({
           <Box style={{ minWidth: 0 }}>
             <Text size="xs" fw={700} c="dimmed">
               Goal continuation
+            </Text>
+            <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+              {presentation.content}
+            </Text>
+            {commonActions}
+          </Box>
+        </Group>
+      </MessageMetadataSurface>
+    );
+  }
+
+  if (presentation.type === "external_channel_continuation") {
+    return (
+      <MessageMetadataSurface>
+        <Group
+          gap="xs"
+          mb="md"
+          wrap="nowrap"
+          style={{ opacity: deleting ? 0.45 : 0.6 }}
+        >
+          <IconMessageCircle size={15} aria-hidden="true" />
+          <Box style={{ minWidth: 0 }}>
+            <Text size="xs" fw={700} c="dimmed">
+              External Channel continuation
             </Text>
             <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
               {presentation.content}

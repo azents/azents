@@ -274,6 +274,7 @@ class MailboxItemKind(enum.StrEnum):
 
     USER_MESSAGE = "user_message"
     GOAL_CONTINUATION = "goal_continuation"
+    EXTERNAL_CHANNEL_CONTINUATION = "external_channel_continuation"
     ACTION_MESSAGE = "action_message"
     AGENT_MESSAGE = "agent_message"
     EXTERNAL_CHANNEL_INVOCATION = "external_channel_invocation"
@@ -291,6 +292,7 @@ class EventKind(enum.StrEnum):
 
     USER_MESSAGE = "user_message"
     GOAL_CONTINUATION = "goal_continuation"
+    EXTERNAL_CHANNEL_CONTINUATION = "external_channel_continuation"
     GOAL_UPDATED = "goal_updated"
     ACTION_MESSAGE = "action_message"
     AGENT_MESSAGE = "agent_message"
@@ -927,6 +929,14 @@ class ExternalChannelDeliveryStatus(enum.StrEnum):
     FAILED = "failed"
     UNKNOWN = "unknown"
     NOT_ATTEMPTED = "not_attempted"
+
+
+class ExternalChannelSessionActivationState(enum.StrEnum):
+    """Durable admission state for one External Channel Session invocation."""
+
+    INITIALIZING = "initializing"
+    ACTIVATED = "activated"
+    BLOCKED = "blocked"
 
 
 class ExternalChannelWorkProjectionStatus(enum.StrEnum):

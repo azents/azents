@@ -115,6 +115,7 @@ _EXTERNAL_CHANNEL_FILE_DOWNLOAD_CALL_ID = "call_external_channel_file_download"
 _EXTERNAL_CHANNEL_FILE_PROCESS_CALL_ID = "call_external_channel_file_process"
 _EXTERNAL_CHANNEL_FILE_FINISH_CALL_ID = "call_external_channel_file_finish"
 _EXTERNAL_CHANNEL_FILE_INPUT_PATH = "/workspace/agent/external-input.txt"
+_EXTERNAL_CHANNEL_FILE_INPUT_BYTES = 6 * 1024 * 1024
 _EXTERNAL_CHANNEL_FILE_OUTPUT_PATHS = (
     "/workspace/agent/external-summary.txt",
     "/workspace/agent/external-details.txt",
@@ -793,6 +794,7 @@ class _Handler(BaseHTTPRequestHandler):
                     name="download_external_file",
                     arguments={
                         "file": locators[0],
+                        "expected_size_bytes": _EXTERNAL_CHANNEL_FILE_INPUT_BYTES,
                         "path": _EXTERNAL_CHANNEL_FILE_INPUT_PATH,
                         "overwrite": True,
                     },

@@ -59,6 +59,7 @@ from azents.engine.events.protocols import (
 from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
 from azents.engine.events.system_reminders import (
     format_compaction_summary_reminder,
+    format_external_channel_continuation_reminder,
     format_goal_continuation_reminder,
     format_goal_resumed_reminder,
     format_goal_updated_reminder,
@@ -989,6 +990,40 @@ class TestLiteLLMResponsesLowerer:
             }
         ]
 
+    def test_lowers_external_channel_continuation_with_dedicated_prompt(self) -> None:
+        """External Channel continuation does not use Goal continuation semantics."""
+        lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
+        transcript = [
+            _event(
+                EventKind.EXTERNAL_CHANNEL_CONTINUATION,
+                UserMessagePayload(
+                    sender_user_id=None,
+                    content="",
+                    metadata={
+                        "source": "external_channel",
+                        "active_bindings": "binding-handle",
+                        "goal_objective": "must not be rendered",
+                    },
+                ),
+            ),
+        ]
+
+        request = lowerer.lower(transcript, model="gpt-5.1")
+
+        assert request.input == [
+            {
+                "role": "user",
+                "content": format_external_channel_continuation_reminder(
+                    {
+                        "source": "external_channel",
+                        "active_bindings": "binding-handle",
+                        "goal_objective": "must not be rendered",
+                    }
+                ),
+            }
+        ]
+        assert "goal_objective" not in str(request.input[0]["content"])
+
     def test_lowers_interrupted_event_as_system_reminder(self) -> None:
         """Lower interrupted event to synthetic system reminder."""
         lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")
@@ -1016,6 +1051,13 @@ class TestLiteLLMResponsesLowerer:
     def test_system_reminder_helpers_share_structured_xml_format(self) -> None:
         """Reminder helper uses only the same XML structure."""
         reminders = [
+            (
+                "external_channel_continuation",
+                format_external_channel_continuation_reminder(
+                    {"active_bindings": "binding <handle>"}
+                ),
+                {"active_bindings": "binding <handle>"},
+            ),
             (
                 "goal_continuation",
                 format_goal_continuation_reminder("Ship <fast>"),

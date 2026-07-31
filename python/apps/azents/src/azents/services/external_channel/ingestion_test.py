@@ -16,6 +16,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
 )
 from azents.services.external_channel.conversation import (
+    ExternalChannelConversationLockError,
     ExternalChannelConversationLockLease,
     ExternalChannelConversationScope,
     ExternalChannelHistoryRange,
@@ -28,17 +29,18 @@ from azents.services.external_channel.conversation_lock import (
 from azents.services.external_channel.ingestion import (
     ExternalChannelCanonicalHistoryMessage,
     ExternalChannelConversationIngestionService,
-    ExternalChannelIngestionAcceptance,
+    ExternalChannelIngestionActivation,
+    ExternalChannelIngestionAdmission,
     ExternalChannelIngestionOperation,
     ExternalChannelIngestionOutcome,
     ExternalChannelIngestionOutcomeKind,
     ExternalChannelIngestionPreparation,
     ExternalChannelIngestionReason,
     ExternalChannelIngestionRequest,
-    ExternalChannelIngestionStage,
     ExternalChannelIngressAuthority,
     ExternalChannelIngressAuthorityKind,
     ExternalChannelReplayBoundary,
+    ExternalChannelRequiredDeliveryResult,
     ExternalChannelTriggerLocator,
     ExternalChannelWakeDispatchResult,
 )
@@ -55,6 +57,37 @@ class _Lease:
 @dataclass
 class _Lock:
     lease: _Lease = field(default_factory=_Lease)
+
+    def acquire(
+        self,
+        *,
+        scope: ExternalChannelConversationScope,
+        deadline: ExternalChannelOperationDeadline,
+    ) -> AbstractAsyncContextManager[ExternalChannelConversationLockLease]:
+        del scope, deadline
+
+        @asynccontextmanager
+        async def owned() -> AsyncIterator[ExternalChannelConversationLockLease]:
+            yield self.lease
+
+        return owned()
+
+
+@dataclass
+class _LosingLease:
+    assertions: int = 0
+
+    async def assert_owned(self) -> None:
+        self.assertions += 1
+        if self.assertions >= 3:
+            raise ExternalChannelConversationLockError(
+                "Conversation authority was lost."
+            )
+
+
+@dataclass
+class _AuthorityLossLock:
+    lease: _LosingLease = field(default_factory=_LosingLease)
 
     def acquire(
         self,
@@ -108,10 +141,11 @@ class _History:
 @dataclass
 class _Store:
     preparations: list[ExternalChannelIngestionPreparation]
-    stages: list[ExternalChannelIngestionStage]
-    acceptances: list[ExternalChannelIngestionAcceptance]
+    stages: list[ExternalChannelIngestionAdmission]
+    acceptances: list[ExternalChannelIngestionActivation]
     staged_starts: list[str | None] = field(default_factory=list)
     finalized_starts: list[str | None] = field(default_factory=list)
+    blocked_activation_ids: list[str] = field(default_factory=list)
 
     async def prepare(
         self,
@@ -121,33 +155,44 @@ class _Store:
         del request
         return self.preparations.pop(0)
 
-    async def stage(
+    async def admit(
         self,
         *,
         request: ExternalChannelIngestionRequest,
         preparation: ExternalChannelIngestionPreparation,
         history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
-    ) -> ExternalChannelIngestionStage:
+    ) -> ExternalChannelIngestionAdmission:
         del request, history
         self.staged_starts.append(preparation.exclusive_start_position)
         return self.stages.pop(0)
 
-    async def finalize(
+    async def activate(
         self,
         *,
         request: ExternalChannelIngestionRequest,
         preparation: ExternalChannelIngestionPreparation,
         history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
-        stage: ExternalChannelIngestionStage,
-    ) -> ExternalChannelIngestionAcceptance:
+        stage: ExternalChannelIngestionAdmission,
+    ) -> ExternalChannelIngestionActivation:
         del request, history, stage
         self.finalized_starts.append(preparation.exclusive_start_position)
         return self.acceptances.pop(0)
 
+    async def block(
+        self,
+        *,
+        stage: ExternalChannelIngestionAdmission,
+        reason: ExternalChannelIngestionReason,
+    ) -> None:
+        del reason
+        if stage.activation_id is None:
+            raise ValueError("Activation identity is required.")
+        self.blocked_activation_ids.append(stage.activation_id)
+
 
 @dataclass
 class _RequiredDeliveryCoordinator:
-    results: list[bool] = field(default_factory=list)
+    results: list[ExternalChannelRequiredDeliveryResult] = field(default_factory=list)
     calls: list[str] = field(default_factory=list)
 
     async def ensure_delivered(
@@ -155,10 +200,10 @@ class _RequiredDeliveryCoordinator:
         *,
         delivery_attempt_id: str,
         deadline: ExternalChannelOperationDeadline,
-    ) -> bool:
+    ) -> ExternalChannelRequiredDeliveryResult:
         del deadline
         self.calls.append(delivery_attempt_id)
-        return self.results.pop(0) if self.results else True
+        return self.results.pop(0) if self.results else "delivered"
 
 
 class _ExpiringDeadline(ExternalChannelOperationDeadline):
@@ -331,6 +376,7 @@ async def test_ingestion_restarts_history_after_position_mismatch() -> None:
             ExternalChannelIngestionPreparation(
                 position_id="position-1",
                 exclusive_start_position="00000000000000000000",
+                activation_id=None,
                 immediate_outcome=None,
                 wake_mailbox_item_id=None,
                 wake_session_id=None,
@@ -338,33 +384,38 @@ async def test_ingestion_restarts_history_after_position_mismatch() -> None:
             ExternalChannelIngestionPreparation(
                 position_id="position-1",
                 exclusive_start_position="00000000000000000001",
+                activation_id=None,
                 immediate_outcome=None,
                 wake_mailbox_item_id=None,
                 wake_session_id=None,
             ),
         ],
         stages=[
-            ExternalChannelIngestionStage(
+            ExternalChannelIngestionAdmission(
                 status="position_mismatch",
                 reason=ExternalChannelIngestionReason.POSITION_CHANGED,
+                activation_id=None,
                 binding_id=None,
                 session_id=None,
+                mailbox_item_id=None,
                 required_delivery_attempt_ids=(),
                 control_delivery_attempt_id=None,
                 connection_id=None,
             ),
-            ExternalChannelIngestionStage(
+            ExternalChannelIngestionAdmission(
                 status="ready",
                 reason=ExternalChannelIngestionReason.ACCEPTED,
+                activation_id="activation-1",
                 binding_id="binding-1",
                 session_id="session-1",
+                mailbox_item_id="mailbox-1",
                 required_delivery_attempt_ids=("session-link-1", "progress-1"),
                 control_delivery_attempt_id=None,
                 connection_id=None,
             ),
         ],
         acceptances=[
-            ExternalChannelIngestionAcceptance(
+            ExternalChannelIngestionActivation(
                 status="accepted",
                 reason=ExternalChannelIngestionReason.ACCEPTED,
                 mailbox_item_id="batch-1",
@@ -408,17 +459,20 @@ async def test_required_delivery_failure_stops_before_finalize_and_wake() -> Non
             ExternalChannelIngestionPreparation(
                 position_id="position-1",
                 exclusive_start_position=None,
+                activation_id=None,
                 immediate_outcome=None,
                 wake_mailbox_item_id=None,
                 wake_session_id=None,
             )
         ],
         stages=[
-            ExternalChannelIngestionStage(
+            ExternalChannelIngestionAdmission(
                 status="ready",
                 reason=ExternalChannelIngestionReason.ACCEPTED,
+                activation_id="activation-1",
                 binding_id="binding-1",
                 session_id="session-1",
+                mailbox_item_id="mailbox-1",
                 required_delivery_attempt_ids=("session-link-1", "progress-1"),
                 control_delivery_attempt_id=None,
                 connection_id=None,
@@ -426,7 +480,7 @@ async def test_required_delivery_failure_stops_before_finalize_and_wake() -> Non
         ],
         acceptances=[],
     )
-    delivery = _RequiredDeliveryCoordinator(results=[True, False])
+    delivery = _RequiredDeliveryCoordinator(results=["delivered", "terminal_failure"])
     wake = _WakeDispatcher()
     service = ExternalChannelConversationIngestionService(
         conversation_lock=_Lock(),
@@ -438,10 +492,11 @@ async def test_required_delivery_failure_stops_before_finalize_and_wake() -> Non
 
     outcome = await service.ingest(_request())
 
-    assert outcome.kind is ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE
+    assert outcome.kind is ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION
     assert outcome.reason is ExternalChannelIngestionReason.INITIAL_DELIVERY_UNAVAILABLE
     assert delivery.calls == ["session-link-1", "progress-1"]
     assert store.finalized_starts == []
+    assert store.blocked_activation_ids == ["activation-1"]
     assert wake.calls == []
 
 
@@ -451,17 +506,20 @@ async def test_expired_deadline_stops_before_finalize_with_memory_lock() -> None
             ExternalChannelIngestionPreparation(
                 position_id="position-1",
                 exclusive_start_position=None,
+                activation_id=None,
                 immediate_outcome=None,
                 wake_mailbox_item_id=None,
                 wake_session_id=None,
             )
         ],
         stages=[
-            ExternalChannelIngestionStage(
+            ExternalChannelIngestionAdmission(
                 status="ready",
                 reason=ExternalChannelIngestionReason.ACCEPTED,
+                activation_id="activation-1",
                 binding_id="binding-1",
                 session_id="session-1",
+                mailbox_item_id="mailbox-1",
                 required_delivery_attempt_ids=("session-link-1",),
                 control_delivery_attempt_id=None,
                 connection_id=None,
@@ -469,7 +527,7 @@ async def test_expired_deadline_stops_before_finalize_with_memory_lock() -> None
         ],
         acceptances=[],
     )
-    delivery = _RequiredDeliveryCoordinator(results=[True])
+    delivery = _RequiredDeliveryCoordinator(results=["delivered"])
     wake = _WakeDispatcher()
     service = ExternalChannelConversationIngestionService(
         conversation_lock=InMemoryExternalChannelConversationLock(),
@@ -489,6 +547,106 @@ async def test_expired_deadline_stops_before_finalize_with_memory_lock() -> None
     assert wake.calls == []
 
 
+async def test_authority_loss_after_delivery_stops_before_activation() -> None:
+    store = _Store(
+        preparations=[
+            ExternalChannelIngestionPreparation(
+                position_id="position-1",
+                exclusive_start_position=None,
+                activation_id=None,
+                immediate_outcome=None,
+                wake_mailbox_item_id=None,
+                wake_session_id=None,
+            )
+        ],
+        stages=[
+            ExternalChannelIngestionAdmission(
+                status="ready",
+                reason=ExternalChannelIngestionReason.ACCEPTED,
+                activation_id="activation-1",
+                binding_id="binding-1",
+                session_id="session-1",
+                mailbox_item_id="mailbox-1",
+                required_delivery_attempt_ids=("session-link-1", "progress-1"),
+                control_delivery_attempt_id=None,
+                connection_id=None,
+            )
+        ],
+        acceptances=[],
+    )
+    delivery = _RequiredDeliveryCoordinator(results=["delivered", "delivered"])
+    wake = _WakeDispatcher()
+    service = ExternalChannelConversationIngestionService(
+        conversation_lock=_AuthorityLossLock(),
+        history_reader=_History(),
+        store=store,
+        required_delivery_coordinator=delivery,
+        wake_dispatcher=wake,
+    )
+
+    outcome = await service.ingest(_request())
+
+    assert outcome.kind is ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE
+    assert outcome.reason is ExternalChannelIngestionReason.COORDINATION_UNAVAILABLE
+    assert delivery.calls == ["session-link-1", "progress-1"]
+    assert store.finalized_starts == []
+    assert wake.calls == []
+
+
+async def test_terminal_activation_revalidation_blocks_retained_input() -> None:
+    """A terminal post-delivery revalidation cannot leave initialization open."""
+    store = _Store(
+        preparations=[
+            ExternalChannelIngestionPreparation(
+                position_id="position-1",
+                exclusive_start_position=None,
+                activation_id=None,
+                immediate_outcome=None,
+                wake_mailbox_item_id=None,
+                wake_session_id=None,
+            )
+        ],
+        stages=[
+            ExternalChannelIngestionAdmission(
+                status="ready",
+                reason=ExternalChannelIngestionReason.ACCEPTED,
+                activation_id="activation-1",
+                binding_id="binding-1",
+                session_id="session-1",
+                mailbox_item_id="mailbox-1",
+                required_delivery_attempt_ids=("session-link-1",),
+                control_delivery_attempt_id=None,
+                connection_id=None,
+            )
+        ],
+        acceptances=[
+            ExternalChannelIngestionActivation(
+                status="terminal_rejection",
+                reason=ExternalChannelIngestionReason.INGRESS_AUTHORITY_STALE,
+                mailbox_item_id=None,
+                session_id=None,
+                control_delivery_attempt_id=None,
+                connection_id=None,
+            )
+        ],
+    )
+    wake = _WakeDispatcher()
+    service = ExternalChannelConversationIngestionService(
+        conversation_lock=_Lock(),
+        history_reader=_History(),
+        store=store,
+        required_delivery_coordinator=_RequiredDeliveryCoordinator(),
+        wake_dispatcher=wake,
+    )
+
+    outcome = await service.ingest(_request())
+
+    assert outcome.kind is ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION
+    assert outcome.reason is ExternalChannelIngestionReason.INGRESS_AUTHORITY_STALE
+    assert store.blocked_activation_ids == ["activation-1"]
+    assert wake.calls == []
+
+
 async def test_duplicate_recovers_pending_wake_without_history_read() -> None:
     history = _History()
     wake = _WakeDispatcher(results=["already_dispatched"])
@@ -500,6 +658,7 @@ async def test_duplicate_recovers_pending_wake_without_history_read() -> None:
                 ExternalChannelIngestionPreparation(
                     position_id=None,
                     exclusive_start_position=None,
+                    activation_id=None,
                     immediate_outcome=ExternalChannelIngestionOutcome(
                         kind=ExternalChannelIngestionOutcomeKind.DUPLICATE,
                         reason=ExternalChannelIngestionReason.DUPLICATE,
@@ -535,6 +694,7 @@ async def test_concurrent_wake_claim_is_retryable() -> None:
                 ExternalChannelIngestionPreparation(
                     position_id=None,
                     exclusive_start_position=None,
+                    activation_id=None,
                     immediate_outcome=ExternalChannelIngestionOutcome(
                         kind=ExternalChannelIngestionOutcomeKind.DUPLICATE,
                         reason=ExternalChannelIngestionReason.DUPLICATE,
@@ -568,6 +728,7 @@ async def test_history_failure_returns_retryable_outcome() -> None:
                 ExternalChannelIngestionPreparation(
                     position_id="position-1",
                     exclusive_start_position=None,
+                    activation_id=None,
                     immediate_outcome=None,
                     wake_mailbox_item_id=None,
                     wake_session_id=None,

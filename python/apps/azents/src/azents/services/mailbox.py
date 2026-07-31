@@ -18,6 +18,7 @@ from azents.core.enums import (
     AgentRunStatus,
     AgentSessionStatus,
     EventKind,
+    ExternalChannelSessionActivationState,
     MailboxItemKind,
     MailboxSchedulingMode,
 )
@@ -425,41 +426,39 @@ class MailboxService:
     ) -> PendingInputInferenceProfile:
         """Read the next pending input profile without consuming the buffer."""
         async with self.session_manager() as session:
-            pending = await self.mailbox_item_repository.list_for_flush(
-                session,
-                session_id,
-                limit=1,
-            )
+            buffer = await self._first_promotable_mailbox_item(session, session_id)
         return PendingInputInferenceProfile(
-            mailbox_item_id=pending[0].id if pending else None,
-            exists=bool(pending),
+            mailbox_item_id=buffer.id if buffer is not None else None,
+            exists=buffer is not None,
             requires_inference=(
-                _buffer_requires_inference(pending[0]) if pending else False
+                _buffer_requires_inference(buffer) if buffer is not None else False
             ),
             requested_inference_profile=(
-                _requested_inference_profile(pending[0]) if pending else None
+                _requested_inference_profile(buffer) if buffer is not None else None
             ),
         )
 
     async def has_pending_session_mailbox_items(self, session_id: str) -> bool:
         """Check whether session still has unflushed MailboxItem."""
         async with self.session_manager() as session:
-            pending = await self.mailbox_item_repository.list_for_flush(
-                session,
-                session_id,
-                limit=1,
+            return (
+                await self._first_promotable_mailbox_item(session, session_id)
+                is not None
             )
-        return bool(pending)
 
     async def has_pending_wake_session_mailbox_items(self, session_id: str) -> bool:
         """Check whether pending input can start or resume an idle session."""
         async with self.session_manager() as session:
-            repository = self.mailbox_item_repository
-            return await repository.has_by_session_id_and_scheduling_mode(
+            pending = await self.mailbox_item_repository.list_for_flush(
                 session,
-                session_id=session_id,
-                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+                session_id,
             )
+            for buffer in pending:
+                if not await self._mailbox_item_is_promotable(session, buffer):
+                    return False
+                if buffer.scheduling_mode is MailboxSchedulingMode.WAKE_SESSION:
+                    return True
+            return False
 
     async def has_pending_agent_messages(self, session_id: str) -> bool:
         """Check whether the session mailbox has pending agent input."""
@@ -512,6 +511,11 @@ class MailboxService:
                 session,
                 session_id,
             )
+            if oldest is not None and not await self._mailbox_item_is_promotable(
+                session,
+                oldest,
+            ):
+                oldest = None
             actual_buffer_id = oldest.id if oldest is not None else None
             if actual_buffer_id != expected_buffer_id:
                 raise MailboxPreparationStaleError(
@@ -741,14 +745,9 @@ class MailboxService:
                 session,
                 session_id,
             )
-            pending = await self.mailbox_item_repository.list_for_flush(
-                session,
-                session_id,
-                limit=1,
-            )
+            buffer = await self._first_promotable_mailbox_item(session, session_id)
         if agent_session is None:
             raise ValueError("AgentSession not found")
-        buffer = pending[0] if pending else None
         actual_buffer_id = buffer.id if buffer is not None else None
         if actual_buffer_id != expected_buffer_id:
             raise MailboxPreparationStaleError(
@@ -836,6 +835,39 @@ class MailboxService:
                 part.model_file_id for part in materialized.file_parts
             ],
         )
+
+    async def _first_promotable_mailbox_item(
+        self,
+        session: AsyncSession,
+        session_id: str,
+    ) -> MailboxItem | None:
+        """Return the FIFO head only when its durable admission gate is open."""
+        pending = await self.mailbox_item_repository.list_for_flush(
+            session,
+            session_id,
+            limit=1,
+        )
+        if not pending:
+            return None
+        buffer = pending[0]
+        if not await self._mailbox_item_is_promotable(session, buffer):
+            return None
+        return buffer
+
+    async def _mailbox_item_is_promotable(
+        self,
+        session: AsyncSession,
+        buffer: MailboxItem,
+    ) -> bool:
+        """Keep retained External Channel input inert until activation commits."""
+        if buffer.kind is not MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION:
+            return True
+        repository = self.external_channel_repository
+        state = await repository.get_session_activation_state_by_mailbox_item_id(
+            session,
+            mailbox_item_id=buffer.id,
+        )
+        return state is None or state is ExternalChannelSessionActivationState.ACTIVATED
 
     @asynccontextmanager
     async def _discard_prepared_model_files_on_failure(
@@ -932,6 +964,8 @@ class MailboxService:
                 return _UserMessageMailboxProcessor(self)
             case MailboxItemKind.GOAL_CONTINUATION:
                 return _GoalContinuationMailboxProcessor(self)
+            case MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION:
+                return _ExternalChannelContinuationMailboxProcessor(self)
             case MailboxItemKind.AGENT_MESSAGE:
                 return _AgentMessageMailboxProcessor(self)
             case MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION:
@@ -1246,6 +1280,38 @@ class _GoalContinuationMailboxProcessor:
                     buffer=buffer,
                     user_message=user_message,
                     event_kind=EventKind.GOAL_CONTINUATION,
+                    payload=_user_message_payload_json(user_message),
+                    external_id=user_message.external_id,
+                )
+            ],
+            TurnEffect.ELIGIBLE,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class _ExternalChannelContinuationMailboxProcessor:
+    """Prepare an External Channel continuation event."""
+
+    service: MailboxService
+
+    async def process(
+        self,
+        context: MailboxPreparationContext,
+        buffer: MailboxItem,
+    ) -> MailboxPreparationOutcome:
+        user_message = self.service.buffer_to_user_message(
+            buffer,
+            external_id=f"{buffer.id}:external_channel_continuation",
+            fallback_profile=context.required_inference_profile,
+            prepared_inference_state=context.prepared_inference_state,
+            prepared_files=context.prepared_files,
+        )
+        return _preparation_outcome(
+            [
+                _PromotedMailboxItem(
+                    buffer=buffer,
+                    user_message=user_message,
+                    event_kind=EventKind.EXTERNAL_CHANNEL_CONTINUATION,
                     payload=_user_message_payload_json(user_message),
                     external_id=user_message.external_id,
                 )
@@ -1575,6 +1641,7 @@ def _buffer_requires_inference(buffer: MailboxItem) -> bool:
         case (
             MailboxItemKind.USER_MESSAGE
             | MailboxItemKind.GOAL_CONTINUATION
+            | MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION
             | MailboxItemKind.AGENT_MESSAGE
             | MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION
         ):

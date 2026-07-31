@@ -18,12 +18,11 @@ const goalUpdatedEvent: ActivityEvent = {
 
 const externalChannelContinuationEvent: ActivityEvent = {
   id: "external-channel-continuation-story",
-  kind: "goal-control",
+  kind: "external-channel-continuation",
   message: createChatMessage({
     id: "external-channel-continuation-story-message",
-    role: "goal_continuation",
+    role: "external_channel_continuation",
     content: null,
-    metadata: { source: "external_channel" },
   }),
   category: { key: "organize", label: "organize" },
   status: "complete",

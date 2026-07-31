@@ -41,6 +41,8 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelInteraction,
     RDBExternalChannelResource,
+    RDBExternalChannelSessionActivation,
+    RDBExternalChannelSessionActivationDelivery,
     RDBExternalChannelWork,
     RDBExternalChannelWorkProjectionPart,
 )
@@ -57,6 +59,9 @@ from azents.repos.external_channel.data import (
     ExternalChannelPurgePreparation,
     ExternalChannelPurgeVerification,
     ExternalChannelRestoreValidation,
+)
+from azents.repos.external_channel.repository import (
+    block_initializing_session_activations,
 )
 
 
@@ -105,6 +110,13 @@ class ExternalChannelLifecycleRepository:
         for binding in bindings:
             binding.disconnected_at = now
             binding.disconnect_reason = "session_archived"
+        await block_initializing_session_activations(
+            session,
+            binding_condition=(
+                RDBExternalChannelSessionActivation.binding_id.in_(binding_ids)
+            ),
+            now=now,
+        )
 
         finished_work_count = 0
         created_progress_delete_intent_count = 0
@@ -285,6 +297,24 @@ class ExternalChannelLifecycleRepository:
             session_ids=session_ids,
             binding_ids=binding_ids,
         )
+        activation_ids = sa.select(RDBExternalChannelSessionActivation.id).where(
+            sa.or_(
+                RDBExternalChannelSessionActivation.agent_session_id.in_(session_ids),
+                RDBExternalChannelSessionActivation.binding_id.in_(binding_ids),
+            )
+        )
+        await self._delete(
+            session,
+            RDBExternalChannelSessionActivationDelivery,
+            RDBExternalChannelSessionActivationDelivery.activation_id.in_(
+                activation_ids
+            ),
+        )
+        deleted_activation_count = await self._delete(
+            session,
+            RDBExternalChannelSessionActivation,
+            RDBExternalChannelSessionActivation.id.in_(activation_ids),
+        )
         deleted_delivery_attempt_count = await self._delete(
             session,
             RDBExternalChannelDeliveryAttempt,
@@ -333,6 +363,7 @@ class ExternalChannelLifecycleRepository:
         )
         await session.flush()
         return ExternalChannelPurgeCleanup(
+            deleted_activation_count=deleted_activation_count,
             deleted_delivery_attempt_count=deleted_delivery_attempt_count,
             deleted_action_count=deleted_action_count,
             deleted_session_grant_count=deleted_session_grant_count,
@@ -359,6 +390,11 @@ class ExternalChannelLifecycleRepository:
             )
         )
         verification = ExternalChannelPurgeVerification(
+            remaining_activation_count=await self._count(
+                session,
+                RDBExternalChannelSessionActivation,
+                RDBExternalChannelSessionActivation.agent_session_id.in_(session_ids),
+            ),
             remaining_binding_count=await self._count(
                 session,
                 RDBExternalChannelBinding,
@@ -1201,6 +1237,13 @@ class ExternalChannelLifecycleRepository:
         for binding in bindings:
             binding.disconnected_at = now
             binding.disconnect_reason = reason
+        await block_initializing_session_activations(
+            session,
+            binding_condition=(
+                RDBExternalChannelSessionActivation.binding_id.in_(binding_ids)
+            ),
+            now=now,
+        )
         progress_delete_intent_ids: list[str] = []
         for work in works:
             work.status = ExternalChannelWorkStatus.FINISHED

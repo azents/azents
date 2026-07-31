@@ -77,8 +77,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-07-30
-spec_version: 137
+last_verified_at: 2026-07-31
+spec_version: 139
 ---
 
 # Agent Execution Loop
@@ -95,7 +95,7 @@ worker/UI stream boundaries, but the DB source of truth is the event transcript 
 
 Main steps:
 
-1. Worker reads exactly one FIFO InputBuffer head, resolves the requested profile and attachment metadata outside a database session, and then locks the same head for atomic preparation. After it creates or claims the AgentRun, it ensures that run's immutable managed-file projection before calling input promotion or resolving a managed SkillAction.
+1. Worker reads exactly one promotable FIFO InputBuffer head, resolves the requested profile and attachment metadata outside a database session, and then locks the same head for atomic preparation. An External Channel head whose durable Session activation is still `initializing` or `blocked` remains retained but is not exposed as execution work. After the worker creates or claims the AgentRun, it ensures that run's immutable managed-file projection before calling input promotion or resolving a managed SkillAction.
 2. Preparation atomically updates the Session inference snapshot, applies Goal/Skill side effects, appends canonical events, associates run input, and deletes the source buffer. A changed FIFO head restarts preparation instead of applying a stale resolution.
 3. Worker executes buffer-keyed operation TurnActions such as `create_git_worktree` before the next model dispatch. The current Session owner generation admits the execution before buffer deletion; active state and progress remain in execution tables until one atomic terminal handover appends durable history and deletes live state.
 4. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
@@ -1157,12 +1157,13 @@ updated by the user.
 
 ## External Channel Inputs, Tools, and Continuation
 
-Synchronous External Channel acceptance commits the immutable invocation batch and
-items, one `wake_session` mailbox item, the Session running transition, the
-conversation-position advance, and recoverable wake-dispatch state before the
-transport can report success. The post-commit broker signal contains only
-`session_id`; a duplicate callback recovers the same pending logical wake rather than
-creating another batch.
+Synchronous External Channel admission commits the real idle Session, immutable
+provider-history projection in one `wake_session` mailbox item, durable activation,
+and ordered provider-delivery intents before provider initialization. The mailbox item
+is not promotable until every required delivery is durably `delivered` and one
+transaction activates it, marks the Session running, and advances the conversation
+position. The post-commit broker signal contains only `session_id`; a duplicate
+callback recovers the same activation, mailbox item, and pending logical wake.
 
 FIFO preparation resolves the mailbox payload into contiguous source-attributed
 `external_channel_message` events and associates them with the run before model
@@ -1182,13 +1183,22 @@ provider operations execute outside the transaction.
 After a successful run, unfinished Channel Work is an idle-continuation source.
 Continuation remains eligible until every relevant binding finishes or clears
 its tasks. One completed binding does not cancel continuation required by
-another binding in the same root Session. Its durable input retains the common
-`goal_continuation` event kind, but `source=external_channel` metadata is preserved
-through the chat projection so the UI labels it as a Channel Work continuation
-with a channel/message icon rather than presenting it as Goal continuation.
+another binding in the same root Session. The idle hook returns a typed External
+Channel continuation, which the worker stores as an
+`external_channel_continuation` mailbox item. Promotion creates the same dedicated
+event kind, and model lowering renders only the External Channel Work reminder.
+Goal state cannot reinterpret or re-trigger that event. Chat and public API
+projections retain the dedicated kind, and the UI labels it with a channel/message
+icon.
 
 ## Changelog
 
+- **2026-07-31** (spec_version 139) — Split External Channel idle continuation
+  from Goal across hook input, mailbox, event, lowering, public API, and UI
+  presentation.
+- **2026-07-31** (spec_version 138) — Added activation-gated External Channel FIFO
+  input: canonical mailbox state is durable before provider initialization but cannot
+  start or join execution until activation commits.
 - **2026-07-30** (spec_version 137) — Required the visible exact attachment size in
   `download_external_file` and documented verified 500 MiB External Channel ingress.
 - **2026-07-30** (spec_version 136) — Documented synchronous External Channel

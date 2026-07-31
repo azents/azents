@@ -26,6 +26,7 @@ from azents.core.enums import (
     ExternalChannelResourceType,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
+    ExternalChannelSessionActivationState,
     ExternalChannelTransport,
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
@@ -374,6 +375,63 @@ class ExternalChannelBindingCreate(_Record):
     disconnect_reason: str | None
 
 
+class ExternalChannelSessionActivation(_Record):
+    """Durable ordered admission of one External Channel Session invocation."""
+
+    id: str
+    connection_id: str
+    conversation_position_id: str
+    binding_id: str
+    agent_session_id: str
+    trigger_provider_message_key: str
+    trigger_position: str
+    range_start_position: str | None
+    state: ExternalChannelSessionActivationState
+    mailbox_item_id: str
+    failure_kind: str | None
+    failure_summary: str | None
+    activated_at: datetime.datetime | None
+    blocked_at: datetime.datetime | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class ExternalChannelSessionActivationCreate(_Record):
+    """Session activation creation payload."""
+
+    connection_id: str
+    conversation_position_id: str
+    binding_id: str
+    agent_session_id: str
+    trigger_provider_message_key: str
+    trigger_position: str
+    range_start_position: str | None
+    state: ExternalChannelSessionActivationState
+    mailbox_item_id: str
+    failure_kind: str | None
+    failure_summary: str | None
+    activated_at: datetime.datetime | None
+    blocked_at: datetime.datetime | None
+
+
+class ExternalChannelSessionActivationDelivery(_Record):
+    """Ordered provider-delivery identity required by one activation."""
+
+    id: str
+    activation_id: str
+    ordinal: int
+    delivery_attempt_id: str
+    created_at: datetime.datetime
+
+
+class ExternalChannelSessionActivationDeliveryCreate(_Record):
+    """Activation delivery-link creation payload."""
+
+    activation_id: str
+    ordinal: int
+    delivery_attempt_id: str
+
+
 class ExternalChannelMailboxProjectionItem(_Record):
     """One provider-history message embedded in a canonical mailbox item."""
 
@@ -680,6 +738,7 @@ class ExternalChannelPurgePreparation(_Record):
 class ExternalChannelPurgeCleanup(_Record):
     """Summary of Session-owned External Channel records removed during purge."""
 
+    deleted_activation_count: int
     deleted_delivery_attempt_count: int
     deleted_action_count: int
     deleted_session_grant_count: int
@@ -692,6 +751,7 @@ class ExternalChannelPurgeCleanup(_Record):
 class ExternalChannelPurgeVerification(_Record):
     """Verified absence counts for one purged Session tree."""
 
+    remaining_activation_count: int
     remaining_binding_count: int
     remaining_work_count: int
     remaining_action_count: int

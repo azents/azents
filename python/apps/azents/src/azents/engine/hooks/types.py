@@ -255,13 +255,31 @@ class TurnStartResult(BaseModel):
     injected_prompts: list[TurnInjectedPrompt] = Field(default_factory=list)
 
 
-class SessionContinuationInput(BaseModel):
-    """continuation input requested by session idle hook."""
+class SessionContinuationInputBase(BaseModel):
+    """Common persistence metadata for one session idle continuation."""
 
     content: str
     metadata: dict[str, str] = Field(default_factory=dict)
     hook_provider_slug: str | None = None
     hook_continuation_index: int | None = None
+
+
+class GoalSessionContinuationInput(SessionContinuationInputBase):
+    """Goal continuation requested by the Goal idle hook."""
+
+    kind: Literal["goal"] = "goal"
+
+
+class ExternalChannelSessionContinuationInput(SessionContinuationInputBase):
+    """External Channel continuation requested by its idle hook."""
+
+    kind: Literal["external_channel"] = "external_channel"
+
+
+SessionContinuationInput = Annotated[
+    GoalSessionContinuationInput | ExternalChannelSessionContinuationInput,
+    Field(discriminator="kind"),
+]
 
 
 class SessionIdleResult(BaseModel):

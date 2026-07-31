@@ -41,6 +41,14 @@ class PendingMailboxGoalContinuationPresentation(BaseModel):
     requested_inference_profile: RequestedInferenceProfile | None = None
 
 
+class PendingMailboxExternalChannelContinuationPresentation(BaseModel):
+    """Safe pending External Channel continuation presentation."""
+
+    type: Literal["external_channel_continuation"]
+    content: str
+    requested_inference_profile: RequestedInferenceProfile | None = None
+
+
 class PendingMailboxAgentMessagePresentation(BaseModel):
     """Safe pending Agent-to-Agent message presentation."""
 
@@ -81,6 +89,7 @@ class PendingMailboxActionPresentation(BaseModel):
 PendingMailboxPresentation = Annotated[
     PendingMailboxUserMessagePresentation
     | PendingMailboxGoalContinuationPresentation
+    | PendingMailboxExternalChannelContinuationPresentation
     | PendingMailboxAgentMessagePresentation
     | PendingMailboxExternalChannelPresentation
     | PendingMailboxActionPresentation,
