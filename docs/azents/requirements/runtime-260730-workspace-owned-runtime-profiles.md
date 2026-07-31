@@ -2,6 +2,7 @@
 title: "Workspace-Owned Runtime Profiles Requirements"
 created: 2026-07-30
 updated: 2026-07-30
+implemented: 2026-07-31
 tags: [runtime, provider, workspace, infrastructure, security]
 document_role: primary
 document_type: requirements

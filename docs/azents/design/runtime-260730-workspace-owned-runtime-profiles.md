@@ -2,6 +2,7 @@
 title: "Workspace-Owned Runtime Profiles Design"
 created: 2026-07-30
 updated: 2026-07-31
+implemented: 2026-07-31
 tags: [runtime, provider, workspace, profile, infrastructure, security, backend, frontend]
 document_role: primary
 document_type: design

@@ -7,8 +7,13 @@ owner: "@Hardtack"
 touches_domains: [agent, workspace, conversation]
 code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
+  - python/apps/azents/src/azents/rdb/models/runtime_profile.py
   - python/apps/azents/src/azents/repos/agent_runtime/**
+  - python/apps/azents/src/azents/repos/runtime_profile/**
   - python/apps/azents/src/azents/services/agent_runtime/**
+  - python/apps/azents/src/azents/services/runtime_profile_reconciliation/**
+  - python/apps/azents/src/azents/services/runtime_profile_resolution/**
+  - python/apps/azents/src/azents/services/runtime_recreation/**
   - python/apps/azents/src/azents/services/chat/workspace.py
   - python/apps/azents/src/azents/services/session_workspace_project/**
   - python/apps/azents/src/azents/runtime/**
@@ -16,9 +21,8 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
   - infra/charts/azents/**
-  - infra/argocd/azents-runtime-provider-kubernetes/**
-last_verified_at: 2026-07-28
-spec_version: 12
+last_verified_at: 2026-07-31
+spec_version: 13
 ---
 
 # Agent Runtime Persistence
@@ -30,34 +34,29 @@ process and not by S3 checkpoint/restore as a event path. The Provider reports t
 Workspace absolute path as Runtime metadata. Server file APIs and prompts consume that reported
 path instead of hardcoding `/home/sandbox`.
 
-## Provider selection and immutable binding
+## Runtime Profile binding and configuration revisions
 
-When the first logical Runtime row is created, Agent Runtime service delegates Provider selection to
-`RuntimeProviderSelectionService`. The exact Agent preference or typed Platform default is resolved in
-one transaction. Selection does not use environment defaults or fallback after an explicit Provider is
-ineligible. The selected durable Provider resource, binding origin, accepted contract/configuration
-revision IDs, and an immutable policy snapshot are stored before lifecycle commands are dispatched.
+An Agent stores one exact Workspace Runtime Profile selection or no selection. When the logical
+Runtime row is ensured, the Runtime Profile resolver reads that exact Profile and persists the
+logical/durable Provider routing IDs, infrastructure Profile ID, Workspace Runtime Profile ID, and
+an immutable desired configuration revision. It does not consult a Provider preference, Platform
+default, environment default, or fallback.
 
-A later availability, default, contract, or configuration change does not reassign an existing logical
-Runtime. If no Provider can satisfy the request, the lifecycle API returns an explicit unavailable
-conflict and no partial Runtime is persisted.
+The desired revision records the exact Provider capability revision, infrastructure and Workspace
+Profile IDs/versions/digests, Agent selection version, resolved full configuration, source trace,
+target desired generation, and canonical digest. A blocked resolution is also durable and keeps its
+bounded reason and missing-capability evidence without discarding the last applied revision.
 
-Runtime rows created before durable Provider contracts may contain only the historical logical
-Provider ID. On the next Runtime access or lifecycle request, selection resolves that same logical
-Provider, requires its accepted contract, stores the internal Provider resource ID with `migration`
-origin, and attaches the initial policy snapshot transactionally. This upgrade does not replace the
-logical Runtime, advance its desired generation, delete its workspace, or invoke a Provider
-lifecycle command. A later explicit start or restart uses the normal generation-fenced policy and
-preserves the existing host directory or PVC.
+The applied revision pointer is separate physical evidence. It advances only after the exact
+Provider acknowledges the current revision and the ordinary Runner state report returns the same
+generation and digest. Desired changes therefore become visible immediately while the running
+incarnation may remain applied to an older revision or wait for explicit recreation.
 
-Runtime execution policy stores Agent intent separately from the applied Runtime target. The selected
-Profile is the complete policy ceiling; Workspace and Agent restrictions can only narrow it. An Agent
-Profile selection or override change is pending until explicit Apply attaches the next immutable target
-snapshot. A restrictive edit to the selected Profile or Workspace policy automatically attaches a
-narrower target and advances desired generation without reset, terminal
-deletion, Provider fallback, or Agent Workspace data loss. Target/applied snapshots, policy digest,
-source versions, and Provider evidence are generation-fenced durable metadata; they do not expose
-credentials, projected tokens, socket paths, or raw manifests.
+Capability/Profile changes never reassign the Agent to another Provider or Profile. Provider or
+Profile loss preserves IDs, revisions, and existing storage while blocking new create/start/restart/
+reset/recreate work. Historical hierarchy conversion occurs only inside the one-way Alembic
+migration; runtime services do not read legacy policy tables, snapshots, overrides, or status
+fallbacks.
 
 ## Event Persistence
 
@@ -88,13 +87,14 @@ failure when Runner and Provider disagree.
 
 ## Destructive Operation Boundary
 
-Only `reset` may delete Agent Workspace data.
+Only explicit `reset` and terminal delete may delete Agent Workspace data.
 
 - `start` may create compute and attach durable storage; it must not wipe existing workspace bytes.
 - `stop` may stop compute; it must preserve durable storage.
 - `restart` may recreate compute; it must preserve durable storage.
 - `recover` and reconciliation may repair stale backend/control state; they must preserve durable
   storage.
+- ordinary Runtime Profile recreation may replace compute; it must preserve durable storage.
 - `observe` is read-only.
 
 For desired-running Runtimes, periodic reconciliation uses idempotent `start` to compare the
@@ -125,11 +125,12 @@ For each Runtime, the provider creates or reuses an EBS-backed PVC and mounts it
 Agent Workspace path in the Runner Pod. PVC identity is tied to Runtime identity/generation labels
 and fenced by Control generation. Stale observations cannot overwrite newer desired generations.
 
-Reset is the only command that may delete/recreate the PVC contents. Stop/restart/recover must not
+Reset is the only non-terminal command that may delete and recreate the PVC contents. Terminal
+delete removes the PVC without recreating it. Stop/restart/recover and ordinary recreation must not
 delete the PVC.
 
-The execution-policy topology is fixed Provider infrastructure, not user-configurable Pod input. A
-Docker-disabled Runtime contains only the unprivileged Runner. A Docker-enabled Runtime adds one
+The Runtime Profile topology is typed Provider infrastructure, not arbitrary Pod input. A Profile
+without DinD contains only the unprivileged Runner. A DinD-enabled Profile adds one
 privileged DIND sidecar and mounts its Runtime-private Unix socket read-only into the Runner. There
 is no Docker API Gateway or partial operation allowlist. The complete Docker capability supports
 CLI, Compose, SDK, Testcontainers, Ryuk, and port-binding workflows supported by the daemon.
@@ -147,13 +148,12 @@ DIND sidecar's Kubernetes CPU/memory requests and limits and fixed ephemeral-sto
 PID, nested-container count, and per-Profile network fields are not advertised because direct
 privileged Docker authority bypasses such in-daemon policy claims.
 
-The Runtime-specific Kubernetes NetworkPolicy always permits outbound IPv4 and IPv6 subject to the
-Helm deployment NetworkPolicy hard cap, plus required DNS and Runtime Control traffic. Runtime
-policy resolution and the next immutable target snapshot use the Provider's current accepted
-contract rather than raw registration metadata or a prior snapshot's contract revision.
-Persistent Docker data remains unavailable until a Provider advertises and qualifies it.
-The Profile separately controls Agent Workspace PVC capacity. Expansions apply to the existing PVC;
-shrinks are deferred until an explicit reset or terminal deletion recreates storage.
+The Runtime-specific Kubernetes NetworkPolicy is the intersection of the Provider hard boundary,
+the selected Pod Profile preset, and any Workspace narrowing. Required DNS and Runtime Control
+traffic remains protected. Resolution uses the exact Provider's current valid capability revision,
+never raw unvalidated metadata or an older historical revision. The Pod Profile separately controls
+Agent Workspace PVC capacity. Expansions may apply to the existing PVC; shrink remains deferred
+until an explicit reset or terminal deletion recreates storage.
 
 ## Docker Provider v1
 
@@ -161,8 +161,9 @@ Docker Provider v1 assumes one stable Docker host. For each Runtime it creates a
 bind-mounts it into the Runner container at the reported Agent Workspace path. The host directory is
 the event persistence source.
 
-Stop/restart/recover may remove/recreate containers, but must keep the host directory. Reset may
-delete or replace the host directory according to the reset command.
+Stop/restart/recover and ordinary recreation may remove/recreate containers, but must keep the host
+directory. Reset may delete or replace the host directory according to the reset command. Terminal
+delete removes both the container and host directory.
 
 ## Agent Workspace Projects
 
@@ -186,12 +187,17 @@ Required checks:
 - Workspace service tests reject missing provider workspace paths with explicit errors.
 - Runner state sink tests preserve provider path authority and reject missing/mismatched paths.
 - Deterministic azents E2E covers Agent Workspace bootstrap and reset action availability.
-- Execution-policy E2E uses Admin/Public API setup, verifies save versus Apply and automatic
-  restrictive convergence, and treats absent Docker or qualified Kubernetes prerequisites as
-  unavailable evidence rather than passing enablement.
+- Runtime Profile E2E uses Admin/Public API setup and a real Docker Provider to verify unconfigured,
+  default, and explicit selection; exact desired/applied evidence; explicit recreation; Provider
+  loss without substitution; retained selection; and recovery.
+- Migration tests prove exact legacy effective-selection conversion and final absence of obsolete
+  policy/override/snapshot schema.
 
 ## Changelog
 
+- **2026-07-31 (spec_version=13)** — Replaced Provider selection and execution-policy snapshots
+  with exact Workspace Runtime Profile binding, immutable desired/applied configuration revisions,
+  current-capability evidence, migration-only legacy conversion, and explicit recreation.
 - **2026-07-28 (spec_version=12)** — Mounted the Agent Workspace and Pod-local `/tmp` into the Runner and DIND sidecar at identical paths to support ordinary Docker and Compose bind mounts.
 - **2026-07-28 (spec_version=11)** — Replaced the policy Gateway with a direct Runtime-private DIND socket, collapsed Docker operations into one capability, and removed unenforceable PID, nested-container, and Profile network controls while retaining Kubernetes resource, storage, and deployment hard-cap boundaries.
 - **2026-07-27 (spec_version=10)** — Added all implemented Profile network modes, Kubernetes request/limit resource semantics, and Profile-controlled PVC expansion with destructive shrink application.

@@ -11,7 +11,12 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_runtime/**
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
   - python/apps/azents/src/azents/services/agent_runtime/**
-  - python/apps/azents/src/azents/services/runtime_execution_policy/**
+  - python/apps/azents/src/azents/core/runtime_profile.py
+  - python/apps/azents/src/azents/rdb/models/runtime_profile.py
+  - python/apps/azents/src/azents/repos/runtime_profile/**
+  - python/apps/azents/src/azents/services/runtime_profile_reconciliation/**
+  - python/apps/azents/src/azents/services/runtime_profile_resolution/**
+  - python/apps/azents/src/azents/services/runtime_recreation/**
   - python/apps/azents/src/azents/core/runtime_provider_credential.py
   - python/apps/azents/src/azents/core/runtime_runner_credential.py
   - python/apps/azents/src/azents/rdb/models/runtime_provider_binding.py
@@ -29,8 +34,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
-last_verified_at: 2026-07-30
-spec_version: 43
+last_verified_at: 2026-07-31
+spec_version: 44
 ---
 
 # Agent Runtime Control
@@ -138,7 +143,9 @@ Runtime Transfer authorization or startup input.
 `agent_runtimes` stores the product authority for Runtime state:
 
 - desired lifecycle state and desired generation
-- selected `runtime_provider_id`
+- selected logical and durable Provider IDs used for exact routing
+- exact infrastructure Profile and Workspace Runtime Profile IDs
+- desired and applied Runtime configuration revision IDs
 - provider observed state, provider generation, provider runtime id, connection state
 - provider-reported Agent Workspace path
 - runner state, runner generation, active operation ids, connection state
@@ -166,11 +173,25 @@ The store owns:
 - generation fencing data used to reject stale provider/runner messages
 - request claim cursors and stream metadata used to acknowledge delivered Provider/Runner requests
 
-Generation fencing is enforced before volatile stream messages mutate durable state. Control rejects or closes Provider/Runner streams whose inbound message generation differs from the accepted registration generation. Durable Provider reports are accepted only when both the Provider stream generation and observed desired generation are monotonic relative to the `agent_runtimes` row. Durable Runner state reports are accepted only when the Runner generation is not older than the row generation and the reported execution-policy desired generation equals the current durable desired generation. A Runner from the replaced desired generation is ignored during workload handoff and cannot create an evidence-mismatch failure for the new target. Stale reports must not overwrite workspace path, observed state, runner availability, or current failure fields.
+Generation fencing is enforced before volatile stream messages mutate durable state. Control rejects
+or closes Provider/Runner streams whose inbound message generation differs from the accepted
+registration generation. Durable Provider reports are accepted only when both the Provider stream
+generation and observed desired generation are monotonic relative to the `agent_runtimes` row.
+Durable Runner state reports are accepted only when the Runner generation is not older than the row
+generation and any reported configuration evidence names the current desired generation and exact
+digest. A Runner from the replaced desired generation is ignored during workload handoff and cannot
+create an evidence-mismatch failure for the new target. Stale reports must not overwrite workspace
+path, observed state, configuration evidence, runner availability, or current failure fields.
 
 Provider report framing always uses the generation accepted for the current Control stream. A Provider reconnect or leader failover may observe backend resources whose labels contain an older Provider generation; those labels are historical command metadata and must be replaced with the current connection generation before initial resync reports, watch reports, or command completion reports are sent to Control.
 
 Control periodically dispatches idempotent Provider `start` commands for running Runtimes and read-only Provider `observe` commands for stopped-desired Runtimes whose Provider state has not yet converged to `stopped`. Periodic `start` revalidates the desired Runner image and Provider-managed workload configuration, reuses an equivalent workload, and replaces only a drifted workload while preserving Agent Workspace storage. The live Provider connection registry, rather than a cached per-Runtime connection flag, gates dispatch; periodic attempts are durably throttled while a Provider is unavailable, and a successful dispatch refreshes the cached connection flag. Start timeout evaluation happens only after the current reconciliation pass has checked that live registry and only for a desired generation already dispatched to its Provider, so a Control rollout cannot convert a stale durable `connected` flag into a false `START_TIMEOUT`. This converges Runner image/configuration drift after deployment and closes gaps when a backend deletion event is missed during Provider reconnect or leader handoff. A current-generation Provider `stopped` report also converges durable Runner state to `disconnected`; the stopped backend is authoritative that no Runner remains available. Kubernetes Pod replacement treats deletion as asynchronous: the Provider must not apply the replacement under the same name until the old Pod is no longer observable, avoiding immutable-field PATCH failures during restart.
+
+Runtime Profile reconciliation classifies one action for each candidate. A ready desired revision may
+dispatch lifecycle work, wait for Provider acknowledgement, offer exact evidence to the Runner
+through the ordinary heartbeat acknowledgement, wait for a matching Runner state report, adopt a
+NetworkPolicy-only change in place, wait for explicit recreation, or do nothing. Independent loops
+must not select competing lifecycle and configuration actions for the same observation.
 
 Provider and Runner request streams use explicit claim/ack delivery. Control returns each claimed request with the stream cursor and consumer-group metadata needed to acknowledge the request only after it has been sent on the matching gRPC stream. Unacknowledged requests may be reclaimed after an idle interval so a Control replica crash or stream interruption does not strand in-flight Provider/Runner work.
 
@@ -211,7 +232,7 @@ Authentication rollout resources do not own, select, prune, reset, rename, repla
 
 ## Provider Contract
 
-Provider is lifecycle-only. It implements:
+Provider owns substrate lifecycle and exact Runtime configuration application. It implements:
 
 - start
 - stop
@@ -219,6 +240,18 @@ Provider is lifecycle-only. It implements:
 - reset
 - observe
 - terminal delete
+
+Each lifecycle command carries the complete canonical Runtime configuration envelope for the target
+desired generation. The envelope names the exact Provider, Provider capability revision,
+infrastructure Profile, Workspace Runtime Profile, resolved typed configuration, digest, Runner
+image, and generation-scoped Runner credential. Providers reject another Provider's envelope,
+unsupported Profile kinds, invalid typed values, and generation mismatch before backend mutation.
+
+Provider reports include the applied configuration generation and digest. Control records Provider
+acknowledgement only for the exact desired revision. After that acknowledgement, Runner heartbeat
+ACK may carry the same pending evidence; Runner adopts it locally and emits its ordinary state
+report. Control promotes the desired revision to applied only when Provider and Runner evidence both
+match. There is no separate Runner configuration-update request/ACK protocol.
 
 Provider reports backend observed state and metadata. The Agent Workspace absolute path is provider metadata and is stored on `agent_runtimes.workspace_path`. Runner registration can validate that it mounted the same path, but Runner is not the authority for choosing the Agent Workspace path.
 
@@ -339,20 +372,26 @@ Lifecycle APIs are desired-state declarations. Repeating the same request must c
 
 Reset carries its own desired generation and a final desired state. Provider is responsible for performing backend deletion/recreation according to that command and reporting the resulting observed state.
 
-Runtime execution targets are immutable generation-fenced policy snapshots. Explicit Agent Apply
-attaches a target; restrictive edits to the selected Profile or Workspace policy attach a narrower target through automatic
-convergence. Control accepts Provider evidence only for the matching desired generation and does
-not report compliance before matching observation. Failed tightening remains pending or divergent
-and may fence/stop noncompliant authority, but never invokes reset, terminal delete, Provider
-fallback, or workspace deletion. Unsupported capability remains unavailable rather than weakened.
+Runtime configuration targets are immutable generation-fenced revisions resolved from the Agent's
+exact Workspace Runtime Profile. Parent Profile or current capability changes create a new desired
+revision automatically; there is no Agent Apply boundary and no legacy policy fallback.
 
-A mixed policy edit computes the module-owned security meet between the applied policy and current
-intent. Docker enablement, storage mode, and storage capacity remain one atomic module, while
-numeric Kubernetes resource bounds take the lower finite value.
-The restrictive subset converges automatically before any remaining authority expansion is offered
-for explicit Apply. A historical applied Snapshot whose evidence was invalidated by a schema
-migration remains internal recovery state; it does not become an administrator action while a valid
-target can be reconciled.
+Lifecycle commands that create or replace physical compute require the latest ready desired revision.
+An unavailable or blocked desired revision prevents create/start/restart/reset/recreate and reports
+a bounded reason. Stop and terminal delete remain available where needed to remove authority or
+complete decommissioning.
+
+Desired/applied mismatch never authorizes implicit recreation. Kubernetes NetworkPolicy-only changes
+may adopt in place through exact Provider and Runner evidence. PodSpec, PVC, and Docker changes
+remain waiting for an explicit recreation operation. Recreation snapshots the exact target version
+and revision, dispatches one fenced next generation, skips stale or superseded items, and completes
+only after the replacement revision becomes applied. Stopped Runtimes skip immediate recreation and
+adopt the current Profile on their next start.
+
+Start, stop, restart, ordinary recreation, recovery, and in-place adoption preserve Agent Workspace
+data. Reset and terminal delete retain their explicit destructive boundaries. Provider or Profile
+loss preserves stored selection and running incarnation state; it does not select a fallback or
+silently weaken configuration.
 
 ## Delivery
 
@@ -379,14 +418,21 @@ Required deterministic coverage:
 - Runner operation tests for process, file, Git, and strict V4A patch operations
 - Runtime Control contract tests for ordered operation cancellation, start/cancel races, terminal cursor authority, and typed patch result folding
 - Provider tests for Docker host bind mount persistence, Kubernetes PVC persistence, direct DIND socket topology, and deployment-owned NetworkPolicy hard caps
+- Runtime Profile tests for exact resolution, current-capability compatibility, desired/applied
+  evidence, one-action reconciliation, explicit recreation, stale target skips, and bounded failures
 - Docker compatibility tests for CLI, Buildx, Compose, workspace and temporary-file bind mounts, SDK, Testcontainers Network, PostgreSQL port binding, and Ryuk cleanup
 - azents deterministic E2E for Agent Workspace bootstrap and lifecycle actions
+- credential-free runtime-provider E2E for explicit/default/unconfigured Profile precedence, exact
+  binding, applied evidence, Provider loss without fallback, recreation, and recovery
 - credential-free runtime-provider E2E for multi-file `apply_patch`, typed results, final manifests, and traversal rejection
 
 Live/provider evidence belongs in the testenv prerequisite system and must redact tokens, credential ids, auth headers, rendered secrets, and raw Runtime tokens.
 
 ## Changelog
 
+- **2026-07-31** (spec_version 44) — Replaced policy snapshots and Apply with exact desired/applied
+  Runtime configuration revisions, current-capability authority, Provider acknowledgement plus
+  ordinary Runner evidence, one-action reconciliation, and explicit storage-preserving recreation.
 - **2026-07-30** (spec_version 43) — Added typed bounded `file.read_text` encoding selection with strict decode errors and direct text events, while moving Workspace complete downloads to the verified Runtime transfer object path instead of Runner Control file chunks.
 - **2026-07-29** (spec_version 42) — Removed root-owned transfer staging, Runner
   identity switching, and the Kubernetes staging init container. Docker and

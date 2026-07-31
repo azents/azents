@@ -12,25 +12,25 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Domain | Title | Owner | Last Verified | Version |
 |---|---|---|---|---|
-| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-27 | 58 |
+| agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-31 | 59 |
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-29 | 134 |
 | external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-07-31 | 30 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-28 | 13 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-24 | 6 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-21 | 17 |
-| runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-07-28 | 13 |
+| runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-07-31 | 14 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-30 | 5 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-07-28 | 77 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-20 | 8 |
-| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-30 | 52 |
+| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-07-31 | 53 |
 
 ## Flow Specs
 
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
 | [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-07-30 | 137 |
-| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-07-30 | 43 |
-| [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-28 | 12 |
+| [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-07-31 | 44 |
+| [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-31 | 13 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
