@@ -128,7 +128,7 @@ class SlackInteractionCallback:
     callback_id: str | None
     action_id: str | None
     trigger_id: str | None = field(repr=False)
-    selector_admission_id: str | None = field(repr=False)
+    selector_interaction_id: str | None = field(repr=False)
     resource_correlation_key: str | None
     projection: dict[str, object]
     expires_at: datetime.datetime
@@ -383,7 +383,7 @@ def parse_slack_interaction_payload(
         callback_id=callback_id,
         action_id=action_id,
         trigger_id=_optional_string(payload, "trigger_id"),
-        selector_admission_id=_interaction_selector_admission_id(
+        selector_interaction_id=_interaction_selector_interaction_id(
             payload,
             action_id=action_id,
         ),
@@ -836,7 +836,7 @@ def _interaction_action_id(payload: dict[str, object]) -> str | None:
     return _optional_string(action, "action_id") if isinstance(action, dict) else None
 
 
-def _interaction_selector_admission_id(
+def _interaction_selector_interaction_id(
     payload: dict[str, object],
     *,
     action_id: str | None,

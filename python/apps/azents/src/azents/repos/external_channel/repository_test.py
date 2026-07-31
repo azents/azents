@@ -2,7 +2,6 @@
 
 import datetime
 from types import SimpleNamespace
-from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -11,13 +10,11 @@ from azcommon.result import Success
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.elements import ClauseElement
 
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
     ExternalChannelIngressProfile,
-    ExternalChannelInvocationWakeDispatchStatus,
     ExternalChannelProvider,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
@@ -35,7 +32,6 @@ from azents.repos.external_channel.data import (
     ExternalChannelAgentRouteCreate,
     ExternalChannelConnectionCreate,
     ExternalChannelConversationPosition,
-    ExternalChannelInvocationBatch,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.workspace import WorkspaceRepository
@@ -157,96 +153,6 @@ async def test_conversation_position_lock_and_compare_and_set_are_fenced(
 
 
 @pytest.mark.asyncio
-async def test_invocation_wake_dispatch_claim_transitions_are_recoverable(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Fresh claims fence dispatchers; stale claims recover; dispatch is terminal."""
-    repository = ExternalChannelRepository()
-    batch = SimpleNamespace(
-        id="batch-1",
-        wake_dispatch_status=ExternalChannelInvocationWakeDispatchStatus.PENDING,
-        wake_dispatch_claimed_at=None,
-    )
-    session = MagicMock(spec=AsyncSession)
-    session.scalar = AsyncMock(return_value=batch)
-    session.flush = AsyncMock()
-    monkeypatch.setattr(
-        ExternalChannelInvocationBatch,
-        "model_validate",
-        classmethod(lambda cls, value: value),
-    )
-    now = _at(10)
-
-    claimed, should_dispatch = await repository.claim_invocation_wake_dispatch(
-        session,
-        batch_id=batch.id,
-        now=now,
-    )
-    assert claimed is batch
-    assert should_dispatch is True
-    assert (
-        batch.wake_dispatch_status
-        is ExternalChannelInvocationWakeDispatchStatus.CLAIMED
-    )
-
-    claimed, should_dispatch = await repository.claim_invocation_wake_dispatch(
-        session,
-        batch_id=batch.id,
-        now=now + datetime.timedelta(seconds=1),
-    )
-    assert claimed is batch
-    assert should_dispatch is False
-
-    batch.wake_dispatch_claimed_at = now - datetime.timedelta(minutes=2)
-    claimed, should_dispatch = await repository.claim_invocation_wake_dispatch(
-        session,
-        batch_id=batch.id,
-        now=now,
-    )
-    assert claimed is batch
-    assert should_dispatch is True
-
-    dispatched = await repository.mark_invocation_wake_dispatched(
-        session,
-        batch_id=batch.id,
-        dispatched_at=now,
-    )
-    assert dispatched is batch
-    assert (
-        batch.wake_dispatch_status
-        is ExternalChannelInvocationWakeDispatchStatus.DISPATCHED
-    )
-    assert batch.wake_dispatch_claimed_at is None
-
-    claimed, should_dispatch = await repository.claim_invocation_wake_dispatch(
-        session,
-        batch_id=batch.id,
-        now=now + datetime.timedelta(minutes=2),
-    )
-    assert claimed is batch
-    assert should_dispatch is False
-
-
-async def test_invocation_projection_query_preserves_inner_revision_from() -> None:
-    """The original-revision subquery retains an independent FROM clause."""
-    session = MagicMock(spec=AsyncSession)
-
-    async def compile_statement(statement: ClauseElement) -> MagicMock:
-        statement.compile(dialect=postgresql.dialect())
-        result = MagicMock()
-        result.mappings.return_value = []
-        return result
-
-    session.execute = AsyncMock(side_effect=compile_statement)
-
-    items = await ExternalChannelRepository().list_invocation_projection_items(
-        cast(AsyncSession, session),
-        batch_id="batch-1",
-    )
-
-    assert items == []
-
-
 class TestExternalChannelRepository:
     """External Channel foundation repository tests."""
 

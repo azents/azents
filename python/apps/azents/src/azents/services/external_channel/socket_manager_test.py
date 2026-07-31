@@ -211,7 +211,7 @@ def _outcome(
             if kind is ExternalChannelIngestionOutcomeKind.ACCEPTED
             else ExternalChannelIngestionReason.HISTORY_UNAVAILABLE
         ),
-        batch_id=(
+        mailbox_item_id=(
             "batch-1" if kind is ExternalChannelIngestionOutcomeKind.ACCEPTED else None
         ),
         control_delivery_attempt_id=None,

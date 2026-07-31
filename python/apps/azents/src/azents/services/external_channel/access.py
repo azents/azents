@@ -13,7 +13,6 @@ from azents.core.enums import (
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
     ExternalChannelBindingStatus,
-    ExternalChannelConversationAdmissionStatus,
     ExternalChannelResourceStatus,
 )
 from azents.rdb.deps import get_session_manager
@@ -164,19 +163,6 @@ class ExternalChannelAccessService:
                 raise ExternalChannelAccessDecisionError(
                     "The external conversation is already bound to another route."
                 )
-            admission = await self.repository.lock_open_conversation_admission(
-                session,
-                resource_id=request_snapshot.resource_id,
-            )
-            if admission is not None and (
-                admission.selected_route_id != route.id
-                or admission.source_message_id != request_snapshot.source_message_id
-                or admission.status
-                is not ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS
-            ):
-                raise ExternalChannelAccessDecisionError(
-                    "The External Channel admission is not awaiting this Allow."
-                )
             request = await self._locked_request(
                 session,
                 access_request_id=access_request_id,
@@ -191,13 +177,6 @@ class ExternalChannelAccessService:
                 if binding is None or grant is None or grant.scope is not scope:
                     raise ExternalChannelAccessDecisionError(
                         "The prior Allow decision no longer has its active state."
-                    )
-                if admission is not None:
-                    await self.repository.transition_conversation_admission(
-                        session,
-                        admission_id=admission.id,
-                        status=ExternalChannelConversationAdmissionStatus.BOUND,
-                        selected_route_id=route.id,
                     )
                 delete_intent = (
                     await self.repository.create_access_request_control_delete_intent(
@@ -274,7 +253,6 @@ class ExternalChannelAccessService:
                     disconnected_at=None,
                     disconnect_reason=None,
                 ),
-                expected_admission_id=None if admission is None else admission.id,
                 expected_access_request_id=request.id,
             )
             grant = await self.repository.ensure_access_grant(
@@ -305,13 +283,6 @@ class ExternalChannelAccessService:
             )
             if decided is None:
                 raise ExternalChannelAccessRequestNotFound(access_request_id)
-            if admission is not None:
-                await self.repository.transition_conversation_admission(
-                    session,
-                    admission_id=admission.id,
-                    status=ExternalChannelConversationAdmissionStatus.BOUND,
-                    selected_route_id=route.id,
-                )
             delete_intent = (
                 await self.repository.create_access_request_control_delete_intent(
                     session,
@@ -519,22 +490,11 @@ class ExternalChannelAccessService:
                 raise ExternalChannelAccessDecisionError(
                     "The external conversation is already bound to another route."
                 )
-            admission = await self.repository.lock_open_conversation_admission(
-                session,
-                resource_id=resource.id,
-            )
             request = await self._locked_request(
                 session,
                 access_request_id=access_request_id,
             )
             if request.status is expected_status:
-                if admission is not None:
-                    await self.repository.transition_conversation_admission(
-                        session,
-                        admission_id=admission.id,
-                        status=ExternalChannelConversationAdmissionStatus.REJECTED,
-                        selected_route_id=admission.selected_route_id,
-                    )
                 delete_intent = (
                     await self.repository.create_access_request_control_delete_intent(
                         session,
@@ -573,20 +533,6 @@ class ExternalChannelAccessService:
             )
             if decided is None:
                 raise ExternalChannelAccessRequestNotFound(access_request_id)
-            if admission is not None:
-                if (
-                    admission.selected_route_id != route.id
-                    or admission.source_message_id != request.source_message_id
-                ):
-                    raise ExternalChannelAccessDecisionError(
-                        "The External Channel admission does not match this decision."
-                    )
-                await self.repository.transition_conversation_admission(
-                    session,
-                    admission_id=admission.id,
-                    status=ExternalChannelConversationAdmissionStatus.REJECTED,
-                    selected_route_id=route.id,
-                )
             delete_intent = (
                 await self.repository.create_access_request_control_delete_intent(
                     session,

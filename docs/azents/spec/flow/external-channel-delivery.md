@@ -16,7 +16,7 @@ code_paths:
   - python/apps/azents/src/azents/runtime/transfer/runtime_to_provider.py
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/services/external_channel/file_transfer.py
-  - python/apps/azents/src/azents/services/external_channel/ingestion_store.py
+  - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
   - python/apps/azents/src/azents/services/external_channel/presentation.py
   - python/apps/azents/src/azents/services/external_channel/provider_control.py
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
@@ -30,8 +30,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_data.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-07-30
-spec_version: 23
+last_verified_at: 2026-07-31
+spec_version: 24
 ---
 
 # External Channel Delivery and Channel Work
@@ -123,6 +123,22 @@ converges duplicate creates. Credential, permission, missing-message, rate-limit
 confirmed provider rejection outcomes are `failed`; network, timeout, invalid success
 payload, and server ambiguity are `unknown`. An unknown Discord write is never blindly
 replayed.
+
+## Provider File Download
+
+A model-visible file key uses the single direct-address contract:
+
+```text
+external-file:v1:<provider>:<binding>:<channel>:<message>:<file>
+```
+
+Slack leaves channel and message empty and resolves the provider file ID through the
+active App. Discord requires channel, message, and attachment identity and calls the
+provider directly with those coordinates. The download path validates current Agent,
+Session, active binding, route, connection, capability, and the displayed declared
+size before streaming. Provider credentials and permissions are authoritative. It
+does not query Session event history to recover provider coordinates and retains no
+fallback for the replaced shorter key shape.
 
 ## File-bearing Reply Delivery
 
@@ -295,6 +311,8 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-07-31** (spec_version 24) — Replaced the file key in place with direct
+  provider coordinates and removed Session-event source lookup and legacy key fallback.
 - **2026-07-30** (spec_version 22) — Added Worker-owned bounded provider-control
   recovery and clarified the claim, provider-I/O, and final-settlement split with
   same-attempt authority revalidation.

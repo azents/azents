@@ -129,7 +129,9 @@ class _ShortcutSourceDouble:
         now: datetime.datetime,
     ) -> object:
         self.calls.append((shortcut_source_event, interaction_id, now))
-        return SimpleNamespace(admission=SimpleNamespace(id="admission-1"))
+        return SimpleNamespace(
+            selector_interaction=SimpleNamespace(id="interaction-row-1")
+        )
 
 
 class _SelectorResponseDouble:
@@ -141,11 +143,11 @@ class _SelectorResponseDouble:
     async def initial_response(
         self,
         *,
-        admission_id: str,
+        selector_interaction_id: str,
         principal_id: str,
         now: datetime.datetime,
     ) -> dict[str, object]:
-        self.calls.append((admission_id, principal_id, now))
+        self.calls.append((selector_interaction_id, principal_id, now))
         return {
             "type": 4,
             "data": {

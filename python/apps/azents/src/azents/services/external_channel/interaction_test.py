@@ -13,7 +13,6 @@ from azents.core.config import Config
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
-    ExternalChannelConversationAdmissionStatus,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
     ExternalChannelProvider,
@@ -22,7 +21,6 @@ from azents.core.enums import (
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
-    ExternalChannelConversationAdmission,
     ExternalChannelInteraction,
     ExternalChannelResource,
 )
@@ -55,6 +53,10 @@ from azents.services.external_channel.selector import (
     ExternalChannelSelectorSelection,
     ExternalChannelSelectorService,
 )
+from azents.services.external_channel.selector_state import (
+    ExternalChannelSelectorState,
+    projection_with_selector_state,
+)
 from azents.services.external_channel.slack_events import (
     SlackConversationClient,
     SlackInteractionView,
@@ -73,13 +75,25 @@ class _Session:
 
 class _Repository:
     def __init__(self) -> None:
+        selector_state = ExternalChannelSelectorState(
+            connection_id="connection-1",
+            resource_id="resource-1",
+            principal_id="principal-1",
+            conversation_position_id="position-1",
+            trigger_provider_message_key="slack:T-1:C-1:100.0001",
+            range_start_position=None,
+            trigger_position="100.0001",
+            selected_route_id=None,
+        )
         self.interaction = ExternalChannelInteraction.model_construct(
             id="interaction-1",
             connection_id="connection-1",
             principal_id="principal-1",
             resource_correlation_key="C-1:100.0001",
             interaction_type=ExternalChannelInteractionType.SHORTCUT,
+            projection=projection_with_selector_state({}, selector_state),
             status=ExternalChannelInteractionStatus.PROCESSING,
+            expires_at=_VALID_EXPIRY,
         )
         self.configuration = ExternalChannelConnectionConfiguration.model_construct(
             id="connection-1",
@@ -95,15 +109,19 @@ class _Repository:
             provider_resource_key="slack:T-1:C-1:100.0001",
             status=ExternalChannelResourceStatus.ACTIVE,
         )
-        self.admission = ExternalChannelConversationAdmission.model_construct(
+        self.selector = ExternalChannelInteraction.model_construct(
             id="admission-1",
             connection_id="connection-1",
-            resource_id="resource-1",
-            initiating_principal_id="principal-1",
-            status=ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
+            principal_id="principal-1",
+            interaction_type=ExternalChannelInteractionType.MANAGEMENT_ACTION,
+            projection=projection_with_selector_state({}, selector_state),
+            status=ExternalChannelInteractionStatus.ACCEPTED,
             expires_at=_VALID_EXPIRY,
         )
-        self.interactions = {self.interaction.id: self.interaction}
+        self.interactions = {
+            self.interaction.id: self.interaction,
+            self.selector.id: self.selector,
+        }
 
     async def lock_interaction(
         self,
@@ -148,24 +166,6 @@ class _Repository:
     ) -> ExternalChannelResource | None:
         del session
         return self.resource if resource_id == self.resource.id else None
-
-    async def get_open_conversation_admission(
-        self,
-        session: AsyncSession,
-        *,
-        resource_id: str,
-    ) -> ExternalChannelConversationAdmission | None:
-        del session
-        return self.admission if resource_id == self.resource.id else None
-
-    async def get_conversation_admission(
-        self,
-        session: AsyncSession,
-        *,
-        admission_id: str,
-    ) -> ExternalChannelConversationAdmission | None:
-        del session
-        return self.admission if admission_id == self.admission.id else None
 
 
 class _Selector:
@@ -252,13 +252,13 @@ class _Replay:
         self.outcome = outcome or ExternalChannelIngestionOutcome(
             kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
             reason=ExternalChannelIngestionReason.ACCEPTED,
-            batch_id=None,
+            mailbox_item_id=None,
             control_delivery_attempt_id=None,
             connection_id=None,
         )
         self.calls: list[dict[str, object]] = []
 
-    async def replay_selected_admission(
+    async def replay_selected_interaction(
         self,
         **kwargs: object,
     ) -> ExternalChannelIngestionOutcome:
@@ -322,11 +322,13 @@ def _catalog(*, empty: bool = False) -> ExternalChannelSelectorCatalog:
     )
 
 
-def _handoff(*, admission_id: str | None = None) -> ExternalChannelInteractionHandoff:
+def _handoff(
+    *, selector_interaction_id: str | None = None
+) -> ExternalChannelInteractionHandoff:
     return ExternalChannelInteractionHandoff(
         interaction_id="interaction-1",
         trigger_id="trigger-secret-must-not-persist",
-        selector_admission_id=admission_id,
+        selector_interaction_id=selector_interaction_id,
     )
 
 
@@ -346,7 +348,7 @@ async def test_shortcut_modal_is_deterministic_and_secret_free() -> None:
     await _processor(repository, selector, slack).process(handoff)
 
     assert len(selector.calls) == 1
-    assert selector.calls[0]["admission_id"] == "admission-1"
+    assert selector.calls[0]["selector_interaction_id"] == "interaction-1"
     assert selector.calls[0]["principal_id"] == "principal-1"
     assert selector.calls[0]["search"] is None
     assert selector.calls[0]["offset"] == 0
@@ -384,13 +386,24 @@ async def test_block_action_rejects_cross_scope_admission_before_provider_io() -
             error_summary=None,
         )
     )
-    repository.admission = repository.admission.model_copy(
-        update={"resource_id": "foreign-resource"}
+    foreign_state = ExternalChannelSelectorState(
+        connection_id="connection-1",
+        resource_id="foreign-resource",
+        principal_id="principal-1",
+        conversation_position_id="position-1",
+        trigger_provider_message_key="slack:T-1:C-1:100.0001",
+        range_start_position=None,
+        trigger_position="100.0001",
+        selected_route_id=None,
     )
+    repository.selector = repository.selector.model_copy(
+        update={"projection": projection_with_selector_state({}, foreign_state)}
+    )
+    repository.interactions[repository.selector.id] = repository.selector
 
-    with pytest.raises(ValueError, match="admission is unavailable"):
+    with pytest.raises(ValueError, match="interaction is unavailable"):
         await _processor(repository, selector, slack).process(
-            _handoff(admission_id="admission-1")
+            _handoff(selector_interaction_id="admission-1")
         )
 
     assert selector.calls == []
@@ -468,7 +481,7 @@ def test_selector_metadata_rejects_tampering_and_cross_scope() -> None:
         secret=_SECRET,
         connection_id="connection-1",
         resource_id="resource-1",
-        admission_id="admission-1",
+        selector_interaction_id="admission-1",
         interaction_id="interaction-1",
         principal_id="principal-1",
         offset=20,
@@ -480,7 +493,7 @@ def test_selector_metadata_rejects_tampering_and_cross_scope() -> None:
             secret=_SECRET,
             connection_id="connection-1",
             resource_id="resource-1",
-            admission_id="admission-1",
+            selector_interaction_id="admission-1",
             interaction_id="interaction-1",
             principal_id="principal-1",
         )
@@ -492,7 +505,7 @@ def test_selector_metadata_rejects_tampering_and_cross_scope() -> None:
             secret=_SECRET,
             connection_id="connection-1",
             resource_id="resource-1",
-            admission_id="admission-1",
+            selector_interaction_id="admission-1",
             interaction_id="interaction-1",
             principal_id="principal-1",
         )
@@ -502,7 +515,7 @@ def test_selector_metadata_rejects_tampering_and_cross_scope() -> None:
             secret=_SECRET,
             connection_id="connection-1",
             resource_id="foreign-resource",
-            admission_id="admission-1",
+            selector_interaction_id="admission-1",
             interaction_id="interaction-1",
             principal_id="principal-1",
         )
@@ -533,7 +546,7 @@ async def test_navigation_requeries_search_page_and_updates_current_modal() -> N
         secret=_SECRET,
         connection_id="connection-1",
         resource_id="resource-1",
-        admission_id="admission-1",
+        selector_interaction_id="admission-1",
         interaction_id="interaction-1",
         principal_id="principal-1",
         offset=0,
@@ -551,7 +564,7 @@ async def test_navigation_requeries_search_page_and_updates_current_modal() -> N
     )
 
     assert len(selector.calls) == 1
-    assert selector.calls[0]["admission_id"] == "admission-1"
+    assert selector.calls[0]["selector_interaction_id"] == "admission-1"
     assert selector.calls[0]["principal_id"] == "principal-1"
     assert selector.calls[0]["search"] == "ops"
     assert selector.calls[0]["offset"] == 20
@@ -582,11 +595,8 @@ async def test_submission_revalidates_signed_modal_scope_before_selection() -> N
     selector = _Selector(_catalog())
     selector.selection = ExternalChannelSelectorSelection(
         status="selected",
-        admission=repository.admission.model_copy(
-            update={
-                "status": ExternalChannelConversationAdmissionStatus.SELECTED,
-                "selected_route_id": "route-alpha",
-            }
+        selector_interaction=ExternalChannelInteraction.model_construct(
+            id="admission-1",
         ),
         binding=None,
     )
@@ -601,7 +611,7 @@ async def test_submission_revalidates_signed_modal_scope_before_selection() -> N
         secret=_SECRET,
         connection_id="connection-1",
         resource_id="resource-1",
-        admission_id="admission-1",
+        selector_interaction_id="admission-1",
         interaction_id="interaction-1",
         principal_id="principal-1",
         offset=0,
@@ -618,12 +628,12 @@ async def test_submission_revalidates_signed_modal_scope_before_selection() -> N
 
     assert len(selector.selection_calls) == 1
     call = selector.selection_calls[0]
-    assert call["admission_id"] == "admission-1"
+    assert call["selector_interaction_id"] == "admission-1"
     assert call["principal_id"] == "principal-1"
     assert call["route_id"] == "route-alpha"
     assert isinstance(call["now"], datetime.datetime)
     assert len(replay.calls) == 1
-    assert replay.calls[0]["admission_id"] == "admission-1"
+    assert replay.calls[0]["selector_interaction_id"] == "admission-1"
     assert replay.calls[0]["principal_id"] == "principal-1"
     assert slack.views == []
 
@@ -645,14 +655,8 @@ async def test_typed_submission_replays_and_delivers_committed_control() -> None
     selector = _Selector(_catalog())
     selector.selection = ExternalChannelSelectorSelection(
         status="selected",
-        admission=repository.admission.model_copy(
-            update={
-                "status": ExternalChannelConversationAdmissionStatus.SELECTED,
-                "selected_route_id": "route-alpha",
-                "conversation_position_id": "position-1",
-                "range_start_position": "0001",
-                "trigger_position": "0002",
-            }
+        selector_interaction=ExternalChannelInteraction.model_construct(
+            id="admission-1",
         ),
         binding=None,
     )
@@ -667,7 +671,7 @@ async def test_typed_submission_replays_and_delivers_committed_control() -> None
         secret=_SECRET,
         connection_id="connection-1",
         resource_id="resource-1",
-        admission_id="admission-1",
+        selector_interaction_id="admission-1",
         interaction_id="interaction-1",
         principal_id="principal-1",
         offset=0,
@@ -677,7 +681,7 @@ async def test_typed_submission_replays_and_delivers_committed_control() -> None
         ExternalChannelIngestionOutcome(
             kind=ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS,
             reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
-            batch_id=None,
+            mailbox_item_id=None,
             control_delivery_attempt_id="delivery-1",
             connection_id="connection-1",
         )
@@ -698,7 +702,7 @@ async def test_typed_submission_replays_and_delivers_committed_control() -> None
     )
 
     assert len(replay.calls) == 1
-    assert replay.calls[0]["admission_id"] == "admission-1"
+    assert replay.calls[0]["selector_interaction_id"] == "admission-1"
     assert provider_control.calls == ["delivery-1"]
 
 
@@ -727,7 +731,7 @@ async def test_submission_rejects_tampered_metadata_before_selection() -> None:
         secret=_SECRET,
         connection_id="connection-1",
         resource_id="resource-1",
-        admission_id="admission-1",
+        selector_interaction_id="admission-1",
         interaction_id="interaction-1",
         principal_id="principal-1",
         offset=0,
@@ -746,12 +750,13 @@ async def test_submission_rejects_tampered_metadata_before_selection() -> None:
 
 
 @pytest.mark.asyncio
-async def test_expired_admission_blocks_modal_before_provider_io() -> None:
+async def test_expired_selector_interaction_blocks_modal_before_provider_io() -> None:
     """Expired selector scope cannot open or update a Slack modal."""
     repository = _Repository()
-    repository.admission = repository.admission.model_copy(
+    repository.interaction = repository.interaction.model_copy(
         update={"expires_at": _EXPIRED_AT}
     )
+    repository.interactions[repository.interaction.id] = repository.interaction
     selector = _Selector(_catalog())
     slack = _Slack(
         SlackInteractionViewResult(
@@ -761,7 +766,7 @@ async def test_expired_admission_blocks_modal_before_provider_io() -> None:
         )
     )
 
-    with pytest.raises(ValueError, match="admission is unavailable"):
+    with pytest.raises(ValueError, match="interaction is unavailable"):
         await _processor(repository, selector, slack).process(_handoff())
 
     assert selector.calls == []

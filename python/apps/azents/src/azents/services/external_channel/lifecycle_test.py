@@ -138,8 +138,6 @@ class _RepositoryDouble(ExternalChannelLifecycleRepository):
             deleted_session_grant_count=1,
             preserved_agent_grant_reference_count=1,
             deleted_access_request_count=1,
-            deleted_invocation_batch_item_count=1,
-            deleted_invocation_batch_count=1,
             deleted_work_count=1,
             deleted_binding_count=1,
         )
@@ -160,7 +158,6 @@ class _RepositoryDouble(ExternalChannelLifecycleRepository):
             remaining_delivery_attempt_count=0,
             remaining_access_request_count=0,
             remaining_session_grant_count=0,
-            remaining_invocation_batch_count=0,
         )
 
 

@@ -13,8 +13,6 @@ from azents.core.enums import (
     ExternalChannelBindingStatus,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
-    ExternalChannelConversationAdmissionOrigin,
-    ExternalChannelConversationAdmissionStatus,
     ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
@@ -22,13 +20,9 @@ from azents.core.enums import (
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
-    ExternalChannelInvocationWakeDispatchStatus,
-    ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
-    ExternalChannelResourceProvisioningOperation,
-    ExternalChannelResourceProvisioningStatus,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
     ExternalChannelRouteCatalogStatus,
@@ -301,43 +295,6 @@ class ExternalChannelInteractionAdmission(_Record):
     created: bool
 
 
-class ExternalChannelConversationAdmission(_Record):
-    """Route-neutral admission for an unbound provider conversation."""
-
-    id: str
-    connection_id: str
-    resource_id: str
-    source_message_id: str
-    initiating_principal_id: str | None
-    origin: ExternalChannelConversationAdmissionOrigin
-    status: ExternalChannelConversationAdmissionStatus
-    selected_route_id: str | None
-    interaction_id: str | None
-    conversation_position_id: str | None = None
-    range_start_position: str | None = None
-    trigger_position: str | None = None
-    expires_at: datetime.datetime
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-
-
-class ExternalChannelConversationAdmissionCreate(_Record):
-    """Conversation-admission creation payload."""
-
-    connection_id: str
-    resource_id: str
-    source_message_id: str
-    initiating_principal_id: str | None
-    origin: ExternalChannelConversationAdmissionOrigin
-    status: ExternalChannelConversationAdmissionStatus
-    selected_route_id: str | None
-    interaction_id: str | None
-    conversation_position_id: str | None = None
-    range_start_position: str | None = None
-    trigger_position: str | None = None
-    expires_at: datetime.datetime
-
-
 class ExternalChannelChannelDefault(_Record):
     """Durable route default for one provider channel."""
 
@@ -394,69 +351,6 @@ class ExternalChannelPrincipalCreate(_Record):
     profile: dict[str, Any] | None
 
 
-class ExternalChannelMessage(_Record):
-    """Canonical external message independent from provider deliveries."""
-
-    id: str
-    resource_id: str
-    provider_message_key: str
-    provider_position: str
-    principal_id: str | None
-    author_type: ExternalChannelPrincipalAuthorType
-    current_revision_id: str | None
-    original_url: str | None
-    lifecycle: ExternalChannelMessageLifecycle
-    pending_size: int
-    provider_created_at: datetime.datetime | None
-    provider_updated_at: datetime.datetime | None
-    observed_at: datetime.datetime
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-
-
-class ExternalChannelMessageCreate(_Record):
-    """Canonical message creation payload."""
-
-    resource_id: str
-    provider_message_key: str
-    provider_position: str
-    principal_id: str | None
-    author_type: ExternalChannelPrincipalAuthorType
-    current_revision_id: str | None
-    original_url: str | None
-    lifecycle: ExternalChannelMessageLifecycle
-    pending_size: int
-    provider_created_at: datetime.datetime | None
-    provider_updated_at: datetime.datetime | None
-
-
-class ExternalChannelMessageRevision(_Record):
-    """Immutable normalized provider message revision."""
-
-    id: str
-    message_id: str
-    revision_key: str
-    revision_kind: ExternalChannelMessageRevisionKind
-    normalized_body: str | None
-    attachment_metadata: dict[str, Any] | None
-    reference_mappings: dict[str, Any] | None
-    provider_occurred_at: datetime.datetime | None
-    observed_at: datetime.datetime
-    created_at: datetime.datetime
-
-
-class ExternalChannelMessageRevisionCreate(_Record):
-    """Normalized message revision creation payload."""
-
-    message_id: str
-    revision_key: str
-    revision_kind: ExternalChannelMessageRevisionKind
-    normalized_body: str | None
-    attachment_metadata: dict[str, Any] | None
-    reference_mappings: dict[str, Any] | None
-    provider_occurred_at: datetime.datetime | None
-
-
 class ExternalChannelBinding(_Record):
     """Lifecycle-owned resource-to-Session relationship."""
 
@@ -483,81 +377,18 @@ class ExternalChannelBindingCreate(_Record):
     disconnect_reason: str | None
 
 
-class ExternalChannelInvocationBatch(_Record):
-    """One ordered external turn released through an authorized invocation."""
+class ExternalChannelMailboxProjectionItem(_Record):
+    """One provider-history message embedded in a canonical mailbox item."""
 
-    id: str
+    invocation_id: str
     binding_id: str
-    trigger_message_id: str
-    first_provider_position: str
-    last_provider_position: str
-    conversation_position_id: str | None = None
-    range_start_position: str | None = None
-    trigger_position: str | None = None
-    context_omitted: bool = False
-    wake_dispatch_status: ExternalChannelInvocationWakeDispatchStatus = (
-        ExternalChannelInvocationWakeDispatchStatus.DISPATCHED
-    )
-    wake_dispatch_claimed_at: datetime.datetime | None = None
-    mailbox_item_id: str | None
-    connection_id: str | None = None
-    created_at: datetime.datetime
-
-
-class ExternalChannelInvocationBatchCreate(_Record):
-    """Invocation-batch creation payload."""
-
-    binding_id: str
-    trigger_message_id: str
-    first_provider_position: str
-    last_provider_position: str
-    conversation_position_id: str | None = None
-    range_start_position: str | None = None
-    trigger_position: str | None = None
-    context_omitted: bool = False
-    wake_dispatch_status: ExternalChannelInvocationWakeDispatchStatus = (
-        ExternalChannelInvocationWakeDispatchStatus.DISPATCHED
-    )
-    wake_dispatch_claimed_at: datetime.datetime | None = None
-    mailbox_item_id: str | None
-    connection_id: str | None = None
-
-
-class ExternalChannelInvocationBatchItem(_Record):
-    """Immutable message revision membership in an invocation batch."""
-
-    id: str
-    batch_id: str
-    message_revision_id: str
-    sequence: int
-    provider_position: str
-    created_at: datetime.datetime
-
-
-class ExternalChannelInvocationBatchItemCreate(_Record):
-    """Invocation-batch item creation payload."""
-
-    batch_id: str
-    message_revision_id: str
-    sequence: int
-    provider_position: str
-
-
-class ExternalChannelInvocationProjectionItem(_Record):
-    """Joined immutable data needed to project one invocation event."""
-
-    batch_id: str
-    binding_id: str
-    trigger_message_id: str
+    trigger_provider_message_key: str
     context_omitted: bool
     sequence: int
-    message_id: str
-    revision_id: str
     revision_kind: ExternalChannelMessageRevisionKind
-    revision_body: str | None
+    body: str | None
     attachment_metadata: dict[str, Any] | None
     reference_mappings: dict[str, Any] | None
-    provider_occurred_at: datetime.datetime | None
     resource_id: str
     provider_resource_key: str
     resource_type: ExternalChannelResourceType
@@ -573,7 +404,6 @@ class ExternalChannelInvocationProjectionItem(_Record):
     provider_created_at: datetime.datetime | None
     provider_updated_at: datetime.datetime | None
     original_url: str | None
-    correction_of_revision_id: str | None
 
 
 class ExternalChannelAccessRequest(_Record):
@@ -582,7 +412,7 @@ class ExternalChannelAccessRequest(_Record):
     id: str
     route_id: str
     resource_id: str
-    source_message_id: str
+    trigger_provider_message_key: str
     principal_id: str
     agent_session_id: str | None
     status: ExternalChannelAccessRequestStatus
@@ -604,7 +434,7 @@ class ExternalChannelAccessRequestCreate(_Record):
 
     route_id: str
     resource_id: str
-    source_message_id: str
+    trigger_provider_message_key: str
     principal_id: str
     agent_session_id: str | None
     status: ExternalChannelAccessRequestStatus
@@ -812,24 +642,6 @@ class ExternalChannelIngressLeaseClaim(_Record):
     lease: ExternalChannelIngressLease
 
 
-class ExternalChannelResourceProvisioning(_Record):
-    """Durable result state for a resource provisioning operation."""
-
-    id: str
-    resource_id: str
-    conversation_admission_id: str
-    operation: ExternalChannelResourceProvisioningOperation
-    target_provider_resource_key: str
-    status: ExternalChannelResourceProvisioningStatus
-    confirmed_provider_resource_key: str | None
-    error_kind: str | None
-    error_summary: str | None
-    attempted_at: datetime.datetime | None
-    completed_at: datetime.datetime | None
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-
-
 class ExternalChannelWorkProjectionPart(_Record):
     """Current provider projection for an ordered canonical Work part."""
 
@@ -876,8 +688,6 @@ class ExternalChannelPurgeCleanup(_Record):
     deleted_session_grant_count: int
     preserved_agent_grant_reference_count: int
     deleted_access_request_count: int
-    deleted_invocation_batch_item_count: int
-    deleted_invocation_batch_count: int
     deleted_work_count: int
     deleted_binding_count: int
 
@@ -891,7 +701,6 @@ class ExternalChannelPurgeVerification(_Record):
     remaining_delivery_attempt_count: int
     remaining_access_request_count: int
     remaining_session_grant_count: int
-    remaining_invocation_batch_count: int
 
 
 class ExternalChannelAgentDecommissionCleanup(_Record):

@@ -852,10 +852,10 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert isinstance(request_counts, dict)
     typed_counts = cast(dict[str, Any], request_counts)
     assert "conversations.info" not in typed_counts
-    # The initial callback, duplicate delivery, and access replay each revalidate
-    # the canonical provider-history boundary before converging on one binding.
-    assert typed_counts["conversations.history"] == 3
-    assert typed_counts["chat.getPermalink"] == 3
+    # The initial callback, duplicate delivery, initial Allow replay, and repeated
+    # Allow recovery each revalidate provider history before one mailbox input wins.
+    assert typed_counts["conversations.history"] == 4
+    assert typed_counts["chat.getPermalink"] == 4
     # One access-review control is deleted after approval, while durable acceptance
     # creates the initial provider-native work progress through the Worker drain.
     assert typed_counts["chat.postMessage"] == 2
@@ -2873,6 +2873,19 @@ def test_discord_message_command_selector_and_component_journey(
     )
     assert isinstance(selector, str)
     assert selector.startswith("azents-selector:")
+    before_component = _discord_provider_state(discord_provider_fake_url)
+    before_request_counts = cast(
+        dict[str, int],
+        before_component["request_counts"],
+    )
+    before_thread_count = before_request_counts.get("create_thread", 0)
+    before_message_count = before_request_counts.get("create_message", 0)
+    before_operation_count = len(
+        cast(list[dict[str, object]], before_component["operations"])
+    )
+    before_delivery_count = len(
+        cast(list[dict[str, object]], before_component["deliveries"])
+    )
     component = requests.post(
         f"{discord_provider_fake_url}/__testenv/interactions",
         json={
@@ -2889,10 +2902,60 @@ def test_discord_message_command_selector_and_component_journey(
     )
     component.raise_for_status()
     assert component.json() == {"status": 200, "response_type": 7}
-    state = _discord_provider_state(discord_provider_fake_url)
+    state = cast(
+        dict[str, object],
+        wait_until(
+            lambda: (
+                (
+                    provider_state
+                    if (
+                        isinstance(
+                            request_counts := provider_state.get("request_counts"),
+                            dict,
+                        )
+                        and cast(dict[str, int], request_counts).get("create_thread", 0)
+                        > before_thread_count
+                        and cast(dict[str, int], request_counts).get(
+                            "create_message", 0
+                        )
+                        > before_message_count
+                    )
+                    else None
+                )
+                if (
+                    provider_state := _discord_provider_state(discord_provider_fake_url)
+                )
+                else None
+            ),
+            timeout=15,
+            interval=0.2,
+            message=(
+                "Discord selector replay did not provision its thread and deliver "
+                "the access control"
+            ),
+        ),
+    )
     rendered = str(state)
     interactions = cast(list[dict[str, object]], state["interactions"])
     assert [item["response_type"] for item in interactions] == [4, 7]
+    operations = cast(list[dict[str, object]], state["operations"])[
+        before_operation_count:
+    ]
+    thread_channel_id = next(
+        operation["thread_channel_id"]
+        for operation in operations
+        if operation.get("event") == "thread_create"
+        and operation.get("outcome") == "delivered"
+    )
+    deliveries = cast(list[dict[str, object]], state["deliveries"])[
+        before_delivery_count:
+    ]
+    assert any(
+        delivery.get("operation") == "create_message"
+        and delivery.get("outcome") == "created"
+        and delivery.get("channel_id") == thread_channel_id
+        for delivery in deliveries
+    )
     assert source_content not in rendered
     assert _DISCORD_BOT_TOKEN not in rendered
     assert selector not in rendered

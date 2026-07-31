@@ -17,7 +17,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-27 | 58 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-29 | 134 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-31 | 29 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-31 | 30 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-28 | 13 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
@@ -37,10 +37,10 @@ Design documents are accumulated records and are not listed individually in this
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
-| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-30 | 12 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-30 | 23 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-31 | 20 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-31 | 19 |
+| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-31 | 13 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-31 | 24 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-31 | 21 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-31 | 20 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-30 | 36 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
@@ -286,6 +286,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Per-Prompt Inference Profile Historical Requirements Reconstruction](requirements/promptinferenceprofile-260710-prompt-inference-profile.md) | promptinferenceprofile-260710 | 2026-07-10 | 2026-07-10 |
 | [Persist Requested and Resolved AgentRun Provenance Historical Requirements Reconstruction](requirements/provenance-260710-inference-provenance.md) | provenance-260710 | 2026-07-10 | - |
 | [Platform Runtime Provider Management Requirements](requirements/provider-260722-platform-runtime-provider-management.md) | provider-260722 | 2026-07-22 | - |
+| [Direct Provider Conversation Continuity Requirements](requirements/provider-260731-direct-conversation-continuity.md) | provider-260731 | 2026-07-31 | 2026-07-31 |
 | [Use an Explicit Nested Inference Profile Request Historical Requirements Reconstruction](requirements/public-260710-public-inference-profile-request-contract.md) | public-260710 | 2026-07-10 | - |
 | [Pyright Configuration Review Historical Requirements Reconstruction](requirements/pyright-260310-pyright-config.md) | pyright-260310 | 2026-03-10 | 2026-03-10 |
 | [Runtime File Read Data Plane Requirements](requirements/read-260730-runtime-file-read-data-plane.md) | read-260730 | 2026-07-30 | 2026-07-30 |
@@ -634,6 +635,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Per-Prompt Inference Profile Historical Decision Reconstruction](adr/promptinferenceprofile-260710-prompt-inference-profile.md)
 - [Persist Requested and Resolved AgentRun Provenance](adr/provenance-260710-inference-provenance.md)
 - [Platform Runtime Provider Management](adr/provider-260722-platform-runtime-provider-management.md)
+- [Direct Provider Conversation Continuity](adr/provider-260731-direct-conversation-continuity.md)
 - [Use an Explicit Nested Inference Profile Request](adr/public-260710-public-inference-profile-request-contract.md)
 - [Pyright Configuration Review Historical Decision Reconstruction](adr/pyright-260310-pyright-config.md)
 - [Runtime File Read Data Plane](adr/read-260730-runtime-file-read-data-plane.md)

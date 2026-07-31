@@ -105,12 +105,6 @@ def test_external_channel_manifest_excludes_canonical_provider_state() -> None:
         "external_channel_bindings": (
             SessionLifecycleResourceClassification.LIFECYCLE_ROOT
         ),
-        "external_channel_invocation_batches": (
-            SessionLifecycleResourceClassification.LIFECYCLE_ROOT
-        ),
-        "external_channel_invocation_batch_items": (
-            SessionLifecycleResourceClassification.PURE_DATABASE_CHILD
-        ),
         "external_channel_access_requests": (
             SessionLifecycleResourceClassification.LIFECYCLE_ROOT
         ),

@@ -160,7 +160,7 @@ def test_file_metadata_is_identical_and_safe_across_visible_renderers() -> None:
                     "file_access": None,
                     "supported": True,
                     "unsupported_reason": None,
-                    "file": "external-file:v1:slack:binding-1:F123",
+                    "file": "external-file:v1:slack:binding-1:::F123",
                     "url_private": "https://secret-download.example/F123",
                     "body": "private file bytes",
                 },
@@ -176,7 +176,7 @@ def test_file_metadata_is_identical_and_safe_across_visible_renderers() -> None:
                     "file_access": None,
                     "supported": False,
                     "unsupported_reason": "external_file",
-                    "file": "external-file:v1:slack:binding-1:F456",
+                    "file": "external-file:v1:slack:binding-1:::F456",
                 },
             ],
             "files_truncated": True,
@@ -201,7 +201,7 @@ def test_file_metadata_is_identical_and_safe_across_visible_renderers() -> None:
                 "declared_size": 1024,
                 "supported": True,
                 "unsupported_reason": None,
-                "file": "external-file:v1:slack:binding-1:F123",
+                "file": "external-file:v1:slack:binding-1:::F123",
             },
             {
                 "name": None,
@@ -210,7 +210,7 @@ def test_file_metadata_is_identical_and_safe_across_visible_renderers() -> None:
                 "declared_size": None,
                 "supported": False,
                 "unsupported_reason": "external_file",
-                "file": "external-file:v1:slack:binding-1:F456",
+                "file": "external-file:v1:slack:binding-1:::F456",
             },
         ],
         "files_truncated": True,
@@ -222,7 +222,7 @@ def test_file_metadata_is_identical_and_safe_across_visible_renderers() -> None:
         assert "Declared size: 1024 bytes" in rendered
         assert "Status: supported" in rendered
         assert "Status: unsupported (external_file)" in rendered
-        assert "external-file:v1:slack:binding-1:F123" in rendered
+        assert "external-file:v1:slack:binding-1:::F123" in rendered
         assert "Additional files omitted" in rendered
         assert "secret-download" not in rendered
         assert "private file bytes" not in rendered

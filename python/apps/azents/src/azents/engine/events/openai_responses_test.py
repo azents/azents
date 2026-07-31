@@ -2794,7 +2794,7 @@ def test_openai_lowerer_groups_external_invocation_batch() -> None:
                             "declared_size": 1024,
                             "supported": True,
                             "unsupported_reason": None,
-                            "file": "external-file:v1:slack:binding-1:F123",
+                            "file": "external-file:v1:slack:binding-1:::F123",
                         }
                     ]
                 },
@@ -2817,4 +2817,4 @@ def test_openai_lowerer_groups_external_invocation_batch() -> None:
     assert "Body: message-1" in content
     assert "Body: message-2" in content
     assert "Files:" in content
-    assert "File: external-file:v1:slack:binding-1:F123" in content
+    assert "File: external-file:v1:slack:binding-1:::F123" in content

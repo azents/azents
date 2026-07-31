@@ -39,7 +39,7 @@ _DISCORD_SELECTOR_PAGE_SIZE = 20
 class DiscordSelectorScope:
     """A verified compact selector scope carried only in one component ID."""
 
-    admission_id: str
+    selector_interaction_id: str
     action: str
     offset: int
 
@@ -74,13 +74,13 @@ class DiscordSelectorResponseService:
     async def initial_response(
         self,
         *,
-        admission_id: str,
+        selector_interaction_id: str,
         principal_id: str,
         now: datetime.datetime,
     ) -> dict[str, object]:
         """Render the initial ephemeral selector after its durable claim commits."""
         catalog = await self.selector_service.project_catalog(
-            admission_id=admission_id,
+            selector_interaction_id=selector_interaction_id,
             principal_id=principal_id,
             search=None,
             offset=0,
@@ -100,7 +100,7 @@ class DiscordSelectorResponseService:
                 ),
                 "components": _selector_components(
                     catalog=catalog,
-                    admission_id=admission_id,
+                    selector_interaction_id=selector_interaction_id,
                     secret=self.config.auth.jwt.secret_key,
                     offset=0,
                 ),
@@ -123,7 +123,7 @@ class DiscordSelectorResponseService:
             secret=self.config.auth.jwt.secret_key,
         )
         await self.selector_service.validate_discord_component_scope(
-            admission_id=scope.admission_id,
+            selector_interaction_id=scope.selector_interaction_id,
             principal_id=principal_id,
             guild_id=guild_id,
             channel_id=channel_id,
@@ -132,7 +132,7 @@ class DiscordSelectorResponseService:
         if scope.action == _DISCORD_SELECTOR_ACTION_OPEN:
             return DiscordSelectorComponentResponse(
                 response=await self.initial_response(
-                    admission_id=scope.admission_id,
+                    selector_interaction_id=scope.selector_interaction_id,
                     principal_id=principal_id,
                     now=now,
                 ),
@@ -144,7 +144,7 @@ class DiscordSelectorResponseService:
             _DISCORD_SELECTOR_ACTION_NEXT,
         }:
             catalog = await self.selector_service.project_catalog(
-                admission_id=scope.admission_id,
+                selector_interaction_id=scope.selector_interaction_id,
                 principal_id=principal_id,
                 search=None,
                 offset=scope.offset,
@@ -165,7 +165,7 @@ class DiscordSelectorResponseService:
                         ),
                         "components": _selector_components(
                             catalog=catalog,
-                            admission_id=scope.admission_id,
+                            selector_interaction_id=scope.selector_interaction_id,
                             secret=self.config.auth.jwt.secret_key,
                             offset=scope.offset,
                         ),
@@ -177,7 +177,7 @@ class DiscordSelectorResponseService:
         if scope.action != _DISCORD_SELECTOR_ACTION_SELECT or selected_route_id is None:
             raise ValueError("Discord selector submission is invalid.")
         selection = await self.selector_service.select_route(
-            admission_id=scope.admission_id,
+            selector_interaction_id=scope.selector_interaction_id,
             principal_id=principal_id,
             route_id=selected_route_id,
             now=now,
@@ -195,8 +195,8 @@ class DiscordSelectorResponseService:
             control_delivery_attempt_id = None
             connection_id = None
         else:
-            outcome = await self.ingestion_replay_service.replay_selected_admission(
-                admission_id=selection.admission.id,
+            outcome = await self.ingestion_replay_service.replay_selected_interaction(
+                selector_interaction_id=selection.selector_interaction.id,
                 principal_id=principal_id,
                 deadline=external_channel_replay_deadline(now=now),
             )
@@ -265,7 +265,13 @@ def parse_discord_selector_custom_id(
 ) -> DiscordSelectorScope:
     """Verify one compact component scope before loading durable selector owners."""
     try:
-        prefix, action, admission_id, raw_offset, signature = custom_id.split(":", 4)
+        (
+            prefix,
+            action,
+            selector_interaction_id,
+            raw_offset,
+            signature,
+        ) = custom_id.split(":", 4)
     except ValueError as error:
         raise ValueError("Discord selector scope is invalid.") from error
     if prefix != _DISCORD_SELECTOR_PREFIX:
@@ -277,7 +283,7 @@ def parse_discord_selector_custom_id(
         _DISCORD_SELECTOR_ACTION_NEXT,
     }:
         raise ValueError("Discord selector scope is invalid.")
-    if not admission_id or len(admission_id) > 64:
+    if not selector_interaction_id or len(selector_interaction_id) > 64:
         raise ValueError("Discord selector scope is invalid.")
     try:
         offset = int(raw_offset)
@@ -287,14 +293,14 @@ def parse_discord_selector_custom_id(
         raise ValueError("Discord selector scope is invalid.")
     expected = build_discord_selector_custom_id(
         secret=secret,
-        admission_id=admission_id,
+        selector_interaction_id=selector_interaction_id,
         action=action,
         offset=offset,
     ).rsplit(":", 1)[-1]
     if not signature or not hmac.compare_digest(signature, expected):
         raise ValueError("Discord selector scope is invalid.")
     return DiscordSelectorScope(
-        admission_id=admission_id,
+        selector_interaction_id=selector_interaction_id,
         action=action,
         offset=offset,
     )
@@ -303,7 +309,7 @@ def parse_discord_selector_custom_id(
 def _selector_components(
     *,
     catalog: ExternalChannelSelectorCatalog,
-    admission_id: str,
+    selector_interaction_id: str,
     secret: str,
     offset: int,
 ) -> list[dict[str, object]]:
@@ -318,7 +324,7 @@ def _selector_components(
                         "type": 3,
                         "custom_id": build_discord_selector_custom_id(
                             secret=secret,
-                            admission_id=admission_id,
+                            selector_interaction_id=selector_interaction_id,
                             action=_DISCORD_SELECTOR_ACTION_SELECT,
                             offset=offset,
                         ),
@@ -368,7 +374,7 @@ def _selector_components(
                 "label": "Previous",
                 "custom_id": build_discord_selector_custom_id(
                     secret=secret,
-                    admission_id=admission_id,
+                    selector_interaction_id=selector_interaction_id,
                     action=_DISCORD_SELECTOR_ACTION_PREVIOUS,
                     offset=max(0, offset - _DISCORD_SELECTOR_PAGE_SIZE),
                 ),
@@ -382,7 +388,7 @@ def _selector_components(
                 "label": "Next",
                 "custom_id": build_discord_selector_custom_id(
                     secret=secret,
-                    admission_id=admission_id,
+                    selector_interaction_id=selector_interaction_id,
                     action=_DISCORD_SELECTOR_ACTION_NEXT,
                     offset=catalog.next_offset,
                 ),

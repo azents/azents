@@ -1869,7 +1869,7 @@ def _external_payload() -> ExternalChannelMessagePayload:
                     "declared_size": 1024,
                     "supported": True,
                     "unsupported_reason": None,
-                    "file": "external-file:v1:slack:binding-1:F123",
+                    "file": "external-file:v1:slack:binding-1:::F123",
                     "url_private": "https://secret-download.example/F123",
                 }
             ]
@@ -1925,7 +1925,7 @@ def test_external_message_is_visible_to_tokens_and_continuity() -> None:
     files = attachments["files"]
     assert isinstance(files, list)
     assert isinstance(files[0], dict)
-    assert files[0]["file"] == "external-file:v1:slack:binding-1:F123"
+    assert files[0]["file"] == "external-file:v1:slack:binding-1:::F123"
     assert "secret-download" not in str(value)
     visible_bytes = filters._estimate_event_visible_bytes(  # pyright: ignore[reportPrivateUsage]
         event
@@ -1945,5 +1945,5 @@ def test_external_message_is_visible_to_tokens_and_continuity() -> None:
     assert "Authorization: context_only" in text
     assert "context body" in text
     assert "Files:" in text
-    assert "File: external-file:v1:slack:binding-1:F123" in text
+    assert "File: external-file:v1:slack:binding-1:::F123" in text
     assert "secret-download" not in text

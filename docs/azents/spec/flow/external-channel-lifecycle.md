@@ -28,7 +28,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-31
-spec_version: 20
+spec_version: 21
 ---
 
 # External Channel Lifecycle
@@ -36,9 +36,8 @@ spec_version: 20
 ## Direct Management Transitions
 
 Disconnecting a binding terminally marks it disconnected, ends active Channel Work,
-and commits Activity Tracker cleanup delivery when needed. Canonical provider messages,
-conversation positions, immutable invocation batches, and already projected
-AgentSession history remain.
+and commits Activity Tracker cleanup delivery when needed. Provider conversation
+positions and already projected AgentSession history remain.
 
 Disconnecting a connection accepts every lifecycle and credential state. It
 terminalizes the connection, terminates owned active resources/bindings/work, clears
@@ -100,12 +99,12 @@ check. It does not delete canonical provider content, invocation history, projec
 Session events, or unrelated grants.
 
 An Allow decision locks and revalidates the connection, route, resource, binding,
-admission, and request before creating or reusing its grant and active binding. After
+and request before creating or reusing its grant and active binding. After
 the authorization transaction commits, Slack and Discord replay the immutable
 conversation-position boundary through shared synchronous ingestion. That acceptance
-creates or reuses the work projection, batch, mailbox identity, Session navigation
+creates or reuses the work projection, canonical mailbox item, Session navigation
 delivery, position advancement, and recoverable post-commit wake-up. Repeated Allow
-decisions reuse the same durable binding, batch, and mailbox identity. Final Allow,
+decisions reuse the same durable binding and mailbox identity. Final Allow,
 Deny, and Block decisions create a provider-aware idempotent delete intent when their
 approval control was delivered.
 
@@ -148,7 +147,7 @@ Archive uses the explicit terminal transition policy inside the caller-owned arc
 1. lock active bindings in the Session subtree;
 2. mark bindings disconnected and preserve their history;
 3. end Channel Work;
-4. preserve immutable accepted batches and provider-history records; and
+4. preserve already projected Session history and normal mailbox lifecycle state; and
 5. create one cleanup delivery intent for each retained Activity Tracker.
 
 Provider cleanup runs after commit. Failure or an unknown result does not roll back Session archive.
@@ -168,10 +167,11 @@ AgentSession ownership still prevents finalization if Session-owned External
 Channel roots exist outside that earlier snapshot.
 
 - **Prepare** resolves incomplete delivery bookkeeping without provider execution.
-- **Cleanup** deletes Session-owned invocation batches/items, access decisions tied directly to the Session, Channel Work/tasks/actions/delivery rows, and bindings in restrictive ownership order.
+- **Cleanup** deletes access decisions tied directly to the Session, Channel
+  Work/tasks/actions/delivery rows, and bindings in restrictive ownership order.
 - **Verify/finalize** rejects AgentSession tree finalization while actionable binding/work state remains.
 
-Connection, route, resource, conversation-position, principal, message, revision,
+Connection, route, resource, conversation-position, principal, interaction,
 Agent-scoped grant, and block roots are not cascade-deleted through AgentSession.
 
 ## Agent Decommission
@@ -201,13 +201,15 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-07-31** (spec_version 21) — Removed invocation-batch and provider-message
+  lifecycle ownership; Session cleanup now covers retained External Channel roots while
+  canonical mailbox and Session-event state follow their existing Session owners.
 - **2026-07-31** (spec_version 20) — Made Slack and Discord typed SDK lifecycle
   callbacks the fenced connection-health authority while leaving recoverable
   connection mechanics inside each provider SDK.
 - **2026-07-31** (spec_version 19) — Removed pending-context and waiting-hydration
-  lifecycle state, made Allow replay synchronous through immutable conversation
-  positions, and preserved accepted batches/history across terminal lifecycle
-  transitions.
+  lifecycle state and made Allow replay synchronous through immutable conversation
+  positions. The later `provider-260731` replacement removed accepted-batch ownership.
 - **2026-07-28** (spec_version 18) — Replaced immediate Discord Allow activation
   with shared bounded hydration and reconciliation fences before initial work and wake.
 - **2026-07-27** (spec_version 17) — Restored `configuring` provisional PING

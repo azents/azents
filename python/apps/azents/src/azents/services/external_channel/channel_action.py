@@ -1006,10 +1006,13 @@ class ExternalChannelActionService:
             return _invalid_payload()
         control_kind = payload.get("control_kind")
         if control_kind == "agent_selector":
-            admission_id = payload.get("conversation_admission_id")
-            if not isinstance(admission_id, str) or not admission_id:
+            selector_interaction_id = payload.get("selector_interaction_id")
+            if (
+                not isinstance(selector_interaction_id, str)
+                or not selector_interaction_id
+            ):
                 return _invalid_payload()
-            selector = _render_agent_selector_control(admission_id)
+            selector = _render_agent_selector_control(selector_interaction_id)
             return await self.slack_client.post_blocks(
                 bot_token=bot_token,
                 tenant_id=tenant_id,
@@ -1543,9 +1546,9 @@ def _invalid_payload() -> SlackControlMessageResult:
 
 
 def _render_agent_selector_control(
-    conversation_admission_id: str,
+    selector_interaction_id: str,
 ) -> _SlackSelectorControlPresentation:
-    """Render the generic control for one retained Multi-App conversation."""
+    """Render the generic control for one interaction-owned selector."""
     text = "Select an Agent to continue this conversation."
     return _SlackSelectorControlPresentation(
         text=text,
@@ -1561,7 +1564,7 @@ def _render_agent_selector_control(
                         "type": "button",
                         "text": {"type": "plain_text", "text": "Select Agent"},
                         "action_id": "azents_agent_selector_open",
-                        "value": conversation_admission_id,
+                        "value": selector_interaction_id,
                     }
                 ],
             },
