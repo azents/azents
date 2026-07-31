@@ -162,9 +162,6 @@ class UnsupportedRuntimeConfiguration(ValueError):
     """Resolved configuration cannot be enforced by this Provider."""
 
 
-_LEGACY_PROVIDER_DEFAULT_STORAGE_CLASS = "legacy-provider-default"
-
-
 @dataclasses.dataclass(frozen=True)
 class KubernetesRuntimeProviderConfig:
     """Configuration for a Kubernetes Runtime Provider process."""
@@ -176,8 +173,6 @@ class KubernetesRuntimeProviderConfig:
     runtime_control_namespace: str
     runtime_control_labels: Mapping[str, str]
     runtime_control_port: int
-    legacy_storage_class_name: str | None = None
-    legacy_pvc_storage_request: str | None = None
     network_hard_cap_allowed_cidrs: tuple[str, ...] = ()
     network_hard_cap_denied_cidrs: tuple[str, ...] = ()
     network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...] = ()
@@ -762,24 +757,6 @@ class KubernetesRuntimeProvider:
         policy: KubernetesPodProfileV1,
     ) -> PersistentVolumeClaimResource:
         volume = policy.workspace_volume
-        storage_class_name = volume.storage_class_name
-        storage_request = str(volume.storage_request_bytes)
-        if storage_class_name == _LEGACY_PROVIDER_DEFAULT_STORAGE_CLASS:
-            legacy_storage_class_name = self._config.legacy_storage_class_name
-            if legacy_storage_class_name is None:
-                raise UnsupportedRuntimeConfiguration(
-                    "Migrated Runtime Profile requires the legacy Provider "
-                    "storage class."
-                )
-            storage_class_name = legacy_storage_class_name
-            if volume.storage_request_bytes == 1:
-                legacy_storage_request = self._config.legacy_pvc_storage_request
-                if legacy_storage_request is None:
-                    raise UnsupportedRuntimeConfiguration(
-                        "Migrated Runtime Profile requires the legacy Provider "
-                        "PVC size."
-                    )
-                storage_request = legacy_storage_request
         return PersistentVolumeClaimResource(
             metadata=ObjectMeta(
                 name=_pvc_name(command.identity.runtime_id),
@@ -791,9 +768,9 @@ class KubernetesRuntimeProvider:
                 },
             ),
             spec=PersistentVolumeClaimSpec(
-                storage_class_name=storage_class_name,
+                storage_class_name=volume.storage_class_name,
                 access_modes=("ReadWriteOnce",),
-                storage_request=storage_request,
+                storage_request=str(volume.storage_request_bytes),
             ),
         )
 

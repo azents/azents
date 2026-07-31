@@ -11,12 +11,12 @@ document_type: supporting-audit
 This note preserves the constraint audit that was paused to address the Home Runtime outage. The
 open findings below are not an implementation plan and are not marked as fixed.
 
-## Incident findings fixed in the accompanying change
+## Incident findings and disposition
 
 1. The Profile cutover migration stored `legacy-provider-default` as a compatibility sentinel for
    the Provider-owned storage class. The Kubernetes Provider treated it as a literal Kubernetes
-   `StorageClass`, causing immutable PVC patch failures. The Provider must lower this sentinel to
-   its configured legacy storage class and PVC size.
+   `StorageClass`, causing immutable PVC patch failures. The invalid Profile data was removed from
+   the database; no Provider compatibility path is retained.
 2. Kubernetes Pod watch reports downgraded every Ready Pod to `starting` because the watch path did
    not carry trusted NetworkPolicy evidence. These synthetic reports could race with a verified
    command report and leave the Runtime indefinitely preparing. A verified command-policy cache

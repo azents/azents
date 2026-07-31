@@ -384,11 +384,6 @@ Runtime configuration targets are immutable generation-fenced revisions resolved
 exact Workspace Runtime Profile. Parent Profile or current capability changes create a new desired
 revision automatically; there is no Agent Apply boundary and no legacy policy fallback.
 
-The Profile cutover migration uses `legacy-provider-default` and a one-byte storage request only as
-compatibility sentinels for the former Kubernetes Provider defaults. The Kubernetes Provider lowers
-those values to its configured storage class and PVC size before applying resources. They are never
-literal Kubernetes resource values. Explicit Profile storage values remain authoritative.
-
 Lifecycle commands that create or replace physical compute require the latest ready desired revision.
 An unavailable or blocked desired revision prevents create/start/restart/reset/recreate and reports
 a bounded reason. Stop and terminal delete remain available where needed to remove authority or
@@ -443,9 +438,8 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
-- **2026-07-31** (spec_version 45) — Defined migration-only Kubernetes storage sentinel lowering and
-  generation/configuration-fenced NetworkPolicy trust for Pod watch reports so verified Ready state
-  cannot regress through an unverified watch race.
+- **2026-07-31** (spec_version 45) — Defined generation/configuration-fenced NetworkPolicy trust for
+  Pod watch reports so verified Ready state cannot regress through an unverified watch race.
 - **2026-07-31** (spec_version 44) — Replaced policy snapshots and Apply with exact desired/applied
   Runtime configuration revisions, current-capability authority, Provider acknowledgement plus
   ordinary Runner evidence, one-action reconciliation, and explicit storage-preserving recreation.
