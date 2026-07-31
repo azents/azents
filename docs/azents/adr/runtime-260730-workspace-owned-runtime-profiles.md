@@ -1,6 +1,7 @@
 ---
 title: "Workspace-Owned Runtime Profiles"
 created: 2026-07-30
+updated: 2026-07-31
 tags: [runtime, provider, workspace, profile, infrastructure, security, architecture]
 document_role: primary
 document_type: adr
@@ -280,6 +281,95 @@ modules owned by the exact Docker Provider.
 
 - Requiring Docker to expose Kubernetes request, ServiceAccount, scheduling, or Pod security
   concepts was rejected because semantic reuse does not require identical infrastructure fields.
+
+### runtime-260730/ADR-D9: Complete a one-way replacement of legacy Runtime policy authority
+
+**Affected requirements:** `runtime-260730/REQ-1`, `REQ-6`, `REQ-9`, `REQ-11`, `REQ-12`, `REQ-15`,
+`REQ-16`, `REQ-23`
+
+The Workspace-owned Runtime Profile model becomes the sole production authority for Agent
+selection, Runtime configuration resolution, desired state, applied evidence, compatibility, and
+lifecycle eligibility. The cutover converts legacy effective data once and then removes active
+legacy execution-policy parsers, application services, repositories, permissions, capability
+branches, Agent Provider overrides, and Runtime policy snapshots. Migration code may retain the
+historical resolver needed to interpret old rows, but runtime requests, workers, status projection,
+and Provider Control do not read or fall back to those rows after conversion.
+
+Provider-global operational configuration revisions remain a separate supported mechanism for
+controller credentials, namespaces, implementation images, endpoints, and equivalent
+Provider-owned process configuration. They cannot carry customer Runtime resource, storage,
+network, Docker, or Profile-selection authority that this snapshot assigns to infrastructure and
+Workspace Runtime Profiles.
+
+The replacement stack must project both desired and applied Runtime state into the new revision
+model before deleting obsolete persistence. Unknown or unverifiable historical applied evidence is
+represented explicitly in the new model and never recovered through a legacy status path. Removal
+of the superseded production authority is part of the replacement phases and cannot be deferred to
+the final documentation cleanup phase.
+
+**Rationale:**
+
+- Keeping both resolvers creates two sources of truth that can disagree about whether a Runtime is
+  configured, applicable, or safe to start.
+- A migration-only interpreter preserves historical conversion without making legacy semantics a
+  permanent compatibility contract.
+- Separating Provider operational configuration from customer Runtime configuration preserves
+  legitimate Provider management without restoring the superseded policy hierarchy.
+
+**Rejected alternatives:**
+
+- A permanent legacy read fallback was rejected because it makes cutover completeness dependent on
+  which caller or status surface is used.
+- Retaining legacy services and tables as dormant compatibility infrastructure was rejected because
+  internal callers and tests would continue to preserve obsolete authority.
+- Removing all Provider configuration revisions was rejected because Provider-owned operational
+  configuration is distinct from Runtime Profile authority.
+
+### runtime-260730/ADR-D10: Require exact two-party adoption evidence and snapshot-fenced recreation
+
+**Affected requirements:** `runtime-260730/REQ-11`, `REQ-12`, `REQ-13`, `REQ-14`, `REQ-16`,
+`REQ-21`, `REQ-22`
+
+Applied Runtime configuration advances only after the Provider reports the exact ready revision,
+digest, and desired generation and the Runner subsequently reports the same evidence through its
+ordinary state-report path. Runtime Control may include pending exact evidence in the Runner
+heartbeat acknowledgement only after the Provider acknowledgement is durable. The Runner adopts
+that evidence only within its current desired generation and immediately emits an ordinary state
+report. There is no dedicated configuration-update request, acknowledgement, relay, or independent
+completion authority.
+
+A scoped recreation operation snapshots both the affected Runtime identities and each Runtime's
+expected desired revision under the target's optimistic version fence. A worker locks one exact
+running item attempt with PostgreSQL `FOR UPDATE SKIP LOCKED`, dispatches at most one atomic
+generation-fenced restart, and durably records the resulting revision and generation. Success
+requires that exact dispatched revision to become applied.
+
+The operation never refreshes an item to an unrelated later desired revision. A target change
+before dispatch is skipped as a changed snapshot target. A later command that supersedes an exact
+dispatch is skipped rather than causing an implicit second restart. An exact failed dispatch may
+retry only within the bounded durable attempt count. A new authoritative target version requires a
+new recreation operation.
+
+**Rationale:**
+
+- Provider evidence proves substrate adoption, while Runner evidence proves the running process
+  received the same configuration; neither alone is sufficient.
+- Reusing heartbeat delivery and ordinary state reports avoids a second applied-state machine.
+- Stable target snapshots make progress and failures explainable and prevent one operation from
+  silently expanding to later configuration changes.
+- Transaction-held item locks and exact dispatch evidence prevent peer workers from duplicating a
+  restart or losing the durable record of an already-issued generation.
+
+**Rejected alternatives:**
+
+- A dedicated Runner configuration-update operation was rejected because it duplicates delivery,
+  acknowledgement, generation fencing, and applied promotion already owned by Runner Control and
+  state reports.
+- Refreshing each item to the newest desired revision during worker execution was rejected because
+  one version-fenced operation could then apply a target the initiating administrator did not
+  inspect.
+- Polling RUNNING items without a transaction-held item lock was rejected because concurrent
+  workers could race dispatch recording and retry transitions around one physical restart.
 
 ## Superseded Decisions
 

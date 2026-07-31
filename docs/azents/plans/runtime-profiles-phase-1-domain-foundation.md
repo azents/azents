@@ -1,6 +1,7 @@
 ---
 title: "Runtime Profiles Phase 1 Domain Foundation Plan"
 created: 2026-07-30
+updated: 2026-07-31
 tags: [runtime, provider, profile, backend, database, frontend, testenv]
 ---
 
@@ -12,7 +13,12 @@ tags: [runtime, provider, profile, backend, database, frontend, testenv]
 - Inputs: approved `runtime-260730/REQ`, ADR, Design, and implementation plan
 - Deliverables: typed domain models; Provider-scoped infrastructure/Profile persistence; Runtime configuration/reconciliation/recreation persistence; direct capability advertisement behavior; synchronized OpenAPI/generated clients; mechanical Admin capability and E2E fixture alignment; focused migrations and tests
 - Non-goals: Public/Admin Profile CRUD, final Agent cutover, Provider command envelope, new Profile product UI
-- Interfaces: schema families and ownership boundaries fixed by `runtime-260730/ADR`
+- Interfaces: schema families and ownership boundaries fixed by `runtime-260730/ADR`; any temporary
+  coexistence is stack sequencing with an explicit removal phase, not a compatibility contract
+- Removal obligations: accepted capability authority, Admin acceptance service/API behavior,
+  accepted-pointer readiness dependencies, and obsolete acceptance client/UI/fixture actions
+- Absence verification: repository and OpenAPI searches find no acceptance mutation or readiness
+  read; current-advertisement service/control tests and targeted generated-client/UI checks pass
 
 | Workstream | Owner | Owned paths | Depends on | Output | Validation |
 | --- | --- | --- | --- | --- | --- |
@@ -25,4 +31,6 @@ tags: [runtime, provider, profile, backend, database, frontend, testenv]
 - Independent review: `hardtack`, focusing on trust boundary, data retention, FK safety, and absence of stale accepted authority
 - Final validation: backend Ruff, Pyright, focused/full affected Pytest, migration tests, OpenAPI/client generation, targeted TypeScript quality checks, docs validation
 - Scope-drift check: no Profile CRUD, new Profile product UI, or Provider protocol payload changes beyond capability authority
-- Context checkpoint: record schema/API changes, migration head, validation, remaining phase-2 cutover work, and stack risks before PR creation
+- Context checkpoint: record schema/API changes, migration head, validation, every temporary legacy
+  caller or persistence surface and its Phase 2–4 removal owner, remaining phase-2 cutover work, and
+  stack risks before PR creation

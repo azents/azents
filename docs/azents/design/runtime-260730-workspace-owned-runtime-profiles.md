@@ -1,7 +1,7 @@
 ---
 title: "Workspace-Owned Runtime Profiles Design"
 created: 2026-07-30
-updated: 2026-07-30
+updated: 2026-07-31
 tags: [runtime, provider, workspace, profile, infrastructure, security, backend, frontend]
 document_role: primary
 document_type: design
@@ -29,6 +29,11 @@ An Agent stores one Workspace Runtime Profile selection. Every source mutation p
 immutable desired Runtime configuration revision for affected logical Runtimes. The currently
 running physical incarnation retains separate applied evidence until an in-place update or
 recreation adopts the desired revision.
+
+This is a one-way replacement, not a parallel compatibility layer. The migration may interpret
+legacy execution-policy rows once, but the resulting Profile selection and configuration revisions
+become the only production authority. Provider-global operational configuration revisions remain
+supported for Provider-owned process settings and are not customer Runtime policy.
 
 ## Current Behavior and Gaps
 
@@ -78,6 +83,50 @@ keys to a Provider and infrastructure Profile. An Agent stores an exact foreign 
 Runtime Profile. Resolution reads the current versions of those sources and creates immutable
 configuration evidence; no lower source stores a copy that can override or pin an upstream version.
 
+## Removal and Replacement
+
+After data conversion, production code has one authority path:
+
+```mermaid
+flowchart LR
+    S[Workspace Runtime Profile selection]
+    R[Runtime configuration revision]
+    C[Provider and Runner control]
+    E[Applied configuration evidence]
+
+    S --> R --> C --> E
+```
+
+Legacy global Profiles, Workspace and Agent restriction documents, Agent Provider overrides,
+Runtime policy snapshots, execution-policy permissions, and the capability contract's
+`execution_policy` branch are removed after their callers move to this path. No API, worker,
+lifecycle service, status projection, or Provider command may select between legacy and replacement
+authorities. Historical conversion logic remains only inside migration code.
+
+| Existing unit or behavior | Why it becomes obsolete | Replacement or remaining authority | Removal boundary | Absence verification |
+| --- | --- | --- | --- | --- |
+| Global Runtime execution Profiles, Workspace allowances/restrictions, Agent restrictions, independent Agent Provider selection, and Apply behavior | One Workspace-owned Profile selection now represents the complete Agent choice and parent changes propagate authoritatively | Workspace Runtime Profile plus nullable `agents.runtime_profile_id` | Phase 2 application-authority cutover; persistence removed in Phase 4 | API/OpenAPI and service searches show no legacy mutation or Apply route; Agent tests cover only explicit Profile, Workspace default, and unconfigured selection |
+| Runtime Execution Policy domain, resolver, application service, repositories, dependency wiring, and direct tests | Full Runtime configuration revisions replace policy merging, targeting, lifecycle eligibility, and status projection | Runtime Profile resolution, Agent Runtime lifecycle service, and immutable desired/applied revisions | Phase 4 after tool, decommission, worker, and status callers migrate | Import and dependency-wiring searches return no production caller; obsolete module and direct-test paths are deleted; lifecycle/status suites pass |
+| Capability contract `execution_policy` branch and legacy Provider command parser/adapter | Providers consume one typed full Runtime configuration envelope and advertise Profile contracts | Current capability `profile_contracts`, Provider-global operational fields, and `RuntimeConfigurationEnvelope` | Phase 4 replacement consolidation after the Phase 3 envelope activation | Canonical contract and protobuf tests reject the old branch; repository search finds no old envelope, parser, or adapter |
+| Agent Provider override and Runtime policy snapshot aggregates, tables, columns, and applied-status fallback | Exact Profile selection and configuration revisions own source identity and application evidence | Agent Runtime Provider routing plus desired/applied Runtime configuration revision pointers | Phase 4 after applied-state projection, using a generated forward Alembic migration | Migration roundtrip proves retained bindings/evidence; schema and repository searches find no override/snapshot persistence or fallback reads |
+| Runtime execution-policy permission resource and role grants | Authorization follows Runtime Profile resources and scoped recreation operations | Runtime Profile read/write permissions and existing Platform Provider administration | Phase 4 with the final backend authority cutover | Permission and role-map searches find no execution-policy resource; authorization tests cover Profile and recreation scopes |
+| Repeated Profile compatibility preparation across Admin, Workspace, resolution, and compatibility services | One preparation path must define Provider identity, required capabilities, and compatibility while callers add only authorization and persistence context | One typed compatibility preparation primitive | Phase 4 replacement consolidation after the Phase 2 application-authority activation | Service searches and tests show one compatibility preparation implementation and no caller-specific contract interpretation |
+| Duplicate Profile schema parsing plus Provider-local lifecycle command/report models and conversion adapters | The shared Runtime Control contract must define one canonical configuration interpretation and lifecycle/evidence semantics | Shared typed Profile and lifecycle contracts with substrate-native rendering models only | Phase 4 replacement consolidation after the Phase 3 protocol and Provider activation | Backend/shared-control searches show one canonical parser; Docker and Kubernetes implement shared lifecycle types directly; duplicate adapters and conversion tests are absent |
+| Dedicated Runner configuration-update request/ACK operation, backend relay, and separate completion path | Runner state reports already carry exact evidence, so a second operation-specific acknowledgement path duplicates control and promotion state | The existing generation-fenced Control-to-Runner channel plus immediate Runner state evidence | Phase 4 in-place adoption integration | Protobuf, relay, service, and Runner searches show no dedicated configuration-update operation or ACK; exact stale/mismatch and state-report adoption tests pass |
+| Two-transaction lifecycle generation advance followed by configuration-revision pointer repair | Reconciliation can observe an intermediate generation/revision mismatch and requires compensating resolution | One atomic lifecycle transition that validates the ready revision and writes the exact target evidence together | Phase 4 lifecycle guard integration | Repository tests prove no observable intermediate mismatch; service code contains no second resolution call used only to repair the pointer |
+| Separate lifecycle, adoption, and periodic candidate loops with independent action selection | Desired/applied reconciliation needs one deterministic decision for each Runtime observation | One candidate projection and explicit reconciliation action classifier | Phase 4 lifecycle integration | Reconciler tests cover every action and prove one dispatch per candidate; no overlapping legacy/adoption loop remains |
+| Legacy generated API clients, UI controls, stories, messages, fixtures, and E2E journeys | Product surfaces expose Runtime Profile catalogs, selection, status, and scoped recreation only | Regenerated Admin/Public clients, Admin and main Web Runtime Profile flows, and replacement E2E fixtures | API surfaces in Phase 2/4, product surfaces in Phase 5, fixtures in Integrated validation | Generated specifications contain no legacy routes/fields; frontend and testenv searches find no old picker/restriction/Apply flow; replacement E2E passes |
+| Legacy-oriented living spec text and temporary implementation plans | Current behavior and delivery records must describe only the verified replacement | Promoted Runtime Provider/control/persistence specs; immutable snapshot documents | Living specs in Spec promotion; plans only in Cleanup | Spec review reports no stale authority; cleanup deletes only plan documents and temporary references after every implementation removal is complete |
+
+Provider-global capability history and operational configuration revisions are deliberately retained.
+Their repositories and Admin display remain only after Agent override and Runtime snapshot
+responsibilities are removed or split from the same persistence surface.
+
+For this in-progress stack, removal obligations discovered after the earlier implementation PRs were
+created may be consolidated into Phase 4 rather than forcing broad retroactive rewrites of Phase
+1–3. This delivery exception changes phase ownership only: the final integrated implementation must
+still satisfy every absence verification before validation and spec promotion.
+
 ## Domain Model
 
 ### Provider capability revisions
@@ -109,6 +158,10 @@ The capability contract contains:
 - supported module values and bounded implementation constraints;
 - Workspace persistence and destructive lifecycle semantics; and
 - optional operational capabilities that do not grant product authority.
+
+The contract does not retain the legacy execution-policy branch. Provider-global configuration
+fields may remain only for the operational revision mechanism described below and cannot describe
+customer Runtime resource, storage, network, Docker, or Profile-selection policy.
 
 Provider-global operational configuration revisions remain available for controller configuration,
 credentials, namespaces, implementation images, and equivalent process-owned values. They do not
@@ -258,9 +311,10 @@ does not expose resource, Docker, network, Provider, or infrastructure Profile f
 
 ### Runtime configuration revisions
 
-Replace policy-only snapshots with immutable full Runtime configuration revisions. The existing
-snapshot table may be migrated and renamed if retaining identifiers is practical; otherwise a new
-table is populated and old rows remain migration evidence until cleanup.
+Replace policy-only snapshots with immutable full Runtime configuration revisions. Historical
+policy rows are interpreted during migration and then cease to be a runtime data source. A generated
+follow-up migration drops obsolete snapshot and Agent override persistence after all production
+callers use the replacement revisions.
 
 `runtime_configuration_revisions`:
 
@@ -280,7 +334,7 @@ table is populated and old rows remain migration evidence until cleanup.
 - `digest`
 - `target_desired_generation`
 - Provider and Runner evidence digests
-- application state and timestamps
+- Provider `RUNNING` acknowledgement and Runtime observation timestamps
 
 `agent_runtimes` stores:
 
@@ -292,6 +346,9 @@ table is populated and old rows remain migration evidence until cleanup.
 
 A blocked desired revision is authoritative evidence that current sources cannot produce a new
 incarnation. The applied revision remains unchanged while an existing physical Runtime continues.
+Migration projects verifiable historical applied state into this model. If exact evidence cannot be
+proven, the replacement model records an explicit unknown or pending-adoption state; it never reads
+the legacy applied snapshot as a second status authority.
 
 ## Configuration Resolution
 
@@ -348,6 +405,10 @@ bounded pages, and create a new immutable desired revision. Attachment uses opti
 versions and the prior desired pointer so a stale task cannot overwrite newer resolution. Redis is
 not required for correctness.
 
+Compatibility parsing, exact source preparation, and reconciliation action classification each
+have one shared implementation. Product services add authorization and persistence context rather
+than reimplementing Provider contract or Profile compatibility rules.
+
 Reconciliation triggers include:
 
 - Provider capability advertisement change;
@@ -392,14 +453,22 @@ Use a durable PostgreSQL operation rather than a synchronous API loop.
 - created, started, and completed timestamps.
 
 `runtime_recreation_operation_items` stores one Runtime ID, expected desired revision, attempt,
-status, bounded failure code, and timestamps. Item creation uses an impact-query snapshot so the
-operation has a stable target set. Workers claim items with `SKIP LOCKED`, revalidate authority and
-current desired state, and dispatch a generation-fenced restart that preserves Workspace storage.
+status, dispatched generation, bounded failure code, and timestamps. Item creation uses an
+impact-query snapshot so the operation has a stable Runtime set and expected desired revision for
+each item. Pending claims and exact RUNNING-attempt processing use PostgreSQL
+`FOR UPDATE SKIP LOCKED`; the item row remains locked for the processing transaction.
 
-A changed desired revision supersedes the item's expected revision; the item refreshes to the newest
-ready revision before dispatch. A blocked Runtime is recorded as failed or skipped with an explicit
-reason and is never recreated from stale configuration. Retry is bounded and idempotent. The API
-returns operation progress and item failures without requiring Redis or one long-lived process.
+Before dispatch, the worker rereads the operation target's exact source version under a shared row
+lock that allows peer item processing but blocks a concurrent target mutation. A changed source
+version or a desired revision different from the snapshotted expected revision is skipped as a
+changed target. A worker dispatches one atomic generation-fenced restart from the exact ready
+snapshot revision, then replaces the item's expected revision with the restart's cloned revision and
+records the exact dispatched generation. Success requires that exact revision to become applied.
+If another lifecycle command supersedes the recorded generation or revision, the item is skipped
+rather than implicitly dispatching another restart. Exact dispatch failures use bounded durable
+retries. Blocked, stopped, deleted, or no-longer-matching Runtimes are recorded with explicit
+bounded reasons. The API returns aggregate progress and paged skipped/failed details without Redis
+or one long-lived process.
 
 ## API Design
 
@@ -458,6 +527,18 @@ Providers reject an unsupported contract or value explicitly. Provider evidence 
 configuration revision and digest. Protocol additions remain backward-incompatible within this
 unreleased feature and are regenerated from protobuf without a compatibility fallback.
 
+The shared Runtime Control contract is the lifecycle and configuration source for both Provider
+implementations. Provider-local models may add substrate-native rendering data, but they do not
+duplicate shared command, report, or evidence types behind conversion adapters. In-place adoption
+uses the existing generation-fenced Runner heartbeat and ordinary state-report path. Runtime
+Control records Provider acknowledgement only from an exact current-generation `RUNNING` report and
+includes pending evidence in a heartbeat acknowledgement only after that record is durable. The
+Runner accepts it only for its current desired generation, validates the evidence, and immediately
+reports the same evidence in its normal state report. Applied promotion requires both exact Provider
+and Runner records; stale revision, digest, or generation evidence is ignored or surfaced as a
+bounded Runtime failure. No dedicated configuration-update operation or second completion state
+exists.
+
 ## Kubernetes Provider Changes
 
 Refactor `KubernetesRuntimeProviderConfig` into:
@@ -502,8 +583,9 @@ verifies them. Unsupported Profile modules produce compatibility failure before 
 
 - System Admin manages Platform Providers, capability observation, Provider-global hard boundaries,
   infrastructure Profiles, and Platform-scoped recreation.
-- Workspace runtime-policy read/write permissions manage Workspace Runtime Profiles, defaults,
-  Agent selections, and Workspace-scoped recreation.
+- Runtime Profile permissions manage Workspace Runtime Profiles, defaults, Agent selections, and
+  Workspace-scoped recreation; the superseded Runtime execution-policy permission resource is
+  removed.
 - Agent users cannot edit infrastructure values.
 - Provider credentials authenticate only one durable Provider.
 - Capability advertisements never create Provider identity or expand credentials.
@@ -515,7 +597,8 @@ verifies them. Unsupported Profile modules produce compatibility failure before 
 
 ## Migration and Cutover
 
-Use one linear Alembic migration sequence and no runtime compatibility fallback.
+Use a one-way Alembic migration sequence and no runtime compatibility fallback. Existing executed
+migrations remain immutable; any additional removal is generated as a forward migration.
 
 1. Create capability, infrastructure Profile, Workspace Runtime Profile, configuration revision,
    reconciliation, and recreation operation structures.
@@ -526,18 +609,25 @@ Use one linear Alembic migration sequence and no runtime compatibility fallback.
 4. Create generated Workspace Runtime Profiles for each Workspace and effective infrastructure
    configuration, and assign each existing Agent its exact generated Profile.
 5. Preserve existing logical Runtime Provider bindings. Create new desired configuration revisions
-   from generated Profiles while retaining the old applied snapshot as historical applied evidence
-   until recreation.
+   from generated Profiles and project every verifiable applied Runtime incarnation into the new
+   applied revision model. Record unverifiable historical application explicitly without consulting
+   a legacy status path.
 6. Leave Workspace defaults unset unless a deterministic existing Workspace-wide default can be
    derived without changing any Agent selection.
 7. Convert the latest valid current Provider contract, or the accepted contract when no current
    revision exists, into the current capability revision. Remove acceptance authority and routes.
-8. Remove legacy global Profile, allowance, Workspace restriction, Agent restriction, Apply, and
-   independent Agent Provider-preference structures after all references are converted.
-9. Regenerate Admin and Public OpenAPI clients and remove legacy UI flows in the same cutover.
+8. Move internal lifecycle, decommission, tool, worker, and status callers to the new Runtime
+   Profile and configuration-revision services.
+9. Remove legacy global Profile, allowance, Workspace restriction, Agent restriction, Apply,
+   independent Agent Provider preference, execution-policy capability branch, permissions,
+   services, repositories, tests, Agent overrides, and Runtime policy snapshots.
+10. Generate a forward migration that drops obsolete tables and columns while retaining Provider
+    capability history and Provider-global operational configuration revisions.
+11. Regenerate Admin and Public OpenAPI clients and remove legacy UI flows in the same cutover.
 
 Generated migration Profile names include a stable short digest and provenance metadata. They are
-ordinary mutable current resources after migration; no legacy resolver remains.
+ordinary mutable current resources after migration. The historical resolver is migration-only; no
+legacy runtime resolver, parser, adapter, fallback, or status authority remains.
 
 ## Frontend Design
 
@@ -593,6 +683,9 @@ and independent of Redis availability.
 - Profile disable or capability loss preserves references and writes blocked desired revisions.
 - A failed recreation item retains failure evidence and can be retried without duplicating Runtime
   generation.
+- A peer worker that cannot lock the exact RUNNING item attempt performs no dispatch or transition.
+- A desired target changed before dispatch and a lifecycle command superseding an exact dispatch
+  both terminate the item explicitly instead of refreshing or redispatching it.
 - Provider or Runner evidence with the wrong revision, digest, or generation cannot advance the
   applied pointer.
 - PVC resize failure leaves the old PVC and applied Runtime intact and reports a bounded storage
@@ -638,7 +731,8 @@ states, operation progress, and persisted desired/applied revision IDs.
 ### Component and integration checks
 
 - Pydantic contract canonicalization and compatibility tests;
-- repository ownership, optimistic concurrency, impact queries, and `SKIP LOCKED` claims;
+- repository ownership, optimistic concurrency, impact queries, pending claims, and transaction-held
+  RUNNING-item `SKIP LOCKED` processing;
 - service authorization and blocked-state transitions;
 - migration tests with representative legacy hierarchy combinations;
 - protobuf round-trip and stale evidence rejection;
@@ -661,24 +755,25 @@ migration have sequential dependencies.
    selection, reconciliation, and desired/applied revisions.
 5. Provider protocol and implementations: protobuf, Kubernetes lowering, Docker lowering, and
    evidence.
-6. Runtime lifecycle and bulk recreation: command guards, operations, progress, and retries.
+6. Runtime lifecycle and bulk recreation: command guards, operations, progress, retries, applied
+   projection, and removal of the remaining legacy production authority.
 7. Frontend: Admin infrastructure Profiles, Workspace catalog/default, Agent selector, and Runtime
    status.
 8. E2E and integration validation.
 9. Spec promotion.
-10. Cleanup of implementation plans and obsolete legacy code.
+10. Cleanup of implementation plans and temporary delivery artifacts.
 
 ## Traceability
 
 | Requirements | ADR decisions | Design mechanisms |
 | --- | --- | --- |
-| `REQ-1`, `REQ-2`, `REQ-6`, `REQ-23` | `ADR-D1`, `ADR-D2` | Workspace Profile and Agent selection tables, creation-time default |
+| `REQ-1`, `REQ-2`, `REQ-6`, `REQ-23` | `ADR-D1`, `ADR-D2`, `ADR-D9` | Workspace Profile and Agent selection tables, creation-time default, one-way authority cutover |
 | `REQ-3`, `REQ-4`, `REQ-5`, `REQ-6`, `REQ-7`, `REQ-8` | `ADR-D2`, `ADR-D7`, `ADR-D8` | Provider-scoped infrastructure Profiles and authority checks |
-| `REQ-9`, `REQ-10` | `ADR-D1`, `ADR-D2` | removal of hierarchy; future selection authorization boundary |
-| `REQ-11`, `REQ-12`, `REQ-13`, `REQ-14` | `ADR-D6` | durable reconciliation, desired/applied revisions, recreation operations |
-| `REQ-15`, `REQ-16` | `ADR-D3`, `ADR-D4` | current capability pointer, blocked resolution, command guards |
+| `REQ-9`, `REQ-10` | `ADR-D1`, `ADR-D2`, `ADR-D9` | removal of hierarchy and its active authority; future selection authorization boundary |
+| `REQ-11`, `REQ-12`, `REQ-13`, `REQ-14` | `ADR-D6`, `ADR-D9`, `ADR-D10` | durable reconciliation, exact two-party applied promotion, snapshot-fenced recreation operations, single status authority |
+| `REQ-15`, `REQ-16` | `ADR-D3`, `ADR-D4`, `ADR-D9` | current capability pointer, blocked resolution, command guards, removal of the legacy capability branch |
 | `REQ-17`, `REQ-18`, `REQ-19` | `ADR-D5`, `ADR-D8` | compatibility-bound schemas and typed modules |
-| `REQ-20`, `REQ-21`, `REQ-22` | `ADR-D7` | Pod resources, preserved PVC, layered network boundaries |
+| `REQ-20`, `REQ-21`, `REQ-22` | `ADR-D7`, `ADR-D10` | Pod resources, preserved PVC, layered network boundaries, exact in-place adoption evidence |
 
 ## Feasibility Matrix
 
