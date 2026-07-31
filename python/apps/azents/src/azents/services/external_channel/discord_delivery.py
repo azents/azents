@@ -53,6 +53,7 @@ class DiscordDeliveryClient:
         bot_token: str,
         parent_channel_id: str,
         root_message_id: str,
+        name: str | None,
     ) -> DiscordDeliveryResult:
         """Return only after the root Discord message has a usable thread."""
         existing = await self._read_root_thread(
@@ -67,7 +68,7 @@ class DiscordDeliveryClient:
             f"/channels/{parent_channel_id}/messages/{root_message_id}/threads",
             bot_token=bot_token,
             json_body={
-                "name": "Azents",
+                "name": _discord_thread_name(name),
                 "auto_archive_duration": _DISCORD_MIN_AUTO_ARCHIVE_MINUTES,
             },
         )
@@ -302,6 +303,12 @@ class DiscordDeliveryClient:
                 error_summary="Discord delivery transport outcome is unknown.",
             )
         return _response_failure(response) or response
+
+
+def _discord_thread_name(name: str | None) -> str:
+    """Return one bounded valid Discord thread name."""
+    normalized = "" if name is None else " ".join(name.split())
+    return (normalized or "Azents")[:100]
 
 
 def _response_failure(response: httpx.Response) -> DiscordDeliveryResult | None:

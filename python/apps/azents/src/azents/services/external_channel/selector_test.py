@@ -214,7 +214,7 @@ class _Repository:
             {"id": "resource-1", "connection_id": "connection-1"},
         )()
 
-    async def lock_active_binding_by_resource(
+    async def lock_connected_binding_by_resource(
         self,
         session: AsyncSession,
         *,

@@ -721,6 +721,7 @@ class ExternalChannelActionService:
                 bot_token=bot_token,
                 parent_channel_id=parent_channel_id,
                 root_message_id=root_message_id,
+                name=target.agent_name,
             )
             if thread.status != "delivered":
                 return thread

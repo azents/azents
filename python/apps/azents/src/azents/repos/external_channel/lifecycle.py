@@ -13,7 +13,6 @@ from azents.core.enums import (
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
     ExternalChannelAppMode,
-    ExternalChannelBindingStatus,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
@@ -79,7 +78,7 @@ class ExternalChannelLifecycleRepository:
         bindings = await self._locked_bindings(
             session,
             session_ids=session_ids,
-            active_only=True,
+            connected_only=True,
         )
         if not bindings:
             return ExternalChannelArchiveTermination(
@@ -104,7 +103,6 @@ class ExternalChannelLifecycleRepository:
             ).all()
         )
         for binding in bindings:
-            binding.status = ExternalChannelBindingStatus.DISCONNECTED
             binding.disconnected_at = now
             binding.disconnect_reason = "session_archived"
 
@@ -171,12 +169,9 @@ class ExternalChannelLifecycleRepository:
         bindings = await self._locked_bindings(
             session,
             session_ids=session_ids,
-            active_only=False,
+            connected_only=False,
         )
-        if any(
-            binding.status is ExternalChannelBindingStatus.ACTIVE
-            for binding in bindings
-        ):
+        if any(binding.disconnected_at is None for binding in bindings):
             raise RuntimeError("Restored External Channel binding was reactivated")
         binding_ids = [binding.id for binding in bindings]
         works = list(
@@ -209,7 +204,7 @@ class ExternalChannelLifecycleRepository:
             for binding in await self._locked_bindings(
                 session,
                 session_ids=session_ids,
-                active_only=False,
+                connected_only=False,
             )
         ]
         access_request_ids = await self._session_tree_access_request_ids(
@@ -278,7 +273,7 @@ class ExternalChannelLifecycleRepository:
         bindings = await self._locked_bindings(
             session,
             session_ids=session_ids,
-            active_only=False,
+            connected_only=False,
         )
         binding_ids = [binding.id for binding in bindings]
         access_request_ids = await self._session_tree_access_request_ids(
@@ -561,8 +556,7 @@ class ExternalChannelLifecycleRepository:
                     sa.select(RDBExternalChannelBinding)
                     .where(
                         RDBExternalChannelBinding.route_id == route.id,
-                        RDBExternalChannelBinding.status
-                        == ExternalChannelBindingStatus.ACTIVE,
+                        RDBExternalChannelBinding.disconnected_at.is_(None),
                     )
                     .order_by(RDBExternalChannelBinding.resource_id)
                     .with_for_update()
@@ -766,8 +760,7 @@ class ExternalChannelLifecycleRepository:
                     sa.select(RDBExternalChannelBinding)
                     .where(
                         RDBExternalChannelBinding.route_id.in_(route_ids),
-                        RDBExternalChannelBinding.status
-                        == ExternalChannelBindingStatus.ACTIVE,
+                        RDBExternalChannelBinding.disconnected_at.is_(None),
                     )
                     .order_by(RDBExternalChannelBinding.resource_id)
                     .with_for_update()
@@ -1048,7 +1041,7 @@ class ExternalChannelLifecycleRepository:
             RDBExternalChannelBinding,
             sa.and_(
                 RDBExternalChannelBinding.route_id == route_id,
-                RDBExternalChannelBinding.status == ExternalChannelBindingStatus.ACTIVE,
+                RDBExternalChannelBinding.disconnected_at.is_(None),
             ),
         )
         bound_resource_count = int(
@@ -1138,8 +1131,7 @@ class ExternalChannelLifecycleRepository:
                 )
                 .where(
                     RDBExternalChannelBinding.route_id.in_(route_ids),
-                    RDBExternalChannelBinding.status
-                    == ExternalChannelBindingStatus.ACTIVE,
+                    RDBExternalChannelBinding.disconnected_at.is_(None),
                 )
                 .order_by(
                     RDBExternalChannelBinding.agent_session_id,
@@ -1207,7 +1199,6 @@ class ExternalChannelLifecycleRepository:
             ).all()
         )
         for binding in bindings:
-            binding.status = ExternalChannelBindingStatus.DISCONNECTED
             binding.disconnected_at = now
             binding.disconnect_reason = reason
         progress_delete_intent_ids: list[str] = []
@@ -1372,16 +1363,14 @@ class ExternalChannelLifecycleRepository:
         session: AsyncSession,
         *,
         session_ids: Sequence[str],
-        active_only: bool,
+        connected_only: bool,
     ) -> list[RDBExternalChannelBinding]:
         """Lock bindings in stable order after the caller locks Session roots."""
         predicate: list[sa.ColumnElement[bool]] = [
             RDBExternalChannelBinding.agent_session_id.in_(session_ids)
         ]
-        if active_only:
-            predicate.append(
-                RDBExternalChannelBinding.status == ExternalChannelBindingStatus.ACTIVE
-            )
+        if connected_only:
+            predicate.append(RDBExternalChannelBinding.disconnected_at.is_(None))
         return list(
             (
                 await session.scalars(

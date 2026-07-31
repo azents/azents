@@ -10,7 +10,6 @@ from azents.core.enums import (
     AgentLifecycleStatus,
     ExternalChannelAccessGrantScope,
     ExternalChannelAppMode,
-    ExternalChannelBindingStatus,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
@@ -1074,7 +1073,6 @@ class ExternalChannelManagementRepository:
                     provider=connection.provider,
                     resource_type=resource.resource_type.value,
                     resource_label=_resource_label(resource.labels, binding.id),
-                    status=binding.status,
                     connected_at=binding.connected_at,
                     disconnected_at=binding.disconnected_at,
                     disconnect_reason=binding.disconnect_reason,
@@ -1492,12 +1490,11 @@ class ExternalChannelManagementRepository:
         now: datetime.datetime,
         reason: str,
     ) -> tuple[str, ...]:
-        if binding.status is ExternalChannelBindingStatus.DISCONNECTED:
+        if binding.disconnected_at is not None:
             return await self._pending_progress_delete_intent_ids(
                 session,
                 binding_id=binding.id,
             )
-        binding.status = ExternalChannelBindingStatus.DISCONNECTED
         binding.disconnected_at = now
         binding.disconnect_reason = reason
         works = list(

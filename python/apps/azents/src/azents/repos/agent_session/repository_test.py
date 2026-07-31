@@ -17,7 +17,6 @@ from azents.core.enums import (
     AgentSessionStatus,
     AgentSessionTitleSource,
     ExternalChannelAppMode,
-    ExternalChannelBindingStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
@@ -1189,7 +1188,6 @@ class TestAgentSessionRepository:
             resource_id=resource.id,
             route_id=route.id,
             agent_session_id=agent_session.id,
-            status=ExternalChannelBindingStatus.ACTIVE,
         )
         rdb_session.add(binding)
         await rdb_session.flush()

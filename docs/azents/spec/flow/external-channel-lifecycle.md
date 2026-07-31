@@ -30,16 +30,18 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-07-31
-spec_version: 22
+spec_version: 23
 ---
 
 # External Channel Lifecycle
 
 ## Direct Management Transitions
 
-Disconnecting a binding terminally marks it disconnected, ends active Channel Work,
-and commits Activity Tracker cleanup delivery when needed. Provider conversation
-positions and already projected AgentSession history remain.
+Disconnecting a connected binding terminally sets `disconnected_at`, ends active
+Channel Work, and commits Activity Tracker cleanup delivery when needed. Provider
+conversation positions and already projected AgentSession history remain. The
+timestamp is the only binding connectedness authority; no lifecycle path clears it or
+reactivates history.
 
 Disconnecting a connection accepts every lifecycle and credential state. It
 terminalizes the connection, terminates owned active resources/bindings/work, clears
@@ -102,12 +104,14 @@ check. It does not delete canonical provider content, invocation history, projec
 Session events, or unrelated grants.
 
 An Allow decision locks and revalidates the connection, route, resource, binding,
-and request before creating or reusing its grant and active binding. After
+and request before creating or reusing its grant and connected binding. After
 the authorization transaction commits, Slack and Discord replay the immutable
 conversation-position boundary through shared synchronous ingestion. That acceptance
-creates or reuses the work projection, canonical mailbox item, Session navigation
-delivery, position advancement, and recoverable post-commit wake-up. Repeated Allow
-decisions reuse the same durable binding and mailbox identity. Final Allow,
+creates or reuses the work projection and deterministic Session navigation/progress
+intents, settles required provider delivery, and only then commits the canonical
+mailbox item, position advancement, Session running state, and recoverable wake-up.
+Repeated Allow decisions reuse the same durable binding, delivery, and mailbox
+identities. Final Allow,
 Deny, and Block decisions create a provider-aware idempotent delete intent when their
 approval control was delivered.
 
@@ -123,6 +127,9 @@ Provider credential and permission failures move only connection health to
 App uninstall clears provider credentials and terminalizes provider resources while
 preserving the route relationship for later reconfiguration. In-flight validation
 results are generation-fenced so they cannot overwrite a newer edit or disconnect.
+Transient `degraded` or `reconnect_required` ingress health does not disconnect a
+binding or block an otherwise authorized outbound REST delivery. Terminal connection
+disconnect still clears credentials and sets binding terminal timestamps.
 
 Discord Gateway credential and non-reconnectable intent or close-code failures
 atomically record the fenced gap, release the current Gateway lease, and move only
@@ -154,8 +161,8 @@ External Channel is registered as the `session.external-channel` lifecycle parti
 
 Archive uses the explicit terminal transition policy inside the caller-owned archive transaction:
 
-1. lock active bindings in the Session subtree;
-2. mark bindings disconnected and preserve their history;
+1. lock connected bindings in the Session subtree;
+2. set their terminal disconnect timestamps and preserve their history;
 3. end Channel Work;
 4. preserve already projected Session history and normal mailbox lifecycle state; and
 5. create one cleanup delivery intent for each retained Activity Tracker.
@@ -211,6 +218,9 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-07-31** (spec_version 23) — Made binding disconnect a timestamp-only
+  terminal boundary, ordered required provider initialization before mailbox wake,
+  and separated outbound REST authority from transient persistent-ingress health.
 - **2026-07-31** (spec_version 22) — Unified Slack Socket Mode and Discord Gateway
   lifecycle supervision in the provider-neutral External Channel Gateway and decoupled
   persistent connections from Agent Worker lifecycle.

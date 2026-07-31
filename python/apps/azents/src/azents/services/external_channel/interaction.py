@@ -42,6 +42,7 @@ from azents.services.external_channel.ingestion_replay import (
 )
 from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
+    get_external_channel_provider_control_service,
 )
 from azents.services.external_channel.selector import (
     ExternalChannelSelectorCatalog,
@@ -119,7 +120,7 @@ class ExternalChannelInteractionProcessor:
     ]
     provider_control: Annotated[
         ExternalChannelProviderControlService,
-        Depends(ExternalChannelProviderControlService),
+        Depends(get_external_channel_provider_control_service),
     ]
     ingestion_replay_service: Annotated[
         ExternalChannelIngestionReplayService,

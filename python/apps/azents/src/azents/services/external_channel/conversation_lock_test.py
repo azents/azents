@@ -84,6 +84,32 @@ async def test_memory_lease_asserts_after_release() -> None:
 
 
 @pytest.mark.asyncio
+async def test_expired_deadline_does_not_create_redis_operation() -> None:
+    created = False
+
+    class _NeverCalledRedis:
+        def set(
+            self,
+            _key: str,
+            _value: str,
+            *,
+            nx: bool,
+            px: int,
+        ) -> asyncio.Future[object]:
+            del nx, px
+            nonlocal created
+            created = True
+            return asyncio.get_running_loop().create_future()
+
+    lock = RedisExternalChannelConversationLock(cast(Any, _NeverCalledRedis()))
+    with pytest.raises(ExternalChannelConversationLockTimeout):
+        async with lock.acquire(scope=_scope(), deadline=_deadline(-1)):
+            pass
+
+    assert created is False
+
+
+@pytest.mark.asyncio
 async def test_memory_lock_replicas_overlap_but_durable_acceptance_converges() -> None:
     locks = (
         InMemoryExternalChannelConversationLock(),

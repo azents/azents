@@ -19,7 +19,6 @@ from azents.core.enums import (
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
     ExternalChannelAppMode,
-    ExternalChannelBindingStatus,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelConversationScopeKind,
@@ -1308,8 +1307,7 @@ class ExternalChannelRepository:
             work.desired_progress_payload = None
             work.desired_progress_revision += 1
         for binding in bindings:
-            if binding.status is ExternalChannelBindingStatus.ACTIVE:
-                binding.status = ExternalChannelBindingStatus.DISCONNECTED
+            if binding.disconnected_at is None:
                 binding.disconnected_at = now
                 binding.disconnect_reason = reason
         await session.execute(
@@ -2140,10 +2138,9 @@ class ExternalChannelRepository:
             sa.update(RDBExternalChannelBinding)
             .where(
                 RDBExternalChannelBinding.resource_id == resource_id,
-                RDBExternalChannelBinding.status == ExternalChannelBindingStatus.ACTIVE,
+                RDBExternalChannelBinding.disconnected_at.is_(None),
             )
             .values(
-                status=ExternalChannelBindingStatus.DISCONNECTED,
                 disconnected_at=now,
                 disconnect_reason=reason,
             )
@@ -2219,7 +2216,7 @@ class ExternalChannelRepository:
         )
         if resource is None:
             raise ValueError("External Channel binding resource does not exist.")
-        existing = await self.lock_active_binding_by_resource(
+        existing = await self.lock_connected_binding_by_resource(
             session,
             resource_id=create.resource_id,
         )
@@ -2291,33 +2288,33 @@ class ExternalChannelRepository:
                     "External Channel binding access request is incompatible."
                 )
 
-    async def get_active_binding_by_resource(
+    async def get_connected_binding_by_resource(
         self,
         session: AsyncSession,
         *,
         resource_id: str,
     ) -> ExternalChannelBinding | None:
-        """Fetch the one active binding allowed for an external resource."""
+        """Fetch the one connected binding allowed for an external resource."""
         rdb = await session.scalar(
             sa.select(RDBExternalChannelBinding).where(
                 RDBExternalChannelBinding.resource_id == resource_id,
-                RDBExternalChannelBinding.status == ExternalChannelBindingStatus.ACTIVE,
+                RDBExternalChannelBinding.disconnected_at.is_(None),
             )
         )
         return self._as(ExternalChannelBinding, rdb)
 
-    async def lock_active_binding_by_resource(
+    async def lock_connected_binding_by_resource(
         self,
         session: AsyncSession,
         *,
         resource_id: str,
     ) -> ExternalChannelBinding | None:
-        """Lock the one active binding after its resource lock."""
+        """Lock the one connected binding after its resource lock."""
         rdb = await session.scalar(
             sa.select(RDBExternalChannelBinding)
             .where(
                 RDBExternalChannelBinding.resource_id == resource_id,
-                RDBExternalChannelBinding.status == ExternalChannelBindingStatus.ACTIVE,
+                RDBExternalChannelBinding.disconnected_at.is_(None),
             )
             .with_for_update()
         )

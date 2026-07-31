@@ -190,7 +190,7 @@ class ExternalChannelShortcutSourceService:
                 or resource.status is not ExternalChannelResourceStatus.ACTIVE
             ):
                 raise SlackEventExcluded("Shortcut source is unavailable.")
-            binding = await self.repository.lock_active_binding_by_resource(
+            binding = await self.repository.lock_connected_binding_by_resource(
                 session,
                 resource_id=resource.id,
             )

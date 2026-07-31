@@ -1,12 +1,9 @@
 """Typed access and selector replay for synchronous conversation ingestion."""
 
-import asyncio
 import dataclasses
 import datetime
-from collections.abc import AsyncIterator
 from typing import Annotated
 
-import httpx
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,24 +19,16 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelAccessRequest,
-    ExternalChannelConnection,
     ExternalChannelConnectionConfiguration,
     ExternalChannelConversationPosition,
     ExternalChannelPrincipal,
     ExternalChannelResource,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.repos.external_channel.work import ExternalChannelWorkRepository
-from azents.services.external_channel.connection import (
-    get_external_channel_credentials_codec,
-)
 from azents.services.external_channel.conversation import (
     ExternalChannelConversationScope,
     ExternalChannelOperationDeadline,
 )
-from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
-from azents.services.external_channel.data import DiscordConnectionCredentials
-from azents.services.external_channel.discord_delivery import DiscordDeliveryClient
 from azents.services.external_channel.ingestion import (
     ExternalChannelConversationIngestionService,
     ExternalChannelIngestionOperation,
@@ -60,22 +49,6 @@ from azents.services.external_channel.selector_state import (
 )
 
 _REPLAY_OPERATION_BUDGET = datetime.timedelta(seconds=30)
-
-
-async def get_replay_discord_http_client() -> AsyncIterator[httpx.AsyncClient]:
-    """Provide bounded Discord transport for replay thread provisioning."""
-    async with httpx.AsyncClient(timeout=20.0, follow_redirects=False) as client:
-        yield client
-
-
-def get_replay_discord_delivery_client(
-    http_client: Annotated[
-        httpx.AsyncClient,
-        Depends(get_replay_discord_http_client),
-    ],
-) -> DiscordDeliveryClient:
-    """Provide the Discord replay thread-provisioning adapter."""
-    return DiscordDeliveryClient(http_client)
 
 
 class ExternalChannelIngestionReplayUnavailable(ValueError):
@@ -125,18 +98,6 @@ class ExternalChannelIngestionReplayService:
     repository: Annotated[
         ExternalChannelRepository,
         Depends(ExternalChannelRepository),
-    ]
-    work_repository: Annotated[
-        ExternalChannelWorkRepository,
-        Depends(ExternalChannelWorkRepository),
-    ]
-    credentials_codec: Annotated[
-        ExternalChannelCredentialsCodec,
-        Depends(get_external_channel_credentials_codec),
-    ]
-    discord_client: Annotated[
-        DiscordDeliveryClient,
-        Depends(get_replay_discord_delivery_client),
     ]
     ingestion_service: Annotated[
         ExternalChannelConversationIngestionService,
@@ -273,22 +234,8 @@ class ExternalChannelIngestionReplayService:
         )
         if configuration.provider is not ExternalChannelProvider.DISCORD or initial:
             return initial
-        async with self.session_manager() as session:
-            resource = await self._lock_discord_provisioning_authority(
-                session,
-                source=source,
-            )
-            await session.commit()
-        if resource is None:
-            return None
-        labels = resource.labels or {}
-        current = _delivery_thread_key(
-            provider=configuration.provider,
-            labels=labels,
-            position=source.position,
-        )
-        if current:
-            return current
+        del deadline
+        labels = source.resource.labels or {}
         tenant_id = configuration.provider_tenant_id
         if tenant_id is None:
             raise ExternalChannelIngestionReplayUnavailable(
@@ -303,75 +250,9 @@ class ExternalChannelIngestionReplayService:
             tenant_id=tenant_id,
             provider_message_key=source.trigger_provider_message_key,
         )
-        encrypted_credentials = configuration.encrypted_credentials
-        if parent_channel_id is None or encrypted_credentials is None:
+        if parent_channel_id is None:
             return None
-        credentials = self.credentials_codec.decrypt(encrypted_credentials)
-        if not isinstance(credentials, DiscordConnectionCredentials):
-            return None
-        try:
-            async with asyncio.timeout(deadline.remaining_seconds()):
-                result = await self.discord_client.ensure_thread(
-                    bot_token=credentials.bot_token,
-                    parent_channel_id=parent_channel_id,
-                    root_message_id=root_message_id,
-                )
-        except TimeoutError:
-            return None
-        if result.status != "delivered":
-            return None
-        resolved = _discord_thread_channel_id(result.provider_message_key)
-        if resolved is None:
-            return None
-        async with self.session_manager() as session:
-            resource = await self._lock_discord_provisioning_authority(
-                session,
-                source=source,
-            )
-            if resource is None:
-                await session.rollback()
-                return None
-            concurrent = _delivery_thread_key(
-                provider=configuration.provider,
-                labels=resource.labels or {},
-                position=source.position,
-            )
-            if concurrent:
-                await session.commit()
-                return concurrent
-            retained = await self.work_repository.record_discord_delivery_channel(
-                session,
-                resource_id=source.resource.id,
-                delivery_channel_id=resolved,
-            )
-            await session.commit()
-        return retained
-
-    async def _lock_discord_provisioning_authority(
-        self,
-        session: AsyncSession,
-        *,
-        source: _ReplaySource,
-    ) -> ExternalChannelResource | None:
-        configuration = source.configuration
-        connection = await self.repository.lock_connection_for_routing(
-            session,
-            connection_id=configuration.id,
-        )
-        resource = await self.repository.lock_resource(
-            session,
-            resource_id=source.resource.id,
-        )
-        if (
-            connection is None
-            or not _connection_matches_replay(configuration, connection)
-            or resource is None
-            or resource.connection_id != connection.id
-            or resource.status is not ExternalChannelResourceStatus.ACTIVE
-            or resource.provider_resource_key != source.resource.provider_resource_key
-        ):
-            return None
-        return resource
+        return root_message_id
 
     async def _load_source(
         self,
@@ -410,6 +291,7 @@ class ExternalChannelIngestionReplayService:
             not in {
                 ExternalChannelConnectionStatus.ACTIVE,
                 ExternalChannelConnectionStatus.DEGRADED,
+                ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
             }
             or position is None
             or position.connection_id != connection_id
@@ -560,36 +442,6 @@ def _provider_parent_channel_id(
         return None
     value = labels.get("parent_channel_id") or labels.get("channel_id")
     return value if isinstance(value, str) and value else None
-
-
-def _connection_matches_replay(
-    configuration: ExternalChannelConnectionConfiguration,
-    connection: ExternalChannelConnection,
-) -> bool:
-    capabilities = connection.capabilities or {}
-    return (
-        connection.provider is ExternalChannelProvider.DISCORD
-        and connection.provider is configuration.provider
-        and connection.status
-        in {
-            ExternalChannelConnectionStatus.ACTIVE,
-            ExternalChannelConnectionStatus.DEGRADED,
-        }
-        and connection.provider_tenant_id == configuration.provider_tenant_id
-        and connection.configuration_generation
-        == configuration.configuration_generation
-        and capabilities.get("post_messages") is True
-    )
-
-
-def _discord_thread_channel_id(provider_message_key: str | None) -> str | None:
-    if provider_message_key is None:
-        return None
-    prefix = "discord-thread:"
-    if not provider_message_key.startswith(prefix):
-        return None
-    thread_id = provider_message_key.removeprefix(prefix)
-    return thread_id if thread_id.isdigit() else None
 
 
 def _retryable_failure() -> ExternalChannelIngestionOutcome:

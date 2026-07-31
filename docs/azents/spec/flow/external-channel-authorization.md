@@ -35,7 +35,7 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
 last_verified_at: 2026-07-31
-spec_version: 13
+spec_version: 14
 ---
 
 # External Channel Authorization
@@ -107,15 +107,15 @@ never becomes the execution User or replaces the initiating principal.
 Supported decisions are `allow_session`, `allow_agent`, `deny`, and `block`.
 
 - **Allow Session** creates or reuses the resource binding and grants the principal only for that AgentSession.
-- **Allow Agent** creates or reuses the binding and grants the principal across active bindings for that Agent.
+- **Allow Agent** creates or reuses the binding and grants the principal across connected bindings for that Agent.
 - **Deny** resolves only the current request.
 - **Block** resolves the request and creates an Agent-scoped block that takes precedence over grants.
 
 The decision transaction first resolves the request identity, then locks and
 revalidates the route connection, active resource and binding, and the same request.
-It verifies an `active` or `degraded` connection, available route,
+It verifies an `active` or `degraded` ingress connection, available route,
 active resource, and active Agent, creates the External Channel AgentSession only when
-no active binding exists, and writes the active binding, grant, and decision
+no connected binding exists, and writes the connected binding, grant, and decision
 atomically. Repeating the same compatible Allow decision returns the existing binding
 and grant. Conflicting or stale decisions return a conflict instead of creating
 parallel state.
@@ -124,7 +124,7 @@ When Allow needs a new binding, the shared root Session creation boundary reads 
 routed Agent's current automatic Project policy and creates the root
 `SessionAgentContext` Project snapshot before the binding commit. It performs no
 Runtime validation or filesystem access in this transaction; policy save-time
-validation is authoritative. If the resource already has an active binding, Allow
+validation is authoritative. If the resource already has a connected binding, Allow
 reuses that binding's Session and context snapshot instead of rereading or merging
 the current policy.
 
@@ -141,10 +141,18 @@ ingestion service with the request's immutable conversation-position boundary. T
 service re-reads provider history outside a database transaction. If the shared
 position is still before the trigger, it reads forward normally; if another accepted
 invocation advanced past the trigger, it reuses the saved range start and exact trigger
-boundary. Both cases converge on one deterministic mailbox item and logical wake.
+boundary. It then reuses the committed binding, stages deterministic Session-link and
+initial-progress delivery identities, settles every required delivery outside a
+database transaction, and admits the deterministic mailbox item only after all are
+durably delivered. Both position cases converge on one mailbox item and logical wake.
 Repeating a compatible Allow may perform the same provider-history replay to recover a
 post-commit failure, but mailbox identity prevents another Session input or execution.
-Replay failure never reverts the already committed access decision.
+Replay failure never reverts the already committed access decision or binding, and it
+does not admit mailbox input while required provider initialization is incomplete.
+This durable replay remains available while connection ingress health is `active`,
+`degraded`, or `reconnect_required`; `configuring`, `disconnecting`, and `disconnected`
+connections cannot start it. Transient Gateway or Socket recovery therefore does not
+revoke already committed replay and outbound REST authority.
 
 The resulting mailbox item uses `wake_session` scheduling and contains the immutable
 ordered provider-history projection rather than a raw callback or mutable
@@ -153,7 +161,7 @@ pending-context reference. At promotion, it becomes contiguous
 provider source attribution, trigger identity, authorization state, and one optional
 leading omission reminder.
 
-Later authorized original messages on an active binding create another canonical
+Later authorized original messages on a connected binding create another canonical
 mailbox item and wake the same Session. Edit and delete callbacks are excluded; they do not
 independently invoke the Agent or create a lifecycle/revision correction.
 
@@ -166,6 +174,9 @@ Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-07-31** (spec_version 14) — Replaced binding active/inactive state with
+  terminal `disconnected_at` authority and made Allow replay settle durable
+  Session-link and initial-progress deliveries before mailbox admission.
 - **2026-07-31** (spec_version 13) — Moved selector replay state into the owning
   interaction, kept approval replay in the access request, and made the canonical
   mailbox item the sole accepted-input and wake-recovery identity.

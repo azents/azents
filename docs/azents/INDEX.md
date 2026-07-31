@@ -17,7 +17,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-31 | 59 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-29 | 134 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-31 | 31 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-31 | 32 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-28 | 13 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
@@ -37,10 +37,10 @@ Design documents are accumulated records and are not listed individually in this
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
-| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-31 | 13 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-31 | 24 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-31 | 22 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-31 | 21 |
+| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-31 | 14 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-31 | 25 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-31 | 23 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-31 | 22 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-30 | 36 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
@@ -77,6 +77,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Backend Project Browser Manifest Historical Requirements Reconstruction](requirements/backend-260703-backend-browser-manifest.md) | backend-260703 | 2026-07-03 | - |
 | [Background Tool Call Design Discussion Historical Requirements Reconstruction](requirements/background-260416-background-call.md) | background-260416 | 2026-04-16 | - |
 | [Remove Deprecated Background Completion Input Historical Requirements Reconstruction](requirements/background-260712-background-completion-input.md) | background-260712 | 2026-07-12 | - |
+| [External Channel Binding and Admission Ordering Requirements](requirements/binding-260731-admission-ordering.md) | binding-260731 | 2026-07-31 | 2026-07-31 |
 | [Per-Prompt Reasoning Effort Is a Run Boundary Historical Requirements Reconstruction](requirements/boundaries-260710-prompt-reasoning-effort-boundaries.md) | boundaries-260710 | 2026-07-10 | - |
 | [Sandbox Runtime / Workspace State Boundary Historical Requirements Reconstruction](requirements/boundary-260524-sandbox-boundary.md) | boundary-260524 | 2026-05-24 | - |
 | [Add Session Sandbox Workspace Browser API Historical Requirements Reconstruction](requirements/browser-260501-browser-api.md) | browser-260501 | 2026-05-01 | 2026-05-02 |
@@ -428,6 +429,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Backend Project Browser Manifest](adr/backend-260703-backend-browser-manifest.md)
 - [Background Tool Call Design Discussion](adr/background-260416-background-call.md)
 - [Remove Deprecated Background Completion Input](adr/background-260712-background-completion-input.md)
+- [External Channel Binding and Admission Ordering](adr/binding-260731-admission-ordering.md)
 - [Per-Prompt Reasoning Effort Is a Run Boundary](adr/boundaries-260710-prompt-reasoning-effort-boundaries.md)
 - [Sandbox Runtime / Workspace State Boundary Historical Decision Reconstruction](adr/boundary-260524-sandbox-boundary.md)
 - [Add Session Sandbox Workspace Browser API](adr/browser-260501-browser-api.md)

@@ -846,7 +846,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
         if not isinstance(counts, dict):
             return None
         typed = cast(dict[str, Any], counts)
-        if typed.get("chat.postMessage") == 2 and typed.get("chat.delete") == 1:
+        if typed.get("chat.postMessage") == 3 and typed.get("chat.delete") == 1:
             return state
         return None
 
@@ -867,9 +867,9 @@ def test_http_admission_unknown_participant_and_approval_journey(
     # Allow recovery each revalidate provider history before one mailbox input wins.
     assert typed_counts["conversations.history"] == 4
     assert typed_counts["chat.getPermalink"] == 4
-    # One access-review control is deleted after approval, while durable acceptance
-    # creates the initial provider-native work progress through the Worker drain.
-    assert typed_counts["chat.postMessage"] == 2
+    # One access-review control is deleted after approval. Durable acceptance then
+    # delivers the Session link followed by the initial provider-native work progress.
+    assert typed_counts["chat.postMessage"] == 3
     assert typed_counts["chat.delete"] == 1
     rendered_state = str(provider_state)
     assert _BOT_TOKEN not in rendered_state

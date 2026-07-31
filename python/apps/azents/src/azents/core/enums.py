@@ -858,13 +858,6 @@ class ExternalChannelMessageRevisionKind(enum.StrEnum):
     DELETE = "delete"
 
 
-class ExternalChannelBindingStatus(enum.StrEnum):
-    """Session binding lifecycle status."""
-
-    ACTIVE = "active"
-    DISCONNECTED = "disconnected"
-
-
 class ExternalChannelAccessRequestStatus(enum.StrEnum):
     """External invocation access-request state."""
 

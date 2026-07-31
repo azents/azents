@@ -12,7 +12,6 @@ from azents.core.enums import (
     AgentSessionStatus,
     ExternalChannelActionMode,
     ExternalChannelAppMode,
-    ExternalChannelBindingStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
@@ -203,7 +202,6 @@ async def _setup_binding(session: AsyncSession) -> tuple[str, str]:
             resource_id=resource.id,
             route_id=route.id,
             agent_session_id=agent_session.id,
-            status=ExternalChannelBindingStatus.ACTIVE,
             disconnected_at=None,
             disconnect_reason=None,
         ),
@@ -1166,7 +1164,7 @@ async def test_provider_control_final_settlement_revalidates_current_authority(
         now=_at(2),
     )
     assert started is not None
-    binding.status = ExternalChannelBindingStatus.DISCONNECTED
+    binding.disconnected_at = _at(2)
     await rdb_session.flush()
 
     settlement = await repository.settle_delivery(
@@ -1212,13 +1210,14 @@ async def test_initial_discord_delivery_uses_active_binding_authority(
         "title": None,
         "tasks": [],
     }
-    progress_id = await repository.ensure_initial_discord_progress(
+    progress_ids = await repository.ensure_initial_discord_progress(
         rdb_session,
         work_id=work.id,
         binding_id=binding_id,
         labels={"guild_id": "111", "thread_id": "333"},
     )
-    assert progress_id is not None
+    assert len(progress_ids) == 1
+    progress_id = progress_ids[0]
     progress = await rdb_session.get(
         RDBExternalChannelDeliveryAttempt,
         progress_id,
@@ -1276,13 +1275,14 @@ async def test_initial_discord_progress_update_uses_active_binding_authority(
         "title": None,
         "tasks": [],
     }
-    create_id = await repository.ensure_initial_discord_progress(
+    create_ids = await repository.ensure_initial_discord_progress(
         rdb_session,
         work_id=work.id,
         binding_id=binding_id,
         labels={"guild_id": "111", "thread_id": "333"},
     )
-    assert create_id is not None
+    assert len(create_ids) == 1
+    create_id = create_ids[0]
     assert await repository.start_delivery(
         rdb_session,
         delivery_attempt_id=create_id,
@@ -1442,7 +1442,6 @@ async def test_file_access_target_requires_complete_active_binding_chain(
         is None
     )
 
-    binding.status = ExternalChannelBindingStatus.DISCONNECTED
     binding.disconnected_at = _at(2)
     binding.disconnect_reason = "test_disconnect"
     await rdb_session.flush()

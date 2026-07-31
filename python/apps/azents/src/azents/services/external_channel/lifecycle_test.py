@@ -10,7 +10,6 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
-    ExternalChannelBindingStatus,
     ExternalChannelDeliveryOriginType,
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
@@ -235,7 +234,6 @@ async def test_archive_selects_only_active_work_for_progress_cleanup() -> None:
         id="binding-1",
         route_id="route-1",
         resource_id="resource-1",
-        status=ExternalChannelBindingStatus.ACTIVE,
         disconnected_at=None,
         disconnect_reason=None,
     )

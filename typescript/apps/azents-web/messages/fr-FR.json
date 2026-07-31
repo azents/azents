@@ -1229,10 +1229,8 @@
         "grantsTitle": "Accès à la session",
         "grantsDescription": "Participants autorisés uniquement pour cette session.",
         "noGrants": "Aucune autorisation active limitée à la session.",
-        "bindingStatus": {
-          "active": "Active",
-          "disconnected": "Déconnectée"
-        },
+        "connected": "Connectée",
+        "disconnected": "Déconnectée",
         "workStatus": {
           "active": "Travail actif",
           "finished": "Travail terminé"

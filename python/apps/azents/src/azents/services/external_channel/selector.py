@@ -202,7 +202,7 @@ class ExternalChannelSelectorService:
             )
             if resource is None or resource.connection_id != connection.id:
                 raise ExternalChannelSelectorError("Selector source is unavailable.")
-            binding = await self.repository.lock_active_binding_by_resource(
+            binding = await self.repository.lock_connected_binding_by_resource(
                 session,
                 resource_id=resource.id,
             )

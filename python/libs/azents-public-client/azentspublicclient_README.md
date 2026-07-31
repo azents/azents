@@ -424,7 +424,6 @@ Class | Method | HTTP request | Description
  - [ExternalChannelAccessGrantScope](azentspublicclient/docs/ExternalChannelAccessGrantScope.md)
  - [ExternalChannelAccessRequestStatus](azentspublicclient/docs/ExternalChannelAccessRequestStatus.md)
  - [ExternalChannelAppMode](azentspublicclient/docs/ExternalChannelAppMode.md)
- - [ExternalChannelBindingStatus](azentspublicclient/docs/ExternalChannelBindingStatus.md)
  - [ExternalChannelCapabilitySnapshot](azentspublicclient/docs/ExternalChannelCapabilitySnapshot.md)
  - [ExternalChannelChannelDefaultStatus](azentspublicclient/docs/ExternalChannelChannelDefaultStatus.md)
  - [ExternalChannelConnectionStatus](azentspublicclient/docs/ExternalChannelConnectionStatus.md)

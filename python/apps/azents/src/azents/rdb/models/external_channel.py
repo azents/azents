@@ -14,7 +14,6 @@ from azents.core.enums import (
     ExternalChannelAccessRequestStatus,
     ExternalChannelActionMode,
     ExternalChannelAppMode,
-    ExternalChannelBindingStatus,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelConversationScopeKind,
@@ -124,12 +123,6 @@ external_channel_resource_status_enum = ENUM(
 external_channel_principal_author_type_enum = ENUM(
     ExternalChannelPrincipalAuthorType,
     name="external_channel_principal_author_type",
-    create_type=False,
-    values_callable=_enum_values,
-)
-external_channel_binding_status_enum = ENUM(
-    ExternalChannelBindingStatus,
-    name="external_channel_binding_status",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -1052,21 +1045,19 @@ class RDBExternalChannelBinding(RDBModel):
 
     __tablename__ = "external_channel_bindings"
 
-    IX_AGENT_SESSION_ID_STATUS = sa.Index(
-        "ix_external_channel_bindings_agent_session_id_status",
+    IX_AGENT_SESSION_ID = sa.Index(
+        "ix_external_channel_bindings_agent_session_id",
         "agent_session_id",
-        "status",
     )
-    IX_ROUTE_ID_STATUS = sa.Index(
-        "ix_external_channel_bindings_route_id_status",
+    IX_ROUTE_ID = sa.Index(
+        "ix_external_channel_bindings_route_id",
         "route_id",
-        "status",
     )
-    UQ_ACTIVE_RESOURCE = sa.Index(
-        "uq_external_channel_bindings_active_resource",
+    UQ_CONNECTED_RESOURCE = sa.Index(
+        "uq_external_channel_bindings_connected_resource",
         "resource_id",
         unique=True,
-        postgresql_where=sa.text("status = 'active'"),
+        postgresql_where=sa.text("disconnected_at IS NULL"),
     )
 
     id: Mapped[str] = mapped_column(
@@ -1089,11 +1080,6 @@ class RDBExternalChannelBinding(RDBModel):
         sa.String(32),
         sa.ForeignKey("agent_sessions.id", ondelete="RESTRICT"),
         nullable=False,
-    )
-    status: Mapped[ExternalChannelBindingStatus] = mapped_column(
-        external_channel_binding_status_enum,
-        nullable=False,
-        server_default=ExternalChannelBindingStatus.ACTIVE.value,
     )
     connected_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
@@ -1126,9 +1112,9 @@ class RDBExternalChannelBinding(RDBModel):
     )
 
     __table_args__ = (
-        IX_AGENT_SESSION_ID_STATUS,
-        IX_ROUTE_ID_STATUS,
-        UQ_ACTIVE_RESOURCE,
+        IX_AGENT_SESSION_ID,
+        IX_ROUTE_ID,
+        UQ_CONNECTED_RESOURCE,
     )
 
 

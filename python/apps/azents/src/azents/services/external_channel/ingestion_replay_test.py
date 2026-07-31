@@ -4,8 +4,9 @@ import datetime
 from contextlib import AbstractAsyncContextManager
 from types import SimpleNamespace
 from typing import Any, cast
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock
 
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -23,8 +24,6 @@ from azents.core.enums import (
 from azents.services.external_channel.conversation import (
     ExternalChannelOperationDeadline,
 )
-from azents.services.external_channel.data import DiscordConnectionCredentials
-from azents.services.external_channel.discord_delivery import DiscordDeliveryResult
 from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionOperation,
     ExternalChannelIngestionOutcome,
@@ -34,6 +33,7 @@ from azents.services.external_channel.ingestion import (
 )
 from azents.services.external_channel.ingestion_replay import (
     ExternalChannelIngestionReplayService,
+    ExternalChannelIngestionReplayUnavailable,
 )
 
 
@@ -54,26 +54,10 @@ def _service(
     *,
     repository: object,
     ingestion: object,
-    work_repository: object | None = None,
-    credentials_codec: object | None = None,
-    discord_client: object | None = None,
 ) -> ExternalChannelIngestionReplayService:
     return ExternalChannelIngestionReplayService(
         session_manager=cast(Any, _SessionManager()),
         repository=cast(Any, repository),
-        work_repository=cast(
-            Any,
-            work_repository
-            or SimpleNamespace(record_discord_delivery_channel=AsyncMock()),
-        ),
-        credentials_codec=cast(
-            Any,
-            credentials_codec or SimpleNamespace(decrypt=Mock()),
-        ),
-        discord_client=cast(
-            Any,
-            discord_client or SimpleNamespace(ensure_thread=AsyncMock()),
-        ),
         ingestion_service=cast(Any, ingestion),
     )
 
@@ -260,14 +244,13 @@ async def test_access_allow_rebuilds_discord_replay_from_legacy_thread_label() -
     assert replay.authority.kind is ExternalChannelIngressAuthorityKind.DURABLE_REPLAY
 
 
-async def test_access_allow_provisions_unresolved_discord_root_before_ingestion() -> (
+async def test_access_allow_retains_unresolved_discord_root_for_durable_ingestion() -> (
     None
 ):
-    """Discord parent replay persists a usable thread before mailbox acceptance."""
+    """Discord parent replay delegates thread provisioning to durable ingestion."""
     guild_id = "200000000000000001"
     channel_id = "400000000000000001"
     message_id = "500000000000000001"
-    thread_id = "700000000000000001"
     request = SimpleNamespace(
         id="access-1",
         status=ExternalChannelAccessRequestStatus.ALLOWED,
@@ -280,28 +263,7 @@ async def test_access_allow_provisions_unresolved_discord_root_before_ingestion(
         range_start_position=None,
         trigger_position="00000000000000000002",
     )
-    locked_connection = SimpleNamespace(
-        id="connection-1",
-        provider=ExternalChannelProvider.DISCORD,
-        status=ExternalChannelConnectionStatus.ACTIVE,
-        provider_tenant_id=guild_id,
-        configuration_generation=4,
-        capabilities={"post_messages": True},
-    )
-    locked_resource = SimpleNamespace(
-        id="resource-1",
-        connection_id="connection-1",
-        provider_resource_key=f"discord:{guild_id}:{message_id}",
-        labels={
-            "thread_id": message_id,
-            "root_message_id": message_id,
-            "parent_channel_id": channel_id,
-        },
-        status=ExternalChannelResourceStatus.ACTIVE,
-    )
     repository = SimpleNamespace(
-        lock_connection_for_routing=AsyncMock(return_value=locked_connection),
-        lock_resource=AsyncMock(return_value=locked_resource),
         get_access_request=AsyncMock(return_value=request),
         get_connection_configuration=AsyncMock(
             return_value=SimpleNamespace(
@@ -367,31 +329,7 @@ async def test_access_allow_provisions_unresolved_discord_root_before_ingestion(
             )
         )
     )
-    work_repository = SimpleNamespace(
-        record_discord_delivery_channel=AsyncMock(return_value=thread_id)
-    )
-    credentials_codec = SimpleNamespace(
-        decrypt=Mock(
-            return_value=DiscordConnectionCredentials(bot_token="private-bot-token")
-        )
-    )
-    discord_client = SimpleNamespace(
-        ensure_thread=AsyncMock(
-            return_value=DiscordDeliveryResult(
-                status="delivered",
-                provider_message_key=f"discord-thread:{thread_id}",
-                error_kind=None,
-                error_summary=None,
-            )
-        )
-    )
-    service = _service(
-        repository=repository,
-        ingestion=ingestion,
-        work_repository=work_repository,
-        credentials_codec=credentials_codec,
-        discord_client=discord_client,
-    )
+    service = _service(repository=repository, ingestion=ingestion)
 
     outcome = await service.replay_access_allow(
         access_request_id="access-1",
@@ -402,47 +340,26 @@ async def test_access_allow_provisions_unresolved_discord_root_before_ingestion(
 
     replay = ingestion.ingest.await_args.args[0]
     assert outcome.kind is ExternalChannelIngestionOutcomeKind.ACCEPTED
-    assert replay.locator.delivery_thread_key == thread_id
-    discord_client.ensure_thread.assert_awaited_once_with(
-        bot_token="private-bot-token",
-        parent_channel_id=channel_id,
-        root_message_id=message_id,
-    )
-    record_call = work_repository.record_discord_delivery_channel.await_args
-    assert record_call is not None
-    assert record_call.kwargs == {
-        "resource_id": "resource-1",
-        "delivery_channel_id": thread_id,
-    }
-    assert "private-bot-token" not in repr(replay)
+    assert replay.locator.delivery_thread_key == message_id
+    assert replay.locator.provider_parent_channel_id == channel_id
+    assert replay.locator.trigger_provider_message_id == message_id
 
 
-async def test_access_allow_stops_after_discord_connection_authority_loss() -> None:
-    """A stale replay cannot provision or accept after routing authority is lost."""
+@pytest.mark.parametrize(
+    ("connection_status", "replay_available"),
+    [
+        (ExternalChannelConnectionStatus.RECONNECT_REQUIRED, True),
+        (ExternalChannelConnectionStatus.CONFIGURING, False),
+        (ExternalChannelConnectionStatus.DISCONNECTING, False),
+        (ExternalChannelConnectionStatus.DISCONNECTED, False),
+    ],
+)
+async def test_access_allow_replay_uses_durable_connection_authority(
+    connection_status: ExternalChannelConnectionStatus,
+    replay_available: bool,
+) -> None:
+    """Durable replay ignores transient ingress health but rejects terminal owners."""
     repository = SimpleNamespace(
-        lock_connection_for_routing=AsyncMock(
-            return_value=SimpleNamespace(
-                id="connection-1",
-                provider=ExternalChannelProvider.DISCORD,
-                status=ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
-                provider_tenant_id="200",
-                configuration_generation=4,
-                capabilities={"post_messages": True},
-            )
-        ),
-        lock_resource=AsyncMock(
-            return_value=SimpleNamespace(
-                id="resource-1",
-                connection_id="connection-1",
-                provider_resource_key="discord:200:500",
-                labels={
-                    "thread_id": "500",
-                    "root_message_id": "500",
-                    "parent_channel_id": "400",
-                },
-                status=ExternalChannelResourceStatus.ACTIVE,
-            )
-        ),
         get_access_request=AsyncMock(
             return_value=SimpleNamespace(
                 id="access-1",
@@ -464,7 +381,7 @@ async def test_access_allow_stops_after_discord_connection_authority_loss() -> N
                 provider_tenant_id="200",
                 ingress_profile=ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
                 configuration_generation=4,
-                status=ExternalChannelConnectionStatus.ACTIVE,
+                status=connection_status,
                 transport=ExternalChannelTransport.HTTP,
                 app_mode=ExternalChannelAppMode.MULTI,
                 encrypted_credentials="encrypted",
@@ -510,32 +427,35 @@ async def test_access_allow_stops_after_discord_connection_authority_loss() -> N
             )
         ),
     )
-    ingestion = SimpleNamespace(ingest=AsyncMock())
-    work_repository = SimpleNamespace(record_discord_delivery_channel=AsyncMock())
-    discord_client = SimpleNamespace(ensure_thread=AsyncMock())
-    service = _service(
-        repository=repository,
-        ingestion=ingestion,
-        work_repository=work_repository,
-        credentials_codec=SimpleNamespace(
-            decrypt=Mock(
-                return_value=DiscordConnectionCredentials(bot_token="private-bot-token")
+    expected = ExternalChannelIngestionOutcome(
+        kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
+        reason=ExternalChannelIngestionReason.ACCEPTED,
+        mailbox_item_id="mailbox-1",
+        control_delivery_attempt_id=None,
+        connection_id=None,
+    )
+    ingestion = SimpleNamespace(ingest=AsyncMock(return_value=expected))
+    service = _service(repository=repository, ingestion=ingestion)
+
+    if replay_available:
+        outcome = await service.replay_access_allow(
+            access_request_id="access-1",
+            deadline=ExternalChannelOperationDeadline(
+                datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
+            ),
+        )
+        assert outcome is expected
+        ingestion.ingest.assert_awaited_once()
+    else:
+        with pytest.raises(ExternalChannelIngestionReplayUnavailable):
+            await service.replay_access_allow(
+                access_request_id="access-1",
+                deadline=ExternalChannelOperationDeadline(
+                    datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
+                ),
             )
-        ),
-        discord_client=discord_client,
-    )
 
-    outcome = await service.replay_access_allow(
-        access_request_id="access-1",
-        deadline=ExternalChannelOperationDeadline(
-            datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
-        ),
-    )
-
-    assert outcome.kind is ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE
-    discord_client.ensure_thread.assert_not_awaited()
-    ingestion.ingest.assert_not_awaited()
-    work_repository.record_discord_delivery_channel.assert_not_awaited()
+        ingestion.ingest.assert_not_awaited()
 
 
 async def test_selector_replay_keeps_actor_separate_from_source_author() -> None:

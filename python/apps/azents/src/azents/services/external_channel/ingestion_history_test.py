@@ -44,9 +44,9 @@ class _SessionManager:
         return _SessionContext()
 
 
-def _deadline() -> ExternalChannelOperationDeadline:
+def _deadline(seconds: float = 30) -> ExternalChannelOperationDeadline:
     return ExternalChannelOperationDeadline(
-        datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
+        datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=seconds)
     )
 
 
@@ -311,6 +311,84 @@ async def test_slack_history_resolves_visible_bot_author_display_name() -> None:
         provider_user_id="bot:BVISIBLE",
     )
     slack_client.fetch_channel_display_name.assert_not_awaited()
+
+
+async def test_slack_history_skips_optional_enrichment_inside_required_reserve() -> (
+    None
+):
+    """Optional Slack lookups do not consume the required admission reserve."""
+    message = _slack_message()
+    slack_client = SimpleNamespace(
+        read_range=AsyncMock(
+            return_value=ExternalChannelHistoryRange(
+                messages=(message,),
+                trigger=message,
+                context_omitted=False,
+                range_start_position=None,
+                trigger_position=message.provider_position,
+                provider_request_count=1,
+                scanned_message_count=1,
+                elapsed_seconds=0,
+            )
+        ),
+        get_permalink=AsyncMock(return_value="https://example.invalid/source"),
+        fetch_user_display_name=AsyncMock(return_value="Participant"),
+        fetch_channel_display_name=AsyncMock(return_value="#related"),
+    )
+    repository = SimpleNamespace(
+        get_connection_configuration=AsyncMock(
+            return_value=SimpleNamespace(
+                provider=ExternalChannelProvider.SLACK,
+                provider_tenant_id="tenant-1",
+                provider_bot_user_id="connected-bot",
+                provider_app_id="connected-app",
+                encrypted_credentials="ciphertext",
+            )
+        )
+    )
+    reader = ExternalChannelProviderHistoryReader(
+        session_manager=cast(Any, _SessionManager()),
+        repository=cast(Any, repository),
+        credentials_codec=cast(
+            Any,
+            SimpleNamespace(
+                decrypt=lambda ciphertext: SlackConnectionCredentials(
+                    bot_token="secret-bot-token",
+                    signing_secret="secret-signing-key",
+                    app_token=None,
+                )
+            ),
+        ),
+        slack_client=cast(Any, slack_client),
+        discord_client=cast(Any, SimpleNamespace()),
+    )
+    locator = ExternalChannelTriggerLocator(
+        connection_id="connection-1",
+        provider=ExternalChannelProvider.SLACK,
+        provider_tenant_id="tenant-1",
+        provider_channel_id="channel-1",
+        provider_parent_channel_id=None,
+        provider_thread_key="1.000000",
+        delivery_thread_key="1.000000",
+        provider_resource_key=message.provider_resource_key,
+        trigger_provider_message_key=message.provider_message_key,
+        trigger_provider_message_id="2.000000",
+        trigger_position=message.provider_position,
+        provider_user_id="participant-1",
+        invocation=True,
+    )
+
+    history = await reader.read_range(
+        locator=locator,
+        exclusive_start_position=None,
+        deadline=_deadline(0.5),
+    )
+
+    assert history.trigger.sender_display_name is None
+    assert history.trigger.original_url is None
+    slack_client.fetch_user_display_name.assert_not_awaited()
+    slack_client.fetch_channel_display_name.assert_not_awaited()
+    slack_client.get_permalink.assert_not_awaited()
 
 
 async def test_discord_history_preserves_reference_mappings() -> None:
