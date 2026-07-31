@@ -196,6 +196,8 @@ def _provider(
     network_hard_cap_allowed_cidrs: tuple[str, ...] = (),
     network_hard_cap_denied_cidrs: tuple[str, ...] = (),
     network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...] = (),
+    legacy_storage_class_name: str | None = None,
+    legacy_pvc_storage_request: str | None = None,
 ) -> KubernetesRuntimeProvider:
     return _provider_with_runner_env(
         api,
@@ -203,6 +205,8 @@ def _provider(
         network_hard_cap_allowed_cidrs=network_hard_cap_allowed_cidrs,
         network_hard_cap_denied_cidrs=network_hard_cap_denied_cidrs,
         network_hard_cap_extra_egress=network_hard_cap_extra_egress,
+        legacy_storage_class_name=legacy_storage_class_name,
+        legacy_pvc_storage_request=legacy_pvc_storage_request,
     )
 
 
@@ -213,6 +217,8 @@ def _provider_with_runner_env(
     network_hard_cap_allowed_cidrs: tuple[str, ...] = (),
     network_hard_cap_denied_cidrs: tuple[str, ...] = (),
     network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...] = (),
+    legacy_storage_class_name: str | None = None,
+    legacy_pvc_storage_request: str | None = None,
 ) -> KubernetesRuntimeProvider:
     return KubernetesRuntimeProvider(
         api,
@@ -226,6 +232,8 @@ def _provider_with_runner_env(
                 "app.kubernetes.io/component": "runtime-control",
             },
             runtime_control_port=8030,
+            legacy_storage_class_name=legacy_storage_class_name,
+            legacy_pvc_storage_request=legacy_pvc_storage_request,
             network_hard_cap_allowed_cidrs=network_hard_cap_allowed_cidrs,
             network_hard_cap_denied_cidrs=network_hard_cap_denied_cidrs,
             network_hard_cap_extra_egress=network_hard_cap_extra_egress,
@@ -385,6 +393,48 @@ async def test_start_expands_pvc_but_defers_shrink_until_reset() -> None:
         )
     )
     assert api.pvcs[pvc_key].spec.storage_request == "5368709120"
+
+
+@pytest.mark.asyncio
+async def test_start_resolves_migrated_provider_storage_defaults() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(
+        api,
+        legacy_storage_class_name="local-path",
+        legacy_pvc_storage_request="20Gi",
+    )
+
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            runtime_configuration=_runtime_configuration(
+                storage_class_name="legacy-provider-default",
+                persistent_storage_bytes=1,
+            ),
+        )
+    )
+
+    pvc = api.pvcs[("azents-runtime", "azents-runtime-runtime-1-workspace")]
+    assert pvc.spec.storage_class_name == "local-path"
+    assert pvc.spec.storage_request == "20Gi"
+
+
+@pytest.mark.asyncio
+async def test_start_rejects_migrated_storage_without_provider_default() -> None:
+    provider = _provider(FakeKubernetesApi())
+
+    with pytest.raises(
+        UnsupportedRuntimeConfiguration,
+        match="legacy Provider storage class",
+    ):
+        await provider.start(
+            _command(
+                RuntimeLifecycleCommandType.START,
+                runtime_configuration=_runtime_configuration(
+                    storage_class_name="legacy-provider-default",
+                ),
+            )
+        )
 
 
 @pytest.mark.asyncio
@@ -617,6 +667,74 @@ async def test_observe_running_pod_reports_running() -> None:
 
     assert report.observed_state is RuntimeProviderObservedState.RUNNING
     assert report.reason == "pod_running"
+
+
+@pytest.mark.asyncio
+async def test_verified_running_pod_watch_does_not_regress_to_starting() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    command = _command(RuntimeLifecycleCommandType.START)
+    await provider.start(command)
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pod = dataclasses.replace(
+        api.pods[pod_key],
+        status=PodStatus(phase="Running", ready=True),
+    )
+    api.pods[pod_key] = pod
+    api.watch_events.append(PodWatchEvent(event_type="MODIFIED", pod=pod))
+
+    reports = [report async for report in provider.watch_known_runtimes()]
+
+    assert reports[0].observed_state is RuntimeProviderObservedState.RUNNING
+    assert reports[0].reason == "pod_running"
+
+
+@pytest.mark.asyncio
+async def test_running_pod_watch_fails_closed_after_provider_restart() -> None:
+    api = FakeKubernetesApi()
+    command = _command(RuntimeLifecycleCommandType.START)
+    await _provider(api).start(command)
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pod = dataclasses.replace(
+        api.pods[pod_key],
+        status=PodStatus(phase="Running", ready=True),
+    )
+    api.pods[pod_key] = pod
+    api.watch_events.append(PodWatchEvent(event_type="MODIFIED", pod=pod))
+    restarted_provider = _provider(api)
+
+    reports = [report async for report in restarted_provider.watch_known_runtimes()]
+
+    assert reports[0].observed_state is RuntimeProviderObservedState.STARTING
+    assert reports[0].reason == "network_policy_not_ready"
+
+
+@pytest.mark.asyncio
+async def test_running_pod_watch_revalidates_verified_network_policy() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pod = dataclasses.replace(
+        api.pods[pod_key],
+        status=PodStatus(phase="Running", ready=True),
+    )
+    api.pods[pod_key] = pod
+    network_policy_key = (
+        "azents-runtime",
+        "azents-runtime-runtime-1-execution",
+    )
+    network_policy = api.network_policies[network_policy_key]
+    api.network_policies[network_policy_key] = dataclasses.replace(
+        network_policy,
+        spec=dataclasses.replace(network_policy.spec, egress=()),
+    )
+    api.watch_events.append(PodWatchEvent(event_type="MODIFIED", pod=pod))
+
+    reports = [report async for report in provider.watch_known_runtimes()]
+
+    assert reports[0].observed_state is RuntimeProviderObservedState.STARTING
+    assert reports[0].reason == "network_policy_not_ready"
 
 
 @pytest.mark.asyncio
@@ -1617,6 +1735,7 @@ def _runtime_configuration(
     memory_limit_bytes: int = 2_147_483_648,
     ephemeral_storage_bytes: int = 10_737_418_240,
     persistent_storage_bytes: int | None = None,
+    storage_class_name: str = "gp3",
     allowed_cidrs: list[str] | None = None,
     denied_cidrs: list[str] | None = None,
     revision_id: str = "revision-1",
@@ -1642,7 +1761,7 @@ def _runtime_configuration(
             "memory_limit_bytes": (None if omit_runner_resources else 2_147_483_648),
         },
         "workspace_volume": {
-            "storage_class_name": "gp3",
+            "storage_class_name": storage_class_name,
             "storage_request_bytes": (
                 persistent_storage_bytes
                 if persistent_storage_bytes is not None

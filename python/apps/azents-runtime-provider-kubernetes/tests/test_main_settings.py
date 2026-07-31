@@ -88,6 +88,8 @@ def provider_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
         "azents-runtime-provider-kubernetes",
     )
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_WORKSPACE_PATH", "/workspace/agent")
+    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_STORAGE_CLASS", "local-path")
+    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_PVC_SIZE", "20Gi")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_ENGINE_IMAGE", "engine@sha256:test")
     monkeypatch.setenv(
         "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_NAMESPACE",
@@ -129,6 +131,8 @@ def test_provider_settings_loads_provider_global_runtime_controls(
     assert settings.runner_env == {}
     assert settings.image_pull_secrets == ()
     assert settings.engine_image == "engine@sha256:test"
+    assert settings.legacy_storage_class_name == "local-path"
+    assert settings.legacy_pvc_storage_request == "20Gi"
     assert settings.runtime_control_namespace == "azents"
     assert settings.runtime_control_labels == {
         "app.kubernetes.io/component": "runtime-control"

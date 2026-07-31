@@ -162,6 +162,9 @@ class UnsupportedRuntimeConfiguration(ValueError):
     """Resolved configuration cannot be enforced by this Provider."""
 
 
+_LEGACY_PROVIDER_DEFAULT_STORAGE_CLASS = "legacy-provider-default"
+
+
 @dataclasses.dataclass(frozen=True)
 class KubernetesRuntimeProviderConfig:
     """Configuration for a Kubernetes Runtime Provider process."""
@@ -173,12 +176,28 @@ class KubernetesRuntimeProviderConfig:
     runtime_control_namespace: str
     runtime_control_labels: Mapping[str, str]
     runtime_control_port: int
+    legacy_storage_class_name: str | None = None
+    legacy_pvc_storage_request: str | None = None
     network_hard_cap_allowed_cidrs: tuple[str, ...] = ()
     network_hard_cap_denied_cidrs: tuple[str, ...] = ()
     network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...] = ()
     image_pull_secrets: tuple[LocalObjectReference, ...] = ()
     pod_annotations: Mapping[str, str] = dataclasses.field(default_factory=dict)
     workspace_mount_path: str = "/workspace/agent"
+
+
+@dataclasses.dataclass(frozen=True)
+class _CommandPolicyKey:
+    provider_generation: int
+    desired_generation: int
+    revision_id: str
+    digest: str
+
+
+@dataclasses.dataclass(frozen=True)
+class _VerifiedCommandPolicy:
+    key: _CommandPolicyKey
+    network_policy: NetworkPolicyResource
 
 
 class KubernetesRuntimeProvider:
@@ -211,6 +230,7 @@ class KubernetesRuntimeProvider:
         self._config = config
         self._runner_env = dict(config.runner_env)
         self._workspace_mount_path = _absolute_posix_path(config.workspace_mount_path)
+        self._verified_command_policies: dict[str, _VerifiedCommandPolicy] = {}
 
     async def start(
         self,
@@ -247,6 +267,7 @@ class KubernetesRuntimeProvider:
             _network_policy_name(command.identity.runtime_id),
             self._config.namespace,
         )
+        self._verified_command_policies.pop(command.identity.runtime_id, None)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.STOP,
             report=await self.observe(command),
@@ -258,6 +279,7 @@ class KubernetesRuntimeProvider:
     ) -> RuntimeLifecycleResult:
         """Recreate the Runtime Pod and policy while preserving its PVC."""
         policy = self._validate_command(command)
+        self._verified_command_policies.pop(command.identity.runtime_id, None)
         _LOGGER.info(
             "Kubernetes Runtime restart requested",
             extra=_log_context(command, self._config),
@@ -276,6 +298,7 @@ class KubernetesRuntimeProvider:
     ) -> RuntimeLifecycleResult:
         """Delete Pod, policy, and PVC, then converge to the reset target."""
         policy = self._validate_command(command)
+        self._verified_command_policies.pop(command.identity.runtime_id, None)
         _LOGGER.info(
             "Kubernetes Runtime reset requested",
             extra={
@@ -342,14 +365,12 @@ class KubernetesRuntimeProvider:
                 "Runtime configuration requires Kubernetes resource recreation."
             )
         await self._ensure_network_policy(command, policy)
-        observed_state, reason = _observed_state(pod)
+        report = await self.observe(command)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.UPDATE_CONFIGURATION,
-            report=self._report(
-                command,
-                observed_state=observed_state,
-                reason=f"network_policy_updated:{reason}",
-                provider_runtime_id=pod.metadata.name,
+            report=dataclasses.replace(
+                report,
+                reason=f"network_policy_updated:{report.reason}",
             ),
         )
 
@@ -374,6 +395,7 @@ class KubernetesRuntimeProvider:
             _pvc_name(command.identity.runtime_id),
             self._config.namespace,
         )
+        self._verified_command_policies.pop(command.identity.runtime_id, None)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.TERMINAL_DELETE,
             report=dataclasses.replace(
@@ -399,6 +421,7 @@ class KubernetesRuntimeProvider:
             self._config.namespace,
         )
         if pod is None:
+            self._verified_command_policies.pop(command.identity.runtime_id, None)
             pvc = await self._api.get_pvc(
                 _pvc_name(command.identity.runtime_id),
                 self._config.namespace,
@@ -416,16 +439,21 @@ class KubernetesRuntimeProvider:
             _network_policy_name(command.identity.runtime_id),
             self._config.namespace,
         )
-        if network_policy is None or network_policy != self._network_policy(
-            command,
-            policy,
-        ):
+        expected_network_policy = self._network_policy(command, policy)
+        if network_policy is None or network_policy != expected_network_policy:
+            self._verified_command_policies.pop(command.identity.runtime_id, None)
             return self._report(
                 command,
                 observed_state=RuntimeProviderObservedState.STARTING,
                 reason="network_policy_not_ready",
                 provider_runtime_id=pod.metadata.name,
             )
+        self._verified_command_policies[command.identity.runtime_id] = (
+            _VerifiedCommandPolicy(
+                key=_command_policy_key(command),
+                network_policy=expected_network_policy,
+            )
+        )
         observed_state, reason = _observed_state(pod)
         return self._report(
             command,
@@ -459,7 +487,7 @@ class KubernetesRuntimeProvider:
                     },
                 )
                 continue
-            report = _fail_closed_without_command_policy(report)
+            report = await self._fail_closed_without_command_policy(report)
             seen_runtime_ids.add(runtime_id)
             reports.append(report)
         for pvc in await self._api.list_pvcs(labels, self._config.namespace):
@@ -503,9 +531,26 @@ class KubernetesRuntimeProvider:
                 )
                 continue
             if report is not None:
-                if event.event_type != "DELETED":
-                    report = _fail_closed_without_command_policy(report)
+                if event.event_type == "DELETED":
+                    self._verified_command_policies.pop(report.runtime_id, None)
+                else:
+                    report = await self._fail_closed_without_command_policy(report)
                 yield report
+
+    async def _fail_closed_without_command_policy(
+        self,
+        report: RuntimeProviderReport,
+    ) -> RuntimeProviderReport:
+        verified = self._verified_command_policies.get(report.runtime_id)
+        if verified is not None and verified.key == _report_policy_key(report):
+            network_policy = await self._api.get_network_policy(
+                _network_policy_name(report.runtime_id),
+                self._config.namespace,
+            )
+            if network_policy == verified.network_policy:
+                return report
+            self._verified_command_policies.pop(report.runtime_id, None)
+        return _fail_closed_without_command_policy(report)
 
     async def _ensure_pvc(
         self,
@@ -717,6 +762,24 @@ class KubernetesRuntimeProvider:
         policy: KubernetesPodProfileV1,
     ) -> PersistentVolumeClaimResource:
         volume = policy.workspace_volume
+        storage_class_name = volume.storage_class_name
+        storage_request = str(volume.storage_request_bytes)
+        if storage_class_name == _LEGACY_PROVIDER_DEFAULT_STORAGE_CLASS:
+            legacy_storage_class_name = self._config.legacy_storage_class_name
+            if legacy_storage_class_name is None:
+                raise UnsupportedRuntimeConfiguration(
+                    "Migrated Runtime Profile requires the legacy Provider "
+                    "storage class."
+                )
+            storage_class_name = legacy_storage_class_name
+            if volume.storage_request_bytes == 1:
+                legacy_storage_request = self._config.legacy_pvc_storage_request
+                if legacy_storage_request is None:
+                    raise UnsupportedRuntimeConfiguration(
+                        "Migrated Runtime Profile requires the legacy Provider "
+                        "PVC size."
+                    )
+                storage_request = legacy_storage_request
         return PersistentVolumeClaimResource(
             metadata=ObjectMeta(
                 name=_pvc_name(command.identity.runtime_id),
@@ -728,9 +791,9 @@ class KubernetesRuntimeProvider:
                 },
             ),
             spec=PersistentVolumeClaimSpec(
-                storage_class_name=volume.storage_class_name,
+                storage_class_name=storage_class_name,
                 access_modes=("ReadWriteOnce",),
-                storage_request=str(volume.storage_request_bytes),
+                storage_request=storage_request,
             ),
         )
 
@@ -1443,6 +1506,30 @@ def _fail_closed_without_command_policy(
         report,
         observed_state=RuntimeProviderObservedState.STARTING,
         reason="network_policy_not_ready",
+    )
+
+
+def _command_policy_key(
+    command: RuntimeLifecycleCommand,
+) -> _CommandPolicyKey:
+    evidence = command.runtime_configuration.evidence
+    return _CommandPolicyKey(
+        provider_generation=command.provider_generation,
+        desired_generation=command.desired_generation,
+        revision_id=evidence.revision_id,
+        digest=evidence.digest,
+    )
+
+
+def _report_policy_key(
+    report: RuntimeProviderReport,
+) -> _CommandPolicyKey:
+    evidence = report.runtime_configuration
+    return _CommandPolicyKey(
+        provider_generation=report.provider_generation,
+        desired_generation=report.observed_desired_generation,
+        revision_id=evidence.revision_id,
+        digest=evidence.digest,
     )
 
 

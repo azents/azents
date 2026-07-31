@@ -155,6 +155,8 @@ async def _run_control_loop(
             runtime_control_namespace=settings.runtime_control_namespace,
             runtime_control_labels=settings.runtime_control_labels,
             runtime_control_port=settings.runtime_control_port,
+            legacy_storage_class_name=settings.legacy_storage_class_name,
+            legacy_pvc_storage_request=settings.legacy_pvc_storage_request,
             network_hard_cap_allowed_cidrs=settings.network_hard_cap_allowed_cidrs,
             network_hard_cap_denied_cidrs=settings.network_hard_cap_denied_cidrs,
             network_hard_cap_extra_egress=settings.network_hard_cap_extra_egress,
@@ -478,6 +480,10 @@ class ProviderSettings:
         )
         self.lease_name: str = _required_env("AZ_RUNTIME_PROVIDER_LEASE_NAME")
         self.workspace_path: str = _required_env("AZ_RUNTIME_PROVIDER_WORKSPACE_PATH")
+        self.legacy_storage_class_name = _optional_env(
+            "AZ_RUNTIME_PROVIDER_STORAGE_CLASS"
+        )
+        self.legacy_pvc_storage_request = _optional_env("AZ_RUNTIME_PROVIDER_PVC_SIZE")
         self.runner_env: Mapping[str, str] = _selected_env(RUNNER_LIMIT_ENV_NAMES)
         self.engine_image = _required_env("AZ_RUNTIME_PROVIDER_ENGINE_IMAGE")
         self.runtime_control_namespace = _required_env(
@@ -531,6 +537,13 @@ def _required_env(name: str) -> str:
     value = os.environ.get(name)
     if value is None or not value:
         raise RuntimeError(f"required environment variable is missing: {name}")
+    return value
+
+
+def _optional_env(name: str) -> str | None:
+    value = os.environ.get(name)
+    if value is None or not value:
+        return None
     return value
 
 
