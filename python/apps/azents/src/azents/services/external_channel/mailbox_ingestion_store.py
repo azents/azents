@@ -16,7 +16,6 @@ from azents.core.enums import (
     AgentSessionStartReason,
     ExternalChannelAccessRequestStatus,
     ExternalChannelAppMode,
-    ExternalChannelBindingStatus,
     ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
@@ -74,6 +73,7 @@ from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionPreparation,
     ExternalChannelIngestionReason,
     ExternalChannelIngestionRequest,
+    ExternalChannelIngestionStage,
     ExternalChannelIngressAuthorityKind,
 )
 from azents.services.external_channel.selector_state import (
@@ -191,7 +191,6 @@ class ExternalChannelMailboxIngestionStore:
                 resource=resource,
                 position=position,
                 now=now,
-                create_authorized_binding=True,
             )
             if (
                 request.operation is ExternalChannelIngestionOperation.CURRENT_TRIGGER
@@ -244,14 +243,14 @@ class ExternalChannelMailboxIngestionStore:
                 wake_session_id=None,
             )
 
-    async def accept(
+    async def stage(
         self,
         *,
         request: ExternalChannelIngestionRequest,
         preparation: ExternalChannelIngestionPreparation,
         history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
-    ) -> ExternalChannelIngestionAcceptance:
-        """Atomically enqueue provider history and advance its durable position."""
+    ) -> ExternalChannelIngestionStage:
+        """Commit binding and initial provider-delivery intents."""
         now = _utc_now()
         async with self.session_manager() as session:
             connection = await self._lock_authority(session, request=request, now=now)
@@ -316,7 +315,6 @@ class ExternalChannelMailboxIngestionStore:
                 resource=resource,
                 position=position,
                 now=now,
-                create_authorized_binding=False,
             )
             if conversation.route is None:
                 selector = conversation.selector or await self._ensure_selector(
@@ -334,11 +332,12 @@ class ExternalChannelMailboxIngestionStore:
                     selector_id=selector.id,
                 )
                 await session.commit()
-                return ExternalChannelIngestionAcceptance(
+                return ExternalChannelIngestionStage(
                     status="awaiting_selection",
                     reason=ExternalChannelIngestionReason.SELECTION_REQUIRED,
-                    mailbox_item_id=None,
+                    binding_id=None,
                     session_id=None,
+                    required_delivery_attempt_ids=(),
                     control_delivery_attempt_id=delivery_id,
                     connection_id=connection.id if delivery_id is not None else None,
                 )
@@ -403,15 +402,15 @@ class ExternalChannelMailboxIngestionStore:
                     now=now,
                 )
                 await session.commit()
-                return ExternalChannelIngestionAcceptance(
+                return ExternalChannelIngestionStage(
                     status="awaiting_access",
                     reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
-                    mailbox_item_id=None,
+                    binding_id=None,
                     session_id=None,
+                    required_delivery_attempt_ids=(),
                     control_delivery_attempt_id=delivery_id,
                     connection_id=connection.id if delivery_id is not None else None,
                 )
-            initial_binding = conversation.binding is None
             binding = conversation.binding or await self._create_binding(
                 session,
                 route=conversation.route,
@@ -422,24 +421,145 @@ class ExternalChannelMailboxIngestionStore:
                 binding_id=binding.id,
                 desired_progress_payload=checking_progress().model_dump(mode="json"),
             )
-            session_link_id = (
-                await self._create_session_link_intent(
-                    session,
-                    request=request,
-                    connection=connection,
-                    route=conversation.route,
-                    binding=binding,
-                )
-                if initial_binding
-                else None
+            session_link_id = await self._create_session_link_intent(
+                session,
+                request=request,
+                connection=connection,
+                route=conversation.route,
+                resource=resource,
+                binding=binding,
             )
-            progress_id = await self._create_initial_progress_intent(
+            progress_ids = await self._create_initial_progress_intents(
                 session,
                 request=request,
                 resource=resource,
                 binding=binding,
                 work=work,
             )
+            await session.commit()
+            return ExternalChannelIngestionStage(
+                status="ready",
+                reason=ExternalChannelIngestionReason.ACCEPTED,
+                binding_id=binding.id,
+                session_id=binding.agent_session_id,
+                required_delivery_attempt_ids=(session_link_id, *progress_ids),
+                control_delivery_attempt_id=None,
+                connection_id=None,
+            )
+
+    async def finalize(
+        self,
+        *,
+        request: ExternalChannelIngestionRequest,
+        preparation: ExternalChannelIngestionPreparation,
+        history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
+        stage: ExternalChannelIngestionStage,
+    ) -> ExternalChannelIngestionAcceptance:
+        """Atomically enqueue provider history after initial delivery succeeds."""
+        if (
+            stage.status != "ready"
+            or stage.binding_id is None
+            or stage.session_id is None
+        ):
+            raise ValueError("External Channel ready stage is unavailable.")
+        now = _utc_now()
+        async with self.session_manager() as session:
+            connection = await self._lock_authority(session, request=request, now=now)
+            if connection is None:
+                return _acceptance_rejected(
+                    ExternalChannelIngestionReason.INGRESS_AUTHORITY_STALE
+                )
+            if preparation.position_id is None:
+                raise ValueError("External Channel ingestion position is unavailable.")
+            position = await self.repository.lock_conversation_position(
+                session,
+                position_id=preparation.position_id,
+            )
+            if position is None or position.connection_id != connection.id:
+                return _acceptance_rejected(
+                    ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
+                )
+            replay_after_position = (
+                request.replay_boundary is not None
+                and position.read_through_position is not None
+                and position.read_through_position
+                >= request.replay_boundary.trigger_position
+            )
+            if (
+                not replay_after_position
+                and position.read_through_position
+                != preparation.exclusive_start_position
+            ):
+                await session.rollback()
+                return _acceptance_position_mismatch()
+            resource = await self.repository.get_resource_by_provider_key(
+                session,
+                connection_id=connection.id,
+                provider_resource_key=request.locator.provider_resource_key,
+            )
+            if (
+                resource is None
+                or resource.status is not ExternalChannelResourceStatus.ACTIVE
+                or not self._replay_source_matches(
+                    request=request,
+                    resource=resource,
+                )
+            ):
+                return _acceptance_rejected(
+                    ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
+                )
+            conversation = await self._resolve_conversation(
+                session,
+                request=request,
+                connection=connection,
+                resource=resource,
+                position=position,
+                now=now,
+            )
+            if (
+                conversation.route is None
+                or conversation.binding is None
+                or conversation.binding.id != stage.binding_id
+                or conversation.binding.agent_session_id != stage.session_id
+            ):
+                return _acceptance_rejected(
+                    ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
+                )
+            agent_id = conversation.route.require_active_agent_id()
+            if (
+                await self.repository.get_active_block(
+                    session,
+                    agent_id=agent_id,
+                    principal_id=conversation.principal_id,
+                )
+                is not None
+            ):
+                return _acceptance_rejected(
+                    ExternalChannelIngestionReason.AUTHOR_NOT_ELIGIBLE
+                )
+            grant = await self.repository.get_active_access_grant(
+                session,
+                agent_id=agent_id,
+                principal_id=conversation.principal_id,
+                agent_session_id=conversation.binding.agent_session_id,
+            )
+            if grant is None and not _route_has_automatic_access(conversation.route):
+                return _acceptance_rejected(
+                    ExternalChannelIngestionReason.ACCESS_REQUIRED
+                )
+            for delivery_attempt_id in stage.required_delivery_attempt_ids:
+                attempt = await self.repository.lock_delivery_attempt(
+                    session,
+                    delivery_attempt_id=delivery_attempt_id,
+                )
+                if (
+                    attempt is None
+                    or attempt.binding_id != conversation.binding.id
+                    or attempt.status is not ExternalChannelDeliveryStatus.DELIVERED
+                ):
+                    return _acceptance_rejected(
+                        ExternalChannelIngestionReason.INITIAL_DELIVERY_UNAVAILABLE
+                    )
             idempotency_key = _mailbox_idempotency_key(
                 request=request,
                 position_id=position.id,
@@ -448,14 +568,14 @@ class ExternalChannelMailboxIngestionStore:
                 request=request,
                 history=history,
                 resource=resource,
-                binding=binding,
+                binding=conversation.binding,
                 trigger_principal_id=conversation.principal_id,
                 invocation_id=idempotency_key,
             )
             enqueue = await self.mailbox_service.enqueue(
                 session,
                 MailboxEnqueue(
-                    session_id=binding.agent_session_id,
+                    session_id=conversation.binding.agent_session_id,
                     kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
                     scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
                     requested_model_target_label=None,
@@ -472,7 +592,7 @@ class ExternalChannelMailboxIngestionStore:
             )
             await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,
-                binding.agent_session_id,
+                conversation.binding.agent_session_id,
             )
             if not replay_after_position:
                 advance = self.repository.advance_conversation_position_if_current
@@ -484,15 +604,15 @@ class ExternalChannelMailboxIngestionStore:
                 )
                 if not advanced:
                     await session.rollback()
-                    return _position_mismatch()
+                    return _acceptance_position_mismatch()
             await self._initialize_thread_position(
                 session,
                 request=request,
+                resource=resource,
                 parent_position=position,
                 trigger_position=history.trigger_position,
             )
             await session.commit()
-            control_id = session_link_id or progress_id
             return ExternalChannelIngestionAcceptance(
                 status="accepted" if enqueue.created else "duplicate",
                 reason=(
@@ -501,9 +621,9 @@ class ExternalChannelMailboxIngestionStore:
                     else ExternalChannelIngestionReason.DUPLICATE
                 ),
                 mailbox_item_id=enqueue.mailbox_item.id,
-                session_id=binding.agent_session_id,
-                control_delivery_attempt_id=control_id,
-                connection_id=connection.id if control_id is not None else None,
+                session_id=conversation.binding.agent_session_id,
+                control_delivery_attempt_id=None,
+                connection_id=None,
             )
 
     async def _resolve_resource(
@@ -545,13 +665,12 @@ class ExternalChannelMailboxIngestionStore:
         resource: ExternalChannelResource,
         position: ExternalChannelConversationPosition,
         now: datetime.datetime,
-        create_authorized_binding: bool,
     ) -> _Conversation:
         principal_id = await self._ensure_principal(
             session,
             request=request,
         )
-        binding = await self.repository.lock_active_binding_by_resource(
+        binding = await self.repository.lock_connected_binding_by_resource(
             session,
             resource_id=resource.id,
         )
@@ -578,27 +697,6 @@ class ExternalChannelMailboxIngestionStore:
                     principal_id=principal_id,
                     now=now,
                 )
-            elif create_authorized_binding:
-                agent_id = route.require_active_agent_id()
-                blocked = await self.repository.get_active_block(
-                    session,
-                    agent_id=agent_id,
-                    principal_id=principal_id,
-                )
-                grant = await self.repository.get_active_access_grant(
-                    session,
-                    agent_id=agent_id,
-                    principal_id=principal_id,
-                    agent_session_id=None,
-                )
-                if blocked is None and (
-                    grant is not None or _route_has_automatic_access(route)
-                ):
-                    binding = await self._create_binding(
-                        session,
-                        route=route,
-                        resource=resource,
-                    )
         return _Conversation(
             resource=resource,
             route=route,
@@ -760,7 +858,6 @@ class ExternalChannelMailboxIngestionStore:
                 resource_id=resource.id,
                 route_id=route.id,
                 agent_session_id=root.agent_session.id,
-                status=ExternalChannelBindingStatus.ACTIVE,
                 disconnected_at=None,
                 disconnect_reason=None,
             ),
@@ -828,13 +925,22 @@ class ExternalChannelMailboxIngestionStore:
         session: AsyncSession,
         *,
         request: ExternalChannelIngestionRequest,
+        resource: ExternalChannelResource,
         parent_position: ExternalChannelConversationPosition,
         trigger_position: str,
     ) -> None:
+        delivery_thread_key = request.locator.delivery_thread_key
+        if (
+            request.locator.provider is ExternalChannelProvider.DISCORD
+            and resource.labels is not None
+        ):
+            retained = resource.labels.get("delivery_channel_id")
+            if isinstance(retained, str) and retained:
+                delivery_thread_key = retained
         if (
             parent_position.scope_kind
             is not ExternalChannelConversationScopeKind.PARENT_CHANNEL
-            or request.locator.delivery_thread_key is None
+            or delivery_thread_key is None
         ):
             return
         await self.repository.create_conversation_position_idempotent(
@@ -845,9 +951,9 @@ class ExternalChannelMailboxIngestionStore:
                 provider_channel_id=(
                     request.locator.provider_channel_id
                     if request.locator.provider is ExternalChannelProvider.SLACK
-                    else request.locator.delivery_thread_key
+                    else delivery_thread_key
                 ),
-                provider_thread_key=request.locator.delivery_thread_key,
+                provider_thread_key=delivery_thread_key,
                 read_through_position=(
                     trigger_position
                     if request.locator.provider is ExternalChannelProvider.SLACK
@@ -880,7 +986,7 @@ class ExternalChannelMailboxIngestionStore:
                 "provider": "discord",
                 "control_kind": "agent_selector",
                 "guild_id": request.locator.provider_tenant_id,
-                "channel_id": delivery_channel_id,
+                "channel_id": request.locator.provider_channel_id,
                 "selector_interaction_id": selector_id,
                 "text": "Select an Agent to continue this conversation.",
                 "embeds": [
@@ -982,6 +1088,7 @@ class ExternalChannelMailboxIngestionStore:
                     else None
                 ),
             }
+            _add_discord_thread_provisioning(payload, request=request)
         attempt = await self.repository.create_delivery_attempt_idempotent(
             session,
             ExternalChannelDeliveryAttemptCreate(
@@ -1018,8 +1125,9 @@ class ExternalChannelMailboxIngestionStore:
         request: ExternalChannelIngestionRequest,
         connection: ExternalChannelConnection,
         route: ExternalChannelAgentRoute,
+        resource: ExternalChannelResource,
         binding: ExternalChannelBinding,
-    ) -> str | None:
+    ) -> str:
         workspace = await self.workspace_repository.get_by_id(
             session, connection.workspace_id
         )
@@ -1047,15 +1155,12 @@ class ExternalChannelMailboxIngestionStore:
                 "blocks": presentation.blocks,
             }
         else:
-            payload = {
-                "control_kind": "session_link",
-                "guild_id": request.locator.provider_tenant_id,
-                "channel_id": thread_key,
-                "text": "",
-                "components": _discord_link_button(
-                    label="Open Azents session", url=session_url
-                ),
-            }
+            payload = _discord_delivery_payload(resource.labels)
+            payload["text"] = ""
+            payload["control_kind"] = "session_link"
+            payload["components"] = _discord_link_button(
+                label="Open Azents session", url=session_url
+            )
         attempt = await self.repository.create_delivery_attempt_idempotent(
             session,
             ExternalChannelDeliveryAttemptCreate(
@@ -1073,13 +1178,9 @@ class ExternalChannelMailboxIngestionStore:
                 completed_at=None,
             ),
         )
-        return (
-            attempt.id
-            if attempt.status is ExternalChannelDeliveryStatus.PENDING
-            else None
-        )
+        return attempt.id
 
-    async def _create_initial_progress_intent(
+    async def _create_initial_progress_intents(
         self,
         session: AsyncSession,
         *,
@@ -1087,7 +1188,7 @@ class ExternalChannelMailboxIngestionStore:
         resource: ExternalChannelResource,
         binding: ExternalChannelBinding,
         work: ExternalChannelWork,
-    ) -> str | None:
+    ) -> tuple[str, ...]:
         if request.locator.provider is ExternalChannelProvider.DISCORD:
             return await self.work_repository.ensure_initial_discord_progress(
                 session,
@@ -1128,11 +1229,7 @@ class ExternalChannelMailboxIngestionStore:
                 completed_at=None,
             ),
         )
-        return (
-            attempt.id
-            if attempt.status is ExternalChannelDeliveryStatus.PENDING
-            else None
-        )
+        return (attempt.id,)
 
     async def _lock_authority(
         self,
@@ -1198,13 +1295,14 @@ class ExternalChannelMailboxIngestionStore:
         self,
         session: AsyncSession,
         reason: ExternalChannelIngestionReason,
-    ) -> ExternalChannelIngestionAcceptance:
+    ) -> ExternalChannelIngestionStage:
         await session.commit()
-        return ExternalChannelIngestionAcceptance(
+        return ExternalChannelIngestionStage(
             status="ignored",
             reason=reason,
-            mailbox_item_id=None,
+            binding_id=None,
             session_id=None,
+            required_delivery_attempt_ids=(),
             control_delivery_attempt_id=None,
             connection_id=None,
         )
@@ -1282,14 +1380,75 @@ def _resource_labels(request: ExternalChannelIngestionRequest) -> dict[str, obje
             "channel_id": locator.provider_channel_id,
             "thread_ts": locator.delivery_thread_key,
         }
+    delivery_thread_key = locator.delivery_thread_key
+    provisioned_delivery_channel = (
+        delivery_thread_key
+        if locator.provider_thread_key is not None
+        or delivery_thread_key != locator.trigger_provider_message_id
+        else None
+    )
     return {
         "provider": "discord",
         "guild_id": locator.provider_tenant_id,
         "source_channel_id": locator.provider_channel_id,
         "parent_channel_id": locator.provider_parent_channel_id,
-        "thread_id": locator.delivery_thread_key,
-        "delivery_channel_id": locator.delivery_thread_key,
+        "root_message_id": locator.trigger_provider_message_id,
+        "thread_id": delivery_thread_key,
+        "delivery_channel_id": provisioned_delivery_channel,
     }
+
+
+def _add_discord_thread_provisioning(
+    payload: dict[str, object],
+    *,
+    request: ExternalChannelIngestionRequest,
+) -> None:
+    """Attach root-thread provisioning identity without provider credentials."""
+    if (
+        request.locator.provider_thread_key is not None
+        or request.locator.delivery_thread_key
+        != request.locator.trigger_provider_message_id
+    ):
+        return
+    parent_channel_id = request.locator.provider_parent_channel_id
+    root_message_id = request.locator.delivery_thread_key
+    if parent_channel_id is None or root_message_id is None:
+        raise RuntimeError("External Channel Discord thread target is unavailable.")
+    payload["thread_parent_channel_id"] = parent_channel_id
+    payload["thread_root_message_id"] = root_message_id
+
+
+def _discord_delivery_payload(
+    labels: dict[str, object] | None,
+) -> dict[str, object]:
+    """Build one Discord delivery target from durable resource labels."""
+    labels = labels or {}
+    guild_id = labels.get("guild_id")
+    delivery_channel_id = labels.get("delivery_channel_id")
+    thread_id = (
+        delivery_channel_id
+        if isinstance(delivery_channel_id, str) and delivery_channel_id
+        else labels.get("thread_id")
+    )
+    if not isinstance(guild_id, str) or not guild_id:
+        raise RuntimeError("External Channel Discord Guild is unavailable.")
+    if not isinstance(thread_id, str) or not thread_id:
+        raise RuntimeError("External Channel Discord thread is unavailable.")
+    payload: dict[str, object] = {
+        "guild_id": guild_id,
+        "channel_id": thread_id,
+    }
+    parent_channel_id = labels.get("parent_channel_id")
+    root_message_id = labels.get("root_message_id")
+    if delivery_channel_id is None and (
+        isinstance(parent_channel_id, str)
+        and parent_channel_id
+        and isinstance(root_message_id, str)
+        and root_message_id == thread_id
+    ):
+        payload["thread_parent_channel_id"] = parent_channel_id
+        payload["thread_root_message_id"] = root_message_id
+    return payload
 
 
 def _immediate(
@@ -1311,7 +1470,7 @@ def _immediate(
     )
 
 
-def _position_mismatch() -> ExternalChannelIngestionAcceptance:
+def _position_mismatch() -> ExternalChannelIngestionStage:
     return _rejected(
         ExternalChannelIngestionReason.POSITION_CHANGED,
         status="position_mismatch",
@@ -1319,6 +1478,29 @@ def _position_mismatch() -> ExternalChannelIngestionAcceptance:
 
 
 def _rejected(
+    reason: ExternalChannelIngestionReason,
+    *,
+    status: str = "terminal_rejection",
+) -> ExternalChannelIngestionStage:
+    return ExternalChannelIngestionStage(
+        status=status,  # type: ignore[arg-type]
+        reason=reason,
+        binding_id=None,
+        session_id=None,
+        required_delivery_attempt_ids=(),
+        control_delivery_attempt_id=None,
+        connection_id=None,
+    )
+
+
+def _acceptance_position_mismatch() -> ExternalChannelIngestionAcceptance:
+    return _acceptance_rejected(
+        ExternalChannelIngestionReason.POSITION_CHANGED,
+        status="position_mismatch",
+    )
+
+
+def _acceptance_rejected(
     reason: ExternalChannelIngestionReason,
     *,
     status: str = "terminal_rejection",

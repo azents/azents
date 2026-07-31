@@ -51,7 +51,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-07-31
-spec_version: 21
+spec_version: 22
 ---
 
 # External Channel Provider Ingress
@@ -226,19 +226,29 @@ the canonical message source nor a durable queue item.
    messages and records one leading omission reminder when earlier eligible context
    was omitted. The connected Azents App/Bot is excluded; raw REST pages, callbacks,
    tokens, private URLs, and attachment bodies are not retained.
-4. A short final transaction locks and revalidates the same authority, conversation
-   position, active resource, route, binding/selector, and access boundary. PostgreSQL
+   Slack display-name and permalink enrichment is optional and starts only while a
+   fixed reserve remains for required admission.
+4. A short staging transaction locks and revalidates the same authority, conversation
+   position, active resource, route/binding/selector, and access boundary. It creates
+   or reuses the connected binding, root Session, initial Channel Work, and
+   deterministic Session-link and progress delivery intents. PostgreSQL
    compare-and-set restarts the read when another replica advanced the position.
-5. The transaction creates or reuses the active binding and root Session, enqueues one
-   deterministic wake-session mailbox item containing the ordered provider-history
-   projection, establishes initial Channel Work and provider-control intents, marks the
-   Session running, and advances the position atomically.
-6. After commit, the service claims the pending mailbox item and sends routing-only
+5. Outside a database transaction, the service settles the one-time Session-link
+   delivery followed by every initial progress part in stable order through the
+   shared one-attempt delivery fence. Only durable `delivered` results continue.
+6. After required delivery and lock-ownership validation, the service rechecks the same
+   absolute transport deadline. Expiration fails retryably before mailbox admission. A
+   short final transaction then revalidates authority and the exact staged identities,
+   verifies every required delivery is still `delivered`, enqueues one deterministic
+   wake-session mailbox item containing the ordered provider-history projection, marks
+   the Session running, initializes thread position, and advances the conversation
+   position atomically.
+7. After commit, the service claims the pending mailbox item and sends routing-only
    `SessionWakeUp(session_id)`. A crash or broker failure leaves that item recoverable,
    so duplicate transport delivery can complete the same logical wake without creating
    another Session input.
 
-An existing active binding wins route resolution. Otherwise Single uses its sole
+An existing connected binding wins route resolution. Otherwise Single uses its sole
 route, Multi uses one valid channel default, and unresolved Multi traffic creates an
 interaction-owned typed selection boundary. Empty, removed, stale, or ambiguous catalogs never fall
 back to an arbitrary Agent. An already-granted first invocation snapshots the Agent's
@@ -264,8 +274,8 @@ Authenticated Slack App uninstall and token revocation bypass normal message
 ingestion and directly apply fenced connection lifecycle handling. Provider-history,
 coordination, position, or wake failures return a retryable transport outcome. Invalid
 or stale authority and malformed replay boundaries fail closed. Committed selector,
-approval, Session-link, and initial progress controls are attempted after commit
-through the shared provider-control delivery fence.
+and approval controls may be attempted after their commit. Session-link and initial
+progress controls are required synchronous gates before mailbox admission.
 
 ## File Metadata Projection
 
@@ -309,6 +319,10 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-07-31** (spec_version 22) — Split synchronous admission into staging,
+  ordered required provider delivery, and mailbox finalization; reserved Slack
+  optional-enrichment time for required work; and made `disconnected_at` the binding
+  relationship authority.
 - **2026-07-31** (spec_version 21) — Moved Slack Socket Mode and Discord Gateway
   managers into one provider-neutral External Channel Gateway runtime, removed Socket
   supervision from Agent Workers, and preserved direct shared-ingestion calls.

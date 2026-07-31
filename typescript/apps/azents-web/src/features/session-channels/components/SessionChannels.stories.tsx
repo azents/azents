@@ -66,7 +66,6 @@ const binding: ManagedBinding = {
   provider: "slack",
   resource_type: "private_channel_thread",
   resource_label: "#incident-database · thread",
-  status: "active",
   connected_at: "2026-07-22T02:05:00Z",
   disconnected_at: null,
   disconnect_reason: null,
@@ -188,7 +187,6 @@ export const Archived = {
       bindings: [
         {
           ...binding,
-          status: "disconnected",
           disconnected_at: "2026-07-22T05:30:00Z",
           disconnect_reason: "Session archived.",
         },

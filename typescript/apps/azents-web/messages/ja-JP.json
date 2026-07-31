@@ -1229,10 +1229,8 @@
         "grantsTitle": "セッションアクセス",
         "grantsDescription": "このセッションに限定して許可された参加者です。",
         "noGrants": "有効な session-scoped grant はありません。",
-        "bindingStatus": {
-          "active": "有効",
-          "disconnected": "切断済み"
-        },
+        "connected": "接続済み",
+        "disconnected": "切断済み",
         "workStatus": {
           "active": "Work 実行中",
           "finished": "Work 完了"

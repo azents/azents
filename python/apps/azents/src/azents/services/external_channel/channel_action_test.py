@@ -916,6 +916,7 @@ async def test_discord_reply_agent_prefix_follows_app_mode(
                 "bot_token": "xoxb-secret",
                 "parent_channel_id": "222",
                 "root_message_id": "333",
+                "name": "Research * Agent",
             },
         ),
         (
@@ -1070,6 +1071,7 @@ async def test_discord_approval_control_delivery_uses_text_create() -> None:
                 "bot_token": "xoxb-secret",
                 "parent_channel_id": "222",
                 "root_message_id": "333",
+                "name": None,
             },
         ),
         (

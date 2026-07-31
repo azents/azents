@@ -4,7 +4,7 @@ import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Literal, cast
+from typing import cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,12 +20,6 @@ from azents.repos.external_channel.data import (
     ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
-from azents.services.external_channel.data import DiscordConnectionCredentials
-from azents.services.external_channel.discord_delivery import (
-    DiscordDeliveryClient,
-    DiscordDeliveryResult,
-)
 from azents.services.external_channel.ingestion import (
     ExternalChannelConversationIngestionService,
     ExternalChannelIngestionOutcome,
@@ -105,33 +99,6 @@ class _Repository:
         return self.delivery_resource
 
 
-class _Codec:
-    """Return one typed Discord credential without retaining it."""
-
-    def decrypt(self, ciphertext: str) -> DiscordConnectionCredentials:
-        assert ciphertext == "ciphertext"
-        return DiscordConnectionCredentials(bot_token="bot-token")
-
-
-class _DiscordClient:
-    """Capture eager thread provisioning calls."""
-
-    def __init__(self, result: DiscordDeliveryResult) -> None:
-        self.result = result
-        self.calls: list[tuple[str, str]] = []
-
-    async def ensure_thread(
-        self,
-        *,
-        bot_token: str,
-        parent_channel_id: str,
-        root_message_id: str,
-    ) -> DiscordDeliveryResult:
-        assert bot_token == "bot-token"
-        self.calls.append((parent_channel_id, root_message_id))
-        return self.result
-
-
 class _Ingestion:
     """Capture the credential-free request passed to shared ingestion."""
 
@@ -155,25 +122,11 @@ class _Ingestion:
 def _service(
     *,
     repository: _Repository | None = None,
-    discord_result: DiscordDeliveryResult | None = None,
-) -> tuple[
-    ExternalChannelTransportIngestionService,
-    _DiscordClient,
-    _Ingestion,
-]:
+) -> tuple[ExternalChannelTransportIngestionService, _Ingestion]:
     @asynccontextmanager
     async def session_manager() -> AsyncIterator[AsyncSession]:
         yield cast(AsyncSession, object())
 
-    discord_client = _DiscordClient(
-        discord_result
-        or DiscordDeliveryResult(
-            status="delivered",
-            provider_message_key="discord-thread:201",
-            error_kind=None,
-            error_summary=None,
-        )
-    )
     ingestion = _Ingestion()
     return (
         ExternalChannelTransportIngestionService(
@@ -182,14 +135,11 @@ def _service(
                 ExternalChannelRepository,
                 repository or _Repository(),
             ),
-            credentials_codec=cast(ExternalChannelCredentialsCodec, _Codec()),
-            discord_client=cast(DiscordDeliveryClient, discord_client),
             ingestion_service=cast(
                 ExternalChannelConversationIngestionService,
                 ingestion,
             ),
         ),
-        discord_client,
         ingestion,
     )
 
@@ -277,7 +227,7 @@ def _discord_event(
 
 @pytest.mark.asyncio
 async def test_slack_parent_invocation_projects_content_free_parent_request() -> None:
-    service, _, ingestion = _service()
+    service, ingestion = _service()
 
     outcome = await service.ingest_slack_event(
         event=_slack_event(),
@@ -296,7 +246,7 @@ async def test_slack_parent_invocation_projects_content_free_parent_request() ->
 
 @pytest.mark.asyncio
 async def test_slack_manual_thread_invocation_reuses_root_scope() -> None:
-    service, _, ingestion = _service()
+    service, ingestion = _service()
 
     await service.ingest_slack_event(
         event=_slack_event(thread_ts="90.000001"),
@@ -311,8 +261,10 @@ async def test_slack_manual_thread_invocation_reuses_root_scope() -> None:
 
 
 @pytest.mark.asyncio
-async def test_discord_parent_invocation_provisions_thread_before_ingestion() -> None:
-    service, discord_client, ingestion = _service()
+async def test_discord_parent_invocation_defers_thread_provisioning_to_ingestion() -> (
+    None
+):
+    service, ingestion = _service()
 
     await service.ingest_discord_event(
         event=_discord_event(
@@ -325,17 +277,16 @@ async def test_discord_parent_invocation_provisions_thread_before_ingestion() ->
         deadline=external_channel_transport_deadline(_NOW),
     )
 
-    assert discord_client.calls == [("200", "100")]
     request = ingestion.requests[0]
     assert request.scope.kind is ExternalChannelConversationScopeKind.PARENT_CHANNEL
     assert request.locator.provider_resource_key == "discord:300:100"
-    assert request.locator.delivery_thread_key == "201"
-    assert request.locator.provider_parent_channel_id is None
+    assert request.locator.delivery_thread_key == "100"
+    assert request.locator.provider_parent_channel_id == "200"
 
 
 @pytest.mark.asyncio
 async def test_discord_manual_thread_reuses_thread_without_provisioning() -> None:
-    service, discord_client, ingestion = _service()
+    service, ingestion = _service()
 
     await service.ingest_discord_event(
         event=_discord_event(
@@ -348,7 +299,6 @@ async def test_discord_manual_thread_reuses_thread_without_provisioning() -> Non
         deadline=external_channel_transport_deadline(_NOW),
     )
 
-    assert discord_client.calls == []
     request = ingestion.requests[0]
     assert request.scope.kind is ExternalChannelConversationScopeKind.THREAD
     assert request.scope.provider_channel_id == "201"
@@ -365,9 +315,7 @@ async def test_discord_bound_thread_uses_retained_resource_identity() -> None:
             labels={"delivery_channel_id": "201"},
         ),
     )
-    service, discord_client, ingestion = _service(
-        repository=_Repository(delivery_resource=resource)
-    )
+    service, ingestion = _service(repository=_Repository(delivery_resource=resource))
 
     await service.ingest_discord_event(
         event=_discord_event(
@@ -380,54 +328,14 @@ async def test_discord_bound_thread_uses_retained_resource_identity() -> None:
         deadline=external_channel_transport_deadline(_NOW),
     )
 
-    assert discord_client.calls == []
     request = ingestion.requests[0]
     assert request.locator.provider_resource_key == "discord:300:100"
     assert request.locator.invocation is False
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("status", "error_kind"),
-    [
-        ("failed", "permission_denied"),
-        ("unknown", "transport_unknown"),
-    ],
-)
-async def test_discord_unresolved_thread_is_retryable_without_ingestion(
-    status: Literal["failed", "unknown"],
-    error_kind: str,
-) -> None:
-    service, _, ingestion = _service(
-        discord_result=DiscordDeliveryResult(
-            status=status,
-            provider_message_key=None,
-            error_kind=error_kind,
-            error_summary="Discord thread outcome is unknown.",
-        )
-    )
-
-    outcome = await service.ingest_discord_event(
-        event=_discord_event(
-            channel_id="200",
-            thread_id=None,
-            parent_channel_id=None,
-            invocation=True,
-        ),
-        authority=_authority(ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP),
-        deadline=external_channel_transport_deadline(_NOW),
-    )
-
-    assert outcome is not None
-    assert outcome.kind is ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE
-    assert ingestion.requests == []
-
-
-@pytest.mark.asyncio
 async def test_stale_discord_configuration_stops_before_provider_io() -> None:
-    service, discord_client, ingestion = _service(
-        repository=_Repository(configuration_generation=3)
-    )
+    service, ingestion = _service(repository=_Repository(configuration_generation=3))
 
     outcome = await service.ingest_discord_event(
         event=_discord_event(
@@ -442,5 +350,4 @@ async def test_stale_discord_configuration_stops_before_provider_io() -> None:
 
     assert outcome is not None
     assert outcome.kind is ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE
-    assert discord_client.calls == []
     assert ingestion.requests == []

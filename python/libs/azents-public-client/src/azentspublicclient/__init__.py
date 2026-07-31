@@ -178,7 +178,6 @@ __all__ = [
     "ExternalChannelAccessGrantScope",
     "ExternalChannelAccessRequestStatus",
     "ExternalChannelAppMode",
-    "ExternalChannelBindingStatus",
     "ExternalChannelCapabilitySnapshot",
     "ExternalChannelChannelDefaultStatus",
     "ExternalChannelConnectionStatus",
@@ -614,7 +613,6 @@ from azentspublicclient.models.existing_project_workspace_item_response import E
 from azentspublicclient.models.external_channel_access_grant_scope import ExternalChannelAccessGrantScope as ExternalChannelAccessGrantScope
 from azentspublicclient.models.external_channel_access_request_status import ExternalChannelAccessRequestStatus as ExternalChannelAccessRequestStatus
 from azentspublicclient.models.external_channel_app_mode import ExternalChannelAppMode as ExternalChannelAppMode
-from azentspublicclient.models.external_channel_binding_status import ExternalChannelBindingStatus as ExternalChannelBindingStatus
 from azentspublicclient.models.external_channel_capability_snapshot import ExternalChannelCapabilitySnapshot as ExternalChannelCapabilitySnapshot
 from azentspublicclient.models.external_channel_channel_default_status import ExternalChannelChannelDefaultStatus as ExternalChannelChannelDefaultStatus
 from azentspublicclient.models.external_channel_connection_status import ExternalChannelConnectionStatus as ExternalChannelConnectionStatus

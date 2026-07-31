@@ -1229,10 +1229,8 @@
         "grantsTitle": "세션 접근 권한",
         "grantsDescription": "이 세션에 한해 허용된 참여자입니다.",
         "noGrants": "활성 session-scoped grant가 없습니다.",
-        "bindingStatus": {
-          "active": "활성",
-          "disconnected": "연결 해제됨"
-        },
+        "connected": "연결됨",
+        "disconnected": "연결 해제됨",
         "workStatus": {
           "active": "Work 활성",
           "finished": "Work 완료"

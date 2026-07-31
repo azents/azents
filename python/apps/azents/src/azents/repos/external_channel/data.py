@@ -10,7 +10,6 @@ from azents.core.enums import (
     ExternalChannelAccessRequestStatus,
     ExternalChannelActionMode,
     ExternalChannelAppMode,
-    ExternalChannelBindingStatus,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelConversationScopeKind,
@@ -358,7 +357,6 @@ class ExternalChannelBinding(_Record):
     resource_id: str
     route_id: str
     agent_session_id: str
-    status: ExternalChannelBindingStatus
     connected_at: datetime.datetime
     disconnected_at: datetime.datetime | None
     disconnect_reason: str | None
@@ -372,7 +370,6 @@ class ExternalChannelBindingCreate(_Record):
     resource_id: str
     route_id: str
     agent_session_id: str
-    status: ExternalChannelBindingStatus
     disconnected_at: datetime.datetime | None
     disconnect_reason: str | None
 

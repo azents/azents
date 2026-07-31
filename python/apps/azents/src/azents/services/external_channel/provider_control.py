@@ -9,11 +9,15 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.enums import ExternalChannelDeliveryStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
+)
+from azents.services.external_channel.conversation import (
+    ExternalChannelOperationDeadline,
 )
 
 logger = logging.getLogger(__name__)
@@ -117,3 +121,62 @@ class ExternalChannelProviderControlService:
     async def attempt_delivery(self, delivery_attempt_id: str) -> None:
         """Attempt one committed provider control through the shared fence."""
         await self.action_service.attempt_delivery(delivery_attempt_id)
+
+    async def ensure_delivered(
+        self,
+        *,
+        delivery_attempt_id: str,
+        deadline: ExternalChannelOperationDeadline,
+    ) -> bool:
+        """Synchronously settle one required delivery before mailbox acceptance."""
+        while True:
+            remaining = deadline.remaining_seconds()
+            if remaining <= 0:
+                return False
+            async with self.session_manager() as session:
+                status = await self.repository.get_delivery_status(
+                    session,
+                    delivery_attempt_id=delivery_attempt_id,
+                )
+            match status:
+                case ExternalChannelDeliveryStatus.DELIVERED:
+                    return True
+                case ExternalChannelDeliveryStatus.PENDING:
+                    try:
+                        async with asyncio.timeout(remaining):
+                            await self.action_service.attempt_delivery(
+                                delivery_attempt_id
+                            )
+                    except TimeoutError:
+                        return False
+                case ExternalChannelDeliveryStatus.ATTEMPTING:
+                    await asyncio.sleep(min(0.01, remaining))
+                case (
+                    ExternalChannelDeliveryStatus.FAILED
+                    | ExternalChannelDeliveryStatus.UNKNOWN
+                    | ExternalChannelDeliveryStatus.NOT_ATTEMPTED
+                    | None
+                ):
+                    return False
+
+
+def get_external_channel_provider_control_service(
+    session_manager: Annotated[
+        SessionManager[AsyncSession],
+        Depends(get_session_manager),
+    ],
+    repository: Annotated[
+        ExternalChannelWorkRepository,
+        Depends(ExternalChannelWorkRepository),
+    ],
+    action_service: Annotated[
+        ExternalChannelActionService,
+        Depends(ExternalChannelActionService),
+    ],
+) -> ExternalChannelProviderControlService:
+    """Compose provider-control delivery without exposing worker tuning as API input."""
+    return ExternalChannelProviderControlService(
+        session_manager=session_manager,
+        repository=repository,
+        action_service=action_service,
+    )

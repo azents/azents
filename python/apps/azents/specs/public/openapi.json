@@ -17205,15 +17205,6 @@
         "title": "ExternalChannelAppMode",
         "description": "Immutable product administration mode for an external connection."
       },
-      "ExternalChannelBindingStatus": {
-        "type": "string",
-        "enum": [
-          "active",
-          "disconnected"
-        ],
-        "title": "ExternalChannelBindingStatus",
-        "description": "Session binding lifecycle status."
-      },
       "ExternalChannelCapabilitySnapshot": {
         "properties": {
           "provider": {
@@ -19959,9 +19950,6 @@
             "type": "string",
             "title": "Resource Label"
           },
-          "status": {
-            "$ref": "#/components/schemas/ExternalChannelBindingStatus"
-          },
           "connected_at": {
             "type": "string",
             "format": "date-time",
@@ -20027,7 +20015,6 @@
           "provider",
           "resource_type",
           "resource_label",
-          "status",
           "connected_at",
           "disconnected_at",
           "disconnect_reason",

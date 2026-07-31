@@ -119,7 +119,7 @@ class _Repository:
             return None
         return SimpleNamespace(id=resource_id, status=self.resource_status)
 
-    async def lock_active_binding_by_resource(
+    async def lock_connected_binding_by_resource(
         self,
         session: object,
         *,

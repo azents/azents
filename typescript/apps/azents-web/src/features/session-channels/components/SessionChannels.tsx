@@ -282,7 +282,7 @@ function BindingPanel({
   onDisconnect: (binding: ManagedBinding) => void;
 }): React.ReactElement {
   const t = useTranslations("workspace.agents.sessionChannels");
-  const active = binding.status === "active";
+  const connected = binding.disconnected_at === null;
   return (
     <Paper
       withBorder
@@ -295,8 +295,8 @@ function BindingPanel({
           <Box style={{ minWidth: 0 }}>
             <Group gap="xs">
               <Text fw={700}>{binding.resource_label}</Text>
-              <Badge color={active ? "green" : "gray"} variant="light">
-                {t(`bindingStatus.${binding.status}`)}
+              <Badge color={connected ? "green" : "gray"} variant="light">
+                {t(connected ? "connected" : "disconnected")}
               </Badge>
             </Group>
             <Text size="sm" c="dimmed" mt={4}>
@@ -309,7 +309,7 @@ function BindingPanel({
             size="xs"
             leftSection={<IconPlugConnectedX size={rem(14)} />}
             loading={busy}
-            disabled={actionsBusy || !active || archived}
+            disabled={actionsBusy || !connected || archived}
             onClick={() => onDisconnect(binding)}
           >
             {t("disconnect")}

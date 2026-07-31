@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ClauseElement
 
 from azents.core.enums import (
-    ExternalChannelBindingStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
@@ -551,7 +550,7 @@ async def test_disconnect_retry_recovers_pending_progress_cleanup_ids() -> None:
     binding = SimpleNamespace(
         id="binding-1",
         resource_id=resource.id,
-        status=ExternalChannelBindingStatus.DISCONNECTED,
+        disconnected_at=datetime.datetime(2026, 7, 31, tzinfo=datetime.UTC),
     )
     resource_rows = Mock()
     resource_rows.all.return_value = [resource]

@@ -13,6 +13,9 @@ from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
 )
+from azents.services.external_channel.conversation import (
+    ExternalChannelOperationDeadline,
+)
 from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
 )
@@ -55,8 +58,14 @@ class _SessionManager:
 
 
 class _Repository:
-    def __init__(self, events: list[str]) -> None:
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        delivery_statuses: list[ExternalChannelDeliveryStatus | None] | None = None,
+    ) -> None:
         self.events = events
+        self.delivery_statuses = delivery_statuses or []
 
     async def recover_stale_provider_control_deliveries(
         self,
@@ -83,6 +92,17 @@ class _Repository:
         assert limit == 2
         self.events.append("list")
         return ["delivery-1", "delivery-2"]
+
+    async def get_delivery_status(
+        self,
+        session: AsyncSession,
+        *,
+        delivery_attempt_id: str,
+    ) -> ExternalChannelDeliveryStatus | None:
+        del session
+        assert delivery_attempt_id == "delivery-1"
+        self.events.append("status")
+        return self.delivery_statuses.pop(0)
 
 
 class _ActionService:
@@ -124,3 +144,78 @@ async def test_drain_commits_recovery_before_provider_attempts() -> None:
     assert result.stale_unknown == 1
     assert result.attempted == 2
     assert events == ["recover", "list", "commit", "delivery-1", "delivery-2"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status",
+    [
+        ExternalChannelDeliveryStatus.FAILED,
+        ExternalChannelDeliveryStatus.UNKNOWN,
+        ExternalChannelDeliveryStatus.NOT_ATTEMPTED,
+        None,
+    ],
+)
+async def test_required_delivery_terminal_or_missing_status_fails_closed(
+    status: ExternalChannelDeliveryStatus | None,
+) -> None:
+    events: list[str] = []
+    service = ExternalChannelProviderControlService(
+        session_manager=cast(
+            SessionManager[AsyncSession],
+            _SessionManager(events),
+        ),
+        repository=cast(
+            ExternalChannelWorkRepository,
+            _Repository(events, delivery_statuses=[status]),
+        ),
+        action_service=cast(
+            ExternalChannelActionService,
+            _ActionService(events),
+        ),
+    )
+
+    delivered = await service.ensure_delivered(
+        delivery_attempt_id="delivery-1",
+        deadline=ExternalChannelOperationDeadline(
+            datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
+        ),
+    )
+
+    assert delivered is False
+    assert events == ["status"]
+
+
+@pytest.mark.asyncio
+async def test_required_pending_delivery_is_attempted_then_observed_delivered() -> None:
+    events: list[str] = []
+    service = ExternalChannelProviderControlService(
+        session_manager=cast(
+            SessionManager[AsyncSession],
+            _SessionManager(events),
+        ),
+        repository=cast(
+            ExternalChannelWorkRepository,
+            _Repository(
+                events,
+                delivery_statuses=[
+                    ExternalChannelDeliveryStatus.PENDING,
+                    ExternalChannelDeliveryStatus.DELIVERED,
+                ],
+            ),
+        ),
+        action_service=cast(
+            ExternalChannelActionService,
+            _ActionService(events),
+        ),
+    )
+
+    delivered = await service.ensure_delivered(
+        delivery_attempt_id="delivery-1",
+        deadline=ExternalChannelOperationDeadline(
+            datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
+        ),
+    )
+
+    assert delivered is True
+    assert events == ["status", "delivery-1", "status"]

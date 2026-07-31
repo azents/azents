@@ -13,8 +13,6 @@ from azents.core.enums import (
     AgentRunStatus,
     AgentSessionStatus,
     ExternalChannelActionMode,
-    ExternalChannelBindingStatus,
-    ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
@@ -227,7 +225,7 @@ class ExternalChannelWorkRepository:
         work_id: str,
         binding_id: str,
         labels: dict[str, object] | None,
-    ) -> str | None:
+    ) -> tuple[str, ...]:
         """Plan initial Discord Tracker pages through the durable page ledger."""
         work = await session.scalar(
             sa.select(RDBExternalChannelWork)
@@ -237,7 +235,7 @@ class ExternalChannelWorkRepository:
         if work is None:
             raise RuntimeError("External Channel work disappeared.")
         if work.desired_progress_payload is None:
-            return None
+            return ()
         presentation = render_discord_persisted_progress(
             work.desired_progress_payload,
             work_id=work.id,
@@ -276,20 +274,20 @@ class ExternalChannelWorkRepository:
                     labels=labels,
                     page=page,
                 )
-        return await session.scalar(
-            sa.select(RDBExternalChannelDeliveryAttempt.id)
-            .join(
-                RDBExternalChannelWorkProjectionPart,
-                RDBExternalChannelWorkProjectionPart.latest_delivery_attempt_id
-                == RDBExternalChannelDeliveryAttempt.id,
-            )
+        delivery_attempt_ids = await session.scalars(
+            sa.select(RDBExternalChannelWorkProjectionPart.latest_delivery_attempt_id)
             .where(
                 RDBExternalChannelWorkProjectionPart.work_id == work.id,
-                RDBExternalChannelDeliveryAttempt.status
-                == ExternalChannelDeliveryStatus.PENDING,
+                RDBExternalChannelWorkProjectionPart.latest_delivery_attempt_id.is_not(
+                    None
+                ),
             )
             .order_by(RDBExternalChannelWorkProjectionPart.part_ordinal)
-            .limit(1)
+        )
+        return tuple(
+            delivery_attempt_id
+            for delivery_attempt_id in delivery_attempt_ids
+            if delivery_attempt_id is not None
         )
 
     async def ensure_active_work(
@@ -335,8 +333,7 @@ class ExternalChannelWorkRepository:
             sa.select(
                 sa.exists().where(
                     RDBExternalChannelBinding.agent_session_id == session_id,
-                    RDBExternalChannelBinding.status
-                    == ExternalChannelBindingStatus.ACTIVE,
+                    RDBExternalChannelBinding.disconnected_at.is_(None),
                     RDBExternalChannelBinding.agent_session_id == RDBAgentSession.id,
                     RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                     RDBAgentSession.agent_id == agent_id,
@@ -347,8 +344,6 @@ class ExternalChannelWorkRepository:
                     RDBExternalChannelAgentRoute.agent_id == agent_id,
                     RDBExternalChannelAgentRoute.connection_id
                     == RDBExternalChannelConnection.id,
-                    RDBExternalChannelConnection.status
-                    == ExternalChannelConnectionStatus.ACTIVE,
                 )
             )
         )
@@ -396,8 +391,7 @@ class ExternalChannelWorkRepository:
                 .where(
                     RDBExternalChannelBinding.id == binding_id,
                     RDBExternalChannelBinding.agent_session_id == session_id,
-                    RDBExternalChannelBinding.status
-                    == ExternalChannelBindingStatus.ACTIVE,
+                    RDBExternalChannelBinding.disconnected_at.is_(None),
                     RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                     RDBAgentSession.agent_id == agent_id,
                     RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
@@ -406,8 +400,6 @@ class ExternalChannelWorkRepository:
                     == ExternalChannelResourceStatus.ACTIVE,
                     RDBExternalChannelResource.connection_id
                     == RDBExternalChannelConnection.id,
-                    RDBExternalChannelConnection.status
-                    == ExternalChannelConnectionStatus.ACTIVE,
                 )
             )
         ).one_or_none()
@@ -475,14 +467,11 @@ class ExternalChannelWorkRepository:
                 )
                 .where(
                     RDBExternalChannelBinding.agent_session_id == session_id,
-                    RDBExternalChannelBinding.status
-                    == ExternalChannelBindingStatus.ACTIVE,
+                    RDBExternalChannelBinding.disconnected_at.is_(None),
                     RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                     RDBAgentSession.agent_id == agent_id,
                     RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
                     RDBExternalChannelAgentRoute.agent_id == agent_id,
-                    RDBExternalChannelConnection.status
-                    == ExternalChannelConnectionStatus.ACTIVE,
                 )
                 .order_by(RDBExternalChannelBinding.id)
             )
@@ -624,7 +613,7 @@ class ExternalChannelWorkRepository:
             .where(
                 RDBExternalChannelBinding.id == binding_id,
                 RDBExternalChannelBinding.agent_session_id == session_id,
-                RDBExternalChannelBinding.status == ExternalChannelBindingStatus.ACTIVE,
+                RDBExternalChannelBinding.disconnected_at.is_(None),
             )
             .with_for_update()
         )
@@ -641,8 +630,6 @@ class ExternalChannelWorkRepository:
         connection = await session.scalar(
             sa.select(RDBExternalChannelConnection).where(
                 RDBExternalChannelConnection.id == route.connection_id,
-                RDBExternalChannelConnection.status
-                == ExternalChannelConnectionStatus.ACTIVE,
             )
         )
         if connection is None:
@@ -1150,14 +1137,13 @@ class ExternalChannelWorkRepository:
                 now=now,
             )
         if (
-            binding.status is not ExternalChannelBindingStatus.ACTIVE
+            binding.disconnected_at is not None
             or agent_session.status is not AgentSessionStatus.ACTIVE
             or agent_session.stop_requested_at is not None
             or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
             or route.agent_id != agent.id
             or resource.status is not ExternalChannelResourceStatus.ACTIVE
             or resource.connection_id != connection.id
-            or connection.status is not ExternalChannelConnectionStatus.ACTIVE
             or connection.encrypted_credentials is None
         ):
             return await self._reject_delivery_start(
@@ -1378,14 +1364,13 @@ class ExternalChannelWorkRepository:
         if (
             agent is None
             or connection is None
-            or binding.status is not ExternalChannelBindingStatus.ACTIVE
+            or binding.disconnected_at is not None
             or agent_session.status is not AgentSessionStatus.ACTIVE
             or agent_session.stop_requested_at is not None
             or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
             or route.agent_id != agent.id
             or resource.status is not ExternalChannelResourceStatus.ACTIVE
             or resource.connection_id != connection.id
-            or connection.status is not ExternalChannelConnectionStatus.ACTIVE
             or connection.encrypted_credentials is None
         ):
             await self._reject_delivery_start(
@@ -1993,7 +1978,7 @@ class ExternalChannelWorkRepository:
                 and binding.agent_session_id == agent_session.id
                 and binding.route_id == route.id
                 and binding.resource_id == resource.id
-                and binding.status is ExternalChannelBindingStatus.ACTIVE
+                and binding.disconnected_at is None
                 and agent_session.status is AgentSessionStatus.ACTIVE
                 and agent_session.stop_requested_at is None
                 and agent.lifecycle_status is AgentLifecycleStatus.ACTIVE
@@ -2002,7 +1987,6 @@ class ExternalChannelWorkRepository:
                 and route.connection_id == connection.id
                 and resource.status is ExternalChannelResourceStatus.ACTIVE
                 and resource.connection_id == connection.id
-                and connection.status is ExternalChannelConnectionStatus.ACTIVE
                 and connection.encrypted_credentials is not None
             )
         if identity.origin_type is ExternalChannelDeliveryOriginType.ACCESS_REQUEST:
@@ -2127,7 +2111,6 @@ class ExternalChannelWorkRepository:
             and origin_current
             and resource.status is ExternalChannelResourceStatus.ACTIVE
             and resource.connection_id == connection.id
-            and connection.status is ExternalChannelConnectionStatus.ACTIVE
             and connection.encrypted_credentials is not None
             and (
                 route is None
@@ -2943,6 +2926,19 @@ class ExternalChannelWorkRepository:
             .limit(limit)
         )
         return list(result)
+
+    async def get_delivery_status(
+        self,
+        session: AsyncSession,
+        *,
+        delivery_attempt_id: str,
+    ) -> ExternalChannelDeliveryStatus | None:
+        """Read one delivery status without retaining its provider payload."""
+        return await session.scalar(
+            sa.select(RDBExternalChannelDeliveryAttempt.status).where(
+                RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id
+            )
+        )
 
     async def recover_archive_cleanup(
         self,

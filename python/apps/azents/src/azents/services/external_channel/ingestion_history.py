@@ -2,7 +2,7 @@
 
 import asyncio
 import dataclasses
-from collections.abc import AsyncIterator, Awaitable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -46,6 +46,7 @@ from azents.services.external_channel.slack_events import (
 from azents.services.external_channel.slack_sdk_client import create_slack_web_client
 
 _MAX_SLACK_REFERENCE_IDS = 20
+_REQUIRED_ADMISSION_RESERVE_SECONDS = 1.0
 
 
 async def get_ingestion_slack_http_client() -> AsyncIterator[httpx.AsyncClient]:
@@ -229,9 +230,12 @@ async def _optional_slack_permalink(
     message_ts: str,
     deadline: ExternalChannelOperationDeadline,
 ) -> str | None:
-    """Resolve optional canonical source navigation inside the ingress deadline."""
+    """Resolve optional source navigation without consuming required admission time."""
+    budget = _optional_enrichment_budget(deadline)
+    if budget <= 0:
+        return None
     try:
-        async with asyncio.timeout(deadline.remaining_seconds()):
+        async with asyncio.timeout(budget):
             return await client.get_permalink(
                 bot_token=bot_token,
                 channel_id=channel_id,
@@ -278,9 +282,8 @@ async def _optional_slack_reference_cache(
     cache: dict[str, dict[str, str]] = {"users": {}, "channels": {}}
     for user_id in user_ids:
         display_name = await _optional_slack_display_name(
-            client.fetch_user_display_name(
-                bot_token=bot_token,
-                provider_user_id=user_id,
+            lambda user_id=user_id: client.fetch_user_display_name(
+                bot_token=bot_token, provider_user_id=user_id
             ),
             deadline=deadline,
         )
@@ -288,9 +291,8 @@ async def _optional_slack_reference_cache(
             cache["users"][user_id] = display_name
     for channel_id in sorted(channel_ids)[:_MAX_SLACK_REFERENCE_IDS]:
         display_name = await _optional_slack_display_name(
-            client.fetch_channel_display_name(
-                bot_token=bot_token,
-                channel_id=channel_id,
+            lambda channel_id=channel_id: client.fetch_channel_display_name(
+                bot_token=bot_token, channel_id=channel_id
             ),
             deadline=deadline,
         )
@@ -300,18 +302,31 @@ async def _optional_slack_reference_cache(
 
 
 async def _optional_slack_display_name(
-    request: Awaitable[str | None],
+    request: Callable[[], Awaitable[str | None]],
     *,
     deadline: ExternalChannelOperationDeadline,
 ) -> str | None:
-    """Await one optional Slack identity lookup inside the ingress deadline."""
+    """Create one optional Slack lookup only when enrichment budget remains."""
+    budget = _optional_enrichment_budget(deadline)
+    if budget <= 0:
+        return None
     try:
-        async with asyncio.timeout(deadline.remaining_seconds()):
-            return await request
+        async with asyncio.timeout(budget):
+            return await request()
     except asyncio.CancelledError:
         raise
     except TimeoutError, SlackProviderError:
         return None
+
+
+def _optional_enrichment_budget(
+    deadline: ExternalChannelOperationDeadline,
+) -> float:
+    """Return time available after preserving required stage and delivery reserve."""
+    return max(
+        0.0,
+        deadline.remaining_seconds() - _REQUIRED_ADMISSION_RESERVE_SECONDS,
+    )
 
 
 def _canonical_slack(

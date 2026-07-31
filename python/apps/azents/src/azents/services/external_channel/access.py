@@ -12,7 +12,6 @@ from azents.core.enums import (
     AgentSessionStartReason,
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
-    ExternalChannelBindingStatus,
     ExternalChannelResourceStatus,
 )
 from azents.rdb.deps import get_session_manager
@@ -155,7 +154,7 @@ class ExternalChannelAccessService:
                 session,
                 resource_id=request_snapshot.resource_id,
             )
-            binding = await self.repository.lock_active_binding_by_resource(
+            binding = await self.repository.lock_connected_binding_by_resource(
                 session,
                 resource_id=request_snapshot.resource_id,
             )
@@ -249,7 +248,6 @@ class ExternalChannelAccessService:
                     resource_id=request.resource_id,
                     route_id=request.route_id,
                     agent_session_id=agent_session_id,
-                    status=ExternalChannelBindingStatus.ACTIVE,
                     disconnected_at=None,
                     disconnect_reason=None,
                 ),
@@ -482,7 +480,7 @@ class ExternalChannelAccessService:
                 raise ExternalChannelAccessDecisionError(
                     "The external conversation is unavailable."
                 )
-            binding = await self.repository.lock_active_binding_by_resource(
+            binding = await self.repository.lock_connected_binding_by_resource(
                 session,
                 resource_id=resource.id,
             )

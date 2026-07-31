@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from azents.core.enums import (
     AgentLifecycleStatus,
     ExternalChannelAppMode,
-    ExternalChannelBindingStatus,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
@@ -619,7 +618,6 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
             resource_id=resource.id,
             route_id=first_route.id,
             agent_session_id=first_session.id,
-            status=ExternalChannelBindingStatus.ACTIVE,
             disconnected_at=None,
             disconnect_reason=None,
         ),
@@ -632,7 +630,6 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
                 resource_id=resource.id,
                 route_id=second_route.id,
                 agent_session_id=second_session.id,
-                status=ExternalChannelBindingStatus.ACTIVE,
                 disconnected_at=None,
                 disconnect_reason=None,
             ),
@@ -653,7 +650,6 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
                 resource_id=resource.id,
                 route_id=first_route.id,
                 agent_session_id=duplicate_first_session.id,
-                status=ExternalChannelBindingStatus.ACTIVE,
                 disconnected_at=None,
                 disconnect_reason=None,
             ),
@@ -860,7 +856,6 @@ async def test_binding_creation_serializes_on_resource_lock(
             resource_id=resource.id,
             route_id=route.id,
             agent_session_id=agent_session.id,
-            status=ExternalChannelBindingStatus.ACTIVE,
             disconnected_at=None,
             disconnect_reason=None,
         )
@@ -959,7 +954,6 @@ async def test_provider_control_settlement_follows_lifecycle_lock_order(
                     resource_id=resource.id,
                     route_id=route.id,
                     agent_session_id=agent_session.id,
-                    status=ExternalChannelBindingStatus.ACTIVE,
                     disconnected_at=None,
                     disconnect_reason=None,
                 ),
@@ -1191,13 +1185,12 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
         resource_id=resource.id,
         route_id=first_route.id,
         agent_session_id=first_session.id,
-        status=ExternalChannelBindingStatus.ACTIVE,
     )
     rdb_session.add(first)
     await rdb_session.flush()
 
     with pytest.raises(
-        IntegrityError, match="uq_external_channel_bindings_active_resource"
+        IntegrityError, match="uq_external_channel_bindings_connected_resource"
     ):
         async with rdb_session.begin_nested():
             rdb_session.add(
@@ -1205,12 +1198,10 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
                     resource_id=resource.id,
                     route_id=second_route.id,
                     agent_session_id=second_session.id,
-                    status=ExternalChannelBindingStatus.ACTIVE,
                 )
             )
             await rdb_session.flush()
 
-    first.status = ExternalChannelBindingStatus.DISCONNECTED
     first.disconnected_at = _at(30)
     await rdb_session.flush()
     terminal_then_active = await repo.create_binding_idempotent(
@@ -1219,7 +1210,6 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
             resource_id=resource.id,
             route_id=second_route.id,
             agent_session_id=second_session.id,
-            status=ExternalChannelBindingStatus.ACTIVE,
             disconnected_at=None,
             disconnect_reason=None,
         ),

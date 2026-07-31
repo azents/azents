@@ -25,6 +25,7 @@ from azents.broker.types import (
 from azents.engine.model_stream import ModelStreamWatchdog, get_model_stream_watchdog
 from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
+    get_external_channel_provider_control_service,
 )
 from azents.worker.deps import get_worker_broker
 from azents.worker.session.recovery import StuckSessionRecovery
@@ -83,7 +84,7 @@ class AgentWorker:
     ]
     provider_control: Annotated[
         ExternalChannelProviderControlService,
-        Depends(ExternalChannelProviderControlService),
+        Depends(get_external_channel_provider_control_service),
     ]
     shutdown_event: asyncio.Event = dataclasses.field(
         init=False,
