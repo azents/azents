@@ -15,8 +15,12 @@ from azents_runtime_control.grpc_runner_client import (
     RuntimeRunnerControlStreamClosed,
     runner_event_from_message,
 )
-from azents_runtime_control.proto import runtime_runner_control_pb2
+from azents_runtime_control.proto import (
+    runtime_configuration_pb2,
+    runtime_runner_control_pb2,
+)
 from azents_runtime_control.runner import (
+    RunnerHeartbeatAcknowledgement,
     RunnerOperationCancel,
     RunnerOperationEnvelope,
     RunnerOperationEvent,
@@ -82,11 +86,19 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
         )
         heartbeat = await anext(requests)
         sent.append(heartbeat)
+        heartbeat_ack = runtime_runner_control_pb2.RunnerHeartbeatAck(
+            monotonic_sequence=heartbeat.heartbeat.monotonic_sequence,
+        )
+        heartbeat_ack.runtime_configuration.CopyFrom(
+            runtime_configuration_pb2.RuntimeConfigurationEvidence(
+                revision_id="revision-2",
+                digest="e" * 64,
+                desired_generation=5,
+            )
+        )
         yield runtime_runner_control_pb2.RunnerControlMessage(
             request_id=heartbeat.request_id,
-            heartbeat_ack=runtime_runner_control_pb2.RunnerHeartbeatAck(
-                monotonic_sequence=heartbeat.heartbeat.monotonic_sequence,
-            ),
+            heartbeat_ack=heartbeat_ack,
         )
         event = await anext(requests)
         sent.append(event)
@@ -117,6 +129,13 @@ async def test_grpc_client_registers_heartbeats_claims_and_appends_events() -> N
         runtime_id="runtime-1",
         generation=accepted.generation,
         heartbeat_at=_now(),
+    ) == RunnerHeartbeatAcknowledgement(
+        accepted=True,
+        runtime_configuration=RuntimeConfigurationEvidence(
+            revision_id="revision-2",
+            digest="e" * 64,
+            desired_generation=5,
+        ),
     )
 
     await client.append_runner_event(

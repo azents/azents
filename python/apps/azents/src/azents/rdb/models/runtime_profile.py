@@ -542,6 +542,11 @@ class RDBRuntimeRecreationOperationItem(RDBModel):
         nullable=False,
     )
     attempt: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
+    dispatched_generation: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        nullable=True,
+        default=None,
+    )
     failure_code: Mapped[str | None] = mapped_column(
         sa.String(120), nullable=True, default=None
     )

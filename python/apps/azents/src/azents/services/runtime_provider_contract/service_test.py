@@ -43,7 +43,7 @@ def _contract_payload() -> dict[str, object]:
             "observe",
             "terminal_delete",
         ],
-        "optional_capabilities": ["execution_policy_v1"],
+        "optional_capabilities": [],
         "persistence": {
             "kind": "persistent",
             "reset_destroys_workspace": True,

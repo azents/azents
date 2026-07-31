@@ -9859,6 +9859,153 @@
         }
       }
     },
+    "/runtime-profile/v1/workspaces/{handle}/profiles/{profile_id}/recreation-operations": {
+      "post": {
+        "tags": [
+          "Runtime Profile v1"
+        ],
+        "summary": "Create Profile Recreation",
+        "description": "Start bounded recreation for one Workspace Runtime Profile.",
+        "operationId": "runtime_profile_v1_create_profile_recreation",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Profile Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeRecreationCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeRecreationOperationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-profile/v1/workspaces/{handle}/recreation-operations/{operation_id}": {
+      "get": {
+        "tags": [
+          "Runtime Profile v1"
+        ],
+        "summary": "Get Workspace Runtime Profile Recreation",
+        "description": "Read Workspace-scoped recreation progress and bounded failures.",
+        "operationId": "runtime_profile_v1_get_workspace_runtime_profile_recreation",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Operation Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeRecreationOperationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runtime-provider/v1/workspaces/{handle}/providers": {
       "get": {
         "tags": [
@@ -23672,6 +23819,234 @@
         ],
         "title": "RuntimeProviderOptionResponse",
         "description": "Safe Provider option for Workspace and Agent preference surfaces."
+      },
+      "RuntimeRecreationCreateRequest": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Version"
+          },
+          "concurrency_limit": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Concurrency Limit",
+            "default": 5
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "RuntimeRecreationCreateRequest",
+        "description": "Create one optimistic bounded recreation operation."
+      },
+      "RuntimeRecreationItemResponse": {
+        "properties": {
+          "runtime_id": {
+            "type": "string",
+            "title": "Runtime Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RuntimeRecreationItemStatus"
+          },
+          "attempt": {
+            "type": "integer",
+            "title": "Attempt"
+          },
+          "dispatched_generation": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dispatched Generation"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "failure_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Message"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runtime_id",
+          "status",
+          "attempt",
+          "dispatched_generation",
+          "failure_code",
+          "failure_message",
+          "updated_at"
+        ],
+        "title": "RuntimeRecreationItemResponse",
+        "description": "One non-success recreation item detail."
+      },
+      "RuntimeRecreationItemStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "succeeded",
+          "skipped",
+          "failed"
+        ],
+        "title": "RuntimeRecreationItemStatus",
+        "description": "One Runtime item in a scoped recreation operation."
+      },
+      "RuntimeRecreationOperationResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "target_kind": {
+            "$ref": "#/components/schemas/RuntimeRecreationTargetKind"
+          },
+          "target_id": {
+            "type": "string",
+            "title": "Target Id"
+          },
+          "target_version": {
+            "type": "string",
+            "title": "Target Version"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RuntimeRecreationOperationStatus"
+          },
+          "concurrency_limit": {
+            "type": "integer",
+            "title": "Concurrency Limit"
+          },
+          "total_count": {
+            "type": "integer",
+            "title": "Total Count"
+          },
+          "pending_count": {
+            "type": "integer",
+            "title": "Pending Count"
+          },
+          "running_count": {
+            "type": "integer",
+            "title": "Running Count"
+          },
+          "succeeded_count": {
+            "type": "integer",
+            "title": "Succeeded Count"
+          },
+          "skipped_count": {
+            "type": "integer",
+            "title": "Skipped Count"
+          },
+          "failed_count": {
+            "type": "integer",
+            "title": "Failed Count"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeRecreationItemResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "target_kind",
+          "target_id",
+          "target_version",
+          "status",
+          "concurrency_limit",
+          "total_count",
+          "pending_count",
+          "running_count",
+          "succeeded_count",
+          "skipped_count",
+          "failed_count",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "items"
+        ],
+        "title": "RuntimeRecreationOperationResponse",
+        "description": "Durable recreation operation progress and bounded item details."
+      },
+      "RuntimeRecreationOperationStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "completed",
+          "completed_with_failures",
+          "failed"
+        ],
+        "title": "RuntimeRecreationOperationStatus",
+        "description": "Aggregate Runtime recreation operation state."
+      },
+      "RuntimeRecreationTargetKind": {
+        "type": "string",
+        "enum": [
+          "provider",
+          "infrastructure_profile",
+          "workspace_runtime_profile"
+        ],
+        "title": "RuntimeRecreationTargetKind",
+        "description": "Authority scope targeted by one recreation operation."
       },
       "RuntimeRunnerState": {
         "type": "string",

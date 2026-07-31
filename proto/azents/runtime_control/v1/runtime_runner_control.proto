@@ -68,6 +68,7 @@ message RunnerHeartbeat {
 
 message RunnerHeartbeatAck {
   uint64 monotonic_sequence = 1;
+  RuntimeConfigurationEvidence runtime_configuration = 2;
 }
 
 message RunnerOperationStart {

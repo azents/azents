@@ -172,9 +172,6 @@ class RuntimeProfileResolutionService:
                         workspace_runtime_profile_id=profile.id,
                         desired_runtime_configuration_revision_id=None,
                         applied_runtime_configuration_revision_id=None,
-                        runtime_policy_snapshot_id=None,
-                        applied_runtime_policy_snapshot_id=None,
-                        provider_config=None,
                     ),
                 )
                 existing = ensured.runtime

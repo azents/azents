@@ -27,7 +27,6 @@ from azents_runtime_provider_docker.provider import (
     DockerRuntimeProvider,
     DockerRuntimeProviderConfig,
 )
-from azents_runtime_provider_docker.runtime_control import DockerRuntimeControlAdapter
 
 _PROTOCOL_VERSION = "agent-runtime-provider-docker-v1"
 _CONFIG_SCHEMA_VERSION = "agent-runtime-provider-docker-v1"
@@ -121,7 +120,6 @@ async def _run_control_loop(
             tmp_mount_path=settings.tmp_path,
         ),
     )
-    lifecycle = DockerRuntimeControlAdapter(provider)
     registration = ProviderRegistration(
         provider_id=settings.provider_id,
         provider_type="docker",
@@ -154,7 +152,7 @@ async def _run_control_loop(
         )
         run_loop = ProviderRunLoop(
             client=control_client,
-            lifecycle=lifecycle,
+            lifecycle=provider,
             registration=registration,
             connection_id=connection_id,
             consumer_id=f"{connection_id}:provider",

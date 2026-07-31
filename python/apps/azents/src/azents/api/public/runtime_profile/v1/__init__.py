@@ -3,13 +3,21 @@
 from textwrap import dedent
 from typing import Annotated, NoReturn
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from azents.api.runtime_recreation import (
+    RuntimeRecreationCreateRequest,
+    RuntimeRecreationOperationResponse,
+)
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
 from azents.core.auth.permissions import Permission, Permissions
 from azents.services.runtime_profile_workspace.service import (
     RuntimeProfileWorkspaceService,
     RuntimeProfileWorkspaceUnavailable,
+)
+from azents.services.runtime_recreation.service import (
+    RuntimeRecreationService,
+    RuntimeRecreationUnavailable,
 )
 from azents.utils.fastapi.route import RouteMounter
 
@@ -166,6 +174,55 @@ async def replace_workspace_runtime_profile(
     return WorkspaceRuntimeProfileResponse.convert_from(profile)
 
 
+@router.post(
+    "/workspaces/{handle}/profiles/{profile_id}/recreation-operations",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_profile_recreation(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[RuntimeRecreationService, Depends()],
+    request_body: RuntimeRecreationCreateRequest,
+    *,
+    profile_id: str,
+) -> RuntimeRecreationOperationResponse:
+    """Start bounded recreation for one Workspace Runtime Profile."""
+    _require_permission(member, Permissions.RUNTIME_PROFILES_WRITE)
+    try:
+        operation = await service.create_workspace_profile_operation(
+            member.workspace_id,
+            profile_id,
+            expected_version=request_body.expected_version,
+            concurrency_limit=request_body.concurrency_limit,
+            actor_workspace_user_id=member.workspace_user_id,
+        )
+    except RuntimeRecreationUnavailable as error:
+        _raise_recreation_unavailable(error)
+    return RuntimeRecreationOperationResponse.convert_operation(operation)
+
+
+@router.get("/workspaces/{handle}/recreation-operations/{operation_id}")
+async def get_workspace_runtime_profile_recreation(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[RuntimeRecreationService, Depends()],
+    *,
+    operation_id: str,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> RuntimeRecreationOperationResponse:
+    """Read Workspace-scoped recreation progress and bounded failures."""
+    _require_permission(member, Permissions.RUNTIME_PROFILES_READ)
+    try:
+        projection = await service.get_workspace_operation(
+            member.workspace_id,
+            operation_id,
+            offset=offset,
+            limit=limit,
+        )
+    except RuntimeRecreationUnavailable as error:
+        _raise_recreation_unavailable(error)
+    return RuntimeRecreationOperationResponse.convert_projection(projection)
+
+
 def _require_permission(member: WorkspaceMember, permission: Permission) -> None:
     if not member.has_permission(permission):
         raise HTTPException(
@@ -195,6 +252,23 @@ def _raise_unavailable(error: RuntimeProfileWorkspaceUnavailable) -> NoReturn:
     detail: dict[str, object] = {"code": error.code}
     if error.current_profile is not None:
         detail["current_version"] = error.current_profile.version
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=detail,
+    ) from None
+
+
+def _raise_recreation_unavailable(
+    error: RuntimeRecreationUnavailable,
+) -> NoReturn:
+    if error.code in {"profile_not_found", "operation_not_found"}:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": error.code},
+        ) from None
+    detail: dict[str, object] = {"code": error.code}
+    if error.current_version is not None:
+        detail["current_version"] = error.current_version
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail=detail,

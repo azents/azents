@@ -34,6 +34,7 @@ class RuntimeLifecycleCommandType(enum.StrEnum):
     STOP = "stop"
     RESTART = "restart"
     RESET = "reset"
+    UPDATE_CONFIGURATION = "update_configuration"
     OBSERVE = "observe"
     TERMINAL_DELETE = "terminal_delete"
 
@@ -230,6 +231,13 @@ class RuntimeProviderLifecycle(Protocol):
 
     async def reset(self, command: RuntimeLifecycleCommand) -> RuntimeLifecycleResult:
         """Reset a Runtime; this is the only destructive workspace operation."""
+        ...
+
+    async def update_configuration(
+        self,
+        command: RuntimeLifecycleCommand,
+    ) -> RuntimeLifecycleResult:
+        """Apply a supported in-place Runtime configuration change."""
         ...
 
     async def terminal_delete(
@@ -496,6 +504,8 @@ class ProviderRunLoop:
                 return await self._lifecycle.restart(command)
             case RuntimeLifecycleCommandType.RESET:
                 return await self._lifecycle.reset(command)
+            case RuntimeLifecycleCommandType.UPDATE_CONFIGURATION:
+                return await self._lifecycle.update_configuration(command)
             case RuntimeLifecycleCommandType.TERMINAL_DELETE:
                 return await self._lifecycle.terminal_delete(command)
             case RuntimeLifecycleCommandType.OBSERVE:

@@ -187,33 +187,6 @@ class RDBAgentRuntime(RDBModel):
         nullable=True,
         default=None,
     )
-    runtime_policy_snapshot_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey(
-            "runtime_policy_snapshots.id",
-            ondelete="RESTRICT",
-            use_alter=True,
-            name="fk_agent_runtimes_runtime_policy_snapshot_id",
-        ),
-        nullable=True,
-        default=None,
-    )
-    applied_runtime_policy_snapshot_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey(
-            "runtime_policy_snapshots.id",
-            ondelete="RESTRICT",
-            use_alter=True,
-            name="fk_agent_runtimes_applied_runtime_policy_snapshot_id",
-        ),
-        nullable=True,
-        default=None,
-    )
-    provider_config: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB,
-        nullable=True,
-        default=None,
-    )
     desired_state: Mapped[RuntimeDesiredState] = mapped_column(
         runtime_desired_state_enum,
         init=False,

@@ -5,6 +5,10 @@ from typing import Annotated, Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from azents.api.runtime_recreation import (
+    RuntimeRecreationCreateRequest,
+    RuntimeRecreationOperationResponse,
+)
 from azents.core.auth.deps import SystemAdmin, get_system_admin
 from azents.core.runtime_profile import RuntimeInfrastructureProfileKind
 from azents.services.runtime_profile_admin.service import (
@@ -22,6 +26,10 @@ from azents.services.runtime_provider_binding_admin.service import (
 from azents.services.runtime_provider_contract.service import (
     RuntimeProviderContractService,
     RuntimeProviderContractUnavailable,
+)
+from azents.services.runtime_recreation.service import (
+    RuntimeRecreationService,
+    RuntimeRecreationUnavailable,
 )
 from azents.utils.fastapi.route import RouteMounter
 
@@ -248,6 +256,119 @@ async def replace_container_profile(
     except RuntimeProfileAdminUnavailable as error:
         _raise_profile_unavailable(error)
     return RuntimeInfrastructureProfileResponse.convert_from(profile)
+
+
+async def _create_infrastructure_profile_recreation(
+    system_admin: SystemAdmin,
+    service: RuntimeRecreationService,
+    request_body: RuntimeRecreationCreateRequest,
+    *,
+    provider_id: str,
+    profile_id: str,
+    profile_kind: RuntimeInfrastructureProfileKind,
+) -> RuntimeRecreationOperationResponse:
+    try:
+        operation = await service.create_infrastructure_profile_operation(
+            provider_id,
+            profile_id,
+            profile_kind=profile_kind,
+            expected_version=request_body.expected_version,
+            concurrency_limit=request_body.concurrency_limit,
+            actor_user_id=system_admin.user_id,
+        )
+    except RuntimeRecreationUnavailable as error:
+        _raise_recreation_unavailable(error)
+    return RuntimeRecreationOperationResponse.convert_operation(operation)
+
+
+@router.post(
+    "/providers/{provider_id}/pod-profiles/{profile_id}/recreation-operations",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_pod_profile_recreation(
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[RuntimeRecreationService, Depends()],
+    request_body: RuntimeRecreationCreateRequest,
+    *,
+    provider_id: str,
+    profile_id: str,
+) -> RuntimeRecreationOperationResponse:
+    """Start bounded recreation for one Kubernetes Pod Profile."""
+    return await _create_infrastructure_profile_recreation(
+        system_admin,
+        service,
+        request_body,
+        provider_id=provider_id,
+        profile_id=profile_id,
+        profile_kind=RuntimeInfrastructureProfileKind.KUBERNETES_POD,
+    )
+
+
+@router.post(
+    "/providers/{provider_id}/container-profiles/{profile_id}/recreation-operations",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_container_profile_recreation(
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[RuntimeRecreationService, Depends()],
+    request_body: RuntimeRecreationCreateRequest,
+    *,
+    provider_id: str,
+    profile_id: str,
+) -> RuntimeRecreationOperationResponse:
+    """Start bounded recreation for one Docker Container Profile."""
+    return await _create_infrastructure_profile_recreation(
+        system_admin,
+        service,
+        request_body,
+        provider_id=provider_id,
+        profile_id=profile_id,
+        profile_kind=RuntimeInfrastructureProfileKind.DOCKER_CONTAINER,
+    )
+
+
+@router.post(
+    "/providers/{provider_id}/recreation-operations",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_provider_recreation(
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[RuntimeRecreationService, Depends()],
+    request_body: RuntimeRecreationCreateRequest,
+    *,
+    provider_id: str,
+) -> RuntimeRecreationOperationResponse:
+    """Start bounded recreation for one exact Runtime Provider."""
+    try:
+        operation = await service.create_provider_operation(
+            provider_id,
+            expected_admin_version=request_body.expected_version,
+            concurrency_limit=request_body.concurrency_limit,
+            actor_user_id=system_admin.user_id,
+        )
+    except RuntimeRecreationUnavailable as error:
+        _raise_recreation_unavailable(error)
+    return RuntimeRecreationOperationResponse.convert_operation(operation)
+
+
+@router.get("/recreation-operations/{operation_id}")
+async def get_platform_recreation(
+    service: Annotated[RuntimeRecreationService, Depends()],
+    *,
+    operation_id: str,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> RuntimeRecreationOperationResponse:
+    """Read Platform-scoped recreation progress and bounded failures."""
+    try:
+        projection = await service.get_platform_operation(
+            operation_id,
+            offset=offset,
+            limit=limit,
+        )
+    except RuntimeRecreationUnavailable as error:
+        _raise_recreation_unavailable(error)
+    return RuntimeRecreationOperationResponse.convert_projection(projection)
 
 
 @router.get("/providers/{provider_id}/contracts")
@@ -484,6 +605,33 @@ def _raise_profile_unavailable(
     detail: dict[str, Any] = {"code": error.code}
     if error.current_profile is not None:
         detail["current_version"] = error.current_profile.version
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=detail,
+    ) from None
+
+
+def _raise_recreation_unavailable(
+    error: RuntimeRecreationUnavailable,
+) -> NoReturn:
+    """Convert scoped recreation failures to bounded Admin API errors."""
+    if error.code in {
+        "provider_not_found",
+        "profile_not_found",
+        "operation_not_found",
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": error.code},
+        ) from None
+    if error.code == "profile_kind_mismatch":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": error.code},
+        ) from None
+    detail: dict[str, object] = {"code": error.code}
+    if error.current_version is not None:
+        detail["current_version"] = error.current_version
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail=detail,

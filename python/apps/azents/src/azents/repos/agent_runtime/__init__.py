@@ -15,8 +15,10 @@ from azents.core.enums import (
     RuntimeProviderObservedState,
     RuntimeRunnerState,
 )
+from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
+from azents.rdb.models.runtime_profile import RDBRuntimeConfigurationRevision
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
 
 from .data import (
@@ -57,11 +59,6 @@ class AgentRuntimeRepository:
             applied_runtime_configuration_revision_id=(
                 create.applied_runtime_configuration_revision_id
             ),
-            runtime_policy_snapshot_id=create.runtime_policy_snapshot_id,
-            applied_runtime_policy_snapshot_id=(
-                create.applied_runtime_policy_snapshot_id
-            ),
-            provider_config=create.provider_config,
         )
         session.add(rdb)
         await session.flush()
@@ -283,11 +280,6 @@ class AgentRuntimeRepository:
                 applied_runtime_configuration_revision_id=(
                     create.applied_runtime_configuration_revision_id
                 ),
-                runtime_policy_snapshot_id=create.runtime_policy_snapshot_id,
-                applied_runtime_policy_snapshot_id=(
-                    create.applied_runtime_policy_snapshot_id
-                ),
-                provider_config=create.provider_config,
             )
             .on_conflict_do_nothing(index_elements=["agent_id"])
             .returning(RDBAgentRuntime)
@@ -372,6 +364,89 @@ class AgentRuntimeRepository:
         if rdb is None:
             return None
         await session.flush()
+        runtime = self._build(rdb)
+        return AgentRuntimeLifecycleCommand(
+            runtime=runtime,
+            command_type=command_type,
+            desired_generation=runtime.desired_generation,
+        )
+
+    async def set_desired_state_if_ready(
+        self,
+        session: AsyncSession,
+        runtime_id: str,
+        command_type: RuntimeLifecycleCommandType,
+        desired_state: RuntimeDesiredState,
+        *,
+        expected_configuration_revision_id: str,
+        reset_final_desired_state: RuntimeDesiredState | None = None,
+    ) -> AgentRuntimeLifecycleCommand | None:
+        """Advance lifecycle state and exact ready evidence atomically."""
+        result = await session.execute(
+            sa.select(RDBAgentRuntime, RDBRuntimeConfigurationRevision)
+            .join(
+                RDBRuntimeConfigurationRevision,
+                RDBRuntimeConfigurationRevision.id
+                == RDBAgentRuntime.desired_runtime_configuration_revision_id,
+            )
+            .where(
+                RDBAgentRuntime.id == runtime_id,
+                RDBAgentRuntime.terminal_delete_requested_generation.is_(None),
+                RDBAgentRuntime.desired_runtime_configuration_revision_id
+                == expected_configuration_revision_id,
+                RDBRuntimeConfigurationRevision.id
+                == expected_configuration_revision_id,
+                RDBRuntimeConfigurationRevision.runtime_id == RDBAgentRuntime.id,
+                RDBRuntimeConfigurationRevision.provider_id
+                == RDBAgentRuntime.runtime_provider_resource_id,
+                RDBRuntimeConfigurationRevision.target_desired_generation
+                == RDBAgentRuntime.desired_generation,
+                RDBRuntimeConfigurationRevision.resolution_status
+                == RuntimeConfigurationResolutionStatus.READY,
+                RDBRuntimeConfigurationRevision.resolved_configuration.is_not(None),
+            )
+            .with_for_update()
+        )
+        row = result.one_or_none()
+        if row is None:
+            return None
+        rdb = row[0]
+        revision = row[1]
+        next_generation = rdb.desired_generation + 1
+        next_revision = RDBRuntimeConfigurationRevision(
+            runtime_id=revision.runtime_id,
+            provider_id=revision.provider_id,
+            provider_capability_revision_id=(revision.provider_capability_revision_id),
+            infrastructure_profile_id=revision.infrastructure_profile_id,
+            infrastructure_profile_version=revision.infrastructure_profile_version,
+            workspace_runtime_profile_id=revision.workspace_runtime_profile_id,
+            workspace_runtime_profile_version=(
+                revision.workspace_runtime_profile_version
+            ),
+            agent_selection_version=revision.agent_selection_version,
+            resolution_status=revision.resolution_status,
+            required_capabilities=revision.required_capabilities,
+            missing_capabilities=revision.missing_capabilities,
+            source_trace=revision.source_trace,
+            digest=revision.digest,
+            target_desired_generation=next_generation,
+            reason_code=None,
+            resolved_configuration=revision.resolved_configuration,
+            provider_reported_digest=None,
+            runner_reported_digest=None,
+            provider_acknowledged_at=None,
+            runtime_observed_at=None,
+        )
+        session.add(next_revision)
+        await session.flush()
+        rdb.desired_state = desired_state
+        rdb.desired_generation = next_generation
+        rdb.desired_runtime_configuration_revision_id = next_revision.id
+        rdb.last_lifecycle_command = command_type
+        rdb.reset_final_desired_state = reset_final_desired_state
+        rdb.last_state_change_at = datetime.datetime.now(datetime.UTC)
+        await session.flush()
+        await session.refresh(rdb)
         runtime = self._build(rdb)
         return AgentRuntimeLifecycleCommand(
             runtime=runtime,
@@ -975,6 +1050,30 @@ class AgentRuntimeRepository:
         )
         return [self._build(rdb) for rdb in result.scalars()]
 
+    async def find_configuration_adoption_candidates(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int,
+    ) -> list[AgentRuntime]:
+        """List running Runtimes whose exact desired revision is not applied."""
+        result = await session.execute(
+            sa.select(RDBAgentRuntime)
+            .where(
+                RDBAgentRuntime.desired_state == RuntimeDesiredState.RUNNING,
+                RDBAgentRuntime.provider_observed_state
+                == RuntimeProviderObservedState.RUNNING,
+                RDBAgentRuntime.desired_runtime_configuration_revision_id.is_not(None),
+                RDBAgentRuntime.applied_runtime_configuration_revision_id.is_not(None),
+                RDBAgentRuntime.desired_runtime_configuration_revision_id
+                != RDBAgentRuntime.applied_runtime_configuration_revision_id,
+                RDBAgentRuntime.terminal_delete_requested_generation.is_(None),
+            )
+            .order_by(RDBAgentRuntime.last_state_change_at.nulls_first())
+            .limit(limit)
+        )
+        return [self._build(rdb) for rdb in result.scalars()]
+
     def _build(self, rdb: RDBAgentRuntime) -> AgentRuntime:
         """Convert RDB model to domain model."""
         return AgentRuntime(
@@ -993,9 +1092,6 @@ class AgentRuntimeRepository:
             applied_runtime_configuration_revision_id=(
                 rdb.applied_runtime_configuration_revision_id
             ),
-            runtime_policy_snapshot_id=rdb.runtime_policy_snapshot_id,
-            applied_runtime_policy_snapshot_id=(rdb.applied_runtime_policy_snapshot_id),
-            provider_config=rdb.provider_config,
             desired_state=rdb.desired_state,
             desired_generation=rdb.desired_generation,
             last_lifecycle_command=rdb.last_lifecycle_command,

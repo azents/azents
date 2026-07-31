@@ -100,6 +100,7 @@ from azents.services.runtime_provider_control.provider_auth import (
 from azents.services.runtime_provider_control.service import (
     RuntimeProviderEnrollmentService,
 )
+from azents.services.runtime_recreation.service import RuntimeRecreationReconciler
 from azents.services.runtime_runner_auth.service import (
     RuntimeRunnerAuthenticationService,
 )
@@ -324,11 +325,17 @@ async def runtime_control_server_lifespan(
             ),
         ),
     )
+    recreation_reconciler = RuntimeRecreationReconciler(
+        session_manager=session_manager,
+        profile_repository=profile_repository,
+        runtime_repository=runtime_repository,
+    )
     stop_reconciler = asyncio.Event()
     reconciler_task = asyncio.create_task(
         _run_reconciler(
             reconciler,
             profile_reconciliation,
+            recreation_reconciler,
             stop=stop_reconciler,
             interval_seconds=settings.runtime_control_reconcile_interval_seconds,
         ),
@@ -441,6 +448,7 @@ async def runtime_control_server_lifespan(
 async def _run_reconciler(
     reconciler: RuntimeLifecycleReconciler,
     profile_reconciliation: RuntimeProfileReconciliationService,
+    recreation_reconciler: RuntimeRecreationReconciler,
     *,
     stop: asyncio.Event,
     interval_seconds: float,
@@ -463,6 +471,17 @@ async def _run_reconciler(
                         "stale_tasks": profile_result.stale_tasks,
                         "continued_tasks": profile_result.continued_tasks,
                         "retried_tasks": profile_result.retried_tasks,
+                    },
+                )
+            recreation_result = await recreation_reconciler.reconcile_once()
+            if recreation_result.dispatched_items or recreation_result.completed_items:
+                _LOGGER.info(
+                    "Runtime recreation reconcile advanced operations",
+                    extra={
+                        "operations": recreation_result.operations,
+                        "processed_items": recreation_result.processed_items,
+                        "dispatched_items": recreation_result.dispatched_items,
+                        "completed_items": recreation_result.completed_items,
                     },
                 )
             dispatched = await reconciler.reconcile_once()

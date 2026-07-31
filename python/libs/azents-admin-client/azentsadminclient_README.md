@@ -94,9 +94,13 @@ Class | Method | HTTP request | Description
 *ModelCatalogV1Api* | [**model_catalog_v1_refresh_system_model_catalogs**](azentsadminclient/docs/ModelCatalogV1Api.md#model_catalog_v1_refresh_system_model_catalogs) | **POST** /model-catalog/v1/system-catalogs/refresh | Refresh System Model Catalogs
 *RuntimeProviderV1Api* | [**runtime_provider_v1_create_auth_binding**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_create_auth_binding) | **POST** /runtime-provider/v1/providers/{provider_id}/authentication-bindings | Create Auth Binding
 *RuntimeProviderV1Api* | [**runtime_provider_v1_create_container_profile**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_create_container_profile) | **POST** /runtime-provider/v1/providers/{provider_id}/container-profiles | Create Container Profile
+*RuntimeProviderV1Api* | [**runtime_provider_v1_create_container_profile_recreation**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_create_container_profile_recreation) | **POST** /runtime-provider/v1/providers/{provider_id}/container-profiles/{profile_id}/recreation-operations | Create Container Profile Recreation
 *RuntimeProviderV1Api* | [**runtime_provider_v1_create_pod_profile**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_create_pod_profile) | **POST** /runtime-provider/v1/providers/{provider_id}/pod-profiles | Create Pod Profile
+*RuntimeProviderV1Api* | [**runtime_provider_v1_create_pod_profile_recreation**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_create_pod_profile_recreation) | **POST** /runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id}/recreation-operations | Create Pod Profile Recreation
+*RuntimeProviderV1Api* | [**runtime_provider_v1_create_provider_recreation**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_create_provider_recreation) | **POST** /runtime-provider/v1/providers/{provider_id}/recreation-operations | Create Provider Recreation
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_auth_binding**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_auth_binding) | **GET** /runtime-provider/v1/authentication-bindings/{binding_id} | Get Auth Binding
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_container_profile**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_container_profile) | **GET** /runtime-provider/v1/providers/{provider_id}/container-profiles/{profile_id} | Get Container Profile
+*RuntimeProviderV1Api* | [**runtime_provider_v1_get_platform_recreation**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_platform_recreation) | **GET** /runtime-provider/v1/recreation-operations/{operation_id} | Get Platform Recreation
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_pod_profile**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_pod_profile) | **GET** /runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id} | Get Pod Profile
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_runtime_provider**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_runtime_provider) | **GET** /runtime-provider/v1/providers/{provider_id} | Get Runtime Provider
 *RuntimeProviderV1Api* | [**runtime_provider_v1_list_auth_binding_audit_events**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_list_auth_binding_audit_events) | **GET** /runtime-provider/v1/authentication-bindings/{binding_id}/audit-events | List Auth Binding Audit Events
@@ -220,6 +224,12 @@ Class | Method | HTTP request | Description
  - [RuntimeProviderListResponse](azentsadminclient/docs/RuntimeProviderListResponse.md)
  - [RuntimeProviderPolicyUpdateRequest](azentsadminclient/docs/RuntimeProviderPolicyUpdateRequest.md)
  - [RuntimeProviderResponse](azentsadminclient/docs/RuntimeProviderResponse.md)
+ - [RuntimeRecreationCreateRequest](azentsadminclient/docs/RuntimeRecreationCreateRequest.md)
+ - [RuntimeRecreationItemResponse](azentsadminclient/docs/RuntimeRecreationItemResponse.md)
+ - [RuntimeRecreationItemStatus](azentsadminclient/docs/RuntimeRecreationItemStatus.md)
+ - [RuntimeRecreationOperationResponse](azentsadminclient/docs/RuntimeRecreationOperationResponse.md)
+ - [RuntimeRecreationOperationStatus](azentsadminclient/docs/RuntimeRecreationOperationStatus.md)
+ - [RuntimeRecreationTargetKind](azentsadminclient/docs/RuntimeRecreationTargetKind.md)
  - [SentryDiagnostics](azentsadminclient/docs/SentryDiagnostics.md)
  - [SignupTokenDeliveryMethod](azentsadminclient/docs/SignupTokenDeliveryMethod.md)
  - [SignupTokenListResponse](azentsadminclient/docs/SignupTokenListResponse.md)
