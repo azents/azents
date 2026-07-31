@@ -14,7 +14,6 @@ from azents.core.enums import (
     RuntimePolicySnapshotApplicationState,
     RuntimeProviderConfigRevisionState,
     RuntimeProviderConfigValidationStatus,
-    RuntimeProviderContractStatus,
 )
 from azents.rdb.models.base import RDBModel
 from azents.rdb.types.datetime import TimeZoneDateTime
@@ -25,12 +24,6 @@ def _enum_values(enum_cls: type[enum.StrEnum]) -> list[str]:
     return [value.value for value in enum_cls]
 
 
-runtime_provider_contract_status_enum = ENUM(
-    RuntimeProviderContractStatus,
-    name="runtime_provider_contract_status",
-    create_type=False,
-    values_callable=_enum_values,
-)
 runtime_provider_config_revision_state_enum = ENUM(
     RuntimeProviderConfigRevisionState,
     name="runtime_provider_config_revision_state",
@@ -61,11 +54,6 @@ class RDBRuntimeProviderContractRevision(RDBModel):
         "provider_id",
         "created_at",
     )
-    IX_PROVIDER_STATUS = sa.Index(
-        "ix_runtime_provider_contract_revisions_provider_status",
-        "provider_id",
-        "status",
-    )
 
     id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -83,42 +71,6 @@ class RDBRuntimeProviderContractRevision(RDBModel):
     protocol_version: Mapped[str] = mapped_column(sa.String(120), nullable=False)
     contract: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     compatibility: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    status: Mapped[RuntimeProviderContractStatus] = mapped_column(
-        runtime_provider_contract_status_enum,
-        nullable=False,
-    )
-    validation_code: Mapped[str | None] = mapped_column(
-        sa.String(120),
-        nullable=True,
-        default=None,
-    )
-    validation_message: Mapped[str | None] = mapped_column(
-        sa.Text,
-        nullable=True,
-        default=None,
-    )
-    accepted_by_user_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-        default=None,
-    )
-    accepted_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        nullable=True,
-        default=None,
-    )
-    rejected_by_user_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("users.id", ondelete="SET NULL"),
-        nullable=True,
-        default=None,
-    )
-    rejected_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        nullable=True,
-        default=None,
-    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         init=False,
@@ -126,7 +78,7 @@ class RDBRuntimeProviderContractRevision(RDBModel):
         nullable=False,
     )
 
-    __table_args__ = (IX_PROVIDER_CREATED, IX_PROVIDER_STATUS)
+    __table_args__ = (IX_PROVIDER_CREATED,)
 
 
 class RDBRuntimeProviderConfigRevision(RDBModel):

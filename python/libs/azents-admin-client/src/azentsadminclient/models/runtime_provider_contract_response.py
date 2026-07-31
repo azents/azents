@@ -19,8 +19,7 @@ import json
 
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictStr
-from typing import Any, ClassVar, Dict, List, Optional
-from azentsadminclient.models.runtime_provider_contract_status import RuntimeProviderContractStatus
+from typing import Any, ClassVar, Dict, List
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -34,14 +33,9 @@ class RuntimeProviderContractResponse(BaseModel):
     protocol_version: StrictStr
     contract: Dict[str, Any]
     compatibility: Dict[str, Any]
-    status: RuntimeProviderContractStatus
-    validation_code: Optional[StrictStr]
-    validation_message: Optional[StrictStr]
-    accepted_by_user_id: Optional[StrictStr]
-    accepted_at: Optional[datetime]
     created_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "digest", "implementation_version", "protocol_version", "contract", "compatibility", "status", "validation_code", "validation_message", "accepted_by_user_id", "accepted_at", "created_at"]
+    __properties: ClassVar[List[str]] = ["id", "digest", "implementation_version", "protocol_version", "contract", "compatibility", "created_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -89,26 +83,6 @@ class RuntimeProviderContractResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if validation_code (nullable) is None
-        # and model_fields_set contains the field
-        if self.validation_code is None and "validation_code" in self.model_fields_set:
-            _dict['validation_code'] = None
-
-        # set to None if validation_message (nullable) is None
-        # and model_fields_set contains the field
-        if self.validation_message is None and "validation_message" in self.model_fields_set:
-            _dict['validation_message'] = None
-
-        # set to None if accepted_by_user_id (nullable) is None
-        # and model_fields_set contains the field
-        if self.accepted_by_user_id is None and "accepted_by_user_id" in self.model_fields_set:
-            _dict['accepted_by_user_id'] = None
-
-        # set to None if accepted_at (nullable) is None
-        # and model_fields_set contains the field
-        if self.accepted_at is None and "accepted_at" in self.model_fields_set:
-            _dict['accepted_at'] = None
-
         return _dict
 
     @classmethod
@@ -127,11 +101,6 @@ class RuntimeProviderContractResponse(BaseModel):
             "protocol_version": obj.get("protocol_version"),
             "contract": obj.get("contract"),
             "compatibility": obj.get("compatibility"),
-            "status": obj.get("status"),
-            "validation_code": obj.get("validation_code"),
-            "validation_message": obj.get("validation_message"),
-            "accepted_by_user_id": obj.get("accepted_by_user_id"),
-            "accepted_at": obj.get("accepted_at"),
             "created_at": obj.get("created_at")
         })
         # store additional fields in additional_properties

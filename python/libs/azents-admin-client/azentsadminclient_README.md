@@ -98,7 +98,6 @@ Class | Method | HTTP request | Description
 *RuntimeExecutionV1Api* | [**runtime_execution_v1_list_profiles**](azentsadminclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_list_profiles) | **GET** /runtime-execution/v1/profiles | List Profiles
 *RuntimeExecutionV1Api* | [**runtime_execution_v1_replace_profile**](azentsadminclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_replace_profile) | **PUT** /runtime-execution/v1/profiles/{profile_id} | Replace Profile
 *RuntimeExecutionV1Api* | [**runtime_execution_v1_retire_profile**](azentsadminclient/docs/RuntimeExecutionV1Api.md#runtime_execution_v1_retire_profile) | **POST** /runtime-execution/v1/profiles/{profile_id}/retire | Retire Profile
-*RuntimeProviderV1Api* | [**runtime_provider_v1_accept_contract**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_accept_contract) | **POST** /runtime-provider/v1/providers/{provider_id}/contracts/{revision_id}/accept | Accept Contract
 *RuntimeProviderV1Api* | [**runtime_provider_v1_create_auth_binding**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_create_auth_binding) | **POST** /runtime-provider/v1/providers/{provider_id}/authentication-bindings | Create Auth Binding
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_auth_binding**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_auth_binding) | **GET** /runtime-provider/v1/authentication-bindings/{binding_id} | Get Auth Binding
 *RuntimeProviderV1Api* | [**runtime_provider_v1_get_runtime_provider**](azentsadminclient/docs/RuntimeProviderV1Api.md#runtime_provider_v1_get_runtime_provider) | **GET** /runtime-provider/v1/providers/{provider_id} | Get Runtime Provider
@@ -214,10 +213,8 @@ Class | Method | HTTP request | Description
  - [RuntimeProviderBindingAuditEventType](azentsadminclient/docs/RuntimeProviderBindingAuditEventType.md)
  - [RuntimeProviderBindingOwner](azentsadminclient/docs/RuntimeProviderBindingOwner.md)
  - [RuntimeProviderBindingState](azentsadminclient/docs/RuntimeProviderBindingState.md)
- - [RuntimeProviderContractAcceptRequest](azentsadminclient/docs/RuntimeProviderContractAcceptRequest.md)
  - [RuntimeProviderContractListResponse](azentsadminclient/docs/RuntimeProviderContractListResponse.md)
  - [RuntimeProviderContractResponse](azentsadminclient/docs/RuntimeProviderContractResponse.md)
- - [RuntimeProviderContractStatus](azentsadminclient/docs/RuntimeProviderContractStatus.md)
  - [RuntimeProviderLifecycleState](azentsadminclient/docs/RuntimeProviderLifecycleState.md)
  - [RuntimeProviderListResponse](azentsadminclient/docs/RuntimeProviderListResponse.md)
  - [RuntimeProviderPolicyUpdateRequest](azentsadminclient/docs/RuntimeProviderPolicyUpdateRequest.md)

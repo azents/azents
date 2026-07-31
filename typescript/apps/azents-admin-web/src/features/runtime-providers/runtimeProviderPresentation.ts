@@ -1,7 +1,6 @@
 interface RuntimeProviderContractPointers {
   enabled: boolean;
   lifecycle_state: string;
-  accepted_contract_revision_id: string | null;
   current_contract_revision_id: string | null;
 }
 
@@ -21,12 +20,6 @@ export function runtimeProviderReadiness(
   }
   if (provider.current_contract_revision_id === null) {
     return { color: "yellow", label: "Contract pending" };
-  }
-  if (
-    provider.current_contract_revision_id !==
-    provider.accepted_contract_revision_id
-  ) {
-    return { color: "yellow", label: "Review required" };
   }
   return { color: "green", label: "Ready" };
 }

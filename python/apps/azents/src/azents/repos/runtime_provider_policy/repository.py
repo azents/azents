@@ -13,7 +13,6 @@ from azents.core.enums import (
     RuntimePolicySnapshotApplicationState,
     RuntimeProviderConfigRevisionState,
     RuntimeProviderConfigValidationStatus,
-    RuntimeProviderContractStatus,
 )
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
@@ -69,33 +68,6 @@ class RuntimeProviderPolicyRepository:
         rdb = result.scalar_one_or_none()
         return self._build_contract(rdb) if rdb is not None else None
 
-    async def get_contract_by_digest(
-        self,
-        session: AsyncSession,
-        *,
-        provider_id: str,
-        digest: str,
-        for_update: bool,
-    ) -> RuntimeProviderContractRevision | None:
-        """Fetch a contract proposal by its Provider-local semantic digest."""
-        statement = (
-            sa.select(RDBRuntimeProviderContractRevision)
-            .where(
-                RDBRuntimeProviderContractRevision.provider_id == provider_id,
-                RDBRuntimeProviderContractRevision.digest == digest,
-            )
-            .order_by(
-                RDBRuntimeProviderContractRevision.created_at.desc(),
-                RDBRuntimeProviderContractRevision.id.desc(),
-            )
-            .limit(1)
-        )
-        if for_update:
-            statement = statement.with_for_update()
-        result = await session.execute(statement)
-        rdb = result.scalar_one_or_none()
-        return self._build_contract(rdb) if rdb is not None else None
-
     async def list_contracts(
         self,
         session: AsyncSession,
@@ -119,9 +91,7 @@ class RuntimeProviderPolicyRepository:
         *,
         create: RuntimeProviderContractRevisionCreate,
     ) -> RuntimeProviderContractRevision:
-        """Store one immutable Provider contract revision after the Provider lock."""
-        if create.status != RuntimeProviderContractStatus.CANDIDATE:
-            raise ValueError("New Provider contract revisions must be candidates.")
+        """Store and activate one authenticated Provider capability revision."""
         provider_exists = await session.scalar(
             sa.select(RDBRuntimeProvider.id).where(
                 RDBRuntimeProvider.id == create.provider_id
@@ -136,141 +106,18 @@ class RuntimeProviderPolicyRepository:
             protocol_version=create.protocol_version,
             contract=create.contract,
             compatibility=create.compatibility,
-            status=create.status,
-            validation_code=create.validation_code,
-            validation_message=create.validation_message,
         )
         session.add(rdb)
         await session.flush()
         await session.execute(
             sa.update(RDBRuntimeProvider)
             .where(RDBRuntimeProvider.id == create.provider_id)
-            .values(current_contract_revision_id=rdb.id)
-        )
-        await session.execute(
-            sa.delete(RDBRuntimeProviderContractRevision).where(
-                RDBRuntimeProviderContractRevision.provider_id == create.provider_id,
-                RDBRuntimeProviderContractRevision.accepted_at.is_(None),
-                RDBRuntimeProviderContractRevision.id != rdb.id,
+            .values(
+                current_contract_revision_id=rdb.id,
+                capabilities=create.contract,
             )
         )
         return self._build_contract(rdb)
-
-    async def set_current_contract_revision(
-        self,
-        session: AsyncSession,
-        *,
-        provider_id: str,
-        contract_revision_id: str,
-    ) -> bool:
-        """Record the exact contract advertised by the connected Provider."""
-        result = await session.execute(
-            sa.update(RDBRuntimeProvider)
-            .where(RDBRuntimeProvider.id == provider_id)
-            .values(current_contract_revision_id=contract_revision_id)
-            .returning(RDBRuntimeProvider.id)
-        )
-        updated_provider_id = result.scalar_one_or_none()
-        if updated_provider_id is not None:
-            await session.execute(
-                sa.delete(RDBRuntimeProviderContractRevision).where(
-                    RDBRuntimeProviderContractRevision.provider_id == provider_id,
-                    RDBRuntimeProviderContractRevision.accepted_at.is_(None),
-                    RDBRuntimeProviderContractRevision.id != contract_revision_id,
-                )
-            )
-        return updated_provider_id is not None
-
-    async def accept_contract(
-        self,
-        session: AsyncSession,
-        *,
-        provider_id: str,
-        contract_revision_id: str,
-        accepted_by_user_id: str | None,
-        accepted_at: datetime.datetime,
-    ) -> RuntimeProviderContractRevision | None:
-        """Accept one candidate and atomically move the Provider contract pointer."""
-        current_contract_revision_id = await session.scalar(
-            sa.select(RDBRuntimeProvider.current_contract_revision_id).where(
-                RDBRuntimeProvider.id == provider_id
-            )
-        )
-        if current_contract_revision_id != contract_revision_id:
-            return None
-        result = await session.execute(
-            sa.update(RDBRuntimeProviderContractRevision)
-            .where(
-                RDBRuntimeProviderContractRevision.id == contract_revision_id,
-                RDBRuntimeProviderContractRevision.provider_id == provider_id,
-                RDBRuntimeProviderContractRevision.status
-                == RuntimeProviderContractStatus.CANDIDATE,
-                RDBRuntimeProviderContractRevision.validation_code.is_(None),
-            )
-            .values(
-                status=RuntimeProviderContractStatus.ACCEPTED,
-                accepted_by_user_id=accepted_by_user_id,
-                accepted_at=accepted_at,
-            )
-            .returning(RDBRuntimeProviderContractRevision)
-        )
-        accepted = result.scalar_one_or_none()
-        if accepted is None:
-            return None
-        await session.execute(
-            sa.update(RDBRuntimeProviderContractRevision)
-            .where(
-                RDBRuntimeProviderContractRevision.provider_id == provider_id,
-                RDBRuntimeProviderContractRevision.id != contract_revision_id,
-                RDBRuntimeProviderContractRevision.status
-                == RuntimeProviderContractStatus.ACCEPTED,
-            )
-            .values(status=RuntimeProviderContractStatus.SUPERSEDED)
-        )
-        await session.execute(
-            sa.update(RDBRuntimeProvider)
-            .where(RDBRuntimeProvider.id == provider_id)
-            .values(
-                accepted_contract_revision_id=contract_revision_id,
-                admin_version=RDBRuntimeProvider.admin_version + 1,
-                capabilities=accepted.contract,
-            )
-        )
-        await session.flush()
-        return self._build_contract(accepted)
-
-    async def reject_contract(
-        self,
-        session: AsyncSession,
-        *,
-        provider_id: str,
-        contract_revision_id: str,
-        rejected_by_user_id: str | None,
-        rejected_at: datetime.datetime,
-        validation_code: str,
-        validation_message: str,
-    ) -> RuntimeProviderContractRevision | None:
-        """Reject a pending contract without changing the accepted pointer."""
-        result = await session.execute(
-            sa.update(RDBRuntimeProviderContractRevision)
-            .where(
-                RDBRuntimeProviderContractRevision.id == contract_revision_id,
-                RDBRuntimeProviderContractRevision.provider_id == provider_id,
-                RDBRuntimeProviderContractRevision.status
-                == RuntimeProviderContractStatus.CANDIDATE,
-            )
-            .values(
-                status=RuntimeProviderContractStatus.REJECTED,
-                validation_code=validation_code,
-                validation_message=validation_message,
-                rejected_by_user_id=rejected_by_user_id,
-                rejected_at=rejected_at,
-            )
-            .returning(RDBRuntimeProviderContractRevision)
-        )
-        rdb = result.scalar_one_or_none()
-        await session.flush()
-        return self._build_contract(rdb) if rdb is not None else None
 
     async def get_config_by_id(
         self,
@@ -318,9 +165,9 @@ class RuntimeProviderPolicyRepository:
         provider = await session.get(RDBRuntimeProvider, create.provider_id)
         if provider is None:
             raise ValueError("Provider does not exist.")
-        if provider.accepted_contract_revision_id != create.contract_revision_id:
+        if provider.current_contract_revision_id != create.contract_revision_id:
             raise ValueError(
-                "Configuration candidate must use the Provider's accepted contract."
+                "Configuration candidate must use the Provider's current contract."
             )
         contract = await session.get(
             RDBRuntimeProviderContractRevision,
@@ -409,11 +256,11 @@ class RuntimeProviderPolicyRepository:
         activated_at: datetime.datetime,
     ) -> RuntimeProviderConfigRevision | None:
         """Make one validated revision active without replacing any Runtime."""
-        accepted_contract_matches = (
+        current_contract_matches = (
             sa.select(sa.literal(1))
             .where(
                 RDBRuntimeProvider.id == provider_id,
-                RDBRuntimeProvider.accepted_contract_revision_id
+                RDBRuntimeProvider.current_contract_revision_id
                 == RDBRuntimeProviderConfigRevision.contract_revision_id,
             )
             .exists()
@@ -427,7 +274,7 @@ class RuntimeProviderPolicyRepository:
                 == RuntimeProviderConfigRevisionState.PROVIDER_ACCEPTED,
                 RDBRuntimeProviderConfigRevision.validation_status
                 == RuntimeProviderConfigValidationStatus.VALID,
-                accepted_contract_matches,
+                current_contract_matches,
             )
             .values(
                 state=RuntimeProviderConfigRevisionState.ACTIVE,
@@ -919,13 +766,6 @@ class RuntimeProviderPolicyRepository:
             protocol_version=rdb.protocol_version,
             contract=rdb.contract,
             compatibility=rdb.compatibility,
-            status=rdb.status,
-            validation_code=rdb.validation_code,
-            validation_message=rdb.validation_message,
-            accepted_by_user_id=rdb.accepted_by_user_id,
-            accepted_at=rdb.accepted_at,
-            rejected_by_user_id=rdb.rejected_by_user_id,
-            rejected_at=rdb.rejected_at,
             created_at=rdb.created_at,
         )
 

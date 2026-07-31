@@ -7,6 +7,7 @@ from typing import Annotated
 
 from azcommon.datetime import tznow
 from fastapi import Depends
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -14,12 +15,14 @@ from azents.core.enums import (
     RuntimeProviderBindingOrigin,
     RuntimeProviderConfigRevisionState,
     RuntimeProviderConfigValidationStatus,
-    RuntimeProviderContractStatus,
     RuntimeProviderLifecycleState,
     RuntimeProviderScope,
 )
 from azents.core.platform_runtime_system_setting import PlatformRuntimeConfig
-from azents.core.runtime_provider_contract import RuntimeProviderCapabilityContract
+from azents.core.runtime_provider_contract import (
+    RuntimeProviderCapabilityContract,
+    runtime_provider_configuration_schemas_compatible,
+)
 from azents.core.system_setting import SystemSettingSection
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -387,26 +390,22 @@ class RuntimeProviderSelectionService:
                 provider_id=provider_logical_id,
                 message="The selected Runtime Provider is disconnected.",
             )
-        if provider.accepted_contract_revision_id is None:
+        if provider.current_contract_revision_id is None:
             raise RuntimeProviderSelectionUnavailable(
-                code="provider_contract_unaccepted",
+                code="provider_contract_unavailable",
                 provider_id=provider_logical_id,
-                message="The selected Provider has no accepted capability contract.",
+                message="The selected Provider has no current capability contract.",
             )
         contract = await self.policy_repository.get_contract_by_id(
             session,
-            contract_revision_id=provider.accepted_contract_revision_id,
+            contract_revision_id=provider.current_contract_revision_id,
             for_update=False,
         )
-        if (
-            contract is None
-            or contract.status != RuntimeProviderContractStatus.ACCEPTED
-            or contract.provider_id != provider.id
-        ):
+        if contract is None or contract.provider_id != provider.id:
             raise RuntimeProviderSelectionUnavailable(
-                code="provider_contract_unaccepted",
+                code="provider_contract_unavailable",
                 provider_id=provider_logical_id,
-                message="The selected Provider has no accepted capability contract.",
+                message="The selected Provider has no current capability contract.",
             )
         parsed_contract = RuntimeProviderCapabilityContract.model_validate(
             contract.contract
@@ -415,20 +414,65 @@ class RuntimeProviderSelectionService:
             session,
             provider_id=provider.id,
         )
-        if parsed_contract.configuration_fields and (
-            active_config is None
-            or active_config.state != RuntimeProviderConfigRevisionState.ACTIVE
-            or active_config.validation_status
-            != RuntimeProviderConfigValidationStatus.VALID
-            or active_config.provider_id != provider.id
-            or active_config.contract_revision_id != contract.id
-        ):
-            raise RuntimeProviderSelectionUnavailable(
-                code="provider_configuration_unavailable",
-                provider_id=provider_logical_id,
-                message="The selected Provider has no active configuration.",
-            )
-        return contract, active_config
+        schema_compatible = active_config is not None and (
+            active_config.contract_revision_id == contract.id
+        )
+        if active_config is not None:
+            if active_config.provider_id != provider.id:
+                raise RuntimeProviderSelectionUnavailable(
+                    code="provider_configuration_unavailable",
+                    provider_id=provider_logical_id,
+                    message="The selected Provider has no active configuration.",
+                )
+            if not schema_compatible:
+                validated_contract_revision = (
+                    await self.policy_repository.get_contract_by_id(
+                        session,
+                        contract_revision_id=active_config.contract_revision_id,
+                        for_update=False,
+                    )
+                )
+                if (
+                    validated_contract_revision is None
+                    or validated_contract_revision.provider_id != provider.id
+                ):
+                    raise RuntimeProviderSelectionUnavailable(
+                        code="provider_configuration_unavailable",
+                        provider_id=provider_logical_id,
+                        message="The selected Provider has no active configuration.",
+                    )
+                try:
+                    validated_contract = (
+                        RuntimeProviderCapabilityContract.model_validate(
+                            validated_contract_revision.contract
+                        )
+                    )
+                except ValidationError as error:
+                    raise RuntimeProviderSelectionUnavailable(
+                        code="provider_configuration_unavailable",
+                        provider_id=provider_logical_id,
+                        message="The selected Provider has no active configuration.",
+                    ) from error
+                schema_compatible = runtime_provider_configuration_schemas_compatible(
+                    validated_contract,
+                    parsed_contract,
+                )
+        active_config_valid = (
+            active_config is not None
+            and active_config.state is RuntimeProviderConfigRevisionState.ACTIVE
+            and active_config.validation_status
+            is RuntimeProviderConfigValidationStatus.VALID
+            and schema_compatible
+        )
+        if parsed_contract.configuration_fields:
+            if not active_config_valid:
+                raise RuntimeProviderSelectionUnavailable(
+                    code="provider_configuration_unavailable",
+                    provider_id=provider_logical_id,
+                    message="The selected Provider has no active configuration.",
+                )
+            return contract, active_config
+        return contract, None
 
 
 def _binding_evidence(

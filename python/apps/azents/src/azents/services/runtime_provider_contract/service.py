@@ -1,14 +1,12 @@
-"""Runtime Provider capability contract proposal and Admin acceptance."""
+"""Runtime Provider capability advertisement and revision history."""
 
 import dataclasses
 from typing import Annotated, Any
 
-from azcommon.datetime import tznow
 from fastapi import Depends
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import RuntimeProviderContractStatus
 from azents.core.runtime_provider_contract import (
     RuntimeProviderCapabilityContract,
     canonicalize_runtime_provider_contract,
@@ -39,7 +37,7 @@ class RuntimeProviderContractUnavailable(Exception):
 
 @dataclasses.dataclass
 class RuntimeProviderContractService:
-    """Persist Provider proposals and manage explicit Admin acceptance."""
+    """Persist authenticated Provider advertisements as current authority."""
 
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
@@ -59,7 +57,7 @@ class RuntimeProviderContractService:
         protocol_version: str,
         contract_payload: dict[str, Any],
     ) -> RuntimeProviderContractRevision:
-        """Create or find a contract proposed by an authenticated Provider."""
+        """Create or restore the current authenticated Provider capability."""
         try:
             contract = RuntimeProviderCapabilityContract.model_validate(
                 contract_payload
@@ -103,24 +101,14 @@ class RuntimeProviderContractService:
                     ),
                     current_admin_version=provider.admin_version,
                 )
-            existing = await self.policy_repository.get_contract_by_digest(
-                session,
-                provider_id=provider.id,
-                digest=canonical.digest,
-                for_update=False,
-            )
-            if existing is not None and (
-                existing.status is RuntimeProviderContractStatus.CANDIDATE
-                or provider.accepted_contract_revision_id == existing.id
-            ):
-                updated = await self.policy_repository.set_current_contract_revision(
+            if provider.current_contract_revision_id is not None:
+                current = await self.policy_repository.get_contract_by_id(
                     session,
-                    provider_id=provider.id,
-                    contract_revision_id=existing.id,
+                    contract_revision_id=provider.current_contract_revision_id,
+                    for_update=False,
                 )
-                if not updated:
-                    raise AssertionError("Runtime Provider disappeared while locked.")
-                return existing
+                if current is not None and current.digest == canonical.digest:
+                    return current
             return await self.policy_repository.create_contract(
                 session,
                 create=RuntimeProviderContractRevisionCreate(
@@ -130,9 +118,6 @@ class RuntimeProviderContractService:
                     protocol_version=contract.protocol_version,
                     contract=canonical.canonical_json,
                     compatibility={"compatible": True},
-                    status=RuntimeProviderContractStatus.CANDIDATE,
-                    validation_code=None,
-                    validation_message=None,
                 ),
             )
 
@@ -140,7 +125,7 @@ class RuntimeProviderContractService:
         self,
         provider_logical_id: str,
     ) -> list[RuntimeProviderContractRevision]:
-        """List accepted and candidate contracts for one logical Provider."""
+        """List immutable capability advertisement history."""
         async with self.session_manager() as session:
             provider = await self.provider_repository.get_by_provider_id(
                 session,
@@ -157,45 +142,3 @@ class RuntimeProviderContractService:
                 session,
                 provider_id=provider.id,
             )
-
-    async def accept_contract(
-        self,
-        provider_logical_id: str,
-        contract_revision_id: str,
-        *,
-        expected_admin_version: int,
-        actor_user_id: str | None,
-    ) -> RuntimeProviderContractRevision:
-        """Accept one unchanged candidate using Provider optimistic concurrency."""
-        async with self.session_manager() as session:
-            provider = await self.provider_repository.get_by_provider_id(
-                session,
-                provider_logical_id=provider_logical_id,
-                for_update=True,
-            )
-            if provider is None:
-                raise RuntimeProviderContractUnavailable(
-                    code="provider_not_found",
-                    message="Runtime Provider was not found.",
-                    current_admin_version=None,
-                )
-            if provider.admin_version != expected_admin_version:
-                raise RuntimeProviderContractUnavailable(
-                    code="stale_provider_version",
-                    message="Runtime Provider changed before contract acceptance.",
-                    current_admin_version=provider.admin_version,
-                )
-            accepted = await self.policy_repository.accept_contract(
-                session,
-                provider_id=provider.id,
-                contract_revision_id=contract_revision_id,
-                accepted_by_user_id=actor_user_id,
-                accepted_at=tznow(),
-            )
-            if accepted is None:
-                raise RuntimeProviderContractUnavailable(
-                    code="contract_not_acceptable",
-                    message="Runtime Provider contract candidate cannot be accepted.",
-                    current_admin_version=provider.admin_version,
-                )
-            return accepted

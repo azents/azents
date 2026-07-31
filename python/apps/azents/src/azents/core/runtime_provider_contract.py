@@ -14,6 +14,7 @@ from azents.core.runtime_execution_policy import (
     RuntimeExecutionResourceModule,
     RuntimeExecutionStorageMode,
 )
+from azents.core.runtime_profile import RuntimeProviderProfileContractSupport
 
 
 class RuntimeProviderPolicyScope(enum.StrEnum):
@@ -193,6 +194,10 @@ class RuntimeProviderCapabilityContract(BaseModel):
         max_length=100,
     )
     execution_policy: RuntimeProviderExecutionPolicyContract | None = None
+    profile_contracts: list[RuntimeProviderProfileContractSupport] = Field(
+        default_factory=list,
+        max_length=20,
+    )
 
     @model_validator(mode="after")
     def validate_contract(self) -> "RuntimeProviderCapabilityContract":
@@ -212,7 +217,32 @@ class RuntimeProviderCapabilityContract(BaseModel):
             raise ValueError(
                 "Provider contract configuration field names must be unique."
             )
+        profile_contract_keys = [
+            (support.profile_kind, support.contract_family)
+            for support in self.profile_contracts
+        ]
+        if len(set(profile_contract_keys)) != len(profile_contract_keys):
+            raise ValueError("Provider Profile contract declarations must be unique.")
         return self
+
+
+def runtime_provider_configuration_schemas_compatible(
+    first: RuntimeProviderCapabilityContract,
+    second: RuntimeProviderCapabilityContract,
+) -> bool:
+    """Return whether one validated Provider config remains valid across contracts."""
+    return _canonical_configuration_fields(first) == _canonical_configuration_fields(
+        second
+    )
+
+
+def _canonical_configuration_fields(
+    contract: RuntimeProviderCapabilityContract,
+) -> list[dict[str, object]]:
+    return sorted(
+        (field.model_dump(mode="json") for field in contract.configuration_fields),
+        key=lambda field: str(field["name"]),
+    )
 
 
 @dataclass(frozen=True)
@@ -235,6 +265,18 @@ def canonicalize_runtime_provider_contract(
     canonical_json["optional_capabilities"] = sorted(
         canonical_json["optional_capabilities"]
     )
+    profile_contracts = canonical_json["profile_contracts"]
+    if not isinstance(profile_contracts, list):
+        raise AssertionError("Provider Profile contracts must be a list.")
+    canonical_json["profile_contracts"] = sorted(
+        profile_contracts,
+        key=lambda item: (item["profile_kind"], item["contract_family"]),
+    )
+    for profile_contract in canonical_json["profile_contracts"]:
+        profile_contract["schema_versions"] = sorted(
+            profile_contract["schema_versions"]
+        )
+        profile_contract["capabilities"] = sorted(profile_contract["capabilities"])
     execution_policy = canonical_json.get("execution_policy")
     if execution_policy is None:
         # An omitted optional section has no semantic JSON representation.

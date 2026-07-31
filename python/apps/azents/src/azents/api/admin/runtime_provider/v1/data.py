@@ -11,7 +11,6 @@ from azents.core.enums import (
     RuntimeProviderBindingAuditEventType,
     RuntimeProviderBindingOwner,
     RuntimeProviderBindingState,
-    RuntimeProviderContractStatus,
     RuntimeProviderLifecycleState,
 )
 from azents.repos.runtime_provider.data import RuntimeProvider
@@ -40,7 +39,6 @@ class RuntimeProviderResponse(BaseModel):
     enabled: bool
     lifecycle_state: RuntimeProviderLifecycleState
     availability_mode: RuntimeProviderAvailabilityMode
-    accepted_contract_revision_id: str | None
     current_contract_revision_id: str | None
     active_config_revision_id: str | None
     admin_version: int
@@ -62,7 +60,6 @@ class RuntimeProviderResponse(BaseModel):
             enabled=provider.enabled,
             lifecycle_state=provider.lifecycle_state,
             availability_mode=provider.availability_mode,
-            accepted_contract_revision_id=provider.accepted_contract_revision_id,
             current_contract_revision_id=provider.current_contract_revision_id,
             active_config_revision_id=provider.active_config_revision_id,
             admin_version=provider.admin_version,
@@ -87,11 +84,6 @@ class RuntimeProviderContractResponse(BaseModel):
     protocol_version: str
     contract: dict[str, Any]
     compatibility: dict[str, Any]
-    status: RuntimeProviderContractStatus
-    validation_code: str | None
-    validation_message: str | None
-    accepted_by_user_id: str | None
-    accepted_at: datetime.datetime | None
     created_at: datetime.datetime
 
     @classmethod
@@ -107,11 +99,6 @@ class RuntimeProviderContractResponse(BaseModel):
             protocol_version=contract.protocol_version,
             contract=contract.contract,
             compatibility=contract.compatibility,
-            status=contract.status,
-            validation_code=contract.validation_code,
-            validation_message=contract.validation_message,
-            accepted_by_user_id=contract.accepted_by_user_id,
-            accepted_at=contract.accepted_at,
             created_at=contract.created_at,
         )
 
@@ -120,12 +107,6 @@ class RuntimeProviderContractListResponse(BaseModel):
     """Provider contract revision history."""
 
     items: list[RuntimeProviderContractResponse]
-
-
-class RuntimeProviderContractAcceptRequest(BaseModel):
-    """Optimistic concurrency input for explicit contract acceptance."""
-
-    expected_admin_version: int = Field(ge=0)
 
 
 class RuntimeProviderPolicyUpdateRequest(BaseModel):

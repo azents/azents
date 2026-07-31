@@ -44,7 +44,6 @@ def _provider(
         enabled=True,
         lifecycle_state=lifecycle_state,
         availability_mode=availability_mode,
-        accepted_contract_revision_id="contract-1",
         current_contract_revision_id="contract-1",
         active_config_revision_id=None,
         admin_version=1,

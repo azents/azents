@@ -37,11 +37,8 @@ class RuntimeProvider(BaseModel):
     availability_mode: RuntimeProviderAvailabilityMode = Field(
         description="Workspace availability policy"
     )
-    accepted_contract_revision_id: str | None = Field(
-        default=None, description="Accepted capability contract revision ID"
-    )
     current_contract_revision_id: str | None = Field(
-        description="Capability contract revision advertised by the current Provider",
+        description="Authoritative capability revision advertised by the Provider",
     )
     active_config_revision_id: str | None = Field(
         default=None, description="Desired active Provider configuration revision ID"

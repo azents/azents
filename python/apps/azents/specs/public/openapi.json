@@ -24175,7 +24175,7 @@
             "type": "object",
             "title": "Capabilities"
           },
-          "accepted_contract_revision_id": {
+          "current_contract_revision_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -24184,7 +24184,7 @@
                 "type": "null"
               }
             ],
-            "title": "Accepted Contract Revision Id"
+            "title": "Current Contract Revision Id"
           },
           "active_config_revision_id": {
             "anyOf": [
@@ -24206,7 +24206,7 @@
           "scope",
           "availability_mode",
           "capabilities",
-          "accepted_contract_revision_id",
+          "current_contract_revision_id",
           "active_config_revision_id"
         ],
         "title": "RuntimeProviderOptionResponse",

@@ -14,7 +14,6 @@ from azents.core.enums import (
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
     RuntimePolicySnapshotApplicationState,
-    RuntimeProviderContractStatus,
     WorkspaceUserRole,
 )
 from azents.core.runtime_execution_policy import (
@@ -36,12 +35,16 @@ from azents.core.runtime_execution_policy import (
     resolve_runtime_execution_policy,
     standard_runtime_execution_policy,
 )
+from azents.core.runtime_provider_contract import RuntimeProviderCapabilityContract
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_execution_policy.data import (
     AgentRuntimeExecutionSetting,
     RuntimeExecutionProfile,
 )
-from azents.repos.runtime_provider_policy.data import RuntimePolicySnapshot
+from azents.repos.runtime_provider_policy.data import (
+    RuntimePolicySnapshot,
+    RuntimeProviderContractRevision,
+)
 
 from .application_service import (
     RuntimeExecutionPolicyApplicationService,
@@ -53,6 +56,50 @@ from .application_service import (
 )
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
+_REGION_CONFIGURATION_FIELD: dict[str, object] = {
+    "name": "region",
+    "scope": "platform",
+    "type": "string",
+    "application_impact": "immediate",
+}
+
+
+def _provider_contract_revision(
+    revision_id: str,
+    *,
+    configuration_fields: list[dict[str, object]],
+) -> RuntimeProviderContractRevision:
+    """Build one Provider contract revision for configuration-schema tests."""
+    contract = {
+        "schema_version": 1,
+        "implementation_key": "kubernetes",
+        "implementation_version": revision_id,
+        "protocol_version": "agent-runtime-provider-kubernetes-v1",
+        "core_lifecycle_operations": [
+            "start",
+            "stop",
+            "restart",
+            "reset",
+            "observe",
+            "terminal_delete",
+        ],
+        "persistence": {
+            "kind": "persistent",
+            "reset_destroys_workspace": True,
+            "terminal_delete_destroys_workspace": True,
+        },
+        "configuration_fields": configuration_fields,
+    }
+    return RuntimeProviderContractRevision(
+        id=revision_id,
+        provider_id="provider-1",
+        digest=revision_id.removeprefix("contract-").rjust(64, "0"),
+        implementation_version=revision_id,
+        protocol_version="agent-runtime-provider-kubernetes-v1",
+        contract=contract,
+        compatibility={},
+        created_at=_NOW,
+    )
 
 
 def _legacy_provider_capabilities() -> RuntimeExecutionProviderCapabilities:
@@ -171,9 +218,9 @@ def _resolved() -> _ResolvedRuntimePolicy:
         runtime=_runtime(),
         target_snapshot=_snapshot(),
         applied_snapshot=None,
-        accepted_contract_revision_id="contract-1",
+        current_contract_revision_id="contract-1",
         provider_compatibility={
-            "mode": "accepted_contract",
+            "mode": "current_contract",
             "contract_revision_id": "contract-1",
         },
         profile_id="system-standard",
@@ -316,9 +363,9 @@ def _upper_layer_change_resolved(
         runtime=runtime,
         target_snapshot=target,
         applied_snapshot=target,
-        accepted_contract_revision_id="contract-1",
+        current_contract_revision_id="contract-1",
         provider_compatibility={
-            "mode": "accepted_contract",
+            "mode": "current_contract",
             "contract_revision_id": "contract-1",
         },
         profile_id="system-standard",
@@ -385,9 +432,9 @@ def _storage_expansion_resolved() -> _ResolvedRuntimePolicy:
         runtime=runtime,
         target_snapshot=target,
         applied_snapshot=target,
-        accepted_contract_revision_id="contract-1",
+        current_contract_revision_id="contract-1",
         provider_compatibility={
-            "mode": "accepted_contract",
+            "mode": "current_contract",
             "contract_revision_id": "contract-1",
         },
         profile_id="system-standard",
@@ -552,8 +599,8 @@ def test_status_projection_marks_snapshot_divergence() -> None:
     assert status.reason_codes == ("target_divergent",)
 
 
-async def test_resolve_uses_current_accepted_contract_engine_capabilities() -> None:
-    """Runtime resolution consumes typed authority from the accepted contract."""
+async def test_resolve_uses_current_contract_engine_capabilities() -> None:
+    """Runtime resolution consumes typed authority from the current contract."""
     base = standard_runtime_execution_policy()
     docker_policy = base.model_copy(
         update={
@@ -599,12 +646,11 @@ async def test_resolve_uses_current_accepted_contract_engine_capabilities() -> N
     )
     provider = Mock()
     provider.id = "provider-1"
-    provider.accepted_contract_revision_id = "contract-2"
+    provider.current_contract_revision_id = "contract-2"
     contract_revision = Mock()
     contract_revision.id = "contract-2"
     contract_revision.provider_id = "provider-1"
     contract_revision.digest = "c" * 64
-    contract_revision.status = RuntimeProviderContractStatus.ACCEPTED
     contract_revision.contract = {
         "schema_version": 1,
         "implementation_key": "kubernetes",
@@ -638,6 +684,23 @@ async def test_resolve_uses_current_accepted_contract_engine_capabilities() -> N
             "resource_maxima": None,
         },
     }
+    configuration_fields = [
+        {
+            "name": "region",
+            "scope": "platform",
+            "type": "string",
+            "application_impact": "immediate",
+        }
+    ]
+    contract_revision.contract["configuration_fields"] = configuration_fields
+    validated_contract_revision = Mock()
+    validated_contract_revision.id = "contract-1"
+    validated_contract_revision.provider_id = "provider-1"
+    validated_contract_revision.contract = {
+        **contract_revision.contract,
+        "implementation_version": "0.0.9",
+        "configuration_fields": configuration_fields,
+    }
     policy_repository = Mock()
     workspace = Mock()
     workspace.restriction = empty_runtime_execution_restriction()
@@ -647,8 +710,15 @@ async def test_resolve_uses_current_accepted_contract_engine_capabilities() -> N
     policy_repository.get_workspace = AsyncMock(return_value=workspace)
     policy_repository.get_profile = AsyncMock(return_value=profile)
     snapshot_repository = Mock()
-    snapshot_repository.get_contract_by_id = AsyncMock(return_value=contract_revision)
-    snapshot_repository.get_snapshot = AsyncMock(return_value=_snapshot())
+    snapshot_repository.get_contract_by_id = AsyncMock(
+        side_effect=[contract_revision, validated_contract_revision]
+    )
+    snapshot_repository.get_snapshot = AsyncMock(
+        return_value=dataclasses.replace(
+            _snapshot(),
+            config_revision_id="config-1",
+        )
+    )
     runtime_repository = Mock()
     runtime_repository.get_by_agent_id = AsyncMock(return_value=_runtime())
     provider_repository = Mock()
@@ -665,8 +735,74 @@ async def test_resolve_uses_current_accepted_contract_engine_capabilities() -> N
     resolved = await service._resolve_read(Mock(), agent_id="agent-1")
 
     assert resolved.resolution.available
-    assert resolved.accepted_contract_revision_id == "contract-2"
+    assert resolved.current_contract_revision_id == "contract-2"
     assert resolved.provider_compatibility["docker_supported"]
+
+
+@pytest.mark.parametrize(
+    (
+        "current_fields",
+        "validated_fields",
+        "config_revision_id",
+        "validated_revision_exists",
+    ),
+    [
+        ([_REGION_CONFIGURATION_FIELD], [], None, True),
+        ([], [_REGION_CONFIGURATION_FIELD], "config-1", True),
+        (
+            [_REGION_CONFIGURATION_FIELD],
+            [_REGION_CONFIGURATION_FIELD],
+            "config-1",
+            False,
+        ),
+    ],
+)
+async def test_target_configuration_schema_transitions_fail_closed(
+    current_fields: list[dict[str, object]],
+    validated_fields: list[dict[str, object]],
+    config_revision_id: str | None,
+    validated_revision_exists: bool,
+) -> None:
+    """Schema transitions and missing history cannot reuse stale target evidence."""
+    current_revision = _provider_contract_revision(
+        "contract-2",
+        configuration_fields=current_fields,
+    )
+    validated_revision = _provider_contract_revision(
+        "contract-1",
+        configuration_fields=validated_fields,
+    )
+    snapshot_repository = Mock()
+    snapshot_repository.get_contract_by_id = AsyncMock(
+        return_value=validated_revision if validated_revision_exists else None
+    )
+    service = RuntimeExecutionPolicyApplicationService(
+        session_manager=_session_manager,
+        policy_repository=Mock(),
+        snapshot_repository=snapshot_repository,
+        runtime_repository=Mock(),
+        provider_repository=Mock(),
+        agent_admin_repository=Mock(),
+    )
+    target_snapshot = dataclasses.replace(
+        _snapshot(),
+        contract_revision_id=validated_revision.id,
+        config_revision_id=config_revision_id,
+    )
+
+    with pytest.raises(
+        RuntimeExecutionPolicyApplicationUnavailable,
+        match="runtime_provider_configuration_contract_stale",
+    ):
+        await service._validate_target_configuration_contract(
+            Mock(),
+            provider_id="provider-1",
+            current_contract_revision=current_revision,
+            current_contract=RuntimeProviderCapabilityContract.model_validate(
+                current_revision.contract
+            ),
+            target_snapshot=target_snapshot,
+        )
 
 
 async def test_status_read_uses_read_resolver_without_target_mutation() -> None:
@@ -745,9 +881,9 @@ async def test_explicit_apply_creates_next_generation_target_atomically() -> Non
     )
     resolved = dataclasses.replace(
         _resolved(),
-        accepted_contract_revision_id="contract-2",
+        current_contract_revision_id="contract-2",
         provider_compatibility={
-            "mode": "accepted_contract",
+            "mode": "current_contract",
             "contract_revision_id": "contract-2",
         },
     )

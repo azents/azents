@@ -512,7 +512,6 @@ class RuntimeProviderRepository:
             enabled=rdb.enabled,
             lifecycle_state=rdb.lifecycle_state,
             availability_mode=rdb.availability_mode,
-            accepted_contract_revision_id=rdb.accepted_contract_revision_id,
             current_contract_revision_id=rdb.current_contract_revision_id,
             active_config_revision_id=rdb.active_config_revision_id,
             admin_version=rdb.admin_version,

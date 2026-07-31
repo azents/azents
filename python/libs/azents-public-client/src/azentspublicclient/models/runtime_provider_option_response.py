@@ -32,10 +32,10 @@ class RuntimeProviderOptionResponse(BaseModel):
     scope: StrictStr
     availability_mode: StrictStr
     capabilities: Dict[str, Any]
-    accepted_contract_revision_id: Optional[StrictStr]
+    current_contract_revision_id: Optional[StrictStr]
     active_config_revision_id: Optional[StrictStr]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["provider_id", "display_name", "kind", "scope", "availability_mode", "capabilities", "accepted_contract_revision_id", "active_config_revision_id"]
+    __properties: ClassVar[List[str]] = ["provider_id", "display_name", "kind", "scope", "availability_mode", "capabilities", "current_contract_revision_id", "active_config_revision_id"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -83,10 +83,10 @@ class RuntimeProviderOptionResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
-        # set to None if accepted_contract_revision_id (nullable) is None
+        # set to None if current_contract_revision_id (nullable) is None
         # and model_fields_set contains the field
-        if self.accepted_contract_revision_id is None and "accepted_contract_revision_id" in self.model_fields_set:
-            _dict['accepted_contract_revision_id'] = None
+        if self.current_contract_revision_id is None and "current_contract_revision_id" in self.model_fields_set:
+            _dict['current_contract_revision_id'] = None
 
         # set to None if active_config_revision_id (nullable) is None
         # and model_fields_set contains the field
@@ -111,7 +111,7 @@ class RuntimeProviderOptionResponse(BaseModel):
             "scope": obj.get("scope"),
             "availability_mode": obj.get("availability_mode"),
             "capabilities": obj.get("capabilities"),
-            "accepted_contract_revision_id": obj.get("accepted_contract_revision_id"),
+            "current_contract_revision_id": obj.get("current_contract_revision_id"),
             "active_config_revision_id": obj.get("active_config_revision_id")
         })
         # store additional fields in additional_properties

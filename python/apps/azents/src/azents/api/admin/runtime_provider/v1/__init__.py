@@ -30,7 +30,6 @@ from .data import (
     RuntimeProviderAuthenticationBindingRotateRequest,
     RuntimeProviderAuthenticationBindingRotateResponse,
     RuntimeProviderAvailabilityRequest,
-    RuntimeProviderContractAcceptRequest,
     RuntimeProviderContractListResponse,
     RuntimeProviderContractResponse,
     RuntimeProviderListResponse,
@@ -47,7 +46,7 @@ async def list_contracts(
     *,
     provider_id: str,
 ) -> RuntimeProviderContractListResponse:
-    """List accepted and pending capability contract revisions."""
+    """List immutable Provider capability advertisement history."""
     try:
         contracts = await service.list_contracts(provider_id)
     except RuntimeProviderContractUnavailable as error:
@@ -55,28 +54,6 @@ async def list_contracts(
     return RuntimeProviderContractListResponse(
         items=[RuntimeProviderContractResponse.convert_from(item) for item in contracts]
     )
-
-
-@router.post("/providers/{provider_id}/contracts/{revision_id}/accept")
-async def accept_contract(
-    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
-    service: Annotated[RuntimeProviderContractService, Depends()],
-    request_body: RuntimeProviderContractAcceptRequest,
-    *,
-    provider_id: str,
-    revision_id: str,
-) -> RuntimeProviderContractResponse:
-    """Explicitly accept one valid Provider capability contract candidate."""
-    try:
-        contract = await service.accept_contract(
-            provider_id,
-            revision_id,
-            expected_admin_version=request_body.expected_admin_version,
-            actor_user_id=system_admin.user_id,
-        )
-    except RuntimeProviderContractUnavailable as error:
-        _raise_contract_unavailable(error)
-    return RuntimeProviderContractResponse.convert_from(contract)
 
 
 @router.get("/providers/{provider_id}/authentication-bindings")

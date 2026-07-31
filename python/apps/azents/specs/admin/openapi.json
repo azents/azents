@@ -1361,7 +1361,7 @@
           "Runtime Provider v1"
         ],
         "summary": "List Contracts",
-        "description": "List accepted and pending capability contract revisions.",
+        "description": "List immutable Provider capability advertisement history.",
         "operationId": "runtime_provider_v1_list_contracts",
         "security": [
           {
@@ -1386,73 +1386,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RuntimeProviderContractListResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/runtime-provider/v1/providers/{provider_id}/contracts/{revision_id}/accept": {
-      "post": {
-        "tags": [
-          "Runtime Provider v1"
-        ],
-        "summary": "Accept Contract",
-        "description": "Explicitly accept one valid Provider capability contract candidate.",
-        "operationId": "runtime_provider_v1_accept_contract",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "provider_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Provider Id"
-            }
-          },
-          {
-            "name": "revision_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Revision Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RuntimeProviderContractAcceptRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RuntimeProviderContractResponse"
                 }
               }
             }
@@ -5973,21 +5906,6 @@
         "title": "RuntimeProviderBindingState",
         "description": "Lifecycle state of a durable Provider authentication binding."
       },
-      "RuntimeProviderContractAcceptRequest": {
-        "properties": {
-          "expected_admin_version": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Expected Admin Version"
-          }
-        },
-        "type": "object",
-        "required": [
-          "expected_admin_version"
-        ],
-        "title": "RuntimeProviderContractAcceptRequest",
-        "description": "Optimistic concurrency input for explicit contract acceptance."
-      },
       "RuntimeProviderContractListResponse": {
         "properties": {
           "items": {
@@ -6033,54 +5951,6 @@
             "type": "object",
             "title": "Compatibility"
           },
-          "status": {
-            "$ref": "#/components/schemas/RuntimeProviderContractStatus"
-          },
-          "validation_code": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Validation Code"
-          },
-          "validation_message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Validation Message"
-          },
-          "accepted_by_user_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Accepted By User Id"
-          },
-          "accepted_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Accepted At"
-          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -6095,26 +5965,10 @@
           "protocol_version",
           "contract",
           "compatibility",
-          "status",
-          "validation_code",
-          "validation_message",
-          "accepted_by_user_id",
-          "accepted_at",
           "created_at"
         ],
         "title": "RuntimeProviderContractResponse",
         "description": "One immutable Provider capability contract revision."
-      },
-      "RuntimeProviderContractStatus": {
-        "type": "string",
-        "enum": [
-          "candidate",
-          "accepted",
-          "rejected",
-          "superseded"
-        ],
-        "title": "RuntimeProviderContractStatus",
-        "description": "Administrative state of an immutable Provider capability contract."
       },
       "RuntimeProviderLifecycleState": {
         "type": "string",
@@ -6213,17 +6067,6 @@
           "availability_mode": {
             "$ref": "#/components/schemas/RuntimeProviderAvailabilityMode"
           },
-          "accepted_contract_revision_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Accepted Contract Revision Id"
-          },
           "current_contract_revision_id": {
             "anyOf": [
               {
@@ -6292,7 +6135,6 @@
           "enabled",
           "lifecycle_state",
           "availability_mode",
-          "accepted_contract_revision_id",
           "current_contract_revision_id",
           "active_config_revision_id",
           "admin_version",
