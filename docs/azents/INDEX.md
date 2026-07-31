@@ -303,6 +303,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Session-Scoped Runner Operation Concurrency Historical Requirements Reconstruction](requirements/runner-260710-runner-operation-concurrency.md) | runner-260710 | 2026-07-10 | - |
 | [Hierarchical Runtime Execution Profiles Requirements](requirements/runtime-260726-hierarchical-execution-profiles.md) | runtime-260726 | 2026-07-26 | - |
 | [Profile-Only Runtime Execution Policy Requirements](requirements/runtime-260727-profile-only-execution-policy.md) | runtime-260727 | 2026-07-27 | 2026-07-27 |
+| [Workspace-Owned Runtime Profiles Requirements](requirements/runtime-260730-workspace-owned-runtime-profiles.md) | runtime-260730 | 2026-07-30 | - |
 | [Bound Runtime Control Connections Requirements](requirements/runtimeauth-260723-bound-runtime-control-connections.md) | runtimeauth-260723 | 2026-07-23 | - |
 | [Agent Sandbox Historical Requirements Reconstruction](requirements/sandbox-260225-sandbox.md) | sandbox-260225 | 2026-02-25 | 2026-03-23 |
 | [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Requirements Reconstruction](requirements/sandbox-260403-sandbox-daemon-sidecar.md) | sandbox-260403 | 2026-04-03 | 2026-04-03 |
@@ -652,6 +653,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Session-Scoped Runner Operation Concurrency](adr/runner-260710-runner-operation-concurrency.md)
 - [Hierarchical Runtime Execution Profiles](adr/runtime-260726-hierarchical-execution-profiles.md)
 - [Profile-Only Runtime Execution Policy](adr/runtime-260727-profile-only-execution-policy.md)
+- [Workspace-Owned Runtime Profiles](adr/runtime-260730-workspace-owned-runtime-profiles.md)
 - [Bound Runtime Control Connections](adr/runtimeauth-260723-bound-runtime-control-connections.md)
 - [Agent Sandbox Historical Decision Reconstruction](adr/sandbox-260225-sandbox.md)
 - [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Decision Reconstruction](adr/sandbox-260403-sandbox-daemon-sidecar.md)
