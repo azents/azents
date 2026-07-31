@@ -14,6 +14,7 @@ code_paths:
   - python/apps/azents/src/azents/core/llm_catalog.py
   - python/apps/azents/src/azents/core/llm_mapping.py
   - python/apps/azents/src/azents/core/inference_profile.py
+  - python/apps/azents/src/azents/core/runtime_profile.py
   - python/apps/azents/src/azents/rdb/models/agent.py
   - python/apps/azents/src/azents/rdb/models/agent_admin.py
   - python/apps/azents/src/azents/rdb/models/agent_automatic_project_item.py
@@ -21,6 +22,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_decommission.py
   - python/apps/azents/src/azents/rdb/models/llm_provider_integration.py
   - python/apps/azents/src/azents/rdb/models/workspace_model_settings.py
+  - python/apps/azents/src/azents/rdb/models/runtime_profile.py
   - python/apps/azents/src/azents/repos/agent/**
   - python/apps/azents/src/azents/repos/agent_admin/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
@@ -28,6 +30,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_decommission_finalizer/**
   - python/apps/azents/src/azents/repos/llm_provider_integration/**
   - python/apps/azents/src/azents/repos/workspace_model_settings/**
+  - python/apps/azents/src/azents/repos/runtime_profile/**
   - python/apps/azents/src/azents/services/agent/**
   - python/apps/azents/src/azents/services/agent_automatic_project/**
   - python/apps/azents/src/azents/services/agent_decommission.py
@@ -36,12 +39,15 @@ code_paths:
   - python/apps/azents/src/azents/services/llm_provider_integration/**
   - python/apps/azents/src/azents/services/model_listing/**
   - python/apps/azents/src/azents/services/runtime_directory_validation.py
+  - python/apps/azents/src/azents/services/runtime_profile_resolution/**
+  - python/apps/azents/src/azents/services/runtime_profile_workspace/**
   - python/apps/azents/src/azents/services/builtin_capabilities.py
   - python/apps/azents/src/azents/services/workspace_model_settings/**
   - python/apps/azents/src/azents/api/public/agent/**
   - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
   - python/apps/azents/src/azents/api/public/llm_provider_integration/**
   - python/apps/azents/src/azents/api/public/workspace_model_settings/**
+  - python/apps/azents/src/azents/api/public/runtime_profile/**
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/run/builtin_tools.py
   - python/apps/azents/src/azents/engine/context/window.py
@@ -52,6 +58,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/AgentAutomaticProjects.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
   - typescript/apps/azents-web/src/features/external-channel-management/**
+  - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/trpc/routers/agent.ts
 api_routes:
   - /agent/v1/workspaces/{handle}/agents
@@ -61,6 +68,8 @@ api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/avatar
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects
+  - /runtime-profile/v1/workspaces/{handle}/profiles
+  - /runtime-profile/v1/workspaces/{handle}/default
   - /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations
   - /llm-provider-integration/v1/workspaces/{handle}/llm-provider-integrations/{integration_id}/models
   - /workspace-model-settings/v1/workspaces/{handle}
@@ -69,8 +78,8 @@ api_routes:
   - /chat/v1
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-07-27
-spec_version: 58
+last_verified_at: 2026-07-31
+spec_version: 59
 ---
 
 # Agent Domain Spec
@@ -97,7 +106,8 @@ Agent is central execution unit of azents. Within Workspace, it bundles an order
 | `system_prompt` | Agent system prompt |
 | `enabled` | when false, runtime resolve blocks run start with `AgentDisabled` |
 | `type` | `public` or `private` |
-| `runtime_provider_id` | Optional explicit Runtime Provider logical ID. If null, resolve the Platform Runtime System Setting when the Runtime is first created; no environment default is applied |
+| `runtime_profile_id` | nullable exact Workspace Runtime Profile selection. It is copied from the creation-time Workspace default only when no explicit selection is supplied |
+| `runtime_profile_selection_version` | positive optimistic version for replacing or clearing the Agent selection |
 | `shell_enabled` | whether builtin shell toolkit is exposed |
 | `memory_enabled` | whether memory prompt/tool is exposed |
 | `max_turns` | run turn limit. null means unlimited |
@@ -109,14 +119,28 @@ Agent is central execution unit of azents. Within Workspace, it bundles an order
 
 `auto_archive_ttl_days` is required and must be positive. Agent create and patch responses expose the configured value. Updating it changes eligibility for all existing active root Session trees at their next scheduler evaluation; it does not snapshot a TTL onto the Session.
 
-### 1.2 Runtime execution intent
+### 1.2 Runtime Profile selection
 
-Each Agent has versioned Runtime execution intent: an allowed complete-ceiling Profile plus optional restrictive
-typed overrides. Saving intent changes configured policy only and never advances Runtime desired
-generation. A Workspace owner or Agent administrator explicitly applies intent to attach the next
-immutable target. Runtime status is server-authoritative as `configured`, `pending`, `applied`,
-`unavailable`, or `divergent` with a bounded required action; clients do not infer it from Provider
-details, digests, or generations.
+Each Agent stores either one exact Runtime Profile owned by its Workspace or no selection. Agents do
+not store a Provider preference, infrastructure override, or restrictive execution-policy overlay.
+
+Creation-time precedence is:
+
+1. an explicit `runtime_profile_id`;
+2. the Workspace default Runtime Profile copied into the Agent row; or
+3. an unconfigured null selection.
+
+The Workspace default is not inherited dynamically. Changing it affects only later Agent creation
+and never moves an existing Agent. An unavailable selected Profile remains visible and stored; the
+server does not substitute another Profile or Provider. An Agent with no selection may still be
+created and edited, but Runtime create/start/restart/reset/recreate actions are blocked until an
+authorized actor selects an available Profile.
+
+Agent responses expose the selection ID, optimistic selection version, server-computed availability,
+and a bounded availability reason code. Updating the selection requires the expected version.
+Explicit null clears the selection. A non-null replacement must identify a Profile in the same
+Workspace. Selection changes enqueue authoritative Runtime configuration reconciliation; there is no
+Agent Apply action.
 
 `selectable_model_options` is a JSONB array rather than a separate table because option order is part of the fallback contract. The list invariants are:
 
@@ -259,6 +283,14 @@ Create/update requests accept selectable model options as the current model cont
 - During transition, legacy direct `model_selection` and `lightweight_model_selection` inputs remain accepted. They are converted into compatible selectable model options and effective snapshots. These fields are compatibility for the direct snapshot API, not the removed `ModelConfig` API.
 - `model_parameters` is whole-object replace for the remaining Agent-global inference parameters such as temperature and default reasoning effort. Unknown keys are rejected; context, output, and built-in tool settings do not exist at Agent scope.
 - `subagent_settings` is a whole-object replace when supplied. Omitted create requests use the default `{ "max_subagents": 3, "max_depth": 1 }`; omitted update requests leave the stored settings unchanged.
+- `runtime_profile_id` on create uses explicit selection → Workspace default → unconfigured
+  precedence. An explicit ID must be an available Profile owned by the same Workspace.
+- `runtime_profile_id` on update is a partial-update field: omission leaves the selection unchanged,
+  explicit null clears it, and a non-null value replaces it. The request must include
+  `expected_runtime_profile_selection_version`.
+- Runtime Profile selection changes do not directly issue a lifecycle command or recreate physical
+  compute. They reconcile the authoritative desired configuration, and current lifecycle guards
+  decide whether explicit recreation is required.
 - Response returns stored `selectable_model_options`, `main_model_label`, `lightweight_model_label`, effective `model_selection`, effective `lightweight_model_selection`, `model_parameters`, `subagent_settings`, and effective context window value.
 
 ### 2.2 Workspace model settings
@@ -456,6 +488,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-07-31 | 59 | Replaced Agent Provider preference and execution-policy intent with exact Workspace Runtime Profile selection, creation-time default precedence, optimistic replacement, availability projection, and no Apply path. |
 | 2026-07-27 | 58 | Made the selected Profile the complete Runtime execution ceiling without a separate Platform policy. |
 | 2026-07-26 | 57 | Added Agent Runtime execution intent, explicit Apply, and server-authoritative status projection. |
 | 2026-07-26 | 55 | Added Agent-admin Single App ownership, read-only Multi App association context, and mode-aware decommission behavior |
