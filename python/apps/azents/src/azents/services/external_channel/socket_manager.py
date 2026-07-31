@@ -370,6 +370,7 @@ class SlackSocketManagerService:
             )
         result = await self.transport_ingestion_service.ingest_slack_event(
             event=event,
+            connected_bot_user_id=configuration.provider_bot_user_id,
             authority=ExternalChannelIngressAuthority(
                 kind=ExternalChannelIngressAuthorityKind.LEASE,
                 ingress_profile=ExternalChannelIngressProfile.SLACK_SOCKET,

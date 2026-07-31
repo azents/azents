@@ -95,6 +95,7 @@ class ExternalChannelShortcutSourceService:
                     event_type=shortcut_source_event.event_type,
                     tenant_id=shortcut_source_event.provider_tenant_id,
                     envelope=shortcut_source_event.envelope,
+                    connected_bot_user_id=connection.provider_bot_user_id,
                 )
                 if isinstance(normalized, SlackConnectionRevocation):
                     raise ValueError("Shortcut source is unavailable.")

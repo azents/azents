@@ -40,6 +40,8 @@ MAX_SLACK_URL_VERIFICATION_CHALLENGE_BYTES = 4 * 1024
 SLACK_SIGNATURE_TOLERANCE_SECONDS = 5 * 60
 SLACK_INTERACTION_TTL = datetime.timedelta(minutes=15)
 _MAX_SLACK_INTERACTION_FORM_FIELDS = 8
+_MAX_SLACK_AUTHORIZATIONS = 20
+_MAX_SLACK_IDENTIFIER_LENGTH = 255
 SLACK_REQUIRED_BOT_SCOPES = (
     "app_mentions:read",
     "channels:history",
@@ -703,7 +705,7 @@ class SlackWebAPIClient:
                 provider=ExternalChannelProvider.SLACK,
                 app_id=actual_app_id,
                 tenant_id=team_id,
-                bot_user_id=bot_id,
+                bot_user_id=user_id,
             ),
             capabilities=ExternalChannelCapabilitySnapshot(
                 provider=ExternalChannelProvider.SLACK,
@@ -1041,7 +1043,6 @@ def _project_envelope(
         "api_app_id",
         "team_id",
         "enterprise_id",
-        "authorizations",
     )
     event_keys = (
         "type",
@@ -1064,6 +1065,10 @@ def _project_envelope(
     projected: dict[str, object] = {
         key: payload[key] for key in top_level_keys if key in payload
     }
+    if "authorizations" in payload:
+        projected["authorizations"] = _project_slack_authorizations(
+            payload["authorizations"]
+        )
     projected_event = {key: event[key] for key in event_keys if key in event}
     if "blocks" in event:
         projected_event["blocks"] = _project_slack_blocks(event["blocks"])
@@ -1083,6 +1088,26 @@ def _project_envelope(
         raise SlackHTTPPayloadTooLarge(
             "Slack callback projection exceeds the size limit."
         )
+    return projected
+
+
+def _project_slack_authorizations(value: object) -> list[dict[str, object]]:
+    """Retain only bounded Bot User identities from the authenticated callback."""
+    if not isinstance(value, list):
+        return []
+    projected: list[dict[str, object]] = []
+    for item in value[:_MAX_SLACK_AUTHORIZATIONS]:
+        if not isinstance(item, dict):
+            continue
+        authorization: dict[str, object] = {}
+        is_bot = item.get("is_bot")
+        if isinstance(is_bot, bool):
+            authorization["is_bot"] = is_bot
+        for key in ("team_id", "user_id"):
+            field = item.get(key)
+            if isinstance(field, str) and field:
+                authorization[key] = field[:_MAX_SLACK_IDENTIFIER_LENGTH]
+        projected.append(authorization)
     return projected
 
 

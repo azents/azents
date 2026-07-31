@@ -79,6 +79,7 @@ class ExternalChannelTransportIngestionService:
         self,
         *,
         event: ExternalChannelTrigger,
+        connected_bot_user_id: str | None,
         authority: ExternalChannelIngressAuthority,
         deadline: ExternalChannelOperationDeadline,
     ) -> SlackTransportIngestionResult:
@@ -88,6 +89,7 @@ class ExternalChannelTransportIngestionService:
                 event_type=event.event_type,
                 tenant_id=_required_tenant(event),
                 envelope=event.envelope,
+                connected_bot_user_id=connected_bot_user_id,
             )
         except SlackEventExcluded:
             return None

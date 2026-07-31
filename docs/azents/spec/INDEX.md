@@ -14,7 +14,7 @@ Details of all living specs. Synchronized from frontmatter.
 |---|---|---|---|---|
 | agent | [Agent Domain Spec](domain/agent.md) | @Hardtack | 2026-07-31 | 59 |
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-07-31 | 136 |
-| external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-07-31 | 34 |
+| external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-07-31 | 35 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-31 | 14 |
 | memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-24 | 6 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-07-21 | 17 |
@@ -37,7 +37,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [External Channel Authorization](flow/external-channel-authorization.md) | @Hardtack | 2026-07-31 | 15 |
 | [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-07-31 | 26 |
 | [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-31 | 24 |
-| [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-31 | 23 |
+| [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-31 | 24 |
 | [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-07-30 | 36 |
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |

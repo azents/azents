@@ -95,6 +95,7 @@ class _Repository:
             id="connection-1",
             app_mode=ExternalChannelAppMode.MULTI,
             provider=self.provider,
+            provider_bot_user_id="UBOT",
         )
 
     async def create_resource_idempotent(
