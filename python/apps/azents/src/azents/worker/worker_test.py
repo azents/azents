@@ -91,6 +91,7 @@ from azents.worker.session.waiter import (
     SessionRunnerWaiter,
     ShutdownResult,
 )
+from azents.worker.worker import AgentWorker
 
 
 class _Broadcast:
@@ -918,6 +919,63 @@ async def _wait_until(predicate: Callable[[], bool]) -> None:
     """Wait with short yields until condition becomes true."""
     while not predicate():
         await asyncio.sleep(0)
+
+
+class _ReceiveBroker:
+    """Return one prepared Worker signal batch."""
+
+    def __init__(self, messages: list[SessionWakeUp]) -> None:
+        self.messages = messages
+
+    async def receive_messages(self) -> list[SessionWakeUp]:
+        """Return the prepared messages immediately."""
+        return self.messages
+
+
+@pytest.mark.asyncio
+async def test_receive_does_not_cancel_socket_manager_task() -> None:
+    """Normal broker activity must not cancel required transport supervision."""
+    manager_stop = asyncio.Event()
+
+    async def run_manager() -> None:
+        await manager_stop.wait()
+
+    socket_manager_task = asyncio.create_task(run_manager())
+    worker = AgentWorker.__new__(AgentWorker)
+    worker.broker = cast(SessionBroker, _ReceiveBroker([_wake_up()]))
+    try:
+        messages = await worker._receive_or_shutdown(  # pyright: ignore[reportPrivateUsage]
+            asyncio.Event(),
+            socket_manager_task,
+        )
+        assert messages == [_wake_up()]
+        assert not socket_manager_task.done()
+    finally:
+        manager_stop.set()
+        await socket_manager_task
+
+
+@pytest.mark.asyncio
+async def test_receive_propagates_socket_manager_failure() -> None:
+    """A failed required transport manager must terminate Worker supervision."""
+
+    async def fail_manager() -> None:
+        raise ValueError("manager failure")
+
+    class _BlockingBroker:
+        async def receive_messages(self) -> list[SessionWakeUp]:
+            await asyncio.Event().wait()
+            return []
+
+    socket_manager_task = asyncio.create_task(fail_manager())
+    worker = AgentWorker.__new__(AgentWorker)
+    worker.broker = cast(SessionBroker, _BlockingBroker())
+
+    with pytest.raises(RuntimeError, match="Slack Socket manager stopped unexpectedly"):
+        await worker._receive_or_shutdown(  # pyright: ignore[reportPrivateUsage]
+            asyncio.Event(),
+            socket_manager_task,
+        )
 
 
 def test_observed_terminal_run_event_requires_terminal_event() -> None:

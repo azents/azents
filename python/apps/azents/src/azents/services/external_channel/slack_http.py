@@ -2,7 +2,6 @@
 
 import datetime
 import hashlib
-import hmac
 import json
 from dataclasses import dataclass, field
 from typing import Literal
@@ -10,6 +9,7 @@ from urllib.parse import parse_qsl
 
 import aiohttp
 from slack_sdk.errors import SlackApiError
+from slack_sdk.signature import Clock, SignatureVerifier
 from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
@@ -227,33 +227,36 @@ def verify_slack_signature(
     signing_secret: str,
     now: datetime.datetime,
 ) -> None:
-    """Verify Slack's raw-body ``v0`` HMAC and bounded timestamp window."""
+    """Verify one request through the Slack SDK signature boundary."""
     if timestamp_header is None or signature_header is None:
         raise SlackHTTPUnauthorized("Slack signature headers are missing.")
-    try:
-        timestamp = int(timestamp_header)
-    except ValueError as error:
-        raise SlackHTTPUnauthorized("Slack request timestamp is invalid.") from error
     if now.tzinfo is None:
         raise ValueError("Signature verification requires a timezone-aware clock.")
-    age_seconds = abs(now.timestamp() - timestamp)
-    if age_seconds > SLACK_SIGNATURE_TOLERANCE_SECONDS:
-        raise SlackHTTPUnauthorized(
-            "Slack request timestamp is outside the replay window."
-        )
-    if not signature_header.startswith("v0="):
-        raise SlackHTTPUnauthorized("Slack request signature is malformed.")
-    signing_base = b"v0:" + timestamp_header.encode() + b":" + raw_body
-    expected = (
-        "v0="
-        + hmac.new(
-            signing_secret.encode(),
-            signing_base,
-            hashlib.sha256,
-        ).hexdigest()
+    verifier = SignatureVerifier(
+        signing_secret=signing_secret,
+        clock=_SlackSignatureClock(now),
     )
-    if not hmac.compare_digest(expected, signature_header):
+    try:
+        valid = verifier.is_valid(
+            body=raw_body,
+            timestamp=timestamp_header,
+            signature=signature_header,
+        )
+    except UnicodeDecodeError, ValueError:
+        valid = False
+    if not valid:
         raise SlackHTTPUnauthorized("Slack request signature is invalid.")
+
+
+class _SlackSignatureClock(Clock):
+    """Provide the request-local timestamp to the SDK verifier."""
+
+    def __init__(self, now: datetime.datetime) -> None:
+        self.request_time = now.timestamp()
+
+    def now(self) -> float:
+        """Return the injected timezone-aware request time."""
+        return self.request_time
 
 
 def parse_slack_callback_route(raw_body: bytes) -> SlackCallbackRoute:

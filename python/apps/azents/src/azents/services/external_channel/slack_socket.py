@@ -9,19 +9,14 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import aiohttp
-from slack_sdk.errors import SlackApiError
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
-from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from azents.core.enums import ExternalChannelInteractionType
 from azents.repos.external_channel.data import ExternalChannelTrigger
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
-)
-from azents.services.external_channel.slack_endpoint import (
-    slack_insecure_websocket_allowed,
 )
 from azents.services.external_channel.slack_http import (
     SlackEventCallback,
@@ -37,8 +32,6 @@ from azents.services.external_channel.slack_sdk_client import (
 
 MAX_SLACK_SOCKET_MESSAGE_BYTES = 256 * 1024
 DEFAULT_SLACK_SOCKET_PING_INTERVAL_SECONDS = 20.0
-DEFAULT_SLACK_SOCKET_PING_TIMEOUT_SECONDS = 20.0
-DEFAULT_SLACK_SOCKET_CONNECT_TIMEOUT_SECONDS = 20.0
 
 
 class SlackSocketError(ValueError):
@@ -59,13 +52,6 @@ class SlackSocketInvalidEnvelope(SlackSocketError):
 
 class SlackSocketRetryableIngestion(SlackSocketError):
     """A message envelope must remain unacknowledged for provider redelivery."""
-
-
-@dataclass(frozen=True)
-class SlackSocketConnectionOpen:
-    """One short-lived Socket Mode endpoint minted by Slack."""
-
-    url: str
 
 
 @dataclass(frozen=True)
@@ -98,7 +84,8 @@ type SlackSocketInteractionScheduler = Callable[
     [ExternalChannelInteractionHandoff],
     None,
 ]
-type SlackSocketSleep = Callable[[float], Awaitable[object]]
+type SlackSocketActiveReporter = Callable[[], Awaitable[object]]
+type SlackSocketGapReporter = Callable[[str], Awaitable[object]]
 type SlackSocketClock = Callable[[], datetime.datetime]
 
 
@@ -120,10 +107,6 @@ class SlackSocketSDKTransport(Protocol):
         """Send one SDK Socket Mode acknowledgement."""
         ...
 
-    async def is_connected(self) -> bool:
-        """Return whether the SDK transport is currently healthy."""
-        ...
-
 
 class SlackSocketSDKTransportFactory(Protocol):
     """Construct one SDK Socket Mode transport with explicit listeners."""
@@ -133,81 +116,19 @@ class SlackSocketSDKTransportFactory(Protocol):
         *,
         app_token: str,
         web_client: AsyncWebClient,
-        endpoint_url: str,
         ping_interval: float,
         on_message: Callable[[aiohttp.WSMessage], Awaitable[None]],
-        on_error: Callable[[aiohttp.WSMessage], Awaitable[None]],
-        on_close: Callable[[aiohttp.WSMessage], Awaitable[None]],
+        on_active: Callable[[], Awaitable[None]],
+        on_gap: Callable[[str], Awaitable[None]],
+        on_failure: Callable[[str, bool], Awaitable[None]],
     ) -> SlackSocketSDKTransport:
-        """Create one non-reconnecting SDK transport."""
+        """Create one automatically reconnecting observed SDK transport."""
         ...
 
 
 def _utc_now() -> datetime.datetime:
     """Return the current timezone-aware timestamp for durable event admission."""
     return datetime.datetime.now(datetime.UTC)
-
-
-class SlackSocketWebAPIClient:
-    """Open short-lived Slack Socket Mode endpoints with an app-level token."""
-
-    def __init__(self, web_client: AsyncWebClient) -> None:
-        self.web_client = web_client
-
-    async def open_connection(
-        self,
-        *,
-        app_token: str,
-    ) -> SlackSocketConnectionOpen:
-        """Request a Socket Mode endpoint without retaining the app token."""
-        try:
-            response = await self.web_client.apps_connections_open(
-                app_token=app_token,
-            )
-        except SlackApiError as error:
-            response = error.response
-            payload = (
-                response.data
-                if isinstance(response, AsyncSlackResponse)
-                and isinstance(response.data, dict)
-                else {}
-            )
-            if isinstance(response, AsyncSlackResponse) and (
-                response.status_code == 429 or response.status_code >= 500
-            ):
-                raise SlackSocketUnavailable(
-                    "Slack Socket Mode endpoint is temporarily unavailable."
-                ) from error
-            if payload.get("error") in {
-                "account_inactive",
-                "invalid_auth",
-                "not_authed",
-                "token_revoked",
-            }:
-                raise SlackSocketReconnectRequired(
-                    "Slack rejected the Socket Mode credentials."
-                ) from error
-            raise SlackSocketUnavailable(
-                "Slack rejected the Socket Mode app token."
-            ) from error
-        except (aiohttp.ClientError, TimeoutError) as error:
-            raise SlackSocketUnavailable(
-                "Slack Socket Mode endpoint is temporarily unavailable."
-            ) from error
-        payload = response.data if isinstance(response.data, dict) else {}
-        url = payload.get("url")
-        secure_url = isinstance(url, str) and url.startswith("wss://")
-        testenv_url = (
-            isinstance(url, str)
-            and url.startswith("ws://")
-            and slack_insecure_websocket_allowed()
-        )
-        if not secure_url and not testenv_url:
-            raise SlackSocketUnavailable(
-                "Slack Socket Mode endpoint response is invalid."
-            )
-        assert isinstance(url, str)
-        return SlackSocketConnectionOpen(url=url)
 
 
 class SlackSocketModeRunner:
@@ -220,41 +141,34 @@ class SlackSocketModeRunner:
         admit_event: SlackSocketEventAdmission,
         admit_interaction: SlackSocketInteractionAdmission | None = None,
         schedule_interaction: SlackSocketInteractionScheduler | None = None,
+        report_active: SlackSocketActiveReporter,
+        report_gap: SlackSocketGapReporter,
         transport_factory: SlackSocketSDKTransportFactory = (
             create_slack_socket_mode_client
         ),
-        sleep: SlackSocketSleep = asyncio.sleep,
         clock: SlackSocketClock = _utc_now,
         ping_interval_seconds: float = DEFAULT_SLACK_SOCKET_PING_INTERVAL_SECONDS,
-        ping_timeout_seconds: float = DEFAULT_SLACK_SOCKET_PING_TIMEOUT_SECONDS,
-        connect_timeout_seconds: float = DEFAULT_SLACK_SOCKET_CONNECT_TIMEOUT_SECONDS,
     ) -> None:
         """Initialize one SDK-backed connection runner."""
         if ping_interval_seconds <= 0:
             raise ValueError("Slack Socket Mode ping interval must be positive.")
-        if ping_timeout_seconds <= 0:
-            raise ValueError("Slack Socket Mode ping timeout must be positive.")
-        if connect_timeout_seconds <= 0:
-            raise ValueError("Slack Socket Mode connect timeout must be positive.")
         self.web_client = web_client
         self.admit_event = admit_event
         self.admit_interaction = admit_interaction
         self.schedule_interaction = schedule_interaction
+        self.report_active = report_active
+        self.report_gap = report_gap
         self.transport_factory = transport_factory
-        self.sleep = sleep
         self.clock = clock
         self.ping_interval_seconds = ping_interval_seconds
-        self.ping_timeout_seconds = ping_timeout_seconds
-        self.connect_timeout_seconds = connect_timeout_seconds
 
     async def run_connection(
         self,
         *,
         connection_id: str,
         app_token: str,
-        endpoint_url: str,
     ) -> SlackSocketConnectionResult:
-        """Process one SDK Socket Mode connection until Azents chooses reconnect."""
+        """Process Socket callbacks while the SDK owns recoverable reconnect."""
         loop = asyncio.get_running_loop()
         outcome: asyncio.Future[SlackSocketConnectionResult] = loop.create_future()
         admitted_event_count = 0
@@ -289,10 +203,8 @@ class SlackSocketModeRunner:
                     return
                 if envelope.type == "disconnect":
                     reason = _disconnect_reason(envelope.payload)
-                    finish(
-                        reconnect=reason != "link_disabled",
-                        reason=reason,
-                    )
+                    if reason == "link_disabled":
+                        finish(reconnect=False, reason=reason)
                     return
                 if envelope.type not in {"events_api", "interactive"}:
                     return
@@ -319,77 +231,64 @@ class SlackSocketModeRunner:
                 if not outcome.done():
                     outcome.set_exception(error)
 
-        async def on_error(_: aiohttp.WSMessage) -> None:
-            finish(reconnect=True, reason="connection_error")
+        async def on_active() -> None:
+            try:
+                await self.report_active()
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                if not outcome.done():
+                    outcome.set_exception(error)
 
-        async def on_close(_: aiohttp.WSMessage) -> None:
-            finish(reconnect=True, reason="connection_closed")
+        async def on_gap(reason: str) -> None:
+            try:
+                await self.report_gap(reason)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                if not outcome.done():
+                    outcome.set_exception(error)
 
-        sdk_ping_interval = min(
-            self.ping_interval_seconds,
-            self.ping_timeout_seconds / 4,
-        )
+        async def on_failure(reason: str, reconnect_required: bool) -> None:
+            if reconnect_required:
+                finish(reconnect=False, reason=reason)
+                return
+            try:
+                await self.report_gap(reason)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                if not outcome.done():
+                    outcome.set_exception(error)
+
         transport = self.transport_factory(
             app_token=app_token,
             web_client=self.web_client,
-            endpoint_url=endpoint_url,
-            ping_interval=sdk_ping_interval,
+            ping_interval=self.ping_interval_seconds,
             on_message=on_message,
-            on_error=on_error,
-            on_close=on_close,
+            on_active=on_active,
+            on_gap=on_gap,
+            on_failure=on_failure,
         )
-        watchdog_task: asyncio.Task[None] | None = None
+        connect_task: asyncio.Task[None] | None = None
         try:
-            try:
-                await asyncio.wait_for(
-                    transport.connect(),
-                    timeout=self.connect_timeout_seconds,
-                )
-            except TimeoutError as error:
-                raise SlackSocketUnavailable(
-                    "Slack Socket Mode transport connection timed out."
-                ) from error
-            watchdog_task = asyncio.create_task(
-                self._watch_transport(
-                    transport=transport,
-                    outcome=outcome,
-                    admitted_event_count=lambda: admitted_event_count,
-                )
+            await self.report_gap("socket_connecting")
+            connect_task = asyncio.create_task(transport.connect())
+            await asyncio.wait(
+                (connect_task, outcome),
+                return_when=asyncio.FIRST_COMPLETED,
             )
+            if outcome.done():
+                return outcome.result()
+            connect_task.result()
             return await outcome
         except asyncio.CancelledError:
             raise
         finally:
-            if watchdog_task is not None:
-                watchdog_task.cancel()
-                await asyncio.gather(watchdog_task, return_exceptions=True)
+            if connect_task is not None and not connect_task.done():
+                connect_task.cancel()
+                await asyncio.gather(connect_task, return_exceptions=True)
             await transport.close()
-
-    async def _watch_transport(
-        self,
-        *,
-        transport: SlackSocketSDKTransport,
-        outcome: asyncio.Future[SlackSocketConnectionResult],
-        admitted_event_count: Callable[[], int],
-    ) -> None:
-        """Surface closed or stale SDK sessions to the Azents lifecycle owner."""
-        check_interval = min(
-            self.ping_interval_seconds,
-            self.ping_timeout_seconds,
-        )
-        while not outcome.done():
-            await self.sleep(check_interval)
-            if await transport.is_connected():
-                continue
-            if not outcome.done():
-                outcome.set_result(
-                    SlackSocketConnectionResult(
-                        reconnect=True,
-                        reason="connection_inactive",
-                        admitted_event_count=admitted_event_count(),
-                    )
-                )
-            return
 
     async def _admit_envelope(
         self,

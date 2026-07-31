@@ -1568,6 +1568,10 @@ class DiscordWebSocketHandler(socketserver.BaseRequestHandler):
             )
         else:
             return
+        if scenario == "reconnect":
+            STATE.gateway_terminal(scenario)
+            _send_websocket_text(self.request, {"op": 7, "d": None})
+            return
         for dispatch in dispatches:
             _send_websocket_text(
                 self.request,
@@ -1579,10 +1583,6 @@ class DiscordWebSocketHandler(socketserver.BaseRequestHandler):
                 },
             )
             STATE.gateway_dispatch_sent(dispatch)
-        if scenario == "reconnect":
-            STATE.gateway_terminal(scenario)
-            _send_websocket_text(self.request, {"op": 7, "d": None})
-            return
         if scenario == "invalid_session_resumable":
             STATE.gateway_terminal(scenario)
             _send_websocket_text(self.request, {"op": 9, "d": True})

@@ -326,10 +326,10 @@ async def test_stale_owned_socket_revocation_is_not_acknowledged() -> None:
 
 
 @pytest.mark.asyncio
-async def test_retryable_ingestion_records_gap_before_owned_reconnect(
+async def test_retryable_ingestion_releases_degraded_after_sdk_lifecycle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A no-ack ingestion failure reconnects under the retained lease lifecycle."""
+    """A no-ack failure closes the SDK so provider redelivery can recover."""
     service = _service(_SessionDouble(), _RepositoryDouble())
     configuration = SimpleNamespace(
         provider_app_id="app-1",
@@ -349,22 +349,24 @@ async def test_retryable_ingestion_records_gap_before_owned_reconnect(
             )
         ),
     )
-    shutdown_event = asyncio.Event()
     claim = AsyncMock(return_value=configuration)
     mark_active = AsyncMock(return_value=True)
-    run_connection = AsyncMock(side_effect=SlackSocketRetryableIngestion("retryable"))
     record_gap = AsyncMock(return_value=True)
-
-    async def stop_after_gap(_: asyncio.Event) -> None:
-        shutdown_event.set()
-
-    sleep_or_shutdown = AsyncMock(side_effect=stop_after_gap)
     release = AsyncMock(return_value=True)
+
+    class _RetryableRunner:
+        def __init__(self, **kwargs: object) -> None:
+            self.report_active = kwargs["report_active"]
+            self.report_gap = kwargs["report_gap"]
+
+        async def run_connection(self, **_: object) -> None:
+            await self.report_gap("socket_connecting")  # type: ignore[operator]
+            await self.report_active()  # type: ignore[operator]
+            raise SlackSocketRetryableIngestion("retryable")
+
     monkeypatch.setattr(service, "_claim", claim)
     monkeypatch.setattr(service, "_mark_active", mark_active)
-    monkeypatch.setattr(service, "_run_connection_with_lease", run_connection)
     monkeypatch.setattr(service, "_record_gap", record_gap)
-    monkeypatch.setattr(service, "_sleep_or_shutdown", sleep_or_shutdown)
     monkeypatch.setattr(service, "_release", release)
     monkeypatch.setattr(
         socket_manager_module,
@@ -373,32 +375,23 @@ async def test_retryable_ingestion_records_gap_before_owned_reconnect(
     )
     monkeypatch.setattr(
         socket_manager_module,
-        "SlackSocketWebAPIClient",
-        lambda _: SimpleNamespace(
-            open_connection=AsyncMock(
-                return_value=SimpleNamespace(url="wss://socket.example")
-            )
-        ),
-    )
-    monkeypatch.setattr(
-        socket_manager_module,
         "SlackSocketModeRunner",
-        lambda **_: object(),
+        _RetryableRunner,
     )
 
     await service._run_owned_connection(  # pyright: ignore[reportPrivateUsage]
         connection_id="connection-1",
-        shutdown_event=shutdown_event,
+        shutdown_event=asyncio.Event(),
     )
 
     record_gap.assert_awaited_once_with(
         "connection-1",
-        "socket_ingestion_retryable",
+        "socket_connecting",
     )
-    sleep_or_shutdown.assert_awaited_once_with(shutdown_event)
+    mark_active.assert_awaited_once_with("connection-1")
     release.assert_awaited_once_with(
         "connection-1",
-        reason="socket_manager_shutdown",
+        reason="socket_ingestion_retryable",
         status=ExternalChannelConnectionStatus.DEGRADED,
     )
 

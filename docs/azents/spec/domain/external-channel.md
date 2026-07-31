@@ -53,8 +53,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-07-30
-spec_version: 28
+last_verified_at: 2026-07-31
+spec_version: 29
 ---
 
 # External Channel
@@ -121,13 +121,13 @@ contain multiple independent bindings.
   Direct HTTP is limited to authenticated private-file streaming and presigned upload
   bodies. Dedicated non-propagating SDK loggers prevent provider request and response
   content from entering application diagnostics.
-- Slack Socket Mode mints endpoints through the same high-level SDK client. The public
-  aiohttp `SocketModeClient` owns WebSocket connection mechanics, Ping/Pong, frame
-  receipt, and acknowledgement transmission with SDK automatic reconnect disabled.
-  Azents owns the fenced lease, endpoint-scoped connect/close policy, durable admission,
-  acknowledgement ordering, normalized reconnect decision, and gap persistence. Public
-  SDK Socket Mode request and response types validate envelopes and construct
-  acknowledgements.
+- Slack Socket Mode uses the public aiohttp `SocketModeClient` with SDK automatic
+  reconnect enabled. The SDK owns endpoint acquisition and replacement, WebSocket
+  establishment, Ping/Pong, stale-session detection, frame receipt, queue dispatch,
+  and recoverable reconnect. Azents owns the fenced lease, synchronous durable
+  admission, acknowledgement ordering, typed lifecycle projection, and bounded
+  terminal health classification. Public SDK Socket Mode request and response types
+  validate envelopes and construct acknowledgements.
 - An unbound resource resolves only through an existing binding, the Single App's
   sole route, a valid Multi App channel default, or explicit selector completion, in
   that order. It never chooses an arbitrary candidate. A resource has at most one
@@ -162,6 +162,12 @@ contain multiple independent bindings.
   reads raw Gateway payloads/private SDK state nor persists a cross-process Gateway
   Resume checkpoint. Durable provider-event idempotency and the current
   lease/configuration/App-claim fence protect canonical admission.
+- Discord `ready`, `resumed`, and `disconnect` callbacks update active or degraded
+  health only through the current lease fence. Slack Socket establishment and endpoint
+  replacement callbacks use the equivalent fenced active/gap transitions. An Agent
+  Worker treats unexpected Slack Socket manager completion as a process-level
+  supervision failure, while one customer configuration requiring reconnection remains
+  connection-local health.
 - Production Discord Gateway endpoint selection belongs to `discord.py`; Azents does
   not expose a custom or insecure Gateway endpoint override.
 - Inbound Slack and Discord attachments retain only bounded identifiers, filename, media
@@ -297,6 +303,10 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-31** (spec_version 29) — Delegated Slack Socket endpoint acquisition,
+  stale recovery, queue dispatch, and reconnect to the SDK; projected Slack and
+  Discord typed lifecycle evidence through fenced health transitions; and made
+  unexpected Slack Socket manager completion terminate Worker supervision.
 - **2026-07-30** (spec_version 28) — Raised verified inbound attachment eligibility to
   500 MiB, bound Agent selection to the displayed byte size, required matching current
   metadata/HTTP `Content-Length`/received-body evidence, and retained provider bytes
