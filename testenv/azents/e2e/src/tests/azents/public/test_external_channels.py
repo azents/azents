@@ -892,7 +892,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
     # The initial callback, duplicate delivery, and Allow replay each revalidate
     # provider history before one mailbox input wins.
     assert typed_counts["conversations.history"] == 3
-    assert typed_counts["chat.getPermalink"] == 4
+    assert typed_counts["chat.getPermalink"] == 3
     # One access-review control is deleted after approval. Durable acceptance then
     # delivers the Session link followed by the initial provider-native work progress.
     assert typed_counts["chat.postMessage"] == 3

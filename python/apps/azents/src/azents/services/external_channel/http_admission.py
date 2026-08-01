@@ -208,6 +208,7 @@ class SlackHTTPAdmissionService:
                     )
                 result = await self.transport_ingestion_service.ingest_slack_event(
                     event=event,
+                    connected_bot_user_id=configuration.provider_bot_user_id,
                     authority=ExternalChannelIngressAuthority(
                         kind=ExternalChannelIngressAuthorityKind.CONFIGURATION,
                         ingress_profile=ExternalChannelIngressProfile.SLACK_HTTP,

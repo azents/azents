@@ -51,7 +51,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-07-31
-spec_version: 23
+spec_version: 24
 ---
 
 # External Channel Provider Ingress
@@ -65,6 +65,12 @@ Connect, Discord DMs/group DMs, reactions, slash commands, and unrelated bot
 auto-triggers are outside the current scope. A tracked conversation is one provider
 thread rooted by an eligible App mention or message shortcut and resolved to one
 available Agent route whose Agent lifecycle is active.
+
+Slack invocation classification accepts the provider-native `app_mention` event and
+also a subtype-free human `message` whose bounded text explicitly references a
+same-Team Bot User identity from the authenticated callback authorization or current
+connection configuration. Other `message` callbacks remain context-only, including
+connected-App output, unrelated mentions, and visible message subtypes.
 
 ## HTTP Admission
 
@@ -329,6 +335,9 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-07-31** (spec_version 24) — Recognized authenticated same-Team Slack Bot
+  User mentions delivered as subtype-free human `message` callbacks while preserving
+  fail-closed context handling for unrelated or App-authored messages.
 - **2026-07-31** (spec_version 23) — Added durable ordered Session activation as
   the shared binding-to-wake authority, blocked execution after terminal provider
   initialization failure, and corrected Session navigation to the canonical `/w`

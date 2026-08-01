@@ -164,26 +164,35 @@ def _authority(
     )
 
 
-def _slack_event(*, thread_ts: str | None = None) -> ExternalChannelTrigger:
+def _slack_event(
+    *,
+    thread_ts: str | None = None,
+    event_type: str = "app_mention",
+    text: str = "private inbound content",
+    authorizations: list[dict[str, object]] | None = None,
+) -> ExternalChannelTrigger:
     event: dict[str, object] = {
-        "type": "app_mention",
+        "type": event_type,
         "channel": "C100",
         "user": "U100",
-        "text": "private inbound content",
+        "text": text,
         "ts": "100.000001",
     }
     if thread_ts is not None:
         event["thread_ts"] = thread_ts
+    envelope: dict[str, object] = {"event": event}
+    if authorizations is not None:
+        envelope["authorizations"] = authorizations
     return ExternalChannelTrigger(
         connection_id="connection-1",
         provider_event_id="event-1",
         transport_envelope_id=None,
-        event_type="app_mention",
+        event_type=event_type,
         provider_app_id="A100",
         provider_tenant_id="T100",
         provider_enterprise_id=None,
         resource_correlation_key=None,
-        envelope={"event": event},
+        envelope=envelope,
         provider_occurred_at=None,
         received_at=_NOW,
     )
@@ -231,6 +240,7 @@ async def test_slack_parent_invocation_projects_content_free_parent_request() ->
 
     outcome = await service.ingest_slack_event(
         event=_slack_event(),
+        connected_bot_user_id="UAUTH",
         authority=_authority(ExternalChannelIngressProfile.SLACK_HTTP),
         deadline=external_channel_transport_deadline(_NOW),
     )
@@ -250,6 +260,7 @@ async def test_slack_manual_thread_invocation_reuses_root_scope() -> None:
 
     await service.ingest_slack_event(
         event=_slack_event(thread_ts="90.000001"),
+        connected_bot_user_id="UAUTH",
         authority=_authority(ExternalChannelIngressProfile.SLACK_SOCKET),
         deadline=external_channel_transport_deadline(_NOW),
     )
@@ -258,6 +269,32 @@ async def test_slack_manual_thread_invocation_reuses_root_scope() -> None:
     assert request.scope.kind is ExternalChannelConversationScopeKind.THREAD
     assert request.scope.provider_thread_key == "90.000001"
     assert request.locator.delivery_thread_key == "90.000001"
+
+
+@pytest.mark.asyncio
+async def test_slack_message_targeting_authorized_bot_projects_invocation() -> None:
+    service, ingestion = _service()
+
+    await service.ingest_slack_event(
+        event=_slack_event(
+            event_type="message",
+            text="<@UAUTH> private inbound content",
+            authorizations=[
+                {
+                    "is_bot": True,
+                    "team_id": "T100",
+                    "user_id": "UAUTH",
+                }
+            ],
+        ),
+        connected_bot_user_id="BOLD",
+        authority=_authority(ExternalChannelIngressProfile.SLACK_HTTP),
+        deadline=external_channel_transport_deadline(_NOW),
+    )
+
+    request = ingestion.requests[0]
+    assert request.locator.invocation is True
+    assert "private inbound content" not in repr(request)
 
 
 @pytest.mark.asyncio

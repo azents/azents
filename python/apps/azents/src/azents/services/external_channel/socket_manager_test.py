@@ -196,6 +196,7 @@ def _configuration() -> ExternalChannelConnectionConfiguration:
         SimpleNamespace(
             provider_app_id="app-1",
             provider_tenant_id="tenant-1",
+            provider_bot_user_id="UBOT",
             configuration_generation=2,
         ),
     )
@@ -244,6 +245,7 @@ async def test_owned_socket_event_uses_lease_authority_without_legacy_admission(
 
     assert isinstance(result, ExternalChannelIngestionOutcome)
     call = transport.ingest_slack_event.await_args.kwargs
+    assert call["connected_bot_user_id"] == "UBOT"
     authority = call["authority"]
     assert isinstance(authority, ExternalChannelIngressAuthority)
     assert authority.ingress_profile is ExternalChannelIngressProfile.SLACK_SOCKET

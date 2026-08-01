@@ -290,6 +290,7 @@ def normalize_slack_event(
         tenant_id=tenant_id,
         envelope=envelope,
         trusted_block_projection=False,
+        connected_bot_user_id=None,
     )
 
 
@@ -298,6 +299,7 @@ def normalize_projected_slack_event(
     event_type: str,
     tenant_id: str,
     envelope: dict[str, object],
+    connected_bot_user_id: str | None,
 ) -> SlackConnectionRevocation | SlackNormalizedMessage:
     """Normalize one Azents-projected admitted Slack event."""
     return _normalize_slack_event(
@@ -305,6 +307,7 @@ def normalize_projected_slack_event(
         tenant_id=tenant_id,
         envelope=envelope,
         trusted_block_projection=True,
+        connected_bot_user_id=connected_bot_user_id,
     )
 
 
@@ -314,6 +317,7 @@ def _normalize_slack_event(
     tenant_id: str,
     envelope: dict[str, object],
     trusted_block_projection: bool,
+    connected_bot_user_id: str | None,
 ) -> SlackConnectionRevocation | SlackNormalizedMessage:
     """Normalize one Slack event with an explicit block trust boundary."""
     if event_type == "app_uninstalled":
@@ -371,7 +375,16 @@ def _normalize_slack_event(
     provider_created_at = _slack_timestamp(message_ts)
     provider_position = slack_provider_position(message_ts)
     revision_key = _revision_key(message_ts=message_ts)
-    invocation = event_type == "app_mention"
+    invocation = _slack_message_invocation(
+        event_type=event_type,
+        subtype=subtype,
+        author_type=author_type,
+        provider_user_id=provider_user_id,
+        normalized_body=normalized_body,
+        tenant_id=tenant_id,
+        envelope=envelope,
+        connected_bot_user_id=connected_bot_user_id,
+    )
     return SlackNormalizedMessage(
         tenant_id=tenant_id,
         channel_id=channel_id,
@@ -2098,6 +2111,69 @@ def slack_message_reference_ids(body: str | None) -> tuple[set[str], set[str]]:
         set(sorted(user_ids)[:_MAX_REFERENCE_IDS]),
         set(sorted(channel_ids)[:_MAX_REFERENCE_IDS]),
     )
+
+
+def _slack_message_invocation(
+    *,
+    event_type: str,
+    subtype: str | None,
+    author_type: ExternalChannelPrincipalAuthorType,
+    provider_user_id: str | None,
+    normalized_body: str,
+    tenant_id: str,
+    envelope: dict[str, object],
+    connected_bot_user_id: str | None,
+) -> bool:
+    """Classify only explicit human references to the authenticated Slack bot."""
+    if event_type == "app_mention":
+        return True
+    if (
+        subtype is not None
+        or author_type is not ExternalChannelPrincipalAuthorType.HUMAN
+    ):
+        return False
+    target_user_ids = _connected_slack_bot_user_ids(
+        tenant_id=tenant_id,
+        envelope=envelope,
+        connected_bot_user_id=connected_bot_user_id,
+    )
+    if not target_user_ids or provider_user_id in target_user_ids:
+        return False
+    return any(
+        (match.group(1) or match.group(2)) in target_user_ids
+        for match in _SLACK_USER_REFERENCE.finditer(normalized_body)
+    )
+
+
+def _connected_slack_bot_user_ids(
+    *,
+    tenant_id: str,
+    envelope: dict[str, object],
+    connected_bot_user_id: str | None,
+) -> set[str]:
+    """Return configured or authenticated callback Bot User identities."""
+    user_ids: set[str] = set()
+    if isinstance(connected_bot_user_id, str) and _valid_slack_user_id(
+        connected_bot_user_id
+    ):
+        user_ids.add(connected_bot_user_id)
+    authorizations = envelope.get("authorizations")
+    if not isinstance(authorizations, list):
+        return user_ids
+    for authorization in authorizations:
+        if (
+            isinstance(authorization, dict)
+            and authorization.get("is_bot") is True
+            and authorization.get("team_id") == tenant_id
+        ):
+            user_id = authorization.get("user_id")
+            if isinstance(user_id, str) and _valid_slack_user_id(user_id):
+                user_ids.add(user_id)
+    return user_ids
+
+
+def _valid_slack_user_id(value: str) -> bool:
+    return len(value) > 1 and value[0] in {"U", "W"} and value.isalnum()
 
 
 def _channel_display_name(channel: dict[str, object]) -> str | None:

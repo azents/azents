@@ -54,7 +54,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-07-31
-spec_version: 34
+spec_version: 35
 ---
 
 # External Channel
@@ -294,14 +294,17 @@ provider rollout flag; Discord Multi App creation is subject to the shared Multi
 gate. Every enabled Server deployment includes the provider-neutral External Channel
 Gateway.
 
-Slack validation first uses `auth.test` to resolve Team and Bot identity, then uses
-`bots.info` to verify that the Bot Token's actual App ID equals the configured App
-ID. An App ID copied from a different Slack App is rejected as a recoverable
-configuration error rather than being marked active. Validation also checks the
-provider-reported OAuth scope header when present and requires the message,
-conversation-history, conversation-metadata, posting, and user identity scopes used
-by the adapter. `files:read` and `files:write` independently grant download and upload
-capabilities; either may remain unavailable without disabling text conversation.
+Slack validation first uses `auth.test` to resolve the Team, Bot User ID, and Bot ID.
+It retains `auth.test.user_id` as `provider_bot_user_id` and uses the separate Bot ID
+only with `bots.info` to verify that the Bot Token's actual App ID equals the
+configured App ID. An App ID copied from a different Slack App is rejected as a
+recoverable configuration error rather than being marked active. Authenticated event
+callbacks may also contribute a same-Team bot authorization identity for invocation
+classification without another provider call. Validation checks the provider-reported
+OAuth scope header when present and requires the message, conversation-history,
+conversation-metadata, posting, and user identity scopes used by the adapter.
+`files:read` and `files:write` independently grant download and upload capabilities;
+either may remain unavailable without disabling text conversation.
 
 Disconnect has no lifecycle-status admission guard. It disables inbound routing,
 clears credentials, terminalizes owned live state, and commits the terminal
@@ -325,6 +328,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-07-31** (spec_version 35) — Corrected Slack Bot User identity persistence
+  to `auth.test.user_id` and recognized authenticated callback Bot User mentions when
+  Slack delivers a human mention as a normal message event.
 - **2026-07-31** (spec_version 34) — Added the dedicated External Channel
   continuation contract across runtime, persistence, model lowering, API, and UI.
 - **2026-07-31** (spec_version 33) — Added durable ordered Session activation
