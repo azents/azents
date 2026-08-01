@@ -69,9 +69,6 @@ def render_discord_session_presence(
         text="",
         embeds=[
             {
-                "title": (
-                    "Session connected" if state == "joined" else "Session disconnected"
-                ),
                 "description": description,
                 "color": (
                     _SESSION_JOINED_COLOR if state == "joined" else _SESSION_LEFT_COLOR

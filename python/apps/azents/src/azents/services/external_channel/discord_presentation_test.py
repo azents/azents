@@ -9,8 +9,53 @@ from azents.repos.external_channel.work_data import ChannelWorkTask
 from azents.services.external_channel.discord_presentation import (
     DISCORD_DELIVERY_TEXT_LIMIT,
     render_discord_progress,
+    render_discord_session_presence,
     split_discord_markdown,
 )
+
+
+def test_session_presence_uses_titleless_embed_and_session_link() -> None:
+    """Discord Session presence stays compact while retaining navigation."""
+    joined = render_discord_session_presence(
+        agent_name="Research Agent",
+        session_url="https://azents.example/session",
+        state="joined",
+    )
+    left = render_discord_session_presence(
+        agent_name="Research Agent",
+        session_url="https://azents.example/session",
+        state="left",
+    )
+
+    assert joined.embeds == [
+        {
+            "description": "**Research Agent** joined this conversation.",
+            "color": 0x57F287,
+        }
+    ]
+    assert left.embeds == [
+        {
+            "description": "**Research Agent** left this conversation.",
+            "color": 0x99AAB5,
+        }
+    ]
+    assert (
+        joined.components
+        == left.components
+        == [
+            {
+                "type": 1,
+                "components": [
+                    {
+                        "type": 2,
+                        "style": 5,
+                        "label": "View session",
+                        "url": "https://azents.example/session",
+                    }
+                ],
+            }
+        ]
+    )
 
 
 def test_splits_long_text_at_readable_boundaries() -> None:

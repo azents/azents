@@ -1840,10 +1840,10 @@ def _session_presence_category(body: dict[str, object]) -> str | None:
     for raw_embed in cast(list[object], embeds):
         if not isinstance(raw_embed, dict):
             continue
-        title = cast(dict[str, object], raw_embed).get("title")
-        if title == "Session connected":
+        color = cast(dict[str, object], raw_embed).get("color")
+        if color == 0x57F287:
             return "session_presence_joined"
-        if title == "Session disconnected":
+        if color == 0x99AAB5:
             return "session_presence_left"
     return None
 
