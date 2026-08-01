@@ -2977,6 +2977,10 @@ def test_connection_management_web_surface_uses_redacted_operational_state(
             )
         )
     )
+    cast(Any, browser_driver).execute_script(
+        "arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});",
+        connection,
+    )
     connection_text = connection.text
     assert "Slack" in connection_text
     assert "ACTIVE" in connection_text

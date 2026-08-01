@@ -42,7 +42,16 @@ export function SettingsPageLayout({
           </Button>
         </Group>
       </Box>
-      <Box style={{ flex: 1, minHeight: 0 }}>{children}</Box>
+      <Box
+        style={{
+          display: "flex",
+          flex: 1,
+          flexDirection: "column",
+          minHeight: 0,
+        }}
+      >
+        {children}
+      </Box>
     </Box>
   );
 }
