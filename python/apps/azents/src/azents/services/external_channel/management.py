@@ -681,7 +681,7 @@ class ExternalChannelManagementService:
                 raise ExternalChannelManagementNotFound(route_id)
             connection.updated_at = now
             await session.commit()
-        for delivery_id in removal.progress_delete_intent_ids:
+        for delivery_id in removal.cleanup_intent_ids:
             await self.action_service.attempt_delivery(delivery_id)
         return removal.impact
 
@@ -847,7 +847,7 @@ class ExternalChannelManagementService:
             )
             if disconnected is None:
                 raise ExternalChannelManagementNotFound(connection_id)
-            for delivery_id in disconnected.progress_delete_intent_ids:
+            for delivery_id in disconnected.cleanup_intent_ids:
                 target = await self.action_service.prepare_delivery_in_session(
                     session,
                     delivery_id,
@@ -863,7 +863,7 @@ class ExternalChannelManagementService:
             connection.updated_at = now
             await session.commit()
         for target in cleanup_targets:
-            await self.action_service.attempt_prepared_delivery(target)
+            await self.action_service.attempt_captured_terminal_delivery(target)
         return _managed_multi_disconnect(disconnected)
 
     async def load_multi_management_handoff(
@@ -1062,7 +1062,7 @@ class ExternalChannelManagementService:
                 raise ExternalChannelManagementNotFound(connection_id)
             await session.commit()
         for target in cleanup_targets:
-            await self.action_service.attempt_prepared_delivery(target)
+            await self.action_service.attempt_captured_terminal_delivery(target)
         return connection
 
     async def update_connection_access_policy(

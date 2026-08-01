@@ -86,7 +86,7 @@ class _ActionService:
             SimpleNamespace(delivery_attempt_id=delivery_attempt_id),
         )
 
-    async def attempt_prepared_delivery(
+    async def attempt_captured_terminal_delivery(
         self,
         target: ChannelDeliveryTarget,
     ) -> None:

@@ -78,6 +78,9 @@ class ChannelDeliveryTarget(_Record):
     encrypted_credentials: str | None
     provider_tenant_id: str | None
     capabilities: dict[str, Any] | None
+    workspace_handle: str | None
+    agent_id: str | None
+    agent_session_id: str | None
     agent_name: str | None
     agent_avatar: dict[str, Any] | None
     request_payload: dict[str, Any]

@@ -98,5 +98,5 @@ class ExternalChannelConnectionRevocationService:
                     return False
             await session.commit()
         for target in cleanup_targets:
-            await self.action_service.attempt_prepared_delivery(target)
+            await self.action_service.attempt_captured_terminal_delivery(target)
         return True

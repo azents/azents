@@ -35,7 +35,7 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
 last_verified_at: 2026-08-01
-spec_version: 16
+spec_version: 17
 ---
 
 # External Channel Authorization
@@ -143,8 +143,8 @@ position is still before the trigger, it reads forward normally; if another acce
 invocation advanced past the trigger, it reuses the saved range start and exact trigger
 boundary. It then reuses the committed binding and atomically commits the deterministic
 canonical mailbox item, conversation-position advance, Session running transition, and
-deterministic Session-link and initial-progress delivery intents. Both position cases
-converge on one mailbox item and logical wake.
+deterministic joined-presence and initial-progress delivery intents. Both position
+cases converge on one mailbox item and logical wake.
 Repeating a compatible Allow may perform the same provider-history replay to recover a
 post-commit failure, but mailbox identity prevents another Session input or execution.
 Replay failure never reverts the already committed access decision or binding, and it
@@ -174,6 +174,8 @@ Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-08-01** (spec_version 17) — Replaced the initial button-only Session link
+  with a joined-presence control that retains canonical Session navigation.
 - **2026-08-01** (spec_version 16) — Made Allow replay converge through the
   conversation position and canonical mailbox while provider-control delivery remains
   independent.

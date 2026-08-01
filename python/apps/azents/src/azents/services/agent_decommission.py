@@ -314,7 +314,7 @@ class AgentDecommissionService:
                         context,
                     )
                     if result is not None:
-                        archive_cleanup_ids = result.progress_delete_intent_ids
+                        archive_cleanup_ids = result.cleanup_intent_ids
 
                 await self.lifecycle_orchestrator.archive(
                     context=SessionLifecycleTransitionContext(
@@ -380,9 +380,9 @@ class AgentDecommissionService:
                 now=now,
             )
             external_cleanup_targets = (
-                await self.external_channel_lifecycle_service.prepare_progress_cleanup(
+                await self.external_channel_lifecycle_service.prepare_cleanup(
                     session,
-                    external_cleanup.progress_delete_intent_ids,
+                    external_cleanup.cleanup_intent_ids,
                 )
             )
             await cleanup_service.purge_decommissioned_provider_state(
@@ -409,8 +409,9 @@ class AgentDecommissionService:
                 raise RuntimeError("Agent decommission lease was lost")
             await session.commit()
 
-        await self.external_channel_lifecycle_service.consume_prepared_progress_cleanup(
-            external_cleanup_targets
+        await self.external_channel_lifecycle_service.consume_prepared_cleanup(
+            external_cleanup_targets,
+            external_cleanup.provider_state_purge_connection_ids,
         )
         for file in files:
             if file.blob_deleted_at is not None:

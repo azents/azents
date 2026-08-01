@@ -339,11 +339,11 @@ class _ExternalChannelDecommissionCleanupDouble:
         del session, agent_id, now
         self.events.append("external-channel-cleanup")
         return SimpleNamespace(
-            progress_delete_intent_ids=("delivery-1",),
+            cleanup_intent_ids=("delivery-1",),
             provider_state_purge_connection_ids=("connection-1",),
         )
 
-    async def prepare_progress_cleanup(
+    async def prepare_cleanup(
         self,
         session: AsyncSession,
         delivery_ids: tuple[str, ...],
@@ -351,7 +351,7 @@ class _ExternalChannelDecommissionCleanupDouble:
         """Capture provider cleanup targets before the transaction commits."""
         del session
         assert delivery_ids == ("delivery-1",)
-        self.events.append("prepare-progress-cleanup")
+        self.events.append("prepare-cleanup")
         return ("target-1",)
 
     async def purge_decommissioned_provider_state(
@@ -365,13 +365,15 @@ class _ExternalChannelDecommissionCleanupDouble:
         self.events.append("purge-provider-state")
         return 1
 
-    async def consume_prepared_progress_cleanup(
+    async def consume_prepared_cleanup(
         self,
         targets: tuple[str, ...],
+        purged_connection_ids: tuple[str, ...],
     ) -> int:
         """Record one post-commit provider cleanup attempt."""
         assert targets == ("target-1",)
-        self.events.append("consume-progress-cleanup")
+        assert purged_connection_ids == ("connection-1",)
+        self.events.append("consume-cleanup")
         return 1
 
 
@@ -490,10 +492,10 @@ async def test_decommission_cleanup_removes_external_agent_roots_first() -> None
 
     assert events == [
         "external-channel-cleanup",
-        "prepare-progress-cleanup",
+        "prepare-cleanup",
         "purge-provider-state",
         "expire-unbound-files",
-        "consume-progress-cleanup",
+        "consume-cleanup",
     ]
 
 

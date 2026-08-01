@@ -8,6 +8,10 @@ from azents.core.external_channel_progress import (
     ExternalChannelDesiredProgress,
     ExternalChannelWorkTask,
 )
+from azents.core.external_channel_session_presence import (
+    ExternalChannelSessionPresenceState,
+    session_presence_sentence,
+)
 
 _CHECKING_TITLE = "Agent is checking your message"
 SLACK_FALLBACK_TEXT_MAX_LENGTH = 4_000
@@ -87,25 +91,42 @@ def render_slack_persisted_progress(
     )
 
 
-def render_slack_session_link(session_url: str) -> SlackProgressPresentation:
-    """Render the one-time Session link message for a new binding."""
+def render_slack_session_presence(
+    *,
+    agent_name: str,
+    session_url: str,
+    state: ExternalChannelSessionPresenceState,
+) -> SlackProgressPresentation:
+    """Render one Session binding presence control with navigation."""
+    text = session_presence_sentence(agent_name, state)
+    escaped_name = (
+        agent_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+    verb = "joined" if state == "joined" else "left"
     return SlackProgressPresentation(
-        text="Open Azents session",
+        text=text,
         blocks=[
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*{escaped_name}* {verb} this conversation.",
+                },
+            },
             {
                 "type": "actions",
                 "elements": [
                     {
                         "type": "button",
-                        "action_id": "open_azents_session",
+                        "action_id": "view_azents_session",
                         "text": {
                             "type": "plain_text",
-                            "text": "Open Azents session",
+                            "text": "View session",
                         },
                         "url": session_url,
                     }
                 ],
-            }
+            },
         ],
     )
 

@@ -326,6 +326,28 @@ def _successful_session_paths(provider_state: dict[str, object]) -> list[str]:
     return paths
 
 
+def _successful_session_presence_states(
+    provider_state: dict[str, object],
+) -> list[str]:
+    """Return sanitized joined/left evidence from successful provider controls."""
+    deliveries = provider_state.get("deliveries")
+    if not isinstance(deliveries, list):
+        return []
+    states: list[str] = []
+    for raw_delivery in cast(list[object], deliveries):
+        if not isinstance(raw_delivery, dict):
+            continue
+        delivery = cast(dict[str, object], raw_delivery)
+        category = delivery.get("safe_category")
+        if delivery.get("outcome") not in {"delivered", "created", "duplicate"}:
+            continue
+        if category == "session_presence_joined":
+            states.append("joined")
+        elif category == "session_presence_left":
+            states.append("left")
+    return states
+
+
 def _external_channel_input_evidence(
     *,
     public_server_url: str,
@@ -915,15 +937,49 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert typed_counts["conversations.history"] == 3
     assert typed_counts["chat.getPermalink"] == 3
     # One access-review control is deleted after approval. Durable acceptance then
-    # delivers the Session link followed by the initial provider-native work progress.
+    # delivers joined presence followed by the initial provider-native work progress.
     assert typed_counts["chat.postMessage"] == 3
     assert typed_counts["chat.delete"] == 1
     assert _successful_session_paths(provider_state) == [
         f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}"
     ]
+    assert _successful_session_presence_states(provider_state) == ["joined"]
     rendered_state = str(provider_state)
     assert _BOT_TOKEN not in rendered_state
     assert _SIGNING_SECRET not in rendered_state
+
+    disconnected = external_api.external_channel_v1_disconnect_session_channel(
+        agent_id=agent_id,
+        session_id=approved_session_id,
+        binding_id=bindings.items[0].id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert len(disconnected.items) == 1
+    assert disconnected.items[0].disconnected_at is not None
+
+    disconnected_state = cast(
+        dict[str, object],
+        wait_until(
+            lambda: (
+                state
+                if _successful_session_presence_states(
+                    state := _provider_state(slack_provider_fake_url)
+                )
+                == ["joined", "left"]
+                else None
+            ),
+            timeout=10,
+            interval=0.2,
+            message="Manual Slack binding disconnect did not deliver leave presence",
+        ),
+    )
+    disconnected_counts = cast(dict[str, Any], disconnected_state["request_counts"])
+    assert disconnected_counts["chat.postMessage"] == 4
+    assert _successful_session_paths(disconnected_state) == [
+        f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
+        f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
+    ]
 
     revocation_body = json.dumps(
         {
@@ -2437,9 +2493,27 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
         )
         assert len(input_evidence) == 1
         assert input_evidence[0]["provider"] == "slack"
-        assert _successful_session_paths(_provider_state(slack_provider_fake_url)) == [
+        expected_session_path = (
             f"/w/{handle}/agents/{agent_id}/sessions/{socket_session.id}"
-        ]
+        )
+        presence_state = cast(
+            dict[str, object],
+            wait_until(
+                lambda: (
+                    state
+                    if _successful_session_paths(
+                        state := _provider_state(slack_provider_fake_url)
+                    )
+                    == [expected_session_path]
+                    and _successful_session_presence_states(state) == ["joined"]
+                    else None
+                ),
+                timeout=10,
+                interval=0.2,
+                message="Socket Mode joined presence was not delivered",
+            ),
+        )
+        assert _successful_session_paths(presence_state) == [expected_session_path]
 
         def reconnect_required_connection() -> object | None:
             connections = external_api.external_channel_v1_list_connections(
@@ -2859,7 +2933,7 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
             ),
             timeout=30,
             interval=0.2,
-            message="Discord Session-link provider control was not delivered",
+            message="Discord joined-presence provider control was not delivered",
         )
 
     assert session.agent_id == agent_id
@@ -2902,6 +2976,7 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
     )
     state = _discord_provider_state(discord_provider_fake_url)
     assert _successful_session_paths(state) == [expected_session_path]
+    assert _successful_session_presence_states(state) == ["joined"]
     request_counts = cast(dict[str, int], state["request_counts"])
     assert request_counts["create_thread"] >= 1
     # Thread reconciliation runs before create; canonical history runs after create.
@@ -2917,6 +2992,38 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
     rendered = str(state)
     assert source_text not in rendered
     assert _DISCORD_BOT_TOKEN not in rendered
+
+    disconnected = external_api.external_channel_v1_disconnect_connection(
+        agent_id=agent_id,
+        connection_id=setup.connection.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert disconnected.status is ExternalChannelConnectionStatus.DISCONNECTED
+    assert disconnected.credentials_configured is False
+    terminal_state = cast(
+        dict[str, object],
+        wait_until(
+            lambda: (
+                provider_state
+                if _successful_session_presence_states(
+                    provider_state := _discord_provider_state(discord_provider_fake_url)
+                )
+                == ["joined", "left"]
+                else None
+            ),
+            timeout=15,
+            interval=0.2,
+            message=(
+                "Discord connection disconnect did not deliver captured leave presence"
+            ),
+        ),
+    )
+    assert _successful_session_paths(terminal_state) == [
+        expected_session_path,
+        expected_session_path,
+    ]
+    assert _DISCORD_BOT_TOKEN not in str(terminal_state)
 
 
 def test_discord_message_command_selector_and_component_journey(
@@ -3213,10 +3320,11 @@ def test_discord_message_command_selector_and_component_journey(
             ),
             timeout=15,
             interval=0.2,
-            message="Discord HTTP selector replay did not deliver the Session link",
+            message="Discord HTTP selector replay did not deliver joined presence",
         ),
     )
     assert _successful_session_paths(activation_state) == [expected_session_path]
+    assert _successful_session_presence_states(activation_state) == ["joined"]
     assert source_content not in rendered
     assert _DISCORD_BOT_TOKEN not in rendered
     assert selector not in rendered

@@ -659,8 +659,8 @@ class ExternalChannelArchiveTermination(_Record):
 
     disconnected_binding_count: int
     finished_work_count: int
-    created_progress_delete_intent_count: int
-    progress_delete_intent_ids: tuple[str, ...]
+    created_cleanup_intent_count: int
+    cleanup_intent_ids: tuple[str, ...]
 
 
 class ExternalChannelRestoreValidation(_Record):
@@ -703,7 +703,7 @@ class ExternalChannelPurgeVerification(_Record):
 class ExternalChannelAgentDecommissionCleanup(_Record):
     """Summary of direct Agent-owned External Channel state removal."""
 
-    progress_delete_intent_ids: tuple[str, ...]
+    cleanup_intent_ids: tuple[str, ...]
     provider_state_purge_connection_ids: tuple[str, ...]
     deleted_route_count: int
     deleted_access_request_count: int
@@ -766,7 +766,7 @@ class ExternalChannelMultiRouteRemoval(_Record):
     """Committed Multi route removal result without provider execution."""
 
     impact: ExternalChannelMultiRouteImpact
-    progress_delete_intent_ids: tuple[str, ...]
+    cleanup_intent_ids: tuple[str, ...]
 
 
 class ExternalChannelMultiConnectionDisconnect(_Record):
@@ -778,4 +778,4 @@ class ExternalChannelMultiConnectionDisconnect(_Record):
     expired_access_request_count: int
     unavailable_resource_count: int
     disconnected_binding_count: int
-    progress_delete_intent_ids: tuple[str, ...]
+    cleanup_intent_ids: tuple[str, ...]

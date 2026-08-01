@@ -761,6 +761,9 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         session_path = _session_path(body)
         if session_path is not None:
             delivery["session_path"] = session_path
+        presence_state = _session_presence_state(body)
+        if presence_state is not None:
+            delivery["safe_category"] = f"session_presence_{presence_state}"
         if action_ids:
             delivery["action_ids"] = action_ids
         if selector_admission_id is not None:
@@ -1155,7 +1158,7 @@ def _session_path(body: dict[str, object]) -> str | None:
     """Extract only the relative Azents Session route from one control payload."""
     for block in _object_list_or_empty(body.get("blocks")):
         for element in _object_list_or_empty(block.get("elements")):
-            if element.get("action_id") != "open_azents_session":
+            if element.get("action_id") != "view_azents_session":
                 continue
             url = element.get("url")
             if not isinstance(url, str):
@@ -1164,6 +1167,24 @@ def _session_path(body: dict[str, object]) -> str | None:
             if parsed.scheme not in {"http", "https"} or not parsed.netloc:
                 return None
             return parsed.path if parsed.path.startswith("/w/") else None
+    return None
+
+
+def _session_presence_state(body: dict[str, object]) -> str | None:
+    """Classify Session presence without retaining Agent-authored display text."""
+    if _session_path(body) is None:
+        return None
+    for block in _object_list_or_empty(body.get("blocks")):
+        text = block.get("text")
+        if not isinstance(text, dict):
+            continue
+        rendered = cast(dict[str, object], text).get("text")
+        if not isinstance(rendered, str):
+            continue
+        if rendered.endswith(" joined this conversation."):
+            return "joined"
+        if rendered.endswith(" left this conversation."):
+            return "left"
     return None
 
 

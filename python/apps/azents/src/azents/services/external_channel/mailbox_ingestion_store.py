@@ -32,9 +32,9 @@ from azents.core.enums import (
     MailboxSchedulingMode,
 )
 from azents.core.external_channel_progress import checking_progress
+from azents.core.external_channel_session_presence import session_presence_payload
 from azents.core.slack_external_channel_progress import (
     render_slack_progress,
-    render_slack_session_link,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -60,7 +60,6 @@ from azents.repos.external_channel.data import (
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
-from azents.repos.workspace import WorkspaceRepository
 from azents.services.external_channel.conversation import ExternalChannelHistoryRange
 from azents.services.external_channel.discord_selector_scope import (
     build_discord_selector_custom_id,
@@ -132,10 +131,6 @@ class ExternalChannelMailboxIngestionStore:
         Depends(ExternalChannelWorkRepository),
     ]
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
-    workspace_repository: Annotated[
-        WorkspaceRepository,
-        Depends(WorkspaceRepository),
-    ]
     agent_session_repository: Annotated[
         AgentSessionRepository,
         Depends(AgentSessionRepository),
@@ -433,11 +428,8 @@ class ExternalChannelMailboxIngestionStore:
                 binding_id=binding.id,
                 desired_progress_payload=checking_progress().model_dump(mode="json"),
             )
-            session_link_id = await self._create_session_link_intent(
+            session_presence_id = await self._create_session_presence_intent(
                 session,
-                request=request,
-                connection=connection,
-                route=conversation.route,
                 resource=resource,
                 binding=binding,
             )
@@ -509,7 +501,7 @@ class ExternalChannelMailboxIngestionStore:
                         "provider_event_type": request.locator.provider_event_type,
                     },
                 )
-            control_id = session_link_id or progress_id
+            control_id = session_presence_id or progress_id
             return ExternalChannelIngestionAcceptance(
                 status="accepted" if enqueue.created else "duplicate",
                 reason=(
@@ -1019,49 +1011,13 @@ class ExternalChannelMailboxIngestionStore:
             else None
         )
 
-    async def _create_session_link_intent(
+    async def _create_session_presence_intent(
         self,
         session: AsyncSession,
         *,
-        request: ExternalChannelIngestionRequest,
-        connection: ExternalChannelConnection,
-        route: ExternalChannelAgentRoute,
         resource: ExternalChannelResource,
         binding: ExternalChannelBinding,
     ) -> str | None:
-        workspace = await self.workspace_repository.get_by_id(
-            session, connection.workspace_id
-        )
-        if workspace is None:
-            raise RuntimeError("External Channel Workspace disappeared.")
-        session_url = build_external_channel_session_url(
-            self.config.web_url,
-            workspace.handle,
-            route.require_active_agent_id(),
-            binding.agent_session_id,
-        )
-        if session_url is None:
-            raise RuntimeError("External Channel Session URL is unavailable.")
-        thread_key = request.locator.delivery_thread_key
-        if thread_key is None:
-            raise RuntimeError("External Channel Session link target is unavailable.")
-        if request.locator.provider is ExternalChannelProvider.SLACK:
-            presentation = render_slack_session_link(session_url)
-            payload: dict[str, object] = {
-                "control_kind": "session_link",
-                "tenant_id": request.locator.provider_tenant_id,
-                "channel_id": request.locator.provider_channel_id,
-                "thread_ts": thread_key,
-                "text": presentation.text,
-                "blocks": presentation.blocks,
-            }
-        else:
-            payload = _discord_delivery_payload(resource.labels)
-            payload["text"] = ""
-            payload["control_kind"] = "session_link"
-            payload["components"] = _discord_link_button(
-                label="Open Azents session", url=session_url
-            )
         attempt = await self.repository.create_delivery_attempt_idempotent(
             session,
             ExternalChannelDeliveryAttemptCreate(
@@ -1070,7 +1026,10 @@ class ExternalChannelMailboxIngestionStore:
                 channel_action_id=None,
                 binding_id=binding.id,
                 operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-                request_payload=payload,
+                request_payload=session_presence_payload(
+                    resource.labels,
+                    state="joined",
+                ),
                 status=ExternalChannelDeliveryStatus.PENDING,
                 provider_message_key=None,
                 error_kind=None,
@@ -1331,39 +1290,6 @@ def _add_discord_thread_provisioning(
     payload["thread_root_message_id"] = root_message_id
 
 
-def _discord_delivery_payload(
-    labels: dict[str, object] | None,
-) -> dict[str, object]:
-    """Build one Discord delivery target from durable resource labels."""
-    labels = labels or {}
-    guild_id = labels.get("guild_id")
-    delivery_channel_id = labels.get("delivery_channel_id")
-    thread_id = (
-        delivery_channel_id
-        if isinstance(delivery_channel_id, str) and delivery_channel_id
-        else labels.get("thread_id")
-    )
-    if not isinstance(guild_id, str) or not guild_id:
-        raise RuntimeError("External Channel Discord Guild is unavailable.")
-    if not isinstance(thread_id, str) or not thread_id:
-        raise RuntimeError("External Channel Discord thread is unavailable.")
-    payload: dict[str, object] = {
-        "guild_id": guild_id,
-        "channel_id": thread_id,
-    }
-    parent_channel_id = labels.get("parent_channel_id")
-    root_message_id = labels.get("root_message_id")
-    if delivery_channel_id is None and (
-        isinstance(parent_channel_id, str)
-        and parent_channel_id
-        and isinstance(root_message_id, str)
-        and root_message_id == thread_id
-    ):
-        payload["thread_parent_channel_id"] = parent_channel_id
-        payload["thread_root_message_id"] = root_message_id
-    return payload
-
-
 def _immediate(
     kind: ExternalChannelIngestionOutcomeKind,
     reason: ExternalChannelIngestionReason,
@@ -1420,22 +1346,6 @@ def _approval_url(web_url: str, access_request_id: str) -> str | None:
             fragment="",
         )
     )
-
-
-def build_external_channel_session_url(
-    web_url: str,
-    workspace_handle: str,
-    agent_id: str,
-    session_id: str,
-) -> str | None:
-    parsed = urlparse(web_url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return None
-    path = (
-        f"/w/{quote(workspace_handle, safe='')}/agents/{quote(agent_id, safe='')}"
-        f"/sessions/{quote(session_id, safe='')}"
-    )
-    return urlunparse(parsed._replace(path=path, query="", fragment=""))
 
 
 def _render_discord_access_request_control(approval_url: str | None) -> str:

@@ -26,6 +26,7 @@ from azents.core.enums import (
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
 )
+from azents.core.external_channel_session_presence import session_presence_payload
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.base import RDBModel
 from azents.rdb.models.external_channel import (
@@ -84,10 +85,25 @@ class ExternalChannelLifecycleRepository:
             return ExternalChannelArchiveTermination(
                 disconnected_binding_count=0,
                 finished_work_count=0,
-                created_progress_delete_intent_count=0,
-                progress_delete_intent_ids=(),
+                created_cleanup_intent_count=0,
+                cleanup_intent_ids=(),
             )
         binding_ids = [binding.id for binding in bindings]
+        resources = {
+            resource.id: resource
+            for resource in (
+                await session.scalars(
+                    sa.select(RDBExternalChannelResource)
+                    .where(
+                        RDBExternalChannelResource.id.in_(
+                            [binding.resource_id for binding in bindings]
+                        )
+                    )
+                    .order_by(RDBExternalChannelResource.id)
+                    .with_for_update()
+                )
+            ).all()
+        }
         works = list(
             (
                 await session.scalars(
@@ -102,13 +118,34 @@ class ExternalChannelLifecycleRepository:
                 )
             ).all()
         )
+        cleanup_intent_ids: list[str] = []
         for binding in bindings:
             binding.disconnected_at = now
             binding.disconnect_reason = "session_archived"
+            resource = resources.get(binding.resource_id)
+            if resource is None:
+                continue
+            presence = RDBExternalChannelDeliveryAttempt(
+                origin_type=ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
+                origin_id=binding.id,
+                channel_action_id=None,
+                binding_id=binding.id,
+                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                request_payload=session_presence_payload(
+                    resource.labels,
+                    state="left",
+                ),
+                status=ExternalChannelDeliveryStatus.PENDING,
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+                attempted_at=None,
+                completed_at=None,
+            )
+            session.add(presence)
+            cleanup_intent_ids.append(presence.id)
 
         finished_work_count = 0
-        created_progress_delete_intent_count = 0
-        progress_delete_intent_ids: list[str] = []
         for work in works:
             work.status = ExternalChannelWorkStatus.FINISHED
             work.finished_at = now
@@ -141,22 +178,20 @@ class ExternalChannelLifecycleRepository:
                 )
                 created_id = result.scalar_one_or_none()
                 if created_id is not None:
-                    created_progress_delete_intent_count += 1
-                    progress_delete_intent_ids.append(created_id)
+                    cleanup_intent_ids.append(created_id)
         discord_cleanup_ids = await self._create_discord_projection_delete_intents(
             session,
             binding_ids=binding_ids,
             origin_type=ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
             now=now,
         )
-        progress_delete_intent_ids.extend(discord_cleanup_ids)
-        created_progress_delete_intent_count += len(discord_cleanup_ids)
+        cleanup_intent_ids.extend(discord_cleanup_ids)
         await session.flush()
         return ExternalChannelArchiveTermination(
             disconnected_binding_count=len(bindings),
             finished_work_count=finished_work_count,
-            created_progress_delete_intent_count=created_progress_delete_intent_count,
-            progress_delete_intent_ids=tuple(progress_delete_intent_ids),
+            created_cleanup_intent_count=len(cleanup_intent_ids),
+            cleanup_intent_ids=tuple(cleanup_intent_ids),
         )
 
     async def validate_restore_session_tree(
@@ -592,7 +627,7 @@ class ExternalChannelLifecycleRepository:
                 )
             ).all()
         )
-        progress_delete_intent_ids = await self._terminalize_bindings(
+        cleanup_intent_ids = await self._terminalize_bindings(
             session,
             bindings=bindings,
             resources=resources,
@@ -630,7 +665,7 @@ class ExternalChannelLifecycleRepository:
         await session.flush()
         return ExternalChannelMultiRouteRemoval(
             impact=impact,
-            progress_delete_intent_ids=progress_delete_intent_ids,
+            cleanup_intent_ids=cleanup_intent_ids,
         )
 
     async def reenable_multi_route(
@@ -796,7 +831,7 @@ class ExternalChannelLifecycleRepository:
                 )
             ).all()
         )
-        progress_delete_intent_ids = await self._terminalize_bindings(
+        cleanup_intent_ids = await self._terminalize_bindings(
             session,
             bindings=bindings,
             resources=resources,
@@ -870,7 +905,7 @@ class ExternalChannelLifecycleRepository:
             expired_access_request_count=len(access_requests),
             unavailable_resource_count=unavailable_resource_count,
             disconnected_binding_count=len(bindings),
-            progress_delete_intent_ids=progress_delete_intent_ids,
+            cleanup_intent_ids=cleanup_intent_ids,
         )
 
     async def purge_disconnected_connection_provider_state(
@@ -933,7 +968,7 @@ class ExternalChannelLifecycleRepository:
                 )
             )
         ).all()
-        progress_delete_intent_ids: list[str] = []
+        cleanup_intent_ids: list[str] = []
         provider_state_purge_connection_ids: list[str] = []
         for route_id, connection_id, app_mode in route_rows:
             if app_mode is ExternalChannelAppMode.SINGLE:
@@ -945,9 +980,7 @@ class ExternalChannelLifecycleRepository:
                     defer_provider_state_purge=True,
                 )
                 if disconnected is not None:
-                    progress_delete_intent_ids.extend(
-                        disconnected.progress_delete_intent_ids
-                    )
+                    cleanup_intent_ids.extend(disconnected.cleanup_intent_ids)
                     provider_state_purge_connection_ids.append(connection_id)
             else:
                 removed = await self.remove_multi_route(
@@ -958,9 +991,7 @@ class ExternalChannelLifecycleRepository:
                     now=now,
                 )
                 if removed is not None:
-                    progress_delete_intent_ids.extend(
-                        removed.progress_delete_intent_ids
-                    )
+                    cleanup_intent_ids.extend(removed.cleanup_intent_ids)
         deleted_agent_grant_count = await self._delete(
             session,
             RDBExternalChannelAccessGrant,
@@ -973,7 +1004,7 @@ class ExternalChannelLifecycleRepository:
         )
         await session.flush()
         return ExternalChannelAgentDecommissionCleanup(
-            progress_delete_intent_ids=tuple(progress_delete_intent_ids),
+            cleanup_intent_ids=tuple(cleanup_intent_ids),
             provider_state_purge_connection_ids=tuple(
                 provider_state_purge_connection_ids
             ),
@@ -1201,7 +1232,34 @@ class ExternalChannelLifecycleRepository:
         for binding in bindings:
             binding.disconnected_at = now
             binding.disconnect_reason = reason
-        progress_delete_intent_ids: list[str] = []
+        cleanup_intent_ids: list[str] = []
+        for binding in bindings:
+            result = await session.execute(
+                pg_insert(RDBExternalChannelDeliveryAttempt)
+                .values(
+                    id=uuid7().hex,
+                    origin_type=ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
+                    origin_id=binding.id,
+                    channel_action_id=None,
+                    binding_id=binding.id,
+                    operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                    request_payload=session_presence_payload(
+                        resource_labels.get(binding.resource_id),
+                        state="left",
+                    ),
+                    status=ExternalChannelDeliveryStatus.PENDING,
+                    provider_message_key=None,
+                    error_kind=None,
+                    error_summary=None,
+                    attempted_at=None,
+                    completed_at=None,
+                )
+                .on_conflict_do_nothing()
+                .returning(RDBExternalChannelDeliveryAttempt.id)
+            )
+            created_id = result.scalar_one_or_none()
+            if created_id is not None:
+                cleanup_intent_ids.append(created_id)
         for work in works:
             work.status = ExternalChannelWorkStatus.FINISHED
             work.finished_at = now
@@ -1235,8 +1293,8 @@ class ExternalChannelLifecycleRepository:
             )
             created_id = result.scalar_one_or_none()
             if created_id is not None:
-                progress_delete_intent_ids.append(created_id)
-        progress_delete_intent_ids.extend(
+                cleanup_intent_ids.append(created_id)
+        cleanup_intent_ids.extend(
             await self._create_discord_projection_delete_intents(
                 session,
                 binding_ids=binding_ids,
@@ -1245,7 +1303,7 @@ class ExternalChannelLifecycleRepository:
             )
         )
         await session.flush()
-        return tuple(progress_delete_intent_ids)
+        return tuple(cleanup_intent_ids)
 
     async def _create_discord_projection_delete_intents(
         self,
