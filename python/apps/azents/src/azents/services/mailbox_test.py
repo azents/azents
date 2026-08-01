@@ -28,7 +28,6 @@ from azents.core.enums import (
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceType,
-    ExternalChannelSessionActivationState,
     LLMProvider,
     MailboxItemKind,
     MailboxSchedulingMode,
@@ -808,78 +807,6 @@ def _mailbox_item_service(
 async def _unit_session_manager() -> AsyncIterator[AsyncSession]:
     """Yield a DB-session placeholder for preparation-only unit tests."""
     yield AsyncMock(spec=AsyncSession)
-
-
-async def test_initializing_external_channel_mailbox_remains_inert() -> None:
-    """A retained canonical input cannot promote before activation commits."""
-    buffer = MailboxItem.model_construct(
-        id="buffer-001",
-        session_id="session-001",
-        kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
-        scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
-        requested_model_target_label=None,
-        requested_reasoning_effort=None,
-    )
-    mailbox_repository = AsyncMock(spec=MailboxRepository)
-    mailbox_repository.list_for_flush.return_value = [buffer]
-    mailbox_repository.lock_oldest_by_session_id.return_value = buffer
-    agent_session_repository = AsyncMock(spec=AgentSessionRepository)
-    agent_session_repository.get_by_id.return_value = SimpleNamespace(
-        workspace_id="workspace-001",
-        agent_id="agent-001",
-    )
-    agent_session_repository.lock_by_id.return_value = SimpleNamespace(
-        owner_generation=0,
-    )
-    external_channel_repository = AsyncMock(spec=ExternalChannelRepository)
-    get_activation_state = (
-        external_channel_repository.get_session_activation_state_by_mailbox_item_id
-    )
-    get_activation_state.return_value = (
-        ExternalChannelSessionActivationState.INITIALIZING
-    )
-    service = MailboxService(
-        session_manager=cast(
-            SessionManager[AsyncSession],
-            _unit_session_manager,
-        ),
-        mailbox_item_repository=cast(MailboxRepository, mailbox_repository),
-        exchange_file_service=cast(ExchangeFileService, object()),
-        model_file_service=cast(ModelFileService, object()),
-        agent_session_repository=cast(
-            AgentSessionRepository,
-            agent_session_repository,
-        ),
-        event_transcript_repository=cast(EventTranscriptRepository, object()),
-        agent_run_repository=cast(AgentRunRepository, object()),
-        action_execution_repository=cast(ActionExecutionRepository, object()),
-        vfs_projection_service=None,
-        external_channel_repository=cast(
-            ExternalChannelRepository,
-            external_channel_repository,
-        ),
-    )
-
-    profile = await service.peek_pending_inference_profile("session-001")
-    has_pending = await service.has_pending_session_mailbox_items("session-001")
-    has_wake = await service.has_pending_wake_session_mailbox_items("session-001")
-    flushed = await service.flush_session_mailbox_items(
-        session_id="session-001",
-        owner_generation=0,
-        model=None,
-        required_inference_profile=None,
-        expected_buffer_id=None,
-        prepared_inference_state=None,
-        profile_resolution_failure=None,
-        active_run_id=None,
-    )
-
-    assert profile.mailbox_item_id is None
-    assert not profile.exists
-    assert not has_pending
-    assert not has_wake
-    assert flushed.claimed_count == 0
-    assert flushed.inserted_count == 0
 
 
 async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> None:

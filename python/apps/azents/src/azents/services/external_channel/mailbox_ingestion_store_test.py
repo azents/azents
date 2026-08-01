@@ -1,8 +1,8 @@
-"""Tests for durable External Channel mailbox activation helpers."""
+"""Tests for canonical External Channel mailbox ingestion helpers."""
 
 import datetime
 import json
-from contextlib import AbstractAsyncContextManager
+from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.enums import (
+    AgentLifecycleStatus,
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
     ExternalChannelConversationScopeKind,
@@ -20,10 +21,9 @@ from azents.core.enums import (
     ExternalChannelResourceType,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
-    ExternalChannelSessionActivationState,
     ExternalChannelTransport,
 )
-from azents.rdb.session import SessionManager
+from azents.repos.agent.data import Agent
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
     ExternalChannelBinding,
@@ -31,21 +31,15 @@ from azents.repos.external_channel.data import (
     ExternalChannelConversationPosition,
     ExternalChannelDeliveryAttempt,
     ExternalChannelResource,
-    ExternalChannelSessionActivation,
 )
+from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.workspace.data import Workspace
 from azents.services.external_channel.conversation import (
     ExternalChannelConversationScope,
-    ExternalChannelHistoryRange,
     ExternalChannelOperationDeadline,
 )
 from azents.services.external_channel.ingestion import (
-    ExternalChannelCanonicalHistoryMessage,
-    ExternalChannelIngestionAdmission,
     ExternalChannelIngestionOperation,
-    ExternalChannelIngestionOutcomeKind,
-    ExternalChannelIngestionPreparation,
-    ExternalChannelIngestionReason,
     ExternalChannelIngestionRequest,
     ExternalChannelIngressAuthority,
     ExternalChannelIngressAuthorityKind,
@@ -58,7 +52,7 @@ from azents.services.external_channel.mailbox_ingestion_store import (
 
 
 def test_session_url_uses_canonical_workspace_route() -> None:
-    """Provider navigation targets the real Agent Session App Router page."""
+    """Provider navigation targets the canonical Agent Session route."""
     assert build_external_channel_session_url(
         "https://azents.example/base",
         "workspace name",
@@ -87,6 +81,7 @@ def _slack_request() -> ExternalChannelIngestionRequest:
     locator = ExternalChannelTriggerLocator(
         connection_id="connection-1",
         provider=ExternalChannelProvider.SLACK,
+        provider_event_type="app_mention",
         provider_tenant_id="tenant-1",
         provider_channel_id="channel-1",
         provider_parent_channel_id=None,
@@ -123,254 +118,29 @@ def _slack_request() -> ExternalChannelIngestionRequest:
     )
 
 
-class _Session:
-    def __init__(self) -> None:
-        self.commits = 0
-        self.rollbacks = 0
-
-    async def commit(self) -> None:
-        self.commits += 1
-
-    async def rollback(self) -> None:
-        self.rollbacks += 1
-
-
-class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
-    def __init__(self, session: _Session) -> None:
-        self.session = session
-
-    async def __aenter__(self) -> AsyncSession:
-        return cast(AsyncSession, self.session)
-
-    async def __aexit__(self, *exc_info: object) -> None:
-        return None
-
-
-class _SessionManager:
-    def __init__(self, session: _Session) -> None:
-        self.session = session
-
-    def __call__(self) -> _SessionScope:
-        return _SessionScope(self.session)
-
-
-async def test_stale_admission_rejects_an_already_blocked_activation() -> None:
-    """A stale retry cannot resume provider delivery after activation blocking."""
-    request = _slack_request()
-    session = _Session()
-    connection = ExternalChannelConnection.model_construct(id="connection-1")
-    position = ExternalChannelConversationPosition.model_construct(
-        id="position-1",
-        connection_id=connection.id,
-        read_through_position=None,
-    )
-    activation = ExternalChannelSessionActivation.model_construct(
-        id="activation-1",
-        connection_id=connection.id,
-        conversation_position_id=position.id,
-        trigger_provider_message_key=request.locator.trigger_provider_message_key,
-        trigger_position=request.locator.trigger_position,
-        state=ExternalChannelSessionActivationState.BLOCKED,
-    )
-    repository = MagicMock()
-    repository.lock_conversation_position = AsyncMock(return_value=position)
-    repository.get_open_session_activation_by_position = AsyncMock(
-        return_value=activation
-    )
-    repository.get_resource_by_provider_key = AsyncMock()
-    store = ExternalChannelMailboxIngestionStore(
-        session_manager=cast(
-            SessionManager[AsyncSession],
-            _SessionManager(session),
-        ),
-        repository=repository,
+def _store(
+    *,
+    repository: object,
+    agent_repository: object | None = None,
+    workspace_repository: object | None = None,
+    root_creation_service: object | None = None,
+) -> ExternalChannelMailboxIngestionStore:
+    return ExternalChannelMailboxIngestionStore(
+        session_manager=MagicMock(),
+        repository=cast(ExternalChannelRepository, repository),
         work_repository=MagicMock(),
-        agent_repository=MagicMock(),
-        workspace_repository=MagicMock(),
+        agent_repository=agent_repository or MagicMock(),
+        workspace_repository=workspace_repository or MagicMock(),
         agent_session_repository=MagicMock(),
-        root_agent_session_creation_service=MagicMock(),
+        root_agent_session_creation_service=root_creation_service or MagicMock(),
         mailbox_service=MagicMock(),
-        config=Config.model_construct(web_url="https://azents.example"),
+        config=Config.model_construct(web_url="https://azents.example/base"),
     )
-    store._lock_authority = AsyncMock(  # pyright: ignore[reportPrivateUsage]
-        return_value=connection
-    )
-
-    result = await store.admit(
-        request=request,
-        preparation=ExternalChannelIngestionPreparation(
-            position_id=position.id,
-            exclusive_start_position=None,
-            activation_id=activation.id,
-            immediate_outcome=None,
-            wake_mailbox_item_id=None,
-            wake_session_id=None,
-        ),
-        history=cast(
-            ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
-            MagicMock(),
-        ),
-    )
-
-    assert result.status == "terminal_rejection"
-    assert result.reason is ExternalChannelIngestionReason.INITIAL_DELIVERY_UNAVAILABLE
-    assert session.commits == 1
-    assert session.rollbacks == 0
-    repository.get_resource_by_provider_key.assert_not_awaited()
-
-
-async def test_prepare_returns_activated_trigger_as_duplicate() -> None:
-    """A completed trigger retry skips provider history and delivery reconstruction."""
-    request = _slack_request()
-    session = _Session()
-    connection = ExternalChannelConnection.model_construct(id="connection-1")
-    position = ExternalChannelConversationPosition.model_construct(
-        id="position-1",
-        connection_id=connection.id,
-        read_through_position=request.locator.trigger_position,
-    )
-    resource = ExternalChannelResource.model_construct(
-        id="resource-1",
-        connection_id=connection.id,
-        provider_resource_key=request.locator.provider_resource_key,
-        status=ExternalChannelResourceStatus.ACTIVE,
-    )
-    activation = ExternalChannelSessionActivation.model_construct(
-        id="activation-1",
-        connection_id=connection.id,
-        conversation_position_id=position.id,
-        trigger_provider_message_key=request.locator.trigger_provider_message_key,
-        trigger_position=request.locator.trigger_position,
-        range_start_position=None,
-        state=ExternalChannelSessionActivationState.ACTIVATED,
-        mailbox_item_id="mailbox-1",
-        agent_session_id="session-1",
-    )
-    repository = MagicMock()
-    repository.get_session_activation_by_trigger = AsyncMock(return_value=activation)
-    repository.get_open_session_activation_by_position = AsyncMock()
-    store = ExternalChannelMailboxIngestionStore(
-        session_manager=cast(
-            SessionManager[AsyncSession],
-            _SessionManager(session),
-        ),
-        repository=repository,
-        work_repository=MagicMock(),
-        agent_repository=MagicMock(),
-        workspace_repository=MagicMock(),
-        agent_session_repository=MagicMock(),
-        root_agent_session_creation_service=MagicMock(),
-        mailbox_service=MagicMock(),
-        config=Config.model_construct(web_url="https://azents.example"),
-    )
-    store._lock_authority = AsyncMock(  # pyright: ignore[reportPrivateUsage]
-        return_value=connection
-    )
-    store._prepare_position = AsyncMock(  # pyright: ignore[reportPrivateUsage]
-        return_value=position
-    )
-    store._resolve_resource = AsyncMock(  # pyright: ignore[reportPrivateUsage]
-        return_value=resource
-    )
-    store._resolve_conversation = AsyncMock(  # pyright: ignore[reportPrivateUsage]
-        return_value=MagicMock()
-    )
-
-    preparation = await store.prepare(request=request)
-
-    assert preparation.immediate_outcome is not None
-    assert (
-        preparation.immediate_outcome.kind
-        is ExternalChannelIngestionOutcomeKind.DUPLICATE
-    )
-    assert preparation.wake_mailbox_item_id == activation.mailbox_item_id
-    assert preparation.wake_session_id == activation.agent_session_id
-    assert session.commits == 1
-    repository.get_open_session_activation_by_position.assert_not_awaited()
-
-
-async def test_activation_locks_resource_before_session_mutation() -> None:
-    """Provider resource loss fences activation before Session state can change."""
-    request = _slack_request()
-    session = _Session()
-    connection = ExternalChannelConnection.model_construct(id="connection-1")
-    position = ExternalChannelConversationPosition.model_construct(
-        id="position-1",
-        connection_id=connection.id,
-        read_through_position=None,
-    )
-    resource_snapshot = ExternalChannelResource.model_construct(
-        id="resource-1",
-        connection_id=connection.id,
-        provider_resource_key=request.locator.provider_resource_key,
-        status=ExternalChannelResourceStatus.ACTIVE,
-    )
-    unavailable_resource = resource_snapshot.model_copy(
-        update={"status": ExternalChannelResourceStatus.UNAVAILABLE}
-    )
-    repository = MagicMock()
-    repository.lock_conversation_position = AsyncMock(return_value=position)
-    repository.get_resource_by_provider_key = AsyncMock(return_value=resource_snapshot)
-    repository.lock_resource = AsyncMock(return_value=unavailable_resource)
-    agent_session_repository = MagicMock()
-    agent_session_repository.lock_by_id = AsyncMock()
-    store = ExternalChannelMailboxIngestionStore(
-        session_manager=cast(
-            SessionManager[AsyncSession],
-            _SessionManager(session),
-        ),
-        repository=repository,
-        work_repository=MagicMock(),
-        agent_repository=MagicMock(),
-        workspace_repository=MagicMock(),
-        agent_session_repository=agent_session_repository,
-        root_agent_session_creation_service=MagicMock(),
-        mailbox_service=MagicMock(),
-        config=Config.model_construct(web_url="https://azents.example"),
-    )
-    store._lock_authority = AsyncMock(  # pyright: ignore[reportPrivateUsage]
-        return_value=connection
-    )
-
-    result = await store.activate(
-        request=request,
-        preparation=ExternalChannelIngestionPreparation(
-            position_id=position.id,
-            exclusive_start_position=None,
-            activation_id="activation-1",
-            immediate_outcome=None,
-            wake_mailbox_item_id=None,
-            wake_session_id=None,
-        ),
-        history=cast(
-            ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
-            MagicMock(),
-        ),
-        stage=ExternalChannelIngestionAdmission(
-            status="ready",
-            reason=ExternalChannelIngestionReason.ACCEPTED,
-            activation_id="activation-1",
-            binding_id="binding-1",
-            session_id="session-1",
-            mailbox_item_id="mailbox-1",
-            required_delivery_attempt_ids=("delivery-1",),
-            control_delivery_attempt_id=None,
-            connection_id=None,
-        ),
-    )
-
-    assert result.status == "terminal_rejection"
-    assert result.reason is ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
-    repository.lock_resource.assert_awaited_once_with(
-        cast(AsyncSession, session),
-        resource_id=resource_snapshot.id,
-    )
-    agent_session_repository.lock_by_id.assert_not_awaited()
 
 
 async def test_session_link_intent_contains_the_retained_session_route() -> None:
-    """The actual provider payload links to the exact retained Session."""
-    now = datetime.datetime(2026, 7, 31, tzinfo=datetime.UTC)
+    """The provider payload links to the exact retained Session."""
+    now = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
     workspace_repository = MagicMock()
     workspace_repository.get_by_id = AsyncMock(
         return_value=Workspace(
@@ -389,16 +159,9 @@ async def test_session_link_intent_contains_the_retained_session_route() -> None
             status=ExternalChannelDeliveryStatus.PENDING,
         )
     )
-    store = ExternalChannelMailboxIngestionStore(
-        session_manager=MagicMock(),
+    store = _store(
         repository=repository,
-        work_repository=MagicMock(),
-        agent_repository=MagicMock(),
         workspace_repository=workspace_repository,
-        agent_session_repository=MagicMock(),
-        root_agent_session_creation_service=MagicMock(),
-        mailbox_service=MagicMock(),
-        config=Config.model_construct(web_url="https://azents.example/base"),
     )
     connection = ExternalChannelConnection.model_construct(
         id="connection-1",
@@ -434,7 +197,7 @@ async def test_session_link_intent_contains_the_retained_session_route() -> None
     )
 
     delivery_id = await store._create_session_link_intent(  # pyright: ignore[reportPrivateUsage]
-        MagicMock(),
+        cast(AsyncSession, MagicMock()),
         request=_slack_request(),
         connection=connection,
         route=route,
@@ -449,3 +212,99 @@ async def test_session_link_intent_contains_the_retained_session_route() -> None
         "https://azents.example/w/workspace%20name/agents/agent%2Fid/"
         "sessions/session%20id"
     ) in rendered_payload
+
+
+async def test_conversation_resolution_does_not_create_session_before_acceptance() -> (
+    None
+):
+    """Provider-history preparation does not leave a Session without mailbox input."""
+    repository = MagicMock()
+    repository.lock_connected_binding_by_resource = AsyncMock(return_value=None)
+    root_creation_service = MagicMock()
+    root_creation_service.create_root_session = AsyncMock()
+    store = _store(
+        repository=repository,
+        root_creation_service=root_creation_service,
+    )
+    store._ensure_principal = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value="principal-1"
+    )
+    store._resolve_route = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=ExternalChannelAgentRoute.model_construct(
+            id="route-1",
+            agent_id="agent-1",
+        )
+    )
+
+    conversation = await store._resolve_conversation(  # pyright: ignore[reportPrivateUsage]
+        cast(AsyncSession, MagicMock()),
+        request=_slack_request(),
+        connection=ExternalChannelConnection.model_construct(id="connection-1"),
+        resource=ExternalChannelResource.model_construct(id="resource-1"),
+        position=ExternalChannelConversationPosition.model_construct(id="position-1"),
+        now=datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC),
+    )
+
+    assert conversation.binding is None
+    root_creation_service.create_root_session.assert_not_awaited()
+
+
+async def test_create_binding_reports_only_the_new_root_session() -> None:
+    """Binding creation reports whether this transaction created the root Session."""
+    repository = MagicMock()
+    repository.create_binding_idempotent = AsyncMock(
+        return_value=ExternalChannelBinding.model_construct(
+            id="binding-1",
+            resource_id="resource-1",
+            route_id="route-1",
+            agent_session_id="session-1",
+            disconnected_at=None,
+        )
+    )
+    agent_repository = MagicMock()
+    agent_repository.get_by_id = AsyncMock(
+        return_value=Agent.model_construct(
+            id="agent-1",
+            workspace_id="workspace-1",
+            lifecycle_status=AgentLifecycleStatus.ACTIVE,
+        )
+    )
+    root_creation_service = MagicMock()
+    root_creation_service.create_root_session = AsyncMock(
+        side_effect=[
+            SimpleNamespace(
+                agent_session=SimpleNamespace(id="session-1"),
+                created=True,
+            ),
+            SimpleNamespace(
+                agent_session=SimpleNamespace(id="session-1"),
+                created=False,
+            ),
+        ]
+    )
+    store = _store(
+        repository=repository,
+        agent_repository=agent_repository,
+        root_creation_service=root_creation_service,
+    )
+    route = ExternalChannelAgentRoute.model_construct(
+        id="route-1",
+        agent_id="agent-1",
+    )
+    resource = ExternalChannelResource.model_construct(id="resource-1")
+
+    first = await store._create_binding(  # pyright: ignore[reportPrivateUsage]
+        cast(AsyncSession, MagicMock()),
+        route=route,
+        resource=resource,
+    )
+    repeated = await store._create_binding(  # pyright: ignore[reportPrivateUsage]
+        cast(AsyncSession, MagicMock()),
+        route=route,
+        resource=resource,
+    )
+
+    assert first.binding.agent_session_id == "session-1"
+    assert first.session_created
+    assert repeated.binding.agent_session_id == "session-1"
+    assert not repeated.session_created

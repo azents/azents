@@ -43,6 +43,10 @@ const meta = {
         reasoning_effort: "high",
       },
     }),
+    currentWorkspaceProfile: {
+      userId: "user-story",
+      name: "Story User",
+    },
     onDelete: () => {},
   },
 } satisfies Meta<typeof PendingMailboxBubble>;
@@ -63,7 +67,7 @@ export const AgentMessage: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const trigger = canvas.getByRole("button", {
-      name: "Agent · send_message",
+      name: "/send_message",
     });
     await expect(
       canvas.queryByText("A collaborating agent supplied additional context."),
@@ -85,7 +89,7 @@ export const GoalContinuation: Story = {
   },
   play: async ({ canvasElement }) => {
     await expect(
-      within(canvasElement).getByText("Goal continuation"),
+      within(canvasElement).getByText("Goal continuation queued"),
     ).toBeVisible();
   },
 };
@@ -107,10 +111,17 @@ export const ExternalChannel: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    const trigger = canvas.getByRole("button", {
+      name: "Expand external message from Taylor · engineering",
+    });
     await expect(
       canvas.getByText("A safe pending external-channel projection."),
     ).toBeVisible();
-    await expect(canvas.getByText(/slack · channel/)).toBeVisible();
+    await expect(canvas.getByText("Context")).toBeVisible();
+    await userEvent.click(trigger);
+    await expect(
+      canvas.getByText("The original message is unavailable."),
+    ).toBeVisible();
   },
 };
 
@@ -131,7 +142,8 @@ export const DiscordExternalChannel: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByText(/discord · thread/)).toBeVisible();
+    await expect(canvas.getByText("Alice:")).toBeVisible();
+    await expect(canvas.getByText("Invoked")).toBeVisible();
   },
 };
 
@@ -177,7 +189,6 @@ export const TurnAction: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByText("Pending action")).toBeVisible();
     await expect(canvas.getByText("/review")).toBeVisible();
   },
 };

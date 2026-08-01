@@ -16,8 +16,8 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-31 | 59 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-31 | 136 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-31 | 35 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-01 | 137 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-01 | 36 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
@@ -31,16 +31,16 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-31 | 139 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-01 | 140 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-31 | 45 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-31 | 13 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
-| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-31 | 15 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-31 | 26 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-31 | 24 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-31 | 24 |
+| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-01 | 16 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-01 | 27 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-01 | 25 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-01 | 25 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-30 | 36 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
@@ -203,6 +203,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Store Requested Inference Profiles as Typed Durable Data Historical Requirements Reconstruction](requirements/inference-260710-inference-profile.md) | inference-260710 | 2026-07-10 | - |
 | [Keep Resolved Inference Provenance Run-Owned Historical Requirements Reconstruction](requirements/inference-260711-inference-provenance.md) | inference-260711 | 2026-07-11 | - |
 | [Use Session Current Inference State Per Turn Historical Requirements Reconstruction](requirements/inference-260712-inference-turn.md) | inference-260712 | 2026-07-12 | - |
+| [Reliable External Channel Execution Requirements](requirements/ingress-260801-reliable-external-channel-execution.md) | ingress-260801 | 2026-08-01 | 2026-08-01 |
 | [Session Initialization Lifecycle Historical Requirements Reconstruction](requirements/initialization-260703-initialization-lifecycle.md) | initialization-260703 | 2026-07-03 | - |
 | [Project Compact Inference Summaries with User Messages Historical Requirements Reconstruction](requirements/inline-260710-inline-message-inference-summary.md) | inline-260710 | 2026-07-10 | - |
 | [User Input Boundary FilePart Materialization Historical Requirements Reconstruction](requirements/input-260604-input-bound-filepart-materialization.md) | input-260604 | 2026-06-04 | - |
@@ -556,6 +557,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Store Requested Inference Profiles as Typed Durable Data](adr/inference-260710-inference-profile.md)
 - [Keep Resolved Inference Provenance Run-Owned](adr/inference-260711-inference-provenance.md)
 - [Use Session Current Inference State Per Turn](adr/inference-260712-inference-turn.md)
+- [Reliable External Channel Execution](adr/ingress-260801-reliable-external-channel-execution.md)
 - [Session Initialization Lifecycle](adr/initialization-260703-initialization-lifecycle.md)
 - [Project Compact Inference Summaries with User Messages](adr/inline-260710-inline-message-inference-summary.md)
 - [User Input Boundary FilePart Materialization](adr/input-260604-input-bound-filepart-materialization.md)

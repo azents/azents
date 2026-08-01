@@ -29,8 +29,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-07-31
-spec_version: 24
+last_verified_at: 2026-08-01
+spec_version: 25
 ---
 
 # External Channel Lifecycle
@@ -107,11 +107,11 @@ An Allow decision locks and revalidates the connection, route, resource, binding
 and request before creating or reusing its grant and connected binding. After
 the authorization transaction commits, Slack and Discord replay the immutable
 conversation-position boundary through shared synchronous ingestion. That acceptance
-creates or reuses the real idle Session, durable Session activation, work projection,
-deterministic canonical non-promotable mailbox input, and Session
-navigation/progress intents; settles required provider delivery; and only then commits
-activation, position advancement, Session running state, and recoverable wake-up.
-Repeated Allow decisions reuse the same durable binding, delivery, and mailbox
+atomically creates or reuses the real Session, work projection, deterministic canonical
+mailbox input, conversation-position advance, Session running state, recoverable
+wake-up identity, and Session navigation/progress intents. Provider-control delivery
+runs independently after commit. Repeated Allow decisions reuse the same durable
+binding, delivery, and mailbox
 identities. Final Allow,
 Deny, and Block decisions create a provider-aware idempotent delete intent when their
 approval control was delivered.
@@ -219,12 +219,12 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
-- **2026-07-31** (spec_version 24) — Made durable Session activation own the
-  binding-to-wake sequence, retain canonical mailbox input before provider
-  initialization, and block promotion after terminal initialization failure.
+- **2026-08-01** (spec_version 25) — Made the conversation position plus canonical
+  mailbox own Allow replay acceptance and wake recovery while provider-control
+  delivery remains independent.
 - **2026-07-31** (spec_version 23) — Made binding disconnect a timestamp-only
-  terminal boundary, ordered required provider initialization before mailbox wake,
-  and separated outbound REST authority from transient persistent-ingress health.
+  terminal boundary and separated outbound REST authority from transient persistent-
+  ingress health.
 - **2026-07-31** (spec_version 22) — Unified Slack Socket Mode and Discord Gateway
   lifecycle supervision in the provider-neutral External Channel Gateway and decoupled
   persistent connections from Agent Worker lifecycle.

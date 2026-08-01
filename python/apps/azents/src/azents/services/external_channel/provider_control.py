@@ -9,18 +9,11 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import ExternalChannelDeliveryStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
-)
-from azents.services.external_channel.conversation import (
-    ExternalChannelOperationDeadline,
-)
-from azents.services.external_channel.ingestion import (
-    ExternalChannelRequiredDeliveryResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -124,43 +117,6 @@ class ExternalChannelProviderControlService:
     async def attempt_delivery(self, delivery_attempt_id: str) -> None:
         """Attempt one committed provider control through the shared fence."""
         await self.action_service.attempt_delivery(delivery_attempt_id)
-
-    async def ensure_delivered(
-        self,
-        *,
-        delivery_attempt_id: str,
-        deadline: ExternalChannelOperationDeadline,
-    ) -> ExternalChannelRequiredDeliveryResult:
-        """Synchronously settle one required delivery before Session activation."""
-        while True:
-            remaining = deadline.remaining_seconds()
-            if remaining <= 0:
-                return "pending"
-            async with self.session_manager() as session:
-                status = await self.repository.get_delivery_status(
-                    session,
-                    delivery_attempt_id=delivery_attempt_id,
-                )
-            match status:
-                case ExternalChannelDeliveryStatus.DELIVERED:
-                    return "delivered"
-                case ExternalChannelDeliveryStatus.PENDING:
-                    try:
-                        async with asyncio.timeout(remaining):
-                            await self.action_service.attempt_delivery(
-                                delivery_attempt_id
-                            )
-                    except TimeoutError:
-                        return "pending"
-                case ExternalChannelDeliveryStatus.ATTEMPTING:
-                    await asyncio.sleep(min(0.01, remaining))
-                case (
-                    ExternalChannelDeliveryStatus.FAILED
-                    | ExternalChannelDeliveryStatus.UNKNOWN
-                    | ExternalChannelDeliveryStatus.NOT_ATTEMPTED
-                    | None
-                ):
-                    return "terminal_failure"
 
 
 def get_external_channel_provider_control_service(

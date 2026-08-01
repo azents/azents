@@ -77,8 +77,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-07-31
-spec_version: 139
+last_verified_at: 2026-08-01
+spec_version: 140
 ---
 
 # Agent Execution Loop
@@ -95,7 +95,7 @@ worker/UI stream boundaries, but the DB source of truth is the event transcript 
 
 Main steps:
 
-1. Worker reads exactly one promotable FIFO InputBuffer head, resolves the requested profile and attachment metadata outside a database session, and then locks the same head for atomic preparation. An External Channel head whose durable Session activation is still `initializing` or `blocked` remains retained but is not exposed as execution work. After the worker creates or claims the AgentRun, it ensures that run's immutable managed-file projection before calling input promotion or resolving a managed SkillAction.
+1. Worker reads exactly one FIFO InputBuffer head, resolves the requested profile and attachment metadata outside a database session, and then locks the same head for atomic preparation. After the worker creates or claims the AgentRun, it ensures that run's immutable managed-file projection before calling input promotion or resolving a managed SkillAction.
 2. Preparation atomically updates the Session inference snapshot, applies Goal/Skill side effects, appends canonical events, associates run input, and deletes the source buffer. A changed FIFO head restarts preparation instead of applying a stale resolution.
 3. Worker executes buffer-keyed operation TurnActions such as `create_git_worktree` before the next model dispatch. The current Session owner generation admits the execution before buffer deletion; active state and progress remain in execution tables until one atomic terminal handover appends durable history and deletes live state.
 4. `AgentRunExecution` repeats model steps and tool steps while updating `agent_runs.phase`.
@@ -1157,13 +1157,13 @@ updated by the user.
 
 ## External Channel Inputs, Tools, and Continuation
 
-Synchronous External Channel admission commits the real idle Session, immutable
-provider-history projection in one `wake_session` mailbox item, durable activation,
-and ordered provider-delivery intents before provider initialization. The mailbox item
-is not promotable until every required delivery is durably `delivered` and one
-transaction activates it, marks the Session running, and advances the conversation
-position. The post-commit broker signal contains only `session_id`; a duplicate
-callback recovers the same activation, mailbox item, and pending logical wake.
+Synchronous External Channel acceptance atomically commits the real Session, immutable
+provider-history projection in one `wake_session` mailbox item, conversation-position
+advance, Session running transition, and provider-control intents. The conversation
+position is the sole duplicate-prevention authority. The post-commit broker signal
+contains only `session_id`; a duplicate callback recovers the same mailbox item and
+pending logical wake. Provider-control failure, ambiguity, or cancellation is recorded
+independently and does not block mailbox promotion or AgentRun creation.
 
 FIFO preparation resolves the mailbox payload into contiguous source-attributed
 `external_channel_message` events and associates them with the run before model
@@ -1193,12 +1193,12 @@ icon.
 
 ## Changelog
 
+- **2026-08-01** (spec_version 140) — Removed External Channel activation and
+  provider-delivery execution gates; accepted mailbox input now enters the ordinary
+  FIFO execution path immediately after its cursor transaction commits.
 - **2026-07-31** (spec_version 139) — Split External Channel idle continuation
   from Goal across hook input, mailbox, event, lowering, public API, and UI
   presentation.
-- **2026-07-31** (spec_version 138) — Added activation-gated External Channel FIFO
-  input: canonical mailbox state is durable before provider initialization but cannot
-  start or join execution until activation commits.
 - **2026-07-30** (spec_version 137) — Required the visible exact attachment size in
   `download_external_file` and documented verified 500 MiB External Channel ingress.
 - **2026-07-30** (spec_version 136) — Documented synchronous External Channel

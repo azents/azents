@@ -148,6 +148,7 @@ async def test_access_allow_rebuilds_slack_replay_without_content() -> None:
     assert replay.authority.lease_owner is None
     assert replay.locator.trigger_provider_message_id == "2.000000"
     assert replay.locator.delivery_thread_key == "2.000000"
+    assert replay.locator.provider_event_type == "unknown"
     assert replay.locator.provider_user_id == "participant-1"
     assert replay.replay_boundary.principal_id == "principal-1"
     assert replay.replay_boundary.range_start_position == "00000000000000000001"
@@ -198,7 +199,10 @@ async def test_access_allow_rebuilds_discord_replay_from_legacy_thread_label() -
                 id="resource-1",
                 connection_id="connection-1",
                 provider_resource_key="discord:guild-1:message-2",
-                labels={"thread_id": "thread-2"},
+                labels={
+                    "provider_event_type": "discord_message_create",
+                    "thread_id": "thread-2",
+                },
                 status=ExternalChannelResourceStatus.ACTIVE,
             )
         ),
@@ -295,6 +299,7 @@ async def test_access_allow_retains_unresolved_discord_root_for_durable_ingestio
                 connection_id="connection-1",
                 provider_resource_key=f"discord:{guild_id}:{message_id}",
                 labels={
+                    "provider_event_type": "discord_message_create",
                     "thread_id": message_id,
                     "root_message_id": message_id,
                     "parent_channel_id": channel_id,
@@ -404,6 +409,7 @@ async def test_access_allow_replay_uses_durable_connection_authority(
                 connection_id="connection-1",
                 provider_resource_key="discord:200:500",
                 labels={
+                    "provider_event_type": "discord_message_create",
                     "thread_id": "500",
                     "root_message_id": "500",
                     "parent_channel_id": "400",
@@ -508,7 +514,10 @@ async def test_selector_replay_keeps_actor_separate_from_source_author() -> None
                 id="resource-1",
                 connection_id="connection-1",
                 provider_resource_key="slack:tenant-1:channel-1:2.000000",
-                labels={"thread_ts": "2.000000"},
+                labels={
+                    "provider_event_type": "app_mention",
+                    "thread_ts": "2.000000",
+                },
                 status=ExternalChannelResourceStatus.ACTIVE,
             )
         ),

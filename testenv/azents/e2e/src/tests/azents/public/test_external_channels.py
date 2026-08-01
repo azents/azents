@@ -331,14 +331,9 @@ def _external_channel_input_evidence(
     public_server_url: str,
     token: str,
     session_id: str,
+    include_pending: bool = True,
 ) -> list[dict[str, object]]:
     """Read logical External Channel input through public live and history APIs."""
-    live_response = requests.get(
-        f"{public_server_url}/chat/v1/sessions/{session_id}/live",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=10,
-    )
-    live_response.raise_for_status()
     history_response = requests.get(
         f"{public_server_url}/chat/v1/sessions/{session_id}/history?limit=100",
         headers={"Authorization": f"Bearer {token}"},
@@ -347,28 +342,37 @@ def _external_channel_input_evidence(
     history_response.raise_for_status()
 
     candidates: list[dict[str, object]] = []
-    live_payload = live_response.json()
-    if isinstance(live_payload, dict):
-        envelopes = cast(dict[str, object], live_payload).get("mailbox_items")
-        if isinstance(envelopes, list):
-            for raw_envelope in cast(list[object], envelopes):
-                if not isinstance(raw_envelope, dict):
-                    continue
-                envelope = cast(dict[str, object], raw_envelope)
-                if envelope.get("kind") != "external_channel_invocation":
-                    continue
-                raw_items = envelope.get("items")
-                if not isinstance(raw_items, list):
-                    continue
-                for raw_item in cast(list[object], raw_items):
-                    if not isinstance(raw_item, dict):
+    if include_pending:
+        live_response = requests.get(
+            f"{public_server_url}/chat/v1/sessions/{session_id}/live",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        live_response.raise_for_status()
+        live_payload = live_response.json()
+        if isinstance(live_payload, dict):
+            envelopes = cast(dict[str, object], live_payload).get("mailbox_items")
+            if isinstance(envelopes, list):
+                for raw_envelope in cast(list[object], envelopes):
+                    if not isinstance(raw_envelope, dict):
                         continue
-                    presentation = cast(dict[str, object], raw_item).get("presentation")
-                    if not isinstance(presentation, dict):
+                    envelope = cast(dict[str, object], raw_envelope)
+                    if envelope.get("kind") != "external_channel_invocation":
                         continue
-                    presentation_item = cast(dict[str, object], presentation)
-                    if presentation_item.get("type") == "external_channel_message":
-                        candidates.append(presentation_item)
+                    raw_items = envelope.get("items")
+                    if not isinstance(raw_items, list):
+                        continue
+                    for raw_item in cast(list[object], raw_items):
+                        if not isinstance(raw_item, dict):
+                            continue
+                        presentation = cast(dict[str, object], raw_item).get(
+                            "presentation"
+                        )
+                        if not isinstance(presentation, dict):
+                            continue
+                        presentation_item = cast(dict[str, object], presentation)
+                        if presentation_item.get("type") == "external_channel_message":
+                            candidates.append(presentation_item)
 
     history_payload = history_response.json()
     if isinstance(history_payload, dict):
@@ -807,11 +811,12 @@ def test_http_admission_unknown_participant_and_approval_journey(
     )
     assert decided.status is ExternalChannelAccessRequestStatus.ALLOWED
     assert decided.agent_session_id
+    approved_session_id = decided.agent_session_id
 
     def binding_projection() -> object | None:
         projection = external_api.external_channel_v1_list_session_channels(
             agent_id=agent_id,
-            session_id=cast(str, decided.agent_session_id),
+            session_id=approved_session_id,
             handle=handle,
             _headers=headers,
         )
@@ -835,13 +840,13 @@ def test_http_admission_unknown_participant_and_approval_journey(
         agent_id=agent_id,
         _headers=headers,
     )
-    assert decided.agent_session_id in [session.id for session in sessions.items]
+    assert approved_session_id in [session.id for session in sessions.items]
     detail = chat_api.chat_v1_get_agent_session(
         agent_id=agent_id,
-        session_id=decided.agent_session_id,
+        session_id=approved_session_id,
         _headers=headers,
     )
-    assert detail.id == decided.agent_session_id
+    assert detail.id == approved_session_id
     agent_access = external_api.external_channel_v1_list_agent_access(
         agent_id=agent_id,
         handle=handle,
@@ -850,10 +855,26 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert len(agent_access.grants) == 1
     assert agent_access.grants[0].scope is ExternalChannelAccessGrantScope.AGENT
     assert agent_access.grants[0].agent_session_id is None
-    input_evidence = _external_channel_input_evidence(
-        public_server_url=azents_public_server_url,
-        token=token,
-        session_id=decided.agent_session_id,
+    input_evidence = cast(
+        list[dict[str, object]],
+        wait_until(
+            lambda: (
+                evidence
+                if len(
+                    evidence := _external_channel_input_evidence(
+                        public_server_url=azents_public_server_url,
+                        token=token,
+                        session_id=approved_session_id,
+                        include_pending=False,
+                    )
+                )
+                == 1
+                else None
+            ),
+            timeout=30,
+            interval=0.2,
+            message="Approved Slack input was not promoted into Session history",
+        ),
     )
     assert len(input_evidence) == 1
     logical_input = input_evidence[0]
@@ -898,7 +919,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert typed_counts["chat.postMessage"] == 3
     assert typed_counts["chat.delete"] == 1
     assert _successful_session_paths(provider_state) == [
-        f"/w/{handle}/agents/{agent_id}/sessions/{decided.agent_session_id}"
+        f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}"
     ]
     rendered_state = str(provider_state)
     assert _BOT_TOKEN not in rendered_state
@@ -2643,11 +2664,13 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     discord_provider_fake_url: str,
+    azents_engine_worker_container: Container,
     azents_external_channel_gateway_factory: Callable[
         [], AbstractContextManager[Container]
     ],
 ) -> None:
-    """Ingest one real Gateway message only after thread and Session acceptance."""
+    """Accept one Gateway message before independent provider-control delivery."""
+    del azents_engine_worker_container
     application_id = "100000000000000004"
     guild_id = "200000000000000004"
     bot_user_id = "300000000000000004"
@@ -2826,6 +2849,18 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
                 message="Discord Gateway create did not activate one Session binding",
             ),
         )
+        expected_session_path = f"/w/{handle}/agents/{agent_id}/sessions/{session.id}"
+        wait_until(
+            lambda: (
+                expected_session_path
+                in _successful_session_paths(
+                    _discord_provider_state(discord_provider_fake_url)
+                )
+            ),
+            timeout=30,
+            interval=0.2,
+            message="Discord Session-link provider control was not delivered",
+        )
 
     assert session.agent_id == agent_id
     assert binding.provider.value == "discord"
@@ -2835,10 +2870,26 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
         _headers=headers,
     )
     assert detail.id == session.id
-    input_evidence = _external_channel_input_evidence(
-        public_server_url=azents_public_server_url,
-        token=token,
-        session_id=session.id,
+    input_evidence = cast(
+        list[dict[str, object]],
+        wait_until(
+            lambda: (
+                evidence
+                if len(
+                    evidence := _external_channel_input_evidence(
+                        public_server_url=azents_public_server_url,
+                        token=token,
+                        session_id=session.id,
+                        include_pending=False,
+                    )
+                )
+                == 1
+                else None
+            ),
+            timeout=30,
+            interval=0.2,
+            message="Discord Gateway input was not promoted into Session history",
+        ),
     )
     assert len(input_evidence) == 1
     logical_input = input_evidence[0]
@@ -2850,9 +2901,7 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
         f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
     )
     state = _discord_provider_state(discord_provider_fake_url)
-    assert _successful_session_paths(state) == [
-        f"/w/{handle}/agents/{agent_id}/sessions/{session.id}"
-    ]
+    assert _successful_session_paths(state) == [expected_session_path]
     request_counts = cast(dict[str, int], state["request_counts"])
     assert request_counts["create_thread"] >= 1
     # Thread reconciliation runs before create; canonical history runs after create.

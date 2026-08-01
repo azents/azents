@@ -30,8 +30,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_data.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-07-31
-spec_version: 26
+last_verified_at: 2026-08-01
+spec_version: 27
 ---
 
 # External Channel Delivery and Channel Work
@@ -112,12 +112,10 @@ Provider controls created by synchronous ingestion or lifecycle operations use t
 same delivery fence. The Agent Worker periodically recovers stale `attempting`
 controls to `unknown`, lists bounded pending control IDs, and delegates each attempt to
 the shared action service. It never reconstructs provider content from callbacks.
-Synchronous initial Session-link and progress controls are settled in stable order by
-the ingestion coordinator after the canonical mailbox item and activation are durable.
-Only a durable `delivered` result permits mailbox promotion and Session activation;
-`failed`, `unknown`, `not_attempted`, missing, in-flight past the deadline, or
-incomplete delivery retains the mailbox item but fails closed without promotion,
-running transition, or Session wake.
+Initial Session-link and progress controls are independent post-acceptance work.
+`failed`, `unknown`, `not_attempted`, or cancelled delivery remains durable provider
+evidence but does not gate canonical mailbox promotion, Session wake, or AgentRun
+creation.
 After provider I/O, final settlement opens a new transaction, locks the delivery and
 current connection/binding/work authority, and verifies that the same claimed attempt
 still owns settlement before recording the provider result. A stale owner or changed
@@ -225,9 +223,9 @@ delivery outcome and never causes an unsafe replay.
 - Conversational replies use `chat.postMessage` with Slack `markdown_text` in the bound thread. The Tool schema and the provider delivery boundary enforce Slack's current 12,000-character Markdown limit before a mutation request.
 - Releasing the first eligible invocation while a binding has no unanswered work creates Channel Work and one Block Kit Activity Tracker intent before Session wake-up. Creation does not depend on Todo state or a `channel_action` call.
 - Initial binding acceptance separately creates one button-only `Open Azents session`
-  control message and the initial Activity Tracker after retaining the triggering
-  mailbox input but before activating or waking the Session. Retries reuse the same
-  mailbox and delivery attempts.
+  control message and the initial Activity Tracker in the same durable transaction as
+  the triggering mailbox input. The Worker attempts those controls independently after
+  commit. Retries reuse the same mailbox and delivery attempts.
   Later invocations on the binding do not repeat the provider mutation, and Activity
   Tracker desired state never contains the Session URL.
 - The initial Tracker states that the Agent is checking the message with one
@@ -247,8 +245,8 @@ delivery outcome and never causes an unsafe replay.
 - A later work cycle creates a new Tracker rather than reusing the deleted cycle's
   provider identity.
 - Discord creates one Session-link control and an initial compact Channel Work Embed
-  containing `◉ Agent is checking your message` through the same durable activation
-  release. Later complete snapshots replace that retained message's content with an
+  containing `◉ Agent is checking your message` from the same accepted binding
+  transaction. Later complete snapshots replace that retained message's content with an
   empty string and its Embed with the current bounded title, status summary, ordered
   checklist, prioritized context, and labeled sources. Update, delete, replacement,
   recovery, and final-reply cleanup use the same durable Tracker identity and gating.
@@ -324,13 +322,12 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
-- **2026-07-31** (spec_version 26) — Moved canonical mailbox retention before
-  Session-link and initial progress mutation while keeping delivery as the durable gate
-  for promotion, running transition, and wake.
+- **2026-08-01** (spec_version 27) — Decoupled initial Session-link and progress
+  provider-control outcomes from canonical mailbox promotion, Session wake, and
+  AgentRun creation.
 - **2026-07-31** (spec_version 25) — Required durable Session-link and initial
-  progress delivery before mailbox admission, removed transient ingress health from
-  outbound REST authority, and derived new Discord thread titles from the routed
-  Agent name.
+  progress intents, removed transient ingress health from outbound REST authority,
+  and derived new Discord thread titles from the routed Agent name.
 - **2026-07-31** (spec_version 24) — Replaced the file key in place with direct
   provider coordinates and removed Session-event source lookup and legacy key fallback.
 - **2026-07-30** (spec_version 22) — Added Worker-owned bounded provider-control

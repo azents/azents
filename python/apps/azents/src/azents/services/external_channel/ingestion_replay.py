@@ -338,6 +338,10 @@ def _build_request(
     locator = ExternalChannelTriggerLocator(
         connection_id=configuration.id,
         provider=configuration.provider,
+        provider_event_type=_provider_event_type(
+            provider=configuration.provider,
+            labels=labels,
+        ),
         provider_tenant_id=tenant_id,
         provider_channel_id=source.position.provider_channel_id,
         provider_parent_channel_id=_provider_parent_channel_id(
@@ -384,6 +388,21 @@ def _build_request(
             range_start_position=source.range_start_position,
             trigger_position=source.trigger_position,
         ),
+    )
+
+
+def _provider_event_type(
+    *,
+    provider: ExternalChannelProvider,
+    labels: dict[str, object],
+) -> str:
+    value = labels.get("provider_event_type")
+    expected = {
+        ExternalChannelProvider.SLACK: {"app_mention", "message"},
+        ExternalChannelProvider.DISCORD: {"discord_message_create"},
+    }
+    return (
+        value if isinstance(value, str) and value in expected[provider] else "unknown"
     )
 
 

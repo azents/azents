@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelDeliveryOriginType,
-    ExternalChannelSessionActivationState,
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
 )
@@ -22,10 +21,7 @@ from azents.core.session_lifecycle import (
     SessionLifecycleTransitionContext,
     SessionLifecycleTransitionPolicy,
 )
-from azents.rdb.models.external_channel import (
-    RDBExternalChannelBinding,
-    RDBExternalChannelDeliveryAttempt,
-)
+from azents.rdb.models.external_channel import RDBExternalChannelDeliveryAttempt
 from azents.repos.external_channel.data import (
     ExternalChannelArchiveTermination,
     ExternalChannelPurgeCleanup,
@@ -136,7 +132,6 @@ class _RepositoryDouble(ExternalChannelLifecycleRepository):
         del session
         self.calls.append(("cleanup", tuple(session_ids)))
         return ExternalChannelPurgeCleanup(
-            deleted_activation_count=1,
             deleted_delivery_attempt_count=1,
             deleted_action_count=1,
             deleted_session_grant_count=1,
@@ -156,7 +151,6 @@ class _RepositoryDouble(ExternalChannelLifecycleRepository):
         del session
         self.calls.append(("verify", tuple(session_ids)))
         return ExternalChannelPurgeVerification(
-            remaining_activation_count=0,
             remaining_binding_count=0,
             remaining_work_count=0,
             remaining_action_count=0,
@@ -262,12 +256,7 @@ async def test_archive_selects_only_active_work_for_progress_cleanup() -> None:
     )
 
     work_select = str(session.scalar_statements[1])
-    progress_statement = next(
-        statement
-        for statement in session.execute_statements
-        if "INSERT INTO external_channel_delivery_attempts" in str(statement)
-    )
-    progress_insert = progress_statement.compile().params
+    progress_insert = session.execute_statements[0].compile().params
     assert progress_insert is not None
     assert "external_channel_works.status =" in work_select
     assert active_work.state_revision == 8
@@ -278,44 +267,6 @@ async def test_archive_selects_only_active_work_for_progress_cleanup() -> None:
     assert all(
         "external_channel_pending_contexts" not in str(statement)
         for statement in session.execute_statements
-    )
-
-
-@pytest.mark.asyncio
-async def test_binding_terminalization_blocks_initializing_session_activation() -> None:
-    """Route or connection removal cannot leave an orphan activation barrier."""
-    binding = SimpleNamespace(
-        id="binding-1",
-        route_id="route-1",
-        resource_id="resource-1",
-        disconnected_at=None,
-        disconnect_reason=None,
-    )
-    session = _LifecycleSessionDouble([[]], execute_rows=[[]])
-    terminalize = ExternalChannelLifecycleRepository()._terminalize_bindings  # pyright: ignore[reportPrivateUsage]
-
-    await terminalize(
-        cast(AsyncSession, session),
-        bindings=cast(Sequence[RDBExternalChannelBinding], (binding,)),
-        resources=(),
-        now=datetime.datetime(2026, 7, 31, tzinfo=datetime.UTC),
-        reason="relationship_removed",
-    )
-
-    activation_update = next(
-        statement
-        for statement in session.execute_statements
-        if str(statement).startswith("UPDATE external_channel_session_activations")
-    )
-    params = activation_update.compile().params
-    assert params is not None
-    assert params["state"] is ExternalChannelSessionActivationState.BLOCKED
-    assert params["failure_kind"] == "binding_disconnected"
-    assert binding.disconnected_at == datetime.datetime(
-        2026,
-        7,
-        31,
-        tzinfo=datetime.UTC,
     )
 
 
@@ -393,11 +344,7 @@ async def test_purge_delivery_cleanup_includes_binding_null_action_attempts() ->
         session_ids=("session-1",),
     )
 
-    delivery_delete = next(
-        str(statement)
-        for statement in session.execute_statements
-        if str(statement).startswith("DELETE FROM external_channel_delivery_attempts")
-    )
+    delivery_delete = str(session.execute_statements[0])
     assert "external_channel_delivery_attempts.channel_action_id IN" in delivery_delete
 
 

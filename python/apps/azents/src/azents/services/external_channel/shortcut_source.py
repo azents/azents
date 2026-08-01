@@ -112,6 +112,7 @@ class ExternalChannelShortcutSourceService:
                 )
                 labels: dict[str, object] = {
                     "provider": "slack",
+                    "provider_event_type": normalized.source_event_type,
                     "tenant_id": normalized.tenant_id,
                     "channel_id": normalized.channel_id,
                     "thread_ts": normalized.root_thread_ts,
@@ -140,6 +141,7 @@ class ExternalChannelShortcutSourceService:
                     position_provider_thread_key = normalized.thread_id
                 labels = {
                     "provider": "discord",
+                    "provider_event_type": shortcut_source_event.event_type,
                     "guild_id": normalized.tenant_id,
                     "source_channel_id": normalized.channel_id,
                     "channel_id": parent_channel_id,

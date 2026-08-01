@@ -108,8 +108,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-31
-spec_version: 136
+last_verified_at: 2026-08-01
+spec_version: 137
 ---
 
 # Conversation & Events
@@ -879,12 +879,9 @@ producers own wake-up and run-state transitions. User, Goal, action, spawn, and 
 `wake_session`; ordinary `send_message` and terminal `agent_result` inputs use `queue_only` and do not
 mark or wake the target session. Queue-only rows remain in FIFO order and are promoted with a later
 wake-producing input, but they do not count as follow-up work and do not prevent a session with no
-active Run from becoming idle. An External Channel invocation may be durably enqueued before its
-provider initialization completes. Its Session activation is a separate durable promotion gate:
-`initializing` and `blocked` items remain visible pending rows but are not eligible for pending-work
-checks, wake scheduling, attachment preparation, or FIFO promotion. An `activated` item becomes
-ordinary promotable FIFO input. A gated head also prevents later Session input from overtaking it.
-Preparation handles exactly one promotable FIFO head per transaction. The worker
+active Run from becoming idle. An External Channel invocation is ordinary FIFO input after its
+acceptance transaction commits the conversation-position advance, mailbox item, and Session running
+transition. Preparation handles exactly one FIFO head per transaction. The worker
 first reads the head's identity and inference requirement, resolves the profile and attachment metadata outside any database session when needed, then locks the Session and
 the same FIFO head. Attachment resolution is metadata-only during promotion: it never downloads the
 Exchange file or creates a replacement ModelFile, and model rich input comes only from FileParts
@@ -901,7 +898,7 @@ Canonical outcomes are:
 | `goal_continuation`       | Durable `goal_continuation` event.                                                                                     |
 | `external_channel_continuation` | Durable `external_channel_continuation` event.                                                                    |
 | `agent_message`           | Durable `agent_message` event.                                                                                         |
-| `external_channel_invocation` | Contiguous source-attributed `external_channel_message` events after durable Session activation.                  |
+| `external_channel_invocation` | Contiguous source-attributed `external_channel_message` events.                                                   |
 | Goal `action_message`     | Goal side effect plus canonical goal/user events; no `action_message` event.                                           |
 | Skill `action_message`    | `skill_loaded` plus optional `user_message`; no `action_message` event.                                                |
 | Worktree `action_message` | Mailbox-item-keyed live `ActionExecution` claim with action payload and current owner generation; no `action_message` event. |
@@ -1059,10 +1056,9 @@ Current verification:
 
 An authorized External Channel invocation enters a Session through one deterministic
 mailbox envelope containing its immutable ordered provider-history projection. The
-envelope is committed with the real idle Session and durable activation before
-provider initialization, but cannot promote while activation is `initializing` or
-`blocked`. After activation, promotion appends contiguous
-`external_channel_message` events.
+acceptance transaction atomically advances the conversation position, commits the
+mailbox item, and makes the Session runnable. Promotion appends contiguous
+`external_channel_message` events. Provider-control delivery has no promotion gate.
 
 Each event retains provider, resource/binding, canonical message and revision,
 sender, author type, provider timestamp, authorization state, lifecycle, and
@@ -1081,12 +1077,12 @@ participant.
 
 ## 12. Changelog
 
+- **2026-08-01** — v137. Removed the External Channel activation promotion gate;
+  accepted invocation mailboxes now follow the ordinary FIFO contract, with the
+  conversation position as the sole duplicate-prevention authority.
 - **2026-07-31** — v136. Added the dedicated
   `external_channel_continuation` mailbox, event, live projection, and public API
   contract instead of reusing Goal continuation.
-- **2026-07-31** — v135. Added the durable External Channel mailbox promotion gate:
-  canonical invocation input is retained before provider initialization, while
-  `initializing` and `blocked` activations remain inert FIFO barriers.
 - **2026-07-24** — v132. Promoted Team Session requester/sender separation, post-commit
   routing-only wakes, canonical Postgres execution authority, and Userless execution invariants.
 - **2026-07-24** — v131. Added explicit versus Agent-default root workspace intent,

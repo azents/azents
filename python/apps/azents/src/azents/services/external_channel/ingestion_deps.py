@@ -22,10 +22,6 @@ from azents.services.external_channel.mailbox_ingestion_store import (
 from azents.services.external_channel.mailbox_wake import (
     ExternalChannelMailboxWakeDispatcher,
 )
-from azents.services.external_channel.provider_control import (
-    ExternalChannelProviderControlService,
-    get_external_channel_provider_control_service,
-)
 
 
 def get_external_channel_conversation_ingestion_service(
@@ -41,10 +37,6 @@ def get_external_channel_conversation_ingestion_service(
         ExternalChannelMailboxIngestionStore,
         Depends(ExternalChannelMailboxIngestionStore),
     ],
-    required_delivery_coordinator: Annotated[
-        ExternalChannelProviderControlService,
-        Depends(get_external_channel_provider_control_service),
-    ],
     wake_dispatcher: Annotated[
         ExternalChannelMailboxWakeDispatcher,
         Depends(ExternalChannelMailboxWakeDispatcher),
@@ -55,6 +47,5 @@ def get_external_channel_conversation_ingestion_service(
         conversation_lock=conversation_lock,
         history_reader=history_reader,
         store=store,
-        required_delivery_coordinator=required_delivery_coordinator,
         wake_dispatcher=wake_dispatcher,
     )

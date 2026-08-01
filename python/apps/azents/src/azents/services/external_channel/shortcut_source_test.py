@@ -231,6 +231,8 @@ async def test_shortcut_source_commits_content_free_selector_state() -> None:
     assert state.trigger_provider_message_key == "slack:T-1:C-1:100.0001"
     assert state.trigger_position == "00000000000000000100.000100"
     assert state.selected_route_id is None
+    create = cast(Any, repository.resource_creates[0])
+    assert create.labels["provider_event_type"] == "app_mention"
     assert session.commit_count == 1
     assert repository.calls == [
         "interaction",
@@ -351,6 +353,7 @@ async def test_discord_message_command_source_preserves_thread_identity() -> Non
     assert create.provider_resource_key == "discord:guild-1:100"
     assert create.labels == {
         "provider": "discord",
+        "provider_event_type": "discord_message_create",
         "guild_id": "guild-1",
         "source_channel_id": "channel-1",
         "channel_id": "channel-1",
