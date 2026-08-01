@@ -12,6 +12,13 @@ class Workspace(BaseModel):
 
     name: str = Field(description="Workspace name")
     handle: str = Field(description="Workspace unique handle")
+    default_runtime_profile_id: str | None = Field(
+        description="Runtime Profile copied to new Agents when currently available"
+    )
+    default_runtime_profile_version: int = Field(
+        ge=1,
+        description="Optimistic version for the Workspace Runtime Profile default",
+    )
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
 
@@ -38,6 +45,14 @@ class WorkspaceList(BaseModel):
     """Workspace list."""
 
     items: list[Workspace] = Field(description="Workspace list")
+
+
+@dataclasses.dataclass(frozen=True)
+class WorkspaceRuntimeProfileDefaultReplace:
+    """Optimistic replacement of one Workspace Runtime Profile default."""
+
+    expected_version: int
+    runtime_profile_id: str | None
 
 
 @dataclasses.dataclass(frozen=True)

@@ -288,7 +288,7 @@ async def test_download_external_file_uses_current_runtime_storage() -> None:
     output = await state.tools[1].handler(
         json.dumps(
             {
-                "file": "external-file:v1:slack:binding-1:F123",
+                "file": "external-file:v1:slack:binding-1:::F123",
                 "expected_size_bytes": 42,
                 "path": "/workspace/agent/report.csv",
                 "overwrite": False,
@@ -307,7 +307,7 @@ async def test_download_external_file_uses_current_runtime_storage() -> None:
             "session_id": "session-1",
             "agent_id": "agent-1",
             "operation_id": "run-current",
-            "file": "external-file:v1:slack:binding-1:F123",
+            "file": "external-file:v1:slack:binding-1:::F123",
             "expected_size_bytes": 42,
             "path": "/workspace/agent/report.csv",
             "overwrite": False,

@@ -27,6 +27,7 @@ from azents.core.enums import (
     ExchangeFileOrigin,
     ExchangeFileProvenanceKind,
     ExchangeFileStatus,
+    ExternalChannelResponseMode,
     WorkspaceUserRole,
 )
 from azents.repos.agent.data import Agent
@@ -479,9 +480,11 @@ def _make_agent() -> Agent:
         model_parameters=None,
         system_prompt=None,
         enabled=True,
+        external_channel_default_response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
         lifecycle_status=AgentLifecycleStatus.ACTIVE,
         type=AgentType.PUBLIC,
-        runtime_provider_id=None,
+        runtime_profile_id=None,
+        runtime_profile_selection_version=1,
         shell_enabled=True,
         memory_enabled=True,
         tool_search_enabled=False,

@@ -52,6 +52,7 @@ from azentspublicclient.models.slack_connection_setup_request import (
 from docker.models.containers import Container as DockerPyContainer
 from testcontainers.core.container import DockerContainer
 
+from support.runtime_profiles import create_workspace_runtime_profile
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
@@ -84,7 +85,7 @@ def _create_runtime_agent(
     admin_api_client: azentsadminclient.ApiClient,
     server_url: str,
     *,
-    runtime_provider_id: str,
+    runtime_profile_provider_id: str,
 ) -> _Setup:
     """Create an Agent configured with the deterministic Docker Runtime Provider."""
     suffix = unique()
@@ -120,6 +121,12 @@ def _create_runtime_agent(
         handle,
         integration.id,
     )
+    runtime_profile_id = create_workspace_runtime_profile(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        provider_id=runtime_profile_provider_id,
+    )
     agent = AgentV1Api(public_api_client).agent_v1_create_agent(
         handle=handle,
         agent_create_request=AgentCreateRequest(
@@ -127,7 +134,7 @@ def _create_runtime_agent(
             model_selection=model_selection,
             lightweight_model_selection=model_selection,
             type=AgentType.PUBLIC,
-            runtime_provider_id=runtime_provider_id,
+            runtime_profile_id=runtime_profile_id,
             shell_enabled=True,
         ),
         _headers=headers,
@@ -283,8 +290,7 @@ def _prepare_runtime_workspace(
     public_url: str,
     setup: _Setup,
 ) -> list[str]:
-    """Ensure a Runtime exists without consuming the team-primary producer."""
-    _explicit_session(public_url=public_url, setup=setup, paths=[])
+    """Start the Runtime without consuming the team-primary producer."""
     runtime_api = AgentRuntimeV1Api(public_api_client)
     runtime_api.agent_runtime_v1_start_agent_runtime(
         agent_id=setup.agent_id,
@@ -458,7 +464,7 @@ def test_automatic_session_projects_policy_and_explicit_precedence(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id=_RUNTIME_PROVIDER_ID,
+        runtime_profile_provider_id=_RUNTIME_PROVIDER_ID,
     )
     paths = _prepare_runtime_workspace(
         public_api_client=public_api_client,
@@ -526,7 +532,7 @@ def test_automatic_session_projects_revision_missing_path_and_clear(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id=_RUNTIME_PROVIDER_ID,
+        runtime_profile_provider_id=_RUNTIME_PROVIDER_ID,
     )
     paths = _prepare_runtime_workspace(
         public_api_client=public_api_client,
@@ -595,7 +601,7 @@ def test_automatic_session_projects_runtime_unavailable_and_clear(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id=_RUNTIME_PROVIDER_ID,
+        runtime_profile_provider_id=_RUNTIME_PROVIDER_ID,
     )
     paths = _prepare_runtime_workspace(
         public_api_client=public_api_client,
@@ -664,7 +670,7 @@ def test_external_channel_allow_and_granted_binding_snapshot_projects(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id=_RUNTIME_PROVIDER_ID,
+        runtime_profile_provider_id=_RUNTIME_PROVIDER_ID,
     )
     paths = _prepare_runtime_workspace(
         public_api_client=public_api_client,
@@ -865,7 +871,7 @@ def test_subagent_reuses_root_project_context_without_duplicates(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
-        runtime_provider_id=_RUNTIME_PROVIDER_ID,
+        runtime_profile_provider_id=_RUNTIME_PROVIDER_ID,
     )
     paths = _prepare_runtime_workspace(
         public_api_client=public_api_client,

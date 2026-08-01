@@ -123,6 +123,7 @@ async def test_ensure_thread_creates_a_missing_root_message_thread() -> None:
             bot_token="discord-secret",
             parent_channel_id="222",
             root_message_id="333",
+            name=None,
         )
 
     assert result.status == "delivered"
@@ -160,6 +161,7 @@ async def test_ensure_thread_reuses_a_thread_returned_by_the_root_message() -> N
             bot_token="discord-secret",
             parent_channel_id="222",
             root_message_id="333",
+            name=None,
         )
 
     assert result.status == "delivered"
@@ -185,6 +187,7 @@ async def test_ensure_thread_treats_root_200_without_thread_as_absent() -> None:
             bot_token="discord-secret",
             parent_channel_id="222",
             root_message_id="333",
+            name=None,
         )
 
     assert result.status == "delivered"
@@ -209,6 +212,7 @@ async def test_ensure_thread_reconciles_ambiguous_create_without_replay() -> Non
             bot_token="discord-secret",
             parent_channel_id="222",
             root_message_id="333",
+            name=None,
         )
 
     assert result.status == "delivered"

@@ -4,7 +4,11 @@ import { useRef, useState } from "react";
 import { trpc } from "@/trpc/client";
 import { sessionChannelDisconnectInvalidationPlan } from "../invalidation";
 import type { SessionChannelsState } from "../types";
-import type { AgentResponse, ManagedBinding } from "@azents/public-client";
+import type {
+  AgentResponse,
+  ExternalChannelResponseMode,
+  ManagedBinding,
+} from "@azents/public-client";
 
 export interface SessionChannelsContainerProps {
   handle: string;
@@ -19,7 +23,15 @@ export interface SessionChannelsContainerOutput {
   state: SessionChannelsState;
   actionError: string | null;
   disconnectingId: string | null;
+  responseModeDrafts: Record<string, ExternalChannelResponseMode>;
+  updatingResponseModeId: string | null;
+  responseModeError: { bindingId: string; message: string } | null;
   onDisconnect: (binding: ManagedBinding) => void;
+  onResponseModeChange: (
+    binding: ManagedBinding,
+    responseMode: ExternalChannelResponseMode,
+  ) => void;
+  onSaveResponseMode: (binding: ManagedBinding) => void;
 }
 
 function normalizeError(error: unknown): string {
@@ -34,6 +46,16 @@ export function useSessionChannelsContainer({
   const utils = trpc.useUtils();
   const [actionError, setActionError] = useState<string | null>(null);
   const [disconnectingId, setDisconnectingId] = useState<string | null>(null);
+  const [responseModeDrafts, setResponseModeDrafts] = useState<
+    Record<string, ExternalChannelResponseMode>
+  >({});
+  const [updatingResponseModeId, setUpdatingResponseModeId] = useState<
+    string | null
+  >(null);
+  const [responseModeError, setResponseModeError] = useState<{
+    bindingId: string;
+    message: string;
+  } | null>(null);
   const disconnectLock = useRef(false);
   const sessionInput = { agentId: agent.id, sessionId };
   const channelInput = { handle, ...sessionInput };
@@ -71,6 +93,36 @@ export function useSessionChannelsContainer({
         setDisconnectingId(null);
       },
     });
+  const responseModeMutation =
+    trpc.externalChannel.updateBindingResponseMode.useMutation({
+      onSuccess: async (binding) => {
+        try {
+          await utils.externalChannel.listSessionChannels.invalidate(
+            channelInput,
+          );
+          setResponseModeDrafts((drafts) => {
+            const next = { ...drafts };
+            delete next[binding.id];
+            return next;
+          });
+          setResponseModeError(null);
+        } catch (error) {
+          setResponseModeError({
+            bindingId: binding.id,
+            message: normalizeError(error),
+          });
+        } finally {
+          setUpdatingResponseModeId(null);
+        }
+      },
+      onError: (error, variables) => {
+        setResponseModeError({
+          bindingId: variables.bindingId,
+          message: normalizeError(error),
+        });
+        setUpdatingResponseModeId(null);
+      },
+    });
 
   const state: SessionChannelsState =
     sessionQuery.isPending || channelsQuery.isPending
@@ -93,6 +145,9 @@ export function useSessionChannelsContainer({
     state,
     actionError,
     disconnectingId,
+    responseModeDrafts,
+    updatingResponseModeId,
+    responseModeError,
     onDisconnect: (binding) => {
       if (disconnectLock.current) {
         return;
@@ -103,6 +158,31 @@ export function useSessionChannelsContainer({
       disconnectMutation.mutate({
         ...channelInput,
         bindingId: binding.id,
+      });
+    },
+    onResponseModeChange: (binding, responseMode) => {
+      setResponseModeDrafts((drafts) => ({
+        ...drafts,
+        [binding.id]: responseMode,
+      }));
+      setResponseModeError(null);
+    },
+    onSaveResponseMode: (binding) => {
+      const responseMode =
+        responseModeDrafts[binding.id] ?? binding.response_mode;
+      if (
+        responseMode === binding.response_mode ||
+        updatingResponseModeId !== null ||
+        binding.disconnected_at !== null
+      ) {
+        return;
+      }
+      setResponseModeError(null);
+      setUpdatingResponseModeId(binding.id);
+      responseModeMutation.mutate({
+        ...channelInput,
+        bindingId: binding.id,
+        responseMode,
       });
     },
   };

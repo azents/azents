@@ -28,6 +28,7 @@ class EventKind(str, Enum):
     """
     USER_MESSAGE = 'user_message'
     GOAL_CONTINUATION = 'goal_continuation'
+    EXTERNAL_CHANNEL_CONTINUATION = 'external_channel_continuation'
     GOAL_UPDATED = 'goal_updated'
     ACTION_MESSAGE = 'action_message'
     AGENT_MESSAGE = 'agent_message'

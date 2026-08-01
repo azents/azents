@@ -16,6 +16,7 @@ import {
   IconAdjustments,
   IconChevronRight,
   IconPlugConnected,
+  IconServer,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
@@ -89,6 +90,12 @@ export function WorkspaceSettingsHub({
       icon: <IconPlugConnected size={rem(18)} />,
       label: t("llmIntegrations.label"),
       description: t("llmIntegrations.description"),
+    },
+    {
+      href: `${basePath}/runtime-profiles`,
+      icon: <IconServer size={rem(18)} />,
+      label: t("runtimeProfiles.label"),
+      description: t("runtimeProfiles.description"),
     },
   ];
 

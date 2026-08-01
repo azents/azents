@@ -167,7 +167,7 @@ def test_context_breakdown_counts_external_file_metadata() -> None:
                     "declared_size": 1024,
                     "supported": True,
                     "unsupported_reason": None,
-                    "file": "external-file:v1:slack:binding-1:F123",
+                    "file": "external-file:v1:slack:binding-1:::F123",
                 }
             ]
         },
@@ -192,7 +192,7 @@ def test_context_breakdown_counts_external_file_metadata() -> None:
     assert len(breakdown) == 1
     assert breakdown[0].key == "user"
     assert breakdown[0].tokens == len(rendered)
-    assert "File: external-file:v1:slack:binding-1:F123" in rendered
+    assert "File: external-file:v1:slack:binding-1:::F123" in rendered
 
 
 def test_context_projection_uses_session_prompt_snapshot() -> None:

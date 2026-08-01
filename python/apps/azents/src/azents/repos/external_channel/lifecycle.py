@@ -13,13 +13,12 @@ from azents.core.enums import (
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
     ExternalChannelAppMode,
-    ExternalChannelBindingStatus,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
-    ExternalChannelConversationAdmissionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
+    ExternalChannelInteractionStatus,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelRouteCatalogStatus,
@@ -27,6 +26,7 @@ from azents.core.enums import (
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
 )
+from azents.core.external_channel_session_presence import session_presence_payload
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.base import RDBModel
 from azents.rdb.models.external_channel import (
@@ -39,10 +39,8 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelBlock,
     RDBExternalChannelChannelDefault,
     RDBExternalChannelConnection,
-    RDBExternalChannelConversationAdmission,
     RDBExternalChannelDeliveryAttempt,
-    RDBExternalChannelInvocationBatch,
-    RDBExternalChannelInvocationBatchItem,
+    RDBExternalChannelInteraction,
     RDBExternalChannelResource,
     RDBExternalChannelWork,
     RDBExternalChannelWorkProjectionPart,
@@ -81,16 +79,31 @@ class ExternalChannelLifecycleRepository:
         bindings = await self._locked_bindings(
             session,
             session_ids=session_ids,
-            active_only=True,
+            connected_only=True,
         )
         if not bindings:
             return ExternalChannelArchiveTermination(
                 disconnected_binding_count=0,
                 finished_work_count=0,
-                created_progress_delete_intent_count=0,
-                progress_delete_intent_ids=(),
+                created_cleanup_intent_count=0,
+                cleanup_intent_ids=(),
             )
         binding_ids = [binding.id for binding in bindings]
+        resources = {
+            resource.id: resource
+            for resource in (
+                await session.scalars(
+                    sa.select(RDBExternalChannelResource)
+                    .where(
+                        RDBExternalChannelResource.id.in_(
+                            [binding.resource_id for binding in bindings]
+                        )
+                    )
+                    .order_by(RDBExternalChannelResource.id)
+                    .with_for_update()
+                )
+            ).all()
+        }
         works = list(
             (
                 await session.scalars(
@@ -105,14 +118,34 @@ class ExternalChannelLifecycleRepository:
                 )
             ).all()
         )
+        cleanup_intent_ids: list[str] = []
         for binding in bindings:
-            binding.status = ExternalChannelBindingStatus.DISCONNECTED
             binding.disconnected_at = now
             binding.disconnect_reason = "session_archived"
+            resource = resources.get(binding.resource_id)
+            if resource is None:
+                continue
+            presence = RDBExternalChannelDeliveryAttempt(
+                origin_type=ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
+                origin_id=binding.id,
+                channel_action_id=None,
+                binding_id=binding.id,
+                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                request_payload=session_presence_payload(
+                    resource.labels,
+                    state="left",
+                ),
+                status=ExternalChannelDeliveryStatus.PENDING,
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+                attempted_at=None,
+                completed_at=None,
+            )
+            session.add(presence)
+            cleanup_intent_ids.append(presence.id)
 
         finished_work_count = 0
-        created_progress_delete_intent_count = 0
-        progress_delete_intent_ids: list[str] = []
         for work in works:
             work.status = ExternalChannelWorkStatus.FINISHED
             work.finished_at = now
@@ -145,22 +178,20 @@ class ExternalChannelLifecycleRepository:
                 )
                 created_id = result.scalar_one_or_none()
                 if created_id is not None:
-                    created_progress_delete_intent_count += 1
-                    progress_delete_intent_ids.append(created_id)
+                    cleanup_intent_ids.append(created_id)
         discord_cleanup_ids = await self._create_discord_projection_delete_intents(
             session,
             binding_ids=binding_ids,
             origin_type=ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
             now=now,
         )
-        progress_delete_intent_ids.extend(discord_cleanup_ids)
-        created_progress_delete_intent_count += len(discord_cleanup_ids)
+        cleanup_intent_ids.extend(discord_cleanup_ids)
         await session.flush()
         return ExternalChannelArchiveTermination(
             disconnected_binding_count=len(bindings),
             finished_work_count=finished_work_count,
-            created_progress_delete_intent_count=created_progress_delete_intent_count,
-            progress_delete_intent_ids=tuple(progress_delete_intent_ids),
+            created_cleanup_intent_count=len(cleanup_intent_ids),
+            cleanup_intent_ids=tuple(cleanup_intent_ids),
         )
 
     async def validate_restore_session_tree(
@@ -173,12 +204,9 @@ class ExternalChannelLifecycleRepository:
         bindings = await self._locked_bindings(
             session,
             session_ids=session_ids,
-            active_only=False,
+            connected_only=False,
         )
-        if any(
-            binding.status is ExternalChannelBindingStatus.ACTIVE
-            for binding in bindings
-        ):
+        if any(binding.disconnected_at is None for binding in bindings):
             raise RuntimeError("Restored External Channel binding was reactivated")
         binding_ids = [binding.id for binding in bindings]
         works = list(
@@ -211,7 +239,7 @@ class ExternalChannelLifecycleRepository:
             for binding in await self._locked_bindings(
                 session,
                 session_ids=session_ids,
-                active_only=False,
+                connected_only=False,
             )
         ]
         access_request_ids = await self._session_tree_access_request_ids(
@@ -280,7 +308,7 @@ class ExternalChannelLifecycleRepository:
         bindings = await self._locked_bindings(
             session,
             session_ids=session_ids,
-            active_only=False,
+            connected_only=False,
         )
         binding_ids = [binding.id for binding in bindings]
         access_request_ids = await self._session_tree_access_request_ids(
@@ -291,18 +319,6 @@ class ExternalChannelLifecycleRepository:
             session,
             session_ids=session_ids,
             binding_ids=binding_ids,
-        )
-        batch_ids = list(
-            (
-                await session.scalars(
-                    sa.select(RDBExternalChannelInvocationBatch.id)
-                    .where(
-                        RDBExternalChannelInvocationBatch.binding_id.in_(binding_ids)
-                    )
-                    .order_by(RDBExternalChannelInvocationBatch.id)
-                    .with_for_update()
-                )
-            ).all()
         )
         deleted_delivery_attempt_count = await self._delete(
             session,
@@ -340,16 +356,6 @@ class ExternalChannelLifecycleRepository:
             RDBExternalChannelAccessRequest,
             RDBExternalChannelAccessRequest.id.in_(access_request_ids),
         )
-        deleted_invocation_batch_item_count = await self._delete(
-            session,
-            RDBExternalChannelInvocationBatchItem,
-            RDBExternalChannelInvocationBatchItem.batch_id.in_(batch_ids),
-        )
-        deleted_invocation_batch_count = await self._delete(
-            session,
-            RDBExternalChannelInvocationBatch,
-            RDBExternalChannelInvocationBatch.id.in_(batch_ids),
-        )
         deleted_work_count = await self._delete(
             session,
             RDBExternalChannelWork,
@@ -367,8 +373,6 @@ class ExternalChannelLifecycleRepository:
             deleted_session_grant_count=deleted_session_grant_count,
             preserved_agent_grant_reference_count=preserved_agent_grant_reference_count,
             deleted_access_request_count=deleted_access_request_count,
-            deleted_invocation_batch_item_count=deleted_invocation_batch_item_count,
-            deleted_invocation_batch_count=deleted_invocation_batch_count,
             deleted_work_count=deleted_work_count,
             deleted_binding_count=deleted_binding_count,
         )
@@ -426,11 +430,6 @@ class ExternalChannelLifecycleRepository:
                     == ExternalChannelAccessGrantScope.SESSION,
                     RDBExternalChannelAccessGrant.agent_session_id.in_(session_ids),
                 ),
-            ),
-            remaining_invocation_batch_count=await self._count(
-                session,
-                RDBExternalChannelInvocationBatch,
-                RDBExternalChannelInvocationBatch.binding_id.in_(binding_ids),
             ),
         )
         if any(verification.model_dump().values()):
@@ -519,17 +518,10 @@ class ExternalChannelLifecycleRepository:
             ),
             open_admission_count=await self._count(
                 session,
-                RDBExternalChannelConversationAdmission,
-                sa.and_(
-                    RDBExternalChannelConversationAdmission.connection_id
-                    == connection.id,
-                    RDBExternalChannelConversationAdmission.status.in_(
-                        (
-                            ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
-                            ExternalChannelConversationAdmissionStatus.SELECTED,
-                            ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
-                        )
-                    ),
+                RDBExternalChannelInteraction,
+                _open_selector_condition(
+                    connection_id=connection.id,
+                    route_id=None,
                 ),
             ),
             pending_access_request_count=await self._count(
@@ -599,29 +591,24 @@ class ExternalChannelLifecycleRepository:
                     sa.select(RDBExternalChannelBinding)
                     .where(
                         RDBExternalChannelBinding.route_id == route.id,
-                        RDBExternalChannelBinding.status
-                        == ExternalChannelBindingStatus.ACTIVE,
+                        RDBExternalChannelBinding.disconnected_at.is_(None),
                     )
                     .order_by(RDBExternalChannelBinding.resource_id)
                     .with_for_update()
                 )
             ).all()
         )
-        admissions = list(
+        selector_interactions = list(
             (
                 await session.scalars(
-                    sa.select(RDBExternalChannelConversationAdmission)
+                    sa.select(RDBExternalChannelInteraction)
                     .where(
-                        RDBExternalChannelConversationAdmission.selected_route_id
-                        == route.id,
-                        RDBExternalChannelConversationAdmission.status.in_(
-                            (
-                                ExternalChannelConversationAdmissionStatus.SELECTED,
-                                ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
-                            )
-                        ),
+                        _open_selector_condition(
+                            connection_id=connection.id,
+                            route_id=route.id,
+                        )
                     )
-                    .order_by(RDBExternalChannelConversationAdmission.id)
+                    .order_by(RDBExternalChannelInteraction.id)
                     .with_for_update()
                 )
             ).all()
@@ -640,7 +627,7 @@ class ExternalChannelLifecycleRepository:
                 )
             ).all()
         )
-        progress_delete_intent_ids = await self._terminalize_bindings(
+        cleanup_intent_ids = await self._terminalize_bindings(
             session,
             bindings=bindings,
             resources=resources,
@@ -664,8 +651,8 @@ class ExternalChannelLifecycleRepository:
                 invalidation_reason="relationship_removed",
             )
         )
-        for admission in admissions:
-            admission.status = ExternalChannelConversationAdmissionStatus.EXPIRED
+        for interaction in selector_interactions:
+            interaction.status = ExternalChannelInteractionStatus.EXPIRED
         for request in access_requests:
             request.status = ExternalChannelAccessRequestStatus.EXPIRED
             request.decision_summary = "The External Channel relationship was removed."
@@ -678,7 +665,7 @@ class ExternalChannelLifecycleRepository:
         await session.flush()
         return ExternalChannelMultiRouteRemoval(
             impact=impact,
-            progress_delete_intent_ids=progress_delete_intent_ids,
+            cleanup_intent_ids=cleanup_intent_ids,
         )
 
     async def reenable_multi_route(
@@ -808,30 +795,24 @@ class ExternalChannelLifecycleRepository:
                     sa.select(RDBExternalChannelBinding)
                     .where(
                         RDBExternalChannelBinding.route_id.in_(route_ids),
-                        RDBExternalChannelBinding.status
-                        == ExternalChannelBindingStatus.ACTIVE,
+                        RDBExternalChannelBinding.disconnected_at.is_(None),
                     )
                     .order_by(RDBExternalChannelBinding.resource_id)
                     .with_for_update()
                 )
             ).all()
         )
-        admissions = list(
+        selector_interactions = list(
             (
                 await session.scalars(
-                    sa.select(RDBExternalChannelConversationAdmission)
+                    sa.select(RDBExternalChannelInteraction)
                     .where(
-                        RDBExternalChannelConversationAdmission.connection_id
-                        == connection.id,
-                        RDBExternalChannelConversationAdmission.status.in_(
-                            (
-                                ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
-                                ExternalChannelConversationAdmissionStatus.SELECTED,
-                                ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
-                            )
-                        ),
+                        _open_selector_condition(
+                            connection_id=connection.id,
+                            route_id=None,
+                        )
                     )
-                    .order_by(RDBExternalChannelConversationAdmission.id)
+                    .order_by(RDBExternalChannelInteraction.id)
                     .with_for_update()
                 )
             ).all()
@@ -850,7 +831,7 @@ class ExternalChannelLifecycleRepository:
                 )
             ).all()
         )
-        progress_delete_intent_ids = await self._terminalize_bindings(
+        cleanup_intent_ids = await self._terminalize_bindings(
             session,
             bindings=bindings,
             resources=resources,
@@ -877,8 +858,8 @@ class ExternalChannelLifecycleRepository:
                 invalidation_reason=reason,
             ),
         )
-        for admission in admissions:
-            admission.status = ExternalChannelConversationAdmissionStatus.EXPIRED
+        for interaction in selector_interactions:
+            interaction.status = ExternalChannelInteractionStatus.EXPIRED
         for request in access_requests:
             request.status = ExternalChannelAccessRequestStatus.EXPIRED
             request.decision_summary = (
@@ -920,11 +901,11 @@ class ExternalChannelLifecycleRepository:
         return ExternalChannelMultiConnectionDisconnect(
             disconnected_route_count=disconnected_route_count,
             invalidated_default_count=invalidated_default_count,
-            expired_admission_count=len(admissions),
+            expired_admission_count=len(selector_interactions),
             expired_access_request_count=len(access_requests),
             unavailable_resource_count=unavailable_resource_count,
             disconnected_binding_count=len(bindings),
-            progress_delete_intent_ids=progress_delete_intent_ids,
+            cleanup_intent_ids=cleanup_intent_ids,
         )
 
     async def purge_disconnected_connection_provider_state(
@@ -987,7 +968,7 @@ class ExternalChannelLifecycleRepository:
                 )
             )
         ).all()
-        progress_delete_intent_ids: list[str] = []
+        cleanup_intent_ids: list[str] = []
         provider_state_purge_connection_ids: list[str] = []
         for route_id, connection_id, app_mode in route_rows:
             if app_mode is ExternalChannelAppMode.SINGLE:
@@ -999,9 +980,7 @@ class ExternalChannelLifecycleRepository:
                     defer_provider_state_purge=True,
                 )
                 if disconnected is not None:
-                    progress_delete_intent_ids.extend(
-                        disconnected.progress_delete_intent_ids
-                    )
+                    cleanup_intent_ids.extend(disconnected.cleanup_intent_ids)
                     provider_state_purge_connection_ids.append(connection_id)
             else:
                 removed = await self.remove_multi_route(
@@ -1012,9 +991,7 @@ class ExternalChannelLifecycleRepository:
                     now=now,
                 )
                 if removed is not None:
-                    progress_delete_intent_ids.extend(
-                        removed.progress_delete_intent_ids
-                    )
+                    cleanup_intent_ids.extend(removed.cleanup_intent_ids)
         deleted_agent_grant_count = await self._delete(
             session,
             RDBExternalChannelAccessGrant,
@@ -1027,7 +1004,7 @@ class ExternalChannelLifecycleRepository:
         )
         await session.flush()
         return ExternalChannelAgentDecommissionCleanup(
-            progress_delete_intent_ids=tuple(progress_delete_intent_ids),
+            cleanup_intent_ids=tuple(cleanup_intent_ids),
             provider_state_purge_connection_ids=tuple(
                 provider_state_purge_connection_ids
             ),
@@ -1095,7 +1072,7 @@ class ExternalChannelLifecycleRepository:
             RDBExternalChannelBinding,
             sa.and_(
                 RDBExternalChannelBinding.route_id == route_id,
-                RDBExternalChannelBinding.status == ExternalChannelBindingStatus.ACTIVE,
+                RDBExternalChannelBinding.disconnected_at.is_(None),
             ),
         )
         bound_resource_count = int(
@@ -1114,16 +1091,10 @@ class ExternalChannelLifecycleRepository:
             bound_resource_count=bound_resource_count,
             open_admission_count=await self._count(
                 session,
-                RDBExternalChannelConversationAdmission,
-                sa.and_(
-                    RDBExternalChannelConversationAdmission.selected_route_id
-                    == route_id,
-                    RDBExternalChannelConversationAdmission.status.in_(
-                        (
-                            ExternalChannelConversationAdmissionStatus.SELECTED,
-                            ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS,
-                        )
-                    ),
+                RDBExternalChannelInteraction,
+                _open_selector_condition(
+                    connection_id=None,
+                    route_id=route_id,
                 ),
             ),
             pending_access_request_count=await self._count(
@@ -1191,8 +1162,7 @@ class ExternalChannelLifecycleRepository:
                 )
                 .where(
                     RDBExternalChannelBinding.route_id.in_(route_ids),
-                    RDBExternalChannelBinding.status
-                    == ExternalChannelBindingStatus.ACTIVE,
+                    RDBExternalChannelBinding.disconnected_at.is_(None),
                 )
                 .order_by(
                     RDBExternalChannelBinding.agent_session_id,
@@ -1260,10 +1230,36 @@ class ExternalChannelLifecycleRepository:
             ).all()
         )
         for binding in bindings:
-            binding.status = ExternalChannelBindingStatus.DISCONNECTED
             binding.disconnected_at = now
             binding.disconnect_reason = reason
-        progress_delete_intent_ids: list[str] = []
+        cleanup_intent_ids: list[str] = []
+        for binding in bindings:
+            result = await session.execute(
+                pg_insert(RDBExternalChannelDeliveryAttempt)
+                .values(
+                    id=uuid7().hex,
+                    origin_type=ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
+                    origin_id=binding.id,
+                    channel_action_id=None,
+                    binding_id=binding.id,
+                    operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                    request_payload=session_presence_payload(
+                        resource_labels.get(binding.resource_id),
+                        state="left",
+                    ),
+                    status=ExternalChannelDeliveryStatus.PENDING,
+                    provider_message_key=None,
+                    error_kind=None,
+                    error_summary=None,
+                    attempted_at=None,
+                    completed_at=None,
+                )
+                .on_conflict_do_nothing()
+                .returning(RDBExternalChannelDeliveryAttempt.id)
+            )
+            created_id = result.scalar_one_or_none()
+            if created_id is not None:
+                cleanup_intent_ids.append(created_id)
         for work in works:
             work.status = ExternalChannelWorkStatus.FINISHED
             work.finished_at = now
@@ -1297,8 +1293,8 @@ class ExternalChannelLifecycleRepository:
             )
             created_id = result.scalar_one_or_none()
             if created_id is not None:
-                progress_delete_intent_ids.append(created_id)
-        progress_delete_intent_ids.extend(
+                cleanup_intent_ids.append(created_id)
+        cleanup_intent_ids.extend(
             await self._create_discord_projection_delete_intents(
                 session,
                 binding_ids=binding_ids,
@@ -1307,7 +1303,7 @@ class ExternalChannelLifecycleRepository:
             )
         )
         await session.flush()
-        return tuple(progress_delete_intent_ids)
+        return tuple(cleanup_intent_ids)
 
     async def _create_discord_projection_delete_intents(
         self,
@@ -1425,16 +1421,14 @@ class ExternalChannelLifecycleRepository:
         session: AsyncSession,
         *,
         session_ids: Sequence[str],
-        active_only: bool,
+        connected_only: bool,
     ) -> list[RDBExternalChannelBinding]:
         """Lock bindings in stable order after the caller locks Session roots."""
         predicate: list[sa.ColumnElement[bool]] = [
             RDBExternalChannelBinding.agent_session_id.in_(session_ids)
         ]
-        if active_only:
-            predicate.append(
-                RDBExternalChannelBinding.status == ExternalChannelBindingStatus.ACTIVE
-            )
+        if connected_only:
+            predicate.append(RDBExternalChannelBinding.disconnected_at.is_(None))
         return list(
             (
                 await session.scalars(
@@ -1545,6 +1539,35 @@ class ExternalChannelLifecycleRepository:
         """Apply one terminal transition and return its affected row count."""
         result = await session.execute(statement.returning(sa.literal(1)))
         return len(result.scalars().all())
+
+
+def _open_selector_condition(
+    *,
+    connection_id: str | None,
+    route_id: str | None,
+) -> sa.ColumnElement[bool]:
+    """Match nonterminal interaction-owned selector state."""
+    conditions: list[sa.ColumnElement[bool]] = [
+        RDBExternalChannelInteraction.projection.op("?")("agent_selector"),
+        RDBExternalChannelInteraction.status.in_(
+            (
+                ExternalChannelInteractionStatus.ACCEPTED,
+                ExternalChannelInteractionStatus.PROCESSING,
+                ExternalChannelInteractionStatus.COMPLETED,
+            )
+        ),
+        RDBExternalChannelInteraction.expires_at > sa.func.now(),
+    ]
+    if connection_id is not None:
+        conditions.append(RDBExternalChannelInteraction.connection_id == connection_id)
+    if route_id is not None:
+        conditions.append(
+            RDBExternalChannelInteraction.projection["agent_selector"][
+                "selected_route_id"
+            ].as_string()
+            == route_id
+        )
+    return sa.and_(*conditions)
 
 
 def _provider_payload(

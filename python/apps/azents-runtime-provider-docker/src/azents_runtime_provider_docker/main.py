@@ -27,7 +27,6 @@ from azents_runtime_provider_docker.provider import (
     DockerRuntimeProvider,
     DockerRuntimeProviderConfig,
 )
-from azents_runtime_provider_docker.runtime_control import DockerRuntimeControlAdapter
 
 _PROTOCOL_VERSION = "agent-runtime-provider-docker-v1"
 _CONFIG_SCHEMA_VERSION = "agent-runtime-provider-docker-v1"
@@ -55,6 +54,22 @@ _CAPABILITY_CONTRACT: dict[str, JsonValue] = {
         "terminal_delete_destroys_workspace": True,
     },
     "configuration_fields": [],
+    "profile_contracts": [
+        {
+            "profile_kind": "docker_container",
+            "contract_family": "docker.container-profile",
+            "schema_versions": [1],
+            "capabilities": [
+                "docker.container-profile",
+                "runtime.resources",
+                "workspace.host-directory",
+            ],
+            "constraints": {
+                "maximums": {},
+                "allowed_values": {},
+            },
+        }
+    ],
 }
 
 
@@ -75,7 +90,6 @@ async def _main() -> None:
             "provider_id": settings.provider_id,
             "connection_id": settings.connection_id,
             "control_endpoint": settings.control_endpoint,
-            "docker_network": settings.docker_network,
             "host_data_root": str(settings.host_data_root),
         },
     )
@@ -101,13 +115,11 @@ async def _run_control_loop(
         DockerRuntimeProviderConfig(
             provider_id=settings.provider_id,
             host_data_root=settings.host_data_root,
-            docker_network=settings.docker_network,
             runner_env=settings.runner_env,
             workspace_mount_path=settings.workspace_path,
             tmp_mount_path=settings.tmp_path,
         ),
     )
-    lifecycle = DockerRuntimeControlAdapter(provider)
     registration = ProviderRegistration(
         provider_id=settings.provider_id,
         provider_type="docker",
@@ -140,7 +152,7 @@ async def _run_control_loop(
         )
         run_loop = ProviderRunLoop(
             client=control_client,
-            lifecycle=lifecycle,
+            lifecycle=provider,
             registration=registration,
             connection_id=connection_id,
             consumer_id=f"{connection_id}:provider",
@@ -194,7 +206,6 @@ class ProviderSettings:
             "AZ_RUNTIME_CONTROL_ALLOW_INSECURE"
         )
         self.provider_id = _required_env("AZ_RUNTIME_PROVIDER_ID")
-        self.docker_network = _required_env("AZ_RUNTIME_PROVIDER_DOCKER_NETWORK")
         self.host_data_root = Path(_required_env("AZ_RUNTIME_PROVIDER_HOST_DATA_ROOT"))
         self.workspace_path = os.environ.get(
             "AZ_RUNTIME_PROVIDER_WORKSPACE_PATH",

@@ -25,11 +25,13 @@ from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
     ExternalChannelProvider,
+    ExternalChannelResponseMode,
     ExternalChannelTransport,
     WorkspaceUserRole,
 )
 from azents.repos.external_channel.data import ExternalChannelMultiConnectionImpact
 from azents.repos.external_channel.management_data import (
+    ManagedBinding,
     ManagedConnection,
     ManagedMultiConnection,
 )
@@ -49,6 +51,7 @@ from azents.services.external_channel.management import (
     ExternalChannelManagementGenerationChanged,
     ExternalChannelManagementNotFound,
     ExternalChannelManagementService,
+    ExternalChannelResponseModeSetting,
     ManagedConnectionSetup,
     ManagedMultiConnectionSetup,
 )
@@ -98,6 +101,28 @@ def _multi_connection() -> ManagedMultiConnection:
         generation=datetime.datetime(2026, 7, 25, tzinfo=datetime.UTC),
         active_agent_count=2,
         configured_default_count=1,
+    )
+
+
+def _binding(
+    response_mode: ExternalChannelResponseMode = (
+        ExternalChannelResponseMode.MENTION_ONLY
+    ),
+) -> ManagedBinding:
+    now = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
+    return ManagedBinding(
+        id="binding-1",
+        agent_session_id="session-1",
+        provider=ExternalChannelProvider.SLACK,
+        response_mode=response_mode,
+        resource_type="thread",
+        resource_label="Channel thread",
+        connected_at=now,
+        disconnected_at=None,
+        disconnect_reason=None,
+        latest_activity_at=now,
+        work=None,
+        deliveries=[],
     )
 
 
@@ -197,6 +222,9 @@ def test_agent_connection_list_includes_read_only_associated_multi_apps() -> Non
     service = AsyncMock(spec=ExternalChannelManagementService)
     service.list_connections.return_value = [_connection()]
     service.list_agent_multi_connections.return_value = [_multi_connection()]
+    service.get_default_response_mode.return_value = ExternalChannelResponseModeSetting(
+        response_mode=ExternalChannelResponseMode.ALL_MESSAGES
+    )
 
     response = _client(service, role=WorkspaceUserRole.MEMBER).get(
         "/external-channel/v1/workspaces/ws/agents/agent-1/external-channels"
@@ -204,6 +232,7 @@ def test_agent_connection_list_includes_read_only_associated_multi_apps() -> Non
 
     assert response.status_code == 200
     assert response.json()["items"][0]["id"] == "connection-1"
+    assert response.json()["default_response_mode"] == "all_messages"
     associated = response.json()["associated_multi_apps"]
     assert associated == [
         {
@@ -233,6 +262,72 @@ def test_agent_connection_list_includes_read_only_associated_multi_apps() -> Non
         workspace_id="workspace-1",
         agent_id="agent-1",
         workspace_user_id="workspace-user-1",
+    )
+
+
+def test_agent_admin_can_replace_default_response_mode() -> None:
+    """The Agent-scoped setting accepts one required concrete mode."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+    service.update_default_response_mode.return_value = (
+        ExternalChannelResponseModeSetting(
+            response_mode=ExternalChannelResponseMode.MENTION_ONLY
+        )
+    )
+
+    response = _client(service).put(
+        "/external-channel/v1/workspaces/ws/agents/agent-1/"
+        "external-channels/default-response-mode",
+        json={"response_mode": "mention_only"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"response_mode": "mention_only"}
+    service.update_default_response_mode.assert_awaited_once_with(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        workspace_user_id="workspace-user-1",
+        setting=management_route_module.ResponseModeRequest(
+            response_mode=ExternalChannelResponseMode.MENTION_ONLY
+        ),
+    )
+
+
+def test_default_response_mode_rejects_unknown_values() -> None:
+    """The API cannot create nullable, inherited, or unknown policy state."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+
+    response = _client(service).put(
+        "/external-channel/v1/workspaces/ws/agents/agent-1/"
+        "external-channels/default-response-mode",
+        json={"response_mode": "use_agent_default"},
+    )
+
+    assert response.status_code == 422
+    service.update_default_response_mode.assert_not_awaited()
+
+
+def test_agent_admin_can_replace_connected_binding_response_mode() -> None:
+    """A session binding update returns the concrete projected mode."""
+    service = AsyncMock(spec=ExternalChannelManagementService)
+    service.update_binding_response_mode.return_value = _binding()
+
+    response = _client(service).put(
+        "/external-channel/v1/workspaces/ws/agents/agent-1/sessions/session-1/"
+        "external-channels/binding-1/response-mode",
+        json={"response_mode": "mention_only"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["response_mode"] == "mention_only"
+    service.update_binding_response_mode.assert_awaited_once_with(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        workspace_user_id="workspace-user-1",
+        agent_session_id="session-1",
+        binding_id="binding-1",
+        setting=management_route_module.ResponseModeRequest(
+            response_mode=ExternalChannelResponseMode.MENTION_ONLY
+        ),
     )
 
 
@@ -973,6 +1068,14 @@ def test_openapi_includes_management_but_excludes_provider_callback() -> None:
     assert (
         "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels"
         in paths
+    )
+    assert (
+        "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/"
+        "external-channels/default-response-mode" in paths
+    )
+    assert (
+        "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/"
+        "{session_id}/external-channels/{binding_id}/response-mode" in paths
     )
     assert f"{connection_path}/slack" in paths
     assert "put" in paths[f"{connection_path}/slack"]

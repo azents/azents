@@ -15,6 +15,7 @@ from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelIngressProfile,
     ExternalChannelProvider,
+    ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
     ExternalChannelTransport,
@@ -23,6 +24,7 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.models.external_channel import RDBExternalChannelConnection
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
+from azents.repos.agent.data import Agent
 from azents.repos.agent_admin import AgentAdminRepository
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRouteCreate,
@@ -126,6 +128,14 @@ class ExternalChannelAccessPolicyInput(BaseModel):
     open_access_enabled: bool = True
 
 
+class ExternalChannelResponseModeSetting(BaseModel):
+    """Canonical full-value External Channel response-mode setting."""
+
+    model_config = ConfigDict(frozen=True)
+
+    response_mode: ExternalChannelResponseMode
+
+
 @dataclass
 class ExternalChannelManagementService:
     """Authorize and orchestrate External Channel management boundaries."""
@@ -190,6 +200,55 @@ class ExternalChannelManagementService:
                 workspace_id=workspace_id,
                 agent_id=agent_id,
             )
+
+    async def get_default_response_mode(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        workspace_user_id: str,
+    ) -> ExternalChannelResponseModeSetting:
+        """Read the default copied to subsequently created bindings."""
+        agent = await self._require_agent(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=workspace_user_id,
+            admin=False,
+        )
+        return ExternalChannelResponseModeSetting(
+            response_mode=agent.external_channel_default_response_mode
+        )
+
+    async def update_default_response_mode(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        workspace_user_id: str,
+        setting: ExternalChannelResponseModeSetting,
+    ) -> ExternalChannelResponseModeSetting:
+        """Replace only the Agent default without rewriting existing bindings."""
+        await self._require_agent(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=workspace_user_id,
+            admin=True,
+        )
+        async with self.session_manager() as session:
+            update_default = (
+                self.agent_repository.update_external_channel_default_response_mode
+            )
+            agent = await update_default(
+                session,
+                agent_id=agent_id,
+                response_mode=setting.response_mode,
+            )
+            if agent is None or agent.workspace_id != workspace_id:
+                raise ExternalChannelManagementNotFound(agent_id)
+            await session.commit()
+        return ExternalChannelResponseModeSetting(
+            response_mode=agent.external_channel_default_response_mode
+        )
 
     async def list_agent_multi_connections(
         self,
@@ -681,7 +740,7 @@ class ExternalChannelManagementService:
                 raise ExternalChannelManagementNotFound(route_id)
             connection.updated_at = now
             await session.commit()
-        for delivery_id in removal.progress_delete_intent_ids:
+        for delivery_id in removal.cleanup_intent_ids:
             await self.action_service.attempt_delivery(delivery_id)
         return removal.impact
 
@@ -847,7 +906,7 @@ class ExternalChannelManagementService:
             )
             if disconnected is None:
                 raise ExternalChannelManagementNotFound(connection_id)
-            for delivery_id in disconnected.progress_delete_intent_ids:
+            for delivery_id in disconnected.cleanup_intent_ids:
                 target = await self.action_service.prepare_delivery_in_session(
                     session,
                     delivery_id,
@@ -863,7 +922,7 @@ class ExternalChannelManagementService:
             connection.updated_at = now
             await session.commit()
         for target in cleanup_targets:
-            await self.action_service.attempt_prepared_delivery(target)
+            await self.action_service.attempt_captured_terminal_delivery(target)
         return _managed_multi_disconnect(disconnected)
 
     async def load_multi_management_handoff(
@@ -1062,7 +1121,7 @@ class ExternalChannelManagementService:
                 raise ExternalChannelManagementNotFound(connection_id)
             await session.commit()
         for target in cleanup_targets:
-            await self.action_service.attempt_prepared_delivery(target)
+            await self.action_service.attempt_captured_terminal_delivery(target)
         return connection
 
     async def update_connection_access_policy(
@@ -1144,6 +1203,45 @@ class ExternalChannelManagementService:
             agent_id=agent_id,
             agent_session_id=agent_session_id,
         )
+
+    async def update_binding_response_mode(
+        self,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        workspace_user_id: str,
+        agent_session_id: str,
+        binding_id: str,
+        setting: ExternalChannelResponseModeSetting,
+    ) -> ManagedBinding:
+        """Replace one connected binding's concrete response mode."""
+        await self._require_agent(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=workspace_user_id,
+            admin=True,
+        )
+        async with self.session_manager() as session:
+            updated = await self.repository.update_binding_response_mode(
+                session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                agent_session_id=agent_session_id,
+                binding_id=binding_id,
+                response_mode=setting.response_mode,
+            )
+            if not updated:
+                raise ExternalChannelManagementNotFound(binding_id)
+            await session.commit()
+        bindings = await self.list_bindings(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            agent_session_id=agent_session_id,
+        )
+        for binding in bindings:
+            if binding.id == binding_id:
+                return binding
+        raise ExternalChannelManagementNotFound(binding_id)
 
     async def list_agent_access(
         self,
@@ -1379,7 +1477,7 @@ class ExternalChannelManagementService:
         agent_id: str,
         workspace_user_id: str,
         admin: bool,
-    ) -> None:
+    ) -> Agent:
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, agent_id)
             if agent is None or agent.workspace_id != workspace_id:
@@ -1390,6 +1488,7 @@ class ExternalChannelManagementService:
                 workspace_user_id,
             ):
                 raise ExternalChannelManagementNotFound(agent_id)
+            return agent
 
 
 def _managed_multi_disconnect(

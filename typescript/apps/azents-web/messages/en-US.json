@@ -291,8 +291,7 @@
       "empty": "No agents yet",
       "viewAllAgents": "View all agents ({count})",
       "slackApps": "External channels",
-      "integrations": "External channels",
-      "runtimeExecution": "Runtime execution"
+      "integrations": "External channels"
     },
     "settings": {
       "layout": {
@@ -310,6 +309,10 @@
         "llmIntegrations": {
           "label": "LLM integrations",
           "description": "Provider credentials, connections, status, and usage"
+        },
+        "runtimeProfiles": {
+          "label": "Runtime profiles",
+          "description": "Runtime provider and infrastructure choices for workspace agents"
         }
       }
     },
@@ -581,6 +584,70 @@
         "statusError": "Device authorization {status}."
       }
     },
+    "runtimeProfiles": {
+      "headline": "Runtime profiles",
+      "description": "Define complete runtime choices for agents in this workspace.",
+      "addProfile": "Add profile",
+      "noInfrastructureTitle": "No Provider profiles available",
+      "noInfrastructureDescription": "A platform administrator must publish a compatible Pod Profile or Container Profile before this workspace can create a Runtime Profile.",
+      "defaultTitle": "New agent default",
+      "defaultDescription": "Copied once when a new agent is created without an explicit runtime profile.",
+      "defaultPlaceholder": "No default profile",
+      "emptyTitle": "No runtime profiles",
+      "emptyDescription": "Create a runtime profile to give agents an exact provider and infrastructure choice.",
+      "nameColumn": "Profile",
+      "infrastructureColumn": "Provider profile",
+      "statusColumn": "Status",
+      "versionColumn": "Version",
+      "actionsColumn": "Actions",
+      "defaultBadge": "Default",
+      "noDescription": "No description",
+      "available": "Available",
+      "unavailable": "Unavailable",
+      "active": "Active",
+      "disabled": "Disabled",
+      "edit": "Edit",
+      "recreate": "Recreate runtimes",
+      "operationLoading": "Loading recreation progress…",
+      "operationTitle": "Runtime recreation",
+      "operationCounts": "{succeeded} succeeded · {running} running · {failed} failed · {skipped} skipped · {total} total",
+      "operationItemNoDetail": "No additional detail.",
+      "createTitle": "Add runtime profile",
+      "editTitle": "Edit runtime profile",
+      "nameLabel": "Name",
+      "descriptionLabel": "Description",
+      "infrastructureLabel": "Provider Pod or Container Profile",
+      "infrastructureDescription": "This exact Provider and Profile will be used. No fallback is applied.",
+      "lifecycleLabel": "Lifecycle",
+      "allowedCidrsLabel": "Allowed CIDRs",
+      "deniedCidrsLabel": "Denied CIDRs",
+      "cidrsDescription": "Enter one CIDR per line. Workspace rules can only narrow provider policy.",
+      "cancel": "Cancel",
+      "save": "Save",
+      "availabilityReasons": {
+        "workspaceProfileDisabled": "This Runtime Profile is disabled.",
+        "providerUnavailable": "The selected Runtime Provider is not currently available to this Workspace.",
+        "infrastructureProfileUnavailable": "The selected Provider Profile is disabled or unavailable.",
+        "workspacePolicyInvalid": "The Workspace network restrictions are invalid for this Provider Profile.",
+        "profileIncompatible": "The selected Provider Profile is incompatible with the Provider's current capabilities.",
+        "unknown": "The current Runtime configuration is unavailable."
+      },
+      "missingCapabilities": "Missing capabilities: {capabilities}",
+      "operationStatus": {
+        "pending": "Pending",
+        "running": "Running",
+        "completed": "Completed",
+        "completed_with_failures": "Completed with failures",
+        "failed": "Failed"
+      },
+      "operationItemStatus": {
+        "pending": "Pending",
+        "running": "Running",
+        "succeeded": "Succeeded",
+        "skipped": "Skipped",
+        "failed": "Failed"
+      }
+    },
     "agents": {
       "headline": "Agents",
       "description": "Manage AI agents for your workspace",
@@ -602,6 +669,12 @@
       "namePlaceholder": "e.g. Customer Support Agent",
       "descriptionLabel": "Description",
       "descriptionPlaceholder": "Briefly describe what this agent does",
+      "runtimeProfileLabel": "Runtime profile",
+      "runtimeProfileDescription": "Choose the complete provider and infrastructure configuration for this agent. Leave empty to copy the workspace default when creating the agent.",
+      "runtimeProfilePlaceholder": "Use workspace default",
+      "runtimeProfileLoading": "Loading runtime profiles…",
+      "runtimeProfileUnavailableTitle": "Selected runtime profile is unavailable",
+      "runtimeProfileUnavailableDescription": "The selection is preserved, but new runtime creation is blocked: {reason}",
       "integrationLabel": "LLM Integration",
       "integrationPlaceholder": "Select an integration",
       "providerPlaceholder": "Select a provider",
@@ -978,6 +1051,20 @@
       "externalChannels": {
         "title": "External channels",
         "description": "Operate dedicated Slack and Discord connections and control who can invoke this agent.",
+        "defaultResponseModeTitle": "Default response mode",
+        "defaultResponseModeDescription": "This value is copied to newly connected conversations only. Existing conversations keep their current mode.",
+        "defaultResponseModeSaved": "Default response mode saved.",
+        "saveResponseMode": "Save",
+        "responseMode": {
+          "all_messages": {
+            "label": "All eligible messages",
+            "description": "Continue participating when eligible people send ordinary messages."
+          },
+          "mention_only": {
+            "label": "Mentions only",
+            "description": "Keep ordinary messages as context until someone explicitly mentions the agent."
+          }
+        },
         "addConnection": "Connect Slack",
         "connectionsTitle": "Connections",
         "emptyConnectionsTitle": "No external channel connection",
@@ -1141,6 +1228,15 @@
       "sessionChannels": {
         "title": "Channels",
         "description": "Inspect external channel bindings, work projection, delivery outcomes, and retained access.",
+        "responseModeTitle": "Response mode",
+        "responseModeLabel": "Messages that trigger this agent",
+        "responseModeDescription": "This setting affects future messages in this connected conversation.",
+        "responseModeReadOnlyDescription": "The saved mode is retained for this disconnected or archived conversation.",
+        "saveResponseMode": "Save",
+        "responseMode": {
+          "all_messages": "All eligible messages",
+          "mention_only": "Mentions only"
+        },
         "archivedTitle": "Archived session",
         "archivedDescription": "External channels were terminally disconnected at archive time. This projection is read-only.",
         "retentionUnlimited": "Retention: unlimited",
@@ -1180,10 +1276,8 @@
         "grantsTitle": "Session access",
         "grantsDescription": "Participants authorized specifically for this session.",
         "noGrants": "No active session-scoped grants.",
-        "bindingStatus": {
-          "active": "Active",
-          "disconnected": "Disconnected"
-        },
+        "connected": "Connected",
+        "disconnected": "Disconnected",
         "workStatus": {
           "active": "Work active",
           "finished": "Work finished"
@@ -1207,6 +1301,14 @@
           "session": "Session access",
           "agent": "Agent access"
         }
+      },
+      "runtimeProfileAvailabilityReasons": {
+        "workspaceProfileDisabled": "This Runtime Profile is disabled.",
+        "providerUnavailable": "Its Runtime Provider is not currently available.",
+        "infrastructureProfileUnavailable": "Its Provider Profile is disabled or unavailable.",
+        "workspacePolicyInvalid": "Its Workspace network restrictions are invalid.",
+        "profileIncompatible": "Its Provider Profile is incompatible with the Provider's current capabilities.",
+        "unknown": "The current Runtime configuration is unavailable."
       }
     },
     "toolkits": {
@@ -1591,181 +1693,6 @@
       "handoffPermissionTitle": "Workspace permission required",
       "handoffPermissionDescription": "Only Workspace Owners and Managers can manage this Slack channel default."
     },
-    "runtimeExecution": {
-      "restrictions": {
-        "dockerTitle": "Docker",
-        "dockerDescription": "Add Workspace restrictions to the Docker access granted by the selected Profile. Unset values inherit the Profile.",
-        "disableDocker": "Disable Docker",
-        "inheritWhenEmpty": "Leave empty to inherit the Profile value.",
-        "dockerStoragePolicy": "Docker storage policy",
-        "dockerStorageDescription": "Keep the Profile setting or further restrict temporary Docker data.",
-        "inheritProfile": "Inherit from Profile",
-        "temporaryDockerStorage": "Temporary Docker storage capacity",
-        "storagePlaceholder": "e.g. 8",
-        "kubernetesResourcesTitle": "Kubernetes Pod resources",
-        "kubernetesResourcesDescription": "Optional upper bounds applied to Kubernetes Requests and Limits. Empty values inherit the Profile.",
-        "cpuRequestMillicores": "CPU request (millicores)",
-        "cpuLimitMillicores": "CPU limit (millicores)",
-        "cpuRequestPlaceholder": "e.g. 500",
-        "cpuLimitPlaceholder": "e.g. 1000",
-        "memoryRequest": "Memory request",
-        "memoryLimit": "Memory limit",
-        "memoryRequestPlaceholder": "e.g. 2",
-        "memoryLimitPlaceholder": "e.g. 4",
-        "ephemeralStorage": "Ephemeral storage",
-        "ephemeralStorageDescription": "Uses the same value for the Kubernetes Request and Limit.",
-        "ephemeralPlaceholder": "e.g. 8",
-        "persistentStorage": "Persistent workspace storage",
-        "persistentStorageDescription": "PVC expansions apply automatically. Smaller values take effect after the PVC is deleted and recreated.",
-        "persistentPlaceholder": "e.g. 20",
-        "unit": "Unit",
-        "storageEphemeral": "Temporary storage"
-      },
-      "workspacePage": {
-        "title": "Runtime execution",
-        "description": "Choose the Profiles available in this workspace and add restrictive workspace limits.",
-        "readOnly": "You can inspect this policy, but only workspace owners and managers can change it.",
-        "save": "Save workspace policy",
-        "actionFailed": "The policy could not be saved.",
-        "allowedProfiles": "Allowed Profiles",
-        "allowedDescription": "Agents can select only Profiles that are allowed and currently available.",
-        "unsupportedSelection": "Remove Profiles that request authority the current Runtime provider cannot enforce before saving.",
-        "noProfiles": "No Runtime Execution Profiles are visible.",
-        "available": "Available",
-        "unavailable": "Unavailable",
-        "allowed": "Allowed",
-        "blocked": "Blocked",
-        "restrictionsTitle": "Workspace restrictions",
-        "auditTitle": "Policy audit",
-        "noAudit": "No workspace policy audit events.",
-        "version": "Version {version}",
-        "digest": "Digest {digest}",
-        "updated": "Updated {time}",
-        "neverUpdated": "Using the implicit workspace policy",
-        "reasons": {
-          "profile_retired": "Profile retired",
-          "profile_not_allowed": "Not allowed by workspace",
-          "dependency_unsatisfied": "Dependency unavailable",
-          "provider_module_unsupported": "Provider module unsupported",
-          "provider_engine_unsupported": "Provider engine unsupported",
-          "provider_storage_unsupported": "Provider storage unsupported",
-          "provider_network_unsupported": "Provider network unsupported",
-          "provider_limit_exceeded": "Provider limit exceeded"
-        }
-      },
-      "agentPage": {
-        "hubLabel": "Execution environment",
-        "hubDescription": "Choose a Runtime Execution Profile and inspect applied policy state.",
-        "title": "Execution environment",
-        "description": "Configure restrictive execution intent, save it, then apply it to the Runtime separately.",
-        "statusTitle": "Runtime policy status",
-        "statusLoading": "Loading Runtime policy status…",
-        "statusError": "Runtime policy status is unavailable.",
-        "status": {
-          "configured": "Configured",
-          "pending": "Pending",
-          "applied": "Applied",
-          "unavailable": "Unavailable",
-          "divergent": "Divergent"
-        },
-        "statusHelp": {
-          "configured": "Saved intent differs from the Runtime target. Apply when ready.",
-          "pending": "The target is immutable and waiting for the Runtime to report applied evidence.",
-          "applied": "The Runtime target and promoted applied evidence match exactly.",
-          "unavailable": "The policy cannot currently be resolved or applied.",
-          "divergent": "The Runtime evidence does not match the current target."
-        },
-        "actions": {
-          "none": "No action required",
-          "apply": "Apply configured policy",
-          "wait": "Wait for Runtime",
-          "administrator_action": "Administrator action required"
-        },
-        "apply": "Apply to Runtime",
-        "applying": "Applying…",
-        "save": "Save configuration",
-        "configurationTitle": "Configured intent",
-        "configurationDescription": "Saving changes updates Agent intent only. It does not retarget the Runtime.",
-        "profile": "Execution Profile",
-        "profileRetired": "Retired",
-        "profileUnavailable": "Unavailable",
-        "effectivePreview": "Effective preview",
-        "providerCompatibility": "Provider compatibility is evaluated only during Apply.",
-        "reductions": "Hierarchy reductions",
-        "noReductions": "No upper-layer reductions affect this configuration.",
-        "comparisonTitle": "Configured, target, and applied",
-        "configured": "Configured",
-        "target": "Target",
-        "applied": "Applied",
-        "none": "None",
-        "profileValue": "Profile {profile}",
-        "generation": "Generation {generation}",
-        "policyFingerprint": "Policy fingerprint",
-        "capabilities": "Capabilities",
-        "storage": "Storage",
-        "network": "Network",
-        "enabled": "Enabled",
-        "disabled": "Disabled",
-        "governingLayers": "Where each value comes from",
-        "whyUnavailable": "Why this policy cannot be applied",
-        "reasonExplanations": {
-          "profile_retired": "The selected Profile has been retired. Select an active Profile.",
-          "profile_not_allowed": "This Workspace does not allow the selected Profile.",
-          "dependency_unsatisfied": "A required Runtime policy dependency is not satisfied.",
-          "provider_module_unsupported": "The Runtime Provider does not support one or more settings in this Profile.",
-          "provider_engine_unsupported": "The Runtime Provider does not support the requested Docker capabilities.",
-          "provider_storage_unsupported": "The Runtime Provider does not support the requested storage policy.",
-          "provider_network_unsupported": "The Runtime Provider does not support the requested outbound network policy.",
-          "provider_limit_exceeded": "One or more requested values exceed the Runtime Provider's supported maximum.",
-          "execution_policy_unavailable": "The Runtime policy could not be resolved from the current configuration.",
-          "automatic_convergence_pending": "A restrictive policy change is being applied automatically.",
-          "explicit_apply_required": "The saved configuration differs from the Runtime target. Apply it when ready.",
-          "application_pending": "The Runtime has not yet confirmed the current target.",
-          "target_divergent": "The Runtime reported evidence that does not match the current target.",
-          "reported_digest_mismatch": "The Runtime reported a different policy fingerprint from the current target.",
-          "target_generation_mismatch": "The Runtime target belongs to an older Generation and must be reconciled.",
-          "applied_snapshot_missing": "The recorded applied policy Snapshot is missing.",
-          "applied_pointer_mismatch": "The Runtime's applied policy reference does not point to the current verified target.",
-          "provider_evidence_mismatch": "The Runtime Provider did not return policy evidence matching the requested Generation and target.",
-          "runtime_failure": "The Runtime reported an operational failure. Reference code: {code}"
-        },
-        "fieldLabels": {
-          "docker": "Docker",
-          "cpuRequest": "CPU request",
-          "cpuLimit": "CPU limit",
-          "memoryRequest": "Memory request",
-          "memoryLimit": "Memory limit",
-          "ephemeralStorage": "Runtime ephemeral storage",
-          "persistentStorage": "Persistent workspace storage",
-          "dockerStoragePolicy": "Temporary Docker storage policy",
-          "dockerStorageCapacity": "Temporary Docker storage capacity"
-        },
-        "layerLabels": {
-          "profile": "Profile",
-          "workspace": "Workspace restrictions",
-          "agent": "Agent settings"
-        },
-        "capabilityLabels": {
-          "docker": "Docker"
-        },
-        "storageModes": {
-          "none": "No temporary Docker storage",
-          "ephemeral": "Temporary Docker storage",
-          "persistent": "Persistent Docker storage"
-        },
-        "networkModes": {
-          "none": "System traffic only",
-          "restricted": "Allowed IP ranges only",
-          "direct": "All IP addresses"
-        },
-        "reasonCodes": "Reason codes",
-        "auditTitle": "Execution policy audit",
-        "noAudit": "No Agent execution-policy audit events.",
-        "actionFailed": "The Runtime Execution action failed.",
-        "saveSuccess": "Configuration saved. Apply remains a separate action.",
-        "applySuccess": "A Runtime policy target was created or reused."
-      }
-    },
     "integrations": {
       "title": "External channels",
       "description": "Manage Workspace-owned Slack and Discord Apps, Agent catalogs, and channel defaults.",
@@ -2041,7 +1968,44 @@
       "workspaceTab": "Agent Runtime",
       "settingsTab": "Settings",
       "settingsTitle": "Runtime settings",
-      "settingsSubtitle": "Manage the current agent runtime lifecycle.",
+      "settingsSubtitle": "Start, stop, and check the status of this runtime.",
+      "configurationTitle": "Runtime status",
+      "configurationLoading": "Loading runtime configuration…",
+      "configurationTechnicalDetails": "Technical details",
+      "configurationCurrent": "Current configuration",
+      "configurationDesired": "New configuration",
+      "configurationApplied": "Currently applied configuration",
+      "configurationNoDesired": "No desired configuration has been resolved.",
+      "configurationNoApplied": "No configuration has been applied to a runtime.",
+      "configurationEvidence": {
+        "revision": "Revision",
+        "profile": "Runtime profile",
+        "infrastructure": "Infrastructure",
+        "generation": "Generation",
+        "digest": "Digest"
+      },
+      "configurationStatus": {
+        "profile_required": {
+          "label": "Setup required",
+          "description": "Choose an environment before using the runtime."
+        },
+        "configuration_blocked": {
+          "label": "Needs attention",
+          "description": "The selected runtime configuration is not currently available. Check the settings."
+        },
+        "configured_not_created": {
+          "label": "Ready to start",
+          "description": "Setup is complete. The configuration will be applied when the runtime starts."
+        },
+        "waiting_for_recreation": {
+          "label": "Update required",
+          "description": "Recreate the runtime to apply the new configuration."
+        },
+        "applied": {
+          "label": "Healthy",
+          "description": "The runtime is using the latest configuration and is ready to use."
+        }
+      },
       "stopRuntimeDescription": "Stop the running runtime pod without deleting workspace files.",
       "runtimeNotRunningHint": "The runtime is not running, so there is nothing to stop.",
       "runtimeControlUnavailableHint": "Runtime control is currently unavailable.",
@@ -2150,7 +2114,16 @@
         "missing": "Missing",
         "unavailable": "Unavailable",
         "error": "Error"
-      }
+      },
+      "configurationReasons": {
+        "sourceMismatch": "The stored Runtime Profile references do not form one exact Provider path.",
+        "profileDisabled": "A selected Runtime Profile or Provider Profile is disabled.",
+        "providerUnavailable": "The exact Runtime Provider is disabled, disconnected, or unavailable to this Workspace.",
+        "capabilityUnavailable": "The Provider's current capabilities cannot satisfy the selected Profile.",
+        "profileInvalid": "The selected Profile document is invalid.",
+        "unknown": "The desired Runtime configuration could not be resolved."
+      },
+      "configurationMissingCapabilities": "Missing capabilities: {capabilities}"
     },
     "toolCall": {
       "preparing": "Writing command...",

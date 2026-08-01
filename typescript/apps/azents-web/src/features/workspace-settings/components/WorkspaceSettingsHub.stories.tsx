@@ -1,4 +1,5 @@
 import { rem } from "@mantine/core";
+import { expect, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
 import { WorkspaceSettingsHub } from "./WorkspaceSettingsHub";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
@@ -21,4 +22,11 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const Default = {} satisfies Story;
+export const Default = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Default models")).toBeVisible();
+    await expect(canvas.getByText("LLM integrations")).toBeVisible();
+    await expect(canvas.getByText("Runtime profiles")).toBeVisible();
+  },
+} satisfies Story;

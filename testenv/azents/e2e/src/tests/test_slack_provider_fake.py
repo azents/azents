@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import threading
+import time
 from collections.abc import Generator
 from http.server import ThreadingHTTPServer
 
@@ -714,7 +715,7 @@ def test_slack_fake_can_make_completion_ambiguous(
 
 
 def test_slack_fake_websocket_captures_acknowledgement_after_envelope() -> None:
-    """Serve a real WebSocket handshake and retain only sanitized ACK evidence."""
+    """Retain a delayed ACK without imposing an artificial provider timeout."""
     state = FakeState()
     state.configure(
         {
@@ -746,7 +747,7 @@ def test_slack_fake_websocket_captures_acknowledgement_after_envelope() -> None:
     )
 
     class IsolatedWebSocketHandler(SlackWebSocketHandler):
-        pass
+        socket_timeout_seconds = 0.01
 
     IsolatedWebSocketHandler.state = state
     server = ThreadingSocketServer(("127.0.0.1", 0), IsolatedWebSocketHandler)
@@ -761,6 +762,7 @@ def test_slack_fake_websocket_captures_acknowledgement_after_envelope() -> None:
             assert isinstance(envelope, str)
             assert '"type": "hello"' in hello
             assert '"envelope_id":"Env-1"' in envelope
+            time.sleep(0.05)
             pong_received = connection.ping(b"sdk-ping-pong:test")
             connection.send('{"envelope_id":"Env-1"}')
             assert pong_received.wait(timeout=5)

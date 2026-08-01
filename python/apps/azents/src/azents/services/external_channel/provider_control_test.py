@@ -55,8 +55,14 @@ class _SessionManager:
 
 
 class _Repository:
-    def __init__(self, events: list[str]) -> None:
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        delivery_statuses: list[ExternalChannelDeliveryStatus | None] | None = None,
+    ) -> None:
         self.events = events
+        self.delivery_statuses = delivery_statuses or []
 
     async def recover_stale_provider_control_deliveries(
         self,
@@ -83,6 +89,17 @@ class _Repository:
         assert limit == 2
         self.events.append("list")
         return ["delivery-1", "delivery-2"]
+
+    async def get_delivery_status(
+        self,
+        session: AsyncSession,
+        *,
+        delivery_attempt_id: str,
+    ) -> ExternalChannelDeliveryStatus | None:
+        del session
+        assert delivery_attempt_id == "delivery-1"
+        self.events.append("status")
+        return self.delivery_statuses.pop(0)
 
 
 class _ActionService:

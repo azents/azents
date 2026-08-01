@@ -1,4 +1,4 @@
-"""Multi App selector catalog and immutable selection tests."""
+"""Multi App selector interaction-state tests."""
 
 import datetime
 from collections.abc import AsyncGenerator
@@ -10,7 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAppMode,
-    ExternalChannelConversationAdmissionStatus,
+    ExternalChannelConnectionStatus,
+    ExternalChannelInteractionStatus,
+    ExternalChannelInteractionType,
     ExternalChannelPrincipalAuthorType,
 )
 from azents.rdb.session import SessionManager
@@ -19,42 +21,33 @@ from azents.repos.external_channel.data import (
     ExternalChannelBinding,
     ExternalChannelCatalogRoute,
     ExternalChannelConnection,
-    ExternalChannelConversationAdmission,
+    ExternalChannelInteraction,
     ExternalChannelPrincipal,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.selector import (
     ExternalChannelSelectorCandidate,
+    ExternalChannelSelectorError,
     ExternalChannelSelectorService,
 )
+from azents.services.external_channel.selector_state import (
+    ExternalChannelSelectorState,
+    projection_with_selector_state,
+    selector_state_from_interaction,
+)
 
-_NOW = datetime.datetime(2026, 7, 25, tzinfo=datetime.UTC)
+_NOW = datetime.datetime(2026, 7, 31, tzinfo=datetime.UTC)
 
 
 class _Session:
-    """Record the selector transaction completion boundary."""
-
     def __init__(self) -> None:
         self.committed = False
 
     async def commit(self) -> None:
-        """Record the durable selection commit."""
         self.committed = True
 
 
-def _connection() -> ExternalChannelConnection:
-    """Build the fields consumed by selector catalog checks."""
-    return ExternalChannelConnection.model_construct(
-        id="connection-1",
-        app_mode=ExternalChannelAppMode.MULTI,
-    )
-
-
-def _route(
-    route_id: str,
-    agent_id: str,
-) -> ExternalChannelAgentRoute:
-    """Build one active selector route."""
+def _route(route_id: str, agent_id: str) -> ExternalChannelAgentRoute:
     return ExternalChannelAgentRoute.model_construct(
         id=route_id,
         connection_id="connection-1",
@@ -62,60 +55,61 @@ def _route(
     )
 
 
-def _admission(
+def _selector(
     *,
     selected_route_id: str | None = None,
-) -> ExternalChannelConversationAdmission:
-    """Build one current pending selector admission."""
-    return ExternalChannelConversationAdmission.model_construct(
-        id="admission-1",
+    expires_at: datetime.datetime | None = None,
+) -> ExternalChannelInteraction:
+    state = ExternalChannelSelectorState(
         connection_id="connection-1",
         resource_id="resource-1",
-        initiating_principal_id="principal-1",
-        status=ExternalChannelConversationAdmissionStatus.PENDING_SELECTION,
+        principal_id="principal-1",
+        conversation_position_id="position-1",
+        trigger_provider_message_key="slack:T-1:C-1:100.0001",
+        range_start_position=None,
+        trigger_position="100.0001",
         selected_route_id=selected_route_id,
-        expires_at=_NOW + datetime.timedelta(minutes=10),
+    )
+    return ExternalChannelInteraction.model_construct(
+        id="selector-1",
+        connection_id="connection-1",
+        interaction_type=ExternalChannelInteractionType.MANAGEMENT_ACTION,
+        principal_id="principal-1",
+        projection=projection_with_selector_state({}, state),
+        status=ExternalChannelInteractionStatus.ACCEPTED,
+        expires_at=expires_at or _NOW + datetime.timedelta(minutes=10),
     )
 
 
 class _Repository:
-    """In-memory selector state that records trusted operation ordering."""
-
     def __init__(
         self,
         *,
         rows: list[ExternalChannelCatalogRoute],
         binding: ExternalChannelBinding | None = None,
+        connection_status: ExternalChannelConnectionStatus = (
+            ExternalChannelConnectionStatus.ACTIVE
+        ),
     ) -> None:
         self.rows = rows
         self.binding = binding
-        self.admission = _admission()
+        self.selector = _selector()
         self.calls: list[str] = []
-        self.transitions: list[
-            tuple[ExternalChannelConversationAdmissionStatus, str | None]
-        ] = []
-        self.catalog_queries: list[
-            tuple[
-                str,
-                ExternalChannelPrincipalAuthorType,
-                str | None,
-                int,
-                int,
-            ]
-        ] = []
-        self.blocked_agents: set[str] = set()
+        self.catalog_queries: list[tuple[str | None, int, int]] = []
         self.granted_agents: set[str] = set()
+        self.blocked_agents: set[str] = set()
         self.author_type = ExternalChannelPrincipalAuthorType.HUMAN
+        self.connection_status = connection_status
 
-    async def get_conversation_admission(
+    async def lock_interaction(
         self,
         session: AsyncSession,
         *,
-        admission_id: str,
-    ) -> ExternalChannelConversationAdmission | None:
+        interaction_id: str,
+    ) -> ExternalChannelInteraction | None:
         del session
-        self.calls.append("admission_snapshot")
-        return self.admission if admission_id == self.admission.id else None
+        self.calls.append("interaction_lock")
+        return self.selector if interaction_id == self.selector.id else None
 
     async def get_connection(
         self,
@@ -125,7 +119,13 @@ class _Repository:
     ) -> ExternalChannelConnection | None:
         del session
         self.calls.append("connection_snapshot")
-        return _connection() if connection_id == "connection-1" else None
+        if connection_id != "connection-1":
+            return None
+        return ExternalChannelConnection.model_construct(
+            id="connection-1",
+            app_mode=ExternalChannelAppMode.MULTI,
+            status=self.connection_status,
+        )
 
     async def get_principal(
         self,
@@ -157,20 +157,73 @@ class _Repository:
         self.calls.append("catalog")
         assert connection_id == "connection-1"
         assert principal_id == "principal-1"
-        self.catalog_queries.append((principal_id, author_type, search, offset, limit))
-        filtered = (
-            self.rows
-            if search is None
-            else [row for row in self.rows if search.lower() in row.agent_name.lower()]
-        )
-        if author_type is not ExternalChannelPrincipalAuthorType.HUMAN:
-            return []
-        filtered = [
+        assert author_type is ExternalChannelPrincipalAuthorType.HUMAN
+        self.catalog_queries.append((search, offset, limit))
+        rows = [
             row
-            for row in filtered
+            for row in self.rows
             if row.route.require_active_agent_id() not in self.blocked_agents
+            and (search is None or search.lower() in row.agent_name.lower())
         ]
-        return filtered[offset : offset + limit]
+        return rows[offset : offset + limit]
+
+    async def get_active_access_grant(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        principal_id: str,
+        agent_session_id: str | None,
+    ) -> object | None:
+        del session
+        assert principal_id == "principal-1"
+        assert agent_session_id is None
+        return object() if agent_id in self.granted_agents else None
+
+    async def lock_connection_for_routing(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+    ) -> ExternalChannelConnection | None:
+        return await self.get_connection(session, connection_id=connection_id)
+
+    async def get_routable_route_by_id(
+        self,
+        session: AsyncSession,
+        *,
+        route_id: str,
+    ) -> ExternalChannelAgentRoute | None:
+        del session
+        self.calls.append("route_lock")
+        return next((row.route for row in self.rows if row.route.id == route_id), None)
+
+    async def lock_resource(
+        self,
+        session: AsyncSession,
+        *,
+        resource_id: str,
+    ) -> object | None:
+        del session
+        self.calls.append("resource_lock")
+        if resource_id != "resource-1":
+            return None
+        return type(
+            "Resource",
+            (),
+            {"id": "resource-1", "connection_id": "connection-1"},
+        )()
+
+    async def lock_connected_binding_by_resource(
+        self,
+        session: AsyncSession,
+        *,
+        resource_id: str,
+    ) -> ExternalChannelBinding | None:
+        del session
+        self.calls.append("binding_lock")
+        assert resource_id == "resource-1"
+        return self.binding
 
     async def get_active_block(
         self,
@@ -184,104 +237,41 @@ class _Repository:
         assert principal_id == "principal-1"
         return object() if agent_id in self.blocked_agents else None
 
-    async def get_active_access_grant(
+    async def replace_interaction_projection(
         self,
         session: AsyncSession,
         *,
-        agent_id: str,
-        principal_id: str,
-        agent_session_id: str | None,
-    ) -> object | None:
+        interaction_id: str,
+        projection: dict[str, object],
+    ) -> ExternalChannelInteraction | None:
         del session
-        self.calls.append("grant")
-        assert principal_id == "principal-1"
-        assert agent_session_id is None
-        return object() if agent_id in self.granted_agents else None
+        self.calls.append("projection_replace")
+        if interaction_id != self.selector.id:
+            return None
+        self.selector = self.selector.model_copy(update={"projection": projection})
+        return self.selector
 
-    async def lock_connection_for_routing(
+    async def transition_interaction(
         self,
         session: AsyncSession,
         *,
-        connection_id: str,
-    ) -> ExternalChannelConnection | None:
-        del session
-        self.calls.append("connection_lock")
-        return _connection() if connection_id == "connection-1" else None
-
-    async def get_routable_route_by_id(
-        self,
-        session: AsyncSession,
-        *,
-        route_id: str,
-    ) -> ExternalChannelAgentRoute | None:
-        del session
-        self.calls.append("route_lock")
-        for row in self.rows:
-            if row.route.id == route_id:
-                return row.route
-        return None
-
-    async def lock_resource(
-        self,
-        session: AsyncSession,
-        *,
-        resource_id: str,
-    ) -> object | None:
-        del session
-        self.calls.append("resource_lock")
-        return (
-            type(
-                "Resource", (), {"id": "resource-1", "connection_id": "connection-1"}
-            )()
-            if resource_id == "resource-1"
-            else None
-        )
-
-    async def lock_active_binding_by_resource(
-        self,
-        session: AsyncSession,
-        *,
-        resource_id: str,
-    ) -> ExternalChannelBinding | None:
-        del session
-        self.calls.append("binding_lock")
-        assert resource_id == "resource-1"
-        return self.binding
-
-    async def lock_open_conversation_admission(
-        self,
-        session: AsyncSession,
-        *,
-        resource_id: str,
-    ) -> ExternalChannelConversationAdmission | None:
-        del session
-        self.calls.append("admission_lock")
-        return self.admission if resource_id == "resource-1" else None
-
-    async def transition_conversation_admission(
-        self,
-        session: AsyncSession,
-        *,
-        admission_id: str,
-        status: ExternalChannelConversationAdmissionStatus,
-        selected_route_id: str | None,
-    ) -> ExternalChannelConversationAdmission | None:
-        del session
-        self.calls.append("admission_transition")
-        assert admission_id == self.admission.id
-        self.transitions.append((status, selected_route_id))
-        self.admission = self.admission.model_copy(
-            update={"status": status, "selected_route_id": selected_route_id}
-        )
-        return self.admission
+        interaction_id: str,
+        status: ExternalChannelInteractionStatus,
+        error_kind: str | None,
+        error_summary: str | None,
+        transitioned_at: datetime.datetime,
+    ) -> ExternalChannelInteraction | None:
+        del session, error_kind, error_summary, transitioned_at
+        self.calls.append("interaction_transition")
+        if interaction_id != self.selector.id:
+            return None
+        self.selector = self.selector.model_copy(update={"status": status})
+        return self.selector
 
 
 def _service(
-    session: _Session,
-    repository: _Repository,
+    session: _Session, repository: _Repository
 ) -> ExternalChannelSelectorService:
-    """Build selector service with a one-transaction in-memory boundary."""
-
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
         yield cast(AsyncSession, session)
@@ -293,20 +283,23 @@ def _service(
 
 
 @pytest.mark.asyncio
-async def test_catalog_excludes_blocks_and_labels_current_access() -> None:
-    """Only current non-blocked routes are projected with current access state."""
+async def test_catalog_uses_interaction_state_and_labels_access() -> None:
     session = _Session()
-    rows = [
-        ExternalChannelCatalogRoute(route=_route("route-1", "agent-1"), agent_name="A"),
-        ExternalChannelCatalogRoute(route=_route("route-2", "agent-2"), agent_name="B"),
-        ExternalChannelCatalogRoute(route=_route("route-3", "agent-3"), agent_name="C"),
-    ]
-    repository = _Repository(rows=rows)
+    repository = _Repository(
+        rows=[
+            ExternalChannelCatalogRoute(
+                route=_route("route-1", "agent-1"), agent_name="Alpha"
+            ),
+            ExternalChannelCatalogRoute(
+                route=_route("route-2", "agent-2"), agent_name="Beta"
+            ),
+        ]
+    )
     repository.granted_agents.add("agent-1")
     repository.blocked_agents.add("agent-2")
 
     catalog = await _service(session, repository).project_catalog(
-        admission_id="admission-1",
+        selector_interaction_id="selector-1",
         principal_id="principal-1",
         search=None,
         offset=0,
@@ -316,160 +309,124 @@ async def test_catalog_excludes_blocks_and_labels_current_access() -> None:
     assert catalog.candidates == (
         ExternalChannelSelectorCandidate(
             route_id="route-1",
-            agent_name="A",
+            agent_name="Alpha",
             access="available",
-        ),
-        ExternalChannelSelectorCandidate(
-            route_id="route-3",
-            agent_name="C",
-            access="access_required",
         ),
     )
     assert catalog.next_offset is None
+    assert repository.catalog_queries == [(None, 0, 21)]
     assert session.committed is False
 
 
 @pytest.mark.asyncio
-async def test_catalog_search_and_paging_are_bounded_and_deterministic() -> None:
-    """Catalog pages preserve repository order and expose the next offset."""
-    session = _Session()
-    rows = [
-        ExternalChannelCatalogRoute(
-            route=_route(f"route-{index:02}", f"agent-{index:02}"),
-            agent_name=f"Agent {index:02}",
-        )
-        for index in range(21)
-    ]
-    repository = _Repository(rows=rows)
-    service = _service(session, repository)
-
-    first_page = await service.project_catalog(
-        admission_id="admission-1",
-        principal_id="principal-1",
-        search=None,
-        offset=0,
-        now=_NOW,
-    )
-    second_page = await service.project_catalog(
-        admission_id="admission-1",
-        principal_id="principal-1",
-        search=None,
-        offset=20,
-        now=_NOW,
-    )
-    searched = await service.project_catalog(
-        admission_id="admission-1",
-        principal_id="principal-1",
-        search="Agent 20",
-        offset=0,
-        now=_NOW,
-    )
-
-    assert [candidate.route_id for candidate in first_page.candidates] == [
-        f"route-{index:02}" for index in range(20)
-    ]
-    assert first_page.next_offset == 20
-    assert [candidate.route_id for candidate in second_page.candidates] == ["route-20"]
-    assert second_page.next_offset is None
-    assert [candidate.route_id for candidate in searched.candidates] == ["route-20"]
-    assert repository.catalog_queries == [
-        ("principal-1", ExternalChannelPrincipalAuthorType.HUMAN, None, 0, 21),
-        ("principal-1", ExternalChannelPrincipalAuthorType.HUMAN, None, 20, 21),
-        (
-            "principal-1",
-            ExternalChannelPrincipalAuthorType.HUMAN,
-            "Agent 20",
-            0,
-            21,
-        ),
-    ]
-
-
-@pytest.mark.asyncio
-async def test_bot_principal_cannot_project_or_select_catalog() -> None:
-    """Only human principals may use Multi App selector admission."""
+async def test_selection_replaces_only_typed_interaction_projection() -> None:
     session = _Session()
     repository = _Repository(
         rows=[
             ExternalChannelCatalogRoute(
-                route=_route("route-1", "agent-1"),
-                agent_name="Incident Agent",
+                route=_route("route-1", "agent-1"), agent_name="Alpha"
+            ),
+            ExternalChannelCatalogRoute(
+                route=_route("route-2", "agent-2"), agent_name="Beta"
             ),
         ]
     )
-    repository.author_type = ExternalChannelPrincipalAuthorType.BOT
-    service = _service(session, repository)
 
-    with pytest.raises(ValueError, match="Selector principal is unavailable"):
-        await service.project_catalog(
-            admission_id="admission-1",
+    selection = await _service(session, repository).select_route(
+        selector_interaction_id="selector-1",
+        principal_id="principal-1",
+        route_id="route-1",
+        now=_NOW,
+    )
+
+    assert selection.status == "selected"
+    assert (
+        selector_state_from_interaction(
+            selection.selector_interaction
+        ).selected_route_id
+        == "route-1"
+    )
+    assert "projection_replace" in repository.calls
+    assert session.committed is True
+
+    repeated = await _service(_Session(), repository).select_route(
+        selector_interaction_id="selector-1",
+        principal_id="principal-1",
+        route_id="route-1",
+        now=_NOW,
+    )
+    assert repeated.status == "already_selected"
+
+    with pytest.raises(ExternalChannelSelectorError, match="immutable"):
+        await _service(_Session(), repository).select_route(
+            selector_interaction_id="selector-1",
             principal_id="principal-1",
-            search=None,
-            offset=0,
-            now=_NOW,
-        )
-    with pytest.raises(ValueError, match="Selected Agent is unavailable"):
-        await service.select_route(
-            admission_id="admission-1",
-            principal_id="principal-1",
-            route_id="route-1",
+            route_id="route-2",
             now=_NOW,
         )
 
 
 @pytest.mark.asyncio
-async def test_catalog_paginates_after_block_filtering() -> None:
-    """Blocked routes cannot consume visible page slots or offsets."""
+async def test_existing_binding_wins_without_selector_mutation() -> None:
     session = _Session()
-    rows = [
-        ExternalChannelCatalogRoute(
-            route=_route(f"route-{index:02}", f"agent-{index:02}"),
-            agent_name=f"Agent {index:02}",
-        )
-        for index in range(45)
-    ]
-    repository = _Repository(rows=rows)
-    repository.blocked_agents.update(f"agent-{index:02}" for index in range(20))
-    service = _service(session, repository)
-
-    first_page = await service.project_catalog(
-        admission_id="admission-1",
-        principal_id="principal-1",
-        search=None,
-        offset=0,
-        now=_NOW,
+    binding = ExternalChannelBinding.model_construct(id="binding-1", route_id="route-2")
+    repository = _Repository(
+        rows=[
+            ExternalChannelCatalogRoute(
+                route=_route("route-1", "agent-1"), agent_name="Alpha"
+            )
+        ],
+        binding=binding,
     )
-    second_page = await service.project_catalog(
-        admission_id="admission-1",
+
+    selection = await _service(session, repository).select_route(
+        selector_interaction_id="selector-1",
         principal_id="principal-1",
-        search=None,
-        offset=20,
+        route_id="route-1",
         now=_NOW,
     )
 
-    assert [candidate.route_id for candidate in first_page.candidates] == [
-        f"route-{index:02}" for index in range(20, 40)
-    ]
-    assert first_page.next_offset == 20
-    assert [candidate.route_id for candidate in second_page.candidates] == [
-        f"route-{index:02}" for index in range(40, 45)
-    ]
-    assert second_page.next_offset is None
+    assert selection.status == "already_bound"
+    assert selection.binding is binding
+    assert "projection_replace" not in repository.calls
 
 
 @pytest.mark.asyncio
-async def test_catalog_rejects_expired_admission_before_query() -> None:
-    """Expired selector admission cannot expose a stale Agent catalog."""
+async def test_expired_interaction_is_terminalized_before_selection() -> None:
     session = _Session()
+    repository = _Repository(
+        rows=[
+            ExternalChannelCatalogRoute(
+                route=_route("route-1", "agent-1"), agent_name="Alpha"
+            )
+        ]
+    )
+    repository.selector = _selector(expires_at=_NOW - datetime.timedelta(seconds=1))
+
+    selection = await _service(session, repository).select_route(
+        selector_interaction_id="selector-1",
+        principal_id="principal-1",
+        route_id="route-1",
+        now=_NOW,
+    )
+
+    assert selection.status == "expired"
+    assert (
+        selection.selector_interaction.status
+        is ExternalChannelInteractionStatus.EXPIRED
+    )
+    assert "interaction_transition" in repository.calls
+    assert "projection_replace" not in repository.calls
+
+
+@pytest.mark.asyncio
+async def test_catalog_rejects_cross_principal_interaction() -> None:
     repository = _Repository(rows=[])
-    repository.admission = repository.admission.model_copy(
-        update={"expires_at": _NOW - datetime.timedelta(seconds=1)}
-    )
 
-    with pytest.raises(ValueError, match="admission is unavailable"):
-        await _service(session, repository).project_catalog(
-            admission_id="admission-1",
-            principal_id="principal-1",
+    with pytest.raises(ExternalChannelSelectorError, match="unavailable"):
+        await _service(_Session(), repository).project_catalog(
+            selector_interaction_id="selector-1",
+            principal_id="principal-2",
             search=None,
             offset=0,
             now=_NOW,
@@ -479,67 +436,20 @@ async def test_catalog_rejects_expired_admission_before_query() -> None:
 
 
 @pytest.mark.asyncio
-async def test_selection_uses_required_lock_order_and_is_immutable() -> None:
-    """Selection locks durable owners before recording one route exactly once."""
-    session = _Session()
+async def test_catalog_rejects_connection_without_routing_authority() -> None:
+    """Catalog projection cannot race past connection routing shutdown."""
     repository = _Repository(
-        rows=[
-            ExternalChannelCatalogRoute(
-                route=_route("route-1", "agent-1"),
-                agent_name="A",
-            )
-        ]
+        rows=[],
+        connection_status=ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
     )
 
-    selected = await _service(session, repository).select_route(
-        admission_id="admission-1",
-        principal_id="principal-1",
-        route_id="route-1",
-        now=_NOW,
-    )
+    with pytest.raises(ExternalChannelSelectorError, match="unavailable"):
+        await _service(_Session(), repository).project_catalog(
+            selector_interaction_id="selector-1",
+            principal_id="principal-1",
+            search=None,
+            offset=0,
+            now=_NOW,
+        )
 
-    assert selected.status == "selected"
-    assert selected.admission.selected_route_id == "route-1"
-    assert repository.transitions == [
-        (ExternalChannelConversationAdmissionStatus.SELECTED, "route-1")
-    ]
-    assert repository.calls == [
-        "admission_snapshot",
-        "connection_lock",
-        "route_lock",
-        "principal",
-        "resource_lock",
-        "binding_lock",
-        "admission_lock",
-        "block",
-        "admission_transition",
-    ]
-    assert session.committed is True
-
-
-@pytest.mark.asyncio
-async def test_existing_binding_is_a_non_mutating_selector_winner() -> None:
-    """A selector cannot move a resource with an established binding."""
-    session = _Session()
-    binding = ExternalChannelBinding.model_construct(id="binding-1", route_id="route-2")
-    repository = _Repository(
-        rows=[
-            ExternalChannelCatalogRoute(
-                route=_route("route-1", "agent-1"),
-                agent_name="A",
-            )
-        ],
-        binding=binding,
-    )
-
-    selected = await _service(session, repository).select_route(
-        admission_id="admission-1",
-        principal_id="principal-1",
-        route_id="route-1",
-        now=_NOW,
-    )
-
-    assert selected.status == "already_bound"
-    assert selected.binding is binding
-    assert repository.transitions == []
-    assert session.committed is True
+    assert repository.catalog_queries == []

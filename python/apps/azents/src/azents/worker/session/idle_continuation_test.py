@@ -16,6 +16,8 @@ from azents.core.enums import (
 from azents.core.tools import Toolkit, ToolkitState, ToolkitStatus, TurnContext
 from azents.engine.events.types import Event
 from azents.engine.hooks.types import (
+    ExternalChannelSessionContinuationInput,
+    GoalSessionContinuationInput,
     RuntimeHooks,
     SessionContinuationInput,
     SessionIdleHookContext,
@@ -291,7 +293,7 @@ async def test_consume_defers_when_new_pending_input_exists() -> None:
     broker = _Broker()
     mailbox_item_repository = _MailboxRepository(pending=True)
     toolkit = _IdleToolkit(
-        [SessionContinuationInput(content="", metadata={"source": "goal"})]
+        [GoalSessionContinuationInput(content="", metadata={"source": "goal"})]
     )
 
     result = await _service(
@@ -320,7 +322,7 @@ async def test_consume_rejects_owner_generation_takeover() -> None:
     event_publisher = _EventPublisher()
     broker = _Broker()
     toolkit = _IdleToolkit(
-        [SessionContinuationInput(content="", metadata={"source": "goal"})]
+        [GoalSessionContinuationInput(content="", metadata={"source": "goal"})]
     )
 
     with pytest.raises(CanonicalExecutionOwnerGenerationStaleError):
@@ -350,7 +352,7 @@ async def test_consume_stores_continuation_and_sends_wake_up() -> None:
     repository = _AgentSessionRepository()
     toolkit = _IdleToolkit(
         [
-            SessionContinuationInput(
+            GoalSessionContinuationInput(
                 content="ignored",
                 metadata={"source": "goal", "goal_objective": "Ship"},
             )
@@ -394,6 +396,52 @@ async def test_consume_stores_continuation_and_sends_wake_up() -> None:
     assert len(event_publisher.dispatched) == 1
     assert event_publisher.dispatched[0][0] == "session-001"
     assert event_publisher.dispatched[0][1].kind == EventKind.GOAL_CONTINUATION
+    assert broker.sent_messages == [SessionWakeUp(session_id=snapshot.session_id)]
+
+
+@pytest.mark.asyncio
+async def test_consume_stores_external_channel_continuation_separately() -> None:
+    """External Channel continuation never becomes a Goal continuation."""
+    mailbox_item_service = _MailboxService()
+    event_publisher = _EventPublisher()
+    broker = _Broker()
+    repository = _AgentSessionRepository()
+    toolkit = _IdleToolkit(
+        [
+            ExternalChannelSessionContinuationInput(
+                content="",
+                metadata={
+                    "source": "external_channel",
+                    "active_bindings": "binding-handle",
+                },
+            )
+        ]
+    )
+
+    result = await _service(
+        mailbox_item_service=mailbox_item_service,
+        event_publisher=event_publisher,
+        broker=broker,
+        agent_session_repository=repository,
+    ).consume(
+        snapshot := _snapshot(),
+        toolkits=[ToolkitBinding(toolkit, "external_channel", False)],
+        run_id="run-001",
+    )
+
+    assert result is True
+    [enqueue] = mailbox_item_service.enqueued_batches[0]
+    assert enqueue.kind == MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION
+    assert enqueue.metadata == {
+        "source": "external_channel",
+        "active_bindings": "binding-handle",
+        "provider_slug": "external_channel",
+    }
+    assert enqueue.idempotency_key == ("idle_continuation:run-001:external_channel:0")
+    assert event_publisher.dispatched[0][1].kind == (
+        EventKind.EXTERNAL_CHANNEL_CONTINUATION
+    )
+    assert repository.consumed == [("session-001", "run-001", True)]
     assert broker.sent_messages == [SessionWakeUp(session_id=snapshot.session_id)]
 
 

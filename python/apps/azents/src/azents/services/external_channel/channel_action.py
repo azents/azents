@@ -28,6 +28,13 @@ from azents.core.external_channel_file import (
     ExternalChannelOutboundFileManifest,
     ExternalChannelOutboundFileSource,
 )
+from azents.core.external_channel_session_presence import (
+    ExternalChannelSessionPresenceState,
+    build_external_channel_session_url,
+)
+from azents.core.slack_external_channel_progress import (
+    render_slack_session_presence,
+)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
@@ -56,6 +63,9 @@ from azents.services.external_channel.discord_delivery import (
     DiscordDeliveryResult,
     DiscordOutboundFile,
     DiscordOutboundFileContentError,
+)
+from azents.services.external_channel.discord_presentation import (
+    render_discord_session_presence,
 )
 from azents.services.external_channel.file_transfer import (
     ExternalChannelFileTransferError,
@@ -86,6 +96,15 @@ async def get_slack_delivery_http_client() -> AsyncIterator[httpx.AsyncClient]:
     """Provide the bounded outbound Slack mutation transport."""
     async with httpx.AsyncClient(timeout=20.0) as client:
         yield client
+
+
+@dataclass(frozen=True)
+class _SessionPresenceContext:
+    """Validated Session presence navigation and copy identity."""
+
+    agent_name: str
+    session_url: str
+    state: ExternalChannelSessionPresenceState
 
 
 def get_slack_delivery_client(
@@ -351,6 +370,40 @@ class ExternalChannelActionService:
         authority: SessionResourceAuthority | None = None,
         provider_delivery_capability: RuntimeToProviderDeliveryCapability | None = None,
     ) -> ExternalChannelDeliveryStatus | None:
+        """Attempt one prepared target after revalidating current provider authority."""
+        return await self._attempt_prepared_delivery(
+            target,
+            captured_terminal=False,
+            file_storage=file_storage,
+            agent_id=agent_id,
+            authority=authority,
+            provider_delivery_capability=provider_delivery_capability,
+        )
+
+    async def attempt_captured_terminal_delivery(
+        self,
+        target: ChannelDeliveryTarget,
+    ) -> ExternalChannelDeliveryStatus | None:
+        """Attempt terminal cleanup using provider authority captured before purge."""
+        return await self._attempt_prepared_delivery(
+            target,
+            captured_terminal=True,
+            file_storage=None,
+            agent_id=None,
+            authority=None,
+            provider_delivery_capability=None,
+        )
+
+    async def _attempt_prepared_delivery(
+        self,
+        target: ChannelDeliveryTarget,
+        *,
+        captured_terminal: bool,
+        file_storage: FileStorage | None,
+        agent_id: str | None,
+        authority: SessionResourceAuthority | None,
+        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None,
+    ) -> ExternalChannelDeliveryStatus | None:
         """Attempt one current target or settle its prior provider completion."""
         runtime_provider_transfer = _uses_runtime_provider_transfer(target)
         completed_recoveries = (
@@ -381,17 +434,24 @@ class ExternalChannelActionService:
                     await session.commit()
                 return ExternalChannelDeliveryStatus.FAILED
         async with self.session_manager() as session:
-            started = await self.repository.start_delivery(
-                session,
-                delivery_attempt_id=target.delivery_attempt_id,
-                now=datetime.datetime.now(datetime.UTC),
-                runtime_target=(
-                    provider_delivery_capability.target
-                    if runtime_provider_transfer
-                    and provider_delivery_capability is not None
-                    else None
-                ),
-            )
+            if captured_terminal:
+                started = await self.repository.start_captured_terminal_delivery(
+                    session,
+                    target=target,
+                    now=datetime.datetime.now(datetime.UTC),
+                )
+            else:
+                started = await self.repository.start_delivery(
+                    session,
+                    delivery_attempt_id=target.delivery_attempt_id,
+                    now=datetime.datetime.now(datetime.UTC),
+                    runtime_target=(
+                        provider_delivery_capability.target
+                        if runtime_provider_transfer
+                        and provider_delivery_capability is not None
+                        else None
+                    ),
+                )
             await session.commit()
         if started is None:
             return None
@@ -721,6 +781,7 @@ class ExternalChannelActionService:
                 bot_token=bot_token,
                 parent_channel_id=parent_channel_id,
                 root_message_id=root_message_id,
+                name=target.agent_name,
             )
             if thread.status != "delivered":
                 return thread
@@ -739,6 +800,30 @@ class ExternalChannelActionService:
                 | ExternalChannelDeliveryOperation.PROGRESS_CREATE
                 | ExternalChannelDeliveryOperation.CONTROL_MESSAGE
             ):
+                if (
+                    target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+                    and payload.get("control_kind") == "session_presence"
+                ):
+                    presence = _session_presence_context(
+                        target,
+                        web_url=self.config.web_url,
+                    )
+                    if presence is None or files:
+                        return _discord_invalid_payload()
+                    control = render_discord_session_presence(
+                        agent_name=presence.agent_name,
+                        session_url=presence.session_url,
+                        state=presence.state,
+                    )
+                    return await self.discord_client.create_message(
+                        bot_token=bot_token,
+                        guild_id=guild_id,
+                        channel_id=delivery_channel_id,
+                        content=control.text,
+                        delivery_attempt_id=target.delivery_attempt_id,
+                        components=control.components,
+                        embeds=control.embeds,
+                    )
                 text = payload.get("text")
                 if not isinstance(text, str):
                     return _discord_invalid_payload()
@@ -747,12 +832,6 @@ class ExternalChannelActionService:
                     return _discord_invalid_payload()
                 embeds = _discord_embeds(payload.get("embeds"))
                 if payload.get("embeds") is not None and embeds is None:
-                    return _discord_invalid_payload()
-                if (
-                    target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-                    and payload.get("control_kind") == "session_link"
-                    and (files or components is None or embeds is not None)
-                ):
                     return _discord_invalid_payload()
                 if files:
                     if components is not None or embeds is not None:
@@ -1006,10 +1085,13 @@ class ExternalChannelActionService:
             return _invalid_payload()
         control_kind = payload.get("control_kind")
         if control_kind == "agent_selector":
-            admission_id = payload.get("conversation_admission_id")
-            if not isinstance(admission_id, str) or not admission_id:
+            selector_interaction_id = payload.get("selector_interaction_id")
+            if (
+                not isinstance(selector_interaction_id, str)
+                or not selector_interaction_id
+            ):
                 return _invalid_payload()
-            selector = _render_agent_selector_control(admission_id)
+            selector = _render_agent_selector_control(selector_interaction_id)
             return await self.slack_client.post_blocks(
                 bot_token=bot_token,
                 tenant_id=tenant_id,
@@ -1019,18 +1101,25 @@ class ExternalChannelActionService:
                 blocks=selector.blocks,
                 icon_url=None,
             )
-        if control_kind == "session_link":
-            text = payload.get("text")
-            blocks = _blocks(payload.get("blocks"))
-            if not isinstance(text, str) or blocks is None:
+        if control_kind == "session_presence":
+            context = _session_presence_context(
+                target,
+                web_url=self.config.web_url,
+            )
+            if context is None:
                 return _invalid_payload()
+            control = render_slack_session_presence(
+                agent_name=context.agent_name,
+                session_url=context.session_url,
+                state=context.state,
+            )
             return await self.slack_client.post_blocks(
                 bot_token=bot_token,
                 tenant_id=tenant_id,
                 channel_id=channel_id,
                 thread_ts=thread_ts,
-                text=text,
-                blocks=blocks,
+                text=control.text,
+                blocks=control.blocks,
                 icon_url=None,
             )
         if control_kind == "shortcut_already_bound":
@@ -1533,6 +1622,45 @@ def _discord_agent_content(target: ChannelDeliveryTarget, text: str) -> str:
     return f"**{escaped_name}**\n{text}"
 
 
+def _session_presence_context(
+    target: ChannelDeliveryTarget,
+    *,
+    web_url: str,
+) -> _SessionPresenceContext | None:
+    """Resolve one presence control without trusting persisted display content."""
+    match target.request_payload.get("presence_state"):
+        case "joined":
+            state: ExternalChannelSessionPresenceState = "joined"
+        case "left":
+            state = "left"
+        case _:
+            return None
+    if (
+        not isinstance(target.agent_name, str)
+        or not target.agent_name
+        or not isinstance(target.workspace_handle, str)
+        or not target.workspace_handle
+        or not isinstance(target.agent_id, str)
+        or not target.agent_id
+        or not isinstance(target.agent_session_id, str)
+        or not target.agent_session_id
+    ):
+        return None
+    session_url = build_external_channel_session_url(
+        web_url,
+        target.workspace_handle,
+        target.agent_id,
+        target.agent_session_id,
+    )
+    if session_url is None:
+        return None
+    return _SessionPresenceContext(
+        agent_name=target.agent_name,
+        session_url=session_url,
+        state=state,
+    )
+
+
 def _invalid_payload() -> SlackControlMessageResult:
     return SlackControlMessageResult(
         status="failed",
@@ -1543,9 +1671,9 @@ def _invalid_payload() -> SlackControlMessageResult:
 
 
 def _render_agent_selector_control(
-    conversation_admission_id: str,
+    selector_interaction_id: str,
 ) -> _SlackSelectorControlPresentation:
-    """Render the generic control for one retained Multi-App conversation."""
+    """Render the generic control for one interaction-owned selector."""
     text = "Select an Agent to continue this conversation."
     return _SlackSelectorControlPresentation(
         text=text,
@@ -1561,7 +1689,7 @@ def _render_agent_selector_control(
                         "type": "button",
                         "text": {"type": "plain_text", "text": "Select Agent"},
                         "action_id": "azents_agent_selector_open",
-                        "value": conversation_admission_id,
+                        "value": selector_interaction_id,
                     }
                 ],
             },

@@ -20,8 +20,8 @@ import json
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from azentspublicclient.models.external_channel_binding_status import ExternalChannelBindingStatus
 from azentspublicclient.models.external_channel_provider import ExternalChannelProvider
+from azentspublicclient.models.external_channel_response_mode import ExternalChannelResponseMode
 from azentspublicclient.models.managed_delivery import ManagedDelivery
 from azentspublicclient.models.managed_work import ManagedWork
 from typing import Optional, Set
@@ -34,9 +34,9 @@ class ManagedBinding(BaseModel):
     id: StrictStr
     agent_session_id: StrictStr
     provider: ExternalChannelProvider
+    response_mode: ExternalChannelResponseMode
     resource_type: StrictStr
     resource_label: StrictStr
-    status: ExternalChannelBindingStatus
     connected_at: datetime
     disconnected_at: Optional[datetime]
     disconnect_reason: Optional[StrictStr]
@@ -44,7 +44,7 @@ class ManagedBinding(BaseModel):
     work: Optional[ManagedWork]
     deliveries: List[ManagedDelivery]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "agent_session_id", "provider", "resource_type", "resource_label", "status", "connected_at", "disconnected_at", "disconnect_reason", "latest_activity_at", "work", "deliveries"]
+    __properties: ClassVar[List[str]] = ["id", "agent_session_id", "provider", "response_mode", "resource_type", "resource_label", "connected_at", "disconnected_at", "disconnect_reason", "latest_activity_at", "work", "deliveries"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -137,9 +137,9 @@ class ManagedBinding(BaseModel):
             "id": obj.get("id"),
             "agent_session_id": obj.get("agent_session_id"),
             "provider": obj.get("provider"),
+            "response_mode": obj.get("response_mode"),
             "resource_type": obj.get("resource_type"),
             "resource_label": obj.get("resource_label"),
-            "status": obj.get("status"),
             "connected_at": obj.get("connected_at"),
             "disconnected_at": obj.get("disconnected_at"),
             "disconnect_reason": obj.get("disconnect_reason"),

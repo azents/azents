@@ -35,6 +35,7 @@ from azentspublicclient.models.toolkit_config_create_request import (
 from pydantic import TypeAdapter
 from testcontainers.core.container import DockerContainer
 
+from support.runtime_profiles import create_workspace_runtime_profile
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
@@ -399,10 +400,12 @@ class _RuntimeHookWorkspace:
         token: str,
         handle: str,
         model_selection: AgentModelSelectionInput,
+        runtime_profile_id: str,
     ) -> None:
         self.token = token
         self.handle = handle
         self.model_selection = model_selection
+        self.runtime_profile_id = runtime_profile_id
 
 
 def _setup_workspace(
@@ -438,6 +441,12 @@ def _setup_workspace(
         ),
         _headers=headers,
     )
+    runtime_profile_id = create_workspace_runtime_profile(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        provider_id=_RUNTIME_PROVIDER_ID,
+    )
     return _RuntimeHookWorkspace(
         token=token,
         handle=handle,
@@ -447,6 +456,7 @@ def _setup_workspace(
             handle,
             integration.id,
         ),
+        runtime_profile_id=runtime_profile_id,
     )
 
 
@@ -489,7 +499,7 @@ def _create_agent_with_runtime_hook_toolkit(
             model_selection=workspace.model_selection,
             lightweight_model_selection=workspace.model_selection,
             type=AgentType.PUBLIC,
-            runtime_provider_id=_RUNTIME_PROVIDER_ID,
+            runtime_profile_id=workspace.runtime_profile_id,
             shell_enabled=shell_enabled,
             tool_search_enabled=tool_search_enabled,
         ),

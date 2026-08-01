@@ -12,12 +12,12 @@ from typing import Protocol
 import grpc
 from google.protobuf import timestamp_pb2
 
-from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 from azents_runtime_control.grpc_tls import (
     GrpcClientTlsConfig,
     create_grpc_aio_channel,
 )
 from azents_runtime_control.proto import (
+    runtime_configuration_pb2,
     runtime_runner_control_pb2,
     runtime_runner_control_pb2_grpc,
     runtime_runner_transfer_pb2,
@@ -26,6 +26,7 @@ from azents_runtime_control.runner import (
     JsonValue,
     RunnerBodyChunk,
     RunnerControlClient,
+    RunnerHeartbeatAcknowledgement,
     RunnerOperationCancel,
     RunnerOperationCancelHandler,
     RunnerOperationEnvelope,
@@ -49,6 +50,7 @@ from azents_runtime_control.runner_transfer import (
     RunnerTransferOutcome,
     RunnerTransferResult,
 )
+from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 
 
 class RunnerControlStream(Protocol):
@@ -95,7 +97,9 @@ class GrpcRunnerControlClient(RunnerControlClient):
         self._operation_cancel_handler: RunnerOperationCancelHandler | None = None
         self._transfer_intent_handler: RunnerTransferIntentHandler | None = None
         self._transfer_cancel_handler: RunnerTransferCancelHandler | None = None
-        self._pending_heartbeat_acks: dict[str, asyncio.Future[bool]] = {}
+        self._pending_heartbeat_acks: dict[
+            str, asyncio.Future[RunnerHeartbeatAcknowledgement]
+        ] = {}
         self._pending_operation_start_acks: dict[str, asyncio.Future[bool]] = {}
         self._accepted: asyncio.Future[RunnerRegistrationAccepted] | None = None
         self._receiver_task: asyncio.Task[None] | None = None
@@ -182,8 +186,8 @@ class GrpcRunnerControlClient(RunnerControlClient):
         runtime_id: str,
         generation: int,
         heartbeat_at: datetime,
-    ) -> bool:
-        """Send a heartbeat and wait for the matching ack."""
+    ) -> RunnerHeartbeatAcknowledgement:
+        """Send a heartbeat and wait for optional configuration evidence."""
         del runtime_id, heartbeat_at
         self._heartbeat_sequence += 1
         request_id = f"heartbeat:{self._heartbeat_sequence}"
@@ -334,7 +338,18 @@ class GrpcRunnerControlClient(RunnerControlClient):
         if payload == "heartbeat_ack":
             future = self._pending_heartbeat_acks.get(message.request_id)
             if future is not None and not future.done():
-                future.set_result(True)
+                future.set_result(
+                    RunnerHeartbeatAcknowledgement(
+                        accepted=True,
+                        runtime_configuration=(
+                            _runtime_configuration_evidence(
+                                message.heartbeat_ack.runtime_configuration
+                            )
+                            if message.heartbeat_ack.HasField("runtime_configuration")
+                            else None
+                        ),
+                    )
+                )
             return
         if payload == "operation_start_ack":
             future = self._pending_operation_start_acks.get(message.request_id)
@@ -423,8 +438,8 @@ def _register_message(
             workspace_path=registration.workspace_path,
         ),
     )
-    message.register.execution_policy.CopyFrom(
-        _execution_policy_evidence_message(registration.execution_policy)
+    message.register.runtime_configuration.CopyFrom(
+        _runtime_configuration_evidence_message(registration.runtime_configuration)
     )
     return message
 
@@ -456,8 +471,8 @@ def _state_report_message(
         workspace_path=report.workspace_path,
         reported_at=_timestamp(report.reported_at),
     )
-    message.execution_policy.CopyFrom(
-        _execution_policy_evidence_message(report.execution_policy)
+    message.runtime_configuration.CopyFrom(
+        _runtime_configuration_evidence_message(report.runtime_configuration)
     )
     return message
 
@@ -509,8 +524,8 @@ def _event_message(
 def runner_state_report_from_message(
     message: runtime_runner_control_pb2.RunnerStateReport,
 ) -> RunnerStateReport:
-    if not message.HasField("execution_policy"):
-        raise ValueError("Runtime Runner execution-policy evidence is required.")
+    if not message.HasField("runtime_configuration"):
+        raise ValueError("Runtime Runner configuration evidence is required.")
     return RunnerStateReport(
         runtime_id=message.runtime_id,
         runner_id=message.runner_id,
@@ -522,38 +537,43 @@ def runner_state_report_from_message(
         diagnostic=dict(message.diagnostic),
         workspace_path=message.workspace_path,
         reported_at=_datetime(message.reported_at),
-        execution_policy=_execution_policy_evidence(message.execution_policy),
+        runtime_configuration=_runtime_configuration_evidence(
+            message.runtime_configuration
+        ),
     )
 
 
-def _execution_policy_evidence(
-    message: runtime_runner_control_pb2.RunnerExecutionPolicyEvidence,
-) -> RuntimeExecutionPolicyEvidence:
-    return RuntimeExecutionPolicyEvidence(
-        snapshot_id=message.snapshot_id,
+def _runtime_configuration_evidence(
+    message: runtime_configuration_pb2.RuntimeConfigurationEvidence,
+) -> RuntimeConfigurationEvidence:
+    return RuntimeConfigurationEvidence(
+        revision_id=message.revision_id,
         digest=message.digest,
         desired_generation=message.desired_generation,
-        module_versions=dict(message.module_versions),
-        source_versions=dict(message.source_versions),
     )
 
 
-def runner_execution_policy_evidence_from_message(
-    message: runtime_runner_control_pb2.RunnerExecutionPolicyEvidence,
-) -> RuntimeExecutionPolicyEvidence:
-    """Deserialize required Runner execution-policy evidence."""
-    return _execution_policy_evidence(message)
+def runner_runtime_configuration_evidence_from_message(
+    message: runtime_configuration_pb2.RuntimeConfigurationEvidence,
+) -> RuntimeConfigurationEvidence:
+    """Deserialize required Runner configuration evidence."""
+    return _runtime_configuration_evidence(message)
 
 
-def _execution_policy_evidence_message(
-    evidence: RuntimeExecutionPolicyEvidence,
-) -> runtime_runner_control_pb2.RunnerExecutionPolicyEvidence:
-    return runtime_runner_control_pb2.RunnerExecutionPolicyEvidence(
-        snapshot_id=evidence.snapshot_id,
+def runner_runtime_configuration_evidence_to_message(
+    evidence: RuntimeConfigurationEvidence,
+) -> runtime_configuration_pb2.RuntimeConfigurationEvidence:
+    """Serialize required Runner configuration evidence."""
+    return _runtime_configuration_evidence_message(evidence)
+
+
+def _runtime_configuration_evidence_message(
+    evidence: RuntimeConfigurationEvidence,
+) -> runtime_configuration_pb2.RuntimeConfigurationEvidence:
+    return runtime_configuration_pb2.RuntimeConfigurationEvidence(
+        revision_id=evidence.revision_id,
         digest=evidence.digest,
         desired_generation=evidence.desired_generation,
-        module_versions=dict(evidence.module_versions),
-        source_versions=dict(evidence.source_versions),
     )
 
 
@@ -1691,7 +1711,7 @@ __all__ = [
     "GrpcRunnerControlClient",
     "RunnerControlStream",
     "RuntimeRunnerControlStreamClosed",
-    "runner_execution_policy_evidence_from_message",
+    "runner_runtime_configuration_evidence_from_message",
     "runner_event_from_message",
     "runner_state_report_from_message",
     "runner_transfer_cancel_from_message",

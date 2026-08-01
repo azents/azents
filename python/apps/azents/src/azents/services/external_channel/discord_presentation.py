@@ -8,6 +8,9 @@ from azents.core.external_channel_progress import (
     ExternalChannelDesiredProgress,
     ExternalChannelWorkTask,
 )
+from azents.core.external_channel_session_presence import (
+    ExternalChannelSessionPresenceState,
+)
 
 _DISCORD_MESSAGE_CONTENT_LIMIT = 2_000
 _DISCORD_AGENT_PREFIX_RESERVE = 200
@@ -18,6 +21,8 @@ _PROGRESS_TITLE_MAX_LENGTH = 160
 _TASK_TITLE_MAX_LENGTH = 120
 _TASK_CONTEXT_MAX_LENGTH = 240
 _TRACKER_COLOR = 0x5865F2
+_SESSION_JOINED_COLOR = 0x57F287
+_SESSION_LEFT_COLOR = 0x99AAB5
 
 
 @dataclass(frozen=True)
@@ -33,6 +38,57 @@ class DiscordProgressPresentation:
     """Ordered Discord-native pages for one canonical Channel Work snapshot."""
 
     pages: tuple[DiscordProgressPage, ...]
+
+
+@dataclass(frozen=True)
+class DiscordSessionPresencePresentation:
+    """One Discord-native Session binding presence control."""
+
+    text: str
+    embeds: list[dict[str, object]]
+    components: list[dict[str, object]]
+
+
+def render_discord_session_presence(
+    *,
+    agent_name: str,
+    session_url: str,
+    state: ExternalChannelSessionPresenceState,
+) -> DiscordSessionPresencePresentation:
+    """Render one Session binding presence Embed with navigation."""
+    escaped_name = (
+        agent_name.replace("\\", "\\\\")
+        .replace("*", "\\*")
+        .replace("_", "\\_")
+        .replace("~", "\\~")
+        .replace("`", "\\`")
+    )
+    verb = "joined" if state == "joined" else "left"
+    description = f"**{escaped_name}** {verb} this conversation."
+    return DiscordSessionPresencePresentation(
+        text="",
+        embeds=[
+            {
+                "description": description,
+                "color": (
+                    _SESSION_JOINED_COLOR if state == "joined" else _SESSION_LEFT_COLOR
+                ),
+            }
+        ],
+        components=[
+            {
+                "type": 1,
+                "components": [
+                    {
+                        "type": 2,
+                        "style": 5,
+                        "label": "View session",
+                        "url": session_url,
+                    }
+                ],
+            }
+        ],
+    )
 
 
 def split_discord_markdown(text: str) -> tuple[str, ...]:

@@ -484,6 +484,7 @@ class FakeState:
         file_count: int = 0,
         file_bytes: int = 0,
         safe_category: str | None = None,
+        session_path: str | None = None,
     ) -> None:
         """Record sanitized provider mutation evidence."""
         delivery: dict[str, object] = {
@@ -498,6 +499,8 @@ class FakeState:
             delivery["file_bytes"] = file_bytes
         if safe_category is not None:
             delivery["safe_category"] = safe_category
+        if session_path is not None:
+            delivery["session_path"] = session_path
         with self.lock:
             self.deliveries.append(delivery)
 
@@ -1207,6 +1210,8 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 outcome=nonce_outcome,
                 file_count=file_count,
                 file_bytes=file_bytes,
+                safe_category=_session_presence_category(body),
+                session_path=_session_path(body),
             )
             self.state.record_operation(
                 "message",
@@ -1800,6 +1805,47 @@ def _multipart_or_json_object(raw_body: bytes) -> dict[str, object]:
     if match is not None:
         return _json_object_or_empty(match.group(1))
     return _json_object_or_empty(raw_body)
+
+
+def _session_path(body: dict[str, object]) -> str | None:
+    """Extract only the relative Azents Session route from one control payload."""
+    components = body.get("components")
+    if not isinstance(components, list):
+        return None
+    for raw_row in cast(list[object], components):
+        if not isinstance(raw_row, dict):
+            continue
+        row_components = cast(dict[str, object], raw_row).get("components")
+        if not isinstance(row_components, list):
+            continue
+        for raw_component in cast(list[object], row_components):
+            if not isinstance(raw_component, dict):
+                continue
+            url = cast(dict[str, object], raw_component).get("url")
+            if not isinstance(url, str):
+                continue
+            parsed = urlparse(url)
+            if parsed.scheme in {"http", "https"} and parsed.netloc:
+                return parsed.path if parsed.path.startswith("/w/") else None
+    return None
+
+
+def _session_presence_category(body: dict[str, object]) -> str | None:
+    """Classify Session presence without retaining Agent-authored display text."""
+    if _session_path(body) is None:
+        return None
+    embeds = body.get("embeds")
+    if not isinstance(embeds, list):
+        return None
+    for raw_embed in cast(list[object], embeds):
+        if not isinstance(raw_embed, dict):
+            continue
+        color = cast(dict[str, object], raw_embed).get("color")
+        if color == 0x57F287:
+            return "session_presence_joined"
+        if color == 0x99AAB5:
+            return "session_presence_left"
+    return None
 
 
 def _multipart_file_evidence(raw_body: bytes) -> tuple[int, int]:

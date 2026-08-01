@@ -22,9 +22,9 @@ def _request() -> dict[str, object]:
                     "External Channel file transfer E2E.\n"
                     "Files:\n"
                     "1. Name: first.txt\n"
-                    "   File: external-file:v1:slack:binding-file-123:F1\n"
+                    "   File: external-file:v1:slack:binding-file-123:::F1\n"
                     "2. Name: second.txt\n"
-                    "   File: external-file:v1:slack:binding-file-123:F2"
+                    "   File: external-file:v1:slack:binding-file-123:::F2"
                 ),
             }
         ],
@@ -54,8 +54,8 @@ def test_file_proxy_recognizes_two_locators_and_required_tools() -> None:
 
     assert proxy.is_external_channel_file_request(request) is True
     assert proxy.external_channel_file_locators(request) == [
-        "external-file:v1:slack:binding-file-123:F1",
-        "external-file:v1:slack:binding-file-123:F2",
+        "external-file:v1:slack:binding-file-123:::F1",
+        "external-file:v1:slack:binding-file-123:::F2",
     ]
     assert proxy.external_channel_file_evidence(request) == {
         "matched": True,

@@ -12,6 +12,7 @@ import {
   Loader,
   Paper,
   rem,
+  Select,
   SimpleGrid,
   Stack,
   Text,
@@ -273,16 +274,29 @@ function BindingPanel({
   archived,
   busy,
   actionsBusy,
+  responseModeDraft,
+  responseModeSaving,
+  responseModeError,
   onDisconnect,
+  onResponseModeChange,
+  onSaveResponseMode,
 }: {
   binding: ManagedBinding;
   archived: boolean;
   busy: boolean;
   actionsBusy: boolean;
+  responseModeDraft: ManagedBinding["response_mode"];
+  responseModeSaving: boolean;
+  responseModeError: string | null;
   onDisconnect: (binding: ManagedBinding) => void;
+  onResponseModeChange: (
+    binding: ManagedBinding,
+    responseMode: ManagedBinding["response_mode"],
+  ) => void;
+  onSaveResponseMode: (binding: ManagedBinding) => void;
 }): React.ReactElement {
   const t = useTranslations("workspace.agents.sessionChannels");
-  const active = binding.status === "active";
+  const connected = binding.disconnected_at === null;
   return (
     <Paper
       withBorder
@@ -295,8 +309,8 @@ function BindingPanel({
           <Box style={{ minWidth: 0 }}>
             <Group gap="xs">
               <Text fw={700}>{binding.resource_label}</Text>
-              <Badge color={active ? "green" : "gray"} variant="light">
-                {t(`bindingStatus.${binding.status}`)}
+              <Badge color={connected ? "green" : "gray"} variant="light">
+                {t(connected ? "connected" : "disconnected")}
               </Badge>
             </Group>
             <Text size="sm" c="dimmed" mt={4}>
@@ -309,12 +323,65 @@ function BindingPanel({
             size="xs"
             leftSection={<IconPlugConnectedX size={rem(14)} />}
             loading={busy}
-            disabled={actionsBusy || !active || archived}
+            disabled={
+              actionsBusy || responseModeSaving || !connected || archived
+            }
             onClick={() => onDisconnect(binding)}
           >
             {t("disconnect")}
           </Button>
         </Group>
+
+        <Stack gap="xs">
+          <Text size="sm" fw={700}>
+            {t("responseModeTitle")}
+          </Text>
+          <Group align="flex-end" wrap="wrap">
+            <Select
+              data-testid={`external-binding-response-mode-${binding.id}`}
+              label={t("responseModeLabel")}
+              description={
+                connected && !archived
+                  ? t("responseModeDescription")
+                  : t("responseModeReadOnlyDescription")
+              }
+              data={[
+                {
+                  value: "all_messages",
+                  label: t("responseMode.all_messages"),
+                },
+                {
+                  value: "mention_only",
+                  label: t("responseMode.mention_only"),
+                },
+              ]}
+              value={responseModeDraft}
+              disabled={!connected || archived || responseModeSaving}
+              onChange={(value) =>
+                onResponseModeChange(
+                  binding,
+                  value === "mention_only" ? "mention_only" : "all_messages",
+                )
+              }
+              style={{ flex: 1 }}
+            />
+            <Button
+              size="xs"
+              loading={responseModeSaving}
+              data-testid={`save-external-binding-response-mode-${binding.id}`}
+              disabled={
+                !connected ||
+                archived ||
+                responseModeSaving ||
+                responseModeDraft === binding.response_mode
+              }
+              onClick={() => onSaveResponseMode(binding)}
+            >
+              {t("saveResponseMode")}
+            </Button>
+          </Group>
+          {responseModeError && <Alert color="red">{responseModeError}</Alert>}
+        </Stack>
 
         <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
           <Box>
@@ -409,7 +476,12 @@ export function SessionChannels({
   state,
   actionError,
   disconnectingId,
+  responseModeDrafts,
+  updatingResponseModeId,
+  responseModeError,
   onDisconnect,
+  onResponseModeChange,
+  onSaveResponseMode,
 }: SessionChannelsContainerOutput): React.ReactElement {
   const t = useTranslations("workspace.agents.sessionChannels");
   const modals = useModals();
@@ -487,7 +559,18 @@ export function SessionChannels({
                     archived={state.session.archived_at !== null}
                     busy={disconnectingId === binding.id}
                     actionsBusy={disconnectingId !== null}
+                    responseModeDraft={
+                      responseModeDrafts[binding.id] ?? binding.response_mode
+                    }
+                    responseModeSaving={updatingResponseModeId === binding.id}
+                    responseModeError={
+                      responseModeError?.bindingId === binding.id
+                        ? responseModeError.message
+                        : null
+                    }
                     onDisconnect={openDisconnectConfirm}
+                    onResponseModeChange={onResponseModeChange}
+                    onSaveResponseMode={onSaveResponseMode}
                   />
                 ))}
               </Stack>

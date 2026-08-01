@@ -8,11 +8,7 @@ import hashlib
 from typing import Annotated, Literal, Protocol, assert_never
 
 from fastapi import Depends
-from redis.exceptions import RedisError
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.broker.deps import get_broker
-from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.core.enums import (
     ExternalChannelIngressProfile,
     ExternalChannelMessageLifecycle,
@@ -20,10 +16,6 @@ from azents.core.enums import (
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
 )
-from azents.rdb.deps import get_session_manager
-from azents.rdb.session import SessionManager
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.conversation import (
     ExternalChannelConversationLock,
     ExternalChannelConversationLockError,
@@ -73,6 +65,7 @@ class ExternalChannelIngestionReason(enum.StrEnum):
     SELECTION_REQUIRED = "selection_required"
     ACCESS_REQUIRED = "access_required"
     NOT_AN_INVOCATION = "not_an_invocation"
+    RESPONSE_MODE_NOT_TRIGGERED = "response_mode_not_triggered"
     AUTHOR_NOT_ELIGIBLE = "author_not_eligible"
     CONNECTION_UNAVAILABLE = "connection_unavailable"
     INGRESS_AUTHORITY_STALE = "ingress_authority_stale"
@@ -90,6 +83,7 @@ class ExternalChannelTriggerLocator:
 
     connection_id: str
     provider: ExternalChannelProvider
+    provider_event_type: str
     provider_tenant_id: str
     provider_channel_id: str
     provider_parent_channel_id: str | None
@@ -115,6 +109,15 @@ class ExternalChannelTriggerLocator:
         )
         if any(not value for value in required):
             raise ValueError("External Channel trigger locator is incomplete.")
+        expected_event_types = {
+            ExternalChannelProvider.SLACK: {"app_mention", "message", "unknown"},
+            ExternalChannelProvider.DISCORD: {
+                "discord_message_create",
+                "unknown",
+            },
+        }
+        if self.provider_event_type not in expected_event_types[self.provider]:
+            raise ValueError("External Channel provider event type is invalid.")
 
     @property
     def digest(self) -> str:
@@ -220,7 +223,8 @@ class ExternalChannelReplayBoundary:
 
     connection_id: str
     resource_id: str
-    source_message_id: str
+    principal_id: str
+    trigger_provider_message_key: str
     conversation_position_id: str
     range_start_position: str | None
     trigger_position: str
@@ -230,7 +234,8 @@ class ExternalChannelReplayBoundary:
         required = (
             self.connection_id,
             self.resource_id,
-            self.source_message_id,
+            self.principal_id,
+            self.trigger_provider_message_key,
             self.conversation_position_id,
             self.trigger_position,
         )
@@ -244,7 +249,8 @@ class ExternalChannelReplayBoundary:
                 (
                     self.connection_id,
                     self.resource_id,
-                    self.source_message_id,
+                    self.principal_id,
+                    self.trigger_provider_message_key,
                     self.conversation_position_id,
                     self.range_start_position or "",
                     self.trigger_position,
@@ -332,7 +338,7 @@ class ExternalChannelIngestionOutcome:
 
     kind: ExternalChannelIngestionOutcomeKind
     reason: ExternalChannelIngestionReason
-    batch_id: str | None = dataclasses.field(repr=False)
+    mailbox_item_id: str | None = dataclasses.field(repr=False)
     control_delivery_attempt_id: str | None = dataclasses.field(repr=False)
     connection_id: str | None = dataclasses.field(repr=False)
 
@@ -351,14 +357,14 @@ class ExternalChannelIngestionPreparation:
     position_id: str | None
     exclusive_start_position: str | None
     immediate_outcome: ExternalChannelIngestionOutcome | None
-    wake_batch_id: str | None
+    wake_mailbox_item_id: str | None
     wake_session_id: str | None
 
     def __post_init__(self) -> None:
         """Require either a history position or one completed outcome."""
         if self.immediate_outcome is None and self.position_id is None:
             raise ValueError("External Channel ingestion position is unavailable.")
-        if (self.wake_batch_id is None) != (self.wake_session_id is None):
+        if (self.wake_mailbox_item_id is None) != (self.wake_session_id is None):
             raise ValueError("External Channel wake recovery identity is incomplete.")
 
 
@@ -379,14 +385,14 @@ class ExternalChannelIngestionAcceptance:
 
     status: ExternalChannelAcceptanceStatus
     reason: ExternalChannelIngestionReason
-    batch_id: str | None
+    mailbox_item_id: str | None
     session_id: str | None
     control_delivery_attempt_id: str | None
     connection_id: str | None
 
     def __post_init__(self) -> None:
         """Require complete wake and provider-control identities."""
-        if (self.batch_id is None) != (self.session_id is None):
+        if (self.mailbox_item_id is None) != (self.session_id is None):
             raise ValueError("External Channel accepted wake identity is incomplete.")
         if (self.control_delivery_attempt_id is None) != (self.connection_id is None):
             raise ValueError(
@@ -447,85 +453,13 @@ class ExternalChannelWakeDispatcher(Protocol):
     async def dispatch(
         self,
         *,
-        batch_id: str,
+        mailbox_item_id: str,
         session_id: str,
         now: datetime.datetime,
         deadline: ExternalChannelOperationDeadline,
     ) -> ExternalChannelWakeDispatchResult:
         """Dispatch or recover one durable invocation wake."""
         ...
-
-
-@dataclasses.dataclass
-class ExternalChannelInvocationWakeDispatcher:
-    """Claim, send, and durably complete one routing-only Session wake."""
-
-    session_manager: Annotated[
-        SessionManager[AsyncSession],
-        Depends(get_session_manager),
-    ]
-    repository: Annotated[
-        ExternalChannelRepository,
-        Depends(ExternalChannelRepository),
-    ]
-    agent_session_repository: Annotated[
-        AgentSessionRepository,
-        Depends(AgentSessionRepository),
-    ]
-    broker: Annotated[SessionBroker, Depends(get_broker)]
-
-    async def dispatch(
-        self,
-        *,
-        batch_id: str,
-        session_id: str,
-        now: datetime.datetime,
-        deadline: ExternalChannelOperationDeadline,
-    ) -> ExternalChannelWakeDispatchResult:
-        """Dispatch one recoverable wake after its acceptance transaction commits."""
-        async with self.session_manager() as session:
-            batch, claimed = await self.repository.claim_invocation_wake_dispatch(
-                session,
-                batch_id=batch_id,
-                now=now,
-            )
-            if batch is None:
-                raise ValueError("External Channel invocation batch is unavailable.")
-            if not claimed:
-                await session.commit()
-                if batch.wake_dispatch_status.value == "dispatched":
-                    return "already_dispatched"
-                return "claimed_elsewhere"
-            await self.agent_session_repository.mark_running_for_input_wakeup(
-                session,
-                session_id,
-            )
-            await session.commit()
-        try:
-            async with asyncio.timeout(deadline.remaining_seconds()):
-                await self.broker.send_message(SessionWakeUp(session_id=session_id))
-        except asyncio.CancelledError:
-            raise
-        except (RedisError, OSError, TimeoutError) as error:
-            async with self.session_manager() as session:
-                await self.repository.reset_invocation_wake_dispatch(
-                    session,
-                    batch_id=batch_id,
-                )
-                await session.commit()
-            raise ExternalChannelWakeDispatchUnavailable(
-                "External Channel Session wake dispatch is unavailable."
-            ) from error
-        async with self.session_manager() as session:
-            dispatched = await self.repository.mark_invocation_wake_dispatched(
-                session,
-                batch_id=batch_id,
-                dispatched_at=now,
-            )
-            if dispatched is None:
-                raise ValueError("External Channel invocation batch is unavailable.")
-            await session.commit()
-        return "dispatched"
 
 
 @dataclasses.dataclass
@@ -572,7 +506,7 @@ class ExternalChannelConversationIngestionService:
                             reason=(
                                 ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY
                             ),
-                            batch_id=None,
+                            mailbox_item_id=None,
                             control_delivery_attempt_id=None,
                             connection_id=None,
                         )
@@ -592,7 +526,7 @@ class ExternalChannelConversationIngestionService:
                 return ExternalChannelIngestionOutcome(
                     kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                     reason=ExternalChannelIngestionReason.POSITION_CHANGED,
-                    batch_id=None,
+                    mailbox_item_id=None,
                     control_delivery_attempt_id=None,
                     connection_id=None,
                 )
@@ -602,7 +536,7 @@ class ExternalChannelConversationIngestionService:
             return ExternalChannelIngestionOutcome(
                 kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                 reason=ExternalChannelIngestionReason.COORDINATION_UNAVAILABLE,
-                batch_id=None,
+                mailbox_item_id=None,
                 control_delivery_attempt_id=None,
                 connection_id=None,
             )
@@ -610,7 +544,7 @@ class ExternalChannelConversationIngestionService:
             return ExternalChannelIngestionOutcome(
                 kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                 reason=ExternalChannelIngestionReason.HISTORY_UNAVAILABLE,
-                batch_id=None,
+                mailbox_item_id=None,
                 control_delivery_attempt_id=None,
                 connection_id=None,
             )
@@ -618,7 +552,7 @@ class ExternalChannelConversationIngestionService:
             return ExternalChannelIngestionOutcome(
                 kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                 reason=ExternalChannelIngestionReason.WAKE_DISPATCH_PENDING,
-                batch_id=None,
+                mailbox_item_id=None,
                 control_delivery_attempt_id=None,
                 connection_id=None,
             )
@@ -634,11 +568,11 @@ class ExternalChannelConversationIngestionService:
         if outcome is None:
             raise RuntimeError("External Channel immediate outcome is unavailable.")
         if (
-            preparation.wake_batch_id is not None
+            preparation.wake_mailbox_item_id is not None
             and preparation.wake_session_id is not None
         ):
             dispatch = await self.wake_dispatcher.dispatch(
-                batch_id=preparation.wake_batch_id,
+                mailbox_item_id=preparation.wake_mailbox_item_id,
                 session_id=preparation.wake_session_id,
                 now=_utc_now(),
                 deadline=deadline,
@@ -647,7 +581,7 @@ class ExternalChannelConversationIngestionService:
                 return ExternalChannelIngestionOutcome(
                     kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                     reason=ExternalChannelIngestionReason.WAKE_DISPATCH_PENDING,
-                    batch_id=preparation.wake_batch_id,
+                    mailbox_item_id=preparation.wake_mailbox_item_id,
                     control_delivery_attempt_id=None,
                     connection_id=None,
                 )
@@ -661,9 +595,9 @@ class ExternalChannelConversationIngestionService:
         deadline: ExternalChannelOperationDeadline,
     ) -> ExternalChannelIngestionOutcome:
         """Dispatch accepted input and translate the closed store result."""
-        if acceptance.batch_id is not None and acceptance.session_id is not None:
+        if acceptance.mailbox_item_id is not None and acceptance.session_id is not None:
             dispatch = await self.wake_dispatcher.dispatch(
-                batch_id=acceptance.batch_id,
+                mailbox_item_id=acceptance.mailbox_item_id,
                 session_id=acceptance.session_id,
                 now=now,
                 deadline=deadline,
@@ -672,7 +606,7 @@ class ExternalChannelConversationIngestionService:
                 return ExternalChannelIngestionOutcome(
                     kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                     reason=ExternalChannelIngestionReason.WAKE_DISPATCH_PENDING,
-                    batch_id=acceptance.batch_id,
+                    mailbox_item_id=acceptance.mailbox_item_id,
                     control_delivery_attempt_id=None,
                     connection_id=None,
                 )
@@ -698,7 +632,7 @@ class ExternalChannelConversationIngestionService:
         return ExternalChannelIngestionOutcome(
             kind=kind,
             reason=acceptance.reason,
-            batch_id=acceptance.batch_id,
+            mailbox_item_id=acceptance.mailbox_item_id,
             control_delivery_attempt_id=acceptance.control_delivery_attempt_id,
             connection_id=acceptance.connection_id,
         )

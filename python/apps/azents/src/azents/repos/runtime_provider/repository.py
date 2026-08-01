@@ -228,8 +228,16 @@ class RuntimeProviderRepository:
         *,
         provider_id: str,
         workspace_ids: set[str],
-    ) -> None:
-        """Replace explicit selected-Workspace availability membership."""
+    ) -> RuntimeProvider | None:
+        """Replace selected-Workspace membership and advance Admin version."""
+        result = await session.execute(
+            sa.select(RDBRuntimeProvider)
+            .where(RDBRuntimeProvider.id == provider_id)
+            .with_for_update()
+        )
+        provider = result.scalar_one_or_none()
+        if provider is None:
+            return None
         await session.execute(
             sa.delete(RDBRuntimeProviderWorkspaceAvailability).where(
                 RDBRuntimeProviderWorkspaceAvailability.provider_id == provider_id
@@ -244,7 +252,10 @@ class RuntimeProviderRepository:
                 for workspace_id in sorted(workspace_ids)
             ]
         )
+        provider.admin_version += 1
         await session.flush()
+        await session.refresh(provider)
+        return self._build_provider(provider)
 
     async def is_available_to_workspace(
         self,
@@ -512,7 +523,6 @@ class RuntimeProviderRepository:
             enabled=rdb.enabled,
             lifecycle_state=rdb.lifecycle_state,
             availability_mode=rdb.availability_mode,
-            accepted_contract_revision_id=rdb.accepted_contract_revision_id,
             current_contract_revision_id=rdb.current_contract_revision_id,
             active_config_revision_id=rdb.active_config_revision_id,
             admin_version=rdb.admin_version,

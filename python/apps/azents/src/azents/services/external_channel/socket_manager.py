@@ -78,7 +78,7 @@ class SlackSocketCredentialError(RuntimeError):
 
 @dataclasses.dataclass
 class SlackSocketManagerService:
-    """Own multiple Slack sockets in Agent Worker processes with DB fencing."""
+    """Own multiple Slack sockets in External Channel Gateway processes."""
 
     session_manager: Annotated[
         SessionManager[AsyncSession],
@@ -240,7 +240,7 @@ class SlackSocketManagerService:
                     ExternalChannelInteractionHandoff(
                         interaction_id=claim.interaction.id,
                         trigger_id=callback.trigger_id,
-                        selector_admission_id=callback.selector_admission_id,
+                        selector_interaction_id=callback.selector_interaction_id,
                         selector_metadata=callback.selector_metadata,
                         selected_route_id=callback.selected_route_id,
                         selector_navigation=callback.selector_navigation,
@@ -370,6 +370,7 @@ class SlackSocketManagerService:
             )
         result = await self.transport_ingestion_service.ingest_slack_event(
             event=event,
+            connected_bot_user_id=configuration.provider_bot_user_id,
             authority=ExternalChannelIngressAuthority(
                 kind=ExternalChannelIngressAuthorityKind.LEASE,
                 ingress_profile=ExternalChannelIngressProfile.SLACK_SOCKET,

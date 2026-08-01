@@ -9,7 +9,12 @@ from unittest.mock import AsyncMock
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentLifecycleStatus, AgentType, WorkspaceUserRole
+from azents.core.enums import (
+    AgentLifecycleStatus,
+    AgentType,
+    ExternalChannelResponseMode,
+    WorkspaceUserRole,
+)
 from azents.repos.agent.data import Agent
 from azents.repos.memory.data import Memory, MemoryScope
 from azents.testing.model_selection import (
@@ -39,9 +44,11 @@ def _make_agent(agent_id: str = "agent-1") -> Agent:
         model_parameters=None,
         system_prompt=None,
         enabled=True,
+        external_channel_default_response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
         lifecycle_status=AgentLifecycleStatus.ACTIVE,
         type=AgentType.PUBLIC,
-        runtime_provider_id=None,
+        runtime_profile_id=None,
+        runtime_profile_selection_version=1,
         shell_enabled=True,
         memory_enabled=True,
         tool_search_enabled=False,

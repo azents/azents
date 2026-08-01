@@ -78,6 +78,9 @@ class ChannelDeliveryTarget(_Record):
     encrypted_credentials: str | None
     provider_tenant_id: str | None
     capabilities: dict[str, Any] | None
+    workspace_handle: str | None
+    agent_id: str | None
+    agent_session_id: str | None
     agent_name: str | None
     agent_avatar: dict[str, Any] | None
     request_payload: dict[str, Any]
@@ -94,11 +97,3 @@ class ExternalChannelFileAccessTarget(_Record):
     provider_tenant_id: str | None
     capabilities: dict[str, Any] | None
     resource_labels: dict[str, Any] | None
-
-
-class ExternalChannelFileSource(_Record):
-    """Retained source message identity for one binding-authorized provider file."""
-
-    provider_message_key: str
-    provider_channel_id: str | None
-    metadata: dict[str, Any]

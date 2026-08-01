@@ -11,6 +11,7 @@ code_paths:
   - python/apps/azents/src/azents/core/external_channel.py
   - python/apps/azents/src/azents/core/external_channel_file.py
   - python/apps/azents/src/azents/core/external_channel_progress.py
+  - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/slack_external_channel_progress.py
   - python/apps/azents/src/azents/core/enums.py
   - python/apps/azents/src/azents/engine/events/external_channel_rendering.py
@@ -38,6 +39,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/externalChannel.ts
 api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels
+  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/manifest
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/slack
@@ -52,22 +54,25 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/management-handoffs/{handoff_id}
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
+  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-07-31
-spec_version: 29
+last_verified_at: 2026-08-01
+spec_version: 38
 ---
 
 # External Channel
 
 ## Overview
 
-External Channels connect provider conversations to Azents Agents without treating provider credentials, conversations, participants, or delivery state as AgentSession-owned chat data. Workspace owns connection credentials and provider identity. An Agent route selects the Agent for a connection. A resource represents one provider conversation, and an active binding links that resource to one AgentSession.
+External Channels connect provider conversations to Azents Agents without treating provider credentials, conversations, participants, or delivery state as AgentSession-owned chat data. Workspace owns connection credentials and provider identity. An Agent route selects the Agent for a connection. A resource represents one provider conversation, and a connected binding links that resource to one AgentSession until explicit disconnect.
 
 Slack and Discord are supported providers. A Slack connection uses a manually
 configured Slack App and selects either signed HTTP callbacks or Socket Mode. A Discord
 connection uses a customer-owned Discord App, its Bot Token, one target Guild, a signed
-interaction callback, and a dedicated Gateway Worker. Both providers have an immutable
-App mode. A Single App is managed by one Agent's administrators and has exactly one
+interaction callback, and a Gateway session. A provider-neutral External Channel
+Gateway runtime owns both Slack Socket Mode and Discord Gateway connections. Both
+providers have an immutable App mode. A Single App is managed by one Agent's
+administrators and has exactly one
 Agent route. A Multi App is managed by Workspace Owners and Managers and may have zero
 or more Agent routes. One Agent may appear in several Apps, and one AgentSession may
 contain multiple independent bindings.
@@ -75,17 +80,25 @@ contain multiple independent bindings.
 ## Ownership and Security Boundaries
 
 - Connection and route records are Workspace/Agent administration state.
-- Provider resources, principals, messages, and immutable revisions are retained independently from AgentSession history.
-- Bindings, invocation batches, Channel Work, channel actions, and delivery attempts are Session lifecycle resources.
+- Provider resources, principals, conversation positions, access requests, and
+  selector interactions retain only routing, authorization, and replay identity.
+- Bindings, Channel Work, channel actions, and delivery attempts are Session lifecycle resources.
 - Credentials are encrypted at rest and decrypted only inside provider adapters. Public APIs, generated clients, prompts, events, logs, UI state, and test evidence expose only redacted credential status.
-- Provider message content remains external input even after approval. It retains provider, resource, sender, author type, authorization, message identity, and revision attribution.
+- Provider history is the inbound content authority. One accepted history range becomes
+  one canonical mailbox item and then contiguous Session events with provider, resource,
+  sender, author type, authorization, and message identity attribution.
 - An ExternalChannelPrincipal is provider provenance and admission authority only. It is never an
   Azents execution User. After a binding releases durable work, the linked Team Session executes
   through canonical Session/Run authority without inferring a User from the principal, approver,
   route owner, Agent creator, Workspace owner, or broker signal.
-- External Channel wake-ups are routing-only `SessionWakeUp(session_id)` notifications. The batch,
-  binding, provider principal, and source content are loaded from durable records after the Worker
-  claims owner generation; they are not carried by the broker.
+- External Channel wake-ups are routing-only `SessionWakeUp(session_id)` notifications.
+  The canonical mailbox item is the accepted-input and wake-recovery identity; provider
+  content is never carried by the broker.
+- Unfinished Channel Work uses the dedicated
+  `external_channel_continuation` hook input, mailbox kind, event kind, model
+  reminder, public projection, and UI presentation. It never reuses
+  `goal_continuation`, so active Goal state cannot reinterpret or recursively
+  re-trigger Channel work.
 - Foreign keys are restrictive across lifecycle roots. AgentSession deletion cannot cascade away provider or audit roots before lifecycle cleanup and verification complete.
 
 ## Core Records
@@ -95,15 +108,13 @@ contain multiple independent bindings.
 | Connection | Workspace-owned provider App identity, immutable `single` or `multi` mode, encrypted credentials, capability/health snapshot, configuration and App-claim generations, terminal disconnect state, and provider ingress lease/gap state. Slack has one selected HTTP or Socket transport; Discord concurrently uses signed HTTP interactions and a Gateway session. |
 | Agent route | Persistent connection-to-Agent relationship. Single Apps require exactly one current route. Multi Apps retain zero or more available or removed catalog routes; immutable Agent identity snapshots preserve history after Agent deletion. Each active dedicated route defaults to open human access and separately defaults to rejecting external bot messages. |
 | Channel default | Multi App channel-to-route preference. At most one active default exists per connection and provider channel. Removing its route invalidates rather than silently retargets it. |
-| Conversation admission | Durable, expiring unbound-conversation scope that records the initiating provider principal and may become selected exactly once. |
-| Interaction | Idempotent signed Slack or Discord shortcut, component/action, navigation, or submission claim. Provider triggers and Discord interaction tokens stay transient and are never persisted or replayed. |
+| Interaction | Idempotent signed Slack or Discord shortcut, component/action, navigation, or submission claim. An unresolved selector interaction retains a content-free provider locator, conversation position boundary, initiating principal, and selected route. Provider triggers and Discord interaction tokens stay transient and are never persisted or replayed. |
 | Resource | One provider conversation: a Slack thread or Discord root/thread, with provider labels, availability, latest activity, and any provisioned delivery-thread identity. Discord labels separately retain source channel, parent channel, root message, existing thread, and provisioned delivery thread identities. |
 | Conversation position | Durable read-through position for one connection-scoped parent channel or thread. PostgreSQL position compare-and-set is the ordering authority across retries and replicas. |
 | Principal | Provider tenant/user identity and author category. It is not an Azents User or WorkspaceUser. |
-| Message and revision | Canonical provider-history snapshot plus immutable accepted revisions. Slack messages prefer non-blank fallback text and otherwise derive bounded readable text from supported Block Kit content. Slack identity mappings include each retained message sender as well as bounded body references. Discord messages are normalized only after target-Guild, author, content, and message eligibility checks. Raw callback payloads are never canonical content authority. Revisions retain optional bounded provider identity mappings and up to 20 metadata-only file entries. Supported entries expose binding-scoped opaque locators; private URLs and file bodies are never persisted or rendered. |
-| Binding | Active or disconnected link from one route/resource to one AgentSession. A new authorized conversation creates an active binding in the final synchronous acceptance transaction. |
-| Invocation batch | Immutable ordered revision membership released through one authorized trigger, linked to its conversation position and mailbox item, and carrying recoverable wake-dispatch state. |
-| Access request/grant/block | Opaque approval request, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
+| Binding | Persistent link from one route/resource to one AgentSession with one required concrete `mention_only` or `all_messages` response mode. `disconnected_at IS NULL` identifies the current connected relationship; a non-null timestamp is its terminal boundary. A new authorized conversation copies the Agent default and commits the binding and real Session with its first canonical mailbox input. |
+| Mailbox item and Session events | One deterministic mailbox item contains the ordered immutable provider-history projection. The conversation position compare-and-set is the sole duplicate-prevention and ordering authority. Mailbox identity owns input idempotency and pending wake recovery. Promotion creates the canonical External Channel Session events; no parallel provider-message, revision, invocation-batch, activation, or wake-dispatch record exists. |
+| Access request/grant/block | Opaque approval request with a content-free provider locator and conversation-position replay boundary, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
 | Channel Work/action/delivery | Binding-scoped durable current-work title and ordered provider-neutral tasks with stable identities, status, optional details, optional output, and labeled URL sources; one work-cycle-owned desired progress state and provider identity; one atomic explicit action; and persisted provider intents/outcomes. File-bearing replies retain only bounded Runtime source manifests and delivery phase evidence. Management derives projection state from the latest progress operation belonging to the current work cycle. |
 
 ## State Invariants
@@ -131,17 +142,26 @@ contain multiple independent bindings.
 - An unbound resource resolves only through an existing binding, the Single App's
   sole route, a valid Multi App channel default, or explicit selector completion, in
   that order. It never chooses an arbitrary candidate. A resource has at most one
-  active binding, so a later Agent choice cannot replace an established thread.
+  connected binding, so a later Agent choice cannot replace an established thread.
 - Durable execution mutations are fenced by the current Session owner generation.
   Provider principals, Slack callback actors, Workspace requesters, and approvers
   remain provenance or authorization identities and never become the execution User.
 - A resource is `active`, `unavailable`, or `deleted`. Provider history is read on demand for one synchronous ingestion operation and has no durable hydration lifecycle.
-- A binding is either active or disconnected. There is no waiting-hydration activation state.
+- A binding has no active/inactive lifecycle state. `disconnected_at IS NULL` means
+  connected, and explicit disconnect sets the terminal timestamp and reason. Gateway
+  health, lease ownership, reconnect state, and provider-ingress availability never
+  reactivate or disable that relationship.
+- A binding response mode is always concrete. `all_messages` admits eligible ordinary
+  human messages on a connected binding; `mention_only` requires an explicit provider
+  invocation. The Agent default is copied only when a binding is created and is never
+  dynamically inherited. Existing Agents and historical bindings use `all_messages`.
 - Connection capabilities expose `download_files` and `upload_files` independently.
-  Missing legacy fields are unavailable. A file locator is valid only for the current
-  Agent, Session, active binding, route, and active or degraded connection; provider
-  authorization remains authoritative at download time.
-- File-bearing External Channel state retains provider metadata, opaque locators,
+  Missing legacy fields are unavailable. A model-visible file key directly contains
+  its provider request coordinates. It is valid only for the current Agent, Session,
+  connected binding, route, current credentials, and directional capability. Transient
+  Gateway or Socket health is not outbound authority; provider authentication and
+  authorization remain authoritative at download time.
+- File-bearing External Channel state retains provider metadata, direct provider-address keys,
   bounded Runtime transfer manifests, consumer-claim identity, and terminal delivery
   evidence only. Provider bodies enter the common Server-to-Runtime transfer path only
   after a current authorization recheck. Runtime bodies leave through one verified
@@ -154,20 +174,20 @@ contain multiple independent bindings.
   configuration-derived state. Discord
   interaction tokens, callback URLs, raw interaction bodies, and signature values are
   never durable External Channel state.
-- The dedicated Discord Gateway Worker claims each connection through owner,
+- The External Channel Gateway's Discord manager claims each connection through owner,
   configuration-generation, App-claim-generation, and lease-generation fences.
   Heartbeats and lease renewal do not authorize durable mutation by themselves.
-  The Worker uses only public high-level `discord.py` APIs and typed SDK callbacks.
+  The manager uses only public high-level `discord.py` APIs and typed SDK callbacks.
   The SDK owns discovery, heartbeat, reconnect, and in-process Resume. Azents neither
   reads raw Gateway payloads/private SDK state nor persists a cross-process Gateway
   Resume checkpoint. Durable provider-event idempotency and the current
   lease/configuration/App-claim fence protect canonical admission.
 - Discord `ready`, `resumed`, and `disconnect` callbacks update active or degraded
   health only through the current lease fence. Slack Socket establishment and endpoint
-  replacement callbacks use the equivalent fenced active/gap transitions. An Agent
-  Worker treats unexpected Slack Socket manager completion as a process-level
-  supervision failure, while one customer configuration requiring reconnection remains
-  connection-local health.
+  replacement callbacks use the equivalent fenced active/gap transitions. One
+  provider-neutral gateway process supervises both required manager loops and exits if
+  either loop stops unexpectedly. One customer configuration requiring reconnection
+  remains connection-local health. General Agent Workers own neither provider socket.
 - Production Discord Gateway endpoint selection belongs to `discord.py`; Azents does
   not expose a custom or insecure Gateway endpoint override.
 - Inbound Slack and Discord attachments retain only bounded identifiers, filename, media
@@ -180,8 +200,13 @@ contain multiple independent bindings.
   verified object before Runtime delivery. Any metadata, response-header, or body-size
   mismatch fails closed without a Runtime destination commit; provider URLs and bytes
   remain outside durable External Channel state.
-- Initial synchronous binding acceptance creates one separate Session navigation message
-  and one checking work projection before Session wake-up. Slack lowers work through its
+- Initial synchronous binding acceptance atomically commits the binding, real Session,
+  canonical mailbox input, conversation-position advance, running transition, one
+  joined-presence intent with Session navigation, and one checking work projection.
+  Broker wake follows that commit using the mailbox item as its recovery identity.
+  Provider-control delivery is independent background work: failed, unknown, or
+  cancelled presence or progress delivery never blocks mailbox promotion, Session
+  wake, or AgentRun creation. Slack lowers work through its
   retained Tracker message; Discord lowers each work snapshot to one retained compact
   Embed Tracker. The Embed title carries the current-work title, while its bounded
   description carries the status summary, every ordered task title and status marker,
@@ -244,6 +269,11 @@ can invoke. This setting never overrides a block or admits the connected Azents 
 Removing the Single association disconnects the App. Secret fields remain blank and
 required when an existing connection is edited.
 
+The same Agent settings surface exposes the Agent's default External Channel response
+mode even when no App is connected. Agent administrators may replace the required
+`mention_only` or `all_messages` value. The mutation changes only the creation-time
+default and does not enumerate or rewrite existing bindings.
+
 Workspace Owners and Managers manage provider-scoped Multi Apps from Workspace
 integrations. Ordinary Members have neither Multi read nor write authority. Slack and
 Discord Multi creation start with zero Agents. Their provider-correct public API,
@@ -270,16 +300,20 @@ authority behind the same fences and requires reconnection. Replacing Discord
 credentials or App identity invalidates prior callback and Gateway authority before
 activation repeats. Dedicated Discord setup is available without a deployment-scoped
 provider rollout flag; Discord Multi App creation is subject to the shared Multi rollout
-gate. Every enabled Server deployment includes the dedicated Gateway Worker.
+gate. Every enabled Server deployment includes the provider-neutral External Channel
+Gateway.
 
-Slack validation first uses `auth.test` to resolve Team and Bot identity, then uses
-`bots.info` to verify that the Bot Token's actual App ID equals the configured App
-ID. An App ID copied from a different Slack App is rejected as a recoverable
-configuration error rather than being marked active. Validation also checks the
-provider-reported OAuth scope header when present and requires the message,
-conversation-history, conversation-metadata, posting, and user identity scopes used
-by the adapter. `files:read` and `files:write` independently grant download and upload
-capabilities; either may remain unavailable without disabling text conversation.
+Slack validation first uses `auth.test` to resolve the Team, Bot User ID, and Bot ID.
+It retains `auth.test.user_id` as `provider_bot_user_id` and uses the separate Bot ID
+only with `bots.info` to verify that the Bot Token's actual App ID equals the
+configured App ID. An App ID copied from a different Slack App is rejected as a
+recoverable configuration error rather than being marked active. Authenticated event
+callbacks may also contribute a same-Team bot authorization identity for invocation
+classification without another provider call. Validation checks the provider-reported
+OAuth scope header when present and requires the message, conversation-history,
+conversation-metadata, posting, and user identity scopes used by the adapter.
+`files:read` and `files:write` independently grant download and upload capabilities;
+either may remain unavailable without disabling text conversation.
 
 Disconnect has no lifecycle-status admission guard. It disables inbound routing,
 clears credentials, terminalizes owned live state, and commits the terminal
@@ -289,7 +323,11 @@ Agent connection list.
 
 Session Channels shows bindings, the current Channel Work title, typed ordered
 tasks, failed state, details, output, source links, Activity Tracker projection
-state, delivery outcomes, grants, and terminal disconnect state.
+state, delivery outcomes, grants, concrete response mode, and terminal disconnect
+state. Agent administrators may replace the mode only while the binding remains
+connected and owned by the requested Agent and Session. Disconnected historical
+bindings retain their final mode as read-only state; foreign, missing, unauthorized,
+and disconnected mutations use the not-found-shaped management boundary.
 Approval and management detail surfaces show complete provider user identities with
 copy controls, while regular timeline summaries remain name-first. Destructive
 connection, binding, grant, and block actions require in-product confirmation.
@@ -303,6 +341,30 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-01** (spec_version 38) — Added Agent defaults and concrete binding
+  response modes, creation-time copy semantics, connected-only management, and
+  `all_messages` compatibility for existing data.
+- **2026-08-01** (spec_version 37) — Replaced the initial button-only Session
+  navigation control with joined-presence copy and added leave-presence delivery to
+  binding termination while retaining the canonical Session link.
+- **2026-08-01** (spec_version 36) — Made the conversation position the sole
+  duplicate-prevention authority and made Session-link and progress delivery
+  independent from canonical mailbox acceptance, Session wake, and Agent execution.
+- **2026-07-31** (spec_version 35) — Corrected Slack Bot User identity persistence
+  to `auth.test.user_id` and recognized authenticated callback Bot User mentions when
+  Slack delivers a human mention as a normal message event.
+- **2026-07-31** (spec_version 34) — Added the dedicated External Channel
+  continuation contract across runtime, persistence, model lowering, API, and UI.
+- **2026-07-31** (spec_version 32) — Made `disconnected_at` the only binding
+  connectedness authority, added canonical `/w` Session navigation, and removed
+  transient ingress health from outbound REST authority.
+- **2026-07-31** (spec_version 31) — Unified Slack Socket Mode and Discord Gateway
+  ownership in one provider-neutral External Channel Gateway runtime and removed
+  persistent transport ownership from general Agent Workers.
+- **2026-07-31** (spec_version 30) — Replaced provider message/revision,
+  conversation-admission, invocation-batch, provisioning, and wake-dispatch ownership
+  with content-free interaction/access replay boundaries and one canonical mailbox
+  item; changed file keys to carry direct provider coordinates.
 - **2026-07-31** (spec_version 29) — Delegated Slack Socket endpoint acquisition,
   stale recovery, queue dispatch, and reconnect to the SDK; projected Slack and
   Discord typed lifecycle evidence through fenced health transitions; and made
@@ -319,9 +381,8 @@ Connection responses expose provider identity, capabilities, health, route relat
   retained message senders even when their IDs do not appear in message bodies.
 - **2026-07-30** (spec_version 26) — Replaced durable provider events,
   hydration/pending-context activation, and truncation projections with typed
-  synchronous ingestion, parent/thread conversation positions, immutable invocation
-  batches, active binding acceptance, recoverable wake state, and provider-history
-  content authority.
+  synchronous ingestion and provider-history content authority. The later
+  `provider-260731` replacement removed the intermediate batch and wake owners.
 - **2026-07-29** (spec_version 25) — Moved Discord's retained functional Channel Work
   Tracker into one bounded Embed without duplicating its body as ordinary message
   content.

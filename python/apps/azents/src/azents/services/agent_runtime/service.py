@@ -18,6 +18,7 @@ from azents.core.enums import (
     RuntimeSummary,
     WorkspaceUserRole,
 )
+from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -29,22 +30,20 @@ from azents.repos.agent_runtime.data import (
     AgentRuntimeFailureSummary,
     AgentRuntimeSummaryState,
 )
-from azents.services.runtime_execution_policy.application_service import (
-    RuntimeExecutionPolicyApplicationService,
-    RuntimeExecutionPolicyApplicationUnavailable,
-    RuntimeExecutionPolicyStatusProjection,
+from azents.repos.runtime_profile.repository import RuntimeProfileRepository
+from azents.services.runtime_profile_resolution.data import (
+    RuntimeProfileResolutionResult,
+    RuntimeProfileResolutionUnavailable,
 )
-from azents.services.runtime_provider_selection.data import (
-    RuntimeProviderSelectionUnavailable,
-)
-from azents.services.runtime_provider_selection.service import (
-    RuntimeProviderSelectionService,
+from azents.services.runtime_profile_resolution.service import (
+    RuntimeProfileResolutionService,
 )
 
 from .lifecycle_data import (
     AgentAccessDenied,
     AgentNotBelongToWorkspace,
     AgentNotFound,
+    AgentRuntimeConfigurationStatus,
     AgentRuntimeLifecycleOutput,
     AgentRuntimeOutput,
     InvalidResetFinalDesiredState,
@@ -68,13 +67,13 @@ class AgentRuntimeService:
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
-    runtime_provider_selection_service: Annotated[
-        RuntimeProviderSelectionService,
+    runtime_profile_resolution_service: Annotated[
+        RuntimeProfileResolutionService,
         Depends(),
     ]
-    execution_policy_application_service: Annotated[
-        RuntimeExecutionPolicyApplicationService,
-        Depends(),
+    runtime_profile_repository: Annotated[
+        RuntimeProfileRepository,
+        Depends(RuntimeProfileRepository),
     ]
 
     async def get(
@@ -102,8 +101,8 @@ class AgentRuntimeService:
             return Failure(access_error)
 
         try:
-            runtime = await self._ensure_runtime_for_agent(agent_id)
-        except RuntimeProviderSelectionUnavailable as error:
+            resolution = await self._ensure_runtime_for_agent(agent_id)
+        except RuntimeProfileResolutionUnavailable as error:
             return Failure(
                 RuntimeProviderUnavailable(
                     code=error.code,
@@ -111,21 +110,7 @@ class AgentRuntimeService:
                     message=error.message,
                 )
             )
-        try:
-            execution_policy = (
-                await self.execution_policy_application_service.get_status(
-                    agent_id=agent_id
-                )
-            )
-        except RuntimeExecutionPolicyApplicationUnavailable as error:
-            return Failure(
-                RuntimeProviderUnavailable(
-                    code=error.code,
-                    provider_id=None,
-                    message=error.code,
-                )
-            )
-        return Success(self._build_output(runtime, execution_policy=execution_policy))
+        return Success(self._build_output(resolution))
 
     async def start(
         self,
@@ -239,22 +224,38 @@ class AgentRuntimeService:
             return Failure(access_error)
 
         try:
-            runtime = await self._ensure_runtime_for_agent(agent_id)
+            resolution = await self._ensure_runtime_for_agent(agent_id)
+            runtime = resolution.runtime
+            blocked = self.configuration_blocking_error(resolution)
+            if blocked is not None:
+                return Failure(blocked)
             if (
                 runtime.provider_connection_state
                 == RuntimeProviderConnectionState.DISCONNECTED
             ):
                 return Failure(ProviderDisconnected(runtime_id=runtime.id))
-            application = self.execution_policy_application_service
-            command = await application.target_lifecycle_command(
-                agent_id=agent_id,
-                command_type=RuntimeLifecycleCommandType.RESET,
-                desired_state=final_desired_state,
-                reset_final_desired_state=final_desired_state,
-                terminal_delete_requested=False,
-            )
-            execution_policy = await application.get_status(agent_id=agent_id)
-        except RuntimeProviderSelectionUnavailable as error:
+            async with self.session_manager() as session:
+                command = await self.runtime_repository.set_desired_state_if_ready(
+                    session,
+                    runtime.id,
+                    RuntimeLifecycleCommandType.RESET,
+                    final_desired_state,
+                    expected_configuration_revision_id=(resolution.desired_revision.id),
+                    reset_final_desired_state=final_desired_state,
+                )
+            if command is None:
+                return Failure(
+                    RuntimeProviderUnavailable(
+                        code="runtime_configuration_changed",
+                        provider_id=runtime.runtime_provider_id,
+                        message=(
+                            "Runtime configuration changed before reset "
+                            "could be stored."
+                        ),
+                    )
+                )
+            resolution = await self._ensure_runtime_for_agent(agent_id)
+        except RuntimeProfileResolutionUnavailable as error:
             return Failure(
                 RuntimeProviderUnavailable(
                     code=error.code,
@@ -262,21 +263,13 @@ class AgentRuntimeService:
                     message=error.message,
                 )
             )
-        except RuntimeExecutionPolicyApplicationUnavailable as error:
-            return Failure(
-                RuntimeProviderUnavailable(
-                    code=error.code,
-                    provider_id=None,
-                    message=error.code,
-                )
-            )
         return Success(
             AgentRuntimeLifecycleOutput(
-                runtime=command.runtime,
-                state=self.calculate_state(command.runtime),
+                runtime=resolution.runtime,
+                state=self.calculate_state(resolution.runtime),
                 command_type=command.command_type,
                 desired_generation=command.desired_generation,
-                execution_policy=execution_policy,
+                configuration=self._configuration_status(resolution),
             )
         )
 
@@ -301,6 +294,49 @@ class AgentRuntimeService:
             workspace_user_id=workspace_user_id,
             role=role,
         )
+
+    async def ensure_started_for_agent(self, agent_id: str) -> AgentRuntime:
+        """Ensure an internal Runtime consumer has targeted the current Profile."""
+        resolution = await self._ensure_runtime_for_agent(agent_id)
+        runtime = resolution.runtime
+        if runtime.desired_state is RuntimeDesiredState.RUNNING:
+            return runtime
+        blocked = self.configuration_blocking_error(resolution)
+        if blocked is not None:
+            raise RuntimeProfileResolutionUnavailable(
+                code=blocked.code,
+                provider_id=blocked.provider_id,
+                message=blocked.message,
+            )
+        async with self.session_manager() as session:
+            command = await self.runtime_repository.set_desired_state_if_ready(
+                session,
+                runtime.id,
+                RuntimeLifecycleCommandType.START,
+                RuntimeDesiredState.RUNNING,
+                expected_configuration_revision_id=resolution.desired_revision.id,
+            )
+        if command is None:
+            raise RuntimeProfileResolutionUnavailable(
+                code="runtime_configuration_changed",
+                provider_id=runtime.runtime_provider_id,
+                message=("Runtime configuration changed before start could be stored."),
+            )
+        return (await self._ensure_runtime_for_agent(agent_id)).runtime
+
+    async def request_terminal_delete_for_agent(
+        self,
+        agent_id: str,
+    ) -> AgentRuntime | None:
+        """Request idempotent terminal deletion without requiring ready sources."""
+        async with self.session_manager() as session:
+            runtime = await self.runtime_repository.get_by_agent_id(session, agent_id)
+            if runtime is None:
+                return None
+            return await self.runtime_repository.request_terminal_delete(
+                session,
+                runtime.id,
+            )
 
     async def _set_lifecycle_command(
         self,
@@ -330,39 +366,83 @@ class AgentRuntimeService:
             return Failure(access_error)
 
         try:
-            await self._ensure_runtime_for_agent(agent_id)
-            application = self.execution_policy_application_service
-            command = await application.target_lifecycle_command(
-                agent_id=agent_id,
-                command_type=command_type,
-                desired_state=desired_state,
-                reset_final_desired_state=None,
-                terminal_delete_requested=False,
-            )
-            execution_policy = await application.get_status(agent_id=agent_id)
-        except RuntimeProviderSelectionUnavailable as error:
+            resolution = await self._ensure_runtime_for_agent(agent_id)
+        except RuntimeProfileResolutionUnavailable as error:
+            if command_type is not RuntimeLifecycleCommandType.STOP:
+                return Failure(
+                    RuntimeProviderUnavailable(
+                        code=error.code,
+                        provider_id=error.provider_id,
+                        message=error.message,
+                    )
+                )
+            existing = await self._get_existing_resolution(agent_id)
+            if existing is None:
+                return Failure(
+                    RuntimeProviderUnavailable(
+                        code=error.code,
+                        provider_id=error.provider_id,
+                        message=error.message,
+                    )
+                )
+            resolution = existing
+
+        if command_type is not RuntimeLifecycleCommandType.STOP:
+            blocked = self.configuration_blocking_error(resolution)
+            if blocked is not None:
+                return Failure(blocked)
+
+        async with self.session_manager() as session:
+            if command_type is RuntimeLifecycleCommandType.STOP:
+                command = await self.runtime_repository.set_desired_state(
+                    session,
+                    resolution.runtime.id,
+                    command_type,
+                    desired_state,
+                )
+            else:
+                command = await self.runtime_repository.set_desired_state_if_ready(
+                    session,
+                    resolution.runtime.id,
+                    command_type,
+                    desired_state,
+                    expected_configuration_revision_id=(resolution.desired_revision.id),
+                )
+        if command is None:
+            if command_type is RuntimeLifecycleCommandType.STOP:
+                return Failure(RuntimeNotFound(runtime_id=resolution.runtime.id))
             return Failure(
                 RuntimeProviderUnavailable(
-                    code=error.code,
-                    provider_id=error.provider_id,
-                    message=error.message,
+                    code="runtime_configuration_changed",
+                    provider_id=resolution.runtime.runtime_provider_id,
+                    message=(
+                        "Runtime configuration changed before the lifecycle "
+                        "command could be stored."
+                    ),
                 )
             )
-        except RuntimeExecutionPolicyApplicationUnavailable as error:
-            return Failure(
-                RuntimeProviderUnavailable(
-                    code=error.code,
-                    provider_id=None,
-                    message=error.code,
+        try:
+            resolution = await self._ensure_runtime_for_agent(agent_id)
+        except RuntimeProfileResolutionUnavailable as error:
+            if command_type is not RuntimeLifecycleCommandType.STOP:
+                return Failure(
+                    RuntimeProviderUnavailable(
+                        code=error.code,
+                        provider_id=error.provider_id,
+                        message=error.message,
+                    )
                 )
-            )
+            existing = await self._get_existing_resolution(agent_id)
+            if existing is None:
+                return Failure(RuntimeNotFound(runtime_id=command.runtime.id))
+            resolution = existing
         return Success(
             AgentRuntimeLifecycleOutput(
-                runtime=command.runtime,
-                state=self.calculate_state(command.runtime),
+                runtime=resolution.runtime,
+                state=self.calculate_state(resolution.runtime),
                 command_type=command.command_type,
                 desired_generation=command.desired_generation,
-                execution_policy=execution_policy,
+                configuration=self._configuration_status(resolution),
             )
         )
 
@@ -390,24 +470,91 @@ class AgentRuntimeService:
                 return AgentAccessDenied(agent_id=agent_id)
         return None
 
-    async def _ensure_runtime_for_agent(self, agent_id: str) -> AgentRuntime:
-        """Ensure Agent Runtime through exact Provider selection."""
-        result = await self.runtime_provider_selection_service.ensure_for_agent(
-            agent_id
+    async def _ensure_runtime_for_agent(
+        self, agent_id: str
+    ) -> RuntimeProfileResolutionResult:
+        """Ensure Agent Runtime through exact Workspace Runtime Profile selection."""
+        return await self.runtime_profile_resolution_service.ensure_for_agent(agent_id)
+
+    async def _get_existing_resolution(
+        self,
+        agent_id: str,
+    ) -> RuntimeProfileResolutionResult | None:
+        """Load retained configuration evidence without resolving new sources."""
+        async with self.session_manager() as session:
+            runtime = await self.runtime_repository.get_by_agent_id(session, agent_id)
+            if (
+                runtime is None
+                or runtime.desired_runtime_configuration_revision_id is None
+            ):
+                return None
+            desired = await self.runtime_profile_repository.get_configuration_revision(
+                session,
+                revision_id=runtime.desired_runtime_configuration_revision_id,
+            )
+            if desired is None:
+                return None
+            applied = None
+            if runtime.applied_runtime_configuration_revision_id is not None:
+                applied = (
+                    await self.runtime_profile_repository.get_configuration_revision(
+                        session,
+                        revision_id=(runtime.applied_runtime_configuration_revision_id),
+                    )
+                )
+        return RuntimeProfileResolutionResult(
+            runtime=runtime,
+            desired_revision=desired,
+            applied_revision=applied,
+            runtime_created=False,
         )
-        return result.runtime
 
     def _build_output(
         self,
-        runtime: AgentRuntime,
-        *,
-        execution_policy: RuntimeExecutionPolicyStatusProjection,
+        resolution: RuntimeProfileResolutionResult,
     ) -> AgentRuntimeOutput:
-        """Combine Runtime raw state and summary."""
+        """Combine Runtime raw state and configuration summary."""
         return AgentRuntimeOutput(
-            runtime=runtime,
-            state=self.calculate_state(runtime),
-            execution_policy=execution_policy,
+            runtime=resolution.runtime,
+            state=self.calculate_state(resolution.runtime),
+            configuration=self._configuration_status(resolution),
+        )
+
+    def _configuration_status(
+        self,
+        resolution: RuntimeProfileResolutionResult,
+    ) -> AgentRuntimeConfigurationStatus:
+        desired = resolution.desired_revision
+        applied = resolution.applied_revision
+        if desired.resolution_status.value == "blocked":
+            status = "configuration_blocked"
+        elif applied is None:
+            status = "configured_not_created"
+        elif applied.id != desired.id:
+            status = "waiting_for_recreation"
+        else:
+            status = "applied"
+        return AgentRuntimeConfigurationStatus(
+            status=status,
+            desired=desired,
+            applied=applied,
+        )
+
+    @staticmethod
+    def configuration_blocking_error(
+        resolution: RuntimeProfileResolutionResult,
+    ) -> RuntimeProviderUnavailable | None:
+        """Reject creation commands when current exact sources are blocked."""
+        desired = resolution.desired_revision
+        if (
+            desired.resolution_status
+            is not RuntimeConfigurationResolutionStatus.BLOCKED
+        ):
+            return None
+        return RuntimeProviderUnavailable(
+            code=desired.reason_code or "runtime_configuration_blocked",
+            provider_id=resolution.runtime.runtime_provider_id,
+            message="The selected Runtime Profile cannot create a Runtime.",
         )
 
     def calculate_state(self, runtime: AgentRuntime) -> AgentRuntimeSummaryState:

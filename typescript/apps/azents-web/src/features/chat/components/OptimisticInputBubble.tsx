@@ -1,36 +1,27 @@
 "use client";
 
-/** before server ack user input displaying optimistic bubble. */
-
-import { InputBufferBubbleFrame } from "./InputBufferBubbleFrame";
-import { MessageActionRow } from "./MessageActionRow";
-import { MessageMetadataSurface } from "./MessageMetadataFooter";
+import { pendingInputBufferMessage } from "../pendingMessageProjection";
+import { MessageBubble } from "./MessageBubble";
+import type { CurrentWorkspaceProfile } from "../senderPresentation";
 import type { PendingInputBuffer } from "../types";
 
 interface OptimisticInputBubbleProps {
   buffer: PendingInputBuffer;
+  currentWorkspaceProfile?: CurrentWorkspaceProfile | null;
 }
 
 export function OptimisticInputBubble({
   buffer,
+  currentWorkspaceProfile = null,
 }: OptimisticInputBubbleProps): React.ReactElement {
   return (
-    <MessageMetadataSurface>
-      <InputBufferBubbleFrame
-        content={buffer.content}
-        action={buffer.action}
-        attachments={buffer.attachments}
-        attachmentFiles={buffer.attachmentFiles}
-        opacity={0.6}
-        actions={
-          <MessageActionRow
-            content={buffer.content}
-            createdAt={buffer.createdAt}
-            align="user"
-            inferenceProfile={buffer.requestedInferenceProfile}
-          />
-        }
-      />
-    </MessageMetadataSurface>
+    <MessageBubble
+      message={pendingInputBufferMessage(
+        buffer,
+        currentWorkspaceProfile?.userId ?? null,
+      )}
+      currentWorkspaceProfile={currentWorkspaceProfile}
+      opacity={0.6}
+    />
   );
 }

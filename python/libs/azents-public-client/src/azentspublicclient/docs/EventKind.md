@@ -8,6 +8,8 @@ Event transcript event kind.
 
 * `GOAL_CONTINUATION` (value: `'goal_continuation'`)
 
+* `EXTERNAL_CHANNEL_CONTINUATION` (value: `'external_channel_continuation'`)
+
 * `GOAL_UPDATED` (value: `'goal_updated'`)
 
 * `ACTION_MESSAGE` (value: `'action_message'`)

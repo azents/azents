@@ -24,6 +24,7 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
 from azentspublicclient.models.secrets import Secrets
 from testcontainers.core.container import DockerContainer
 
+from support.runtime_profiles import create_workspace_runtime_profile
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
@@ -420,6 +421,12 @@ def _exercise_agents_md_loader(
         workspace_handle,
         integration.id,
     )
+    runtime_profile_id = create_workspace_runtime_profile(
+        public_api_client,
+        token=access_token,
+        workspace_handle=workspace_handle,
+        provider_id=_RUNTIME_PROVIDER_ID,
+    )
 
     agent_api = AgentV1Api(public_api_client)
     agent = agent_api.agent_v1_create_agent(
@@ -429,7 +436,7 @@ def _exercise_agents_md_loader(
             model_selection=model_selection,
             lightweight_model_selection=model_selection,
             type=AgentType.PUBLIC,
-            runtime_provider_id=_RUNTIME_PROVIDER_ID,
+            runtime_profile_id=runtime_profile_id,
             shell_enabled=True,
         ),
         _headers={"Authorization": f"Bearer {access_token}"},

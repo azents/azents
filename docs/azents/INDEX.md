@@ -15,32 +15,32 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-27 | 58 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-07-29 | 134 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-31 | 29 |
-| [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-28 | 13 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-01 | 61 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-01 | 137 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-01 | 38 |
+| [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-01 | 18 |
-| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-07-28 | 13 |
+| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-07-31 | 14 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-28 | 77 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-01 | 53 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-01 | 54 |
 
 ## Living Specs — Flow
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-07-30 | 137 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-30 | 43 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-28 | 12 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-01 | 140 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-31 | 45 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-31 | 13 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
-| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-30 | 12 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-30 | 23 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-31 | 20 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-31 | 19 |
+| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-01 | 18 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-01 | 28 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-01 | 27 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-01 | 27 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-30 | 36 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
@@ -48,7 +48,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-26 | 11 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-24 | 25 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-31 | 14 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-01 | 17 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-01 | 3 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-08-01 | 6 |
 
@@ -62,6 +62,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Provider Tool Live Activity Historical Requirements Reconstruction](requirements/activity-260716-live-activity.md) | activity-260716 | 2026-07-16 | 2026-07-16 |
 | [Slack Activity Tracker Lifecycle Requirements](requirements/activity-260723-slack-tracker-lifecycle.md) | activity-260723 | 2026-07-23 | - |
 | [Generalize Admin-Managed System Configuration Historical Requirements Reconstruction](requirements/admin-260718-admin-configuration.md) | admin-260718 | 2026-07-18 | - |
+| [External Channel Session Activation Requirements](requirements/admission-260731-external-channel-session-activation.md) | admission-260731 | 2026-07-31 | - |
 | [Agent Default Projects for Automatic Sessions Requirements](requirements/agent-260724-automatic-session-default-projects.md) | agent-260724 | 2026-07-24 | 2026-07-24 |
 | [Release and Snapshot Artifact Policy Historical Requirements Reconstruction](requirements/and-260623-and-snapshot-artifact-policy.md) | and-260623 | 2026-06-23 | - |
 | [AgentSession Archive Policy Historical Requirements Reconstruction](requirements/archive-260626-archive-policy.md) | archive-260626 | 2026-06-26 | - |
@@ -77,6 +78,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Backend Project Browser Manifest Historical Requirements Reconstruction](requirements/backend-260703-backend-browser-manifest.md) | backend-260703 | 2026-07-03 | - |
 | [Background Tool Call Design Discussion Historical Requirements Reconstruction](requirements/background-260416-background-call.md) | background-260416 | 2026-04-16 | - |
 | [Remove Deprecated Background Completion Input Historical Requirements Reconstruction](requirements/background-260712-background-completion-input.md) | background-260712 | 2026-07-12 | - |
+| [External Channel Binding and Admission Ordering Requirements](requirements/binding-260731-admission-ordering.md) | binding-260731 | 2026-07-31 | 2026-07-31 |
 | [Per-Prompt Reasoning Effort Is a Run Boundary Historical Requirements Reconstruction](requirements/boundaries-260710-prompt-reasoning-effort-boundaries.md) | boundaries-260710 | 2026-07-10 | - |
 | [Sandbox Runtime / Workspace State Boundary Historical Requirements Reconstruction](requirements/boundary-260524-sandbox-boundary.md) | boundary-260524 | 2026-05-24 | - |
 | [Add Session Sandbox Workspace Browser API Historical Requirements Reconstruction](requirements/browser-260501-browser-api.md) | browser-260501 | 2026-05-01 | 2026-05-02 |
@@ -88,6 +90,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Model Catalog Projection and Sync Historical Requirements Reconstruction](requirements/catalog-260620-catalog-projection-sync.md) | catalog-260620 | 2026-06-20 | - |
 | [Responsive Context-Preserving External Conversations Requirements](requirements/channel-260729-responsive-context-preserving-conversations.md) | channel-260729 | 2026-07-29 | 2026-07-30 |
 | [Reliable External Channel Provider Connections Requirements](requirements/channel-260731-reliable-provider-connections.md) | channel-260731 | 2026-07-31 | 2026-07-31 |
+| [External Channel Binding Response Modes Requirements](requirements/channel-260801-binding-response-modes.md) | channel-260801 | 2026-08-01 | 2026-08-01 |
 | [Split Chat Input Buffer into Separate RDB Table Historical Requirements Reconstruction](requirements/chat-260519-chat-input-buffer.md) | chat-260519 | 2026-05-19 | - |
 | [Chat Protocol Uses Canonical Event History/Live API Historical Requirements Reconstruction](requirements/chat-260604-chat-protocol-history-live.md) | chat-260604 | 2026-06-04 | 2026-06-04 |
 | [Chat Session Resync Converges to History/Live State After Subscribe Ack Historical Requirements Reconstruction](requirements/chat-260609-chat-resync-scroll.md) | chat-260609 | 2026-06-09 | - |
@@ -172,6 +175,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent Runtime and Session Foundation Historical Requirements Reconstruction](requirements/foundation-260504-foundation.md) | foundation-260504 | 2026-05-04 | 2026-05-04 |
 | [Split FunctionCallItem.output into a Separate FunctionCallOutputItem Historical Requirements Reconstruction](requirements/function-260429-function-call-output-item.md) | function-260429 | 2026-04-29 | 2026-04-29 |
 | [GA4 stdio MCP -> Native Toolkit Migration Historical Requirements Reconstruction](requirements/ga4-260401-ga4-toolkit.md) | ga4-260401 | 2026-04-01 | 2026-04-01 |
+| [Consistent Persistent Provider Ingress Requirements](requirements/gateway-260731-consistent-provider-ingress.md) | gateway-260731 | 2026-07-31 | - |
 | [GCP Toolkit — Google Hosted Remote MCP Historical Requirements Reconstruction](requirements/gcp-260326-gcp-observability-toolkit.md) | gcp-260326 | 2026-03-26 | 2026-03-26 |
 | [Materialize Provider-Generated Images as File Resources Historical Requirements Reconstruction](requirements/generated-260717-generated-images-as-file-resources.md) | generated-260717 | 2026-07-17 | - |
 | [Use Generic Native Adapter Request Types Historical Requirements Reconstruction](requirements/generic-260716-generic-adapter-request-types.md) | generic-260716 | 2026-07-16 | - |
@@ -200,6 +204,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Store Requested Inference Profiles as Typed Durable Data Historical Requirements Reconstruction](requirements/inference-260710-inference-profile.md) | inference-260710 | 2026-07-10 | - |
 | [Keep Resolved Inference Provenance Run-Owned Historical Requirements Reconstruction](requirements/inference-260711-inference-provenance.md) | inference-260711 | 2026-07-11 | - |
 | [Use Session Current Inference State Per Turn Historical Requirements Reconstruction](requirements/inference-260712-inference-turn.md) | inference-260712 | 2026-07-12 | - |
+| [Reliable External Channel Execution Requirements](requirements/ingress-260801-reliable-external-channel-execution.md) | ingress-260801 | 2026-08-01 | 2026-08-01 |
 | [Session Initialization Lifecycle Historical Requirements Reconstruction](requirements/initialization-260703-initialization-lifecycle.md) | initialization-260703 | 2026-07-03 | - |
 | [Project Compact Inference Summaries with User Messages Historical Requirements Reconstruction](requirements/inline-260710-inline-message-inference-summary.md) | inline-260710 | 2026-07-10 | - |
 | [User Input Boundary FilePart Materialization Historical Requirements Reconstruction](requirements/input-260604-input-bound-filepart-materialization.md) | input-260604 | 2026-06-04 | - |
@@ -286,6 +291,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Per-Prompt Inference Profile Historical Requirements Reconstruction](requirements/promptinferenceprofile-260710-prompt-inference-profile.md) | promptinferenceprofile-260710 | 2026-07-10 | 2026-07-10 |
 | [Persist Requested and Resolved AgentRun Provenance Historical Requirements Reconstruction](requirements/provenance-260710-inference-provenance.md) | provenance-260710 | 2026-07-10 | - |
 | [Platform Runtime Provider Management Requirements](requirements/provider-260722-platform-runtime-provider-management.md) | provider-260722 | 2026-07-22 | - |
+| [Direct Provider Conversation Continuity Requirements](requirements/provider-260731-direct-conversation-continuity.md) | provider-260731 | 2026-07-31 | 2026-07-31 |
 | [Use an Explicit Nested Inference Profile Request Historical Requirements Reconstruction](requirements/public-260710-public-inference-profile-request-contract.md) | public-260710 | 2026-07-10 | - |
 | [Pyright Configuration Review Historical Requirements Reconstruction](requirements/pyright-260310-pyright-config.md) | pyright-260310 | 2026-03-10 | 2026-03-10 |
 | [Runtime File Read Data Plane Requirements](requirements/read-260730-runtime-file-read-data-plane.md) | read-260730 | 2026-07-30 | 2026-07-30 |
@@ -302,6 +308,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Session-Scoped Runner Operation Concurrency Historical Requirements Reconstruction](requirements/runner-260710-runner-operation-concurrency.md) | runner-260710 | 2026-07-10 | - |
 | [Hierarchical Runtime Execution Profiles Requirements](requirements/runtime-260726-hierarchical-execution-profiles.md) | runtime-260726 | 2026-07-26 | - |
 | [Profile-Only Runtime Execution Policy Requirements](requirements/runtime-260727-profile-only-execution-policy.md) | runtime-260727 | 2026-07-27 | 2026-07-27 |
+| [Workspace-Owned Runtime Profiles Requirements](requirements/runtime-260730-workspace-owned-runtime-profiles.md) | runtime-260730 | 2026-07-30 | 2026-07-31 |
 | [Bound Runtime Control Connections Requirements](requirements/runtimeauth-260723-bound-runtime-control-connections.md) | runtimeauth-260723 | 2026-07-23 | - |
 | [Agent Sandbox Historical Requirements Reconstruction](requirements/sandbox-260225-sandbox.md) | sandbox-260225 | 2026-02-25 | 2026-03-23 |
 | [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Requirements Reconstruction](requirements/sandbox-260403-sandbox-daemon-sidecar.md) | sandbox-260403 | 2026-04-03 | 2026-04-03 |
@@ -411,6 +418,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Provider Tool Live Activity Historical Decision Reconstruction](adr/activity-260716-live-activity.md)
 - [Slack Activity Tracker Lifecycle](adr/activity-260723-slack-tracker-lifecycle.md)
 - [Generalize Admin-Managed System Configuration](adr/admin-260718-admin-configuration.md)
+- [External Channel Session Activation](adr/admission-260731-external-channel-session-activation.md)
 - [Agent Default Projects for Automatic Sessions](adr/agent-260724-automatic-session-default-projects.md)
 - [Release and Snapshot Artifact Policy](adr/and-260623-and-snapshot-artifact-policy.md)
 - [AgentSession Archive Policy](adr/archive-260626-archive-policy.md)
@@ -426,6 +434,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Backend Project Browser Manifest](adr/backend-260703-backend-browser-manifest.md)
 - [Background Tool Call Design Discussion](adr/background-260416-background-call.md)
 - [Remove Deprecated Background Completion Input](adr/background-260712-background-completion-input.md)
+- [External Channel Binding and Admission Ordering](adr/binding-260731-admission-ordering.md)
 - [Per-Prompt Reasoning Effort Is a Run Boundary](adr/boundaries-260710-prompt-reasoning-effort-boundaries.md)
 - [Sandbox Runtime / Workspace State Boundary Historical Decision Reconstruction](adr/boundary-260524-sandbox-boundary.md)
 - [Add Session Sandbox Workspace Browser API](adr/browser-260501-browser-api.md)
@@ -437,6 +446,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Model Catalog Projection and Sync](adr/catalog-260620-catalog-projection-sync.md)
 - [Responsive Context-Preserving External Conversations](adr/channel-260729-responsive-context-preserving-conversations.md)
 - [Reliable External Channel Provider Connections](adr/channel-260731-reliable-provider-connections.md)
+- [External Channel Binding Response Modes](adr/channel-260801-binding-response-modes.md)
 - [Split Chat Input Buffer into Separate RDB Table](adr/chat-260519-chat-input-buffer.md)
 - [Chat Protocol Uses Canonical Event History/Live API](adr/chat-260604-chat-protocol-history-live.md)
 - [Chat Session Resync Converges to History/Live State After Subscribe Ack](adr/chat-260609-chat-resync-scroll.md)
@@ -521,6 +531,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Agent Runtime and Session Foundation Historical Decision Reconstruction](adr/foundation-260504-foundation.md)
 - [Split FunctionCallItem.output into a Separate FunctionCallOutputItem](adr/function-260429-function-call-output-item.md)
 - [GA4 stdio MCP -> Native Toolkit Migration Historical Decision Reconstruction](adr/ga4-260401-ga4-toolkit.md)
+- [Consistent Persistent Provider Ingress](adr/gateway-260731-consistent-provider-ingress.md)
 - [GCP Toolkit — Google Hosted Remote MCP Historical Decision Reconstruction](adr/gcp-260326-gcp-observability-toolkit.md)
 - [Materialize Provider-Generated Images as File Resources](adr/generated-260717-generated-images-as-file-resources.md)
 - [Use Generic Native Adapter Request Types](adr/generic-260716-generic-adapter-request-types.md)
@@ -549,6 +560,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Store Requested Inference Profiles as Typed Durable Data](adr/inference-260710-inference-profile.md)
 - [Keep Resolved Inference Provenance Run-Owned](adr/inference-260711-inference-provenance.md)
 - [Use Session Current Inference State Per Turn](adr/inference-260712-inference-turn.md)
+- [Reliable External Channel Execution](adr/ingress-260801-reliable-external-channel-execution.md)
 - [Session Initialization Lifecycle](adr/initialization-260703-initialization-lifecycle.md)
 - [Project Compact Inference Summaries with User Messages](adr/inline-260710-inline-message-inference-summary.md)
 - [User Input Boundary FilePart Materialization](adr/input-260604-input-bound-filepart-materialization.md)
@@ -635,6 +647,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Per-Prompt Inference Profile Historical Decision Reconstruction](adr/promptinferenceprofile-260710-prompt-inference-profile.md)
 - [Persist Requested and Resolved AgentRun Provenance](adr/provenance-260710-inference-provenance.md)
 - [Platform Runtime Provider Management](adr/provider-260722-platform-runtime-provider-management.md)
+- [Direct Provider Conversation Continuity](adr/provider-260731-direct-conversation-continuity.md)
 - [Use an Explicit Nested Inference Profile Request](adr/public-260710-public-inference-profile-request-contract.md)
 - [Pyright Configuration Review Historical Decision Reconstruction](adr/pyright-260310-pyright-config.md)
 - [Runtime File Read Data Plane](adr/read-260730-runtime-file-read-data-plane.md)
@@ -651,6 +664,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Session-Scoped Runner Operation Concurrency](adr/runner-260710-runner-operation-concurrency.md)
 - [Hierarchical Runtime Execution Profiles](adr/runtime-260726-hierarchical-execution-profiles.md)
 - [Profile-Only Runtime Execution Policy](adr/runtime-260727-profile-only-execution-policy.md)
+- [Workspace-Owned Runtime Profiles](adr/runtime-260730-workspace-owned-runtime-profiles.md)
 - [Bound Runtime Control Connections](adr/runtimeauth-260723-bound-runtime-control-connections.md)
 - [Agent Sandbox Historical Decision Reconstruction](adr/sandbox-260225-sandbox.md)
 - [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Decision Reconstruction](adr/sandbox-260403-sandbox-daemon-sidecar.md)

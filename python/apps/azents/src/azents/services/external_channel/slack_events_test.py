@@ -190,6 +190,118 @@ def test_normalizes_human_app_mention_as_authorized_invocation_candidate() -> No
     }
 
 
+@pytest.mark.parametrize(
+    ("authorizations", "connected_bot_user_id"),
+    [
+        (
+            [{"is_bot": True, "team_id": "T1", "user_id": "UAUTH"}],
+            "BOLD",
+        ),
+        ([], "UAUTH"),
+    ],
+)
+def test_projected_human_message_targeting_authorized_bot_is_invocation(
+    authorizations: list[dict[str, object]],
+    connected_bot_user_id: str,
+) -> None:
+    """A signed message callback may carry the App mention as a message event."""
+    normalized = normalize_projected_slack_event(
+        event_type="message",
+        tenant_id="T1",
+        connected_bot_user_id=connected_bot_user_id,
+        envelope={
+            "authorizations": authorizations,
+            "event": {
+                "type": "message",
+                "channel": "C1",
+                "channel_type": "channel",
+                "user": "U1",
+                "ts": "1721600000.000200",
+                "text": "<@UAUTH> investigate",
+            },
+        },
+    )
+
+    assert isinstance(normalized, SlackNormalizedMessage)
+    assert normalized.author_type is ExternalChannelPrincipalAuthorType.HUMAN
+    assert normalized.invocation is True
+
+
+@pytest.mark.parametrize(
+    ("text", "authorizations", "connected_bot_user_id"),
+    [
+        (
+            "<@UOTHER> investigate",
+            [{"is_bot": True, "team_id": "T1", "user_id": "UAUTH"}],
+            "BOLD",
+        ),
+        ("no mention", [], "UAUTH"),
+        (
+            "<@UAUTH> investigate",
+            [{"is_bot": True, "team_id": "T2", "user_id": "UAUTH"}],
+            "BOLD",
+        ),
+    ],
+)
+def test_projected_human_message_without_connected_bot_target_is_context(
+    text: str,
+    authorizations: list[dict[str, object]],
+    connected_bot_user_id: str,
+) -> None:
+    """Only the connected bot identity may promote a message callback."""
+    normalized = normalize_projected_slack_event(
+        event_type="message",
+        tenant_id="T1",
+        connected_bot_user_id=connected_bot_user_id,
+        envelope={
+            "authorizations": authorizations,
+            "event": {
+                "type": "message",
+                "channel": "C1",
+                "channel_type": "channel",
+                "user": "U1",
+                "ts": "1721600000.000200",
+                "text": text,
+            },
+        },
+    )
+
+    assert isinstance(normalized, SlackNormalizedMessage)
+    assert normalized.invocation is False
+
+
+def test_projected_bot_message_cannot_invoke_through_self_mention() -> None:
+    """Connected-App output remains context even when it mentions the App."""
+    normalized = normalize_projected_slack_event(
+        event_type="message",
+        tenant_id="T1",
+        connected_bot_user_id="UAUTH",
+        envelope={
+            "authorizations": [
+                {
+                    "is_bot": True,
+                    "team_id": "T1",
+                    "user_id": "UAUTH",
+                }
+            ],
+            "event": {
+                "type": "message",
+                "subtype": "bot_message",
+                "channel": "C1",
+                "channel_type": "channel",
+                "user": "UAUTH",
+                "bot_id": "B1",
+                "ts": "1721600000.000200",
+                "text": "<@UAUTH> generated output",
+            },
+        },
+    )
+
+    assert isinstance(normalized, SlackNormalizedMessage)
+    assert normalized.author_type is ExternalChannelPrincipalAuthorType.BOT
+    assert normalized.invocation is False
+
+
 def test_normalizes_bounded_file_metadata_and_fail_closed_modes() -> None:
     """Retain decision metadata while classifying unsupported Slack file modes."""
     files: list[object] = [
@@ -537,6 +649,7 @@ def test_raw_provider_normalization_ignores_spoofed_normalized_text() -> None:
     projected = normalize_projected_slack_event(
         event_type="message",
         tenant_id="T1",
+        connected_bot_user_id=None,
         envelope=_envelope(
             {
                 "type": "message",

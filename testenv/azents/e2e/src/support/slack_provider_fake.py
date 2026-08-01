@@ -758,6 +758,12 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             "outcome": "delivered",
             "approval_request_id": approval_request_id,
         }
+        session_path = _session_path(body)
+        if session_path is not None:
+            delivery["session_path"] = session_path
+        presence_state = _session_presence_state(body)
+        if presence_state is not None:
+            delivery["safe_category"] = f"session_presence_{presence_state}"
         if action_ids:
             delivery["action_ids"] = action_ids
         if selector_admission_id is not None:
@@ -890,11 +896,12 @@ class SlackWebSocketHandler(socketserver.BaseRequestHandler):
     """Serve a minimal deterministic Socket Mode WebSocket."""
 
     state: ClassVar[FakeState] = STATE
+    socket_timeout_seconds: ClassVar[float] = 10
 
     def handle(self) -> None:
         """Perform the handshake, send configured envelopes, and capture ACKs."""
         request = cast(socket.socket, self.request)
-        request.settimeout(10)
+        request.settimeout(self.socket_timeout_seconds)
         headers = _read_http_headers(request)
         key = headers.get("sec-websocket-key")
         if key is None:
@@ -930,19 +937,11 @@ class SlackWebSocketHandler(socketserver.BaseRequestHandler):
                 request,
                 json.dumps(envelope, separators=(",", ":")),
             )
-            acknowledgement = _receive_websocket_text(request)
-            try:
-                payload: object = json.loads(acknowledgement)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(payload, dict):
-                acknowledged_id = cast(
-                    dict[str, object],
-                    payload,
-                ).get("envelope_id")
-                if isinstance(acknowledged_id, str):
-                    with self.state.lock:
-                        self.state.socket_acknowledgements.append(acknowledged_id)
+            acknowledged_id = _receive_websocket_acknowledgement(request)
+            if acknowledged_id is None:
+                return
+            with self.state.lock:
+                self.state.socket_acknowledgements.append(acknowledged_id)
         if disconnect_reason is not None:
             _send_websocket_text(
                 request,
@@ -1148,6 +1147,40 @@ def _body_metadata(body: dict[str, object]) -> dict[str, object]:
     return metadata
 
 
+def _session_path(body: dict[str, object]) -> str | None:
+    """Extract only the relative Azents Session route from one control payload."""
+    for block in _object_list_or_empty(body.get("blocks")):
+        for element in _object_list_or_empty(block.get("elements")):
+            if element.get("action_id") != "view_azents_session":
+                continue
+            url = element.get("url")
+            if not isinstance(url, str):
+                return None
+            parsed = urlparse(url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                return None
+            return parsed.path if parsed.path.startswith("/w/") else None
+    return None
+
+
+def _session_presence_state(body: dict[str, object]) -> str | None:
+    """Classify Session presence without retaining Agent-authored display text."""
+    if _session_path(body) is None:
+        return None
+    for block in _object_list_or_empty(body.get("blocks")):
+        text = block.get("text")
+        if not isinstance(text, dict):
+            continue
+        rendered = cast(dict[str, object], text).get("text")
+        if not isinstance(rendered, str):
+            continue
+        if rendered.endswith(" joined this conversation."):
+            return "joined"
+        if rendered.endswith(" left this conversation."):
+            return "left"
+    return None
+
+
 def _selector_route_ids(view: dict[str, object]) -> list[str]:
     """Extract only bounded selector option identities from one modal payload."""
     route_ids: list[str] = []
@@ -1226,6 +1259,31 @@ def _receive_websocket_text(connection: socket.socket) -> str:
         if opcode == 0x1:
             return payload.decode()
         raise ConnectionError("Unsupported WebSocket frame.")
+
+
+def _receive_websocket_acknowledgement(connection: socket.socket) -> str | None:
+    """Wait for one ACK while the client connection remains open."""
+    previous_timeout = connection.gettimeout()
+    connection.settimeout(None)
+    try:
+        while True:
+            try:
+                acknowledgement = _receive_websocket_text(connection)
+            except OSError:
+                return None
+            if not acknowledgement:
+                return None
+            try:
+                payload: object = json.loads(acknowledgement)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            acknowledged_id = cast(dict[str, object], payload).get("envelope_id")
+            if isinstance(acknowledged_id, str):
+                return acknowledged_id
+    finally:
+        connection.settimeout(previous_timeout)
 
 
 def _receive_exact(connection: socket.socket, size: int) -> bytes:

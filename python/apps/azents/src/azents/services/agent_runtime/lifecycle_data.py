@@ -1,6 +1,7 @@
 """Agent Runtime lifecycle service data models."""
 
 import dataclasses
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -14,9 +15,21 @@ from azents.repos.agent_runtime.data import (
     AgentRuntimeFailureSummary,
     AgentRuntimeSummaryState,
 )
-from azents.services.runtime_execution_policy.application_service import (
-    RuntimeExecutionPolicyStatusProjection,
-)
+from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
+
+
+class AgentRuntimeConfigurationStatus(BaseModel):
+    """Server-authoritative desired and applied Runtime configuration."""
+
+    status: Literal[
+        "profile_required",
+        "configuration_blocked",
+        "configured_not_created",
+        "waiting_for_recreation",
+        "applied",
+    ]
+    desired: RuntimeConfigurationRevision | None
+    applied: RuntimeConfigurationRevision | None
 
 
 class AgentRuntimeOutput(BaseModel):
@@ -24,8 +37,8 @@ class AgentRuntimeOutput(BaseModel):
 
     runtime: AgentRuntime = Field(description="Raw runtime state")
     state: AgentRuntimeSummaryState = Field(description="Server-computed state")
-    execution_policy: RuntimeExecutionPolicyStatusProjection = Field(
-        description="Server-computed execution-policy status"
+    configuration: AgentRuntimeConfigurationStatus = Field(
+        description="Server-computed Runtime configuration status"
     )
 
 
@@ -36,8 +49,8 @@ class AgentRuntimeLifecycleOutput(BaseModel):
     state: AgentRuntimeSummaryState = Field(description="Server-computed state")
     command_type: RuntimeLifecycleCommandType = Field(description="Command type")
     desired_generation: int = Field(description="Desired generation")
-    execution_policy: RuntimeExecutionPolicyStatusProjection = Field(
-        description="Server-computed execution-policy status"
+    configuration: AgentRuntimeConfigurationStatus = Field(
+        description="Server-computed Runtime configuration status"
     )
 
 
@@ -97,6 +110,7 @@ __all__ = [
     "AgentNotBelongToWorkspace",
     "AgentNotFound",
     "AgentRuntimeActions",
+    "AgentRuntimeConfigurationStatus",
     "AgentRuntimeFailureSummary",
     "AgentRuntimeLifecycleOutput",
     "AgentRuntimeOutput",

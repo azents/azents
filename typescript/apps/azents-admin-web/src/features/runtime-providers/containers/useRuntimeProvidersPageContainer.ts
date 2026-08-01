@@ -56,12 +56,10 @@ export interface RuntimeProvidersPageContentProps {
   authMutating: boolean;
   oneTimeSecret: RuntimeProviderAuthenticationBindingRotateResponse | null;
   updating: boolean;
-  acceptingContract: boolean;
   errorMessage: string | null;
   onSelectProvider: (providerId: string) => void;
   onDetailClose: () => void;
   onToggleEnabled: (provider: RuntimeProviderItem) => void;
-  onAcceptContract: (contract: RuntimeProviderContractItem) => void;
   onCreateAuthBinding: () => void;
   onRotateAuthBinding: (binding: RuntimeProviderAuthBindingItem) => void;
   onRevokeAuthBinding: (binding: RuntimeProviderAuthBindingItem) => void;
@@ -106,16 +104,6 @@ export function useRuntimeProvidersPageContainer(): RuntimeProvidersPageContentP
     { providerId: effectiveSelectedProviderId ?? "" },
     { enabled: effectiveSelectedProviderId !== null },
   );
-  const acceptContract = trpc.runtimeProvider.acceptContract.useMutation({
-    onSuccess: async () => {
-      await utils.runtimeProvider.list.invalidate();
-      if (effectiveSelectedProviderId !== null) {
-        await utils.runtimeProvider.listContracts.invalidate({
-          providerId: effectiveSelectedProviderId,
-        });
-      }
-    },
-  });
   const [oneTimeSecret, setOneTimeSecret] =
     useState<RuntimeProviderAuthenticationBindingRotateResponse | null>(null);
   const [auditBinding, setAuditBinding] =
@@ -215,22 +203,6 @@ export function useRuntimeProvidersPageContainer(): RuntimeProvidersPageContentP
       subject: `provider:${effectiveSelectedProviderId}:admin`,
     });
   }, [createAuthBinding, effectiveSelectedProviderId]);
-  const handleAcceptContract = useCallback(
-    (contract: RuntimeProviderContractItem): void => {
-      if (selectedProvider === null) {
-        return;
-      }
-      if (!window.confirm("Accept this Provider capability contract?")) {
-        return;
-      }
-      acceptContract.mutate({
-        providerId: selectedProvider.provider_id,
-        revisionId: contract.id,
-        expectedAdminVersion: selectedProvider.admin_version,
-      });
-    },
-    [acceptContract, selectedProvider],
-  );
   const handleRotateAuthBinding = useCallback(
     (binding: RuntimeProviderAuthBindingItem): void => {
       const rotate = async (): Promise<void> => {
@@ -295,10 +267,8 @@ export function useRuntimeProvidersPageContainer(): RuntimeProvidersPageContentP
       revokeAuthBinding.isPending,
     oneTimeSecret,
     updating: updatePolicy.isPending,
-    acceptingContract: acceptContract.isPending,
     errorMessage:
       updatePolicy.error?.message ??
-      acceptContract.error?.message ??
       createAuthBinding.error?.message ??
       rotateError ??
       revokeAuthBinding.error?.message ??
@@ -306,7 +276,6 @@ export function useRuntimeProvidersPageContainer(): RuntimeProvidersPageContentP
     onSelectProvider: handleSelectProvider,
     onDetailClose: () => setSelectedProviderId(null),
     onToggleEnabled: handleToggleEnabled,
-    onAcceptContract: handleAcceptContract,
     onCreateAuthBinding: handleCreateAuthBinding,
     onRotateAuthBinding: handleRotateAuthBinding,
     onRevokeAuthBinding: handleRevokeAuthBinding,

@@ -41,11 +41,6 @@ class TestRuntimeProviderContractResponse(unittest.TestCase):
                 protocol_version = '',
                 contract = azentsadminclient.models.contract.Contract(),
                 compatibility = azentsadminclient.models.compatibility.Compatibility(),
-                status = 'candidate',
-                validation_code = '',
-                validation_message = '',
-                accepted_by_user_id = '',
-                accepted_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f')
             )
         else:
@@ -56,11 +51,6 @@ class TestRuntimeProviderContractResponse(unittest.TestCase):
                 protocol_version = '',
                 contract = azentsadminclient.models.contract.Contract(),
                 compatibility = azentsadminclient.models.compatibility.Compatibility(),
-                status = 'candidate',
-                validation_code = '',
-                validation_message = '',
-                accepted_by_user_id = '',
-                accepted_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
                 created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'),
         )
         """

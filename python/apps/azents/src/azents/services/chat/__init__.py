@@ -1081,7 +1081,7 @@ class ChatSessionService:
                     )
                 )
                 if result is not None:
-                    archive_cleanup_ids = result.progress_delete_intent_ids
+                    archive_cleanup_ids = result.cleanup_intent_ids
 
             await self.lifecycle_orchestrator.archive(
                 context=SessionLifecycleTransitionContext(

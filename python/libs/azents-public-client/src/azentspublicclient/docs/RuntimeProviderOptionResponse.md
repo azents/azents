@@ -12,7 +12,7 @@ Name | Type | Description | Notes
 **scope** | **str** |  | 
 **availability_mode** | **str** |  | 
 **capabilities** | **Dict[str, object]** |  | 
-**accepted_contract_revision_id** | **str** |  | 
+**current_contract_revision_id** | **str** |  | 
 **active_config_revision_id** | **str** |  | 
 
 ## Example

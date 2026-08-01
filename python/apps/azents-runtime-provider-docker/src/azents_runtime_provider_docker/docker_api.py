@@ -48,9 +48,11 @@ class DockerContainerSpec:
     labels: Mapping[str, str]
     binds: Sequence[DockerBindMount]
     network: str
-    memory_bytes: int
-    cpu_quota: int
+    memory_bytes: int | None
+    memory_reservation_bytes: int | None
+    cpu_quota: int | None
     cpu_period: int
+    cpu_shares: int | None
     extra_hosts: Sequence[str]
 
 

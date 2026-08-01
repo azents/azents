@@ -9,8 +9,13 @@ from azents.core.enums import (
     RuntimeRunnerState,
     RuntimeSummary,
 )
+from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
 from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
 from azents.services.agent_runtime.service import AgentRuntimeService
+from azents.services.runtime_profile_resolution.data import (
+    RuntimeProfileResolutionResult,
+)
 
 
 def _runtime(
@@ -36,7 +41,6 @@ def _runtime(
         workspace_id="workspace-id",
         agent_id="agent-id",
         runtime_provider_id=None,
-        provider_config=None,
         desired_state=desired_state,
         desired_generation=desired_generation,
         last_lifecycle_command=None,
@@ -56,6 +60,46 @@ def _runtime(
         last_state_change_at=None,
         created_at=now,
         updated_at=now,
+    )
+
+
+def _resolution(
+    *,
+    status: RuntimeConfigurationResolutionStatus,
+    reason_code: str | None,
+) -> RuntimeProfileResolutionResult:
+    """Create one Runtime Profile resolution for lifecycle guard tests."""
+    now = datetime.now(UTC)
+    runtime = _runtime()
+    revision = RuntimeConfigurationRevision(
+        id="revision-id",
+        runtime_id=runtime.id,
+        provider_id="provider-resource-id",
+        provider_capability_revision_id="capability-revision-id",
+        infrastructure_profile_id="infrastructure-profile-id",
+        infrastructure_profile_version=1,
+        workspace_runtime_profile_id="workspace-profile-id",
+        workspace_runtime_profile_version=1,
+        agent_selection_version=1,
+        resolution_status=status,
+        reason_code=reason_code,
+        required_capabilities=(),
+        missing_capabilities=(),
+        resolved_configuration={} if reason_code is None else None,
+        source_trace={},
+        digest="a" * 64,
+        target_desired_generation=runtime.desired_generation,
+        provider_reported_digest=None,
+        runner_reported_digest=None,
+        provider_acknowledged_at=None,
+        runtime_observed_at=None,
+        created_at=now,
+    )
+    return RuntimeProfileResolutionResult(
+        runtime=runtime,
+        desired_revision=revision,
+        applied_revision=None,
+        runtime_created=False,
     )
 
 
@@ -170,3 +214,26 @@ class TestAgentRuntimeLifecycleSummary:
         assert state.actions.restart is False
         assert state.actions.reset is False
         assert state.actions.use_runner is False
+
+    def test_blocked_configuration_rejects_creation_commands(self) -> None:
+        """A blocked desired revision cannot create a new Runtime incarnation."""
+        error = self.service.configuration_blocking_error(
+            _resolution(
+                status=RuntimeConfigurationResolutionStatus.BLOCKED,
+                reason_code="provider_disabled",
+            )
+        )
+
+        assert error is not None
+        assert error.code == "provider_disabled"
+
+    def test_ready_configuration_allows_creation_commands(self) -> None:
+        """A ready desired revision passes the lifecycle configuration guard."""
+        error = self.service.configuration_blocking_error(
+            _resolution(
+                status=RuntimeConfigurationResolutionStatus.READY,
+                reason_code=None,
+            )
+        )
+
+        assert error is None

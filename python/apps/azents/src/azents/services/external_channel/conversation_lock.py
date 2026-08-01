@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
-from collections.abc import AsyncIterator, Awaitable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, cast
@@ -52,7 +52,7 @@ def _remaining_seconds(deadline: ExternalChannelOperationDeadline) -> float:
 
 
 async def _await_with_deadline(
-    awaitable: Awaitable[object],
+    operation: Callable[[], Awaitable[object]],
     *,
     deadline: ExternalChannelOperationDeadline,
 ) -> object:
@@ -63,7 +63,7 @@ async def _await_with_deadline(
         )
     try:
         async with asyncio.timeout(remaining):
-            return await awaitable
+            return await operation()
     except TimeoutError as error:
         raise ExternalChannelConversationLockTimeout(
             "External Channel conversation lock deadline expired."
@@ -161,11 +161,8 @@ class _RedisLease:
             )
         try:
             result = await _await_with_deadline(
-                cast(Any, self.redis).eval(
-                    _ASSERT_SCRIPT,
-                    1,
-                    self.key,
-                    self.owner,
+                lambda: cast(Any, self.redis).eval(
+                    _ASSERT_SCRIPT, 1, self.key, self.owner
                 ),
                 deadline=self.deadline,
             )
@@ -283,12 +280,7 @@ class RedisExternalChannelConversationLock(ExternalChannelConversationLock):
                 )
             try:
                 acquired = await _await_with_deadline(
-                    self.redis.set(
-                        key,
-                        owner,
-                        nx=True,
-                        px=ttl_milliseconds,
-                    ),
+                    lambda: self.redis.set(key, owner, nx=True, px=ttl_milliseconds),
                     deadline=deadline,
                 )
             except ExternalChannelConversationLockTimeout:

@@ -29,7 +29,7 @@ __all__ = [
     "JoinRequestV1Api",
     "KimiOAuthV1Api",
     "LLMProviderIntegrationV1Api",
-    "RuntimeExecutionV1Api",
+    "RuntimeProfileV1Api",
     "RuntimeProviderEnrollmentV1Api",
     "RuntimeProviderV1Api",
     "SecurityV1Api",
@@ -70,10 +70,7 @@ __all__ = [
     "AgentRunPhase",
     "AgentRunStatus",
     "AgentRuntimeActionsResponse",
-    "AgentRuntimeExecutionPolicyApplyResponse",
-    "AgentRuntimeExecutionPolicyReplaceRequest",
-    "AgentRuntimeExecutionPolicyResponse",
-    "AgentRuntimeExecutionPolicyStatusResponse",
+    "AgentRuntimeConfigurationStatusResponse",
     "AgentRuntimeFailureResponse",
     "AgentRuntimeLifecycleResponse",
     "AgentRuntimeRawStateResponse",
@@ -171,6 +168,8 @@ __all__ = [
     "DiscordConnectionConfiguration",
     "DiscordConnectionCredentials",
     "DiscordConnectionSetupRequest",
+    "DockerContainerProfileSpecV1",
+    "DockerContainerResources",
     "ElevateResponse",
     "ElevateWithEmailRequest",
     "ElevateWithPasswordRequest",
@@ -179,7 +178,6 @@ __all__ = [
     "ExternalChannelAccessGrantScope",
     "ExternalChannelAccessRequestStatus",
     "ExternalChannelAppMode",
-    "ExternalChannelBindingStatus",
     "ExternalChannelCapabilitySnapshot",
     "ExternalChannelChannelDefaultStatus",
     "ExternalChannelConnectionStatus",
@@ -194,6 +192,8 @@ __all__ = [
     "ExternalChannelMultiRouteImpact",
     "ExternalChannelProvider",
     "ExternalChannelProviderIdentity",
+    "ExternalChannelResponseMode",
+    "ExternalChannelResponseModeSetting",
     "ExternalChannelRouteCatalogStatus",
     "ExternalChannelTransport",
     "ExternalChannelWorkStatus",
@@ -237,6 +237,12 @@ __all__ = [
     "KimiOAuthDeviceStartResponse",
     "KimiOAuthDeviceStatusResponse",
     "KimiOAuthSessionStatus",
+    "KubernetesContainerResources",
+    "KubernetesDinDModule",
+    "KubernetesPodProfileSpecV1",
+    "KubernetesSchedulingModule",
+    "KubernetesToleration",
+    "KubernetesWorkspaceVolume",
     "LLMCatalogScope",
     "LLMModelDeveloper",
     "LLMProvider",
@@ -308,6 +314,7 @@ __all__ = [
     "PendingMailboxActionPresentation",
     "PendingMailboxAgentMessagePresentation",
     "PendingMailboxEnvelope",
+    "PendingMailboxExternalChannelContinuationPresentation",
     "PendingMailboxExternalChannelPresentation",
     "PendingMailboxGoalContinuationPresentation",
     "PendingMailboxItem",
@@ -340,46 +347,32 @@ __all__ = [
     "ResetAgentRuntimeRequest",
     "ResponseChatV1ReadAgentWorkspacePath",
     "ResponseLlmProviderIntegrationV1GetSubscriptionUsage",
+    "ResponseModeRequest",
+    "RuntimeConfigurationResolutionStatus",
+    "RuntimeConfigurationRevisionResponse",
     "RuntimeDesiredState",
-    "RuntimeExecutionAuditEventType",
-    "RuntimeExecutionAvailabilityReason",
-    "RuntimeExecutionCapabilitySummaryResponse",
-    "RuntimeExecutionChangeDirection",
-    "RuntimeExecutionChangeSummary",
-    "RuntimeExecutionConfiguredSummaryResponse",
-    "RuntimeExecutionDockerModule",
-    "RuntimeExecutionDockerRestriction",
-    "RuntimeExecutionFieldChange",
-    "RuntimeExecutionManagementCapabilitiesResponse",
-    "RuntimeExecutionManagementLayer",
-    "RuntimeExecutionModuleId",
-    "RuntimeExecutionPolicyAuditEventResponse",
-    "RuntimeExecutionPolicyAuditListResponse",
-    "RuntimeExecutionPolicyDocument",
-    "RuntimeExecutionPolicyLayer",
-    "RuntimeExecutionPolicyRestriction",
-    "RuntimeExecutionPolicyStatus",
-    "RuntimeExecutionProfileLifecycle",
-    "RuntimeExecutionReduction",
-    "RuntimeExecutionReductionReason",
-    "RuntimeExecutionRequiredAction",
-    "RuntimeExecutionResolution",
-    "RuntimeExecutionResourceModule",
-    "RuntimeExecutionResourceRestriction",
-    "RuntimeExecutionSnapshotSummaryResponse",
-    "RuntimeExecutionSourceVersions",
-    "RuntimeExecutionStorageMode",
+    "RuntimeInfrastructureProfileSpec",
     "RuntimeLifecycleCommandType",
+    "RuntimeNetworkPolicyModule",
+    "RuntimeProfileLifecycle",
     "RuntimeProviderConnectionState",
     "RuntimeProviderCredentialExchangeRequest",
     "RuntimeProviderCredentialExchangeResponse",
     "RuntimeProviderObservedState",
     "RuntimeProviderOptionListResponse",
     "RuntimeProviderOptionResponse",
+    "RuntimeRecreationCreateRequest",
+    "RuntimeRecreationItemResponse",
+    "RuntimeRecreationItemStatus",
+    "RuntimeRecreationOperationResponse",
+    "RuntimeRecreationOperationStatus",
+    "RuntimeRecreationTargetKind",
     "RuntimeRunnerState",
     "RuntimeSummary",
     "Secrets",
     "Secrets1",
+    "SelectableInfrastructureProfileListResponse",
+    "SelectableInfrastructureProfileResponse",
     "SelectableModelOption",
     "SelectableModelOptionInput",
     "SelectableModelSettings",
@@ -441,10 +434,13 @@ __all__ = [
     "WorkspaceModelSettingsResponse",
     "WorkspaceModelSettingsUpdateRequest",
     "WorkspaceResponse",
-    "WorkspaceRuntimeExecutionPolicyReplaceRequest",
-    "WorkspaceRuntimeExecutionPolicyResponse",
-    "WorkspaceRuntimeExecutionProfileListResponse",
-    "WorkspaceRuntimeExecutionProfileResponse",
+    "WorkspaceRuntimeProfileCreateRequest",
+    "WorkspaceRuntimeProfileDefaultReplaceRequest",
+    "WorkspaceRuntimeProfileDefaultResponse",
+    "WorkspaceRuntimeProfileListResponse",
+    "WorkspaceRuntimeProfilePolicyV1",
+    "WorkspaceRuntimeProfileReplaceRequest",
+    "WorkspaceRuntimeProfileResponse",
     "WorkspaceUserListResponse",
     "WorkspaceUserResponse",
     "WorkspaceUserRole",
@@ -468,7 +464,7 @@ from azentspublicclient.api.invitation_v1_api import InvitationV1Api as Invitati
 from azentspublicclient.api.join_request_v1_api import JoinRequestV1Api as JoinRequestV1Api
 from azentspublicclient.api.kimi_o_auth_v1_api import KimiOAuthV1Api as KimiOAuthV1Api
 from azentspublicclient.api.llm_provider_integration_v1_api import LLMProviderIntegrationV1Api as LLMProviderIntegrationV1Api
-from azentspublicclient.api.runtime_execution_v1_api import RuntimeExecutionV1Api as RuntimeExecutionV1Api
+from azentspublicclient.api.runtime_profile_v1_api import RuntimeProfileV1Api as RuntimeProfileV1Api
 from azentspublicclient.api.runtime_provider_enrollment_v1_api import RuntimeProviderEnrollmentV1Api as RuntimeProviderEnrollmentV1Api
 from azentspublicclient.api.runtime_provider_v1_api import RuntimeProviderV1Api as RuntimeProviderV1Api
 from azentspublicclient.api.security_v1_api import SecurityV1Api as SecurityV1Api
@@ -513,10 +509,7 @@ from azentspublicclient.models.agent_response import AgentResponse as AgentRespo
 from azentspublicclient.models.agent_run_phase import AgentRunPhase as AgentRunPhase
 from azentspublicclient.models.agent_run_status import AgentRunStatus as AgentRunStatus
 from azentspublicclient.models.agent_runtime_actions_response import AgentRuntimeActionsResponse as AgentRuntimeActionsResponse
-from azentspublicclient.models.agent_runtime_execution_policy_apply_response import AgentRuntimeExecutionPolicyApplyResponse as AgentRuntimeExecutionPolicyApplyResponse
-from azentspublicclient.models.agent_runtime_execution_policy_replace_request import AgentRuntimeExecutionPolicyReplaceRequest as AgentRuntimeExecutionPolicyReplaceRequest
-from azentspublicclient.models.agent_runtime_execution_policy_response import AgentRuntimeExecutionPolicyResponse as AgentRuntimeExecutionPolicyResponse
-from azentspublicclient.models.agent_runtime_execution_policy_status_response import AgentRuntimeExecutionPolicyStatusResponse as AgentRuntimeExecutionPolicyStatusResponse
+from azentspublicclient.models.agent_runtime_configuration_status_response import AgentRuntimeConfigurationStatusResponse as AgentRuntimeConfigurationStatusResponse
 from azentspublicclient.models.agent_runtime_failure_response import AgentRuntimeFailureResponse as AgentRuntimeFailureResponse
 from azentspublicclient.models.agent_runtime_lifecycle_response import AgentRuntimeLifecycleResponse as AgentRuntimeLifecycleResponse
 from azentspublicclient.models.agent_runtime_raw_state_response import AgentRuntimeRawStateResponse as AgentRuntimeRawStateResponse
@@ -614,6 +607,8 @@ from azentspublicclient.models.detail import Detail as Detail
 from azentspublicclient.models.discord_connection_configuration import DiscordConnectionConfiguration as DiscordConnectionConfiguration
 from azentspublicclient.models.discord_connection_credentials import DiscordConnectionCredentials as DiscordConnectionCredentials
 from azentspublicclient.models.discord_connection_setup_request import DiscordConnectionSetupRequest as DiscordConnectionSetupRequest
+from azentspublicclient.models.docker_container_profile_spec_v1 import DockerContainerProfileSpecV1 as DockerContainerProfileSpecV1
+from azentspublicclient.models.docker_container_resources import DockerContainerResources as DockerContainerResources
 from azentspublicclient.models.elevate_response import ElevateResponse as ElevateResponse
 from azentspublicclient.models.elevate_with_email_request import ElevateWithEmailRequest as ElevateWithEmailRequest
 from azentspublicclient.models.elevate_with_password_request import ElevateWithPasswordRequest as ElevateWithPasswordRequest
@@ -622,7 +617,6 @@ from azentspublicclient.models.existing_project_workspace_item_response import E
 from azentspublicclient.models.external_channel_access_grant_scope import ExternalChannelAccessGrantScope as ExternalChannelAccessGrantScope
 from azentspublicclient.models.external_channel_access_request_status import ExternalChannelAccessRequestStatus as ExternalChannelAccessRequestStatus
 from azentspublicclient.models.external_channel_app_mode import ExternalChannelAppMode as ExternalChannelAppMode
-from azentspublicclient.models.external_channel_binding_status import ExternalChannelBindingStatus as ExternalChannelBindingStatus
 from azentspublicclient.models.external_channel_capability_snapshot import ExternalChannelCapabilitySnapshot as ExternalChannelCapabilitySnapshot
 from azentspublicclient.models.external_channel_channel_default_status import ExternalChannelChannelDefaultStatus as ExternalChannelChannelDefaultStatus
 from azentspublicclient.models.external_channel_connection_status import ExternalChannelConnectionStatus as ExternalChannelConnectionStatus
@@ -637,6 +631,8 @@ from azentspublicclient.models.external_channel_multi_impact_default import Exte
 from azentspublicclient.models.external_channel_multi_route_impact import ExternalChannelMultiRouteImpact as ExternalChannelMultiRouteImpact
 from azentspublicclient.models.external_channel_provider import ExternalChannelProvider as ExternalChannelProvider
 from azentspublicclient.models.external_channel_provider_identity import ExternalChannelProviderIdentity as ExternalChannelProviderIdentity
+from azentspublicclient.models.external_channel_response_mode import ExternalChannelResponseMode as ExternalChannelResponseMode
+from azentspublicclient.models.external_channel_response_mode_setting import ExternalChannelResponseModeSetting as ExternalChannelResponseModeSetting
 from azentspublicclient.models.external_channel_route_catalog_status import ExternalChannelRouteCatalogStatus as ExternalChannelRouteCatalogStatus
 from azentspublicclient.models.external_channel_transport import ExternalChannelTransport as ExternalChannelTransport
 from azentspublicclient.models.external_channel_work_status import ExternalChannelWorkStatus as ExternalChannelWorkStatus
@@ -680,6 +676,12 @@ from azentspublicclient.models.kimi_o_auth_config import KimiOAuthConfig as Kimi
 from azentspublicclient.models.kimi_o_auth_device_start_response import KimiOAuthDeviceStartResponse as KimiOAuthDeviceStartResponse
 from azentspublicclient.models.kimi_o_auth_device_status_response import KimiOAuthDeviceStatusResponse as KimiOAuthDeviceStatusResponse
 from azentspublicclient.models.kimi_o_auth_session_status import KimiOAuthSessionStatus as KimiOAuthSessionStatus
+from azentspublicclient.models.kubernetes_container_resources import KubernetesContainerResources as KubernetesContainerResources
+from azentspublicclient.models.kubernetes_din_d_module import KubernetesDinDModule as KubernetesDinDModule
+from azentspublicclient.models.kubernetes_pod_profile_spec_v1 import KubernetesPodProfileSpecV1 as KubernetesPodProfileSpecV1
+from azentspublicclient.models.kubernetes_scheduling_module import KubernetesSchedulingModule as KubernetesSchedulingModule
+from azentspublicclient.models.kubernetes_toleration import KubernetesToleration as KubernetesToleration
+from azentspublicclient.models.kubernetes_workspace_volume import KubernetesWorkspaceVolume as KubernetesWorkspaceVolume
 from azentspublicclient.models.llm_catalog_scope import LLMCatalogScope as LLMCatalogScope
 from azentspublicclient.models.llm_model_developer import LLMModelDeveloper as LLMModelDeveloper
 from azentspublicclient.models.llm_provider import LLMProvider as LLMProvider
@@ -751,6 +753,7 @@ from azentspublicclient.models.password_login_response import PasswordLoginRespo
 from azentspublicclient.models.pending_mailbox_action_presentation import PendingMailboxActionPresentation as PendingMailboxActionPresentation
 from azentspublicclient.models.pending_mailbox_agent_message_presentation import PendingMailboxAgentMessagePresentation as PendingMailboxAgentMessagePresentation
 from azentspublicclient.models.pending_mailbox_envelope import PendingMailboxEnvelope as PendingMailboxEnvelope
+from azentspublicclient.models.pending_mailbox_external_channel_continuation_presentation import PendingMailboxExternalChannelContinuationPresentation as PendingMailboxExternalChannelContinuationPresentation
 from azentspublicclient.models.pending_mailbox_external_channel_presentation import PendingMailboxExternalChannelPresentation as PendingMailboxExternalChannelPresentation
 from azentspublicclient.models.pending_mailbox_goal_continuation_presentation import PendingMailboxGoalContinuationPresentation as PendingMailboxGoalContinuationPresentation
 from azentspublicclient.models.pending_mailbox_item import PendingMailboxItem as PendingMailboxItem
@@ -783,46 +786,32 @@ from azentspublicclient.models.requested_inference_profile import RequestedInfer
 from azentspublicclient.models.reset_agent_runtime_request import ResetAgentRuntimeRequest as ResetAgentRuntimeRequest
 from azentspublicclient.models.response_chat_v1_read_agent_workspace_path import ResponseChatV1ReadAgentWorkspacePath as ResponseChatV1ReadAgentWorkspacePath
 from azentspublicclient.models.response_llm_provider_integration_v1_get_subscription_usage import ResponseLlmProviderIntegrationV1GetSubscriptionUsage as ResponseLlmProviderIntegrationV1GetSubscriptionUsage
+from azentspublicclient.models.response_mode_request import ResponseModeRequest as ResponseModeRequest
+from azentspublicclient.models.runtime_configuration_resolution_status import RuntimeConfigurationResolutionStatus as RuntimeConfigurationResolutionStatus
+from azentspublicclient.models.runtime_configuration_revision_response import RuntimeConfigurationRevisionResponse as RuntimeConfigurationRevisionResponse
 from azentspublicclient.models.runtime_desired_state import RuntimeDesiredState as RuntimeDesiredState
-from azentspublicclient.models.runtime_execution_audit_event_type import RuntimeExecutionAuditEventType as RuntimeExecutionAuditEventType
-from azentspublicclient.models.runtime_execution_availability_reason import RuntimeExecutionAvailabilityReason as RuntimeExecutionAvailabilityReason
-from azentspublicclient.models.runtime_execution_capability_summary_response import RuntimeExecutionCapabilitySummaryResponse as RuntimeExecutionCapabilitySummaryResponse
-from azentspublicclient.models.runtime_execution_change_direction import RuntimeExecutionChangeDirection as RuntimeExecutionChangeDirection
-from azentspublicclient.models.runtime_execution_change_summary import RuntimeExecutionChangeSummary as RuntimeExecutionChangeSummary
-from azentspublicclient.models.runtime_execution_configured_summary_response import RuntimeExecutionConfiguredSummaryResponse as RuntimeExecutionConfiguredSummaryResponse
-from azentspublicclient.models.runtime_execution_docker_module import RuntimeExecutionDockerModule as RuntimeExecutionDockerModule
-from azentspublicclient.models.runtime_execution_docker_restriction import RuntimeExecutionDockerRestriction as RuntimeExecutionDockerRestriction
-from azentspublicclient.models.runtime_execution_field_change import RuntimeExecutionFieldChange as RuntimeExecutionFieldChange
-from azentspublicclient.models.runtime_execution_management_capabilities_response import RuntimeExecutionManagementCapabilitiesResponse as RuntimeExecutionManagementCapabilitiesResponse
-from azentspublicclient.models.runtime_execution_management_layer import RuntimeExecutionManagementLayer as RuntimeExecutionManagementLayer
-from azentspublicclient.models.runtime_execution_module_id import RuntimeExecutionModuleId as RuntimeExecutionModuleId
-from azentspublicclient.models.runtime_execution_policy_audit_event_response import RuntimeExecutionPolicyAuditEventResponse as RuntimeExecutionPolicyAuditEventResponse
-from azentspublicclient.models.runtime_execution_policy_audit_list_response import RuntimeExecutionPolicyAuditListResponse as RuntimeExecutionPolicyAuditListResponse
-from azentspublicclient.models.runtime_execution_policy_document import RuntimeExecutionPolicyDocument as RuntimeExecutionPolicyDocument
-from azentspublicclient.models.runtime_execution_policy_layer import RuntimeExecutionPolicyLayer as RuntimeExecutionPolicyLayer
-from azentspublicclient.models.runtime_execution_policy_restriction import RuntimeExecutionPolicyRestriction as RuntimeExecutionPolicyRestriction
-from azentspublicclient.models.runtime_execution_policy_status import RuntimeExecutionPolicyStatus as RuntimeExecutionPolicyStatus
-from azentspublicclient.models.runtime_execution_profile_lifecycle import RuntimeExecutionProfileLifecycle as RuntimeExecutionProfileLifecycle
-from azentspublicclient.models.runtime_execution_reduction import RuntimeExecutionReduction as RuntimeExecutionReduction
-from azentspublicclient.models.runtime_execution_reduction_reason import RuntimeExecutionReductionReason as RuntimeExecutionReductionReason
-from azentspublicclient.models.runtime_execution_required_action import RuntimeExecutionRequiredAction as RuntimeExecutionRequiredAction
-from azentspublicclient.models.runtime_execution_resolution import RuntimeExecutionResolution as RuntimeExecutionResolution
-from azentspublicclient.models.runtime_execution_resource_module import RuntimeExecutionResourceModule as RuntimeExecutionResourceModule
-from azentspublicclient.models.runtime_execution_resource_restriction import RuntimeExecutionResourceRestriction as RuntimeExecutionResourceRestriction
-from azentspublicclient.models.runtime_execution_snapshot_summary_response import RuntimeExecutionSnapshotSummaryResponse as RuntimeExecutionSnapshotSummaryResponse
-from azentspublicclient.models.runtime_execution_source_versions import RuntimeExecutionSourceVersions as RuntimeExecutionSourceVersions
-from azentspublicclient.models.runtime_execution_storage_mode import RuntimeExecutionStorageMode as RuntimeExecutionStorageMode
+from azentspublicclient.models.runtime_infrastructure_profile_spec import RuntimeInfrastructureProfileSpec as RuntimeInfrastructureProfileSpec
 from azentspublicclient.models.runtime_lifecycle_command_type import RuntimeLifecycleCommandType as RuntimeLifecycleCommandType
+from azentspublicclient.models.runtime_network_policy_module import RuntimeNetworkPolicyModule as RuntimeNetworkPolicyModule
+from azentspublicclient.models.runtime_profile_lifecycle import RuntimeProfileLifecycle as RuntimeProfileLifecycle
 from azentspublicclient.models.runtime_provider_connection_state import RuntimeProviderConnectionState as RuntimeProviderConnectionState
 from azentspublicclient.models.runtime_provider_credential_exchange_request import RuntimeProviderCredentialExchangeRequest as RuntimeProviderCredentialExchangeRequest
 from azentspublicclient.models.runtime_provider_credential_exchange_response import RuntimeProviderCredentialExchangeResponse as RuntimeProviderCredentialExchangeResponse
 from azentspublicclient.models.runtime_provider_observed_state import RuntimeProviderObservedState as RuntimeProviderObservedState
 from azentspublicclient.models.runtime_provider_option_list_response import RuntimeProviderOptionListResponse as RuntimeProviderOptionListResponse
 from azentspublicclient.models.runtime_provider_option_response import RuntimeProviderOptionResponse as RuntimeProviderOptionResponse
+from azentspublicclient.models.runtime_recreation_create_request import RuntimeRecreationCreateRequest as RuntimeRecreationCreateRequest
+from azentspublicclient.models.runtime_recreation_item_response import RuntimeRecreationItemResponse as RuntimeRecreationItemResponse
+from azentspublicclient.models.runtime_recreation_item_status import RuntimeRecreationItemStatus as RuntimeRecreationItemStatus
+from azentspublicclient.models.runtime_recreation_operation_response import RuntimeRecreationOperationResponse as RuntimeRecreationOperationResponse
+from azentspublicclient.models.runtime_recreation_operation_status import RuntimeRecreationOperationStatus as RuntimeRecreationOperationStatus
+from azentspublicclient.models.runtime_recreation_target_kind import RuntimeRecreationTargetKind as RuntimeRecreationTargetKind
 from azentspublicclient.models.runtime_runner_state import RuntimeRunnerState as RuntimeRunnerState
 from azentspublicclient.models.runtime_summary import RuntimeSummary as RuntimeSummary
 from azentspublicclient.models.secrets import Secrets as Secrets
 from azentspublicclient.models.secrets1 import Secrets1 as Secrets1
+from azentspublicclient.models.selectable_infrastructure_profile_list_response import SelectableInfrastructureProfileListResponse as SelectableInfrastructureProfileListResponse
+from azentspublicclient.models.selectable_infrastructure_profile_response import SelectableInfrastructureProfileResponse as SelectableInfrastructureProfileResponse
 from azentspublicclient.models.selectable_model_option import SelectableModelOption as SelectableModelOption
 from azentspublicclient.models.selectable_model_option_input import SelectableModelOptionInput as SelectableModelOptionInput
 from azentspublicclient.models.selectable_model_settings import SelectableModelSettings as SelectableModelSettings
@@ -884,10 +873,13 @@ from azentspublicclient.models.workspace_list_response import WorkspaceListRespo
 from azentspublicclient.models.workspace_model_settings_response import WorkspaceModelSettingsResponse as WorkspaceModelSettingsResponse
 from azentspublicclient.models.workspace_model_settings_update_request import WorkspaceModelSettingsUpdateRequest as WorkspaceModelSettingsUpdateRequest
 from azentspublicclient.models.workspace_response import WorkspaceResponse as WorkspaceResponse
-from azentspublicclient.models.workspace_runtime_execution_policy_replace_request import WorkspaceRuntimeExecutionPolicyReplaceRequest as WorkspaceRuntimeExecutionPolicyReplaceRequest
-from azentspublicclient.models.workspace_runtime_execution_policy_response import WorkspaceRuntimeExecutionPolicyResponse as WorkspaceRuntimeExecutionPolicyResponse
-from azentspublicclient.models.workspace_runtime_execution_profile_list_response import WorkspaceRuntimeExecutionProfileListResponse as WorkspaceRuntimeExecutionProfileListResponse
-from azentspublicclient.models.workspace_runtime_execution_profile_response import WorkspaceRuntimeExecutionProfileResponse as WorkspaceRuntimeExecutionProfileResponse
+from azentspublicclient.models.workspace_runtime_profile_create_request import WorkspaceRuntimeProfileCreateRequest as WorkspaceRuntimeProfileCreateRequest
+from azentspublicclient.models.workspace_runtime_profile_default_replace_request import WorkspaceRuntimeProfileDefaultReplaceRequest as WorkspaceRuntimeProfileDefaultReplaceRequest
+from azentspublicclient.models.workspace_runtime_profile_default_response import WorkspaceRuntimeProfileDefaultResponse as WorkspaceRuntimeProfileDefaultResponse
+from azentspublicclient.models.workspace_runtime_profile_list_response import WorkspaceRuntimeProfileListResponse as WorkspaceRuntimeProfileListResponse
+from azentspublicclient.models.workspace_runtime_profile_policy_v1 import WorkspaceRuntimeProfilePolicyV1 as WorkspaceRuntimeProfilePolicyV1
+from azentspublicclient.models.workspace_runtime_profile_replace_request import WorkspaceRuntimeProfileReplaceRequest as WorkspaceRuntimeProfileReplaceRequest
+from azentspublicclient.models.workspace_runtime_profile_response import WorkspaceRuntimeProfileResponse as WorkspaceRuntimeProfileResponse
 from azentspublicclient.models.workspace_user_list_response import WorkspaceUserListResponse as WorkspaceUserListResponse
 from azentspublicclient.models.workspace_user_response import WorkspaceUserResponse as WorkspaceUserResponse
 from azentspublicclient.models.workspace_user_role import WorkspaceUserRole as WorkspaceUserRole

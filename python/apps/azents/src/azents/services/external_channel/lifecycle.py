@@ -211,10 +211,10 @@ class ExternalChannelLifecycleService:
         self,
         delivery_ids: Sequence[str],
     ) -> int:
-        """Attempt every committed archive progress cleanup once."""
+        """Attempt every committed archive provider cleanup once."""
         return await self.action_service.drain_archive_cleanup(delivery_ids)
 
-    async def prepare_progress_cleanup(
+    async def prepare_cleanup(
         self,
         session: AsyncSession,
         delivery_ids: Sequence[str],
@@ -241,11 +241,16 @@ class ExternalChannelLifecycleService:
             connection_ids=connection_ids,
         )
 
-    async def consume_prepared_progress_cleanup(
+    async def consume_prepared_cleanup(
         self,
         targets: Sequence[ChannelDeliveryTarget],
+        purged_connection_ids: Sequence[str],
     ) -> int:
         """Attempt every target once after its terminal transaction commits."""
+        purged = frozenset(purged_connection_ids)
         for target in targets:
-            await self.action_service.attempt_prepared_delivery(target)
+            if target.connection_id in purged:
+                await self.action_service.attempt_captured_terminal_delivery(target)
+            else:
+                await self.action_service.attempt_prepared_delivery(target)
         return len(targets)

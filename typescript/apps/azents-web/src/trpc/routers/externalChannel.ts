@@ -38,9 +38,11 @@ import {
   externalChannelV1SetupMultiSlackConnection,
   externalChannelV1SetupSlackConnection,
   externalChannelV1UpdateConnectionAccessPolicy,
+  externalChannelV1UpdateDefaultResponseMode,
   externalChannelV1UpdateDiscordConnection,
   externalChannelV1UpdateMultiDiscordConnection,
   externalChannelV1UpdateMultiSlackConnection,
+  externalChannelV1UpdateSessionChannelResponseMode,
   externalChannelV1UpdateSlackConnection,
   externalChannelV1ValidateConnection,
   externalChannelV1ValidateMultiDiscordConnection,
@@ -58,6 +60,7 @@ const approvalDecisionSchema = z.enum([
 ]);
 const transportSchema = z.enum(["http", "socket"]);
 const providerSchema = z.enum(["slack", "discord"]);
+const responseModeSchema = z.enum(["mention_only", "all_messages"]);
 const slackCredentialsSchema = z.object({
   botToken: z.string().min(1),
   signingSecret: z.string().min(1),
@@ -113,6 +116,28 @@ export const externalChannelRouter = router({
         const { data } = await externalChannelV1ListConnections({
           client: ctx.apiClient,
           path: { handle: input.handle, agent_id: input.agentId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (error) {
+        throw mapManagementError(error);
+      }
+    }),
+
+  updateDefaultResponseMode: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        responseMode: responseModeSchema,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await externalChannelV1UpdateDefaultResponseMode({
+          client: ctx.apiClient,
+          path: { handle: input.handle, agent_id: input.agentId },
+          body: { response_mode: input.responseMode },
           throwOnError: true,
         });
         return data;
@@ -942,6 +967,36 @@ export const externalChannelRouter = router({
           },
           throwOnError: true,
         });
+        return data;
+      } catch (error) {
+        throw mapManagementError(error);
+      }
+    }),
+
+  updateBindingResponseMode: publicProcedure
+    .input(
+      z.object({
+        handle: z.string().min(1),
+        agentId: z.string().min(1),
+        sessionId: z.string().min(1),
+        bindingId: z.string().min(1),
+        responseMode: responseModeSchema,
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } =
+          await externalChannelV1UpdateSessionChannelResponseMode({
+            client: ctx.apiClient,
+            path: {
+              handle: input.handle,
+              agent_id: input.agentId,
+              session_id: input.sessionId,
+              binding_id: input.bindingId,
+            },
+            body: { response_mode: input.responseMode },
+            throwOnError: true,
+          });
         return data;
       } catch (error) {
         throw mapManagementError(error);

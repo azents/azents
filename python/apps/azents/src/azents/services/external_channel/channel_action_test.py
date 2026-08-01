@@ -103,6 +103,9 @@ class _RepositoryDouble:
             encrypted_credentials="ciphertext",
             provider_tenant_id="T1",
             capabilities=None,
+            workspace_handle="workspace",
+            agent_id="agent-1",
+            agent_session_id="session-1",
             agent_name=None,
             agent_avatar=None,
             request_payload={
@@ -146,6 +149,19 @@ class _RepositoryDouble:
         return await self.get_delivery_target(
             session,
             delivery_attempt_id=delivery_attempt_id,
+        )
+
+    async def start_captured_terminal_delivery(
+        self,
+        session: AsyncSession,
+        *,
+        target: ChannelDeliveryTarget,
+        now: datetime.datetime,
+    ) -> ChannelDeliveryTarget | None:
+        del session, now
+        self.events.append("start-captured")
+        return target.model_copy(
+            update={"status": ExternalChannelDeliveryStatus.ATTEMPTING}
         )
 
     async def record_runtime_provider_state(
@@ -658,7 +674,13 @@ def _service(
             ExchangeFileService,
             exchange_file_service or _ExchangeFileService(),
         ),
-        config=cast(Config, SimpleNamespace(avatar_cdn_base_url=None)),
+        config=cast(
+            Config,
+            SimpleNamespace(
+                avatar_cdn_base_url=None,
+                web_url="https://azents.example",
+            ),
+        ),
     )
 
 
@@ -772,6 +794,52 @@ async def test_prepared_delivery_revalidates_secret_before_provider() -> None:
     assert repository.finished == [
         (ExternalChannelDeliveryStatus.FAILED, None, "credentials_missing")
     ]
+
+
+@pytest.mark.asyncio
+async def test_captured_terminal_delivery_uses_pre_purge_provider_target() -> None:
+    """Terminal cleanup reaches the provider with the captured credential snapshot."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "operation": ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            "agent_name": "Research Agent",
+            "request_payload": {
+                "control_kind": "session_presence",
+                "presence_state": "left",
+                "tenant_id": "T1",
+                "channel_id": "C1",
+                "thread_ts": "1.000001",
+            },
+        }
+    )
+
+    class _CapturedTerminalSlackClient(_SlackClient):
+        async def post_blocks(self, **kwargs: object) -> SlackControlMessageResult:
+            self.events.append("provider")
+            self.bot_tokens.append(cast(str, kwargs["bot_token"]))
+            assert kwargs["channel_id"] == "C1"
+            assert kwargs["thread_ts"] == "1.000001"
+            assert kwargs["text"] == "Research Agent left this conversation."
+            return self._result()
+
+    slack_client = _CapturedTerminalSlackClient(
+        events,
+        SlackControlMessageResult(
+            status="delivered",
+            provider_message_key="1721600100.000001",
+            error_kind=None,
+            error_summary=None,
+        ),
+    )
+    service = _service(events, repository, slack_client)
+
+    result = await service.attempt_captured_terminal_delivery(repository.target)
+
+    assert result is ExternalChannelDeliveryStatus.DELIVERED
+    assert events == ["start-captured", "commit", "provider", "finish", "commit"]
+    assert slack_client.bot_tokens == ["xoxb-secret"]
 
 
 @pytest.mark.asyncio
@@ -916,6 +984,7 @@ async def test_discord_reply_agent_prefix_follows_app_mode(
                 "bot_token": "xoxb-secret",
                 "parent_channel_id": "222",
                 "root_message_id": "333",
+                "name": "Research * Agent",
             },
         ),
         (
@@ -1070,6 +1139,7 @@ async def test_discord_approval_control_delivery_uses_text_create() -> None:
                 "bot_token": "xoxb-secret",
                 "parent_channel_id": "222",
                 "root_message_id": "333",
+                "name": None,
             },
         ),
         (
@@ -1089,53 +1159,116 @@ async def test_discord_approval_control_delivery_uses_text_create() -> None:
 
 
 @pytest.mark.asyncio
-async def test_slack_session_link_control_reaches_provider() -> None:
-    """A committed Slack Session link is delivered as validated blocks."""
+async def test_slack_selector_control_uses_interaction_identity() -> None:
+    """A committed selector control carries only its retained interaction ID."""
     events: list[str] = []
     repository = _RepositoryDouble(events)
     repository.target = repository.target.model_copy(
         update={
             "operation": ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
             "request_payload": {
-                "control_kind": "session_link",
+                "control_kind": "agent_selector",
                 "tenant_id": "T1",
                 "channel_id": "C1",
                 "thread_ts": "1.000001",
-                "text": "Open this Session in Azents.",
-                "blocks": [
-                    {
-                        "type": "actions",
-                        "elements": [
-                            {
-                                "type": "button",
-                                "text": {
-                                    "type": "plain_text",
-                                    "text": "Open Session",
-                                },
-                                "url": "https://azents.example/session-1",
-                            }
-                        ],
-                    }
-                ],
+                "selector_interaction_id": "selector-1",
             },
         }
     )
 
-    class _SessionLinkSlackClient(_SlackClient):
+    class _SelectorSlackClient(_SlackClient):
+        async def post_blocks(self, **kwargs: object) -> SlackControlMessageResult:
+            self.events.append("provider")
+            blocks = cast(list[dict[str, object]], kwargs["blocks"])
+            actions = cast(list[dict[str, object]], blocks[1]["elements"])
+            assert actions[0]["value"] == "selector-1"
+            assert "conversation_admission_id" not in repository.target.request_payload
+            return self._result()
+
+    service = _service(
+        events,
+        repository,
+        _SelectorSlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key="slack:T1:C1:2.000001",
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+    )
+
+    await service.attempt_delivery("delivery-1")
+
+    assert repository.finished == [
+        (
+            ExternalChannelDeliveryStatus.DELIVERED,
+            "slack:T1:C1:2.000001",
+            None,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_slack_session_presence_control_replaces_open_session() -> None:
+    """A committed Slack binding presence is delivered as copy plus navigation."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "operation": ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            "agent_name": "Research Agent",
+            "request_payload": {
+                "control_kind": "session_presence",
+                "presence_state": "joined",
+                "tenant_id": "T1",
+                "channel_id": "C1",
+                "thread_ts": "1.000001",
+            },
+        }
+    )
+
+    class _SessionPresenceSlackClient(_SlackClient):
         async def post_blocks(self, **kwargs: object) -> SlackControlMessageResult:
             self.events.append("provider")
             self.bot_tokens.append(cast(str, kwargs["bot_token"]))
             assert kwargs["channel_id"] == "C1"
             assert kwargs["thread_ts"] == "1.000001"
-            assert kwargs["text"] == "Open this Session in Azents."
-            assert kwargs["blocks"] == repository.target.request_payload["blocks"]
+            assert kwargs["text"] == "Research Agent joined this conversation."
+            assert kwargs["blocks"] == [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "*Research Agent* joined this conversation.",
+                    },
+                },
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "action_id": "view_azents_session",
+                            "text": {
+                                "type": "plain_text",
+                                "text": "View session",
+                            },
+                            "url": (
+                                "https://azents.example/w/workspace/agents/agent-1/"
+                                "sessions/session-1"
+                            ),
+                        }
+                    ],
+                },
+            ]
             assert kwargs["icon_url"] is None
             return self._result()
 
     service = _service(
         events,
         repository,
-        _SessionLinkSlackClient(
+        _SessionPresenceSlackClient(
             events,
             SlackControlMessageResult(
                 status="delivered",
@@ -1153,34 +1286,21 @@ async def test_slack_session_link_control_reaches_provider() -> None:
 
 
 @pytest.mark.asyncio
-async def test_discord_session_link_control_reaches_provider() -> None:
-    """A committed Discord Session link is delivered with its link component."""
+async def test_discord_session_presence_control_uses_embed_and_link() -> None:
+    """A committed Discord binding presence uses an Embed and Session button."""
     events: list[str] = []
     repository = _RepositoryDouble(events)
-    components = [
-        {
-            "type": 1,
-            "components": [
-                {
-                    "type": 2,
-                    "style": 5,
-                    "label": "Open Azents session",
-                    "url": "https://azents.example/session-1",
-                }
-            ],
-        }
-    ]
     repository.target = repository.target.model_copy(
         update={
             "provider": ExternalChannelProvider.DISCORD,
             "provider_tenant_id": "111",
             "operation": ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            "agent_name": "Research Agent",
             "request_payload": {
-                "control_kind": "session_link",
+                "control_kind": "session_presence",
+                "presence_state": "left",
                 "guild_id": "111",
                 "channel_id": "333",
-                "text": "",
-                "components": components,
             },
         }
     )
@@ -1212,8 +1332,28 @@ async def test_discord_session_link_control_reaches_provider() -> None:
                 "channel_id": "333",
                 "content": "",
                 "delivery_attempt_id": "delivery-1",
-                "components": components,
-                "embeds": None,
+                "components": [
+                    {
+                        "type": 1,
+                        "components": [
+                            {
+                                "type": 2,
+                                "style": 5,
+                                "label": "View session",
+                                "url": (
+                                    "https://azents.example/w/workspace/agents/"
+                                    "agent-1/sessions/session-1"
+                                ),
+                            }
+                        ],
+                    }
+                ],
+                "embeds": [
+                    {
+                        "description": "**Research Agent** left this conversation.",
+                        "color": 0x99AAB5,
+                    }
+                ],
             },
         )
     ]

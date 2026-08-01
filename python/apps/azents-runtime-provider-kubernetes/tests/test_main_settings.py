@@ -12,8 +12,6 @@ from azents_runtime_control.grpc_provider_client import GrpcProviderControlClien
 
 import azents_runtime_provider_kubernetes.main as provider_main
 from azents_runtime_provider_kubernetes.kubernetes_api import (
-    ContainerResourceClaim,
-    ContainerResources,
     LeaseResource,
     LeaseSpec,
     LocalObjectReference,
@@ -90,8 +88,6 @@ def provider_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
         "azents-runtime-provider-kubernetes",
     )
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_WORKSPACE_PATH", "/workspace/agent")
-    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_STORAGE_CLASS", "gp3")
-    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_PVC_SIZE", "20Gi")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_ENGINE_IMAGE", "engine@sha256:test")
     monkeypatch.setenv(
         "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_NAMESPACE",
@@ -115,8 +111,6 @@ def provider_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
         "[]",
     )
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_POD_ANNOTATIONS", "{}")
-    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_POD_NODE_SELECTOR", "{}")
-    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_POD_TOLERATIONS", "[]")
     token_file = tmp_path / "service-account-token"
     token_file.write_text("test-provider-credential\n")
     monkeypatch.setenv(
@@ -127,12 +121,11 @@ def provider_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     return token_file
 
 
-def test_provider_settings_defaults_runner_resources_to_none(
+def test_provider_settings_loads_provider_global_runtime_controls(
     provider_env: Path,
 ) -> None:
     settings = ProviderSettings()
 
-    assert settings.runner_resources is None
     assert settings.runner_env == {}
     assert settings.image_pull_secrets == ()
     assert settings.engine_image == "engine@sha256:test"
@@ -305,39 +298,6 @@ def test_provider_settings_collects_runner_limit_environment(
     assert settings.runner_env == expected
 
 
-def test_provider_settings_accepts_runner_resources_null(
-    monkeypatch: pytest.MonkeyPatch,
-    provider_env: Path,
-) -> None:
-    monkeypatch.setenv("AZ_RUNTIME_RUNNER_RESOURCES", "null")
-
-    settings = ProviderSettings()
-
-    assert settings.runner_resources is None
-
-
-def test_provider_settings_accepts_generic_runner_resources(
-    monkeypatch: pytest.MonkeyPatch,
-    provider_env: Path,
-) -> None:
-    monkeypatch.setenv(
-        "AZ_RUNTIME_RUNNER_RESOURCES",
-        (
-            '{"requests":{"cpu":"500m","ephemeral-storage":"1Gi"},'
-            '"limits":{"memory":"2Gi","nvidia.com/gpu":1},'
-            '"claims":[{"name":"gpu-claim","request":"gpu"}]}'
-        ),
-    )
-
-    settings = ProviderSettings()
-
-    assert settings.runner_resources == ContainerResources(
-        requests={"cpu": "500m", "ephemeral-storage": "1Gi"},
-        limits={"memory": "2Gi", "nvidia.com/gpu": 1},
-        claims=(ContainerResourceClaim(name="gpu-claim", request="gpu"),),
-    )
-
-
 def test_provider_settings_accepts_pod_image_pull_secrets(
     monkeypatch: pytest.MonkeyPatch,
     provider_env: Path,
@@ -354,23 +314,29 @@ def test_provider_settings_accepts_pod_image_pull_secrets(
     )
 
 
-def test_capability_contract_declares_qualified_execution_support() -> None:
-    """Registration carries the exact execution authority Admin must accept."""
-    execution_policy = provider_main._CAPABILITY_CONTRACT["execution_policy"]
+def test_capability_contract_declares_kubernetes_pod_profile_support() -> None:
+    """Registration advertises the exact current Pod Profile contract."""
+    profile_contracts = provider_main._CAPABILITY_CONTRACT["profile_contracts"]
 
-    assert isinstance(execution_policy, dict)
-    assert execution_policy["storage_modes"] == ["none", "ephemeral"]
-    supported_modules = execution_policy["supported_modules"]
-    assert isinstance(supported_modules, list)
-    module_versions: dict[str, int] = {}
-    for module in supported_modules:
-        assert isinstance(module, dict)
-        module_id = module["module_id"]
-        version = module["version"]
-        assert isinstance(module_id, str)
-        assert isinstance(version, int)
-        module_versions[module_id] = version
-    assert module_versions == {
-        "docker": 1,
-        "runtime.resources": 1,
-    }
+    assert isinstance(profile_contracts, list)
+    assert profile_contracts == [
+        {
+            "profile_kind": "kubernetes_pod",
+            "contract_family": "kubernetes.pod-profile",
+            "schema_versions": [1],
+            "capabilities": [
+                "kubernetes.pod-profile",
+                "runtime.resources",
+                "workspace.persistent-volume",
+                "runtime.network-policy",
+                "kubernetes.service-account",
+                "kubernetes.scheduling",
+                "docker.dind",
+                "docker.storage.ephemeral",
+            ],
+            "constraints": {
+                "maximums": {},
+                "allowed_values": {},
+            },
+        }
+    ]

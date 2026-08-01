@@ -332,9 +332,8 @@ export const ExternalChannelContinuationIndicator = {
   args: {
     message: createChatMessage({
       id: "external-channel-continuation",
-      role: "goal_continuation",
+      role: "external_channel_continuation",
       content: null,
-      metadata: { source: "external_channel" },
     }),
   },
 } satisfies Story;

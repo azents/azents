@@ -26,7 +26,7 @@ export function continuationMetadata(value: unknown): Record<string, string> {
 export function continuationPresentation(
   message?: ChatMessage | null,
 ): ContinuationPresentation {
-  if (message?.metadata?.source === "external_channel") {
+  if (message?.role === "external_channel_continuation") {
     return {
       source: "external_channel",
       icon: "channel",

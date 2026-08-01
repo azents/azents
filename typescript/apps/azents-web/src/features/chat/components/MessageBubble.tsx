@@ -56,9 +56,11 @@ interface MessageBubbleProps {
   message: ChatMessage;
   currentWorkspaceProfile?: CurrentWorkspaceProfile | null;
   dimmed?: boolean;
+  opacity?: number;
   editable?: boolean;
   onEdit?: () => void;
   failedRunRetryAction?: FailedRunRetryAction | null;
+  additionalActions?: React.ReactNode;
 }
 
 interface TextMessageProps {
@@ -143,9 +145,11 @@ function UserTextMessage({
   senderLabel,
   editable = false,
   onEdit,
+  additionalActions = null,
 }: TextMessageProps & {
   editable?: boolean;
   onEdit?: () => void;
+  additionalActions?: React.ReactNode;
 }): React.ReactElement {
   const t = useTranslations("chat");
   const editAction =
@@ -183,7 +187,12 @@ function UserTextMessage({
                 createdAt={message.createdAt}
                 align="user"
                 inferenceProfile={message.inferenceProfile}
-                additionalActions={editAction}
+                additionalActions={
+                  <>
+                    {additionalActions}
+                    {editAction}
+                  </>
+                }
               />
             ) : null
           }
@@ -241,7 +250,12 @@ function UserTextMessage({
                 createdAt={message.createdAt}
                 align="user"
                 inferenceProfile={message.inferenceProfile}
-                additionalActions={editAction}
+                additionalActions={
+                  <>
+                    {additionalActions}
+                    {editAction}
+                  </>
+                }
               />
             )}
         </MessageMetadataSurface>
@@ -261,8 +275,10 @@ function agentNameFromPath(path: string): string {
 
 function AgentMailboxMessage({
   message,
+  additionalActions = null,
 }: {
   message: ChatMessage;
+  additionalActions?: React.ReactNode;
 }): React.ReactElement {
   const t = useTranslations("chat");
   const sourcePath = message.metadata?.source_path || "/root";
@@ -273,6 +289,17 @@ function AgentMailboxMessage({
       title={t("agentMessage.title", { name: sourceName })}
       titleTooltip={sourcePath}
       content={message.content ?? ""}
+      actions={
+        additionalActions ? (
+          <MessageActionRow
+            content={message.content}
+            createdAt={message.createdAt}
+            align="user"
+            inferenceProfile={message.inferenceProfile}
+            additionalActions={additionalActions}
+          />
+        ) : null
+      }
     />
   );
 }
@@ -307,23 +334,27 @@ function AssistantTextMessage({
 function InlineControlMessage({
   icon,
   label,
+  actions = null,
 }: {
   icon: React.ReactNode;
   label: string;
+  actions?: React.ReactNode;
 }): React.ReactElement {
   return (
-    <Group
-      gap={rem(6)}
-      c="dimmed"
-      mb="md"
-      wrap="nowrap"
-      className={inlineControlClasses.root}
-    >
-      {icon}
-      <Text size="xs" className={inlineControlClasses.label}>
-        {label}
-      </Text>
-    </Group>
+    <Box mb="md">
+      <Group
+        gap={rem(6)}
+        c="dimmed"
+        wrap="nowrap"
+        className={inlineControlClasses.root}
+      >
+        {icon}
+        <Text size="xs" className={inlineControlClasses.label}>
+          {label}
+        </Text>
+      </Group>
+      {actions}
+    </Box>
   );
 }
 
@@ -489,11 +520,14 @@ export const MessageBubble = memo(function MessageBubble({
   message,
   currentWorkspaceProfile = null,
   dimmed = false,
+  opacity,
   editable = false,
   onEdit,
   failedRunRetryAction = null,
+  additionalActions = null,
 }: MessageBubbleProps): React.ReactElement | null {
   const t = useTranslations("chat");
+  const messageOpacity = opacity ?? (dimmed ? 0.45 : 1);
 
   // tool, system, and completion marker messages hide
   if (
@@ -518,10 +552,13 @@ export const MessageBubble = memo(function MessageBubble({
   const senderLabel =
     sender.type === "AVAILABLE" ? sender.name : t("senderUnavailable");
 
-  if (message.role === "goal_continuation") {
+  if (
+    message.role === "goal_continuation" ||
+    message.role === "external_channel_continuation"
+  ) {
     const continuation = continuationPresentation(message);
     return (
-      <Box opacity={dimmed ? 0.45 : 1}>
+      <Box opacity={messageOpacity}>
         <InlineControlMessage
           icon={
             continuation.icon === "channel" ? (
@@ -531,6 +568,17 @@ export const MessageBubble = memo(function MessageBubble({
             )
           }
           label={t(continuation.labelKey)}
+          actions={
+            additionalActions ? (
+              <MessageActionRow
+                content={message.content}
+                createdAt={message.createdAt}
+                align="user"
+                inferenceProfile={message.inferenceProfile}
+                additionalActions={additionalActions}
+              />
+            ) : null
+          }
         />
       </Box>
     );
@@ -538,7 +586,7 @@ export const MessageBubble = memo(function MessageBubble({
 
   if (message.role === "goal_updated") {
     return (
-      <Box opacity={dimmed ? 0.45 : 1}>
+      <Box opacity={messageOpacity}>
         <InlineControlMessage
           icon={<IconTargetArrow aria-hidden="true" size={14} stroke={1.8} />}
           label={t("goalUpdatedIndicator")}
@@ -549,7 +597,7 @@ export const MessageBubble = memo(function MessageBubble({
 
   if (message.role === "interrupted") {
     return (
-      <Box opacity={dimmed ? 0.45 : 1}>
+      <Box opacity={messageOpacity}>
         <InterruptedControlMessage />
       </Box>
     );
@@ -557,7 +605,7 @@ export const MessageBubble = memo(function MessageBubble({
 
   if (message.role === "goal_briefing") {
     return (
-      <Box opacity={dimmed ? 0.45 : 1}>
+      <Box opacity={messageOpacity}>
         <GoalBriefingCard message={message} />
       </Box>
     );
@@ -565,10 +613,21 @@ export const MessageBubble = memo(function MessageBubble({
 
   if (externalChannelSource !== null) {
     return (
-      <Box opacity={dimmed ? 0.45 : 1}>
+      <Box opacity={messageOpacity}>
         <ExternalChannelMessage
           source={externalChannelSource}
           partial={message.status === "partial"}
+          actions={
+            additionalActions ? (
+              <MessageActionRow
+                content={message.content}
+                createdAt={message.createdAt}
+                align="user"
+                inferenceProfile={message.inferenceProfile}
+                additionalActions={additionalActions}
+              />
+            ) : null
+          }
         />
       </Box>
     );
@@ -581,7 +640,7 @@ export const MessageBubble = memo(function MessageBubble({
 
   if (hasToolCalls) {
     return (
-      <Box opacity={dimmed ? 0.45 : 1}>
+      <Box opacity={messageOpacity}>
         <AssistantToolCallMessage message={message} />
       </Box>
     );
@@ -589,21 +648,25 @@ export const MessageBubble = memo(function MessageBubble({
 
   if (message.role === "user" && isAgentMailboxMessage(message)) {
     return (
-      <Box opacity={dimmed ? 0.45 : 1}>
-        <AgentMailboxMessage message={message} />
+      <Box opacity={messageOpacity}>
+        <AgentMailboxMessage
+          message={message}
+          additionalActions={additionalActions}
+        />
       </Box>
     );
   }
 
   if (message.role === "user") {
     return (
-      <Box opacity={dimmed ? 0.45 : 1}>
+      <Box opacity={messageOpacity}>
         <UserTextMessage
           message={message}
           hasContent={hasContent}
           senderLabel={senderLabel}
           editable={editable}
           onEdit={onEdit}
+          additionalActions={additionalActions}
         />
       </Box>
     );
@@ -611,7 +674,7 @@ export const MessageBubble = memo(function MessageBubble({
 
   if (message.role === "error") {
     return (
-      <Box opacity={dimmed ? 0.45 : 1}>
+      <Box opacity={messageOpacity}>
         <ErrorTextMessage
           message={message}
           failedRunRetryAction={failedRunRetryAction}
@@ -621,7 +684,7 @@ export const MessageBubble = memo(function MessageBubble({
   }
 
   return (
-    <Box opacity={dimmed ? 0.45 : 1}>
+    <Box opacity={messageOpacity}>
       <AssistantTextMessage message={message} hasContent={hasContent} />
     </Box>
   );

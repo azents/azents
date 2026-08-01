@@ -75,6 +75,39 @@ def test_user_mailbox_item_live_event_preserves_nullable_requested_profile() -> 
     assert event.payload.metadata["live_projection"] == "input_buffer"
 
 
+def test_external_channel_continuation_has_dedicated_live_projections() -> None:
+    """Pending Channel work never projects as a Goal continuation."""
+    mailbox_item = MailboxItem(
+        id="0523456789abcdef0123456789abcdef",
+        session_id="1123456789abcdef0123456789abcdef",
+        kind=MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION,
+        scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+        requested_model_target_label="quality",
+        requested_reasoning_effort=None,
+        sender_user_id=None,
+        content="",
+        idempotency_key="idle_continuation:run-1:external_channel:0",
+        metadata={
+            "source": "external_channel",
+            "active_bindings": "binding-handle",
+        },
+        action=None,
+        attachments=[],
+        file_parts=[],
+        created_at=datetime.datetime(2026, 7, 31, tzinfo=datetime.UTC),
+    )
+
+    event = mailbox_item_to_live_event(mailbox_item)
+    projection = mailbox_item_to_pending_projection(mailbox_item)
+
+    assert event is not None
+    assert event.kind is EventKind.EXTERNAL_CHANNEL_CONTINUATION
+    assert isinstance(event.payload, UserMessagePayload)
+    assert event.payload.metadata["source"] == "external_channel"
+    assert projection.kind == "external_channel_continuation"
+    assert projection.items[0].presentation.type == ("external_channel_continuation")
+
+
 def test_agent_result_mailbox_item_live_event_restores_terminal_metadata() -> None:
     """Pending terminal result exposes the complete agent message payload."""
     event = mailbox_item_to_live_event(

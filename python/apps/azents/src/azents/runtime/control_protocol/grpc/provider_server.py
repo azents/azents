@@ -816,28 +816,22 @@ def _provider_command(
         runner_auth_token=runner_credential.token,
     )
     command.payload.update(cast(dict[str, object], payload))
-    execution_policy = _required_mapping(envelope.payload, "execution_policy")
-    command.execution_policy.evidence.snapshot_id = _required_string(
-        execution_policy,
-        "snapshot_id",
+    runtime_configuration = _required_mapping(envelope.payload, "runtime_configuration")
+    command.runtime_configuration.evidence.revision_id = _required_string(
+        runtime_configuration,
+        "revision_id",
     )
-    command.execution_policy.evidence.digest = _required_string(
-        execution_policy,
+    command.runtime_configuration.evidence.digest = _required_string(
+        runtime_configuration,
         "digest",
     )
-    command.execution_policy.evidence.desired_generation = _required_int(
-        execution_policy,
+    command.runtime_configuration.evidence.desired_generation = _required_int(
+        runtime_configuration,
         "desired_generation",
     )
-    command.execution_policy.evidence.module_versions.update(
-        _required_int_mapping(execution_policy, "module_versions")
-    )
-    command.execution_policy.evidence.source_versions.update(
-        _required_int_mapping(execution_policy, "source_versions")
-    )
-    command.execution_policy.effective_policy_json = _required_string(
-        execution_policy,
-        "effective_policy_json",
+    command.runtime_configuration.resolved_configuration_json = _required_string(
+        runtime_configuration,
+        "resolved_configuration_json",
     )
     if envelope.deadline_at is not None:
         command.deadline_at.CopyFrom(deadline)
@@ -894,26 +888,6 @@ def _required_int(payload: dict[str, JsonValue], key: str) -> int:
             f"Provider command payload requires integer field: {key}",
         )
     return value
-
-
-def _required_int_mapping(
-    payload: dict[str, JsonValue],
-    key: str,
-) -> dict[str, int]:
-    value = _required_mapping(payload, key)
-    if not all(
-        isinstance(item_key, str) and isinstance(item_value, int) and item_value >= 1
-        for item_key, item_value in value.items()
-    ):
-        raise InvalidRuntimeProviderCommandPayload(
-            "INVALID_PROVIDER_COMMAND_PAYLOAD",
-            f"Provider command payload requires integer object field: {key}",
-        )
-    return {
-        item_key: item_value
-        for item_key, item_value in value.items()
-        if isinstance(item_value, int)
-    }
 
 
 def _required_command_type(payload: dict[str, JsonValue]) -> str:

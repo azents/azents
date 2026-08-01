@@ -130,6 +130,7 @@ class Toleration:
     operator: str | None = None
     value: str | None = None
     effect: str | None = None
+    toleration_seconds: int | None = None
 
 
 @dataclasses.dataclass(frozen=True)

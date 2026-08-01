@@ -145,6 +145,24 @@ def test_workspace_settings_hub_owner_and_member_flows(
         ec.element_to_be_clickable(
             (
                 By.CSS_SELECTOR,
+                f"a[href='/w/{handle}/settings/runtime-profiles']",
+            )
+        )
+    ).click()
+    _wait(browser_driver).until(ec.url_contains("/settings/runtime-profiles"))
+    _assert_visible_text(browser_driver, workspace_name)
+    _assert_visible_text(browser_driver, "Runtime profiles")
+    _assert_visible_text(browser_driver, "No Provider profiles available")
+    _assert_visible_text(browser_driver, "Add profile")
+    _wait(browser_driver).until(
+        ec.element_to_be_clickable((By.LINK_TEXT, "Back to settings"))
+    ).click()
+    _wait(browser_driver).until(lambda driver: driver.current_url == settings_url)
+
+    _wait(browser_driver).until(
+        ec.element_to_be_clickable(
+            (
+                By.CSS_SELECTOR,
                 f"a[href='/w/{handle}/settings/llm-integrations']",
             )
         )
@@ -244,6 +262,12 @@ def test_workspace_settings_hub_owner_and_member_flows(
     _assert_visible_text(browser_driver, "Default models")
     assert not browser_driver.find_elements(
         By.XPATH, "//button[normalize-space()='Save default models']"
+    )
+
+    browser_driver.get(f"{settings_url}/runtime-profiles")
+    _assert_visible_text(browser_driver, "Runtime profiles")
+    assert not browser_driver.find_elements(
+        By.XPATH, "//button[normalize-space()='Add profile']"
     )
 
     browser_driver.set_window_size(390, 844)

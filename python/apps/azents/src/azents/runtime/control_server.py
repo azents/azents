@@ -31,11 +31,9 @@ from azents.core.runtime_transfer_coordinator_credential import (
     RuntimeTransferCoordinatorCredentialVerifier,
 )
 from azents.rdb.session import SessionManager
-from azents.repos.agent_admin import AgentAdminRepository
+from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
-from azents.repos.runtime_execution_policy.repository import (
-    RuntimeExecutionPolicyRepository,
-)
+from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_binding.repository import (
     RuntimeProviderAuthBindingRepository,
@@ -87,8 +85,11 @@ from azents.runtime.transfer.object_store import RuntimeTransferS3Cleanup
 from azents.runtime.transfer.result_coordinator import (
     RuntimeRunnerTransferResultCoordinator,
 )
-from azents.services.runtime_execution_policy.application_service import (
-    RuntimeExecutionPolicyApplicationService,
+from azents.services.runtime_profile_reconciliation.service import (
+    RuntimeProfileReconciliationService,
+)
+from azents.services.runtime_profile_resolution.service import (
+    RuntimeProfileResolutionService,
 )
 from azents.services.runtime_provider_contract.service import (
     RuntimeProviderContractService,
@@ -99,6 +100,7 @@ from azents.services.runtime_provider_control.provider_auth import (
 from azents.services.runtime_provider_control.service import (
     RuntimeProviderEnrollmentService,
 )
+from azents.services.runtime_recreation.service import RuntimeRecreationReconciler
 from azents.services.runtime_runner_auth.service import (
     RuntimeRunnerAuthenticationService,
 )
@@ -244,14 +246,22 @@ async def runtime_control_server_lifespan(
     session_manager = _session_manager(engine)
     runtime_repository = AgentRuntimeRepository()
     policy_repository = RuntimeProviderPolicyRepository()
-    execution_policy_repository = RuntimeExecutionPolicyRepository()
-    execution_policy_application = RuntimeExecutionPolicyApplicationService(
+    profile_repository = RuntimeProfileRepository()
+    provider_repository = RuntimeProviderRepository()
+    provider_control_repository = RuntimeProviderControlRepository()
+    profile_resolution = RuntimeProfileResolutionService(
         session_manager=session_manager,
-        policy_repository=execution_policy_repository,
-        snapshot_repository=policy_repository,
+        agent_repository=AgentRepository(),
         runtime_repository=runtime_repository,
-        provider_repository=RuntimeProviderRepository(),
-        agent_admin_repository=AgentAdminRepository(),
+        profile_repository=profile_repository,
+        provider_repository=provider_repository,
+        control_repository=provider_control_repository,
+        provider_policy_repository=policy_repository,
+    )
+    profile_reconciliation = RuntimeProfileReconciliationService(
+        session_manager=session_manager,
+        profile_repository=profile_repository,
+        resolution_service=profile_resolution,
     )
     kubernetes_api_client: ApiClient | None = None
     kubernetes_token_reviewer = None
@@ -263,8 +273,8 @@ async def runtime_control_server_lifespan(
         )
     enrollment_service = RuntimeProviderEnrollmentService(
         session_manager=session_manager,
-        repository=RuntimeProviderControlRepository(),
-        provider_repository=RuntimeProviderRepository(),
+        repository=provider_control_repository,
+        provider_repository=provider_repository,
         binding_repository=RuntimeProviderAuthBindingRepository(),
         verifier=RuntimeProviderCredentialVerifier(settings.credential_encryption_key),
         kubernetes_token_reviewer=kubernetes_token_reviewer,
@@ -272,17 +282,18 @@ async def runtime_control_server_lifespan(
     )
     contract_service = RuntimeProviderContractService(
         session_manager=session_manager,
-        provider_repository=RuntimeProviderRepository(),
+        provider_repository=provider_repository,
         policy_repository=policy_repository,
+        profile_repository=profile_repository,
     )
     provider_sink = RuntimeProviderReportRepositorySink(
         runtime_repository=runtime_repository,
-        policy_repository=policy_repository,
+        profile_repository=profile_repository,
         session_manager=session_manager,
     )
     runner_sink = RuntimeRunnerStateRepositorySink(
         runtime_repository=runtime_repository,
-        policy_repository=policy_repository,
+        profile_repository=profile_repository,
         session_manager=session_manager,
     )
     runner_credential_verifier = RuntimeRunnerCredentialVerifier(
@@ -295,7 +306,7 @@ async def runtime_control_server_lifespan(
     )
     reconciler = RuntimeLifecycleReconciler(
         runtime_repository=runtime_repository,
-        policy_repository=policy_repository,
+        profile_repository=profile_repository,
         session_manager=session_manager,
         coordination_store=coordination_store,
         control_protocol=control_protocol,
@@ -314,11 +325,17 @@ async def runtime_control_server_lifespan(
             ),
         ),
     )
+    recreation_reconciler = RuntimeRecreationReconciler(
+        session_manager=session_manager,
+        profile_repository=profile_repository,
+        runtime_repository=runtime_repository,
+    )
     stop_reconciler = asyncio.Event()
     reconciler_task = asyncio.create_task(
         _run_reconciler(
             reconciler,
-            execution_policy_application,
+            profile_reconciliation,
+            recreation_reconciler,
             stop=stop_reconciler,
             interval_seconds=settings.runtime_control_reconcile_interval_seconds,
         ),
@@ -430,22 +447,41 @@ async def runtime_control_server_lifespan(
 
 async def _run_reconciler(
     reconciler: RuntimeLifecycleReconciler,
-    execution_policy_application: RuntimeExecutionPolicyApplicationService,
+    profile_reconciliation: RuntimeProfileReconciliationService,
+    recreation_reconciler: RuntimeRecreationReconciler,
     *,
     stop: asyncio.Event,
     interval_seconds: float,
 ) -> None:
     while not stop.is_set():
         try:
-            convergence = await execution_policy_application.converge_once()
-            if convergence.targeted or convergence.stopped:
+            profile_result = await profile_reconciliation.reconcile_once()
+            if (
+                profile_result.reconciled_agents
+                or profile_result.blocked_agents
+                or profile_result.stale_tasks
+            ):
                 _LOGGER.info(
-                    "Runtime execution-policy convergence updated Runtimes",
+                    "Runtime Profile reconciliation updated desired configurations",
                     extra={
-                        "scanned": convergence.scanned,
-                        "targeted": convergence.targeted,
-                        "stopped": convergence.stopped,
-                        "pending_expansion": convergence.pending_expansion,
+                        "claimed_tasks": profile_result.claimed_tasks,
+                        "reconciled_agents": profile_result.reconciled_agents,
+                        "blocked_agents": profile_result.blocked_agents,
+                        "skipped_agents": profile_result.skipped_agents,
+                        "stale_tasks": profile_result.stale_tasks,
+                        "continued_tasks": profile_result.continued_tasks,
+                        "retried_tasks": profile_result.retried_tasks,
+                    },
+                )
+            recreation_result = await recreation_reconciler.reconcile_once()
+            if recreation_result.dispatched_items or recreation_result.completed_items:
+                _LOGGER.info(
+                    "Runtime recreation reconcile advanced operations",
+                    extra={
+                        "operations": recreation_result.operations,
+                        "processed_items": recreation_result.processed_items,
+                        "dispatched_items": recreation_result.dispatched_items,
+                        "completed_items": recreation_result.completed_items,
                     },
                 )
             dispatched = await reconciler.reconcile_once()

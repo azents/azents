@@ -313,6 +313,13 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """
         pass
 
+    def test_external_channel_v1_update_default_response_mode(self) -> None:
+        """Test case for external_channel_v1_update_default_response_mode
+
+        Update Default Response Mode
+        """
+        pass
+
     def test_external_channel_v1_update_discord_connection(self) -> None:
         """Test case for external_channel_v1_update_discord_connection
 
@@ -331,6 +338,13 @@ class TestExternalChannelV1Api(unittest.TestCase):
         """Test case for external_channel_v1_update_multi_slack_connection
 
         Update Multi Slack Connection
+        """
+        pass
+
+    def test_external_channel_v1_update_session_channel_response_mode(self) -> None:
+        """Test case for external_channel_v1_update_session_channel_response_mode
+
+        Update Session Channel Response Mode
         """
         pass
 

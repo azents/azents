@@ -108,8 +108,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-29
-spec_version: 134
+last_verified_at: 2026-08-01
+spec_version: 137
 ---
 
 # Conversation & Events
@@ -780,6 +780,8 @@ Redis, while tests may use the in-memory implementation. Pending mailbox items a
 `mailbox_items` table and are exposed through `/live` as typed envelope/item projections. Goal
 continuation starts as a pending `goal_continuation` mailbox envelope and becomes a durable
 `goal_continuation` event only when the session runner flushes mailbox items into the next model input.
+External Channel continuation uses the separate `external_channel_continuation`
+mailbox and event kind across pending, live, durable, and public API projections.
 The `/live` reader obtains access, pending input, active Run, Goal/Todo Toolkit state, and action
 execution projections in one short PostgreSQL session. It closes that session before reading Redis
 live projections and performs no nested database session reads inside the snapshot.
@@ -860,7 +862,8 @@ error message when diagram rendering fails.
 ## 6. Mailbox And Session Inputs
 
 Chat route and collaboration inputs are prepared before model-call boundaries. The supported
-Mailbox kinds are `user_message`, `goal_continuation`, `action_message`, `agent_message`, and
+Mailbox kinds are `user_message`, `goal_continuation`,
+`external_channel_continuation`, `action_message`, `agent_message`, and
 `external_channel_invocation`. Every mailbox envelope carries explicit scheduling intent and an
 immutable typed payload whose ordered items use stable `(mailbox_item_id, item_key)` identity.
 Broker wake-ups are payload-free signals and never carry model input.
@@ -876,7 +879,9 @@ producers own wake-up and run-state transitions. User, Goal, action, spawn, and 
 `wake_session`; ordinary `send_message` and terminal `agent_result` inputs use `queue_only` and do not
 mark or wake the target session. Queue-only rows remain in FIFO order and are promoted with a later
 wake-producing input, but they do not count as follow-up work and do not prevent a session with no
-active Run from becoming idle. Preparation handles exactly one FIFO head per transaction. The worker
+active Run from becoming idle. An External Channel invocation is ordinary FIFO input after its
+acceptance transaction commits the conversation-position advance, mailbox item, and Session running
+transition. Preparation handles exactly one FIFO head per transaction. The worker
 first reads the head's identity and inference requirement, resolves the profile and attachment metadata outside any database session when needed, then locks the Session and
 the same FIFO head. Attachment resolution is metadata-only during promotion: it never downloads the
 Exchange file or creates a replacement ModelFile, and model rich input comes only from FileParts
@@ -891,7 +896,9 @@ Canonical outcomes are:
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `user_message`            | Durable `user_message` event.                                                                                          |
 | `goal_continuation`       | Durable `goal_continuation` event.                                                                                     |
+| `external_channel_continuation` | Durable `external_channel_continuation` event.                                                                    |
 | `agent_message`           | Durable `agent_message` event.                                                                                         |
+| `external_channel_invocation` | Contiguous source-attributed `external_channel_message` events.                                                   |
 | Goal `action_message`     | Goal side effect plus canonical goal/user events; no `action_message` event.                                           |
 | Skill `action_message`    | `skill_loaded` plus optional `user_message`; no `action_message` event.                                                |
 | Worktree `action_message` | Mailbox-item-keyed live `ActionExecution` claim with action payload and current owner generation; no `action_message` event. |
@@ -1047,11 +1054,11 @@ Current verification:
 
 ## 11. External Channel Conversation Projection
 
-An authorized External Channel invocation enters a Session through a batch
-mailbox envelope that stores only the invocation-batch reference. Promotion resolves
-the immutable ordered batch items and appends contiguous
-`external_channel_message` events; provider text is not duplicated in the
-mailbox payload.
+An authorized External Channel invocation enters a Session through one deterministic
+mailbox envelope containing its immutable ordered provider-history projection. The
+acceptance transaction atomically advances the conversation position, commits the
+mailbox item, and makes the Session runnable. Promotion appends contiguous
+`external_channel_message` events. Provider-control delivery has no promotion gate.
 
 Each event retains provider, resource/binding, canonical message and revision,
 sender, author type, provider timestamp, authorization state, lifecycle, and
@@ -1070,6 +1077,12 @@ participant.
 
 ## 12. Changelog
 
+- **2026-08-01** — v137. Removed the External Channel activation promotion gate;
+  accepted invocation mailboxes now follow the ordinary FIFO contract, with the
+  conversation position as the sole duplicate-prevention authority.
+- **2026-07-31** — v136. Added the dedicated
+  `external_channel_continuation` mailbox, event, live projection, and public API
+  contract instead of reusing Goal continuation.
 - **2026-07-24** — v132. Promoted Team Session requester/sender separation, post-commit
   routing-only wakes, canonical Postgres execution authority, and Userless execution invariants.
 - **2026-07-24** — v131. Added explicit versus Agent-default root workspace intent,

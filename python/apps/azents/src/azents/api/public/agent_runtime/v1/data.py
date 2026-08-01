@@ -1,6 +1,7 @@
 """Agent Runtime v1 Public API data models."""
 
 import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 from typing_extensions import Self
@@ -13,22 +14,12 @@ from azents.core.enums import (
     RuntimeRunnerState,
     RuntimeSummary,
 )
-from azents.core.runtime_execution_policy import (
-    RuntimeExecutionModuleId,
-    RuntimeExecutionPolicyLayer,
-    RuntimeExecutionPolicyStatus,
-    RuntimeExecutionRequiredAction,
-    RuntimeExecutionStorageMode,
-)
+from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
+from azents.repos.runtime_profile.data import RuntimeConfigurationRevision
 from azents.services.agent_runtime.lifecycle_data import (
+    AgentRuntimeConfigurationStatus,
     AgentRuntimeLifecycleOutput,
     AgentRuntimeOutput,
-)
-from azents.services.runtime_execution_policy.application_service import (
-    RuntimeExecutionCapabilitySummary,
-    RuntimeExecutionConfiguredSummary,
-    RuntimeExecutionPolicyStatusProjection,
-    RuntimeExecutionSnapshotSummary,
 )
 
 
@@ -58,107 +49,83 @@ class AgentRuntimeSummaryResponse(BaseModel):
     failure: AgentRuntimeFailureResponse | None
 
 
-class RuntimeExecutionCapabilitySummaryResponse(BaseModel):
-    """One safe Runtime execution capability summary."""
+class RuntimeConfigurationRevisionResponse(BaseModel):
+    """Safe immutable Runtime configuration revision evidence."""
 
-    module_id: RuntimeExecutionModuleId
-    version: int
-    enabled: bool
-
-    @classmethod
-    def convert_from(cls, data: RuntimeExecutionCapabilitySummary) -> Self:
-        """Convert one capability summary."""
-        return cls(
-            module_id=data.module_id,
-            version=data.version,
-            enabled=data.enabled,
-        )
-
-
-class RuntimeExecutionConfiguredSummaryResponse(BaseModel):
-    """Safe configured Runtime execution-policy summary."""
-
-    profile_id: str
+    id: str
+    provider_id: str
+    provider_capability_revision_id: str | None
+    infrastructure_profile_id: str
+    infrastructure_profile_version: int
+    workspace_runtime_profile_id: str
+    workspace_runtime_profile_version: int
+    agent_selection_version: int
+    resolution_status: RuntimeConfigurationResolutionStatus
+    reason_code: str | None
+    required_capabilities: list[str]
+    missing_capabilities: list[str]
     digest: str
-    capabilities: list[RuntimeExecutionCapabilitySummaryResponse]
-    storage_mode: RuntimeExecutionStorageMode
-    storage_capacity_bytes: int | None
+    target_desired_generation: int
+    provider_reported_digest: str | None
+    runner_reported_digest: str | None
+    provider_acknowledged_at: datetime.datetime | None
+    runtime_observed_at: datetime.datetime | None
+    created_at: datetime.datetime
 
     @classmethod
-    def convert_from(cls, data: RuntimeExecutionConfiguredSummary) -> Self:
-        """Convert configured policy without implementation details."""
+    def convert_from(cls, data: RuntimeConfigurationRevision) -> Self:
+        """Convert immutable evidence without resolved infrastructure details."""
         return cls(
-            profile_id=data.profile_id,
+            id=data.id,
+            provider_id=data.provider_id,
+            provider_capability_revision_id=data.provider_capability_revision_id,
+            infrastructure_profile_id=data.infrastructure_profile_id,
+            infrastructure_profile_version=data.infrastructure_profile_version,
+            workspace_runtime_profile_id=data.workspace_runtime_profile_id,
+            workspace_runtime_profile_version=data.workspace_runtime_profile_version,
+            agent_selection_version=data.agent_selection_version,
+            resolution_status=data.resolution_status,
+            reason_code=data.reason_code,
+            required_capabilities=list(data.required_capabilities),
+            missing_capabilities=list(data.missing_capabilities),
             digest=data.digest,
-            capabilities=[
-                RuntimeExecutionCapabilitySummaryResponse.convert_from(item)
-                for item in data.capabilities
-            ],
-            storage_mode=data.storage_mode,
-            storage_capacity_bytes=data.storage_capacity_bytes,
+            target_desired_generation=data.target_desired_generation,
+            provider_reported_digest=data.provider_reported_digest,
+            runner_reported_digest=data.runner_reported_digest,
+            provider_acknowledged_at=data.provider_acknowledged_at,
+            runtime_observed_at=data.runtime_observed_at,
+            created_at=data.created_at,
         )
 
 
-class RuntimeExecutionSnapshotSummaryResponse(BaseModel):
-    """Safe target or applied Runtime execution-policy summary."""
+class AgentRuntimeConfigurationStatusResponse(BaseModel):
+    """Desired and applied Runtime configuration status."""
 
-    profile_id: str
-    digest: str
-    desired_generation: int
-    capabilities: list[RuntimeExecutionCapabilitySummaryResponse]
-    storage_mode: RuntimeExecutionStorageMode
-    storage_capacity_bytes: int | None
-
-    @classmethod
-    def convert_from(cls, data: RuntimeExecutionSnapshotSummary) -> Self:
-        """Convert one immutable snapshot summary."""
-        return cls(
-            profile_id=data.profile_id,
-            digest=data.digest,
-            desired_generation=data.desired_generation,
-            capabilities=[
-                RuntimeExecutionCapabilitySummaryResponse.convert_from(item)
-                for item in data.capabilities
-            ],
-            storage_mode=data.storage_mode,
-            storage_capacity_bytes=data.storage_capacity_bytes,
-        )
-
-
-class AgentRuntimeExecutionPolicyStatusResponse(BaseModel):
-    """Safe server-authoritative Runtime execution-policy status."""
-
-    status: RuntimeExecutionPolicyStatus
-    configured: RuntimeExecutionConfiguredSummaryResponse
-    target: RuntimeExecutionSnapshotSummaryResponse | None
-    applied: RuntimeExecutionSnapshotSummaryResponse | None
-    desired_generation: int
-    governing_layers: dict[str, RuntimeExecutionPolicyLayer]
-    reason_codes: list[str]
-    required_action: RuntimeExecutionRequiredAction
+    status: Literal[
+        "profile_required",
+        "configuration_blocked",
+        "configured_not_created",
+        "waiting_for_recreation",
+        "applied",
+    ]
+    desired: RuntimeConfigurationRevisionResponse | None
+    applied: RuntimeConfigurationRevisionResponse | None
 
     @classmethod
-    def convert_from(cls, data: RuntimeExecutionPolicyStatusProjection) -> Self:
-        """Convert the read-only execution-policy projection."""
+    def convert_from(cls, data: AgentRuntimeConfigurationStatus) -> Self:
+        """Convert server-authoritative configuration status."""
         return cls(
             status=data.status,
-            configured=RuntimeExecutionConfiguredSummaryResponse.convert_from(
-                data.configured
-            ),
-            target=(
-                RuntimeExecutionSnapshotSummaryResponse.convert_from(data.target)
-                if data.target is not None
+            desired=(
+                RuntimeConfigurationRevisionResponse.convert_from(data.desired)
+                if data.desired is not None
                 else None
             ),
             applied=(
-                RuntimeExecutionSnapshotSummaryResponse.convert_from(data.applied)
+                RuntimeConfigurationRevisionResponse.convert_from(data.applied)
                 if data.applied is not None
                 else None
             ),
-            desired_generation=data.desired_generation,
-            governing_layers=data.governing_layers,
-            reason_codes=list(data.reason_codes),
-            required_action=data.required_action,
         )
 
 
@@ -169,7 +136,11 @@ class AgentRuntimeRawStateResponse(BaseModel):
     workspace_id: str
     agent_id: str
     runtime_provider_id: str | None
-    provider_config: dict[str, object] | None
+    runtime_provider_resource_id: str | None
+    infrastructure_profile_id: str | None
+    workspace_runtime_profile_id: str | None
+    desired_runtime_configuration_revision_id: str | None
+    applied_runtime_configuration_revision_id: str | None
     desired_state: RuntimeDesiredState
     desired_generation: int
     last_lifecycle_command: RuntimeLifecycleCommandType | None
@@ -193,7 +164,7 @@ class AgentRuntimeResponse(BaseModel):
 
     runtime: AgentRuntimeRawStateResponse
     state: AgentRuntimeSummaryResponse
-    execution_policy: AgentRuntimeExecutionPolicyStatusResponse
+    configuration: AgentRuntimeConfigurationStatusResponse
 
     @classmethod
     def convert_from(cls, data: AgentRuntimeOutput) -> Self:
@@ -204,7 +175,19 @@ class AgentRuntimeResponse(BaseModel):
                 workspace_id=data.runtime.workspace_id,
                 agent_id=data.runtime.agent_id,
                 runtime_provider_id=data.runtime.runtime_provider_id,
-                provider_config=data.runtime.provider_config,
+                runtime_provider_resource_id=(
+                    data.runtime.runtime_provider_resource_id
+                ),
+                infrastructure_profile_id=data.runtime.infrastructure_profile_id,
+                workspace_runtime_profile_id=(
+                    data.runtime.workspace_runtime_profile_id
+                ),
+                desired_runtime_configuration_revision_id=(
+                    data.runtime.desired_runtime_configuration_revision_id
+                ),
+                applied_runtime_configuration_revision_id=(
+                    data.runtime.applied_runtime_configuration_revision_id
+                ),
                 desired_state=data.runtime.desired_state,
                 desired_generation=data.runtime.desired_generation,
                 last_lifecycle_command=data.runtime.last_lifecycle_command,
@@ -235,8 +218,8 @@ class AgentRuntimeResponse(BaseModel):
                     else None
                 ),
             ),
-            execution_policy=AgentRuntimeExecutionPolicyStatusResponse.convert_from(
-                data.execution_policy
+            configuration=AgentRuntimeConfigurationStatusResponse.convert_from(
+                data.configuration
             ),
         )
 
@@ -254,13 +237,13 @@ class AgentRuntimeLifecycleResponse(AgentRuntimeResponse):
             AgentRuntimeOutput(
                 runtime=data.runtime,
                 state=data.state,
-                execution_policy=data.execution_policy,
+                configuration=data.configuration,
             )
         )
         return cls(
             runtime=base.runtime,
             state=base.state,
-            execution_policy=base.execution_policy,
+            configuration=base.configuration,
             command_type=data.command_type,
             desired_generation=data.desired_generation,
         )

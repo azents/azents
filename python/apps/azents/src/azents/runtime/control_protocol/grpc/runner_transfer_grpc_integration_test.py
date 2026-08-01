@@ -25,6 +25,9 @@ from azents_runtime_control.grpc_runner_transfer_client import (
     RunnerDownloadChunk,
     RunnerUploadComplete,
 )
+from azents_runtime_control.proto import (
+    runtime_configuration_pb2 as configuration_pb,
+)
 from azents_runtime_control.proto import runtime_runner_control_pb2 as control_pb
 from azents_runtime_control.proto import runtime_runner_control_pb2_grpc as control_grpc
 from azents_runtime_control.proto import runtime_runner_transfer_pb2 as transfer_pb
@@ -93,6 +96,14 @@ class _StateSink:
     async def validate_runner_registration(self, registration: object) -> bool:
         del registration
         return True
+
+    async def configuration_evidence_for_runner_heartbeat(
+        self,
+        *,
+        runtime_id: str,
+    ) -> None:
+        del runtime_id
+        return None
 
 
 class _TransferResultSink:
@@ -773,16 +784,10 @@ def _register() -> control_pb.RunnerMessage:
             health="ok",
             workspace_path="/workspace",
             auth_credential_id="credential-1",
-            execution_policy=control_pb.RunnerExecutionPolicyEvidence(
-                snapshot_id="snapshot-1",
+            runtime_configuration=configuration_pb.RuntimeConfigurationEvidence(
+                revision_id="revision-1",
                 digest="d" * 64,
                 desired_generation=1,
-                module_versions={"docker": 1, "runtime.resources": 1},
-                source_versions={
-                    "profile": 1,
-                    "workspace": 1,
-                    "agent": 1,
-                },
             ),
         ),
     )

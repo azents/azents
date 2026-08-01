@@ -25,10 +25,12 @@ from azentspublicclient.models.external_channel_connection_status_snapshot impor
 from azentspublicclient.models.external_channel_decision_input import ExternalChannelDecisionInput
 from azentspublicclient.models.external_channel_multi_connection_impact import ExternalChannelMultiConnectionImpact
 from azentspublicclient.models.external_channel_multi_route_impact import ExternalChannelMultiRouteImpact
+from azentspublicclient.models.external_channel_response_mode_setting import ExternalChannelResponseModeSetting
 from azentspublicclient.models.external_channel_transport import ExternalChannelTransport
 from azentspublicclient.models.generation_fence_request import GenerationFenceRequest
 from azentspublicclient.models.managed_access_response import ManagedAccessResponse
 from azentspublicclient.models.managed_approval_request import ManagedApprovalRequest
+from azentspublicclient.models.managed_binding import ManagedBinding
 from azentspublicclient.models.managed_binding_list_response import ManagedBindingListResponse
 from azentspublicclient.models.managed_channel_default import ManagedChannelDefault
 from azentspublicclient.models.managed_channel_default_list_response import ManagedChannelDefaultListResponse
@@ -44,6 +46,7 @@ from azentspublicclient.models.managed_multi_route_list_response import ManagedM
 from azentspublicclient.models.managed_slack_management_handoff import ManagedSlackManagementHandoff
 from azentspublicclient.models.multi_channel_default_request import MultiChannelDefaultRequest
 from azentspublicclient.models.multi_route_create_request import MultiRouteCreateRequest
+from azentspublicclient.models.response_mode_request import ResponseModeRequest
 from azentspublicclient.models.slack_connection_setup_request import SlackConnectionSetupRequest
 from azentspublicclient.models.slack_manifest_guidance import SlackManifestGuidance
 
@@ -12375,6 +12378,313 @@ class ExternalChannelV1Api:
 
 
     @validate_call
+    def external_channel_v1_update_default_response_mode(
+        self,
+        agent_id: StrictStr,
+        handle: StrictStr,
+        response_mode_request: ResponseModeRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ExternalChannelResponseModeSetting:
+        """Update Default Response Mode
+
+        Replace the default copied to newly connected conversations.
+
+        :param agent_id: (required)
+        :type agent_id: str
+        :param handle: (required)
+        :type handle: str
+        :param response_mode_request: (required)
+        :type response_mode_request: ResponseModeRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._external_channel_v1_update_default_response_mode_serialize(
+            agent_id=agent_id,
+            handle=handle,
+            response_mode_request=response_mode_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "ExternalChannelResponseModeSetting",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    @validate_call
+    def external_channel_v1_update_default_response_mode_with_http_info(
+        self,
+        agent_id: StrictStr,
+        handle: StrictStr,
+        response_mode_request: ResponseModeRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[ExternalChannelResponseModeSetting]:
+        """Update Default Response Mode
+
+        Replace the default copied to newly connected conversations.
+
+        :param agent_id: (required)
+        :type agent_id: str
+        :param handle: (required)
+        :type handle: str
+        :param response_mode_request: (required)
+        :type response_mode_request: ResponseModeRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._external_channel_v1_update_default_response_mode_serialize(
+            agent_id=agent_id,
+            handle=handle,
+            response_mode_request=response_mode_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "ExternalChannelResponseModeSetting",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    @validate_call
+    def external_channel_v1_update_default_response_mode_without_preload_content(
+        self,
+        agent_id: StrictStr,
+        handle: StrictStr,
+        response_mode_request: ResponseModeRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """Update Default Response Mode
+
+        Replace the default copied to newly connected conversations.
+
+        :param agent_id: (required)
+        :type agent_id: str
+        :param handle: (required)
+        :type handle: str
+        :param response_mode_request: (required)
+        :type response_mode_request: ResponseModeRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._external_channel_v1_update_default_response_mode_serialize(
+            agent_id=agent_id,
+            handle=handle,
+            response_mode_request=response_mode_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "ExternalChannelResponseModeSetting",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _external_channel_v1_update_default_response_mode_serialize(
+        self,
+        agent_id,
+        handle,
+        response_mode_request,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[
+            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
+        ] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        if agent_id is not None:
+            _path_params['agent_id'] = agent_id
+        if handle is not None:
+            _path_params['handle'] = handle
+        # process the query parameters
+        # process the header parameters
+        # process the form parameters
+        # process the body parameter
+        if response_mode_request is not None:
+            _body_params = response_mode_request
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+        # set the HTTP header `Content-Type`
+        if _content_type:
+            _header_params['Content-Type'] = _content_type
+        else:
+            _default_content_type = (
+                self.api_client.select_header_content_type(
+                    [
+                        'application/json'
+                    ]
+                )
+            )
+            if _default_content_type is not None:
+                _header_params['Content-Type'] = _default_content_type
+
+        # authentication setting
+        _auth_settings: List[str] = [
+            'HTTPBearer'
+        ]
+
+        return self.api_client.param_serialize(
+            method='PUT',
+            resource_path='/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    @validate_call
     def external_channel_v1_update_discord_connection(
         self,
         agent_id: StrictStr,
@@ -13295,6 +13605,343 @@ class ExternalChannelV1Api:
         return self.api_client.param_serialize(
             method='PUT',
             resource_path='/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}',
+            path_params=_path_params,
+            query_params=_query_params,
+            header_params=_header_params,
+            body=_body_params,
+            post_params=_form_params,
+            files=_files,
+            auth_settings=_auth_settings,
+            collection_formats=_collection_formats,
+            _host=_host,
+            _request_auth=_request_auth
+        )
+
+
+
+
+    @validate_call
+    def external_channel_v1_update_session_channel_response_mode(
+        self,
+        agent_id: StrictStr,
+        session_id: StrictStr,
+        binding_id: StrictStr,
+        handle: StrictStr,
+        response_mode_request: ResponseModeRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ManagedBinding:
+        """Update Session Channel Response Mode
+
+        Replace one connected conversation binding's response mode.
+
+        :param agent_id: (required)
+        :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
+        :param binding_id: (required)
+        :type binding_id: str
+        :param handle: (required)
+        :type handle: str
+        :param response_mode_request: (required)
+        :type response_mode_request: ResponseModeRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._external_channel_v1_update_session_channel_response_mode_serialize(
+            agent_id=agent_id,
+            session_id=session_id,
+            binding_id=binding_id,
+            handle=handle,
+            response_mode_request=response_mode_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "ManagedBinding",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        ).data
+
+
+    @validate_call
+    def external_channel_v1_update_session_channel_response_mode_with_http_info(
+        self,
+        agent_id: StrictStr,
+        session_id: StrictStr,
+        binding_id: StrictStr,
+        handle: StrictStr,
+        response_mode_request: ResponseModeRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> ApiResponse[ManagedBinding]:
+        """Update Session Channel Response Mode
+
+        Replace one connected conversation binding's response mode.
+
+        :param agent_id: (required)
+        :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
+        :param binding_id: (required)
+        :type binding_id: str
+        :param handle: (required)
+        :type handle: str
+        :param response_mode_request: (required)
+        :type response_mode_request: ResponseModeRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._external_channel_v1_update_session_channel_response_mode_serialize(
+            agent_id=agent_id,
+            session_id=session_id,
+            binding_id=binding_id,
+            handle=handle,
+            response_mode_request=response_mode_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "ManagedBinding",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        response_data.read()
+        return self.api_client.response_deserialize(
+            response_data=response_data,
+            response_types_map=_response_types_map,
+        )
+
+
+    @validate_call
+    def external_channel_v1_update_session_channel_response_mode_without_preload_content(
+        self,
+        agent_id: StrictStr,
+        session_id: StrictStr,
+        binding_id: StrictStr,
+        handle: StrictStr,
+        response_mode_request: ResponseModeRequest,
+        _request_timeout: Union[
+            None,
+            Annotated[StrictFloat, Field(gt=0)],
+            Tuple[
+                Annotated[StrictFloat, Field(gt=0)],
+                Annotated[StrictFloat, Field(gt=0)]
+            ]
+        ] = None,
+        _request_auth: Optional[Dict[StrictStr, Any]] = None,
+        _content_type: Optional[StrictStr] = None,
+        _headers: Optional[Dict[StrictStr, Any]] = None,
+        _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
+    ) -> RESTResponseType:
+        """Update Session Channel Response Mode
+
+        Replace one connected conversation binding's response mode.
+
+        :param agent_id: (required)
+        :type agent_id: str
+        :param session_id: (required)
+        :type session_id: str
+        :param binding_id: (required)
+        :type binding_id: str
+        :param handle: (required)
+        :type handle: str
+        :param response_mode_request: (required)
+        :type response_mode_request: ResponseModeRequest
+        :param _request_timeout: timeout setting for this request. If one
+                                 number provided, it will be total request
+                                 timeout. It can also be a pair (tuple) of
+                                 (connection, read) timeouts.
+        :type _request_timeout: int, tuple(int, int), optional
+        :param _request_auth: set to override the auth_settings for an a single
+                              request; this effectively ignores the
+                              authentication in the spec for a single request.
+        :type _request_auth: dict, optional
+        :param _content_type: force content-type for the request.
+        :type _content_type: str, Optional
+        :param _headers: set to override the headers for a single
+                         request; this effectively ignores the headers
+                         in the spec for a single request.
+        :type _headers: dict, optional
+        :param _host_index: set to override the host_index for a single
+                            request; this effectively ignores the host_index
+                            in the spec for a single request.
+        :type _host_index: int, optional
+        :return: Returns the result object.
+        """ # noqa: E501
+
+        _param = self._external_channel_v1_update_session_channel_response_mode_serialize(
+            agent_id=agent_id,
+            session_id=session_id,
+            binding_id=binding_id,
+            handle=handle,
+            response_mode_request=response_mode_request,
+            _request_auth=_request_auth,
+            _content_type=_content_type,
+            _headers=_headers,
+            _host_index=_host_index
+        )
+
+        _response_types_map: Dict[str, Optional[str]] = {
+            '200': "ManagedBinding",
+            '422': "HTTPValidationError",
+        }
+        response_data = self.api_client.call_api(
+            *_param,
+            _request_timeout=_request_timeout
+        )
+        return response_data.response
+
+
+    def _external_channel_v1_update_session_channel_response_mode_serialize(
+        self,
+        agent_id,
+        session_id,
+        binding_id,
+        handle,
+        response_mode_request,
+        _request_auth,
+        _content_type,
+        _headers,
+        _host_index,
+    ) -> RequestSerialized:
+
+        _host = None
+
+        _collection_formats: Dict[str, str] = {
+        }
+
+        _path_params: Dict[str, str] = {}
+        _query_params: List[Tuple[str, str]] = []
+        _header_params: Dict[str, Optional[str]] = _headers or {}
+        _form_params: List[Tuple[str, str]] = []
+        _files: Dict[
+            str, Union[str, bytes, List[str], List[bytes], List[Tuple[str, bytes]]]
+        ] = {}
+        _body_params: Optional[bytes] = None
+
+        # process the path parameters
+        if agent_id is not None:
+            _path_params['agent_id'] = agent_id
+        if session_id is not None:
+            _path_params['session_id'] = session_id
+        if binding_id is not None:
+            _path_params['binding_id'] = binding_id
+        if handle is not None:
+            _path_params['handle'] = handle
+        # process the query parameters
+        # process the header parameters
+        # process the form parameters
+        # process the body parameter
+        if response_mode_request is not None:
+            _body_params = response_mode_request
+
+
+        # set the HTTP header `Accept`
+        if 'Accept' not in _header_params:
+            _header_params['Accept'] = self.api_client.select_header_accept(
+                [
+                    'application/json'
+                ]
+            )
+
+        # set the HTTP header `Content-Type`
+        if _content_type:
+            _header_params['Content-Type'] = _content_type
+        else:
+            _default_content_type = (
+                self.api_client.select_header_content_type(
+                    [
+                        'application/json'
+                    ]
+                )
+            )
+            if _default_content_type is not None:
+                _header_params['Content-Type'] = _default_content_type
+
+        # authentication setting
+        _auth_settings: List[str] = [
+            'HTTPBearer'
+        ]
+
+        return self.api_client.param_serialize(
+            method='PUT',
+            resource_path='/external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode',
             path_params=_path_params,
             query_params=_query_params,
             header_params=_header_params,

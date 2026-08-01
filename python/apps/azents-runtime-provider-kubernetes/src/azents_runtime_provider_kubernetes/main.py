@@ -25,16 +25,12 @@ from azents_runtime_control.provider import (
 )
 
 from azents_runtime_provider_kubernetes.kubernetes_api import (
-    ContainerResourceClaim,
-    ContainerResources,
     IpBlock,
-    KubernetesResourceQuantity,
     LabelSelector,
     LocalObjectReference,
     NetworkPolicyEgressRule,
     NetworkPolicyPeer,
     NetworkPolicyPort,
-    Toleration,
 )
 from azents_runtime_provider_kubernetes.kubernetes_http import KubernetesHttpApi
 from azents_runtime_provider_kubernetes.leader import (
@@ -45,9 +41,6 @@ from azents_runtime_provider_kubernetes.provider import (
     RUNNER_LIMIT_ENV_NAMES,
     KubernetesRuntimeProvider,
     KubernetesRuntimeProviderConfig,
-)
-from azents_runtime_provider_kubernetes.runtime_control import (
-    KubernetesRuntimeControlAdapter,
 )
 
 _PROTOCOL_VERSION = "agent-runtime-provider-kubernetes-v1"
@@ -72,27 +65,34 @@ _CAPABILITY_CONTRACT: dict[str, JsonValue] = {
         "observe",
         "terminal_delete",
     ],
-    "optional_capabilities": [
-        "execution_policy_v1",
-        "runtime_network_policy",
-        "docker_privileged_dind",
-        "docker_storage_ephemeral",
-    ],
+    "optional_capabilities": [],
     "persistence": {
         "kind": "persistent",
         "reset_destroys_workspace": True,
         "terminal_delete_destroys_workspace": True,
     },
     "configuration_fields": [],
-    "execution_policy": {
-        "schema_version": 1,
-        "supported_modules": [
-            {"module_id": "docker", "version": 1},
-            {"module_id": "runtime.resources", "version": 1},
-        ],
-        "storage_modes": ["none", "ephemeral"],
-        "resource_maxima": None,
-    },
+    "profile_contracts": [
+        {
+            "profile_kind": "kubernetes_pod",
+            "contract_family": "kubernetes.pod-profile",
+            "schema_versions": [1],
+            "capabilities": [
+                "kubernetes.pod-profile",
+                "runtime.resources",
+                "workspace.persistent-volume",
+                "runtime.network-policy",
+                "kubernetes.service-account",
+                "kubernetes.scheduling",
+                "docker.dind",
+                "docker.storage.ephemeral",
+            ],
+            "constraints": {
+                "maximums": {},
+                "allowed_values": {},
+            },
+        }
+    ],
 }
 
 
@@ -150,9 +150,6 @@ async def _run_control_loop(
         KubernetesRuntimeProviderConfig(
             provider_id=settings.provider_id,
             namespace=settings.workload_namespace,
-            storage_class_name=settings.storage_class_name,
-            pvc_storage_request=settings.pvc_storage_request,
-            runner_resources=settings.runner_resources,
             runner_env=settings.runner_env,
             engine_image=settings.engine_image,
             runtime_control_namespace=settings.runtime_control_namespace,
@@ -163,12 +160,9 @@ async def _run_control_loop(
             network_hard_cap_extra_egress=settings.network_hard_cap_extra_egress,
             image_pull_secrets=settings.image_pull_secrets,
             pod_annotations=settings.pod_annotations,
-            pod_node_selector=settings.pod_node_selector,
-            pod_tolerations=settings.pod_tolerations,
             workspace_mount_path=settings.workspace_path,
         ),
     )
-    lifecycle = KubernetesRuntimeControlAdapter(provider)
     registration = ProviderRegistration(
         provider_id=settings.provider_id,
         provider_type="kubernetes",
@@ -180,10 +174,6 @@ async def _run_control_loop(
             "observe",
             "workspace_path",
             "pvc_persistence",
-            "execution_policy_v1",
-            "runtime_network_policy",
-            "docker_privileged_dind",
-            "docker_storage_ephemeral",
         ),
         config_schema_version=_CONFIG_SCHEMA_VERSION,
         metadata={"workspace_path": settings.workspace_path},
@@ -209,7 +199,7 @@ async def _run_control_loop(
         )
         run_loop = ProviderRunLoop(
             client=control_client,
-            lifecycle=lifecycle,
+            lifecycle=provider,
             registration=registration,
             connection_id=control_connection_id,
             consumer_id=f"{control_connection_id}:provider",
@@ -219,7 +209,7 @@ async def _run_control_loop(
             _set_readiness(settings.readiness_file, ready=True)
             watch_task = asyncio.create_task(
                 _report_pod_watch_events(
-                    lifecycle,
+                    provider,
                     run_loop,
                     stop=stop,
                 ),
@@ -289,7 +279,7 @@ def create_provider_control_client(
 
 
 async def _report_pod_watch_events(
-    lifecycle: KubernetesRuntimeControlAdapter,
+    lifecycle: KubernetesRuntimeProvider,
     run_loop: ProviderRunLoop,
     *,
     stop: asyncio.Event,
@@ -488,13 +478,6 @@ class ProviderSettings:
         )
         self.lease_name: str = _required_env("AZ_RUNTIME_PROVIDER_LEASE_NAME")
         self.workspace_path: str = _required_env("AZ_RUNTIME_PROVIDER_WORKSPACE_PATH")
-        self.storage_class_name: str = _required_env(
-            "AZ_RUNTIME_PROVIDER_STORAGE_CLASS"
-        )
-        self.pvc_storage_request: str = _required_env("AZ_RUNTIME_PROVIDER_PVC_SIZE")
-        self.runner_resources: ContainerResources | None = (
-            _json_container_resources_env("AZ_RUNTIME_RUNNER_RESOURCES")
-        )
         self.runner_env: Mapping[str, str] = _selected_env(RUNNER_LIMIT_ENV_NAMES)
         self.engine_image = _required_env("AZ_RUNTIME_PROVIDER_ENGINE_IMAGE")
         self.runtime_control_namespace = _required_env(
@@ -530,12 +513,6 @@ class ProviderSettings:
         )
         self.pod_annotations: Mapping[str, str] = _json_string_map_env(
             "AZ_RUNTIME_PROVIDER_POD_ANNOTATIONS"
-        )
-        self.pod_node_selector: Mapping[str, str] = _json_string_map_env(
-            "AZ_RUNTIME_PROVIDER_POD_NODE_SELECTOR"
-        )
-        self.pod_tolerations: tuple[Toleration, ...] = _json_tolerations_env(
-            "AZ_RUNTIME_PROVIDER_POD_TOLERATIONS"
         )
         self.lease_duration_seconds: int = int(
             _required_env("AZ_RUNTIME_PROVIDER_LEASE_DURATION_SECONDS")
@@ -595,22 +572,6 @@ def _set_readiness(path: Path, *, ready: bool) -> None:
 
 def _selected_env(names: tuple[str, ...]) -> Mapping[str, str]:
     return {name: os.environ[name] for name in names if name in os.environ}
-
-
-def _json_container_resources_env(name: str) -> ContainerResources | None:
-    value = os.environ.get(name)
-    if value is None or value.strip() == "":
-        return None
-    parsed = json.loads(value)
-    if parsed is None:
-        return None
-    if not isinstance(parsed, dict):
-        raise RuntimeError(f"{name} must be a JSON object or null")
-    return ContainerResources(
-        requests=_resource_quantity_map(parsed, "requests", name),
-        limits=_resource_quantity_map(parsed, "limits", name),
-        claims=_resource_claims(parsed, name),
-    )
 
 
 def _json_local_object_references_env(name: str) -> tuple[LocalObjectReference, ...]:
@@ -729,56 +690,6 @@ def _network_policy_port(value: object, env_name: str) -> NetworkPolicyPort:
     return NetworkPolicyPort(protocol=protocol, port=port)
 
 
-def _resource_quantity_map(
-    data: Mapping[object, object],
-    key: str,
-    env_name: str,
-) -> Mapping[str, KubernetesResourceQuantity] | None:
-    value = data.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, dict):
-        raise RuntimeError(f"{env_name}.{key} must be a JSON object")
-    result: dict[str, KubernetesResourceQuantity] = {}
-    for resource_name, quantity in value.items():
-        if not isinstance(resource_name, str):
-            raise RuntimeError(f"{env_name}.{key} must map string resource names")
-        result[resource_name] = _resource_quantity(quantity, f"{env_name}.{key}")
-    return result
-
-
-def _resource_quantity(
-    value: object,
-    path: str,
-) -> KubernetesResourceQuantity:
-    if isinstance(value, bool) or value is None:
-        raise RuntimeError(f"{path} values must be string or number quantities")
-    if isinstance(value, str | int | float):
-        return value
-    raise RuntimeError(f"{path} values must be string or number quantities")
-
-
-def _resource_claims(
-    data: Mapping[object, object],
-    env_name: str,
-) -> tuple[ContainerResourceClaim, ...] | None:
-    value = data.get("claims")
-    if value is None:
-        return None
-    if not isinstance(value, list):
-        raise RuntimeError(f"{env_name}.claims must be a JSON array")
-    claims: list[ContainerResourceClaim] = []
-    for item in value:
-        if not isinstance(item, dict):
-            raise RuntimeError(f"{env_name}.claims must contain JSON objects")
-        name = item.get("name")
-        if not isinstance(name, str) or name == "":
-            raise RuntimeError(f"{env_name}.claims.name must be a non-empty string")
-        request = _optional_string(item, "request", f"{env_name}.claims")
-        claims.append(ContainerResourceClaim(name=name, request=request))
-    return tuple(claims)
-
-
 def _json_string_map_env(name: str) -> Mapping[str, str]:
     value = os.environ.get(name)
     if value is None or value.strip() == "":
@@ -792,41 +703,6 @@ def _json_string_map_env(name: str) -> Mapping[str, str]:
             raise RuntimeError(f"{name} must map string keys to string values")
         result[key] = item
     return result
-
-
-def _json_tolerations_env(name: str) -> tuple[Toleration, ...]:
-    value = os.environ.get(name)
-    if value is None or value.strip() == "":
-        return ()
-    parsed = json.loads(value)
-    if not isinstance(parsed, list):
-        raise RuntimeError(f"{name} must be a JSON array")
-    tolerations: list[Toleration] = []
-    for item in parsed:
-        if not isinstance(item, dict):
-            raise RuntimeError(f"{name} must contain JSON objects")
-        tolerations.append(
-            Toleration(
-                key=_optional_string(item, "key", name),
-                operator=_optional_string(item, "operator", name),
-                value=_optional_string(item, "value", name),
-                effect=_optional_string(item, "effect", name),
-            )
-        )
-    return tuple(tolerations)
-
-
-def _optional_string(
-    data: Mapping[object, object],
-    key: str,
-    env_name: str,
-) -> str | None:
-    value = data.get(key)
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise RuntimeError(f"{env_name}.{key} must be a string")
-    return value
 
 
 def _configure_logging() -> None:

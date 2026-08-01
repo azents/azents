@@ -23,10 +23,11 @@ _sym_db = _symbol_database.Default()
 
 from google.protobuf import struct_pb2 as google_dot_protobuf_dot_struct__pb2
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
+from . import runtime_configuration_pb2 as runtime__configuration__pb2
 
 
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(
-    b'\n\x1eruntime_provider_control.proto\x12\x19\x61zents.runtime_control.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto"\xb2\x03\n\x0fProviderMessage\x12\x15\n\rconnection_id\x18\x01 \x01(\t\x12\x12\n\nrequest_id\x18\x02 \x01(\t\x12\x12\n\ngeneration\x18\x03 \x01(\x04\x12?\n\x08register\x18\n \x01(\x0b\x32+.azents.runtime_control.v1.ProviderRegisterH\x00\x12\x41\n\theartbeat\x18\x0b \x01(\x0b\x32,.azents.runtime_control.v1.ProviderHeartbeatH\x00\x12\x42\n\x06report\x18\x14 \x01(\x0b\x32\x30.azents.runtime_control.v1.RuntimeProviderReportH\x00\x12R\n\x12\x63ommand_completion\x18\x15 \x01(\x0b\x32\x34.azents.runtime_control.v1.ProviderCommandCompletionH\x00\x12\x39\n\x05\x65rror\x18( \x01(\x0b\x32(.azents.runtime_control.v1.ProviderErrorH\x00\x42\t\n\x07payload"\xce\x02\n\x0e\x43ontrolMessage\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12P\n\x11register_accepted\x18\n \x01(\x0b\x32\x33.azents.runtime_control.v1.ProviderRegisterAcceptedH\x00\x12H\n\rheartbeat_ack\x18\x0b \x01(\x0b\x32/.azents.runtime_control.v1.ProviderHeartbeatAckH\x00\x12\x46\n\x10provider_command\x18\x14 \x01(\x0b\x32*.azents.runtime_control.v1.ProviderCommandH\x00\x12\x39\n\x05\x65rror\x18( \x01(\x0b\x32(.azents.runtime_control.v1.ProviderErrorH\x00\x42\t\n\x07payload"\xaf\x02\n\x10ProviderRegister\x12\x13\n\x0bprovider_id\x18\x01 \x01(\t\x12\x15\n\rprovider_type\x18\x02 \x01(\t\x12\r\n\x05scope\x18\x03 \x01(\t\x12\x14\n\x0cworkspace_id\x18\x04 \x01(\t\x12\x18\n\x10protocol_version\x18\x05 \x01(\t\x12\x14\n\x0c\x63\x61pabilities\x18\x06 \x03(\t\x12\x1d\n\x15\x63onfig_schema_version\x18\x07 \x01(\t\x12)\n\x08metadata\x18\x08 \x01(\x0b\x32\x17.google.protobuf.Struct\x12\x1a\n\x12\x61uth_credential_id\x18\t \x01(\t\x12\x34\n\x13\x63\x61pability_contract\x18\n \x01(\x0b\x32\x17.google.protobuf.Struct"~\n\x18ProviderRegisterAccepted\x12\x13\n\x0bprovider_id\x18\x01 \x01(\t\x12\x15\n\rconnection_id\x18\x02 \x01(\t\x12\x12\n\ngeneration\x18\x03 \x01(\x04\x12"\n\x1aheartbeat_interval_seconds\x18\x04 \x01(\r"/\n\x11ProviderHeartbeat\x12\x1a\n\x12monotonic_sequence\x18\x01 \x01(\x04"2\n\x14ProviderHeartbeatAck\x12\x1a\n\x12monotonic_sequence\x18\x01 \x01(\x04"\xd5\x03\n\x0fProviderCommand\x12\x12\n\nruntime_id\x18\x01 \x01(\t\x12\x10\n\x08\x61gent_id\x18\x02 \x01(\t\x12\x14\n\x0cworkspace_id\x18\x03 \x01(\t\x12\x1a\n\x12\x64\x65sired_generation\x18\x04 \x01(\x04\x12\x1b\n\x13provider_generation\x18\x05 \x01(\x04\x12\x14\n\x0c\x63ommand_type\x18\x06 \x01(\t\x12!\n\x19reset_final_desired_state\x18\x07 \x01(\t\x12\x14\n\x0crunner_image\x18\x08 \x01(\t\x12\x18\n\x10\x63ontrol_endpoint\x18\t \x01(\t\x12\x19\n\x11runner_auth_token\x18\n \x01(\t\x12(\n\x07payload\x18\x0b \x01(\x0b\x32\x17.google.protobuf.Struct\x12/\n\x0b\x64\x65\x61\x64line_at\x18\x0c \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12S\n\x10\x65xecution_policy\x18\r \x01(\x0b\x32\x39.azents.runtime_control.v1.RuntimeExecutionPolicyEnvelope\x12\x19\n\x11transfer_endpoint\x18\x0e \x01(\t"\x94\x04\n\x15RuntimeProviderReport\x12\x12\n\nruntime_id\x18\x01 \x01(\t\x12\x13\n\x0bprovider_id\x18\x02 \x01(\t\x12\x1b\n\x13provider_generation\x18\x03 \x01(\x04\x12\x16\n\x0eobserved_state\x18\x04 \x01(\t\x12#\n\x1bobserved_desired_generation\x18\x05 \x01(\x04\x12\x1b\n\x13provider_runtime_id\x18\x06 \x01(\t\x12\x16\n\x0eworkspace_path\x18\x07 \x01(\t\x12\x0e\n\x06reason\x18\x08 \x01(\t\x12T\n\ndiagnostic\x18\t \x03(\x0b\x32@.azents.runtime_control.v1.RuntimeProviderReport.DiagnosticEntry\x12/\n\x0breported_at\x18\n \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12$\n\x1cterminal_delete_acknowledged\x18\x0b \x01(\x08\x12S\n\x10\x65xecution_policy\x18\x0c \x01(\x0b\x32\x39.azents.runtime_control.v1.RuntimeExecutionPolicyEvidence\x1a\x31\n\x0f\x44iagnosticEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01"\x9f\x03\n\x1eRuntimeExecutionPolicyEvidence\x12\x13\n\x0bsnapshot_id\x18\x01 \x01(\t\x12\x0e\n\x06\x64igest\x18\x02 \x01(\t\x12\x1a\n\x12\x64\x65sired_generation\x18\x03 \x01(\x04\x12\x66\n\x0fmodule_versions\x18\x04 \x03(\x0b\x32M.azents.runtime_control.v1.RuntimeExecutionPolicyEvidence.ModuleVersionsEntry\x12\x66\n\x0fsource_versions\x18\x05 \x03(\x0b\x32M.azents.runtime_control.v1.RuntimeExecutionPolicyEvidence.SourceVersionsEntry\x1a\x35\n\x13ModuleVersionsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\r:\x02\x38\x01\x1a\x35\n\x13SourceVersionsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x04:\x02\x38\x01"\xa4\x01\n\x1eRuntimeExecutionPolicyEnvelope\x12K\n\x08\x65vidence\x18\x01 \x01(\x0b\x32\x39.azents.runtime_control.v1.RuntimeExecutionPolicyEvidence\x12\x1d\n\x15\x65\x66\x66\x65\x63tive_policy_json\x18\x03 \x01(\tJ\x04\x08\x02\x10\x03R\x10\x65\x66\x66\x65\x63tive_policy"\x87\x02\n\x19ProviderCommandCompletion\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x12\n\nruntime_id\x18\x02 \x01(\t\x12\x12\n\ngeneration\x18\x03 \x01(\x04\x12\x0f\n\x07success\x18\x04 \x01(\x08\x12@\n\x06report\x18\x05 \x01(\x0b\x32\x30.azents.runtime_control.v1.RuntimeProviderReport\x12\x12\n\nerror_code\x18\x06 \x01(\t\x12\x15\n\rerror_message\x18\x07 \x01(\t\x12\x30\n\x0c\x63ompleted_at\x18\x08 \x01(\x0b\x32\x1a.google.protobuf.Timestamp".\n\rProviderError\x12\x0c\n\x04\x63ode\x18\x01 \x01(\t\x12\x0f\n\x07message\x18\x02 \x01(\t2\x86\x01\n\x16RuntimeProviderControl\x12l\n\x0f\x43onnectProvider\x12*.azents.runtime_control.v1.ProviderMessage\x1a).azents.runtime_control.v1.ControlMessage(\x01\x30\x01\x62\x06proto3'
+    b'\n\x1eruntime_provider_control.proto\x12\x19\x61zents.runtime_control.v1\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bruntime_configuration.proto"\xb2\x03\n\x0fProviderMessage\x12\x15\n\rconnection_id\x18\x01 \x01(\t\x12\x12\n\nrequest_id\x18\x02 \x01(\t\x12\x12\n\ngeneration\x18\x03 \x01(\x04\x12?\n\x08register\x18\n \x01(\x0b\x32+.azents.runtime_control.v1.ProviderRegisterH\x00\x12\x41\n\theartbeat\x18\x0b \x01(\x0b\x32,.azents.runtime_control.v1.ProviderHeartbeatH\x00\x12\x42\n\x06report\x18\x14 \x01(\x0b\x32\x30.azents.runtime_control.v1.RuntimeProviderReportH\x00\x12R\n\x12\x63ommand_completion\x18\x15 \x01(\x0b\x32\x34.azents.runtime_control.v1.ProviderCommandCompletionH\x00\x12\x39\n\x05\x65rror\x18( \x01(\x0b\x32(.azents.runtime_control.v1.ProviderErrorH\x00\x42\t\n\x07payload"\xce\x02\n\x0e\x43ontrolMessage\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12P\n\x11register_accepted\x18\n \x01(\x0b\x32\x33.azents.runtime_control.v1.ProviderRegisterAcceptedH\x00\x12H\n\rheartbeat_ack\x18\x0b \x01(\x0b\x32/.azents.runtime_control.v1.ProviderHeartbeatAckH\x00\x12\x46\n\x10provider_command\x18\x14 \x01(\x0b\x32*.azents.runtime_control.v1.ProviderCommandH\x00\x12\x39\n\x05\x65rror\x18( \x01(\x0b\x32(.azents.runtime_control.v1.ProviderErrorH\x00\x42\t\n\x07payload"\xaf\x02\n\x10ProviderRegister\x12\x13\n\x0bprovider_id\x18\x01 \x01(\t\x12\x15\n\rprovider_type\x18\x02 \x01(\t\x12\r\n\x05scope\x18\x03 \x01(\t\x12\x14\n\x0cworkspace_id\x18\x04 \x01(\t\x12\x18\n\x10protocol_version\x18\x05 \x01(\t\x12\x14\n\x0c\x63\x61pabilities\x18\x06 \x03(\t\x12\x1d\n\x15\x63onfig_schema_version\x18\x07 \x01(\t\x12)\n\x08metadata\x18\x08 \x01(\x0b\x32\x17.google.protobuf.Struct\x12\x1a\n\x12\x61uth_credential_id\x18\t \x01(\t\x12\x34\n\x13\x63\x61pability_contract\x18\n \x01(\x0b\x32\x17.google.protobuf.Struct"~\n\x18ProviderRegisterAccepted\x12\x13\n\x0bprovider_id\x18\x01 \x01(\t\x12\x15\n\rconnection_id\x18\x02 \x01(\t\x12\x12\n\ngeneration\x18\x03 \x01(\x04\x12"\n\x1aheartbeat_interval_seconds\x18\x04 \x01(\r"/\n\x11ProviderHeartbeat\x12\x1a\n\x12monotonic_sequence\x18\x01 \x01(\x04"2\n\x14ProviderHeartbeatAck\x12\x1a\n\x12monotonic_sequence\x18\x01 \x01(\x04"\xd8\x03\n\x0fProviderCommand\x12\x12\n\nruntime_id\x18\x01 \x01(\t\x12\x10\n\x08\x61gent_id\x18\x02 \x01(\t\x12\x14\n\x0cworkspace_id\x18\x03 \x01(\t\x12\x1a\n\x12\x64\x65sired_generation\x18\x04 \x01(\x04\x12\x1b\n\x13provider_generation\x18\x05 \x01(\x04\x12\x14\n\x0c\x63ommand_type\x18\x06 \x01(\t\x12!\n\x19reset_final_desired_state\x18\x07 \x01(\t\x12\x14\n\x0crunner_image\x18\x08 \x01(\t\x12\x18\n\x10\x63ontrol_endpoint\x18\t \x01(\t\x12\x19\n\x11runner_auth_token\x18\n \x01(\t\x12(\n\x07payload\x18\x0b \x01(\x0b\x32\x17.google.protobuf.Struct\x12/\n\x0b\x64\x65\x61\x64line_at\x18\x0c \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12V\n\x15runtime_configuration\x18\r \x01(\x0b\x32\x37.azents.runtime_control.v1.RuntimeConfigurationEnvelope\x12\x19\n\x11transfer_endpoint\x18\x0e \x01(\t"\x97\x04\n\x15RuntimeProviderReport\x12\x12\n\nruntime_id\x18\x01 \x01(\t\x12\x13\n\x0bprovider_id\x18\x02 \x01(\t\x12\x1b\n\x13provider_generation\x18\x03 \x01(\x04\x12\x16\n\x0eobserved_state\x18\x04 \x01(\t\x12#\n\x1bobserved_desired_generation\x18\x05 \x01(\x04\x12\x1b\n\x13provider_runtime_id\x18\x06 \x01(\t\x12\x16\n\x0eworkspace_path\x18\x07 \x01(\t\x12\x0e\n\x06reason\x18\x08 \x01(\t\x12T\n\ndiagnostic\x18\t \x03(\x0b\x32@.azents.runtime_control.v1.RuntimeProviderReport.DiagnosticEntry\x12/\n\x0breported_at\x18\n \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12$\n\x1cterminal_delete_acknowledged\x18\x0b \x01(\x08\x12V\n\x15runtime_configuration\x18\x0c \x01(\x0b\x32\x37.azents.runtime_control.v1.RuntimeConfigurationEvidence\x1a\x31\n\x0f\x44iagnosticEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01"\x87\x02\n\x19ProviderCommandCompletion\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x12\n\nruntime_id\x18\x02 \x01(\t\x12\x12\n\ngeneration\x18\x03 \x01(\x04\x12\x0f\n\x07success\x18\x04 \x01(\x08\x12@\n\x06report\x18\x05 \x01(\x0b\x32\x30.azents.runtime_control.v1.RuntimeProviderReport\x12\x12\n\nerror_code\x18\x06 \x01(\t\x12\x15\n\rerror_message\x18\x07 \x01(\t\x12\x30\n\x0c\x63ompleted_at\x18\x08 \x01(\x0b\x32\x1a.google.protobuf.Timestamp".\n\rProviderError\x12\x0c\n\x04\x63ode\x18\x01 \x01(\t\x12\x0f\n\x07message\x18\x02 \x01(\t2\x86\x01\n\x16RuntimeProviderControl\x12l\n\x0f\x43onnectProvider\x12*.azents.runtime_control.v1.ProviderMessage\x1a).azents.runtime_control.v1.ControlMessage(\x01\x30\x01\x62\x06proto3'
 )
 
 _globals = globals()
@@ -38,56 +39,28 @@ if not _descriptor._USE_C_DESCRIPTORS:
     DESCRIPTOR._loaded_options = None
     _globals["_RUNTIMEPROVIDERREPORT_DIAGNOSTICENTRY"]._loaded_options = None
     _globals["_RUNTIMEPROVIDERREPORT_DIAGNOSTICENTRY"]._serialized_options = b"8\001"
-    _globals[
-        "_RUNTIMEEXECUTIONPOLICYEVIDENCE_MODULEVERSIONSENTRY"
-    ]._loaded_options = None
-    _globals[
-        "_RUNTIMEEXECUTIONPOLICYEVIDENCE_MODULEVERSIONSENTRY"
-    ]._serialized_options = b"8\001"
-    _globals[
-        "_RUNTIMEEXECUTIONPOLICYEVIDENCE_SOURCEVERSIONSENTRY"
-    ]._loaded_options = None
-    _globals[
-        "_RUNTIMEEXECUTIONPOLICYEVIDENCE_SOURCEVERSIONSENTRY"
-    ]._serialized_options = b"8\001"
-    _globals["_PROVIDERMESSAGE"]._serialized_start = 125
-    _globals["_PROVIDERMESSAGE"]._serialized_end = 559
-    _globals["_CONTROLMESSAGE"]._serialized_start = 562
-    _globals["_CONTROLMESSAGE"]._serialized_end = 896
-    _globals["_PROVIDERREGISTER"]._serialized_start = 899
-    _globals["_PROVIDERREGISTER"]._serialized_end = 1202
-    _globals["_PROVIDERREGISTERACCEPTED"]._serialized_start = 1204
-    _globals["_PROVIDERREGISTERACCEPTED"]._serialized_end = 1330
-    _globals["_PROVIDERHEARTBEAT"]._serialized_start = 1332
-    _globals["_PROVIDERHEARTBEAT"]._serialized_end = 1379
-    _globals["_PROVIDERHEARTBEATACK"]._serialized_start = 1381
-    _globals["_PROVIDERHEARTBEATACK"]._serialized_end = 1431
-    _globals["_PROVIDERCOMMAND"]._serialized_start = 1434
-    _globals["_PROVIDERCOMMAND"]._serialized_end = 1903
-    _globals["_RUNTIMEPROVIDERREPORT"]._serialized_start = 1906
-    _globals["_RUNTIMEPROVIDERREPORT"]._serialized_end = 2438
-    _globals["_RUNTIMEPROVIDERREPORT_DIAGNOSTICENTRY"]._serialized_start = 2389
-    _globals["_RUNTIMEPROVIDERREPORT_DIAGNOSTICENTRY"]._serialized_end = 2438
-    _globals["_RUNTIMEEXECUTIONPOLICYEVIDENCE"]._serialized_start = 2441
-    _globals["_RUNTIMEEXECUTIONPOLICYEVIDENCE"]._serialized_end = 2856
-    _globals[
-        "_RUNTIMEEXECUTIONPOLICYEVIDENCE_MODULEVERSIONSENTRY"
-    ]._serialized_start = 2748
-    _globals[
-        "_RUNTIMEEXECUTIONPOLICYEVIDENCE_MODULEVERSIONSENTRY"
-    ]._serialized_end = 2801
-    _globals[
-        "_RUNTIMEEXECUTIONPOLICYEVIDENCE_SOURCEVERSIONSENTRY"
-    ]._serialized_start = 2803
-    _globals[
-        "_RUNTIMEEXECUTIONPOLICYEVIDENCE_SOURCEVERSIONSENTRY"
-    ]._serialized_end = 2856
-    _globals["_RUNTIMEEXECUTIONPOLICYENVELOPE"]._serialized_start = 2859
-    _globals["_RUNTIMEEXECUTIONPOLICYENVELOPE"]._serialized_end = 3023
-    _globals["_PROVIDERCOMMANDCOMPLETION"]._serialized_start = 3026
-    _globals["_PROVIDERCOMMANDCOMPLETION"]._serialized_end = 3289
-    _globals["_PROVIDERERROR"]._serialized_start = 3291
-    _globals["_PROVIDERERROR"]._serialized_end = 3337
-    _globals["_RUNTIMEPROVIDERCONTROL"]._serialized_start = 3340
-    _globals["_RUNTIMEPROVIDERCONTROL"]._serialized_end = 3474
+    _globals["_PROVIDERMESSAGE"]._serialized_start = 154
+    _globals["_PROVIDERMESSAGE"]._serialized_end = 588
+    _globals["_CONTROLMESSAGE"]._serialized_start = 591
+    _globals["_CONTROLMESSAGE"]._serialized_end = 925
+    _globals["_PROVIDERREGISTER"]._serialized_start = 928
+    _globals["_PROVIDERREGISTER"]._serialized_end = 1231
+    _globals["_PROVIDERREGISTERACCEPTED"]._serialized_start = 1233
+    _globals["_PROVIDERREGISTERACCEPTED"]._serialized_end = 1359
+    _globals["_PROVIDERHEARTBEAT"]._serialized_start = 1361
+    _globals["_PROVIDERHEARTBEAT"]._serialized_end = 1408
+    _globals["_PROVIDERHEARTBEATACK"]._serialized_start = 1410
+    _globals["_PROVIDERHEARTBEATACK"]._serialized_end = 1460
+    _globals["_PROVIDERCOMMAND"]._serialized_start = 1463
+    _globals["_PROVIDERCOMMAND"]._serialized_end = 1935
+    _globals["_RUNTIMEPROVIDERREPORT"]._serialized_start = 1938
+    _globals["_RUNTIMEPROVIDERREPORT"]._serialized_end = 2473
+    _globals["_RUNTIMEPROVIDERREPORT_DIAGNOSTICENTRY"]._serialized_start = 2424
+    _globals["_RUNTIMEPROVIDERREPORT_DIAGNOSTICENTRY"]._serialized_end = 2473
+    _globals["_PROVIDERCOMMANDCOMPLETION"]._serialized_start = 2476
+    _globals["_PROVIDERCOMMANDCOMPLETION"]._serialized_end = 2739
+    _globals["_PROVIDERERROR"]._serialized_start = 2741
+    _globals["_PROVIDERERROR"]._serialized_end = 2787
+    _globals["_RUNTIMEPROVIDERCONTROL"]._serialized_start = 2790
+    _globals["_RUNTIMEPROVIDERCONTROL"]._serialized_end = 2924
 # @@protoc_insertion_point(module_scope)

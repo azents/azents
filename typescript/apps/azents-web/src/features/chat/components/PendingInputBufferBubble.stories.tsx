@@ -19,6 +19,10 @@ const meta = {
         reasoning_effort: "high",
       },
     },
+    currentWorkspaceProfile: {
+      userId: "user-story",
+      name: "Story User",
+    },
     onDelete: () => {},
   },
 } satisfies Meta<typeof PendingInputBufferBubble>;
@@ -32,6 +36,10 @@ export const Pending: Story = {};
 export const Optimistic: StoryObj<typeof OptimisticInputBubble> = {
   render: (args) => <OptimisticInputBubble {...args} />,
   args: {
+    currentWorkspaceProfile: {
+      userId: "user-story",
+      name: "Story User",
+    },
     buffer: {
       id: "optimistic:buffer-1",
       sessionId: "session-1",

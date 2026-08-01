@@ -6,6 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/session_lifecycle.py
   - python/apps/azents/src/azents/repos/external_channel/lifecycle.py
   - python/apps/azents/src/azents/services/external_channel/lifecycle.py
@@ -16,6 +17,8 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/slack_sdk_client.py
   - python/apps/azents/src/azents/services/external_channel/slack_socket.py
   - python/apps/azents/src/azents/services/external_channel/socket_manager.py
+  - python/apps/azents/src/azents/services/external_channel/gateway_runtime.py
+  - python/apps/azents/src/cli/externalchannelgateway.py
   - python/apps/azents/src/azents/worker/worker.py
   - python/apps/azents/src/azents/api/public/external_channel/v1/management_route.py
   - python/apps/azents/src/azents/services/external_channel/access.py
@@ -27,25 +30,41 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-07-31
-spec_version: 20
+last_verified_at: 2026-08-01
+spec_version: 27
 ---
 
 # External Channel Lifecycle
 
 ## Direct Management Transitions
 
-Disconnecting a binding terminally marks it disconnected, ends active Channel Work,
-and commits Activity Tracker cleanup delivery when needed. Canonical provider messages,
-conversation positions, immutable invocation batches, and already projected
-AgentSession history remain.
+Disconnecting a connected binding terminally sets `disconnected_at`, ends active
+Channel Work, commits one leave-presence control, and commits Activity Tracker cleanup
+delivery when needed. Slack renders the presence control with Block Kit and Discord
+uses an Embed; both include the current Agent name and one `View session` button.
+Provider conversation positions and already projected AgentSession history remain.
+The timestamp is the only binding connectedness authority; no lifecycle path clears
+it or reactivates history. Repeating a manual binding disconnect does not create a
+second leave-presence control.
+
+Replacing a connected binding's concrete response mode preserves its binding,
+Session, work, delivery, and conversation-position lifecycle state. The management
+boundary scopes the mutation to the requested Workspace, Agent, Session, and connected
+binding. Once `disconnected_at` is set, the retained final mode is read-only and the
+same mutation returns the not-found-shaped management result.
 
 Disconnecting a connection accepts every lifecycle and credential state. It
-terminalizes the connection, terminates owned active resources/bindings/work, clears
-credentials, and commits terminal local state before provider cleanup runs. Repeating
-the command is safe. Disconnected connection rows remain durable history roots but
-are excluded from the active Single management list. Disconnected Multi Apps remain
-readable through Workspace history but reject mutation.
+terminalizes the connection, terminates owned active resources/bindings/work, commits
+one leave-presence control for each newly disconnected binding, clears credentials,
+and commits terminal local state before provider cleanup runs. Provider targets are
+captured in memory before route detachment or credential purge. Post-commit delivery
+revalidates the durable connection, route, resource, binding, Session, attempt
+identity, terminal binding state, and purged connection state before using that
+captured target. Credentials are not copied into delivery rows or another persistence
+surface. Repeating the command is safe.
+Disconnected connection rows remain durable history roots but are excluded from the
+active Single management list. Disconnected Multi Apps remain readable through
+Workspace history but reject mutation.
 
 Removing the sole Single App association disconnects the entire App. Removing one
 Multi App route generation-fences the connection, marks only that catalog route
@@ -74,8 +93,9 @@ provisional PING-only authority, then asks Discord to register the endpoint. A f
 registration of the endpoint or required Guild-scoped `Ask an Azents Agent` Message
 Command clears that provisional authority and moves the connection to
 `reconnect_required`; normal interactions are rejected until the final activation
-commit. The Gateway Worker can claim only the newly activated configuration; a stale
-worker cannot continue mutation after replacement or disconnect.
+commit. The External Channel Gateway's Discord manager can claim only the newly
+activated configuration; a stale manager cannot continue mutation after replacement
+or disconnect.
 Retrying a `reconnect_required` Discord connection restores `configuring` while it
 persists a new provisional selector and public key, so endpoint-verification PING can
 authenticate without admitting normal interactions.
@@ -100,12 +120,15 @@ check. It does not delete canonical provider content, invocation history, projec
 Session events, or unrelated grants.
 
 An Allow decision locks and revalidates the connection, route, resource, binding,
-admission, and request before creating or reusing its grant and active binding. After
+and request before creating or reusing its grant and connected binding. After
 the authorization transaction commits, Slack and Discord replay the immutable
 conversation-position boundary through shared synchronous ingestion. That acceptance
-creates or reuses the work projection, batch, mailbox identity, Session navigation
-delivery, position advancement, and recoverable post-commit wake-up. Repeated Allow
-decisions reuse the same durable binding, batch, and mailbox identity. Final Allow,
+atomically creates or reuses the real Session, work projection, deterministic canonical
+mailbox input, conversation-position advance, Session running state, recoverable
+wake-up identity, and Session navigation/progress intents. Provider-control delivery
+runs independently after commit. Repeated Allow decisions reuse the same durable
+binding, delivery, and mailbox
+identities. Final Allow,
 Deny, and Block decisions create a provider-aware idempotent delete intent when their
 approval control was delivered.
 
@@ -117,10 +140,18 @@ file deletion is observed at download time. An in-progress outbound provider att
 retains its existing one-attempt outcome and is never replayed after a lifecycle change.
 
 Provider credential and permission failures move only connection health to
-`reconnect_required`; they preserve route relationships, bindings, and work. Slack
-App uninstall clears provider credentials and terminalizes provider resources while
-preserving the route relationship for later reconfiguration. In-flight validation
+`reconnect_required`; they preserve route relationships, bindings, and work.
+Authenticated Slack token revocation follows that recoverable health transition.
+Authenticated Slack App uninstall instead terminally disconnects the connection,
+creates leave-presence and Tracker cleanup only for bindings that were still
+connected, removes active route authority, marks resources unavailable, and clears
+provider identity and credentials. Cleanup targets are captured before the purge and
+attempted after the terminal commit. A repeated uninstall is idempotent and creates
+no duplicate presence control. In-flight validation
 results are generation-fenced so they cannot overwrite a newer edit or disconnect.
+Transient `degraded` or `reconnect_required` ingress health does not disconnect a
+binding or block an otherwise authorized outbound REST delivery. Terminal connection
+disconnect still clears credentials and sets binding terminal timestamps.
 
 Discord Gateway credential and non-reconnectable intent or close-code failures
 atomically record the fenced gap, release the current Gateway lease, and move only
@@ -136,6 +167,13 @@ Recoverable endpoint, close, refresh, and stale-session transitions remain insid
 SDK lifecycle. Lease loss or shutdown closes the SDK client before authority is
 released.
 
+One provider-neutral External Channel Gateway process supervises both persistent
+transport managers. General Agent Worker rollout, scaling, and broker consumption do
+not change Slack Socket or Discord Gateway ownership. A customer-specific terminal
+connection remains isolated durable health; unexpected completion of either required
+top-level manager stops the gateway process so Kubernetes cannot keep a partially
+supervised gateway ready.
+
 Discord callback and Gateway authority are released during disconnect after terminal
 local state commits; provider cleanup failure remains a visible post-commit outcome.
 
@@ -145,13 +183,15 @@ External Channel is registered as the `session.external-channel` lifecycle parti
 
 Archive uses the explicit terminal transition policy inside the caller-owned archive transaction:
 
-1. lock active bindings in the Session subtree;
-2. mark bindings disconnected and preserve their history;
+1. lock connected bindings in the Session subtree;
+2. set their terminal disconnect timestamps and preserve their history;
 3. end Channel Work;
-4. preserve immutable accepted batches and provider-history records; and
-5. create one cleanup delivery intent for each retained Activity Tracker.
+4. preserve already projected Session history and normal mailbox lifecycle state; and
+5. create one leave-presence control per disconnected binding plus one cleanup
+   delivery intent for each retained Activity Tracker.
 
-Provider cleanup runs after commit. Failure or an unknown result does not roll back Session archive.
+Provider presence and cleanup delivery run after commit. Failure or an unknown result
+does not roll back Session archive.
 External Channel file transfer adds no stored byte object or file-specific cleanup
 participant; only existing metadata, action, and delivery rows follow lifecycle cleanup.
 
@@ -168,21 +208,22 @@ AgentSession ownership still prevents finalization if Session-owned External
 Channel roots exist outside that earlier snapshot.
 
 - **Prepare** resolves incomplete delivery bookkeeping without provider execution.
-- **Cleanup** deletes Session-owned invocation batches/items, access decisions tied directly to the Session, Channel Work/tasks/actions/delivery rows, and bindings in restrictive ownership order.
+- **Cleanup** deletes access decisions tied directly to the Session, Channel
+  Work/tasks/actions/delivery rows, and bindings in restrictive ownership order.
 - **Verify/finalize** rejects AgentSession tree finalization while actionable binding/work state remains.
 
-Connection, route, resource, conversation-position, principal, message, revision,
+Connection, route, resource, conversation-position, principal, interaction,
 Agent-scoped grant, and block roots are not cascade-deleted through AgentSession.
 
 ## Agent Decommission
 
 Agent deletion is asynchronous and irreversible. Its lifecycle status fences new
 routing and invocation, then decommission archives/terminalizes owned Session state
-through the normal lifecycle participant and commits provider cleanup intents. A
-Single App route removal disconnects that App; a Multi App route removal preserves
-the Workspace-owned App and its other Agents. Historical routes retain the immutable
-Agent snapshot with no routable Agent ID. The finalizer never bypasses restrictive
-ownership boundaries.
+through the normal lifecycle participant and commits leave-presence and Tracker
+cleanup intents. A Single App route removal disconnects that App; a Multi App route
+removal preserves the Workspace-owned App and its other Agents. Historical routes
+retain the immutable Agent snapshot with no routable Agent ID. The finalizer never
+bypasses restrictive ownership boundaries.
 
 ## Operational Projection
 
@@ -201,13 +242,32 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-08-01** (spec_version 27) — Added connected-only binding response-mode
+  replacement as a lifecycle-preserving management transition and retained the final
+  mode as read-only terminal history.
+- **2026-08-01** (spec_version 26) — Added one durable leave-presence control to every
+  binding termination path, including manual disconnect, route or connection removal,
+  Session archive, Agent decommission, and authenticated App uninstall. Terminal
+  connection paths capture delivery authority before credential purge and revalidate
+  durable terminal identity after commit without persisting another credential copy.
+- **2026-08-01** (spec_version 25) — Made the conversation position plus canonical
+  mailbox own Allow replay acceptance and wake recovery while provider-control
+  delivery remains independent.
+- **2026-07-31** (spec_version 23) — Made binding disconnect a timestamp-only
+  terminal boundary and separated outbound REST authority from transient persistent-
+  ingress health.
+- **2026-07-31** (spec_version 22) — Unified Slack Socket Mode and Discord Gateway
+  lifecycle supervision in the provider-neutral External Channel Gateway and decoupled
+  persistent connections from Agent Worker lifecycle.
+- **2026-07-31** (spec_version 21) — Removed invocation-batch and provider-message
+  lifecycle ownership; Session cleanup now covers retained External Channel roots while
+  canonical mailbox and Session-event state follow their existing Session owners.
 - **2026-07-31** (spec_version 20) — Made Slack and Discord typed SDK lifecycle
   callbacks the fenced connection-health authority while leaving recoverable
   connection mechanics inside each provider SDK.
 - **2026-07-31** (spec_version 19) — Removed pending-context and waiting-hydration
-  lifecycle state, made Allow replay synchronous through immutable conversation
-  positions, and preserved accepted batches/history across terminal lifecycle
-  transitions.
+  lifecycle state and made Allow replay synchronous through immutable conversation
+  positions. The later `provider-260731` replacement removed accepted-batch ownership.
 - **2026-07-28** (spec_version 18) — Replaced immediate Discord Allow activation
   with shared bounded hydration and reconciliation fences before initial work and wake.
 - **2026-07-27** (spec_version 17) — Restored `configuring` provisional PING

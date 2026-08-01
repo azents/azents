@@ -6,27 +6,19 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from azents_runtime_control.execution_policy import (
+from azents_runtime_control.provider import (
+    RuntimeContainerAuth,
+    RuntimeDesiredState,
+    RuntimeIdentity,
+    RuntimeLifecycleCommand,
+    RuntimeLifecycleCommandType,
+    RuntimeProviderObservedState,
+)
+from azents_runtime_control.runtime_configuration import (
     JsonValue,
-    RuntimeExecutionPolicyEnvelope,
-    RuntimeExecutionPolicyEvidence,
-    canonical_effective_policy_json,
-    digest_effective_policy,
-)
-from azents_runtime_control.provider import (
-    RuntimeContainerAuth as ControlRuntimeContainerAuth,
-)
-from azents_runtime_control.provider import (
-    RuntimeIdentity as ControlRuntimeIdentity,
-)
-from azents_runtime_control.provider import (
-    RuntimeLifecycleCommand as ControlRuntimeLifecycleCommand,
-)
-from azents_runtime_control.provider import (
-    RuntimeLifecycleCommandType as ControlRuntimeLifecycleCommandType,
-)
-from azents_runtime_control.provider import (
-    RuntimeProviderObservedState as ControlRuntimeProviderObservedState,
+    RuntimeConfigurationEnvelope,
+    RuntimeConfigurationEvidence,
+    canonical_runtime_configuration_json,
 )
 
 from azents_runtime_provider_docker.docker_api import (
@@ -35,22 +27,14 @@ from azents_runtime_provider_docker.docker_api import (
     DockerContainerSpec,
     DockerContainerState,
 )
-from azents_runtime_provider_docker.models import (
-    RuntimeContainerAuth,
-    RuntimeDesiredState,
-    RuntimeIdentity,
-    RuntimeLifecycleCommand,
-    RuntimeLifecycleCommandType,
-    RuntimeProviderObservedState,
-)
 from azents_runtime_provider_docker.provider import (
     RUNNER_LIMIT_ENV_NAMES,
     DockerRuntimeProvider,
     DockerRuntimeProviderConfig,
     InvalidResetFinalDesiredState,
     InvalidWorkspacePath,
+    UnsupportedRuntimeConfiguration,
 )
-from azents_runtime_provider_docker.runtime_control import DockerRuntimeControlAdapter
 
 
 @dataclasses.dataclass
@@ -138,7 +122,6 @@ def _provider(tmp_path: Path, docker: FakeDockerApi) -> DockerRuntimeProvider:
         DockerRuntimeProviderConfig(
             provider_id="provider-docker",
             host_data_root=tmp_path,
-            docker_network="azents-runtime",
             runner_env={},
         ),
     )
@@ -153,7 +136,7 @@ def _command(
     runner_image: str = "runner:latest",
     runner_auth_token: str = "runner-token-1",
     runner_auth_credential_id: str = "runner-credential-1",
-    execution_policy: RuntimeExecutionPolicyEnvelope | None = None,
+    runtime_configuration: RuntimeConfigurationEnvelope | None = None,
 ) -> RuntimeLifecycleCommand:
     return RuntimeLifecycleCommand(
         command_type=command_type,
@@ -174,34 +157,8 @@ def _command(
             allow_insecure_control=True,
         ),
         reset_final_desired_state=final_desired_state,
-        execution_policy=execution_policy
-        or _execution_policy(desired_generation=desired_generation),
-    )
-
-
-def _control_command(
-    command_type: ControlRuntimeLifecycleCommandType,
-) -> ControlRuntimeLifecycleCommand:
-    return ControlRuntimeLifecycleCommand(
-        command_type=command_type,
-        identity=ControlRuntimeIdentity(
-            runtime_id="runtime-1",
-            agent_id="agent-1",
-            workspace_id="workspace-1",
-        ),
-        desired_generation=1,
-        provider_generation=7,
-        runner_image="runner:latest",
-        auth=ControlRuntimeContainerAuth(
-            control_endpoint="runtime-control:8020",
-            transfer_endpoint="runtime-transfer:8030",
-            runner_auth_token="runner-token-1",
-            runner_auth_credential_id="runner-credential-1",
-            control_tls_ca_pem=None,
-            allow_insecure_control=True,
-        ),
-        reset_final_desired_state=None,
-        execution_policy=_execution_policy(),
+        runtime_configuration=runtime_configuration
+        or _runtime_configuration(desired_generation=desired_generation),
     )
 
 
@@ -246,7 +203,6 @@ async def test_start_passes_runner_limit_environment_to_container(
         DockerRuntimeProviderConfig(
             provider_id="provider-docker",
             host_data_root=tmp_path,
-            docker_network="azents-runtime",
             runner_env=runner_env,
         ),
     )
@@ -276,7 +232,6 @@ async def test_start_replaces_container_when_runner_limit_environment_changes(
         DockerRuntimeProviderConfig(
             provider_id="provider-docker",
             host_data_root=tmp_path,
-            docker_network="azents-runtime",
             runner_env=initial_env,
         ),
     )
@@ -286,7 +241,6 @@ async def test_start_replaces_container_when_runner_limit_environment_changes(
         DockerRuntimeProviderConfig(
             provider_id="provider-docker",
             host_data_root=tmp_path,
-            docker_network="azents-runtime",
             runner_env=replacement_env,
         ),
     )
@@ -374,20 +328,28 @@ async def test_start_reuses_container_when_runner_image_and_config_are_unchanged
 
 
 @pytest.mark.asyncio
-async def test_runtime_control_adapter_reports_provider_workspace_path(
+async def test_configuration_update_requires_recreation_without_mutation(
     tmp_path: Path,
 ) -> None:
     docker = FakeDockerApi()
     provider = _provider(tmp_path, docker)
-    adapter = DockerRuntimeControlAdapter(provider)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    container = docker.containers["azents-runtime-runtime-1"]
+    networks = list(docker.networks)
+    images = list(docker.images)
 
-    result = await adapter.start(
-        _control_command(ControlRuntimeLifecycleCommandType.START)
-    )
+    with pytest.raises(
+        UnsupportedRuntimeConfiguration,
+        match="configuration changes require recreation",
+    ):
+        await provider.update_configuration(
+            _command(RuntimeLifecycleCommandType.UPDATE_CONFIGURATION)
+        )
 
-    assert result.report.observed_state is ControlRuntimeProviderObservedState.RUNNING
-    assert result.report.workspace_path == "/workspace/agent"
-    assert "azents-runtime-runtime-1" in docker.containers
+    assert docker.containers["azents-runtime-runtime-1"] is container
+    assert docker.removed == []
+    assert docker.networks == networks
+    assert docker.images == images
 
 
 @pytest.mark.asyncio
@@ -519,10 +481,8 @@ async def test_legacy_container_is_skipped_until_command_replaces_it(
     container = docker.containers["azents-runtime-runtime-1"]
     labels = cast(dict[str, str], container.spec.labels)
     for key in (
-        "azents/execution-policy-snapshot-id",
-        "azents/execution-policy-digest",
-        "azents/execution-policy-module-versions",
-        "azents/execution-policy-source-versions",
+        "azents/runtime-configuration-revision-id",
+        "azents/runtime-configuration-digest",
     ):
         labels.pop(key)
 
@@ -530,9 +490,11 @@ async def test_legacy_container_is_skipped_until_command_replaces_it(
 
     result = await provider.start(command)
 
-    assert result.report.execution_policy == command.execution_policy.evidence
+    assert result.report.runtime_configuration == command.runtime_configuration.evidence
     replaced = docker.containers["azents-runtime-runtime-1"]
-    assert replaced.spec.labels["azents/execution-policy-snapshot-id"] == "snapshot-1"
+    assert (
+        replaced.spec.labels["azents/runtime-configuration-revision-id"] == "revision-1"
+    )
 
 
 def test_invalid_workspace_path_is_rejected(tmp_path: Path) -> None:
@@ -544,7 +506,6 @@ def test_invalid_workspace_path_is_rejected(tmp_path: Path) -> None:
             DockerRuntimeProviderConfig(
                 provider_id="provider-docker",
                 host_data_root=tmp_path,
-                docker_network="azents-runtime",
                 runner_env={},
                 workspace_mount_path="relative/path",
             ),
@@ -561,74 +522,124 @@ async def test_reset_requires_explicit_final_desired_state(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
-async def test_standard_policy_evidence_is_persisted_and_reported(
+async def test_runtime_configuration_evidence_is_persisted_and_reported(
     tmp_path: Path,
 ) -> None:
     docker = FakeDockerApi()
     provider = _provider(tmp_path, docker)
-    policy = _execution_policy()
+    configuration = _runtime_configuration()
 
     result = await provider.start(
-        _command(RuntimeLifecycleCommandType.START, execution_policy=policy)
+        _command(RuntimeLifecycleCommandType.START, runtime_configuration=configuration)
     )
 
     container = docker.containers["azents-runtime-runtime-1"]
-    assert container.spec.env["AZ_RUNTIME_EXECUTION_POLICY_SNAPSHOT_ID"] == "snapshot-1"
-    assert result.report.execution_policy == policy.evidence
+    assert container.spec.env["AZ_RUNTIME_CONFIGURATION_REVISION_ID"] == "revision-1"
+    assert result.report.runtime_configuration == configuration.evidence
 
 
 @pytest.mark.asyncio
-async def test_authority_bearing_policy_is_rejected(tmp_path: Path) -> None:
+async def test_kubernetes_profile_is_rejected(tmp_path: Path) -> None:
     docker = FakeDockerApi()
     provider = _provider(tmp_path, docker)
 
-    with pytest.raises(ValueError, match="unsupported authority"):
+    with pytest.raises(ValueError, match="Kubernetes Pod Profile"):
         await provider.start(
             _command(
                 RuntimeLifecycleCommandType.START,
-                execution_policy=_execution_policy(docker_enabled=True),
+                runtime_configuration=_runtime_configuration(kubernetes_profile=True),
             )
         )
 
     assert docker.containers == {}
 
 
-def _execution_policy(
+@pytest.mark.asyncio
+async def test_configuration_bound_to_another_provider_is_rejected(
+    tmp_path: Path,
+) -> None:
+    docker = FakeDockerApi()
+    provider = _provider(tmp_path, docker)
+
+    with pytest.raises(UnsupportedRuntimeConfiguration, match="different Docker"):
+        await provider.start(
+            _command(
+                RuntimeLifecycleCommandType.START,
+                runtime_configuration=_runtime_configuration(
+                    provider_logical_id="provider-docker-other",
+                ),
+            )
+        )
+
+    assert docker.containers == {}
+
+
+def _runtime_configuration(
     *,
-    docker_enabled: bool = False,
+    kubernetes_profile: bool = False,
     desired_generation: int = 1,
-) -> RuntimeExecutionPolicyEnvelope:
-    policy: dict[str, JsonValue] = {
-        "schema_version": 1,
-        "docker": {
-            "module_id": "docker",
-            "version": 1,
-            "enabled": docker_enabled,
-            "storage_mode": "ephemeral" if docker_enabled else "none",
-            "storage_capacity_bytes": (1_073_741_824 if docker_enabled else None),
-        },
-        "resources": {
-            "module_id": "runtime.resources",
-            "version": 1,
-            "cpu_request_millicores": None,
-            "cpu_limit_millicores": 1_000 if docker_enabled else None,
-            "memory_request_bytes": None,
-            "memory_limit_bytes": 1_073_741_824 if docker_enabled else None,
-            "ephemeral_storage_bytes": (1_073_741_824 if docker_enabled else None),
-            "persistent_storage_bytes": None,
-        },
-    }
-    return RuntimeExecutionPolicyEnvelope(
-        evidence=RuntimeExecutionPolicyEvidence(
-            snapshot_id="snapshot-1",
-            digest=digest_effective_policy(policy),
-            desired_generation=desired_generation,
-            module_versions={"docker": 1, "runtime.resources": 1},
-            source_versions={
-                "profile": 1,
-                "workspace": 1,
-                "agent": 1,
+    provider_logical_id: str = "provider-docker",
+) -> RuntimeConfigurationEnvelope:
+    effective_profile: dict[str, JsonValue]
+    if kubernetes_profile:
+        effective_profile = {
+            "profile_kind": "kubernetes_pod",
+            "contract_family": "kubernetes.pod-profile",
+            "schema_version": 1,
+            "runner_resources": {
+                "cpu_request_millicores": None,
+                "cpu_limit_millicores": None,
+                "memory_request_bytes": None,
+                "memory_limit_bytes": None,
             },
+            "workspace_volume": {
+                "storage_class_name": "standard",
+                "storage_request_bytes": 1_073_741_824,
+            },
+            "network_policy": {"allowed_cidrs": [], "denied_cidrs": []},
+            "service_account_name": None,
+            "scheduling": {"node_selector": {}, "tolerations": []},
+            "dind": None,
+        }
+    else:
+        effective_profile = {
+            "profile_kind": "docker_container",
+            "contract_family": "docker.container-profile",
+            "schema_version": 1,
+            "runner_resources": {
+                "cpu_reservation_millicores": None,
+                "cpu_limit_millicores": None,
+                "memory_reservation_bytes": None,
+                "memory_limit_bytes": None,
+            },
+            "network_name": "azents-runtime",
+        }
+    configuration: dict[str, JsonValue] = {
+        "schema_version": 1,
+        "provider": {
+            "id": "provider-resource-1",
+            "logical_id": provider_logical_id,
+            "kind": "docker",
+            "capability_revision_id": "capability-1",
+            "capability_digest": "a" * 64,
+        },
+        "infrastructure_profile": {
+            "id": "infrastructure-1",
+            "version": 1,
+            "digest": "b" * 64,
+        },
+        "workspace_runtime_profile": {
+            "id": "workspace-profile-1",
+            "version": 1,
+            "digest": "c" * 64,
+        },
+        "effective_profile": effective_profile,
+    }
+    return RuntimeConfigurationEnvelope(
+        evidence=RuntimeConfigurationEvidence(
+            revision_id="revision-1",
+            digest="d" * 64,
+            desired_generation=desired_generation,
         ),
-        effective_policy_json=canonical_effective_policy_json(policy),
+        resolved_configuration_json=canonical_runtime_configuration_json(configuration),
     )

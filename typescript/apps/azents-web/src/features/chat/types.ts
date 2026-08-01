@@ -377,6 +377,7 @@ export type ChatHistoryEvent =
   | EventBase<"compaction_marker", CompactionMarkerPayload>
   | EventBase<"compaction_summary", CompactionSummaryPayload>
   | EventBase<"goal_continuation", UserMessagePayload>
+  | EventBase<"external_channel_continuation", UserMessagePayload>
   | EventBase<"goal_updated", UserMessagePayload>
   | EventBase<"goal_briefing", GoalBriefingPayload>
   | EventBase<"action_message", ActionMessagePayload>
@@ -812,6 +813,7 @@ export interface ChatMessage {
     | "compaction"
     | "compaction_started"
     | "goal_continuation"
+    | "external_channel_continuation"
     | "goal_updated"
     | "goal_briefing"
     | "skill_loaded";

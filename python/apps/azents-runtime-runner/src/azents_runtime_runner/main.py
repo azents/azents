@@ -9,7 +9,6 @@ import uuid
 from datetime import UTC, datetime
 
 import grpc
-from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 from azents_runtime_control.grpc_runner_client import (
     GrpcRunnerControlClient,
     RuntimeRunnerControlStreamClosed,
@@ -23,6 +22,7 @@ from azents_runtime_control.runner import (
     RunnerRegistration,
     RunnerRunLoop,
 )
+from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_CAPABILITY,
     RUNNER_TRANSFER_PROTOCOL_VERSION,
@@ -121,7 +121,7 @@ async def run_runtime_runner() -> None:
     runner_id = os.environ.get("AZ_RUNTIME_RUNNER_ID") or f"runner-{uuid.uuid4()}"
     credential_id = _required_env("AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID")
     runner_auth_token = _required_env("AZ_RUNTIME_RUNNER_AUTH_TOKEN")
-    execution_policy = _execution_policy_evidence_from_env()
+    runtime_configuration = _runtime_configuration_evidence_from_env()
     control_tls = _control_tls_from_env()
     allow_insecure_control = _required_bool_env("AZ_RUNTIME_CONTROL_ALLOW_INSECURE")
     base_connection_id = (
@@ -138,7 +138,7 @@ async def run_runtime_runner() -> None:
         workspace_path=workspace_path,
         metadata={},
         auth_credential_id=credential_id,
-        execution_policy=execution_policy,
+        runtime_configuration=runtime_configuration,
     )
     _LOGGER.info(
         "Runtime Runner starting",
@@ -330,28 +330,13 @@ def _control_connection_id(base_connection_id: str) -> str:
     return f"{base_connection_id}:control:{uuid.uuid4().hex}"
 
 
-def _execution_policy_evidence_from_env() -> RuntimeExecutionPolicyEvidence:
-    snapshot_id = _required_env("AZ_RUNTIME_EXECUTION_POLICY_SNAPSHOT_ID")
-    module_versions = json.loads(
-        _required_env("AZ_RUNTIME_EXECUTION_POLICY_MODULE_VERSIONS")
-    )
-    source_versions = json.loads(
-        _required_env("AZ_RUNTIME_EXECUTION_POLICY_SOURCE_VERSIONS")
-    )
-    if not isinstance(module_versions, dict) or not isinstance(source_versions, dict):
-        raise ValueError("Runtime execution-policy evidence must be JSON objects.")
-    return RuntimeExecutionPolicyEvidence(
-        snapshot_id=snapshot_id,
-        digest=_required_env("AZ_RUNTIME_EXECUTION_POLICY_DIGEST"),
+def _runtime_configuration_evidence_from_env() -> RuntimeConfigurationEvidence:
+    return RuntimeConfigurationEvidence(
+        revision_id=_required_env("AZ_RUNTIME_CONFIGURATION_REVISION_ID"),
+        digest=_required_env("AZ_RUNTIME_CONFIGURATION_DIGEST"),
         desired_generation=int(
-            _required_env("AZ_RUNTIME_EXECUTION_POLICY_DESIRED_GENERATION")
+            _required_env("AZ_RUNTIME_CONFIGURATION_DESIRED_GENERATION")
         ),
-        module_versions={
-            str(key): int(value) for key, value in module_versions.items()
-        },
-        source_versions={
-            str(key): int(value) for key, value in source_versions.items()
-        },
     )
 
 

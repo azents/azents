@@ -1,6 +1,7 @@
-"""External Channel access decisions and binding activation setup."""
+"""External Channel access decisions and binding setup."""
 
 import datetime
+import logging
 from dataclasses import dataclass
 from typing import Annotated, Literal, assert_never
 
@@ -12,8 +13,7 @@ from azents.core.enums import (
     AgentSessionStartReason,
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
-    ExternalChannelBindingStatus,
-    ExternalChannelConversationAdmissionStatus,
+    ExternalChannelProvider,
     ExternalChannelResourceStatus,
 )
 from azents.rdb.deps import get_session_manager
@@ -43,6 +43,8 @@ from azents.services.root_agent_session_creation import (
 from azents.services.root_agent_session_creation.data import (
     AgentDefaultRootWorkspaceIntent,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ExternalChannelAccessDecisionError(ValueError):
@@ -121,6 +123,7 @@ class ExternalChannelAccessService:
     ) -> ExternalChannelAllowedAccess:
         """Allow one participant and create its Session binding atomically."""
         async with self.session_manager() as session:
+            created_provider_event_type: str | None = None
             request_snapshot = await self.repository.get_access_request(
                 session,
                 access_request_id=access_request_id,
@@ -156,26 +159,13 @@ class ExternalChannelAccessService:
                 session,
                 resource_id=request_snapshot.resource_id,
             )
-            binding = await self.repository.lock_active_binding_by_resource(
+            binding = await self.repository.lock_connected_binding_by_resource(
                 session,
                 resource_id=request_snapshot.resource_id,
             )
             if binding is not None and binding.route_id != route.id:
                 raise ExternalChannelAccessDecisionError(
                     "The external conversation is already bound to another route."
-                )
-            admission = await self.repository.lock_open_conversation_admission(
-                session,
-                resource_id=request_snapshot.resource_id,
-            )
-            if admission is not None and (
-                admission.selected_route_id != route.id
-                or admission.source_message_id != request_snapshot.source_message_id
-                or admission.status
-                is not ExternalChannelConversationAdmissionStatus.AWAITING_ACCESS
-            ):
-                raise ExternalChannelAccessDecisionError(
-                    "The External Channel admission is not awaiting this Allow."
                 )
             request = await self._locked_request(
                 session,
@@ -191,13 +181,6 @@ class ExternalChannelAccessService:
                 if binding is None or grant is None or grant.scope is not scope:
                     raise ExternalChannelAccessDecisionError(
                         "The prior Allow decision no longer has its active state."
-                    )
-                if admission is not None:
-                    await self.repository.transition_conversation_admission(
-                        session,
-                        admission_id=admission.id,
-                        status=ExternalChannelConversationAdmissionStatus.BOUND,
-                        selected_route_id=route.id,
                     )
                 delete_intent = (
                     await self.repository.create_access_request_control_delete_intent(
@@ -264,17 +247,21 @@ class ExternalChannelAccessService:
                     )
                 )
                 agent_session_id = root_session.agent_session.id
+                if root_session.created:
+                    created_provider_event_type = _provider_event_type(
+                        provider=connection.provider,
+                        labels=resource.labels,
+                    )
             binding = await self.repository.create_binding_idempotent(
                 session,
                 ExternalChannelBindingCreate(
                     resource_id=request.resource_id,
                     route_id=request.route_id,
                     agent_session_id=agent_session_id,
-                    status=ExternalChannelBindingStatus.ACTIVE,
+                    response_mode=agent.external_channel_default_response_mode,
                     disconnected_at=None,
                     disconnect_reason=None,
                 ),
-                expected_admission_id=None if admission is None else admission.id,
                 expected_access_request_id=request.id,
             )
             grant = await self.repository.ensure_access_grant(
@@ -305,13 +292,6 @@ class ExternalChannelAccessService:
             )
             if decided is None:
                 raise ExternalChannelAccessRequestNotFound(access_request_id)
-            if admission is not None:
-                await self.repository.transition_conversation_admission(
-                    session,
-                    admission_id=admission.id,
-                    status=ExternalChannelConversationAdmissionStatus.BOUND,
-                    selected_route_id=route.id,
-                )
             delete_intent = (
                 await self.repository.create_access_request_control_delete_intent(
                     session,
@@ -319,6 +299,14 @@ class ExternalChannelAccessService:
                 )
             )
             await session.commit()
+            if created_provider_event_type is not None:
+                logger.info(
+                    "Created External Channel AgentSession",
+                    extra={
+                        "external_channel_provider": connection.provider.value,
+                        "provider_event_type": created_provider_event_type,
+                    },
+                )
             await self._replay_allowed_request(
                 access_request_id=decided.id,
                 now=now,
@@ -511,7 +499,7 @@ class ExternalChannelAccessService:
                 raise ExternalChannelAccessDecisionError(
                     "The external conversation is unavailable."
                 )
-            binding = await self.repository.lock_active_binding_by_resource(
+            binding = await self.repository.lock_connected_binding_by_resource(
                 session,
                 resource_id=resource.id,
             )
@@ -519,22 +507,11 @@ class ExternalChannelAccessService:
                 raise ExternalChannelAccessDecisionError(
                     "The external conversation is already bound to another route."
                 )
-            admission = await self.repository.lock_open_conversation_admission(
-                session,
-                resource_id=resource.id,
-            )
             request = await self._locked_request(
                 session,
                 access_request_id=access_request_id,
             )
             if request.status is expected_status:
-                if admission is not None:
-                    await self.repository.transition_conversation_admission(
-                        session,
-                        admission_id=admission.id,
-                        status=ExternalChannelConversationAdmissionStatus.REJECTED,
-                        selected_route_id=admission.selected_route_id,
-                    )
                 delete_intent = (
                     await self.repository.create_access_request_control_delete_intent(
                         session,
@@ -573,20 +550,6 @@ class ExternalChannelAccessService:
             )
             if decided is None:
                 raise ExternalChannelAccessRequestNotFound(access_request_id)
-            if admission is not None:
-                if (
-                    admission.selected_route_id != route.id
-                    or admission.source_message_id != request.source_message_id
-                ):
-                    raise ExternalChannelAccessDecisionError(
-                        "The External Channel admission does not match this decision."
-                    )
-                await self.repository.transition_conversation_admission(
-                    session,
-                    admission_id=admission.id,
-                    status=ExternalChannelConversationAdmissionStatus.REJECTED,
-                    selected_route_id=route.id,
-                )
             delete_intent = (
                 await self.repository.create_access_request_control_delete_intent(
                     session,
@@ -627,3 +590,19 @@ class ExternalChannelAccessService:
             )
         if request.expires_at <= now:
             raise ExternalChannelAccessDecisionError("The access request has expired.")
+
+
+def _provider_event_type(
+    *,
+    provider: ExternalChannelProvider,
+    labels: dict[str, object] | None,
+) -> str:
+    """Return the sanitized provider event kind retained with the resource."""
+    value = None if labels is None else labels.get("provider_event_type")
+    expected = {
+        ExternalChannelProvider.SLACK: {"app_mention", "message"},
+        ExternalChannelProvider.DISCORD: {"discord_message_create"},
+    }
+    return (
+        value if isinstance(value, str) and value in expected[provider] else "unknown"
+    )

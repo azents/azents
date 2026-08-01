@@ -1,18 +1,18 @@
 """Agent Runtime desired-state reconciliation."""
 
 import dataclasses
-import json
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from azents_runtime_control.execution_policy import (
-    RuntimeExecutionPolicyEnvelope,
-    RuntimeExecutionPolicyEvidence,
-    parse_execution_policy_envelope,
-)
 from azents_runtime_control.provider import (
     RuntimeLifecycleCommandType as RuntimeProviderCommandType,
+)
+from azents_runtime_control.runtime_configuration import (
+    RuntimeConfigurationEnvelope,
+    RuntimeConfigurationEvidence,
+    canonical_runtime_configuration_json,
+    parse_runtime_configuration_envelope,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,13 +21,15 @@ from azents.core.enums import (
     RuntimeLifecycleCommandType,
     RuntimeProviderConnectionState,
 )
+from azents.core.runtime_profile import (
+    RuntimeConfigurationApplicationImpact,
+    RuntimeConfigurationResolutionStatus,
+    classify_runtime_configuration_application,
+)
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime, AgentRuntimeFailurePatch
-from azents.repos.runtime_provider_policy.data import RuntimePolicySnapshot
-from azents.repos.runtime_provider_policy.repository import (
-    RuntimeProviderPolicyRepository,
-)
+from azents.repos.runtime_profile.repository import RuntimeProfileRepository
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
     RuntimeProtocolRouteUnavailable,
@@ -84,7 +86,7 @@ class RuntimeLifecycleReconciler:
         self,
         *,
         runtime_repository: AgentRuntimeRepository,
-        policy_repository: RuntimeProviderPolicyRepository,
+        profile_repository: RuntimeProfileRepository,
         session_manager: SessionManager[AsyncSession],
         coordination_store: RuntimeCoordinationStore,
         control_protocol: RuntimeControlProtocolService,
@@ -92,7 +94,7 @@ class RuntimeLifecycleReconciler:
     ) -> None:
         """Initialize the reconciler."""
         self._runtime_repository = runtime_repository
-        self._policy_repository = policy_repository
+        self._profile_repository = profile_repository
         self._session_manager = session_manager
         self._coordination_store = coordination_store
         self._control_protocol = control_protocol
@@ -115,14 +117,30 @@ class RuntimeLifecycleReconciler:
                     observe_interval=self._config.observe_interval,
                 )
             )
+            configuration_runtimes = (
+                await self._runtime_repository.find_configuration_adoption_candidates(
+                    session,
+                    limit=limit,
+                )
+            )
 
         dispatched = 0
         for runtime in runtimes:
             if await self._dispatch_runtime(runtime):
                 dispatched += 1
         lifecycle_runtime_ids = {runtime.id for runtime in runtimes}
-        for runtime in reconcile_runtimes:
+        configuration_runtime_ids: set[str] = set()
+        for runtime in configuration_runtimes:
             if runtime.id in lifecycle_runtime_ids:
+                continue
+            if await self._dispatch_configuration_adoption(runtime):
+                dispatched += 1
+                configuration_runtime_ids.add(runtime.id)
+        for runtime in reconcile_runtimes:
+            if (
+                runtime.id in lifecycle_runtime_ids
+                or runtime.id in configuration_runtime_ids
+            ):
                 continue
             if await self._dispatch_periodic_reconcile(runtime):
                 dispatched += 1
@@ -167,7 +185,14 @@ class RuntimeLifecycleReconciler:
             )
         command_type = (
             RuntimeProviderCommandType.START
-            if runtime.desired_state is RuntimeDesiredState.RUNNING
+            if (
+                runtime.desired_state is RuntimeDesiredState.RUNNING
+                and (
+                    runtime.applied_runtime_configuration_revision_id is None
+                    or runtime.desired_runtime_configuration_revision_id
+                    == runtime.applied_runtime_configuration_revision_id
+                )
+            )
             else RuntimeProviderCommandType.OBSERVE
         )
         return await self._dispatch_runtime_command(
@@ -175,6 +200,43 @@ class RuntimeLifecycleReconciler:
             command_type=command_type,
             claim_lifecycle=False,
         )
+
+    async def _dispatch_configuration_adoption(
+        self,
+        runtime: AgentRuntime,
+    ) -> bool:
+        desired_revision_id = runtime.desired_runtime_configuration_revision_id
+        applied_revision_id = runtime.applied_runtime_configuration_revision_id
+        if desired_revision_id is None or applied_revision_id is None:
+            return False
+        async with self._session_manager() as session:
+            desired = await self._profile_repository.get_configuration_revision(
+                session,
+                revision_id=desired_revision_id,
+            )
+            applied = await self._profile_repository.get_configuration_revision(
+                session,
+                revision_id=applied_revision_id,
+            )
+        if desired is None or applied is None:
+            return False
+        impact = classify_runtime_configuration_application(
+            desired_status=desired.resolution_status,
+            desired_configuration=desired.resolved_configuration,
+            applied_configuration=applied.resolved_configuration,
+        )
+        if impact is not RuntimeConfigurationApplicationImpact.IN_PLACE:
+            return False
+        if (
+            desired.provider_acknowledged_at is None
+            or desired.provider_reported_digest != desired.digest
+        ):
+            return await self._dispatch_runtime_command(
+                runtime,
+                command_type=RuntimeProviderCommandType.UPDATE_CONFIGURATION,
+                claim_lifecycle=False,
+            )
+        return False
 
     async def _dispatch_runtime_command(
         self,
@@ -250,11 +312,19 @@ class RuntimeLifecycleReconciler:
             desired_generation=runtime.desired_generation,
         )
         try:
-            execution_policy = await self._execution_policy(runtime)
+            runtime_configuration = await self._runtime_configuration(
+                runtime,
+                require_ready=command_type
+                not in {
+                    RuntimeProviderCommandType.STOP,
+                    RuntimeProviderCommandType.TERMINAL_DELETE,
+                    RuntimeProviderCommandType.OBSERVE,
+                },
+            )
         except ValueError as error:
             await self._record_failure(
                 runtime,
-                code="RUNTIME_EXECUTION_POLICY_INVALID",
+                code="RUNTIME_CONFIGURATION_INVALID",
                 message=str(error),
             )
             return False
@@ -284,7 +354,7 @@ class RuntimeLifecycleReconciler:
                     },
                 },
                 deadline_at=created_at + self._config.provider_command_deadline,
-                execution_policy=execution_policy,
+                runtime_configuration=runtime_configuration,
             ),
             created_at=created_at,
         )
@@ -341,40 +411,91 @@ class RuntimeLifecycleReconciler:
             return False
         raise AssertionError(f"unexpected dispatch result: {result!r}")
 
-    async def _execution_policy(
+    async def _runtime_configuration(
         self,
         runtime: AgentRuntime,
-    ) -> RuntimeExecutionPolicyEnvelope:
-        snapshot_id = runtime.runtime_policy_snapshot_id
-        if snapshot_id is None:
-            raise ValueError("Runtime execution-policy target snapshot is missing.")
-        async with self._session_manager() as session:
-            snapshot = await self._policy_repository.get_snapshot(
-                session,
-                snapshot_id=snapshot_id,
-                for_update=False,
+        *,
+        require_ready: bool = True,
+    ) -> RuntimeConfigurationEnvelope:
+        revision_id = (
+            runtime.desired_runtime_configuration_revision_id
+            if require_ready
+            else (
+                runtime.applied_runtime_configuration_revision_id
+                or runtime.desired_runtime_configuration_revision_id
             )
-        if snapshot is None:
-            raise ValueError("Runtime execution-policy target snapshot is missing.")
-        if snapshot.runtime_id != runtime.id:
-            raise ValueError("Runtime execution-policy snapshot ownership is invalid.")
+        )
+        if revision_id is None:
+            raise ValueError("Runtime configuration target revision is missing.")
+        async with self._session_manager() as session:
+            revision = await self._profile_repository.get_configuration_revision(
+                session,
+                revision_id=revision_id,
+            )
+        if revision is None:
+            raise ValueError("Runtime configuration target revision is missing.")
+        if revision.runtime_id != runtime.id:
+            raise ValueError("Runtime configuration revision ownership is invalid.")
         if (
             runtime.runtime_provider_resource_id is None
-            or snapshot.provider_id != runtime.runtime_provider_resource_id
+            or revision.provider_id != runtime.runtime_provider_resource_id
         ):
-            raise ValueError("Runtime execution-policy Provider binding is invalid.")
-        if snapshot.target_desired_generation != runtime.desired_generation:
-            raise ValueError("Runtime execution-policy target generation is stale.")
-        if snapshot.resolved_execution_policy_json is None:
-            raise ValueError("Runtime execution-policy target document is missing.")
-        envelope = RuntimeExecutionPolicyEnvelope(
-            evidence=_snapshot_policy_evidence(snapshot),
-            effective_policy_json=snapshot.resolved_execution_policy_json,
+            raise ValueError("Runtime configuration Provider binding is invalid.")
+        if require_ready:
+            if revision.target_desired_generation != runtime.desired_generation:
+                raise ValueError("Runtime configuration target generation is stale.")
+            if (
+                revision.resolution_status
+                is not RuntimeConfigurationResolutionStatus.READY
+            ):
+                raise ValueError("Runtime configuration target revision is blocked.")
+            if revision.resolved_configuration is None:
+                raise ValueError("Runtime configuration target document is missing.")
+        envelope = RuntimeConfigurationEnvelope(
+            evidence=RuntimeConfigurationEvidence(
+                revision_id=revision.id,
+                digest=revision.digest,
+                desired_generation=revision.target_desired_generation,
+            ),
+            resolved_configuration_json=canonical_runtime_configuration_json(
+                revision.resolved_configuration or {}
+            ),
         )
-        parse_execution_policy_envelope(
+        if not require_ready:
+            return envelope
+        configuration = parse_runtime_configuration_envelope(
             envelope,
             desired_generation=runtime.desired_generation,
+            expected_provider_kind=None,
         )
+        if (
+            configuration.provider.id != revision.provider_id
+            or configuration.provider.logical_id != runtime.runtime_provider_id
+            or configuration.provider.capability_revision_id
+            != revision.provider_capability_revision_id
+        ):
+            raise ValueError("Runtime configuration Provider reference is invalid.")
+        if (
+            revision.infrastructure_profile_id != runtime.infrastructure_profile_id
+            or configuration.infrastructure_profile.id
+            != revision.infrastructure_profile_id
+            or configuration.infrastructure_profile.version
+            != revision.infrastructure_profile_version
+        ):
+            raise ValueError(
+                "Runtime configuration Infrastructure Profile reference is invalid."
+            )
+        if (
+            revision.workspace_runtime_profile_id
+            != runtime.workspace_runtime_profile_id
+            or configuration.workspace_runtime_profile.id
+            != revision.workspace_runtime_profile_id
+            or configuration.workspace_runtime_profile.version
+            != revision.workspace_runtime_profile_version
+        ):
+            raise ValueError(
+                "Runtime configuration Workspace Runtime Profile reference is invalid."
+            )
         return envelope
 
     async def _record_failure(
@@ -416,41 +537,3 @@ def _provider_command_type(
     if runtime.last_lifecycle_command is None:
         return None
     return RuntimeProviderCommandType(runtime.last_lifecycle_command.value)
-
-
-def _snapshot_policy_evidence(
-    snapshot: RuntimePolicySnapshot,
-) -> RuntimeExecutionPolicyEvidence:
-    source_versions = {
-        "profile": snapshot.execution_profile_version,
-        "workspace": snapshot.execution_workspace_version,
-        "agent": snapshot.execution_agent_version,
-    }
-    if (
-        snapshot.execution_target_digest is None
-        or snapshot.resolved_execution_policy_json is None
-        or any(version is None for version in source_versions.values())
-    ):
-        raise ValueError("Runtime execution-policy snapshot evidence is incomplete.")
-    module_versions: dict[str, int] = {}
-    policy = json.loads(snapshot.resolved_execution_policy_json)
-    if not isinstance(policy, dict):
-        raise ValueError("Runtime execution-policy snapshot must contain an object.")
-    for value in policy.values():
-        if not isinstance(value, dict):
-            continue
-        module_id = value.get("module_id")
-        version = value.get("version")
-        if isinstance(module_id, str) and isinstance(version, int):
-            module_versions[module_id] = version
-    return RuntimeExecutionPolicyEvidence(
-        snapshot_id=snapshot.id,
-        digest=snapshot.execution_target_digest,
-        desired_generation=snapshot.target_desired_generation,
-        module_versions=module_versions,
-        source_versions={
-            key: version
-            for key, version in source_versions.items()
-            if version is not None
-        },
-    )

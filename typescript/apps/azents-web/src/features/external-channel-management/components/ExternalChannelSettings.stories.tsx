@@ -28,7 +28,10 @@ const agent: AgentResponse = {
   effective_auto_compaction_threshold_tokens: 96000,
   model_parameters: null,
   system_prompt: "Coordinate incident response.",
-  runtime_provider_id: null,
+  runtime_profile_id: null,
+  runtime_profile_selection_version: 1,
+  runtime_profile_available: false,
+  runtime_profile_availability_reason_code: "runtime_profile_unconfigured",
   shell_enabled: true,
   memory_enabled: true,
   tool_search_enabled: false,
@@ -153,6 +156,7 @@ const meta = {
     agent,
     state: {
       type: "LOADED",
+      defaultResponseMode: "all_messages",
       connections: [connection],
       associatedMultiApps: [associatedMultiApp],
       grants: [grant],
@@ -164,7 +168,14 @@ const meta = {
     actionError: null,
     actionTarget: null,
     actionsBusy: false,
+    defaultResponseMode: "all_messages",
+    defaultResponseModeDraft: "all_messages",
+    defaultResponseModeSaving: false,
+    defaultResponseModeError: null,
+    defaultResponseModeSaved: false,
     canManageWorkspaceMultiApps: true,
+    onDefaultResponseModeChange: noop,
+    onSaveDefaultResponseMode: noop,
     onOpenSetup: noop,
     onOpenDiscordSetup: noop,
     onOpenEdit: noop,
@@ -192,6 +203,7 @@ export const Empty = {
   args: {
     state: {
       type: "LOADED",
+      defaultResponseMode: "all_messages",
       connections: [],
       associatedMultiApps: [],
       grants: [],
@@ -259,6 +271,7 @@ export const Degraded = {
   args: {
     state: {
       type: "LOADED",
+      defaultResponseMode: "all_messages",
       connections: [
         {
           ...connection,
@@ -279,6 +292,41 @@ export const Busy = {
   args: {
     actionTarget: connection.id,
     actionsBusy: true,
+  },
+} satisfies Story;
+
+export const MentionsOnlyDefault = {
+  args: {
+    state: {
+      type: "LOADED",
+      defaultResponseMode: "mention_only",
+      connections: [connection],
+      associatedMultiApps: [associatedMultiApp],
+      grants: [grant],
+      blocks: [block],
+    },
+    defaultResponseMode: "mention_only",
+    defaultResponseModeDraft: "mention_only",
+  },
+} satisfies Story;
+
+export const DefaultModeChanged = {
+  args: {
+    defaultResponseModeDraft: "mention_only",
+  },
+} satisfies Story;
+
+export const DefaultModeSaving = {
+  args: {
+    defaultResponseModeDraft: "mention_only",
+    defaultResponseModeSaving: true,
+  },
+} satisfies Story;
+
+export const DefaultModeError = {
+  args: {
+    defaultResponseModeDraft: "mention_only",
+    defaultResponseModeError: "The response mode could not be saved.",
   },
 } satisfies Story;
 

@@ -9,9 +9,9 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Protocol, TypeAlias, assert_never
 
-from azents_runtime_control.execution_policy import (
-    RuntimeExecutionPolicyEnvelope,
-    RuntimeExecutionPolicyEvidence,
+from azents_runtime_control.runtime_configuration import (
+    RuntimeConfigurationEnvelope,
+    RuntimeConfigurationEvidence,
 )
 
 JsonValue: TypeAlias = (
@@ -34,6 +34,7 @@ class RuntimeLifecycleCommandType(enum.StrEnum):
     STOP = "stop"
     RESTART = "restart"
     RESET = "reset"
+    UPDATE_CONFIGURATION = "update_configuration"
     OBSERVE = "observe"
     TERMINAL_DELETE = "terminal_delete"
 
@@ -83,7 +84,7 @@ class RuntimeLifecycleCommand:
     runner_image: str
     auth: RuntimeContainerAuth
     reset_final_desired_state: RuntimeDesiredState | None
-    execution_policy: RuntimeExecutionPolicyEnvelope
+    runtime_configuration: RuntimeConfigurationEnvelope
 
 
 @dataclasses.dataclass(frozen=True)
@@ -101,7 +102,7 @@ class RuntimeProviderReport:
     diagnostic: Mapping[str, str]
     reported_at: datetime
     terminal_delete_acknowledged: bool
-    execution_policy: RuntimeExecutionPolicyEvidence
+    runtime_configuration: RuntimeConfigurationEvidence
 
 
 @dataclasses.dataclass(frozen=True)
@@ -230,6 +231,13 @@ class RuntimeProviderLifecycle(Protocol):
 
     async def reset(self, command: RuntimeLifecycleCommand) -> RuntimeLifecycleResult:
         """Reset a Runtime; this is the only destructive workspace operation."""
+        ...
+
+    async def update_configuration(
+        self,
+        command: RuntimeLifecycleCommand,
+    ) -> RuntimeLifecycleResult:
+        """Apply a supported in-place Runtime configuration change."""
         ...
 
     async def terminal_delete(
@@ -496,6 +504,8 @@ class ProviderRunLoop:
                 return await self._lifecycle.restart(command)
             case RuntimeLifecycleCommandType.RESET:
                 return await self._lifecycle.reset(command)
+            case RuntimeLifecycleCommandType.UPDATE_CONFIGURATION:
+                return await self._lifecycle.update_configuration(command)
             case RuntimeLifecycleCommandType.TERMINAL_DELETE:
                 return await self._lifecycle.terminal_delete(command)
             case RuntimeLifecycleCommandType.OBSERVE:

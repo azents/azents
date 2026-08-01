@@ -6,7 +6,11 @@ import type {
   ProviderIntegrationOption,
 } from "../model-selection";
 import type { AgentFormValues } from "../schemas";
-import type { AgentModelSelection, AgentResponse } from "@azents/public-client";
+import type {
+  AgentModelSelection,
+  AgentResponse,
+  WorkspaceRuntimeProfileResponse,
+} from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
 const mainSelection: AgentModelSelection = {
@@ -123,7 +127,10 @@ const baseAgent: AgentResponse = {
   system_prompt: "Help the workspace team with engineering tasks.",
   enabled: true,
   type: "public",
-  runtime_provider_id: null,
+  runtime_profile_id: null,
+  runtime_profile_selection_version: 1,
+  runtime_profile_available: false,
+  runtime_profile_availability_reason_code: "runtime_profile_unconfigured",
   shell_enabled: true,
   memory_enabled: true,
   tool_search_enabled: false,
@@ -133,6 +140,27 @@ const baseAgent: AgentResponse = {
   avatar: null,
   created_at: "2026-05-14T00:00:00Z",
   updated_at: "2026-05-14T00:00:00Z",
+};
+
+const runtimeProfile: WorkspaceRuntimeProfileResponse = {
+  id: "workspace-runtime-profile-standard",
+  provider_id: "runtime-provider-docker",
+  infrastructure_profile_id: "infrastructure-profile-standard",
+  display_name: "Standard runtime",
+  description: "Balanced runtime configuration for general agent work.",
+  lifecycle: "active",
+  policy: { schema_version: 1, network_restriction: null },
+  version: 3,
+  digest: "sha256:runtime-profile-digest",
+  available: true,
+  availability_reason_code: null,
+  capability_revision_id: "capability-revision-7",
+  infrastructure_profile_version: 2,
+  compatible: true,
+  missing_capabilities: [],
+  incompatible_constraints: [],
+  created_at: "2026-07-31T06:00:00Z",
+  updated_at: "2026-07-31T06:00:00Z",
 };
 
 function noopSubmit(values: AgentFormValues): void {
@@ -159,6 +187,8 @@ const meta = {
     providerOptions,
     modelOptions,
     workspaceModelSettings: null,
+    runtimeProfiles: [],
+    runtimeProfilesLoading: false,
     onSyncCatalog: () => Promise.resolve(),
     onSubmit: noopSubmit,
     onAddAdmin: () => {},
@@ -172,6 +202,36 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const DefaultPreselected = {} satisfies Story;
+
+export const CreateUsesWorkspaceDefault = {
+  args: {
+    formState: { type: "CREATE" },
+    runtimeProfiles: [runtimeProfile],
+  },
+} satisfies Story;
+
+export const UnavailableRuntimeProfile = {
+  args: {
+    formState: {
+      type: "EDIT",
+      agent: {
+        ...baseAgent,
+        runtime_profile_id: runtimeProfile.id,
+        runtime_profile_available: false,
+        runtime_profile_availability_reason_code: "provider_unavailable",
+      },
+    },
+    runtimeProfiles: [
+      {
+        ...runtimeProfile,
+        available: false,
+        availability_reason_code: "provider_unavailable",
+        capability_revision_id: null,
+        compatible: false,
+      },
+    ],
+  },
+} satisfies Story;
 
 export const NoModelsAvailable = {
   args: {

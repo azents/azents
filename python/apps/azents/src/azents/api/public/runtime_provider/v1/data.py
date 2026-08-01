@@ -16,7 +16,7 @@ class RuntimeProviderOptionResponse(BaseModel):
     scope: str
     availability_mode: str
     capabilities: dict[str, Any]
-    accepted_contract_revision_id: str | None
+    current_contract_revision_id: str | None
     active_config_revision_id: str | None
 
     @classmethod
@@ -32,7 +32,7 @@ class RuntimeProviderOptionResponse(BaseModel):
             scope=provider.scope.value,
             availability_mode=provider.availability_mode.value,
             capabilities=provider.capabilities,
-            accepted_contract_revision_id=provider.accepted_contract_revision_id,
+            current_contract_revision_id=provider.current_contract_revision_id,
             active_config_revision_id=provider.active_config_revision_id,
         )
 

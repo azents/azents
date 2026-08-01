@@ -291,8 +291,7 @@
       "empty": "エージェントがまだありません",
       "viewAllAgents": "すべてのエージェント ({count})",
       "slackApps": "外部チャンネル",
-      "integrations": "外部チャンネル",
-      "runtimeExecution": "ランタイム実行"
+      "integrations": "外部チャンネル"
     },
     "settings": {
       "layout": {
@@ -310,6 +309,10 @@
         "llmIntegrations": {
           "label": "LLM 連携",
           "description": "プロバイダーの認証情報、接続状態、使用量を管理"
+        },
+        "runtimeProfiles": {
+          "label": "ランタイムプロファイル",
+          "description": "エージェントが使用する Runtime Provider とインフラストラクチャの構成"
         }
       }
     },
@@ -581,6 +584,70 @@
         "statusError": "デバイス認証は {status} です。"
       }
     },
+    "runtimeProfiles": {
+      "headline": "ランタイムプロファイル",
+      "description": "このワークスペースのエージェントが使用する完全なランタイム構成を管理します。",
+      "addProfile": "プロファイルを追加",
+      "noInfrastructureTitle": "利用可能なProvider Profileがありません",
+      "noInfrastructureDescription": "このワークスペースでRuntime Profileを作成するには、プラットフォーム管理者が互換性のあるPod ProfileまたはContainer Profileを公開する必要があります。",
+      "defaultTitle": "新規エージェントの既定値",
+      "defaultDescription": "ランタイムプロファイルを明示せずに新しいエージェントを作成したとき、一度だけコピーされます。",
+      "defaultPlaceholder": "既定のプロファイルなし",
+      "emptyTitle": "ランタイムプロファイルがありません",
+      "emptyDescription": "エージェントが使用する正確なプロバイダーとインフラストラクチャを指定するランタイムプロファイルを作成してください。",
+      "nameColumn": "プロファイル",
+      "infrastructureColumn": "Provider Profile",
+      "statusColumn": "状態",
+      "versionColumn": "バージョン",
+      "actionsColumn": "操作",
+      "defaultBadge": "既定",
+      "noDescription": "説明なし",
+      "available": "利用可能",
+      "unavailable": "利用不可",
+      "active": "有効",
+      "disabled": "無効",
+      "edit": "編集",
+      "recreate": "ランタイムを再作成",
+      "operationLoading": "再作成の進行状況を読み込んでいます…",
+      "operationTitle": "ランタイムの再作成",
+      "operationCounts": "成功 {succeeded} · 実行中 {running} · 失敗 {failed} · スキップ {skipped} · 合計 {total}",
+      "operationItemNoDetail": "追加情報はありません。",
+      "createTitle": "ランタイムプロファイルを追加",
+      "editTitle": "ランタイムプロファイルを編集",
+      "nameLabel": "名前",
+      "descriptionLabel": "説明",
+      "infrastructureLabel": "ProviderのPod / Container Profile",
+      "infrastructureDescription": "選択したProviderとProfileを正確に使用し、フォールバックは行いません。",
+      "lifecycleLabel": "ライフサイクル",
+      "allowedCidrsLabel": "許可するCIDR",
+      "deniedCidrsLabel": "拒否するCIDR",
+      "cidrsDescription": "1行に1つのCIDRを入力してください。ワークスペースの規則はプロバイダーのポリシーをさらに制限することだけができます。",
+      "cancel": "キャンセル",
+      "save": "保存",
+      "availabilityReasons": {
+        "workspaceProfileDisabled": "このRuntime Profileは無効です。",
+        "providerUnavailable": "選択したRuntime Providerは現在このワークスペースで利用できません。",
+        "infrastructureProfileUnavailable": "選択したProvider Profileは無効または利用不可です。",
+        "workspacePolicyInvalid": "ワークスペースのネットワーク制限が、このProvider Profileでは無効です。",
+        "profileIncompatible": "選択したProvider Profileは、Providerの現在のcapabilityと互換性がありません。",
+        "unknown": "現在のRuntime構成は利用できません。"
+      },
+      "missingCapabilities": "不足しているcapability: {capabilities}",
+      "operationStatus": {
+        "pending": "待機中",
+        "running": "実行中",
+        "completed": "完了",
+        "completed_with_failures": "一部失敗で完了",
+        "failed": "失敗"
+      },
+      "operationItemStatus": {
+        "pending": "待機中",
+        "running": "実行中",
+        "succeeded": "成功",
+        "skipped": "スキップ",
+        "failed": "失敗"
+      }
+    },
     "agents": {
       "headline": "エージェント",
       "description": "ワークスペースで使用するAIエージェントを管理します",
@@ -602,6 +669,12 @@
       "namePlaceholder": "例：カスタマーサポートエージェント",
       "descriptionLabel": "説明",
       "descriptionPlaceholder": "このエージェントの役割を簡単に説明してください",
+      "runtimeProfileLabel": "ランタイムプロファイル",
+      "runtimeProfileDescription": "このエージェントが使用する完全なプロバイダーおよびインフラストラクチャ構成を選択します。作成時に空欄にすると、ワークスペースの既定値がコピーされます。",
+      "runtimeProfilePlaceholder": "ワークスペースの既定値を使用",
+      "runtimeProfileLoading": "ランタイムプロファイルを読み込んでいます…",
+      "runtimeProfileUnavailableTitle": "選択したランタイムプロファイルは利用できません",
+      "runtimeProfileUnavailableDescription": "選択は保持されますが、新しいランタイムの作成はブロックされます: {reason}",
       "integrationLabel": "LLM連携",
       "integrationPlaceholder": "連携を選択してください",
       "providerPlaceholder": "Provider を選択してください",
@@ -978,6 +1051,20 @@
       "externalChannels": {
         "title": "外部チャンネル",
         "description": "専用 Slack・Discord 接続を運用し、このエージェントを呼び出せる参加者を管理します。",
+        "defaultResponseModeTitle": "既定の応答モード",
+        "defaultResponseModeDescription": "この値は新しく接続される会話にのみコピーされます。既存の会話のモードは変わりません。",
+        "defaultResponseModeSaved": "既定の応答モードを保存しました。",
+        "saveResponseMode": "保存",
+        "responseMode": {
+          "all_messages": {
+            "label": "対象となるすべてのメッセージ",
+            "description": "対象の参加者が通常のメッセージを送った場合も会話を継続します。"
+          },
+          "mention_only": {
+            "label": "メンションのみ",
+            "description": "通常のメッセージはコンテキストとして保持し、エージェントが明示的にメンションされたときに応答します。"
+          }
+        },
         "addConnection": "Slack を接続",
         "connectionsTitle": "接続",
         "emptyConnectionsTitle": "外部チャンネル接続がありません",
@@ -1141,6 +1228,15 @@
       "sessionChannels": {
         "title": "チャンネル",
         "description": "外部チャンネル binding、work projection、delivery 結果、保持されたアクセスを確認します。",
+        "responseModeTitle": "応答モード",
+        "responseModeLabel": "エージェントを起動するメッセージ",
+        "responseModeDescription": "接続中のこの会話で今後受信するメッセージに適用されます。",
+        "responseModeReadOnlyDescription": "切断またはアーカイブされた会話に保存されていたモードです。",
+        "saveResponseMode": "保存",
+        "responseMode": {
+          "all_messages": "対象となるすべてのメッセージ",
+          "mention_only": "メンションのみ"
+        },
         "archivedTitle": "アーカイブ済みセッション",
         "archivedDescription": "アーカイブ時に外部チャンネルは完全に切断されました。この画面は読み取り専用です。",
         "retentionUnlimited": "保持期間：無期限",
@@ -1180,10 +1276,8 @@
         "grantsTitle": "セッションアクセス",
         "grantsDescription": "このセッションに限定して許可された参加者です。",
         "noGrants": "有効な session-scoped grant はありません。",
-        "bindingStatus": {
-          "active": "有効",
-          "disconnected": "切断済み"
-        },
+        "connected": "接続済み",
+        "disconnected": "切断済み",
         "workStatus": {
           "active": "Work 実行中",
           "finished": "Work 完了"
@@ -1207,6 +1301,14 @@
           "session": "セッションアクセス",
           "agent": "エージェントアクセス"
         }
+      },
+      "runtimeProfileAvailabilityReasons": {
+        "workspaceProfileDisabled": "このRuntime Profileは無効です。",
+        "providerUnavailable": "このProfileのRuntime Providerは現在利用できません。",
+        "infrastructureProfileUnavailable": "このProfileが参照するProvider Profileは無効または利用不可です。",
+        "workspacePolicyInvalid": "ワークスペースのネットワーク制限が無効です。",
+        "profileIncompatible": "Provider ProfileがProviderの現在のcapabilityと互換性がありません。",
+        "unknown": "現在のRuntime構成は利用できません。"
       }
     },
     "toolkits": {
@@ -1591,181 +1693,6 @@
       "handoffPermissionTitle": "ワークスペース権限が必要です",
       "handoffPermissionDescription": "この Slack チャンネルの既定値を管理できるのは、ワークスペースの所有者と管理者のみです。"
     },
-    "runtimeExecution": {
-      "restrictions": {
-        "dockerTitle": "Docker",
-        "dockerDescription": "選択した Profile が許可する Docker 機能を Workspace で追加制限します。未設定の値は Profile を継承します。",
-        "disableDocker": "Docker を無効化",
-        "inheritWhenEmpty": "空欄の場合は Profile の値を継承します。",
-        "dockerStoragePolicy": "Docker ストレージポリシー",
-        "dockerStorageDescription": "Profile の設定を維持するか、一時 Docker データをさらに制限します。",
-        "inheritProfile": "Profile から継承",
-        "temporaryDockerStorage": "一時 Docker ストレージ容量",
-        "storagePlaceholder": "例: 8",
-        "kubernetesResourcesTitle": "Kubernetes Pod リソース",
-        "kubernetesResourcesDescription": "Kubernetes Requests と Limits に適用する任意の上限です。空欄は Profile を継承します。",
-        "cpuRequestMillicores": "CPU リクエスト（ミリコア）",
-        "cpuLimitMillicores": "CPU リミット（ミリコア）",
-        "cpuRequestPlaceholder": "例: 500",
-        "cpuLimitPlaceholder": "例: 1000",
-        "memoryRequest": "Memory Request",
-        "memoryLimit": "Memory Limit",
-        "memoryRequestPlaceholder": "例: 2",
-        "memoryLimitPlaceholder": "例: 4",
-        "ephemeralStorage": "Ephemeral storage",
-        "ephemeralStorageDescription": "Kubernetes Request と Limit に同じ値を適用します。",
-        "ephemeralPlaceholder": "例: 8",
-        "persistentStorage": "Persistent workspace storage",
-        "persistentStorageDescription": "PVC の拡張は自動反映されます。縮小値は PVC を削除して再作成したときに反映されます。",
-        "persistentPlaceholder": "例: 20",
-        "unit": "単位",
-        "storageEphemeral": "一時ストレージ"
-      },
-      "workspacePage": {
-        "title": "Runtime 実行",
-        "description": "Workspace で利用できる Profile と追加の制限を管理します。",
-        "readOnly": "このポリシーは閲覧のみ可能です。変更できるのは Owner と Manager です。",
-        "save": "Workspace ポリシーを保存",
-        "actionFailed": "ポリシーを保存できませんでした。",
-        "allowedProfiles": "許可された Profile",
-        "allowedDescription": "Agent は許可済みかつ利用可能な Profile のみ選択できます。",
-        "unsupportedSelection": "保存する前に、現在の Runtime Provider が適用できない権限を要求する Profile を削除してください。",
-        "noProfiles": "表示できる Profile がありません。",
-        "available": "利用可能",
-        "unavailable": "利用不可",
-        "allowed": "許可",
-        "blocked": "ブロック",
-        "restrictionsTitle": "Workspace 制限",
-        "auditTitle": "ポリシー監査",
-        "noAudit": "監査イベントはありません。",
-        "version": "バージョン {version}",
-        "digest": "ダイジェスト {digest}",
-        "updated": "更新 {time}",
-        "neverUpdated": "暗黙の Workspace ポリシーを使用中",
-        "reasons": {
-          "profile_retired": "Profile は廃止済み",
-          "profile_not_allowed": "Workspace で未許可",
-          "dependency_unsatisfied": "依存関係が利用不可",
-          "provider_module_unsupported": "Provider がモジュール未対応",
-          "provider_engine_unsupported": "Provider が Engine 未対応",
-          "provider_storage_unsupported": "Provider がストレージ未対応",
-          "provider_network_unsupported": "Provider がネットワーク未対応",
-          "provider_limit_exceeded": "Provider 上限超過"
-        }
-      },
-      "agentPage": {
-        "hubLabel": "実行環境",
-        "hubDescription": "Runtime Execution Profile と適用状態を管理します。",
-        "title": "実行環境",
-        "description": "制限的な実行設定を保存し、Runtime への適用は別操作で行います。",
-        "statusTitle": "Runtime ポリシー状態",
-        "statusLoading": "状態を読み込み中…",
-        "statusError": "Runtime ポリシー状態を取得できません。",
-        "status": {
-          "configured": "設定済み",
-          "pending": "保留中",
-          "applied": "適用済み",
-          "unavailable": "利用不可",
-          "divergent": "不一致"
-        },
-        "statusHelp": {
-          "configured": "保存済み設定が Runtime のターゲットと異なります。準備ができたら適用してください。",
-          "pending": "不変のターゲットに対する Runtime の適用証拠を待っています。",
-          "applied": "ターゲットと適用済み証拠が完全に一致しています。",
-          "unavailable": "ポリシーを解決または適用できません。",
-          "divergent": "Runtime の証拠が現在のターゲットと一致しません。"
-        },
-        "actions": {
-          "none": "操作不要",
-          "apply": "設定済みポリシーを適用",
-          "wait": "Runtime を待機",
-          "administrator_action": "管理者の操作が必要"
-        },
-        "apply": "Runtime に適用",
-        "applying": "適用中…",
-        "save": "設定を保存",
-        "configurationTitle": "設定済みの意図",
-        "configurationDescription": "保存は Agent の意図のみ更新します。Runtime の再ターゲットは行いません。",
-        "profile": "Execution Profile",
-        "profileRetired": "廃止済み",
-        "profileUnavailable": "利用不可",
-        "effectivePreview": "有効値プレビュー",
-        "providerCompatibility": "Provider 互換性は適用時のみ評価されます。",
-        "reductions": "階層による縮小",
-        "noReductions": "上位レイヤーによる縮小はありません。",
-        "comparisonTitle": "設定・ターゲット・適用済み",
-        "configured": "設定",
-        "target": "ターゲット",
-        "applied": "適用済み",
-        "none": "なし",
-        "profileValue": "Profile {profile}",
-        "generation": "世代 {generation}",
-        "policyFingerprint": "ポリシー識別子",
-        "capabilities": "機能",
-        "storage": "ストレージ",
-        "network": "ネットワーク",
-        "enabled": "有効",
-        "disabled": "無効",
-        "governingLayers": "各設定値の取得元",
-        "whyUnavailable": "このポリシーを適用できない理由",
-        "reasonExplanations": {
-          "profile_retired": "選択した Profile は廃止されています。有効な Profile を選択してください。",
-          "profile_not_allowed": "この Workspace では選択した Profile を使用できません。",
-          "dependency_unsatisfied": "必要な Runtime ポリシーの依存条件を満たしていません。",
-          "provider_module_unsupported": "Runtime Provider がこの Profile の一部設定をサポートしていません。",
-          "provider_engine_unsupported": "Runtime Provider が要求された Docker 機能をサポートしていません。",
-          "provider_storage_unsupported": "Runtime Provider が要求されたストレージポリシーをサポートしていません。",
-          "provider_network_unsupported": "Runtime Provider が要求された outbound ネットワークポリシーをサポートしていません。",
-          "provider_limit_exceeded": "要求値の一部が Runtime Provider の対応上限を超えています。",
-          "execution_policy_unavailable": "現在の設定から Runtime ポリシーを解決できません。",
-          "automatic_convergence_pending": "より制限的なポリシー変更を Runtime に自動適用しています。",
-          "explicit_apply_required": "保存された構成が Runtime target と異なります。準備ができたら適用してください。",
-          "application_pending": "Runtime は現在の target の適用をまだ確認していません。",
-          "target_divergent": "Runtime が報告した証拠が現在の target と一致しません。",
-          "reported_digest_mismatch": "Runtime が現在の target と異なるポリシーフィンガープリントを報告しました。",
-          "target_generation_mismatch": "Runtime target が以前の Generation に属しているため、再調整が必要です。",
-          "applied_snapshot_missing": "適用済みとして記録されたポリシー Snapshot が見つかりません。",
-          "applied_pointer_mismatch": "Runtime の適用済みポリシー参照が現在の検証済み target を指していません。",
-          "provider_evidence_mismatch": "Runtime Provider が要求された Generation と target に一致するポリシー証拠を返しませんでした。",
-          "runtime_failure": "Runtime 操作に失敗しました。参照コード: {code}"
-        },
-        "fieldLabels": {
-          "docker": "Docker",
-          "cpuRequest": "CPU Request",
-          "cpuLimit": "CPU Limit",
-          "memoryRequest": "Memory Request",
-          "memoryLimit": "Memory Limit",
-          "ephemeralStorage": "Runtime 一時ストレージ",
-          "persistentStorage": "永続 Workspace ストレージ",
-          "dockerStoragePolicy": "一時 Docker ストレージポリシー",
-          "dockerStorageCapacity": "一時 Docker ストレージ容量"
-        },
-        "layerLabels": {
-          "profile": "Profile",
-          "workspace": "Workspace 制限",
-          "agent": "Agent 設定"
-        },
-        "capabilityLabels": {
-          "docker": "Docker"
-        },
-        "storageModes": {
-          "none": "一時 Docker ストレージなし",
-          "ephemeral": "一時 Docker ストレージ",
-          "persistent": "永続 Docker ストレージ"
-        },
-        "networkModes": {
-          "none": "システム通信のみ",
-          "restricted": "許可 IP 範囲のみ",
-          "direct": "すべての IP アドレス"
-        },
-        "reasonCodes": "理由コード",
-        "auditTitle": "実行ポリシー監査",
-        "noAudit": "Agent の監査イベントはありません。",
-        "actionFailed": "Runtime Execution 操作に失敗しました。",
-        "saveSuccess": "設定を保存しました。適用は別操作です。",
-        "applySuccess": "Runtime ポリシーターゲットを作成または再利用しました。"
-      }
-    },
     "integrations": {
       "title": "外部チャンネル",
       "description": "ワークスペース所有の Slack・Discord App、エージェントカタログ、チャンネル既定値を管理します。",
@@ -2041,7 +1968,44 @@
       "workspaceTab": "Agent Runtime",
       "settingsTab": "設定",
       "settingsTitle": "Runtime 設定",
-      "settingsSubtitle": "現在の Agent Runtime lifecycle を管理します。",
+      "settingsSubtitle": "Runtime の起動、停止、状態を管理します。",
+      "configurationTitle": "ランタイムの状態",
+      "configurationLoading": "ランタイム構成を読み込んでいます…",
+      "configurationTechnicalDetails": "技術情報",
+      "configurationCurrent": "現在の構成",
+      "configurationDesired": "新しい構成",
+      "configurationApplied": "現在適用中の構成",
+      "configurationNoDesired": "解決済みの期待する構成はありません。",
+      "configurationNoApplied": "ランタイムに適用された構成はありません。",
+      "configurationEvidence": {
+        "revision": "Revision",
+        "profile": "Runtime Profile",
+        "infrastructure": "インフラストラクチャ",
+        "generation": "Generation",
+        "digest": "Digest"
+      },
+      "configurationStatus": {
+        "profile_required": {
+          "label": "設定が必要",
+          "description": "Runtime を使用するには、まず実行環境を選択してください。"
+        },
+        "configuration_blocked": {
+          "label": "確認が必要",
+          "description": "選択した Runtime 設定は現在使用できません。設定を確認してください。"
+        },
+        "configured_not_created": {
+          "label": "起動準備完了",
+          "description": "設定が完了しました。Runtime を起動すると適用されます。"
+        },
+        "waiting_for_recreation": {
+          "label": "適用が必要",
+          "description": "新しい設定を適用するには、Runtime を再作成してください。"
+        },
+        "applied": {
+          "label": "正常",
+          "description": "最新の設定が適用され、Runtime を使用できます。"
+        }
+      },
       "stopRuntimeDescription": "Workspace ファイルを削除せずに、実行中の Runtime pod を停止します。",
       "runtimeNotRunningHint": "Runtime が実行されていないため、停止する項目はありません。",
       "runtimeControlUnavailableHint": "現在 Runtime control は利用できません。",
@@ -2150,7 +2114,16 @@
         "missing": "見つかりません",
         "unavailable": "利用不可",
         "error": "エラー"
-      }
+      },
+      "configurationReasons": {
+        "sourceMismatch": "保存されているRuntime Profileの参照が、単一の正確なProvider経路を構成していません。",
+        "profileDisabled": "選択したRuntime ProfileまたはProvider Profileが無効です。",
+        "providerUnavailable": "指定されたRuntime Providerは無効、切断中、またはこのワークスペースで利用不可です。",
+        "capabilityUnavailable": "Providerの現在のcapabilityでは、選択したProfileを満たせません。",
+        "profileInvalid": "選択したProfileの定義が無効です。",
+        "unknown": "目的のRuntime構成を解決できませんでした。"
+      },
+      "configurationMissingCapabilities": "不足しているcapability: {capabilities}"
     },
     "toolCall": {
       "preparing": "コマンドを作成中…",

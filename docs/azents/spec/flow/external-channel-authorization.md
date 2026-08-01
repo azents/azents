@@ -9,10 +9,12 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/access.py
   - python/apps/azents/src/azents/services/external_channel/ingestion.py
   - python/apps/azents/src/azents/services/external_channel/ingestion_replay.py
-  - python/apps/azents/src/azents/services/external_channel/ingestion_store.py
+  - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
+  - python/apps/azents/src/azents/services/external_channel/mailbox_wake.py
   - python/apps/azents/src/azents/services/external_channel/transport_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/interaction.py
   - python/apps/azents/src/azents/services/external_channel/selector.py
+  - python/apps/azents/src/azents/services/external_channel/selector_state.py
   - python/apps/azents/src/azents/services/external_channel/shortcut_source.py
   - python/apps/azents/src/azents/services/external_channel/discord_events.py
   - python/apps/azents/src/azents/services/external_channel/discord_http.py
@@ -32,8 +34,8 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-07-30
-spec_version: 12
+last_verified_at: 2026-08-01
+spec_version: 18
 ---
 
 # External Channel Authorization
@@ -58,9 +60,10 @@ human invocation's bounded history. Blocks take precedence over grants and autom
 route access. A grant continues to authorize an eligible human when automatic route
 access is disabled.
 
-Only a human Multi App invocation can create a selector admission. Its catalog and
-route selection revalidate the initiating human principal before a route-specific
-access decision.
+Only a human Multi App invocation can create selector state in its owning interaction.
+Its catalog and route selection revalidate the initiating human principal before a
+route-specific access decision. Duplicate source callbacks validate and reuse that
+state; they never clear an already selected route.
 
 The authenticated Azents administrator who grants or revokes access is a requester for that public
 management operation only. Neither the administrator nor the ExternalChannelPrincipal becomes an
@@ -80,7 +83,7 @@ human follows synchronous authorized ingestion directly.
 When a restricted participant invokes the Agent:
 
 1. A bound thread or resolved Single/default route proceeds directly. An unresolved
-   Multi App shortcut or mention first requires one explicit selector admission and
+   Multi App shortcut or mention first requires one explicit selector interaction and
    validates the chosen route. Slack presents its selector through Block Kit; Discord
    uses a verified command or component interaction.
 2. Synchronous ingestion creates one idempotent access request for the selected route
@@ -104,15 +107,15 @@ never becomes the execution User or replaces the initiating principal.
 Supported decisions are `allow_session`, `allow_agent`, `deny`, and `block`.
 
 - **Allow Session** creates or reuses the resource binding and grants the principal only for that AgentSession.
-- **Allow Agent** creates or reuses the binding and grants the principal across active bindings for that Agent.
+- **Allow Agent** creates or reuses the binding and grants the principal across connected bindings for that Agent.
 - **Deny** resolves only the current request.
 - **Block** resolves the request and creates an Agent-scoped block that takes precedence over grants.
 
 The decision transaction first resolves the request identity, then locks and
-revalidates the route connection, active resource and binding, open admission, and the
-same request. It verifies an `active` or `degraded` connection, available route,
+revalidates the route connection, active resource and binding, and the same request.
+It verifies an `active` or `degraded` ingress connection, available route,
 active resource, and active Agent, creates the External Channel AgentSession only when
-no active binding exists, and writes the active binding, grant, and decision
+no connected binding exists, and writes the connected binding, grant, and decision
 atomically. Repeating the same compatible Allow decision returns the existing binding
 and grant. Conflicting or stale decisions return a conflict instead of creating
 parallel state.
@@ -121,9 +124,11 @@ When Allow needs a new binding, the shared root Session creation boundary reads 
 routed Agent's current automatic Project policy and creates the root
 `SessionAgentContext` Project snapshot before the binding commit. It performs no
 Runtime validation or filesystem access in this transaction; policy save-time
-validation is authoritative. If the resource already has an active binding, Allow
+validation is authoritative. If the resource already has a connected binding, Allow
 reuses that binding's Session and context snapshot instead of rereading or merging
-the current policy.
+the current policy. A newly created binding also copies the routed Agent's current
+required External Channel response-mode default. Reusing a binding retains its
+existing concrete mode.
 
 When the original approval control message has a delivered provider identity, every
 compatible final decision also creates one idempotent access-request-origin delete
@@ -138,18 +143,42 @@ ingestion service with the request's immutable conversation-position boundary. T
 service re-reads provider history outside a database transaction. If the shared
 position is still before the trigger, it reads forward normally; if another accepted
 invocation advanced past the trigger, it reuses the saved range start and exact trigger
-boundary. Both cases converge on one immutable batch, mailbox item, and logical wake.
-Replay failure never reverts the already committed access decision.
+boundary. It then reuses the committed binding and atomically commits the deterministic
+canonical mailbox item, conversation-position advance, Session running transition, and
+deterministic joined-presence and initial-progress delivery intents. Both position
+cases converge on one mailbox item and logical wake.
+Repeating a compatible Allow may perform the same provider-history replay to recover a
+post-commit failure, but mailbox identity prevents another Session input or execution.
+Replay failure never reverts the already committed access decision or binding, and it
+does not couple provider-control delivery outcomes to accepted mailbox execution.
+This durable replay remains available while connection ingress health is `active`,
+`degraded`, or `reconnect_required`; `configuring`, `disconnecting`, and `disconnected`
+connections cannot start it. Transient Gateway or Socket recovery therefore does not
+revoke already committed replay and outbound REST authority.
 
 The resulting mailbox item uses `wake_session` scheduling and contains the immutable
-invocation projection rather than a raw callback or mutable pending-context reference.
-At promotion, the batch becomes contiguous `external_channel_message` events with
+ordered provider-history projection rather than a raw callback or mutable
+pending-context reference. At promotion, it becomes contiguous
+`external_channel_message` events with
 provider source attribution, trigger identity, authorization state, and one optional
 leading omission reminder.
 
-Later authorized original messages on an active binding create another immutable batch
-and wake the same Session. Edit and delete callbacks are excluded; they do not
-independently invoke the Agent or create a lifecycle/revision correction.
+Later authorized original messages on a connected `all_messages` binding create
+another canonical mailbox item and wake the same Session. A `mention_only` binding
+requires an explicit invocation; ordinary messages remain provider-history context
+without independent admission. Edit and delete callbacks are excluded in either mode;
+they do not independently invoke the Agent or create a lifecycle/revision correction.
+
+## Response-Mode Management Authorization
+
+The Agent default and each connected binding mode use the existing External Channel
+management authority. Reading the Agent-scoped default follows Agent visibility.
+Replacing the default or a binding mode requires an explicit AgentAdmin relationship.
+Binding mutation additionally scopes the row to the requested Workspace, Agent,
+AgentSession, binding ID, and `disconnected_at IS NULL`. Unauthorized, cross-scope,
+missing, and disconnected targets remain indistinguishable through the existing
+not-found response. Neither mutation changes grants, blocks, route access policy,
+principal identity, past messages, or already accepted work.
 
 ## Revocation
 
@@ -160,6 +189,20 @@ Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-08-01** (spec_version 18) — Added AgentAdmin-managed Agent and binding
+  response modes, creation-time default copy in Allow, connected ownership scoping,
+  and mention-only authorization-preserving admission.
+- **2026-08-01** (spec_version 17) — Replaced the initial button-only Session link
+  with a joined-presence control that retains canonical Session navigation.
+- **2026-08-01** (spec_version 16) — Made Allow replay converge through the
+  conversation position and canonical mailbox while provider-control delivery remains
+  independent.
+- **2026-07-31** (spec_version 14) — Replaced binding active/inactive state with
+  terminal `disconnected_at` authority and retained durable Session-link and
+  initial-progress delivery intents as independent provider controls.
+- **2026-07-31** (spec_version 13) — Moved selector replay state into the owning
+  interaction, kept approval replay in the access request, and made the canonical
+  mailbox item the sole accepted-input and wake-recovery identity.
 - **2026-07-30** (spec_version 12) — Removed bot-trigger admission and its route
   policy, made selector and approval state metadata-only, and excluded inbound
   edit/delete lifecycle corrections while retaining provider-visible nonhuman history

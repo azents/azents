@@ -44,7 +44,10 @@ class AgentResponse(BaseModel):
     system_prompt: str | None
     enabled: bool
     type: AgentType
-    runtime_provider_id: str | None
+    runtime_profile_id: str | None
+    runtime_profile_selection_version: int
+    runtime_profile_available: bool
+    runtime_profile_availability_reason_code: str | None
     shell_enabled: bool
     memory_enabled: bool
     tool_search_enabled: bool
@@ -78,7 +81,12 @@ class AgentResponse(BaseModel):
             system_prompt=data.system_prompt,
             enabled=data.enabled,
             type=data.type,
-            runtime_provider_id=data.runtime_provider_id,
+            runtime_profile_id=data.runtime_profile_id,
+            runtime_profile_selection_version=(data.runtime_profile_selection_version),
+            runtime_profile_available=data.runtime_profile_available,
+            runtime_profile_availability_reason_code=(
+                data.runtime_profile_availability_reason_code
+            ),
             shell_enabled=data.shell_enabled,
             memory_enabled=data.memory_enabled,
             tool_search_enabled=data.tool_search_enabled,
@@ -219,8 +227,8 @@ class AgentCreateRequest(BaseModel):
     system_prompt: str | None = Field(default=None, description="System prompt")
     enabled: bool = Field(default=True, description="Enabled state")
     type: AgentType = Field(default=AgentType.PUBLIC, description="Visibility scope")
-    runtime_provider_id: str | None = Field(
-        default=None, description="Runtime Provider logical ID"
+    runtime_profile_id: str | None = Field(
+        default=None, description="Selected Workspace Runtime Profile ID"
     )
     shell_enabled: bool = Field(default=True, description="Shell enabled state")
     memory_enabled: bool = Field(default=True, description="Memory enabled state")
@@ -269,8 +277,15 @@ class AgentUpdateRequest(TypedDict, total=False):
     system_prompt: Annotated[str | None, Field(description="System prompt")]
     enabled: Annotated[bool, Field(description="Enabled state")]
     type: Annotated[AgentType, Field(description="Visibility scope")]
-    runtime_provider_id: Annotated[
-        str | None, Field(description="Runtime Provider logical ID")
+    runtime_profile_id: Annotated[
+        str | None, Field(description="Selected Workspace Runtime Profile ID")
+    ]
+    expected_runtime_profile_selection_version: Annotated[
+        int,
+        Field(
+            ge=1,
+            description="Required optimistic version when replacing the selection",
+        ),
     ]
     shell_enabled: Annotated[bool, Field(description="Shell enabled state")]
     memory_enabled: Annotated[bool, Field(description="Memory enabled state")]

@@ -112,6 +112,7 @@ class _AdmissionDouble:
         self.awaiting_access = awaiting_access
         self.revocation_changed = True
         self.events: list[ExternalChannelTrigger] = []
+        self.connected_bot_user_ids: list[str | None] = []
         self.interactions: list[
             tuple[
                 ExternalChannelInteractionCreate,
@@ -127,18 +128,20 @@ class _AdmissionDouble:
         self,
         *,
         event: ExternalChannelTrigger,
+        connected_bot_user_id: str | None,
         authority: object,
         deadline: object,
     ) -> ExternalChannelIngestionOutcome | SlackConnectionRevocation | None:
         del authority, deadline
         self.events.append(event)
+        self.connected_bot_user_ids.append(connected_bot_user_id)
         if self.fail:
             raise RuntimeError("database unavailable")
         if self.retryable:
             return ExternalChannelIngestionOutcome(
                 kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                 reason=ExternalChannelIngestionReason.HISTORY_UNAVAILABLE,
-                batch_id=None,
+                mailbox_item_id=None,
                 control_delivery_attempt_id=None,
                 connection_id=None,
             )
@@ -146,7 +149,7 @@ class _AdmissionDouble:
             return ExternalChannelIngestionOutcome(
                 kind=ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS,
                 reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
-                batch_id=None,
+                mailbox_item_id=None,
                 control_delivery_attempt_id="delivery-1",
                 connection_id=event.connection_id,
             )
@@ -164,7 +167,7 @@ class _AdmissionDouble:
         return ExternalChannelIngestionOutcome(
             kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
             reason=ExternalChannelIngestionReason.ACCEPTED,
-            batch_id="batch-1",
+            mailbox_item_id="batch-1",
             control_delivery_attempt_id=None,
             connection_id=None,
         )
@@ -441,6 +444,7 @@ async def test_matching_active_event_is_admitted_before_return(
     assert result.event_id == "Ev-1"
     assert result.created is True
     assert [event.provider_event_id for event in admission.events] == ["Ev-1"]
+    assert admission.connected_bot_user_ids == ["B-1"]
 
 
 @pytest.mark.asyncio

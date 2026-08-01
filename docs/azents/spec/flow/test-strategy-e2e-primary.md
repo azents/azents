@@ -23,8 +23,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-07-31
-spec_version: 14
+last_verified_at: 2026-08-01
+spec_version: 17
 ---
 
 # E2E Primary Test Strategy
@@ -60,7 +60,8 @@ The Slack and Discord fakes also provide bounded provider-history ranges, mixed 
 types, omission boundaries, failure sequences, duplicate/concurrency barriers, and
 transport acknowledgement evidence for External Channel synchronous ingestion.
 Evidence retains request counts, lifecycle categories, positions, file counts,
-aggregate byte counts, and deterministic hashes only.
+aggregate byte counts, deterministic hashes, and canonical relative Azents Session
+routes only.
 
 Fakes and test evidence never retain credentials, authorization headers, signatures,
 callback URLs, raw payloads, visible message bodies, attachment names, attachment
@@ -122,11 +123,17 @@ Always-on required CI does not depend on external credentials.
   fake; they do not create product rows directly. Focused fake contract tests cover
   signed interaction relay, Gateway lifecycle outcomes, nonce convergence, controlled
   REST failure outcomes, and multipart redaction.
-- The deterministic External Channel module covers Slack HTTP, Slack Socket Mode, and
-  Discord Gateway synchronous admission; durable admission before acknowledgement;
+- The deterministic External Channel module covers Slack HTTP, Slack Socket Mode,
+  Discord HTTP interactions, and Discord Gateway synchronous admission; durable admission before acknowledgement;
   SDK-owned Slack endpoint replacement; Discord Identify-to-Resume recovery; eager or
   reused thread targeting; bound continuation; mixed-author bounded history; duplicate
-  convergence; access replay; and content-free evidence.
+  convergence; access replay; Agent default and binding response-mode management;
+  Slack `mention_only` early ignore without provider-history I/O; retained context on
+  a later mention; `all_messages` continuation after a connected binding edit; Discord
+  creation-time default copy; disconnected binding mutation rejection; and
+  content-free evidence. Slack Socket and Discord
+  Gateway journeys start the same provider-neutral External Channel gateway fixture,
+  while the Agent Worker fixture remains responsible only for Session execution.
 - Backend contract tests run both independent in-memory conversation locks and two
   clients against a real Redis container. Memory replicas may overlap and converge at
   the PostgreSQL position fence; Redis replicas serialize the same scope; unavailable
@@ -178,6 +185,15 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-08-01** — v17. Added public-API and Web Surface verification for Agent and
+  binding response modes, including Slack mention gating/context preservation,
+  all-messages continuation, Discord creation-time copy, and disconnected mutation
+  rejection.
+- **2026-07-31** — v16. Allowed fake-provider evidence to retain only the canonical
+  relative Azents Session route needed to verify provider links against public
+  Session list/detail projections.
+- **2026-07-31** — v15. Replaced the Discord-only gateway fixture and Worker-owned
+  Slack Socket lifecycle with one provider-neutral External Channel gateway fixture.
 - **2026-07-31** — v14. Added deterministic Slack Socket endpoint-replacement and
   Discord Gateway Resume verification through provider fakes and public product paths.
 - **2026-07-30** — v13. Added the post-contraction Slack HTTP, Slack Socket,

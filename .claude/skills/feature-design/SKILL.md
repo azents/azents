@@ -1,6 +1,6 @@
 ---
 name: feature-design
-description: "Requirements-first workflow for new feature design, design documents, and architecture changes. Use for collaborative or autonomous design: interview the user to confirm high-level requirements, preserve an immutable requirements snapshot, use reusable research subagents without blocking the conversation, record design decisions in an ADR, validate repository feasibility, and produce an implementable final design."
+description: "Requirements-first workflow for new feature design, design documents, and architecture changes. Use for collaborative or autonomous design: research current Living Specs and code before interviewing the user, confirm high-level requirements, preserve an immutable requirements snapshot, use reusable research subagents without blocking the conversation, record design decisions in an ADR, validate repository feasibility, and produce an implementable final design."
 ---
 
 # Feature Design Workflow
@@ -8,7 +8,8 @@ description: "Requirements-first workflow for new feature design, design documen
 Use this sequence:
 
 ```text
-requirement interview
+pre-interview current-system research
+→ requirement interview
 → confirmed Requirements snapshot
 → system-grounded problem framing
 → complete ADR decision-backlog briefing
@@ -34,9 +35,35 @@ Keep each artifact's responsibility distinct:
 
 Default to collaborative mode. Both modes require the user to confirm the high-level Requirements before design decisions begin. Autonomous mode delegates design choices, not product intent.
 
+## Phase 0: Pre-interview current-system research
+
+After restating the request and before asking the first requirement or design question,
+research the current product behavior:
+
+1. read the applicable Living Specs first;
+2. inspect the relevant code paths, contracts, tests, fixtures, and configuration;
+3. identify the current terminology, ownership, lifecycle, and user-visible behavior;
+4. distinguish behavior that already exists from the requested gap; and
+5. record evidence-backed unknowns that genuinely require requester intent.
+
+This phase is mandatory for changes to an existing product area. For a genuinely
+greenfield area, search for related specs and code, then state that no current
+implementation was found.
+
+Use the findings to avoid presenting existing behavior as a new option or asking the
+requester to supply facts available from the repository. Before the first interview
+question, give a concise briefing of the confirmed current behavior, the requested
+gap, and any material uncertainty. Ask only a question that remains after this
+research and could change the user-visible contract or scope.
+
+Read historical Requirements, ADRs, and Designs only when current specs or code leave
+product intent or rationale unclear. This preliminary research grounds the interview;
+Phase 3 remains the complete requirement-by-requirement system analysis.
+
 ## Phase 1: Requirement discovery
 
-Keep the main agent as the interview owner. Restate the request, distinguish known facts from assumptions, and ask one high-value question at a time.
+Keep the main agent as the interview owner. Use the Phase 0 evidence to distinguish
+known facts from assumptions, and ask one high-value question at a time.
 
 ### Interview priorities
 
@@ -92,7 +119,12 @@ Give each research subagent:
 
 Send context deltas to the same subagent as the interview evolves. Redirect or discard stale research when the primary scenario changes.
 
-Start limited, reversible scouting proactively when it will prepare better questions, but never wait for it before responding to the user. Do not interrupt the current topic merely because background research completed. Keep results in the main agent's research context until they naturally support the current or next question.
+Start limited, reversible scouting proactively when it will prepare better questions,
+but never wait for it before acknowledging the request and briefing the user. This
+does not relax Phase 0: do not ask the first interview question until the required
+current-system research is complete. Do not interrupt the current topic merely
+because later background research completed. Keep results in the main agent's
+research context until they naturally support the current or next question.
 
 The main agent always owns user communication, Requirements confirmation, ADR updates, and final synthesis.
 
@@ -350,6 +382,10 @@ For final output, use:
 
 ## Guardrails
 
+- Do not ask the first requirement or design question before researching applicable
+  Living Specs and relevant code.
+- Do not ask the requester to resolve current-system facts that repository evidence
+  can answer.
 - Do not skip explicit user confirmation of high-level Requirements, even in autonomous mode.
 - Do not let research subagents own or interrupt the interview.
 - Do not turn benchmark patterns into requirements without user acceptance.

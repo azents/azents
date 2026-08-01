@@ -45,9 +45,11 @@ Method | HTTP request | Description
 [**external_channel_v1_setup_multi_slack_connection**](ExternalChannelV1Api.md#external_channel_v1_setup_multi_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi | Setup Multi Slack Connection
 [**external_channel_v1_setup_slack_connection**](ExternalChannelV1Api.md#external_channel_v1_setup_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack | Setup Slack Connection
 [**external_channel_v1_update_connection_access_policy**](ExternalChannelV1Api.md#external_channel_v1_update_connection_access_policy) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/access-policy | Update Connection Access Policy
+[**external_channel_v1_update_default_response_mode**](ExternalChannelV1Api.md#external_channel_v1_update_default_response_mode) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode | Update Default Response Mode
 [**external_channel_v1_update_discord_connection**](ExternalChannelV1Api.md#external_channel_v1_update_discord_connection) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/discord | Update Discord Connection
 [**external_channel_v1_update_multi_discord_connection**](ExternalChannelV1Api.md#external_channel_v1_update_multi_discord_connection) | **PUT** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id} | Update Multi Discord Connection
 [**external_channel_v1_update_multi_slack_connection**](ExternalChannelV1Api.md#external_channel_v1_update_multi_slack_connection) | **PUT** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id} | Update Multi Slack Connection
+[**external_channel_v1_update_session_channel_response_mode**](ExternalChannelV1Api.md#external_channel_v1_update_session_channel_response_mode) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode | Update Session Channel Response Mode
 [**external_channel_v1_update_slack_connection**](ExternalChannelV1Api.md#external_channel_v1_update_slack_connection) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/slack | Update Slack Connection
 [**external_channel_v1_validate_connection**](ExternalChannelV1Api.md#external_channel_v1_validate_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/validate | Validate Connection
 [**external_channel_v1_validate_multi_discord_connection**](ExternalChannelV1Api.md#external_channel_v1_validate_multi_discord_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/validate | Validate Multi Discord Connection
@@ -3464,6 +3466,90 @@ Name | Type | Description  | Notes
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
+# **external_channel_v1_update_default_response_mode**
+> ExternalChannelResponseModeSetting external_channel_v1_update_default_response_mode(agent_id, handle, response_mode_request)
+
+Update Default Response Mode
+
+Replace the default copied to newly connected conversations.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.external_channel_response_mode_setting import ExternalChannelResponseModeSetting
+from azentspublicclient.models.response_mode_request import ResponseModeRequest
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ExternalChannelV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    handle = 'handle_example' # str | 
+    response_mode_request = azentspublicclient.ResponseModeRequest() # ResponseModeRequest | 
+
+    try:
+        # Update Default Response Mode
+        api_response = api_instance.external_channel_v1_update_default_response_mode(agent_id, handle, response_mode_request)
+        print("The response of ExternalChannelV1Api->external_channel_v1_update_default_response_mode:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ExternalChannelV1Api->external_channel_v1_update_default_response_mode: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **response_mode_request** | [**ResponseModeRequest**](ResponseModeRequest.md)|  | 
+
+### Return type
+
+[**ExternalChannelResponseModeSetting**](ExternalChannelResponseModeSetting.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
 # **external_channel_v1_update_discord_connection**
 > ExternalChannelConnectionStatusSnapshot external_channel_v1_update_discord_connection(agent_id, connection_id, handle, discord_connection_setup_request)
 
@@ -3699,6 +3785,94 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**ExternalChannelConnectionStatusSnapshot**](ExternalChannelConnectionStatusSnapshot.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **external_channel_v1_update_session_channel_response_mode**
+> ManagedBinding external_channel_v1_update_session_channel_response_mode(agent_id, session_id, binding_id, handle, response_mode_request)
+
+Update Session Channel Response Mode
+
+Replace one connected conversation binding's response mode.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.managed_binding import ManagedBinding
+from azentspublicclient.models.response_mode_request import ResponseModeRequest
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ExternalChannelV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    session_id = 'session_id_example' # str | 
+    binding_id = 'binding_id_example' # str | 
+    handle = 'handle_example' # str | 
+    response_mode_request = azentspublicclient.ResponseModeRequest() # ResponseModeRequest | 
+
+    try:
+        # Update Session Channel Response Mode
+        api_response = api_instance.external_channel_v1_update_session_channel_response_mode(agent_id, session_id, binding_id, handle, response_mode_request)
+        print("The response of ExternalChannelV1Api->external_channel_v1_update_session_channel_response_mode:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ExternalChannelV1Api->external_channel_v1_update_session_channel_response_mode: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **session_id** | **str**|  | 
+ **binding_id** | **str**|  | 
+ **handle** | **str**|  | 
+ **response_mode_request** | [**ResponseModeRequest**](ResponseModeRequest.md)|  | 
+
+### Return type
+
+[**ManagedBinding**](ManagedBinding.md)
 
 ### Authorization
 

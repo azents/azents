@@ -30,6 +30,7 @@ import { FileBrowser } from "./FileBrowser";
 import { FileInfo } from "./FileInfo";
 import { FileViewer } from "./FileViewer";
 import { RuntimeActivationView } from "./RuntimeActivationView";
+import { RuntimeConfigurationStatus } from "./RuntimeConfigurationStatus";
 import { WorkspaceDirectoryPickerModal } from "./WorkspaceDirectoryPickerModal";
 import type {
   ProjectRegistrationDialogState,
@@ -246,6 +247,8 @@ export function WorkspacePanel({
                 {t("settingsSubtitle")}
               </Text>
             </Box>
+
+            <RuntimeConfigurationStatus state={state.runtimeConfiguration} />
 
             <Paper withBorder p="md" radius="md">
               <Group justify="space-between" align="center" gap="md">

@@ -11,11 +11,14 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Protocol, TypeAlias
 
-from azents_runtime_control.execution_policy import RuntimeExecutionPolicyEvidence
 from azents_runtime_control.runner_transfer import (
     RunnerTransferCancel,
     RunnerTransferIntent,
     RunnerTransferResult,
+)
+from azents_runtime_control.runtime_configuration import (
+    RuntimeConfigurationEvidence,
+    validate_runtime_configuration_evidence,
 )
 
 JsonValue: TypeAlias = (
@@ -63,7 +66,7 @@ class RunnerRegistration:
     workspace_path: str
     metadata: Mapping[str, JsonValue]
     auth_credential_id: str
-    execution_policy: RuntimeExecutionPolicyEvidence
+    runtime_configuration: RuntimeConfigurationEvidence
 
 
 @dataclasses.dataclass(frozen=True)
@@ -91,7 +94,15 @@ class RunnerStateReport:
     diagnostic: Mapping[str, JsonValue]
     workspace_path: str
     reported_at: datetime
-    execution_policy: RuntimeExecutionPolicyEvidence
+    runtime_configuration: RuntimeConfigurationEvidence
+
+
+@dataclasses.dataclass(frozen=True)
+class RunnerHeartbeatAcknowledgement:
+    """Heartbeat acceptance with optional exact configuration evidence."""
+
+    accepted: bool
+    runtime_configuration: RuntimeConfigurationEvidence | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -200,8 +211,8 @@ class RunnerControlClient(Protocol):
         runtime_id: str,
         generation: int,
         heartbeat_at: datetime,
-    ) -> bool:
-        """Refresh Runner connection TTL for the accepted generation."""
+    ) -> RunnerHeartbeatAcknowledgement:
+        """Refresh Runner TTL and return optional configuration evidence."""
         ...
 
     async def report_runner_state(self, report: RunnerStateReport) -> None:
@@ -323,6 +334,7 @@ class RunnerRunLoop:
         self._monotonic = monotonic or time.monotonic
         self._accepted: RunnerRegistrationAccepted | None = None
         self._last_heartbeat_at: float | None = None
+        self._runtime_configuration = registration.runtime_configuration
         self._max_concurrent_operations_per_session = (
             max_concurrent_operations_per_session
         )
@@ -643,12 +655,12 @@ class RunnerRunLoop:
             and now - self._last_heartbeat_at < heartbeat_interval
         ):
             return
-        ok = await self._client.heartbeat_runner(
+        acknowledgement = await self._client.heartbeat_runner(
             runtime_id=accepted.runtime_id,
             generation=accepted.generation,
             heartbeat_at=self._clock(),
         )
-        if not ok:
+        if not acknowledgement.accepted:
             _LOGGER.warning(
                 "Runtime Runner heartbeat rejected",
                 extra={
@@ -660,6 +672,37 @@ class RunnerRunLoop:
             raise RunnerConnectionRejected(
                 f"Runner generation is stale: runtime={accepted.runtime_id}"
             )
+        evidence = acknowledgement.runtime_configuration
+        if evidence is not None and evidence != self._runtime_configuration:
+            if (
+                evidence.desired_generation
+                != self._runtime_configuration.desired_generation
+            ):
+                _LOGGER.warning(
+                    "Runtime Runner heartbeat configuration rejected",
+                    extra={
+                        "runtime_id": accepted.runtime_id,
+                        "runner_generation": accepted.generation,
+                        "revision_id": evidence.revision_id,
+                        "error_code": "desired_generation_mismatch",
+                    },
+                )
+            else:
+                try:
+                    validate_runtime_configuration_evidence(evidence)
+                except ValueError:
+                    _LOGGER.warning(
+                        "Runtime Runner heartbeat configuration rejected",
+                        extra={
+                            "runtime_id": accepted.runtime_id,
+                            "runner_generation": accepted.generation,
+                            "revision_id": evidence.revision_id,
+                            "error_code": "runtime_configuration_invalid",
+                        },
+                    )
+                else:
+                    self._runtime_configuration = evidence
+                    await self._report_state()
         self._last_heartbeat_at = now
 
     async def _reap_finished_operations(self) -> None:
@@ -734,7 +777,7 @@ class RunnerRunLoop:
                 diagnostic=self._state_diagnostic(),
                 workspace_path=self._registration.workspace_path,
                 reported_at=self._clock(),
-                execution_policy=self._registration.execution_policy,
+                runtime_configuration=self._runtime_configuration,
             )
         )
 

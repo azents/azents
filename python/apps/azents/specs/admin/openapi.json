@@ -950,14 +950,14 @@
         }
       }
     },
-    "/runtime-execution/v1/profiles": {
+    "/runtime-provider/v1/providers/{provider_id}/pod-profiles": {
       "get": {
         "tags": [
-          "Runtime Execution v1"
+          "Runtime Provider v1"
         ],
-        "summary": "List Profiles",
-        "description": "List stable execution Profiles.",
-        "operationId": "runtime_execution_v1_list_profiles",
+        "summary": "List Pod Profiles",
+        "description": "List typed Pod Profiles owned by one Kubernetes Provider.",
+        "operationId": "runtime_provider_v1_list_pod_profiles",
         "security": [
           {
             "HTTPBearer": []
@@ -965,36 +965,22 @@
         ],
         "parameters": [
           {
-            "name": "include_retired",
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          },
+          {
+            "name": "include_disabled",
             "in": "query",
             "required": false,
             "schema": {
               "type": "boolean",
               "default": false,
-              "title": "Include Retired"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0,
-              "title": "Offset"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 50,
-              "title": "Limit"
+              "title": "Include Disabled"
             }
           }
         ],
@@ -1004,7 +990,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RuntimeExecutionProfileListResponse"
+                  "$ref": "#/components/schemas/RuntimeInfrastructureProfileListResponse"
                 }
               }
             }
@@ -1023,14 +1009,25 @@
       },
       "post": {
         "tags": [
-          "Runtime Execution v1"
+          "Runtime Provider v1"
         ],
-        "summary": "Create Profile",
-        "description": "Create one ordinary active execution Profile.",
-        "operationId": "runtime_execution_v1_create_profile",
+        "summary": "Create Pod Profile",
+        "description": "Create one typed infrastructure Profile under one Provider.",
+        "operationId": "runtime_provider_v1_create_pod_profile",
         "security": [
           {
             "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
           }
         ],
         "requestBody": {
@@ -1038,7 +1035,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RuntimeExecutionProfileCreateRequest"
+                "$ref": "#/components/schemas/RuntimeInfrastructureProfileCreateRequest"
               }
             }
           }
@@ -1049,7 +1046,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RuntimeExecutionProfileResponse"
+                  "$ref": "#/components/schemas/RuntimeInfrastructureProfileResponse"
                 }
               }
             }
@@ -1067,20 +1064,143 @@
         }
       }
     },
-    "/runtime-execution/v1/profiles/{profile_id}": {
+    "/runtime-provider/v1/providers/{provider_id}/container-profiles": {
       "get": {
         "tags": [
-          "Runtime Execution v1"
+          "Runtime Provider v1"
         ],
-        "summary": "Get Profile",
-        "description": "Return one stable execution Profile.",
-        "operationId": "runtime_execution_v1_get_profile",
+        "summary": "List Container Profiles",
+        "description": "List typed Container Profiles owned by one Docker Provider.",
+        "operationId": "runtime_provider_v1_list_container_profiles",
         "security": [
           {
             "HTTPBearer": []
           }
         ],
         "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          },
+          {
+            "name": "include_disabled",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Disabled"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeInfrastructureProfileListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Create Container Profile",
+        "description": "Create one typed Container Profile under one Docker Provider.",
+        "operationId": "runtime_provider_v1_create_container_profile",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeInfrastructureProfileCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeInfrastructureProfileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id}": {
+      "get": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Get Pod Profile",
+        "description": "Inspect one exact Provider-owned infrastructure Profile.",
+        "operationId": "runtime_provider_v1_get_pod_profile",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          },
           {
             "name": "profile_id",
             "in": "path",
@@ -1097,7 +1217,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RuntimeExecutionProfileResponse"
+                  "$ref": "#/components/schemas/RuntimeInfrastructureProfileResponse"
                 }
               }
             }
@@ -1116,17 +1236,26 @@
       },
       "put": {
         "tags": [
-          "Runtime Execution v1"
+          "Runtime Provider v1"
         ],
-        "summary": "Replace Profile",
-        "description": "Replace Profile metadata and policy content.",
-        "operationId": "runtime_execution_v1_replace_profile",
+        "summary": "Replace Pod Profile",
+        "description": "Replace one infrastructure Profile with optimistic version fencing.",
+        "operationId": "runtime_provider_v1_replace_pod_profile",
         "security": [
           {
             "HTTPBearer": []
           }
         ],
         "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          },
           {
             "name": "profile_id",
             "in": "path",
@@ -1142,7 +1271,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RuntimeExecutionProfileReplaceRequest"
+                "$ref": "#/components/schemas/RuntimeInfrastructureProfileReplaceRequest"
               }
             }
           }
@@ -1153,7 +1282,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RuntimeExecutionProfileResponse"
+                  "$ref": "#/components/schemas/RuntimeInfrastructureProfileResponse"
                 }
               }
             }
@@ -1171,72 +1300,14 @@
         }
       }
     },
-    "/runtime-execution/v1/profiles/{profile_id}/retire": {
-      "post": {
-        "tags": [
-          "Runtime Execution v1"
-        ],
-        "summary": "Retire Profile",
-        "description": "Retire one ordinary Profile.",
-        "operationId": "runtime_execution_v1_retire_profile",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "profile_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Profile Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RuntimeExecutionProfileRetireRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RuntimeExecutionProfileResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/runtime-execution/v1/audit-events": {
+    "/runtime-provider/v1/providers/{provider_id}/container-profiles/{profile_id}": {
       "get": {
         "tags": [
-          "Runtime Execution v1"
+          "Runtime Provider v1"
         ],
-        "summary": "List Audit Events",
-        "description": "List metadata-only execution-policy audit history.",
-        "operationId": "runtime_execution_v1_list_audit_events",
+        "summary": "Get Container Profile",
+        "description": "Inspect one exact Docker Provider-owned Container Profile.",
+        "operationId": "runtime_provider_v1_get_container_profile",
         "security": [
           {
             "HTTPBearer": []
@@ -1244,67 +1315,326 @@
         ],
         "parameters": [
           {
-            "name": "management_layer",
-            "in": "query",
-            "required": false,
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/RuntimeExecutionManagementLayer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Management Layer"
+              "type": "string",
+              "title": "Provider Id"
             }
           },
           {
-            "name": "target_id",
-            "in": "query",
-            "required": false,
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
+              "type": "string",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeInfrastructureProfileResponse"
                 }
-              ],
-              "title": "Target Id"
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Replace Container Profile",
+        "description": "Replace one Container Profile with optimistic version fencing.",
+        "operationId": "runtime_provider_v1_replace_container_profile",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
             }
           },
           {
-            "name": "workspace_id",
-            "in": "query",
-            "required": false,
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
+              "type": "string",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeInfrastructureProfileReplaceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeInfrastructureProfileResponse"
                 }
-              ],
-              "title": "Workspace Id"
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-provider/v1/providers/{provider_id}/pod-profiles/{profile_id}/recreation-operations": {
+      "post": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Create Pod Profile Recreation",
+        "description": "Start bounded recreation for one Kubernetes Pod Profile.",
+        "operationId": "runtime_provider_v1_create_pod_profile_recreation",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
             }
           },
           {
-            "name": "agent_id",
-            "in": "query",
-            "required": false,
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
+              "type": "string",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeRecreationCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeRecreationOperationResponse"
                 }
-              ],
-              "title": "Agent Id"
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-provider/v1/providers/{provider_id}/container-profiles/{profile_id}/recreation-operations": {
+      "post": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Create Container Profile Recreation",
+        "description": "Start bounded recreation for one Docker Container Profile.",
+        "operationId": "runtime_provider_v1_create_container_profile_recreation",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          },
+          {
+            "name": "profile_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Profile Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeRecreationCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeRecreationOperationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-provider/v1/providers/{provider_id}/recreation-operations": {
+      "post": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Create Provider Recreation",
+        "description": "Start bounded recreation for one exact Runtime Provider.",
+        "operationId": "runtime_provider_v1_create_provider_recreation",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeRecreationCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeRecreationOperationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-provider/v1/recreation-operations/{operation_id}": {
+      "get": {
+        "tags": [
+          "Runtime Provider v1"
+        ],
+        "summary": "Get Platform Recreation",
+        "description": "Read Platform-scoped recreation progress and bounded failures.",
+        "operationId": "runtime_provider_v1_get_platform_recreation",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Operation Id"
             }
           },
           {
@@ -1337,7 +1667,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RuntimeExecutionPolicyAuditListResponse"
+                  "$ref": "#/components/schemas/RuntimeRecreationOperationResponse"
                 }
               }
             }
@@ -1361,7 +1691,7 @@
           "Runtime Provider v1"
         ],
         "summary": "List Contracts",
-        "description": "List accepted and pending capability contract revisions.",
+        "description": "List immutable Provider capability advertisement history.",
         "operationId": "runtime_provider_v1_list_contracts",
         "security": [
           {
@@ -1386,73 +1716,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RuntimeProviderContractListResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/runtime-provider/v1/providers/{provider_id}/contracts/{revision_id}/accept": {
-      "post": {
-        "tags": [
-          "Runtime Provider v1"
-        ],
-        "summary": "Accept Contract",
-        "description": "Explicitly accept one valid Provider capability contract candidate.",
-        "operationId": "runtime_provider_v1_accept_contract",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "provider_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Provider Id"
-            }
-          },
-          {
-            "name": "revision_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Revision Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RuntimeProviderContractAcceptRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RuntimeProviderContractResponse"
                 }
               }
             }
@@ -3960,6 +4223,113 @@
         "title": "DebugExceptionResponse",
         "description": "Debug exception response. The actual response is 500."
       },
+      "DockerContainerProfileSpecV1": {
+        "properties": {
+          "profile_kind": {
+            "type": "string",
+            "const": "docker_container",
+            "title": "Profile Kind"
+          },
+          "contract_family": {
+            "type": "string",
+            "const": "docker.container-profile",
+            "title": "Contract Family"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schema Version"
+          },
+          "runner_resources": {
+            "$ref": "#/components/schemas/DockerContainerResources"
+          },
+          "network_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Network Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "profile_kind",
+          "contract_family",
+          "schema_version",
+          "runner_resources",
+          "network_name"
+        ],
+        "title": "DockerContainerProfileSpecV1",
+        "description": "Docker Container Profile contract version 1."
+      },
+      "DockerContainerResources": {
+        "properties": {
+          "cpu_reservation_millicores": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Reservation Millicores"
+          },
+          "cpu_limit_millicores": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Limit Millicores"
+          },
+          "memory_reservation_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Reservation Bytes"
+          },
+          "memory_limit_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Limit Bytes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cpu_reservation_millicores",
+          "cpu_limit_millicores",
+          "memory_reservation_bytes",
+          "memory_limit_bytes"
+        ],
+        "title": "DockerContainerResources",
+        "description": "Docker-native enforceable Runner resource choices."
+      },
       "EmailVerificationListResponse": {
         "properties": {
           "items": {
@@ -4388,6 +4758,277 @@
         ],
         "title": "InvitationStatus",
         "description": "Workspace invitation status."
+      },
+      "KubernetesContainerResources": {
+        "properties": {
+          "cpu_request_millicores": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Request Millicores"
+          },
+          "cpu_limit_millicores": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Limit Millicores"
+          },
+          "memory_request_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Request Bytes"
+          },
+          "memory_limit_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Limit Bytes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cpu_request_millicores",
+          "cpu_limit_millicores",
+          "memory_request_bytes",
+          "memory_limit_bytes"
+        ],
+        "title": "KubernetesContainerResources",
+        "description": "Explicit Kubernetes resources for one known Runtime component."
+      },
+      "KubernetesDinDModule": {
+        "properties": {
+          "engine_resources": {
+            "$ref": "#/components/schemas/KubernetesContainerResources"
+          },
+          "docker_storage_bytes": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Docker Storage Bytes"
+          },
+          "shared_temporary_storage_bytes": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Shared Temporary Storage Bytes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "engine_resources",
+          "docker_storage_bytes",
+          "shared_temporary_storage_bytes"
+        ],
+        "title": "KubernetesDinDModule",
+        "description": "Privileged DinD topology owned by a Platform Pod Profile."
+      },
+      "KubernetesPodProfileSpecV1": {
+        "properties": {
+          "profile_kind": {
+            "type": "string",
+            "const": "kubernetes_pod",
+            "title": "Profile Kind"
+          },
+          "contract_family": {
+            "type": "string",
+            "const": "kubernetes.pod-profile",
+            "title": "Contract Family"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schema Version"
+          },
+          "runner_resources": {
+            "$ref": "#/components/schemas/KubernetesContainerResources"
+          },
+          "workspace_volume": {
+            "$ref": "#/components/schemas/KubernetesWorkspaceVolume"
+          },
+          "network_policy": {
+            "$ref": "#/components/schemas/RuntimeNetworkPolicyModule"
+          },
+          "service_account_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 253
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Account Name"
+          },
+          "scheduling": {
+            "$ref": "#/components/schemas/KubernetesSchedulingModule"
+          },
+          "dind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KubernetesDinDModule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "profile_kind",
+          "contract_family",
+          "schema_version",
+          "runner_resources",
+          "workspace_volume",
+          "network_policy",
+          "service_account_name",
+          "scheduling",
+          "dind"
+        ],
+        "title": "KubernetesPodProfileSpecV1",
+        "description": "Kubernetes Pod Profile contract version 1."
+      },
+      "KubernetesSchedulingModule": {
+        "properties": {
+          "node_selector": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Node Selector"
+          },
+          "tolerations": {
+            "items": {
+              "$ref": "#/components/schemas/KubernetesToleration"
+            },
+            "type": "array",
+            "title": "Tolerations",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "KubernetesSchedulingModule",
+        "description": "Typed initial Kubernetes scheduling controls."
+      },
+      "KubernetesToleration": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 253,
+            "minLength": 1,
+            "title": "Key"
+          },
+          "operator": {
+            "type": "string",
+            "enum": [
+              "Equal",
+              "Exists"
+            ],
+            "title": "Operator"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 253
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "effect": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "NoSchedule",
+                  "PreferNoSchedule",
+                  "NoExecute"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effect"
+          },
+          "toleration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Toleration Seconds"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "operator",
+          "value",
+          "effect",
+          "toleration_seconds"
+        ],
+        "title": "KubernetesToleration",
+        "description": "Typed Kubernetes toleration supported by Pod Profile v1."
+      },
+      "KubernetesWorkspaceVolume": {
+        "properties": {
+          "storage_class_name": {
+            "type": "string",
+            "maxLength": 253,
+            "minLength": 1,
+            "title": "Storage Class Name"
+          },
+          "storage_request_bytes": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Storage Request Bytes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "storage_class_name",
+          "storage_request_bytes"
+        ],
+        "title": "KubernetesWorkspaceVolume",
+        "description": "Existing per-Runtime Workspace PVC inputs."
       },
       "PasswordResetTokenListResponse": {
         "properties": {
@@ -4933,317 +5574,8 @@
         "title": "PlatformGitHubAppPatchRequest",
         "description": "Optimistic partial update for the Platform GitHub App Admin base."
       },
-      "RuntimeExecutionAuditEventType": {
-        "type": "string",
-        "enum": [
-          "profile_created",
-          "profile_replaced",
-          "profile_retired",
-          "workspace_policy_replaced",
-          "agent_settings_replaced",
-          "target_snapshot_attached",
-          "applied_snapshot_promoted"
-        ],
-        "title": "RuntimeExecutionAuditEventType",
-        "description": "Append-only execution-policy management event vocabulary."
-      },
-      "RuntimeExecutionChangeDirection": {
-        "type": "string",
-        "enum": [
-          "metadata_only",
-          "restrictive",
-          "authority_expanding",
-          "mixed",
-          "incompatible",
-          "application"
-        ],
-        "title": "RuntimeExecutionChangeDirection",
-        "description": "Security direction for one policy change."
-      },
-      "RuntimeExecutionDockerModule": {
+      "RuntimeInfrastructureProfileCreateRequest": {
         "properties": {
-          "module_id": {
-            "type": "string",
-            "const": "docker",
-            "title": "Module Id"
-          },
-          "version": {
-            "type": "integer",
-            "const": 1,
-            "title": "Version"
-          },
-          "enabled": {
-            "type": "boolean",
-            "title": "Enabled"
-          },
-          "storage_mode": {
-            "$ref": "#/components/schemas/RuntimeExecutionStorageMode"
-          },
-          "storage_capacity_bytes": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Storage Capacity Bytes"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "module_id",
-          "version",
-          "enabled",
-          "storage_mode",
-          "storage_capacity_bytes"
-        ],
-        "title": "RuntimeExecutionDockerModule",
-        "description": "Complete Docker capability and its private data-volume lifecycle."
-      },
-      "RuntimeExecutionManagementCapabilitiesResponse": {
-        "properties": {
-          "docker": {
-            "type": "boolean",
-            "title": "Docker"
-          },
-          "storage_modes": {
-            "items": {
-              "$ref": "#/components/schemas/RuntimeExecutionStorageMode"
-            },
-            "type": "array",
-            "title": "Storage Modes"
-          }
-        },
-        "type": "object",
-        "required": [
-          "docker",
-          "storage_modes"
-        ],
-        "title": "RuntimeExecutionManagementCapabilitiesResponse",
-        "description": "Safe server-owned policy management capability gate."
-      },
-      "RuntimeExecutionManagementLayer": {
-        "type": "string",
-        "enum": [
-          "profile",
-          "workspace",
-          "agent",
-          "runtime"
-        ],
-        "title": "RuntimeExecutionManagementLayer",
-        "description": "Management authority that produced one metadata audit event."
-      },
-      "RuntimeExecutionPolicyAuditEventResponse": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "event_type": {
-            "$ref": "#/components/schemas/RuntimeExecutionAuditEventType"
-          },
-          "management_layer": {
-            "$ref": "#/components/schemas/RuntimeExecutionManagementLayer"
-          },
-          "target_id": {
-            "type": "string",
-            "title": "Target Id"
-          },
-          "correlation_id": {
-            "type": "string",
-            "title": "Correlation Id"
-          },
-          "classification": {
-            "$ref": "#/components/schemas/RuntimeExecutionChangeDirection"
-          },
-          "changed_paths": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Changed Paths"
-          },
-          "impact_counts": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "type": "object",
-            "title": "Impact Counts"
-          },
-          "reason_code": {
-            "type": "string",
-            "title": "Reason Code"
-          },
-          "outcome_code": {
-            "type": "string",
-            "title": "Outcome Code"
-          },
-          "workspace_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Workspace Id"
-          },
-          "agent_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Agent Id"
-          },
-          "runtime_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Runtime Id"
-          },
-          "actor_user_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Actor User Id"
-          },
-          "actor_workspace_user_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Actor Workspace User Id"
-          },
-          "system_authority": {
-            "type": "boolean",
-            "title": "System Authority"
-          },
-          "before_digest": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Before Digest"
-          },
-          "after_digest": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "After Digest"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "event_type",
-          "management_layer",
-          "target_id",
-          "correlation_id",
-          "classification",
-          "changed_paths",
-          "impact_counts",
-          "reason_code",
-          "outcome_code",
-          "workspace_id",
-          "agent_id",
-          "runtime_id",
-          "actor_user_id",
-          "actor_workspace_user_id",
-          "system_authority",
-          "before_digest",
-          "after_digest",
-          "created_at"
-        ],
-        "title": "RuntimeExecutionPolicyAuditEventResponse",
-        "description": "Metadata-only execution-policy audit event."
-      },
-      "RuntimeExecutionPolicyAuditListResponse": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/RuntimeExecutionPolicyAuditEventResponse"
-            },
-            "type": "array",
-            "title": "Items"
-          }
-        },
-        "type": "object",
-        "required": [
-          "items"
-        ],
-        "title": "RuntimeExecutionPolicyAuditListResponse",
-        "description": "Metadata-only execution-policy audit collection."
-      },
-      "RuntimeExecutionPolicyDocument": {
-        "properties": {
-          "schema_version": {
-            "type": "integer",
-            "const": 1,
-            "title": "Schema Version"
-          },
-          "docker": {
-            "$ref": "#/components/schemas/RuntimeExecutionDockerModule"
-          },
-          "resources": {
-            "$ref": "#/components/schemas/RuntimeExecutionResourceModule"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "schema_version",
-          "docker",
-          "resources"
-        ],
-        "title": "RuntimeExecutionPolicyDocument",
-        "description": "Complete versioned execution-policy document."
-      },
-      "RuntimeExecutionProfileCreateRequest": {
-        "properties": {
-          "profile_id": {
-            "type": "string",
-            "maxLength": 32,
-            "minLength": 1,
-            "pattern": "^[a-z0-9][a-z0-9-]*$",
-            "title": "Profile Id"
-          },
           "display_name": {
             "type": "string",
             "maxLength": 120,
@@ -5255,51 +5587,41 @@
             "maxLength": 4000,
             "title": "Description"
           },
-          "policy": {
-            "$ref": "#/components/schemas/RuntimeExecutionPolicyDocument"
+          "lifecycle": {
+            "$ref": "#/components/schemas/RuntimeProfileLifecycle",
+            "default": "active"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/RuntimeInfrastructureProfileSpec"
           }
         },
         "type": "object",
         "required": [
-          "profile_id",
           "display_name",
           "description",
-          "policy"
+          "spec"
         ],
-        "title": "RuntimeExecutionProfileCreateRequest",
-        "description": "Create one ordinary active Profile."
+        "title": "RuntimeInfrastructureProfileCreateRequest",
+        "description": "Create one Provider-owned typed infrastructure Profile."
       },
-      "RuntimeExecutionProfileLifecycle": {
-        "type": "string",
-        "enum": [
-          "active",
-          "retired"
-        ],
-        "title": "RuntimeExecutionProfileLifecycle",
-        "description": "Current lifecycle of one stable execution Profile."
-      },
-      "RuntimeExecutionProfileListResponse": {
+      "RuntimeInfrastructureProfileListResponse": {
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/RuntimeExecutionProfileResponse"
+              "$ref": "#/components/schemas/RuntimeInfrastructureProfileResponse"
             },
             "type": "array",
             "title": "Items"
-          },
-          "capabilities": {
-            "$ref": "#/components/schemas/RuntimeExecutionManagementCapabilitiesResponse"
           }
         },
         "type": "object",
         "required": [
-          "items",
-          "capabilities"
+          "items"
         ],
-        "title": "RuntimeExecutionProfileListResponse",
-        "description": "Paginated Profile collection."
+        "title": "RuntimeInfrastructureProfileListResponse",
+        "description": "Provider-scoped infrastructure Profile list."
       },
-      "RuntimeExecutionProfileReplaceRequest": {
+      "RuntimeInfrastructureProfileReplaceRequest": {
         "properties": {
           "expected_version": {
             "type": "integer",
@@ -5317,8 +5639,11 @@
             "maxLength": 4000,
             "title": "Description"
           },
-          "policy": {
-            "$ref": "#/components/schemas/RuntimeExecutionPolicyDocument"
+          "lifecycle": {
+            "$ref": "#/components/schemas/RuntimeProfileLifecycle"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/RuntimeInfrastructureProfileSpec"
           }
         },
         "type": "object",
@@ -5326,16 +5651,21 @@
           "expected_version",
           "display_name",
           "description",
-          "policy"
+          "lifecycle",
+          "spec"
         ],
-        "title": "RuntimeExecutionProfileReplaceRequest",
-        "description": "Complete optimistic Profile replacement."
+        "title": "RuntimeInfrastructureProfileReplaceRequest",
+        "description": "Complete optimistic replacement of one infrastructure Profile."
       },
-      "RuntimeExecutionProfileResponse": {
+      "RuntimeInfrastructureProfileResponse": {
         "properties": {
           "id": {
             "type": "string",
             "title": "Id"
+          },
+          "profile_kind": {
+            "type": "string",
+            "title": "Profile Kind"
           },
           "display_name": {
             "type": "string",
@@ -5346,24 +5676,39 @@
             "title": "Description"
           },
           "lifecycle": {
-            "$ref": "#/components/schemas/RuntimeExecutionProfileLifecycle"
+            "$ref": "#/components/schemas/RuntimeProfileLifecycle"
+          },
+          "contract_family": {
+            "type": "string",
+            "title": "Contract Family"
+          },
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/RuntimeInfrastructureProfileSpec"
+          },
+          "required_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required Capabilities"
           },
           "version": {
             "type": "integer",
             "title": "Version"
           },
-          "policy": {
-            "$ref": "#/components/schemas/RuntimeExecutionPolicyDocument"
-          },
           "digest": {
             "type": "string",
             "title": "Digest"
           },
-          "reserved": {
+          "compatible": {
             "type": "boolean",
-            "title": "Reserved"
+            "title": "Compatible"
           },
-          "system_key": {
+          "compatibility_reason_code": {
             "anyOf": [
               {
                 "type": "string"
@@ -5372,9 +5717,23 @@
                 "type": "null"
               }
             ],
-            "title": "System Key"
+            "title": "Compatibility Reason Code"
           },
-          "updated_by_user_id": {
+          "missing_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Capabilities"
+          },
+          "incompatible_constraints": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Incompatible Constraints"
+          },
+          "capability_revision_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -5383,7 +5742,7 @@
                 "type": "null"
               }
             ],
-            "title": "Updated By User Id"
+            "title": "Capability Revision Id"
           },
           "created_at": {
             "type": "string",
@@ -5399,145 +5758,76 @@
         "type": "object",
         "required": [
           "id",
+          "profile_kind",
           "display_name",
           "description",
           "lifecycle",
+          "contract_family",
+          "schema_version",
+          "spec",
+          "required_capabilities",
           "version",
-          "policy",
           "digest",
-          "reserved",
-          "system_key",
-          "updated_by_user_id",
+          "compatible",
+          "compatibility_reason_code",
+          "missing_capabilities",
+          "incompatible_constraints",
+          "capability_revision_id",
           "created_at",
           "updated_at"
         ],
-        "title": "RuntimeExecutionProfileResponse",
-        "description": "One stable named Runtime execution Profile."
+        "title": "RuntimeInfrastructureProfileResponse",
+        "description": "One Provider-owned infrastructure Profile with compatibility evidence."
       },
-      "RuntimeExecutionProfileRetireRequest": {
-        "properties": {
-          "expected_version": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Expected Version"
+      "RuntimeInfrastructureProfileSpec": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/KubernetesPodProfileSpecV1"
+          },
+          {
+            "$ref": "#/components/schemas/DockerContainerProfileSpecV1"
           }
-        },
-        "type": "object",
-        "required": [
-          "expected_version"
         ],
-        "title": "RuntimeExecutionProfileRetireRequest",
-        "description": "Optimistic Profile retirement."
+        "discriminator": {
+          "propertyName": "profile_kind",
+          "mapping": {
+            "docker_container": "#/components/schemas/DockerContainerProfileSpecV1",
+            "kubernetes_pod": "#/components/schemas/KubernetesPodProfileSpecV1"
+          }
+        }
       },
-      "RuntimeExecutionResourceModule": {
+      "RuntimeNetworkPolicyModule": {
         "properties": {
-          "module_id": {
-            "type": "string",
-            "const": "runtime.resources",
-            "title": "Module Id"
+          "allowed_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Cidrs",
+            "default": []
           },
-          "version": {
-            "type": "integer",
-            "const": 1,
-            "title": "Version"
-          },
-          "cpu_request_millicores": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cpu Request Millicores"
-          },
-          "cpu_limit_millicores": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cpu Limit Millicores"
-          },
-          "memory_request_bytes": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Memory Request Bytes"
-          },
-          "memory_limit_bytes": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Memory Limit Bytes"
-          },
-          "ephemeral_storage_bytes": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ephemeral Storage Bytes"
-          },
-          "persistent_storage_bytes": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Persistent Storage Bytes"
+          "denied_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Denied Cidrs",
+            "default": []
           }
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "module_id",
-          "version",
-          "cpu_request_millicores",
-          "cpu_limit_millicores",
-          "memory_request_bytes",
-          "memory_limit_bytes",
-          "ephemeral_storage_bytes",
-          "persistent_storage_bytes"
-        ],
-        "title": "RuntimeExecutionResourceModule",
-        "description": "Kubernetes resources for the Runtime workload and Workspace volume."
+        "title": "RuntimeNetworkPolicyModule",
+        "description": "Typed customer-traffic network boundary."
       },
-      "RuntimeExecutionStorageMode": {
+      "RuntimeProfileLifecycle": {
         "type": "string",
         "enum": [
-          "none",
-          "ephemeral",
-          "persistent"
+          "active",
+          "disabled"
         ],
-        "title": "RuntimeExecutionStorageMode",
-        "description": "Docker data-storage lifecycle ordered from narrowest to broadest."
+        "title": "RuntimeProfileLifecycle",
+        "description": "Mutable Profile lifecycle."
       },
       "RuntimeProviderAuthMethod": {
         "type": "string",
@@ -5973,21 +6263,6 @@
         "title": "RuntimeProviderBindingState",
         "description": "Lifecycle state of a durable Provider authentication binding."
       },
-      "RuntimeProviderContractAcceptRequest": {
-        "properties": {
-          "expected_admin_version": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Expected Admin Version"
-          }
-        },
-        "type": "object",
-        "required": [
-          "expected_admin_version"
-        ],
-        "title": "RuntimeProviderContractAcceptRequest",
-        "description": "Optimistic concurrency input for explicit contract acceptance."
-      },
       "RuntimeProviderContractListResponse": {
         "properties": {
           "items": {
@@ -6033,54 +6308,6 @@
             "type": "object",
             "title": "Compatibility"
           },
-          "status": {
-            "$ref": "#/components/schemas/RuntimeProviderContractStatus"
-          },
-          "validation_code": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Validation Code"
-          },
-          "validation_message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Validation Message"
-          },
-          "accepted_by_user_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Accepted By User Id"
-          },
-          "accepted_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Accepted At"
-          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -6095,26 +6322,10 @@
           "protocol_version",
           "contract",
           "compatibility",
-          "status",
-          "validation_code",
-          "validation_message",
-          "accepted_by_user_id",
-          "accepted_at",
           "created_at"
         ],
         "title": "RuntimeProviderContractResponse",
         "description": "One immutable Provider capability contract revision."
-      },
-      "RuntimeProviderContractStatus": {
-        "type": "string",
-        "enum": [
-          "candidate",
-          "accepted",
-          "rejected",
-          "superseded"
-        ],
-        "title": "RuntimeProviderContractStatus",
-        "description": "Administrative state of an immutable Provider capability contract."
       },
       "RuntimeProviderLifecycleState": {
         "type": "string",
@@ -6213,17 +6424,6 @@
           "availability_mode": {
             "$ref": "#/components/schemas/RuntimeProviderAvailabilityMode"
           },
-          "accepted_contract_revision_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Accepted Contract Revision Id"
-          },
           "current_contract_revision_id": {
             "anyOf": [
               {
@@ -6292,7 +6492,6 @@
           "enabled",
           "lifecycle_state",
           "availability_mode",
-          "accepted_contract_revision_id",
           "current_contract_revision_id",
           "active_config_revision_id",
           "admin_version",
@@ -6302,6 +6501,234 @@
         ],
         "title": "RuntimeProviderResponse",
         "description": "Durable Runtime Provider inventory item."
+      },
+      "RuntimeRecreationCreateRequest": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Version"
+          },
+          "concurrency_limit": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Concurrency Limit",
+            "default": 5
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "RuntimeRecreationCreateRequest",
+        "description": "Create one optimistic bounded recreation operation."
+      },
+      "RuntimeRecreationItemResponse": {
+        "properties": {
+          "runtime_id": {
+            "type": "string",
+            "title": "Runtime Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RuntimeRecreationItemStatus"
+          },
+          "attempt": {
+            "type": "integer",
+            "title": "Attempt"
+          },
+          "dispatched_generation": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dispatched Generation"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "failure_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Message"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runtime_id",
+          "status",
+          "attempt",
+          "dispatched_generation",
+          "failure_code",
+          "failure_message",
+          "updated_at"
+        ],
+        "title": "RuntimeRecreationItemResponse",
+        "description": "One non-success recreation item detail."
+      },
+      "RuntimeRecreationItemStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "succeeded",
+          "skipped",
+          "failed"
+        ],
+        "title": "RuntimeRecreationItemStatus",
+        "description": "One Runtime item in a scoped recreation operation."
+      },
+      "RuntimeRecreationOperationResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "target_kind": {
+            "$ref": "#/components/schemas/RuntimeRecreationTargetKind"
+          },
+          "target_id": {
+            "type": "string",
+            "title": "Target Id"
+          },
+          "target_version": {
+            "type": "string",
+            "title": "Target Version"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RuntimeRecreationOperationStatus"
+          },
+          "concurrency_limit": {
+            "type": "integer",
+            "title": "Concurrency Limit"
+          },
+          "total_count": {
+            "type": "integer",
+            "title": "Total Count"
+          },
+          "pending_count": {
+            "type": "integer",
+            "title": "Pending Count"
+          },
+          "running_count": {
+            "type": "integer",
+            "title": "Running Count"
+          },
+          "succeeded_count": {
+            "type": "integer",
+            "title": "Succeeded Count"
+          },
+          "skipped_count": {
+            "type": "integer",
+            "title": "Skipped Count"
+          },
+          "failed_count": {
+            "type": "integer",
+            "title": "Failed Count"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeRecreationItemResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "target_kind",
+          "target_id",
+          "target_version",
+          "status",
+          "concurrency_limit",
+          "total_count",
+          "pending_count",
+          "running_count",
+          "succeeded_count",
+          "skipped_count",
+          "failed_count",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "items"
+        ],
+        "title": "RuntimeRecreationOperationResponse",
+        "description": "Durable recreation operation progress and bounded item details."
+      },
+      "RuntimeRecreationOperationStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "completed",
+          "completed_with_failures",
+          "failed"
+        ],
+        "title": "RuntimeRecreationOperationStatus",
+        "description": "Aggregate Runtime recreation operation state."
+      },
+      "RuntimeRecreationTargetKind": {
+        "type": "string",
+        "enum": [
+          "provider",
+          "infrastructure_profile",
+          "workspace_runtime_profile"
+        ],
+        "title": "RuntimeRecreationTargetKind",
+        "description": "Authority scope targeted by one recreation operation."
       },
       "SentryDiagnostics": {
         "properties": {
@@ -7500,6 +7927,24 @@
             "title": "Handle",
             "description": "Workspace unique handle"
           },
+          "default_runtime_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Runtime Profile Id",
+            "description": "Runtime Profile copied to new Agents when currently available"
+          },
+          "default_runtime_profile_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Default Runtime Profile Version",
+            "description": "Optimistic version for the Workspace Runtime Profile default"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -7517,6 +7962,8 @@
         "required": [
           "name",
           "handle",
+          "default_runtime_profile_id",
+          "default_runtime_profile_version",
           "created_at",
           "updated_at"
         ],
@@ -7693,10 +8140,6 @@
     {
       "name": "Model Catalog v1",
       "description": "\nModel Catalog API (Admin)\n\nOperational controls for system-owned model catalog refresh.\n"
-    },
-    {
-      "name": "Runtime Execution v1",
-      "description": "\nRuntime Execution API (Admin)\n\nReusable execution Profile management.\n"
     },
     {
       "name": "Runtime Provider v1",

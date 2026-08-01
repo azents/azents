@@ -179,6 +179,14 @@ def _event_body() -> bytes:
             "api_app_id": "A-1",
             "team_id": "T-1",
             "enterprise_id": "E-1",
+            "authorizations": [
+                {
+                    "is_bot": True,
+                    "team_id": "T-1",
+                    "user_id": "UBOT",
+                    "unexpected": "not retained",
+                }
+            ],
             "token": "deprecated-token-must-not-be-stored",
             "event": {
                 "type": "app_mention",
@@ -422,6 +430,13 @@ def test_event_callback_projects_bounded_routing_and_message_fields() -> None:
     assert result.event.resource_correlation_key == "C-1:100.0001"
     assert result.event.provider_enterprise_id == "E-1"
     assert "token" not in result.event.envelope
+    assert result.event.envelope["authorizations"] == [
+        {
+            "is_bot": True,
+            "team_id": "T-1",
+            "user_id": "UBOT",
+        }
+    ]
     event = result.event.envelope["event"]
     assert isinstance(event, dict)
     assert event["text"] == "Please investigate"
@@ -605,7 +620,7 @@ async def test_auth_test_returns_sanitized_identity() -> None:
     assert result.identity is not None
     assert result.identity.app_id == "A-1"
     assert result.identity.tenant_id == "T-1"
-    assert result.identity.bot_user_id == "B-1"
+    assert result.identity.bot_user_id == "U-BOT"
     assert result.capabilities is not None
     assert result.capabilities.download_files is False
     assert result.capabilities.upload_files is False

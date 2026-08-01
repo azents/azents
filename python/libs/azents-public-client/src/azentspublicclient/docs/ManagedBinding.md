@@ -8,9 +8,9 @@ Name | Type | Description | Notes
 **id** | **str** |  | 
 **agent_session_id** | **str** |  | 
 **provider** | [**ExternalChannelProvider**](ExternalChannelProvider.md) |  | 
+**response_mode** | [**ExternalChannelResponseMode**](ExternalChannelResponseMode.md) |  | 
 **resource_type** | **str** |  | 
 **resource_label** | **str** |  | 
-**status** | [**ExternalChannelBindingStatus**](ExternalChannelBindingStatus.md) |  | 
 **connected_at** | **datetime** |  | 
 **disconnected_at** | **datetime** |  | 
 **disconnect_reason** | **str** |  | 

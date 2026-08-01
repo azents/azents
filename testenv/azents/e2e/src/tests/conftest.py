@@ -1011,7 +1011,7 @@ def azents_engine_worker_container(
 
 
 @pytest.fixture
-def azents_discord_gateway_worker_factory(
+def azents_external_channel_gateway_factory(
     container_network: Network,
     postgres_container: PostgresContainer,
     rustfs_container: DockerContainer,
@@ -1026,7 +1026,7 @@ def azents_discord_gateway_worker_factory(
     system_bootstrap_setup_token: str,
     discord_provider_fake_container: DockerContainer,
 ) -> Callable[[], AbstractContextManager[DockerContainer]]:
-    """Return a starter for a Gateway Worker after durable setup is complete."""
+    """Return a starter for persistent provider ingress after durable setup."""
     del azents_public_server_container, discord_provider_fake_container
 
     @contextmanager
@@ -1036,9 +1036,9 @@ def azents_discord_gateway_worker_factory(
                 image=azents_server_image,
                 docker_client_kw={"timeout": _DOCKER_CLIENT_TIMEOUT_SECONDS},
             )
-            .with_name(f"azents-discord-gateway-worker-{random_secret(4)}")
-            .with_network_aliases("azents-discord-gateway-worker")
-            .with_command(["./bin/discordgatewayworker.sh"])
+            .with_name(f"azents-external-channel-gateway-{random_secret(4)}")
+            .with_network_aliases("azents-external-channel-gateway")
+            .with_command(["./bin/externalchannelgateway.sh"])
             .with_exposed_ports(8013)
         )
         container = _configure_azents_server_container(
@@ -1054,11 +1054,11 @@ def azents_discord_gateway_worker_factory(
         ).with_env("AZ_WORKER_HEALTH_PORT", "8013")
 
         with container:
-            _wait_for_tcp_ready(container, 8013, "azents-discord-gateway-worker")
+            _wait_for_tcp_ready(container, 8013, "azents-external-channel-gateway")
             try:
                 yield container
             finally:
-                _log_server_output(container, "azents-discord-gateway-worker")
+                _log_server_output(container, "azents-external-channel-gateway")
 
     return start
 
@@ -1182,10 +1182,16 @@ def azents_runtime_provider_docker_container(
                     provider_id=_RUNTIME_PROVIDER_ID,
                     secret_values=(runtime_provider_credential,),
                 )
-                _accept_runtime_provider_contract(
+                _wait_for_runtime_provider_contract(
                     admin_server_url=azents_admin_server_url,
                     access_token=system_bootstrap_evidence.access_token,
                     provider_id=_RUNTIME_PROVIDER_ID,
+                )
+                _create_e2e_docker_infrastructure_profile(
+                    admin_server_url=azents_admin_server_url,
+                    access_token=system_bootstrap_evidence.access_token,
+                    provider_id=_RUNTIME_PROVIDER_ID,
+                    network_name=container_network.name,
                 )
                 yield container
                 _log_sanitized_server_output(
@@ -1248,13 +1254,13 @@ def _wait_for_runtime_provider_registered(
     )
 
 
-def _accept_runtime_provider_contract(
+def _wait_for_runtime_provider_contract(
     *,
     admin_server_url: str,
     access_token: str,
     provider_id: str,
 ) -> None:
-    """Accept the registered Provider capability contract for E2E provisioning."""
+    """Wait for the registered Provider capability contract to become current."""
     headers = {"Authorization": f"Bearer {access_token}"}
     deadline = time.monotonic() + 60
     last_error = ""
@@ -1282,41 +1288,59 @@ def _accept_runtime_provider_contract(
             time.sleep(1)
             continue
         current_revision = provider.get("current_contract_revision_id")
-        accepted_revision = provider.get("accepted_contract_revision_id")
-        admin_version = provider.get("admin_version")
-        if (
-            isinstance(current_revision, str)
-            and current_revision
-            and accepted_revision == current_revision
-        ):
+        if isinstance(current_revision, str) and current_revision:
             return
-        if not isinstance(current_revision, str) or not current_revision:
-            last_error = f"provider {provider_id} has no candidate contract"
-            time.sleep(1)
-            continue
-        if not isinstance(admin_version, int):
-            pytest.fail(
-                f"provider {provider_id} inventory did not contain an admin version"
-            )
-        accept_response = requests.post(
-            (
-                f"{admin_server_url}/runtime-provider/v1/providers/"
-                f"{provider_id}/contracts/{current_revision}/accept"
-            ),
-            headers=headers,
-            json={"expected_admin_version": admin_version},
-            timeout=10,
-        )
-        if accept_response.status_code == 200:
-            return
-        last_error = (
-            "provider contract acceptance returned "
-            f"HTTP {accept_response.status_code}: {accept_response.text}"
-        )
+        last_error = f"provider {provider_id} has no current capability contract"
         time.sleep(1)
     pytest.fail(
-        f"runtime provider {provider_id} contract did not become accepted: {last_error}"
+        f"runtime provider {provider_id} contract did not become current: {last_error}"
     )
+
+
+def _create_e2e_docker_infrastructure_profile(
+    *,
+    admin_server_url: str,
+    access_token: str,
+    provider_id: str,
+    network_name: str,
+) -> None:
+    """Create the selectable Docker Profile used by Runtime Provider journeys."""
+    response = requests.post(
+        (
+            f"{admin_server_url}/runtime-provider/v1/providers/"
+            f"{provider_id}/container-profiles"
+        ),
+        headers={"Authorization": f"Bearer {access_token}"},
+        json={
+            "display_name": "E2E Docker Container",
+            "description": "Deterministic Docker Profile for Runtime Provider E2E.",
+            "lifecycle": "active",
+            "spec": {
+                "profile_kind": "docker_container",
+                "contract_family": "docker.container-profile",
+                "schema_version": 1,
+                "runner_resources": {
+                    "cpu_reservation_millicores": None,
+                    "cpu_limit_millicores": None,
+                    "memory_reservation_bytes": None,
+                    "memory_limit_bytes": None,
+                },
+                "network_name": network_name,
+            },
+        },
+        timeout=10,
+    )
+    if response.status_code != 201:
+        pytest.fail(
+            "failed to create E2E Docker infrastructure Profile: "
+            f"HTTP {response.status_code}: {response.text}"
+        )
+    payload = _JSON_OBJECT_ADAPTER.validate_python(response.json())
+    if payload.get("compatible") is not True:
+        pytest.fail(
+            "E2E Docker infrastructure Profile is not compatible: "
+            f"{payload.get('compatibility_reason_code')!r}"
+        )
 
 
 @pytest.fixture(scope="session")

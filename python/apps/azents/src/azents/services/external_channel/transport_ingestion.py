@@ -1,12 +1,9 @@
 """Authenticated transport projection for synchronous conversation ingestion."""
 
-import asyncio
 import dataclasses
 import datetime
-from collections.abc import AsyncIterator
 from typing import Annotated
 
-import httpx
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,21 +15,14 @@ from azents.core.enums import (
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
-    ExternalChannelConnectionConfiguration,
     ExternalChannelResource,
     ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.services.external_channel.connection import (
-    get_external_channel_credentials_codec,
-)
 from azents.services.external_channel.conversation import (
     ExternalChannelConversationScope,
     ExternalChannelOperationDeadline,
 )
-from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
-from azents.services.external_channel.data import DiscordConnectionCredentials
-from azents.services.external_channel.discord_delivery import DiscordDeliveryClient
 from azents.services.external_channel.discord_events import (
     DiscordEventExcluded,
     DiscordEventNormalizationError,
@@ -63,22 +53,6 @@ from azents.services.external_channel.slack_events import (
 _TRANSPORT_OPERATION_BUDGET = datetime.timedelta(seconds=2.5)
 
 
-async def get_transport_discord_http_client() -> AsyncIterator[httpx.AsyncClient]:
-    """Provide bounded Discord transport for eager thread provisioning."""
-    async with httpx.AsyncClient(timeout=20.0, follow_redirects=False) as client:
-        yield client
-
-
-def get_transport_discord_delivery_client(
-    http_client: Annotated[
-        httpx.AsyncClient,
-        Depends(get_transport_discord_http_client),
-    ],
-) -> DiscordDeliveryClient:
-    """Provide the Discord thread-provisioning adapter."""
-    return DiscordDeliveryClient(http_client)
-
-
 type SlackTransportIngestionResult = (
     ExternalChannelIngestionOutcome | SlackConnectionRevocation | None
 )
@@ -96,14 +70,6 @@ class ExternalChannelTransportIngestionService:
         ExternalChannelRepository,
         Depends(ExternalChannelRepository),
     ]
-    credentials_codec: Annotated[
-        ExternalChannelCredentialsCodec,
-        Depends(get_external_channel_credentials_codec),
-    ]
-    discord_client: Annotated[
-        DiscordDeliveryClient,
-        Depends(get_transport_discord_delivery_client),
-    ]
     ingestion_service: Annotated[
         ExternalChannelConversationIngestionService,
         Depends(get_external_channel_conversation_ingestion_service),
@@ -113,6 +79,7 @@ class ExternalChannelTransportIngestionService:
         self,
         *,
         event: ExternalChannelTrigger,
+        connected_bot_user_id: str | None,
         authority: ExternalChannelIngressAuthority,
         deadline: ExternalChannelOperationDeadline,
     ) -> SlackTransportIngestionResult:
@@ -122,6 +89,7 @@ class ExternalChannelTransportIngestionService:
                 event_type=event.event_type,
                 tenant_id=_required_tenant(event),
                 envelope=event.envelope,
+                connected_bot_user_id=connected_bot_user_id,
             )
         except SlackEventExcluded:
             return None
@@ -137,6 +105,7 @@ class ExternalChannelTransportIngestionService:
             locator=ExternalChannelTriggerLocator(
                 connection_id=event.connection_id,
                 provider=ExternalChannelProvider.SLACK,
+                provider_event_type=normalized.source_event_type,
                 provider_tenant_id=normalized.tenant_id,
                 provider_channel_id=normalized.channel_id,
                 provider_parent_channel_id=None,
@@ -250,25 +219,23 @@ class ExternalChannelTransportIngestionService:
             )
             provider_channel_id = normalized.channel_id
             provider_thread_key = None
-            delivery_thread_key = _discord_delivery_channel(resource)
+            delivery_thread_key = (
+                _discord_delivery_channel(resource) or normalized.message_id
+            )
             scope_kind = ExternalChannelConversationScopeKind.PARENT_CHANNEL
-            if normalized.invocation and delivery_thread_key is None:
-                delivery_thread_key = await self._ensure_discord_thread(
-                    configuration=configuration,
-                    parent_channel_id=normalized.channel_id,
-                    root_message_id=normalized.message_id,
-                    deadline=deadline,
-                )
-                if delivery_thread_key is None:
-                    return _retryable_failure()
 
         request = ExternalChannelIngestionRequest(
             locator=ExternalChannelTriggerLocator(
                 connection_id=event.connection_id,
                 provider=ExternalChannelProvider.DISCORD,
+                provider_event_type=event.event_type,
                 provider_tenant_id=normalized.tenant_id,
                 provider_channel_id=provider_channel_id,
-                provider_parent_channel_id=normalized.parent_channel_id,
+                provider_parent_channel_id=(
+                    normalized.parent_channel_id
+                    if normalized.thread_id is not None
+                    else normalized.channel_id
+                ),
                 provider_thread_key=provider_thread_key,
                 delivery_thread_key=delivery_thread_key,
                 provider_resource_key=provider_resource_key,
@@ -320,35 +287,6 @@ class ExternalChannelTransportIngestionService:
                 delivery_channel_id=thread_id,
             )
 
-    async def _ensure_discord_thread(
-        self,
-        *,
-        configuration: ExternalChannelConnectionConfiguration,
-        parent_channel_id: str,
-        root_message_id: str,
-        deadline: ExternalChannelOperationDeadline,
-    ) -> str | None:
-        """Create or reconcile one Discord thread inside the transport deadline."""
-        if configuration.encrypted_credentials is None:
-            return None
-        credentials = self.credentials_codec.decrypt(
-            configuration.encrypted_credentials
-        )
-        if not isinstance(credentials, DiscordConnectionCredentials):
-            return None
-        try:
-            async with asyncio.timeout(deadline.remaining_seconds()):
-                result = await self.discord_client.ensure_thread(
-                    bot_token=credentials.bot_token,
-                    parent_channel_id=parent_channel_id,
-                    root_message_id=root_message_id,
-                )
-        except TimeoutError:
-            return None
-        if result.status != "delivered":
-            return None
-        return _discord_thread_channel_id(result.provider_message_key)
-
 
 def transport_outcome_acknowledgeable(
     outcome: ExternalChannelIngestionOutcome,
@@ -384,21 +322,11 @@ def _discord_delivery_channel(resource: ExternalChannelResource | None) -> str |
     return value if isinstance(value, str) and value else None
 
 
-def _discord_thread_channel_id(provider_message_key: str | None) -> str | None:
-    if provider_message_key is None:
-        return None
-    prefix = "discord-thread:"
-    if not provider_message_key.startswith(prefix):
-        return None
-    thread_id = provider_message_key.removeprefix(prefix)
-    return thread_id if thread_id.isdigit() else None
-
-
 def _retryable_failure() -> ExternalChannelIngestionOutcome:
     return ExternalChannelIngestionOutcome(
         kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
         reason=ExternalChannelIngestionReason.HISTORY_UNAVAILABLE,
-        batch_id=None,
+        mailbox_item_id=None,
         control_delivery_attempt_id=None,
         connection_id=None,
     )
@@ -408,7 +336,7 @@ def _terminal_rejection() -> ExternalChannelIngestionOutcome:
     return ExternalChannelIngestionOutcome(
         kind=ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
         reason=ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE,
-        batch_id=None,
+        mailbox_item_id=None,
         control_delivery_attempt_id=None,
         connection_id=None,
     )

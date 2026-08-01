@@ -440,6 +440,7 @@ def pod_manifest(pod: PodResource) -> JsonObject:
                     "operator": toleration.operator,
                     "value": toleration.value,
                     "effect": toleration.effect,
+                    "tolerationSeconds": toleration.toleration_seconds,
                 }.items()
                 if value is not None
             }
@@ -844,6 +845,7 @@ def _toleration(data: JsonObject) -> Toleration:
         operator=cast(str | None, data.get("operator")),
         value=cast(str | None, data.get("value")),
         effect=cast(str | None, data.get("effect")),
+        toleration_seconds=cast(int | None, data.get("tolerationSeconds")),
     )
 
 

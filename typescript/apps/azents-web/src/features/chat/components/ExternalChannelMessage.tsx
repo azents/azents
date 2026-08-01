@@ -36,6 +36,7 @@ import type { ExternalChannelMessagePresentation } from "../externalChannelMessa
 interface ExternalChannelMessageProps {
   source: ExternalChannelMessagePresentation;
   partial?: boolean;
+  actions?: React.ReactNode;
 }
 
 type ChatTranslator = ReturnType<typeof useTranslations<"chat">>;
@@ -133,6 +134,7 @@ function summaryPreview(value: string): string {
 export function ExternalChannelMessage({
   source,
   partial = false,
+  actions = null,
 }: ExternalChannelMessageProps): React.ReactElement {
   const t = useTranslations("chat");
   const locale = useLocale();
@@ -240,6 +242,7 @@ export function ExternalChannelMessage({
             </Stack>
           </Paper>
         </Collapse>
+        {actions}
       </Stack>
 
       <Modal

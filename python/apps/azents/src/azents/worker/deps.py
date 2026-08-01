@@ -76,6 +76,7 @@ from azents.runtime.transfer.runtime_to_provider import (
 )
 from azents.runtime.transfer.runtime_to_server import RuntimeToServerTransferService
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTransferService
+from azents.services.agent_runtime.service import AgentRuntimeService
 from azents.services.artifact import ArtifactService
 from azents.services.chat.live_events import RedisLiveEventStore
 from azents.services.exchange_file import ExchangeFileService
@@ -98,9 +99,6 @@ from azents.services.external_channel.file_transfer import (
 from azents.services.external_channel.slack_events import SlackConversationClient
 from azents.services.mailbox import MailboxService
 from azents.services.model_file import ModelFileService
-from azents.services.runtime_execution_policy.application_service import (
-    RuntimeExecutionPolicyApplicationService,
-)
 from azents.services.system_setting.service import SystemSettingsService
 from azents.services.vfs import VfsProjectionService
 from azents.utils.appctx import AppContext
@@ -206,8 +204,8 @@ def get_builtin_toolkit_provider(
         VfsProjectionService,
         Depends(get_vfs_projection_service),
     ],
-    execution_policy_application_service: Annotated[
-        RuntimeExecutionPolicyApplicationService,
+    agent_runtime_service: Annotated[
+        AgentRuntimeService,
         Depends(),
     ],
     config: Annotated[Config, Depends(get_config)],
@@ -236,7 +234,7 @@ def get_builtin_toolkit_provider(
         session_manager=session_manager,
         memory_repo=MemoryRepository(),
         agent_runtime_repo=AgentRuntimeRepository(),
-        execution_policy_application_service=execution_policy_application_service,
+        agent_runtime_service=agent_runtime_service,
         runner_operations=runner_operations,
         project_repo=SessionWorkspaceProjectRepository(),
         server_to_runtime_transfer_service=transfer.server_to_runtime,

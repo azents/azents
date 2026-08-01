@@ -12,7 +12,6 @@ from azents.core.enums import (
     AgentSessionStatus,
     ExternalChannelActionMode,
     ExternalChannelAppMode,
-    ExternalChannelBindingStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
@@ -20,6 +19,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
+    ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
     ExternalChannelTransport,
@@ -203,11 +203,10 @@ async def _setup_binding(session: AsyncSession) -> tuple[str, str]:
             resource_id=resource.id,
             route_id=route.id,
             agent_session_id=agent_session.id,
-            status=ExternalChannelBindingStatus.ACTIVE,
+            response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
             disconnected_at=None,
             disconnect_reason=None,
         ),
-        expected_admission_id=None,
         expected_access_request_id=None,
     )
     await session.flush()
@@ -448,6 +447,86 @@ async def test_delivery_identity_and_finish_are_recorded_without_retry(
     assert snapshots[0].latest_action_mode is None
     assert snapshots[0].latest_deliveries == []
     assert snapshots[0].projection_drift == "none"
+
+
+async def test_binding_disconnect_presence_crosses_terminal_delivery_boundary(
+    rdb_session: AsyncSession,
+) -> None:
+    """A leave control can start only after its binding becomes disconnected."""
+    agent_id, binding_id = await _setup_binding(rdb_session)
+    binding = await rdb_session.get(RDBExternalChannelBinding, binding_id)
+    agent_session = await rdb_session.scalar(
+        sa.select(RDBAgentSession).where(RDBAgentSession.agent_id == agent_id)
+    )
+    assert binding is not None
+    assert agent_session is not None
+    route = await rdb_session.get(RDBExternalChannelAgentRoute, binding.route_id)
+    assert route is not None
+    binding.disconnected_at = _at(2)
+    binding.disconnect_reason = "manager_disconnected"
+    route.agent_id = None
+    route.catalog_status = ExternalChannelRouteCatalogStatus.REMOVED
+    route.catalog_removed_at = _at(2)
+    attempt = RDBExternalChannelDeliveryAttempt(
+        origin_type=ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
+        origin_id=binding.id,
+        channel_action_id=None,
+        binding_id=binding.id,
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+        request_payload={
+            "control_kind": "session_presence",
+            "presence_state": "left",
+            "channel_id": "C1",
+            "thread_ts": "1.000001",
+        },
+        status=ExternalChannelDeliveryStatus.PENDING,
+        provider_message_key=None,
+        error_kind=None,
+        error_summary=None,
+        attempted_at=None,
+        completed_at=None,
+    )
+    rdb_session.add(attempt)
+    await rdb_session.flush()
+
+    repository = ExternalChannelWorkRepository()
+    prepared = await repository.get_delivery_target(
+        rdb_session,
+        delivery_attempt_id=attempt.id,
+    )
+    assert prepared is not None
+    assert prepared.agent_name == "Channel Work Agent"
+    assert prepared.agent_session_id == agent_session.id
+    connection = await rdb_session.get(
+        RDBExternalChannelConnection,
+        prepared.connection_id,
+    )
+    resource = await rdb_session.get(
+        RDBExternalChannelResource,
+        prepared.resource_id,
+    )
+    assert connection is not None
+    assert resource is not None
+    connection.status = ExternalChannelConnectionStatus.DISCONNECTED
+    connection.encrypted_credentials = None
+    connection.provider_tenant_id = None
+    connection.capabilities = None
+    resource.status = ExternalChannelResourceStatus.UNAVAILABLE
+    await rdb_session.flush()
+
+    target = await repository.start_captured_terminal_delivery(
+        rdb_session,
+        target=prepared,
+        now=_at(3),
+    )
+
+    assert target is not None
+    assert target.status is ExternalChannelDeliveryStatus.ATTEMPTING
+    assert target.encrypted_credentials == "ciphertext"
+    assert target.provider_tenant_id == "T1"
+    assert target.workspace_handle == "channel-work-test"
+    assert target.agent_id == agent_id
+    assert target.agent_session_id == agent_session.id
 
 
 async def test_discord_progress_updates_one_tracker_and_finishes_cleanup(
@@ -1167,7 +1246,7 @@ async def test_provider_control_final_settlement_revalidates_current_authority(
         now=_at(2),
     )
     assert started is not None
-    binding.status = ExternalChannelBindingStatus.DISCONNECTED
+    binding.disconnected_at = _at(2)
     await rdb_session.flush()
 
     settlement = await repository.settle_delivery(
@@ -1213,23 +1292,27 @@ async def test_initial_discord_delivery_uses_active_binding_authority(
         "title": None,
         "tasks": [],
     }
-    progress_id = await repository.ensure_initial_discord_progress(
+    progress_ids = await repository.ensure_initial_discord_progress(
         rdb_session,
         work_id=work.id,
         binding_id=binding_id,
         labels={"guild_id": "111", "thread_id": "333"},
     )
-    assert progress_id is not None
+    assert len(progress_ids) == 1
+    progress_id = progress_ids[0]
     progress = await rdb_session.get(
         RDBExternalChannelDeliveryAttempt,
         progress_id,
     )
     assert progress is not None
-    session_link = RDBExternalChannelDeliveryAttempt(
+    session_presence = RDBExternalChannelDeliveryAttempt(
         origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
         origin_id=binding_id,
         operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-        request_payload={"text": "Open Session"},
+        request_payload={
+            "control_kind": "session_presence",
+            "presence_state": "joined",
+        },
         status=ExternalChannelDeliveryStatus.PENDING,
         channel_action_id=None,
         binding_id=binding_id,
@@ -1239,10 +1322,10 @@ async def test_initial_discord_delivery_uses_active_binding_authority(
         attempted_at=None,
         completed_at=None,
     )
-    rdb_session.add(session_link)
+    rdb_session.add(session_presence)
     await rdb_session.flush()
 
-    for attempt in (session_link, progress):
+    for attempt in (session_presence, progress):
         target = await repository.start_delivery(
             rdb_session,
             delivery_attempt_id=attempt.id,
@@ -1277,13 +1360,14 @@ async def test_initial_discord_progress_update_uses_active_binding_authority(
         "title": None,
         "tasks": [],
     }
-    create_id = await repository.ensure_initial_discord_progress(
+    create_ids = await repository.ensure_initial_discord_progress(
         rdb_session,
         work_id=work.id,
         binding_id=binding_id,
         labels={"guild_id": "111", "thread_id": "333"},
     )
-    assert create_id is not None
+    assert len(create_ids) == 1
+    create_id = create_ids[0]
     assert await repository.start_delivery(
         rdb_session,
         delivery_attempt_id=create_id,
@@ -1443,7 +1527,6 @@ async def test_file_access_target_requires_complete_active_binding_chain(
         is None
     )
 
-    binding.status = ExternalChannelBindingStatus.DISCONNECTED
     binding.disconnected_at = _at(2)
     binding.disconnect_reason = "test_disconnect"
     await rdb_session.flush()

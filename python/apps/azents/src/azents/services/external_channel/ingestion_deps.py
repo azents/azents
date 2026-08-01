@@ -12,13 +12,15 @@ from azents.services.external_channel.deps import (
 )
 from azents.services.external_channel.ingestion import (
     ExternalChannelConversationIngestionService,
-    ExternalChannelInvocationWakeDispatcher,
 )
 from azents.services.external_channel.ingestion_history import (
     ExternalChannelProviderHistoryReader,
 )
-from azents.services.external_channel.ingestion_store import (
-    ExternalChannelDatabaseIngestionStore,
+from azents.services.external_channel.mailbox_ingestion_store import (
+    ExternalChannelMailboxIngestionStore,
+)
+from azents.services.external_channel.mailbox_wake import (
+    ExternalChannelMailboxWakeDispatcher,
 )
 
 
@@ -32,12 +34,12 @@ def get_external_channel_conversation_ingestion_service(
         Depends(ExternalChannelProviderHistoryReader),
     ],
     store: Annotated[
-        ExternalChannelDatabaseIngestionStore,
-        Depends(ExternalChannelDatabaseIngestionStore),
+        ExternalChannelMailboxIngestionStore,
+        Depends(ExternalChannelMailboxIngestionStore),
     ],
     wake_dispatcher: Annotated[
-        ExternalChannelInvocationWakeDispatcher,
-        Depends(ExternalChannelInvocationWakeDispatcher),
+        ExternalChannelMailboxWakeDispatcher,
+        Depends(ExternalChannelMailboxWakeDispatcher),
     ],
 ) -> ExternalChannelConversationIngestionService:
     """Compose the shared ingestion service for transport and replay callers."""

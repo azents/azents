@@ -16,6 +16,7 @@ import type {
 import type {
   AgentResponse,
   ExternalChannelConnectionStatusSnapshot,
+  ExternalChannelResponseMode,
   ExternalChannelTransport,
   ManagedBlock,
   ManagedConnection,
@@ -37,7 +38,14 @@ export interface ExternalChannelSettingsContainerOutput {
   actionError: string | null;
   actionTarget: string | null;
   actionsBusy: boolean;
+  defaultResponseMode: ExternalChannelResponseMode;
+  defaultResponseModeDraft: ExternalChannelResponseMode;
+  defaultResponseModeSaving: boolean;
+  defaultResponseModeError: string | null;
+  defaultResponseModeSaved: boolean;
   canManageWorkspaceMultiApps: boolean;
+  onDefaultResponseModeChange: (mode: ExternalChannelResponseMode) => void;
+  onSaveDefaultResponseMode: () => void;
   onOpenSetup: () => void;
   onOpenDiscordSetup: () => void;
   onOpenEdit: (connection: ManagedConnection) => void;
@@ -92,6 +100,13 @@ export function useExternalChannelSettingsContainer({
     useState<DiscordConnectionDialogState>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionTarget, setActionTarget] = useState<string | null>(null);
+  const [defaultResponseModeDraft, setDefaultResponseModeDraft] =
+    useState<ExternalChannelResponseMode | null>(null);
+  const [defaultResponseModeError, setDefaultResponseModeError] = useState<
+    string | null
+  >(null);
+  const [defaultResponseModeSaved, setDefaultResponseModeSaved] =
+    useState(false);
   const actionLock = useRef(false);
   const queryInput = { handle, agentId: agent.id };
 
@@ -254,6 +269,28 @@ export function useExternalChannelSettingsContainer({
       },
       onError: (error) => failAction(error),
     });
+  const defaultResponseModeMutation =
+    trpc.externalChannel.updateDefaultResponseMode.useMutation({
+      onSuccess: async () => {
+        try {
+          await utils.externalChannel.listConnections.invalidate(queryInput);
+          setDefaultResponseModeDraft(null);
+          setDefaultResponseModeError(null);
+          setDefaultResponseModeSaved(true);
+        } catch (error) {
+          setDefaultResponseModeError(normalizeError(error));
+        }
+      },
+      onError: (error) => {
+        setDefaultResponseModeError(normalizeError(error));
+        setDefaultResponseModeSaved(false);
+      },
+    });
+
+  const defaultResponseMode =
+    connectionsQuery.data?.default_response_mode ?? "all_messages";
+  const effectiveDefaultResponseMode =
+    defaultResponseModeDraft ?? defaultResponseMode;
 
   const state: ExternalChannelManagementState =
     connectionsQuery.isPending || accessQuery.isPending
@@ -264,6 +301,7 @@ export function useExternalChannelSettingsContainer({
           ? { type: "ERROR", message: accessQuery.error.message }
           : {
               type: "LOADED",
+              defaultResponseMode: connectionsQuery.data.default_response_mode,
               connections: connectionsQuery.data.items,
               associatedMultiApps: connectionsQuery.data.associated_multi_apps,
               grants: accessQuery.data.grants,
@@ -288,9 +326,33 @@ export function useExternalChannelSettingsContainer({
     actionError,
     actionTarget,
     actionsBusy: actionTarget !== null,
+    defaultResponseMode,
+    defaultResponseModeDraft: effectiveDefaultResponseMode,
+    defaultResponseModeSaving: defaultResponseModeMutation.isPending,
+    defaultResponseModeError,
+    defaultResponseModeSaved,
     canManageWorkspaceMultiApps:
       workspaceMemberQuery.data?.role === "owner" ||
       workspaceMemberQuery.data?.role === "manager",
+    onDefaultResponseModeChange: (mode) => {
+      setDefaultResponseModeDraft(mode);
+      setDefaultResponseModeError(null);
+      setDefaultResponseModeSaved(false);
+    },
+    onSaveDefaultResponseMode: () => {
+      if (
+        defaultResponseModeMutation.isPending ||
+        effectiveDefaultResponseMode === defaultResponseMode
+      ) {
+        return;
+      }
+      setDefaultResponseModeError(null);
+      setDefaultResponseModeSaved(false);
+      defaultResponseModeMutation.mutate({
+        ...queryInput,
+        responseMode: effectiveDefaultResponseMode,
+      });
+    },
     onOpenSetup: () => {
       if (actionLock.current) {
         return;

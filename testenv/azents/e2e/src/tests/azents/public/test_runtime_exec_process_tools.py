@@ -24,6 +24,7 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
 from azentspublicclient.models.secrets import Secrets
 from pydantic import TypeAdapter
 
+from support.runtime_profiles import create_workspace_runtime_profile
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
@@ -127,6 +128,12 @@ def _create_shell_enabled_agent(
         workspace_handle,
         integration.id,
     )
+    runtime_profile_id = create_workspace_runtime_profile(
+        public_api_client,
+        token=token,
+        workspace_handle=workspace_handle,
+        provider_id=_RUNTIME_PROVIDER_ID,
+    )
 
     agent = AgentV1Api(public_api_client).agent_v1_create_agent(
         handle=workspace_handle,
@@ -135,7 +142,7 @@ def _create_shell_enabled_agent(
             model_selection=model_selection,
             lightweight_model_selection=model_selection,
             type=AgentType.PUBLIC,
-            runtime_provider_id=_RUNTIME_PROVIDER_ID,
+            runtime_profile_id=runtime_profile_id,
             shell_enabled=True,
         ),
         _headers=_headers(token),
@@ -334,6 +341,24 @@ def _tool_result(
     raise AssertionError(f"tool result not found for call_id={call_id}: {events!r}")
 
 
+def _tool_output_text(result: dict[object, object]) -> str:
+    """Return text from canonical string or typed-part ToolOutput."""
+    output = result.get("output")
+    if isinstance(output, str):
+        return output
+    parts = _object_list(output)
+    if parts is None:
+        raise AssertionError(f"tool output is not text: {result!r}")
+    texts = [
+        text
+        for part in parts
+        if part.get("type") == "text" and isinstance((text := part.get("text")), str)
+    ]
+    if len(texts) != len(parts):
+        raise AssertionError(f"tool output contains non-text parts: {result!r}")
+    return "".join(texts)
+
+
 class TestRuntimeExecProcessTools:
     """Runtime exec process product behavior."""
 
@@ -492,7 +517,7 @@ class TestRuntimeExecProcessTools:
             success_events,
             call_id=_PATCH_SUCCESS_CALL_ID,
         )
-        assert success_result.get("status") == "completed"
+        assert success_result.get("status") == "completed", success_result
         success_output = success_result.get("output")
         assert isinstance(success_output, str)
         assert "M source.txt" in success_output
@@ -544,8 +569,7 @@ class TestRuntimeExecProcessTools:
             call_id=_PATCH_TRAVERSAL_CALL_ID,
         )
         assert failure_result.get("status") == "failed"
-        failure_output = failure_result.get("output")
-        assert isinstance(failure_output, str)
+        failure_output = _tool_output_text(failure_result)
         assert "Patch was not applied" in failure_output
         assert "TRAVERSAL_SECRET" not in failure_output
         failure_metadata = _object_dict(failure_result.get("metadata"))

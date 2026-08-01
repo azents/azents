@@ -274,6 +274,7 @@ class MailboxItemKind(enum.StrEnum):
 
     USER_MESSAGE = "user_message"
     GOAL_CONTINUATION = "goal_continuation"
+    EXTERNAL_CHANNEL_CONTINUATION = "external_channel_continuation"
     ACTION_MESSAGE = "action_message"
     AGENT_MESSAGE = "agent_message"
     EXTERNAL_CHANNEL_INVOCATION = "external_channel_invocation"
@@ -291,6 +292,7 @@ class EventKind(enum.StrEnum):
 
     USER_MESSAGE = "user_message"
     GOAL_CONTINUATION = "goal_continuation"
+    EXTERNAL_CHANNEL_CONTINUATION = "external_channel_continuation"
     GOAL_UPDATED = "goal_updated"
     ACTION_MESSAGE = "action_message"
     AGENT_MESSAGE = "agent_message"
@@ -600,15 +602,6 @@ class RuntimeProviderBindingAuditEventType(enum.StrEnum):
     CONFLICT = "conflict"
 
 
-class RuntimeProviderContractStatus(enum.StrEnum):
-    """Administrative state of an immutable Provider capability contract."""
-
-    CANDIDATE = "candidate"
-    ACCEPTED = "accepted"
-    REJECTED = "rejected"
-    SUPERSEDED = "superseded"
-
-
 class RuntimeProviderConfigRevisionState(enum.StrEnum):
     """Lifecycle state of one immutable Provider configuration revision."""
 
@@ -634,15 +627,6 @@ class RuntimeProviderBindingOrigin(enum.StrEnum):
     AGENT_EXPLICIT = "agent_explicit"
     PLATFORM_DEFAULT = "platform_default"
     MIGRATION = "migration"
-
-
-class RuntimePolicySnapshotApplicationState(enum.StrEnum):
-    """Provider application projection for one immutable Runtime policy snapshot."""
-
-    PENDING = "pending"
-    APPLIED = "applied"
-    DIVERGENT = "divergent"
-    LEGACY_UNVERIFIED = "legacy_unverified"
 
 
 class SnapshotKind(enum.StrEnum):
@@ -802,6 +786,13 @@ class ExternalChannelRouteMode(enum.StrEnum):
     PLATFORM = "platform"
 
 
+class ExternalChannelResponseMode(enum.StrEnum):
+    """Message eligibility policy copied to one external conversation binding."""
+
+    MENTION_ONLY = "mention_only"
+    ALL_MESSAGES = "all_messages"
+
+
 class ExternalChannelRouteCatalogStatus(enum.StrEnum):
     """Catalog availability for one connection-to-Agent route."""
 
@@ -828,26 +819,6 @@ class ExternalChannelInteractionStatus(enum.StrEnum):
     EXPIRED = "expired"
     REJECTED = "rejected"
     FAILED = "failed"
-
-
-class ExternalChannelConversationAdmissionOrigin(enum.StrEnum):
-    """Route-resolution origin for an unbound conversation."""
-
-    SINGLE_ROUTE = "single_route"
-    CHANNEL_DEFAULT = "channel_default"
-    SHORTCUT = "shortcut"
-    MENTION_SELECTOR = "mention_selector"
-
-
-class ExternalChannelConversationAdmissionStatus(enum.StrEnum):
-    """Route-neutral conversation admission lifecycle."""
-
-    PENDING_SELECTION = "pending_selection"
-    SELECTED = "selected"
-    AWAITING_ACCESS = "awaiting_access"
-    BOUND = "bound"
-    EXPIRED = "expired"
-    REJECTED = "rejected"
 
 
 class ExternalChannelChannelDefaultStatus(enum.StrEnum):
@@ -894,21 +865,6 @@ class ExternalChannelMessageRevisionKind(enum.StrEnum):
     ORIGINAL = "original"
     EDIT = "edit"
     DELETE = "delete"
-
-
-class ExternalChannelBindingStatus(enum.StrEnum):
-    """Session binding lifecycle status."""
-
-    ACTIVE = "active"
-    DISCONNECTED = "disconnected"
-
-
-class ExternalChannelInvocationWakeDispatchStatus(enum.StrEnum):
-    """Durable broker wake-dispatch state for one invocation batch."""
-
-    PENDING = "pending"
-    CLAIMED = "claimed"
-    DISPATCHED = "dispatched"
 
 
 class ExternalChannelAccessRequestStatus(enum.StrEnum):
@@ -980,22 +936,6 @@ class ExternalChannelDeliveryStatus(enum.StrEnum):
     FAILED = "failed"
     UNKNOWN = "unknown"
     NOT_ATTEMPTED = "not_attempted"
-
-
-class ExternalChannelResourceProvisioningOperation(enum.StrEnum):
-    """Provider mutation required to make a canonical resource usable."""
-
-    THREAD_CREATE = "thread_create"
-
-
-class ExternalChannelResourceProvisioningStatus(enum.StrEnum):
-    """Durable outcome state for one resource provisioning operation."""
-
-    PENDING = "pending"
-    ATTEMPTING = "attempting"
-    DELIVERED = "delivered"
-    FAILED = "failed"
-    UNKNOWN = "unknown"
 
 
 class ExternalChannelWorkProjectionStatus(enum.StrEnum):

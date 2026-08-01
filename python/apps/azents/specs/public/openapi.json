@@ -7095,6 +7095,73 @@
         }
       }
     },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode": {
+      "put": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Update Default Response Mode",
+        "description": "Replace the default copied to newly connected conversations.",
+        "operationId": "external_channel_v1_update_default_response_mode",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResponseModeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalChannelResponseModeSetting"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack": {
       "post": {
         "tags": [
@@ -7888,6 +7955,91 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ManagedBindingListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode": {
+      "put": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Update Session Channel Response Mode",
+        "description": "Replace one connected conversation binding's response mode.",
+        "operationId": "external_channel_v1_update_session_channel_response_mode",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Binding Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResponseModeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedBinding"
                 }
               }
             }
@@ -9471,14 +9623,14 @@
         }
       }
     },
-    "/runtime-execution/v1/workspaces/{handle}/policy": {
+    "/runtime-profile/v1/workspaces/{handle}/default": {
       "get": {
         "tags": [
-          "Runtime Execution v1"
+          "Runtime Profile v1"
         ],
-        "summary": "Get Workspace Policy",
-        "description": "Return the current safe Workspace execution policy.",
-        "operationId": "runtime_execution_v1_get_workspace_policy",
+        "summary": "Get Workspace Runtime Profile Default",
+        "description": "Get the Workspace Runtime Profile default and its current availability.",
+        "operationId": "runtime_profile_v1_get_workspace_runtime_profile_default",
         "security": [
           {
             "HTTPBearer": []
@@ -9501,7 +9653,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WorkspaceRuntimeExecutionPolicyResponse"
+                  "$ref": "#/components/schemas/WorkspaceRuntimeProfileDefaultResponse"
                 }
               }
             }
@@ -9520,11 +9672,11 @@
       },
       "put": {
         "tags": [
-          "Runtime Execution v1"
+          "Runtime Profile v1"
         ],
-        "summary": "Replace Workspace Policy",
-        "description": "Replace Workspace restrictions and complete Profile allowance.",
-        "operationId": "runtime_execution_v1_replace_workspace_policy",
+        "summary": "Replace Workspace Runtime Profile Default",
+        "description": "Set or clear the Workspace default with optimistic version fencing.",
+        "operationId": "runtime_profile_v1_replace_workspace_runtime_profile_default",
         "security": [
           {
             "HTTPBearer": []
@@ -9546,7 +9698,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/WorkspaceRuntimeExecutionPolicyReplaceRequest"
+                "$ref": "#/components/schemas/WorkspaceRuntimeProfileDefaultReplaceRequest"
               }
             }
           }
@@ -9557,7 +9709,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WorkspaceRuntimeExecutionPolicyResponse"
+                  "$ref": "#/components/schemas/WorkspaceRuntimeProfileDefaultResponse"
                 }
               }
             }
@@ -9575,14 +9727,62 @@
         }
       }
     },
-    "/runtime-execution/v1/workspaces/{handle}/profiles": {
+    "/runtime-profile/v1/workspaces/{handle}/infrastructure-profiles": {
       "get": {
         "tags": [
-          "Runtime Execution v1"
+          "Runtime Profile v1"
         ],
-        "summary": "List Workspace Profiles",
-        "description": "List Profiles with Workspace-level availability reasons.",
-        "operationId": "runtime_execution_v1_list_workspace_profiles",
+        "summary": "List Selectable Infrastructure Profiles",
+        "description": "List exact Provider infrastructure Profiles selectable by the Workspace.",
+        "operationId": "runtime_profile_v1_list_selectable_infrastructure_profiles",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectableInfrastructureProfileListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime-profile/v1/workspaces/{handle}/profiles": {
+      "get": {
+        "tags": [
+          "Runtime Profile v1"
+        ],
+        "summary": "List Workspace Runtime Profiles",
+        "description": "List Workspace-owned Runtime Profiles with current availability.",
+        "operationId": "runtime_profile_v1_list_workspace_runtime_profiles",
         "security": [
           {
             "HTTPBearer": []
@@ -9599,36 +9799,13 @@
             }
           },
           {
-            "name": "include_retired",
+            "name": "include_disabled",
             "in": "query",
             "required": false,
             "schema": {
               "type": "boolean",
               "default": false,
-              "title": "Include Retired"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0,
-              "title": "Offset"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 50,
-              "title": "Limit"
+              "title": "Include Disabled"
             }
           }
         ],
@@ -9638,7 +9815,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WorkspaceRuntimeExecutionProfileListResponse"
+                  "$ref": "#/components/schemas/WorkspaceRuntimeProfileListResponse"
                 }
               }
             }
@@ -9654,16 +9831,14 @@
             }
           }
         }
-      }
-    },
-    "/runtime-execution/v1/workspaces/{handle}/policy/audit-events": {
-      "get": {
+      },
+      "post": {
         "tags": [
-          "Runtime Execution v1"
+          "Runtime Profile v1"
         ],
-        "summary": "List Workspace Audit Events",
-        "description": "List metadata-only Workspace execution-policy audit history.",
-        "operationId": "runtime_execution_v1_list_workspace_audit_events",
+        "summary": "Create Workspace Runtime Profile",
+        "description": "Create one complete Workspace Runtime choice.",
+        "operationId": "runtime_profile_v1_create_workspace_runtime_profile",
         "security": [
           {
             "HTTPBearer": []
@@ -9678,38 +9853,25 @@
               "type": "string",
               "title": "Handle"
             }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0,
-              "title": "Offset"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 50,
-              "title": "Limit"
-            }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceRuntimeProfileCreateRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RuntimeExecutionPolicyAuditListResponse"
+                  "$ref": "#/components/schemas/WorkspaceRuntimeProfileResponse"
                 }
               }
             }
@@ -9727,14 +9889,14 @@
         }
       }
     },
-    "/runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/settings": {
+    "/runtime-profile/v1/workspaces/{handle}/profiles/{profile_id}": {
       "get": {
         "tags": [
-          "Runtime Execution v1"
+          "Runtime Profile v1"
         ],
-        "summary": "Get Agent Policy",
-        "description": "Return configured Agent execution intent and effective preview.",
-        "operationId": "runtime_execution_v1_get_agent_policy",
+        "summary": "Get Workspace Runtime Profile",
+        "description": "Inspect one exact Workspace-owned Runtime Profile.",
+        "operationId": "runtime_profile_v1_get_workspace_runtime_profile",
         "security": [
           {
             "HTTPBearer": []
@@ -9742,12 +9904,12 @@
         ],
         "parameters": [
           {
-            "name": "agent_id",
+            "name": "profile_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Agent Id"
+              "title": "Profile Id"
             }
           },
           {
@@ -9766,7 +9928,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AgentRuntimeExecutionPolicyResponse"
+                  "$ref": "#/components/schemas/WorkspaceRuntimeProfileResponse"
                 }
               }
             }
@@ -9785,11 +9947,11 @@
       },
       "put": {
         "tags": [
-          "Runtime Execution v1"
+          "Runtime Profile v1"
         ],
-        "summary": "Replace Agent Policy",
-        "description": "Replace configured Agent Profile selection and restrictive override.",
-        "operationId": "runtime_execution_v1_replace_agent_policy",
+        "summary": "Replace Workspace Runtime Profile",
+        "description": "Replace one Workspace Profile with optimistic version fencing.",
+        "operationId": "runtime_profile_v1_replace_workspace_runtime_profile",
         "security": [
           {
             "HTTPBearer": []
@@ -9797,12 +9959,12 @@
         ],
         "parameters": [
           {
-            "name": "agent_id",
+            "name": "profile_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Agent Id"
+              "title": "Profile Id"
             }
           },
           {
@@ -9820,7 +9982,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AgentRuntimeExecutionPolicyReplaceRequest"
+                "$ref": "#/components/schemas/WorkspaceRuntimeProfileReplaceRequest"
               }
             }
           }
@@ -9831,7 +9993,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AgentRuntimeExecutionPolicyResponse"
+                  "$ref": "#/components/schemas/WorkspaceRuntimeProfileResponse"
                 }
               }
             }
@@ -9849,14 +10011,14 @@
         }
       }
     },
-    "/runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/apply": {
+    "/runtime-profile/v1/workspaces/{handle}/profiles/{profile_id}/recreation-operations": {
       "post": {
         "tags": [
-          "Runtime Execution v1"
+          "Runtime Profile v1"
         ],
-        "summary": "Apply Agent Policy",
-        "description": "Apply current valid Agent execution intent to its Runtime.",
-        "operationId": "runtime_execution_v1_apply_agent_policy",
+        "summary": "Create Profile Recreation",
+        "description": "Start bounded recreation for one Workspace Runtime Profile.",
+        "operationId": "runtime_profile_v1_create_profile_recreation",
         "security": [
           {
             "HTTPBearer": []
@@ -9864,12 +10026,12 @@
         ],
         "parameters": [
           {
-            "name": "agent_id",
+            "name": "profile_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Agent Id"
+              "title": "Profile Id"
             }
           },
           {
@@ -9882,13 +10044,23 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeRecreationCreateRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AgentRuntimeExecutionPolicyApplyResponse"
+                  "$ref": "#/components/schemas/RuntimeRecreationOperationResponse"
                 }
               }
             }
@@ -9906,14 +10078,14 @@
         }
       }
     },
-    "/runtime-execution/v1/workspaces/{handle}/agents/{agent_id}/audit-events": {
+    "/runtime-profile/v1/workspaces/{handle}/recreation-operations/{operation_id}": {
       "get": {
         "tags": [
-          "Runtime Execution v1"
+          "Runtime Profile v1"
         ],
-        "summary": "List Agent Audit Events",
-        "description": "List metadata-only Agent execution-policy audit history.",
-        "operationId": "runtime_execution_v1_list_agent_audit_events",
+        "summary": "Get Workspace Runtime Profile Recreation",
+        "description": "Read Workspace-scoped recreation progress and bounded failures.",
+        "operationId": "runtime_profile_v1_get_workspace_runtime_profile_recreation",
         "security": [
           {
             "HTTPBearer": []
@@ -9921,12 +10093,12 @@
         ],
         "parameters": [
           {
-            "name": "agent_id",
+            "name": "operation_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Agent Id"
+              "title": "Operation Id"
             }
           },
           {
@@ -9968,7 +10140,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RuntimeExecutionPolicyAuditListResponse"
+                  "$ref": "#/components/schemas/RuntimeRecreationOperationResponse"
                 }
               }
             }
@@ -12729,7 +12901,7 @@
             "description": "Visibility scope",
             "default": "public"
           },
-          "runtime_provider_id": {
+          "runtime_profile_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -12738,8 +12910,8 @@
                 "type": "null"
               }
             ],
-            "title": "Runtime Provider Id",
-            "description": "Runtime Provider logical ID"
+            "title": "Runtime Profile Id",
+            "description": "Selected Workspace Runtime Profile ID"
           },
           "shell_enabled": {
             "type": "boolean",
@@ -13102,7 +13274,7 @@
           "type": {
             "$ref": "#/components/schemas/AgentType"
           },
-          "runtime_provider_id": {
+          "runtime_profile_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -13111,7 +13283,26 @@
                 "type": "null"
               }
             ],
-            "title": "Runtime Provider Id"
+            "title": "Runtime Profile Id"
+          },
+          "runtime_profile_selection_version": {
+            "type": "integer",
+            "title": "Runtime Profile Selection Version"
+          },
+          "runtime_profile_available": {
+            "type": "boolean",
+            "title": "Runtime Profile Available"
+          },
+          "runtime_profile_availability_reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Profile Availability Reason Code"
           },
           "shell_enabled": {
             "type": "boolean",
@@ -13182,7 +13373,10 @@
           "system_prompt",
           "enabled",
           "type",
-          "runtime_provider_id",
+          "runtime_profile_id",
+          "runtime_profile_selection_version",
+          "runtime_profile_available",
+          "runtime_profile_availability_reason_code",
           "shell_enabled",
           "memory_enabled",
           "tool_search_enabled",
@@ -13259,134 +13453,23 @@
         "title": "AgentRuntimeActionsResponse",
         "description": "Agent Runtime action availability response."
       },
-      "AgentRuntimeExecutionPolicyApplyResponse": {
-        "properties": {
-          "snapshot_id": {
-            "type": "string",
-            "title": "Snapshot Id"
-          },
-          "desired_generation": {
-            "type": "integer",
-            "title": "Desired Generation"
-          },
-          "target_digest": {
-            "type": "string",
-            "title": "Target Digest"
-          },
-          "created": {
-            "type": "boolean",
-            "title": "Created"
-          }
-        },
-        "type": "object",
-        "required": [
-          "snapshot_id",
-          "desired_generation",
-          "target_digest",
-          "created"
-        ],
-        "title": "AgentRuntimeExecutionPolicyApplyResponse",
-        "description": "Exact immutable Runtime target created or reused by Agent Apply."
-      },
-      "AgentRuntimeExecutionPolicyReplaceRequest": {
-        "properties": {
-          "expected_version": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Expected Version"
-          },
-          "profile_id": {
-            "type": "string",
-            "maxLength": 32,
-            "minLength": 1,
-            "title": "Profile Id"
-          },
-          "restriction": {
-            "$ref": "#/components/schemas/RuntimeExecutionPolicyRestriction"
-          }
-        },
-        "type": "object",
-        "required": [
-          "expected_version",
-          "profile_id",
-          "restriction"
-        ],
-        "title": "AgentRuntimeExecutionPolicyReplaceRequest",
-        "description": "Complete optimistic Agent intent replacement."
-      },
-      "AgentRuntimeExecutionPolicyResponse": {
-        "properties": {
-          "agent_id": {
-            "type": "string",
-            "title": "Agent Id"
-          },
-          "version": {
-            "type": "integer",
-            "title": "Version"
-          },
-          "profile_id": {
-            "type": "string",
-            "title": "Profile Id"
-          },
-          "profile_version": {
-            "type": "integer",
-            "title": "Profile Version"
-          },
-          "profile_lifecycle": {
-            "$ref": "#/components/schemas/RuntimeExecutionProfileLifecycle"
-          },
-          "restriction": {
-            "$ref": "#/components/schemas/RuntimeExecutionPolicyRestriction"
-          },
-          "digest": {
-            "type": "string",
-            "title": "Digest"
-          },
-          "effective_preview": {
-            "$ref": "#/components/schemas/RuntimeExecutionResolution"
-          },
-          "provider_compatibility_evaluated": {
-            "type": "boolean",
-            "title": "Provider Compatibility Evaluated"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          },
-          "capabilities": {
-            "$ref": "#/components/schemas/RuntimeExecutionManagementCapabilitiesResponse"
-          }
-        },
-        "type": "object",
-        "required": [
-          "agent_id",
-          "version",
-          "profile_id",
-          "profile_version",
-          "profile_lifecycle",
-          "restriction",
-          "digest",
-          "effective_preview",
-          "provider_compatibility_evaluated",
-          "updated_at",
-          "capabilities"
-        ],
-        "title": "AgentRuntimeExecutionPolicyResponse",
-        "description": "Configured Agent intent and hierarchy-only effective preview."
-      },
-      "AgentRuntimeExecutionPolicyStatusResponse": {
+      "AgentRuntimeConfigurationStatusResponse": {
         "properties": {
           "status": {
-            "$ref": "#/components/schemas/RuntimeExecutionPolicyStatus"
+            "type": "string",
+            "enum": [
+              "profile_required",
+              "configuration_blocked",
+              "configured_not_created",
+              "waiting_for_recreation",
+              "applied"
+            ],
+            "title": "Status"
           },
-          "configured": {
-            "$ref": "#/components/schemas/RuntimeExecutionConfiguredSummaryResponse"
-          },
-          "target": {
+          "desired": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/RuntimeExecutionSnapshotSummaryResponse"
+                "$ref": "#/components/schemas/RuntimeConfigurationRevisionResponse"
               },
               {
                 "type": "null"
@@ -13396,48 +13479,22 @@
           "applied": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/RuntimeExecutionSnapshotSummaryResponse"
+                "$ref": "#/components/schemas/RuntimeConfigurationRevisionResponse"
               },
               {
                 "type": "null"
               }
             ]
-          },
-          "desired_generation": {
-            "type": "integer",
-            "title": "Desired Generation"
-          },
-          "governing_layers": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/RuntimeExecutionPolicyLayer"
-            },
-            "type": "object",
-            "title": "Governing Layers"
-          },
-          "reason_codes": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Reason Codes"
-          },
-          "required_action": {
-            "$ref": "#/components/schemas/RuntimeExecutionRequiredAction"
           }
         },
         "type": "object",
         "required": [
           "status",
-          "configured",
-          "target",
-          "applied",
-          "desired_generation",
-          "governing_layers",
-          "reason_codes",
-          "required_action"
+          "desired",
+          "applied"
         ],
-        "title": "AgentRuntimeExecutionPolicyStatusResponse",
-        "description": "Safe server-authoritative Runtime execution-policy status."
+        "title": "AgentRuntimeConfigurationStatusResponse",
+        "description": "Desired and applied Runtime configuration status."
       },
       "AgentRuntimeFailureResponse": {
         "properties": {
@@ -13471,8 +13528,8 @@
           "state": {
             "$ref": "#/components/schemas/AgentRuntimeSummaryResponse"
           },
-          "execution_policy": {
-            "$ref": "#/components/schemas/AgentRuntimeExecutionPolicyStatusResponse"
+          "configuration": {
+            "$ref": "#/components/schemas/AgentRuntimeConfigurationStatusResponse"
           },
           "command_type": {
             "$ref": "#/components/schemas/RuntimeLifecycleCommandType"
@@ -13486,7 +13543,7 @@
         "required": [
           "runtime",
           "state",
-          "execution_policy",
+          "configuration",
           "command_type",
           "desired_generation"
         ],
@@ -13518,17 +13575,60 @@
             ],
             "title": "Runtime Provider Id"
           },
-          "provider_config": {
+          "runtime_provider_resource_id": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Provider Config"
+            "title": "Runtime Provider Resource Id"
+          },
+          "infrastructure_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Infrastructure Profile Id"
+          },
+          "workspace_runtime_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Runtime Profile Id"
+          },
+          "desired_runtime_configuration_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Desired Runtime Configuration Revision Id"
+          },
+          "applied_runtime_configuration_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applied Runtime Configuration Revision Id"
           },
           "desired_state": {
             "$ref": "#/components/schemas/RuntimeDesiredState"
@@ -13647,7 +13747,11 @@
           "workspace_id",
           "agent_id",
           "runtime_provider_id",
-          "provider_config",
+          "runtime_provider_resource_id",
+          "infrastructure_profile_id",
+          "workspace_runtime_profile_id",
+          "desired_runtime_configuration_revision_id",
+          "applied_runtime_configuration_revision_id",
           "desired_state",
           "desired_generation",
           "last_lifecycle_command",
@@ -13676,15 +13780,15 @@
           "state": {
             "$ref": "#/components/schemas/AgentRuntimeSummaryResponse"
           },
-          "execution_policy": {
-            "$ref": "#/components/schemas/AgentRuntimeExecutionPolicyStatusResponse"
+          "configuration": {
+            "$ref": "#/components/schemas/AgentRuntimeConfigurationStatusResponse"
           }
         },
         "type": "object",
         "required": [
           "runtime",
           "state",
-          "execution_policy"
+          "configuration"
         ],
         "title": "AgentRuntimeResponse",
         "description": "Agent Runtime response."
@@ -14301,7 +14405,7 @@
             "$ref": "#/components/schemas/AgentType",
             "description": "Visibility scope"
           },
-          "runtime_provider_id": {
+          "runtime_profile_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -14310,8 +14414,14 @@
                 "type": "null"
               }
             ],
-            "title": "Runtime Provider Id",
-            "description": "Runtime Provider logical ID"
+            "title": "Runtime Profile Id",
+            "description": "Selected Workspace Runtime Profile ID"
+          },
+          "expected_runtime_profile_selection_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Runtime Profile Selection Version",
+            "description": "Required optimistic version when replacing the selection"
           },
           "shell_enabled": {
             "type": "boolean",
@@ -17002,6 +17112,113 @@
         "title": "DiscordConnectionSetupRequest",
         "description": "Secret-bearing Discord App setup input."
       },
+      "DockerContainerProfileSpecV1": {
+        "properties": {
+          "profile_kind": {
+            "type": "string",
+            "const": "docker_container",
+            "title": "Profile Kind"
+          },
+          "contract_family": {
+            "type": "string",
+            "const": "docker.container-profile",
+            "title": "Contract Family"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schema Version"
+          },
+          "runner_resources": {
+            "$ref": "#/components/schemas/DockerContainerResources"
+          },
+          "network_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Network Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "profile_kind",
+          "contract_family",
+          "schema_version",
+          "runner_resources",
+          "network_name"
+        ],
+        "title": "DockerContainerProfileSpecV1",
+        "description": "Docker Container Profile contract version 1."
+      },
+      "DockerContainerResources": {
+        "properties": {
+          "cpu_reservation_millicores": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Reservation Millicores"
+          },
+          "cpu_limit_millicores": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Limit Millicores"
+          },
+          "memory_reservation_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Reservation Bytes"
+          },
+          "memory_limit_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Limit Bytes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cpu_reservation_millicores",
+          "cpu_limit_millicores",
+          "memory_reservation_bytes",
+          "memory_limit_bytes"
+        ],
+        "title": "DockerContainerResources",
+        "description": "Docker-native enforceable Runner resource choices."
+      },
       "ElevateResponse": {
         "properties": {
           "access_token": {
@@ -17064,6 +17281,7 @@
         "enum": [
           "user_message",
           "goal_continuation",
+          "external_channel_continuation",
           "goal_updated",
           "action_message",
           "agent_message",
@@ -17139,15 +17357,6 @@
         ],
         "title": "ExternalChannelAppMode",
         "description": "Immutable product administration mode for an external connection."
-      },
-      "ExternalChannelBindingStatus": {
-        "type": "string",
-        "enum": [
-          "active",
-          "disconnected"
-        ],
-        "title": "ExternalChannelBindingStatus",
-        "description": "Session binding lifecycle status."
       },
       "ExternalChannelCapabilitySnapshot": {
         "properties": {
@@ -17671,6 +17880,28 @@
         ],
         "title": "ExternalChannelProviderIdentity",
         "description": "Validated non-secret identity for one installed provider application."
+      },
+      "ExternalChannelResponseMode": {
+        "type": "string",
+        "enum": [
+          "mention_only",
+          "all_messages"
+        ],
+        "title": "ExternalChannelResponseMode",
+        "description": "Message eligibility policy copied to one external conversation binding."
+      },
+      "ExternalChannelResponseModeSetting": {
+        "properties": {
+          "response_mode": {
+            "$ref": "#/components/schemas/ExternalChannelResponseMode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "response_mode"
+        ],
+        "title": "ExternalChannelResponseModeSetting",
+        "description": "Canonical full-value External Channel response-mode setting."
       },
       "ExternalChannelRouteCatalogStatus": {
         "type": "string",
@@ -18810,37 +19041,6 @@
         "title": "JoinRequestStatus",
         "description": "Workspace join request status."
       },
-      "JsonValue": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "type": "integer"
-          },
-          {
-            "type": "number"
-          },
-          {
-            "type": "string"
-          },
-          {
-            "items": {
-              "$ref": "#/components/schemas/JsonValue"
-            },
-            "type": "array"
-          },
-          {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue"
-            },
-            "type": "object"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
       "KimiOAuthConfig": {
         "properties": {
           "type": {
@@ -19018,6 +19218,277 @@
         ],
         "title": "KimiOAuthSessionStatus",
         "description": "Kimi OAuth session status."
+      },
+      "KubernetesContainerResources": {
+        "properties": {
+          "cpu_request_millicores": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Request Millicores"
+          },
+          "cpu_limit_millicores": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Limit Millicores"
+          },
+          "memory_request_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Request Bytes"
+          },
+          "memory_limit_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Limit Bytes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "cpu_request_millicores",
+          "cpu_limit_millicores",
+          "memory_request_bytes",
+          "memory_limit_bytes"
+        ],
+        "title": "KubernetesContainerResources",
+        "description": "Explicit Kubernetes resources for one known Runtime component."
+      },
+      "KubernetesDinDModule": {
+        "properties": {
+          "engine_resources": {
+            "$ref": "#/components/schemas/KubernetesContainerResources"
+          },
+          "docker_storage_bytes": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Docker Storage Bytes"
+          },
+          "shared_temporary_storage_bytes": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Shared Temporary Storage Bytes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "engine_resources",
+          "docker_storage_bytes",
+          "shared_temporary_storage_bytes"
+        ],
+        "title": "KubernetesDinDModule",
+        "description": "Privileged DinD topology owned by a Platform Pod Profile."
+      },
+      "KubernetesPodProfileSpecV1": {
+        "properties": {
+          "profile_kind": {
+            "type": "string",
+            "const": "kubernetes_pod",
+            "title": "Profile Kind"
+          },
+          "contract_family": {
+            "type": "string",
+            "const": "kubernetes.pod-profile",
+            "title": "Contract Family"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schema Version"
+          },
+          "runner_resources": {
+            "$ref": "#/components/schemas/KubernetesContainerResources"
+          },
+          "workspace_volume": {
+            "$ref": "#/components/schemas/KubernetesWorkspaceVolume"
+          },
+          "network_policy": {
+            "$ref": "#/components/schemas/RuntimeNetworkPolicyModule"
+          },
+          "service_account_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 253
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Account Name"
+          },
+          "scheduling": {
+            "$ref": "#/components/schemas/KubernetesSchedulingModule"
+          },
+          "dind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KubernetesDinDModule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "profile_kind",
+          "contract_family",
+          "schema_version",
+          "runner_resources",
+          "workspace_volume",
+          "network_policy",
+          "service_account_name",
+          "scheduling",
+          "dind"
+        ],
+        "title": "KubernetesPodProfileSpecV1",
+        "description": "Kubernetes Pod Profile contract version 1."
+      },
+      "KubernetesSchedulingModule": {
+        "properties": {
+          "node_selector": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Node Selector"
+          },
+          "tolerations": {
+            "items": {
+              "$ref": "#/components/schemas/KubernetesToleration"
+            },
+            "type": "array",
+            "title": "Tolerations",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "KubernetesSchedulingModule",
+        "description": "Typed initial Kubernetes scheduling controls."
+      },
+      "KubernetesToleration": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 253,
+            "minLength": 1,
+            "title": "Key"
+          },
+          "operator": {
+            "type": "string",
+            "enum": [
+              "Equal",
+              "Exists"
+            ],
+            "title": "Operator"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 253
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "effect": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "NoSchedule",
+                  "PreferNoSchedule",
+                  "NoExecute"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effect"
+          },
+          "toleration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Toleration Seconds"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "operator",
+          "value",
+          "effect",
+          "toleration_seconds"
+        ],
+        "title": "KubernetesToleration",
+        "description": "Typed Kubernetes toleration supported by Pod Profile v1."
+      },
+      "KubernetesWorkspaceVolume": {
+        "properties": {
+          "storage_class_name": {
+            "type": "string",
+            "maxLength": 253,
+            "minLength": 1,
+            "title": "Storage Class Name"
+          },
+          "storage_request_bytes": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Storage Request Bytes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "storage_class_name",
+          "storage_request_bytes"
+        ],
+        "title": "KubernetesWorkspaceVolume",
+        "description": "Existing per-Runtime Workspace PVC inputs."
       },
       "LLMCatalogScope": {
         "type": "string",
@@ -19646,6 +20117,9 @@
           "provider": {
             "$ref": "#/components/schemas/ExternalChannelProvider"
           },
+          "response_mode": {
+            "$ref": "#/components/schemas/ExternalChannelResponseMode"
+          },
           "resource_type": {
             "type": "string",
             "title": "Resource Type"
@@ -19653,9 +20127,6 @@
           "resource_label": {
             "type": "string",
             "title": "Resource Label"
-          },
-          "status": {
-            "$ref": "#/components/schemas/ExternalChannelBindingStatus"
           },
           "connected_at": {
             "type": "string",
@@ -19720,9 +20191,9 @@
           "id",
           "agent_session_id",
           "provider",
+          "response_mode",
           "resource_type",
           "resource_label",
-          "status",
           "connected_at",
           "disconnected_at",
           "disconnect_reason",
@@ -20127,12 +20598,16 @@
             },
             "type": "array",
             "title": "Associated Multi Apps"
+          },
+          "default_response_mode": {
+            "$ref": "#/components/schemas/ExternalChannelResponseMode"
           }
         },
         "type": "object",
         "required": [
           "items",
-          "associated_multi_apps"
+          "associated_multi_apps",
+          "default_response_mode"
         ],
         "title": "ManagedConnectionListResponse"
       },
@@ -22146,6 +22621,36 @@
         "title": "PendingMailboxEnvelope",
         "description": "Stable pending mailbox envelope projection."
       },
+      "PendingMailboxExternalChannelContinuationPresentation": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "external_channel_continuation",
+            "title": "Type"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "requested_inference_profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RequestedInferenceProfile"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "content"
+        ],
+        "title": "PendingMailboxExternalChannelContinuationPresentation",
+        "description": "Safe pending External Channel continuation presentation."
+      },
       "PendingMailboxExternalChannelPresentation": {
         "properties": {
           "type": {
@@ -22299,6 +22804,9 @@
                 "$ref": "#/components/schemas/PendingMailboxGoalContinuationPresentation"
               },
               {
+                "$ref": "#/components/schemas/PendingMailboxExternalChannelContinuationPresentation"
+              },
+              {
                 "$ref": "#/components/schemas/PendingMailboxAgentMessagePresentation"
               },
               {
@@ -22314,6 +22822,7 @@
               "mapping": {
                 "action_message": "#/components/schemas/PendingMailboxActionPresentation",
                 "agent_message": "#/components/schemas/PendingMailboxAgentMessagePresentation",
+                "external_channel_continuation": "#/components/schemas/PendingMailboxExternalChannelContinuationPresentation",
                 "external_channel_message": "#/components/schemas/PendingMailboxExternalChannelPresentation",
                 "goal_continuation": "#/components/schemas/PendingMailboxGoalContinuationPresentation",
                 "user_message": "#/components/schemas/PendingMailboxUserMessagePresentation"
@@ -23118,343 +23627,106 @@
         "title": "ResetAgentRuntimeRequest",
         "description": "Agent Runtime reset request."
       },
-      "RuntimeDesiredState": {
+      "ResponseModeRequest": {
+        "properties": {
+          "response_mode": {
+            "$ref": "#/components/schemas/ExternalChannelResponseMode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "response_mode"
+        ],
+        "title": "ResponseModeRequest",
+        "description": "Required full-value response-mode request."
+      },
+      "RuntimeConfigurationResolutionStatus": {
         "type": "string",
         "enum": [
-          "running",
-          "stopped"
+          "ready",
+          "blocked"
         ],
-        "title": "RuntimeDesiredState",
-        "description": "Agent Runtime desired lifecycle status."
+        "title": "RuntimeConfigurationResolutionStatus",
+        "description": "Whether current source configuration can create a Runtime incarnation."
       },
-      "RuntimeExecutionAuditEventType": {
-        "type": "string",
-        "enum": [
-          "profile_created",
-          "profile_replaced",
-          "profile_retired",
-          "workspace_policy_replaced",
-          "agent_settings_replaced",
-          "target_snapshot_attached",
-          "applied_snapshot_promoted"
-        ],
-        "title": "RuntimeExecutionAuditEventType",
-        "description": "Append-only execution-policy management event vocabulary."
-      },
-      "RuntimeExecutionAvailabilityReason": {
-        "type": "string",
-        "enum": [
-          "profile_retired",
-          "profile_not_allowed",
-          "dependency_unsatisfied",
-          "provider_module_unsupported",
-          "provider_storage_unsupported",
-          "provider_limit_exceeded"
-        ],
-        "title": "RuntimeExecutionAvailabilityReason",
-        "description": "Bounded reason explaining why an execution policy is unavailable."
-      },
-      "RuntimeExecutionCapabilitySummaryResponse": {
-        "properties": {
-          "module_id": {
-            "$ref": "#/components/schemas/RuntimeExecutionModuleId"
-          },
-          "version": {
-            "type": "integer",
-            "title": "Version"
-          },
-          "enabled": {
-            "type": "boolean",
-            "title": "Enabled"
-          }
-        },
-        "type": "object",
-        "required": [
-          "module_id",
-          "version",
-          "enabled"
-        ],
-        "title": "RuntimeExecutionCapabilitySummaryResponse",
-        "description": "One safe Runtime execution capability summary."
-      },
-      "RuntimeExecutionChangeDirection": {
-        "type": "string",
-        "enum": [
-          "metadata_only",
-          "restrictive",
-          "authority_expanding",
-          "mixed",
-          "incompatible",
-          "application"
-        ],
-        "title": "RuntimeExecutionChangeDirection",
-        "description": "Security direction for one policy change."
-      },
-      "RuntimeExecutionChangeSummary": {
-        "properties": {
-          "direction": {
-            "$ref": "#/components/schemas/RuntimeExecutionChangeDirection"
-          },
-          "fields": {
-            "items": {
-              "$ref": "#/components/schemas/RuntimeExecutionFieldChange"
-            },
-            "type": "array",
-            "title": "Fields"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "direction",
-          "fields"
-        ],
-        "title": "RuntimeExecutionChangeSummary",
-        "description": "Aggregate and field-level security direction."
-      },
-      "RuntimeExecutionConfiguredSummaryResponse": {
-        "properties": {
-          "profile_id": {
-            "type": "string",
-            "title": "Profile Id"
-          },
-          "digest": {
-            "type": "string",
-            "title": "Digest"
-          },
-          "capabilities": {
-            "items": {
-              "$ref": "#/components/schemas/RuntimeExecutionCapabilitySummaryResponse"
-            },
-            "type": "array",
-            "title": "Capabilities"
-          },
-          "storage_mode": {
-            "$ref": "#/components/schemas/RuntimeExecutionStorageMode"
-          },
-          "storage_capacity_bytes": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Storage Capacity Bytes"
-          }
-        },
-        "type": "object",
-        "required": [
-          "profile_id",
-          "digest",
-          "capabilities",
-          "storage_mode",
-          "storage_capacity_bytes"
-        ],
-        "title": "RuntimeExecutionConfiguredSummaryResponse",
-        "description": "Safe configured Runtime execution-policy summary."
-      },
-      "RuntimeExecutionDockerModule": {
-        "properties": {
-          "module_id": {
-            "type": "string",
-            "const": "docker",
-            "title": "Module Id"
-          },
-          "version": {
-            "type": "integer",
-            "const": 1,
-            "title": "Version"
-          },
-          "enabled": {
-            "type": "boolean",
-            "title": "Enabled"
-          },
-          "storage_mode": {
-            "$ref": "#/components/schemas/RuntimeExecutionStorageMode"
-          },
-          "storage_capacity_bytes": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Storage Capacity Bytes"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "module_id",
-          "version",
-          "enabled",
-          "storage_mode",
-          "storage_capacity_bytes"
-        ],
-        "title": "RuntimeExecutionDockerModule",
-        "description": "Complete Docker capability and its private data-volume lifecycle."
-      },
-      "RuntimeExecutionDockerRestriction": {
-        "properties": {
-          "enabled": {
-            "anyOf": [
-              {
-                "type": "boolean",
-                "const": false
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enabled"
-          },
-          "storage_mode": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RuntimeExecutionStorageMode"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "storage_capacity_bytes": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Storage Capacity Bytes"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "enabled",
-          "storage_mode",
-          "storage_capacity_bytes"
-        ],
-        "title": "RuntimeExecutionDockerRestriction",
-        "description": "Optional lower-layer Docker authority narrowing."
-      },
-      "RuntimeExecutionFieldChange": {
-        "properties": {
-          "path": {
-            "type": "string",
-            "maxLength": 255,
-            "minLength": 1,
-            "title": "Path"
-          },
-          "direction": {
-            "$ref": "#/components/schemas/RuntimeExecutionChangeDirection"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "path",
-          "direction"
-        ],
-        "title": "RuntimeExecutionFieldChange",
-        "description": "Security direction for one canonical policy field change."
-      },
-      "RuntimeExecutionManagementCapabilitiesResponse": {
-        "properties": {
-          "docker": {
-            "type": "boolean",
-            "title": "Docker"
-          },
-          "storage_modes": {
-            "items": {
-              "$ref": "#/components/schemas/RuntimeExecutionStorageMode"
-            },
-            "type": "array",
-            "title": "Storage Modes"
-          }
-        },
-        "type": "object",
-        "required": [
-          "docker",
-          "storage_modes"
-        ],
-        "title": "RuntimeExecutionManagementCapabilitiesResponse",
-        "description": "Safe server-owned policy management capability gate."
-      },
-      "RuntimeExecutionManagementLayer": {
-        "type": "string",
-        "enum": [
-          "profile",
-          "workspace",
-          "agent",
-          "runtime"
-        ],
-        "title": "RuntimeExecutionManagementLayer",
-        "description": "Management authority that produced one metadata audit event."
-      },
-      "RuntimeExecutionModuleId": {
-        "type": "string",
-        "enum": [
-          "docker",
-          "runtime.resources"
-        ],
-        "title": "RuntimeExecutionModuleId",
-        "description": "Application-owned execution capability module identifiers."
-      },
-      "RuntimeExecutionPolicyAuditEventResponse": {
+      "RuntimeConfigurationRevisionResponse": {
         "properties": {
           "id": {
             "type": "string",
             "title": "Id"
           },
-          "event_type": {
-            "$ref": "#/components/schemas/RuntimeExecutionAuditEventType"
-          },
-          "management_layer": {
-            "$ref": "#/components/schemas/RuntimeExecutionManagementLayer"
-          },
-          "target_id": {
+          "provider_id": {
             "type": "string",
-            "title": "Target Id"
+            "title": "Provider Id"
           },
-          "correlation_id": {
+          "provider_capability_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Capability Revision Id"
+          },
+          "infrastructure_profile_id": {
             "type": "string",
-            "title": "Correlation Id"
+            "title": "Infrastructure Profile Id"
           },
-          "classification": {
-            "$ref": "#/components/schemas/RuntimeExecutionChangeDirection"
+          "infrastructure_profile_version": {
+            "type": "integer",
+            "title": "Infrastructure Profile Version"
           },
-          "changed_paths": {
+          "workspace_runtime_profile_id": {
+            "type": "string",
+            "title": "Workspace Runtime Profile Id"
+          },
+          "workspace_runtime_profile_version": {
+            "type": "integer",
+            "title": "Workspace Runtime Profile Version"
+          },
+          "agent_selection_version": {
+            "type": "integer",
+            "title": "Agent Selection Version"
+          },
+          "resolution_status": {
+            "$ref": "#/components/schemas/RuntimeConfigurationResolutionStatus"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "required_capabilities": {
             "items": {
               "type": "string"
             },
             "type": "array",
-            "title": "Changed Paths"
+            "title": "Required Capabilities"
           },
-          "impact_counts": {
-            "additionalProperties": {
-              "type": "integer"
+          "missing_capabilities": {
+            "items": {
+              "type": "string"
             },
-            "type": "object",
-            "title": "Impact Counts"
+            "type": "array",
+            "title": "Missing Capabilities"
           },
-          "reason_code": {
+          "digest": {
             "type": "string",
-            "title": "Reason Code"
+            "title": "Digest"
           },
-          "outcome_code": {
-            "type": "string",
-            "title": "Outcome Code"
+          "target_desired_generation": {
+            "type": "integer",
+            "title": "Target Desired Generation"
           },
-          "actor_user_id": {
+          "provider_reported_digest": {
             "anyOf": [
               {
                 "type": "string"
@@ -23463,9 +23735,9 @@
                 "type": "null"
               }
             ],
-            "title": "Actor User Id"
+            "title": "Provider Reported Digest"
           },
-          "actor_workspace_user_id": {
+          "runner_reported_digest": {
             "anyOf": [
               {
                 "type": "string"
@@ -23474,33 +23746,31 @@
                 "type": "null"
               }
             ],
-            "title": "Actor Workspace User Id"
+            "title": "Runner Reported Digest"
           },
-          "system_authority": {
-            "type": "boolean",
-            "title": "System Authority"
-          },
-          "before_digest": {
+          "provider_acknowledged_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Before Digest"
+            "title": "Provider Acknowledged At"
           },
-          "after_digest": {
+          "runtime_observed_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "After Digest"
+            "title": "Runtime Observed At"
           },
           "created_at": {
             "type": "string",
@@ -23511,531 +23781,53 @@
         "type": "object",
         "required": [
           "id",
-          "event_type",
-          "management_layer",
-          "target_id",
-          "correlation_id",
-          "classification",
-          "changed_paths",
-          "impact_counts",
+          "provider_id",
+          "provider_capability_revision_id",
+          "infrastructure_profile_id",
+          "infrastructure_profile_version",
+          "workspace_runtime_profile_id",
+          "workspace_runtime_profile_version",
+          "agent_selection_version",
+          "resolution_status",
           "reason_code",
-          "outcome_code",
-          "actor_user_id",
-          "actor_workspace_user_id",
-          "system_authority",
-          "before_digest",
-          "after_digest",
+          "required_capabilities",
+          "missing_capabilities",
+          "digest",
+          "target_desired_generation",
+          "provider_reported_digest",
+          "runner_reported_digest",
+          "provider_acknowledged_at",
+          "runtime_observed_at",
           "created_at"
         ],
-        "title": "RuntimeExecutionPolicyAuditEventResponse",
-        "description": "Metadata-only authorized execution-policy audit event."
+        "title": "RuntimeConfigurationRevisionResponse",
+        "description": "Safe immutable Runtime configuration revision evidence."
       },
-      "RuntimeExecutionPolicyAuditListResponse": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/RuntimeExecutionPolicyAuditEventResponse"
-            },
-            "type": "array",
-            "title": "Items"
-          }
-        },
-        "type": "object",
-        "required": [
-          "items"
-        ],
-        "title": "RuntimeExecutionPolicyAuditListResponse",
-        "description": "Metadata-only authorized execution-policy audit collection."
-      },
-      "RuntimeExecutionPolicyDocument": {
-        "properties": {
-          "schema_version": {
-            "type": "integer",
-            "const": 1,
-            "title": "Schema Version"
-          },
-          "docker": {
-            "$ref": "#/components/schemas/RuntimeExecutionDockerModule"
-          },
-          "resources": {
-            "$ref": "#/components/schemas/RuntimeExecutionResourceModule"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "schema_version",
-          "docker",
-          "resources"
-        ],
-        "title": "RuntimeExecutionPolicyDocument",
-        "description": "Complete versioned execution-policy document."
-      },
-      "RuntimeExecutionPolicyLayer": {
+      "RuntimeDesiredState": {
         "type": "string",
         "enum": [
-          "profile",
-          "workspace",
-          "agent"
+          "running",
+          "stopped"
         ],
-        "title": "RuntimeExecutionPolicyLayer",
-        "description": "Authority layer contributing one effective execution policy value."
+        "title": "RuntimeDesiredState",
+        "description": "Agent Runtime desired lifecycle status."
       },
-      "RuntimeExecutionPolicyRestriction": {
-        "properties": {
-          "schema_version": {
-            "type": "integer",
-            "const": 1,
-            "title": "Schema Version"
+      "RuntimeInfrastructureProfileSpec": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/KubernetesPodProfileSpecV1"
           },
-          "docker": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RuntimeExecutionDockerRestriction"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "resources": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RuntimeExecutionResourceRestriction"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          {
+            "$ref": "#/components/schemas/DockerContainerProfileSpecV1"
           }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "schema_version",
-          "docker",
-          "resources"
         ],
-        "title": "RuntimeExecutionPolicyRestriction",
-        "description": "Restrictive-only Workspace or Agent policy contribution."
-      },
-      "RuntimeExecutionPolicyStatus": {
-        "type": "string",
-        "enum": [
-          "configured",
-          "pending",
-          "applied",
-          "unavailable",
-          "divergent"
-        ],
-        "title": "RuntimeExecutionPolicyStatus",
-        "description": "Server-derived relationship between configured and applied policy."
-      },
-      "RuntimeExecutionProfileLifecycle": {
-        "type": "string",
-        "enum": [
-          "active",
-          "retired"
-        ],
-        "title": "RuntimeExecutionProfileLifecycle",
-        "description": "Current lifecycle of one stable execution Profile."
-      },
-      "RuntimeExecutionReduction": {
-        "properties": {
-          "path": {
-            "type": "string",
-            "maxLength": 255,
-            "minLength": 1,
-            "title": "Path"
-          },
-          "previous": {
-            "$ref": "#/components/schemas/JsonValue"
-          },
-          "current": {
-            "$ref": "#/components/schemas/JsonValue"
-          },
-          "governing_layer": {
-            "$ref": "#/components/schemas/RuntimeExecutionPolicyLayer"
-          },
-          "reason": {
-            "$ref": "#/components/schemas/RuntimeExecutionReductionReason"
+        "discriminator": {
+          "propertyName": "profile_kind",
+          "mapping": {
+            "docker_container": "#/components/schemas/DockerContainerProfileSpecV1",
+            "kubernetes_pod": "#/components/schemas/KubernetesPodProfileSpecV1"
           }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "path",
-          "previous",
-          "current",
-          "governing_layer",
-          "reason"
-        ],
-        "title": "RuntimeExecutionReduction",
-        "description": "One effective value reduced by a governing policy layer."
-      },
-      "RuntimeExecutionReductionReason": {
-        "type": "string",
-        "enum": [
-          "upper_layer_restriction"
-        ],
-        "title": "RuntimeExecutionReductionReason",
-        "description": "Bounded reason attached to a resolved value reduction."
-      },
-      "RuntimeExecutionRequiredAction": {
-        "type": "string",
-        "enum": [
-          "none",
-          "apply",
-          "wait",
-          "administrator_action"
-        ],
-        "title": "RuntimeExecutionRequiredAction",
-        "description": "Bounded next action for one Runtime execution-policy status."
-      },
-      "RuntimeExecutionResolution": {
-        "properties": {
-          "available": {
-            "type": "boolean",
-            "title": "Available"
-          },
-          "effective_policy": {
-            "$ref": "#/components/schemas/RuntimeExecutionPolicyDocument"
-          },
-          "digest": {
-            "type": "string",
-            "title": "Digest"
-          },
-          "source_versions": {
-            "$ref": "#/components/schemas/RuntimeExecutionSourceVersions"
-          },
-          "governing_layers": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/RuntimeExecutionPolicyLayer"
-            },
-            "type": "object",
-            "title": "Governing Layers"
-          },
-          "reductions": {
-            "items": {
-              "$ref": "#/components/schemas/RuntimeExecutionReduction"
-            },
-            "type": "array",
-            "title": "Reductions"
-          },
-          "change": {
-            "$ref": "#/components/schemas/RuntimeExecutionChangeSummary"
-          },
-          "availability_reason": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RuntimeExecutionAvailabilityReason"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "availability_detail": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Availability Detail"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "available",
-          "effective_policy",
-          "digest",
-          "source_versions",
-          "governing_layers",
-          "reductions",
-          "change",
-          "availability_reason",
-          "availability_detail"
-        ],
-        "title": "RuntimeExecutionResolution",
-        "description": "Complete hierarchical resolution and explanation."
-      },
-      "RuntimeExecutionResourceModule": {
-        "properties": {
-          "module_id": {
-            "type": "string",
-            "const": "runtime.resources",
-            "title": "Module Id"
-          },
-          "version": {
-            "type": "integer",
-            "const": 1,
-            "title": "Version"
-          },
-          "cpu_request_millicores": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cpu Request Millicores"
-          },
-          "cpu_limit_millicores": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cpu Limit Millicores"
-          },
-          "memory_request_bytes": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Memory Request Bytes"
-          },
-          "memory_limit_bytes": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Memory Limit Bytes"
-          },
-          "ephemeral_storage_bytes": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ephemeral Storage Bytes"
-          },
-          "persistent_storage_bytes": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Persistent Storage Bytes"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "module_id",
-          "version",
-          "cpu_request_millicores",
-          "cpu_limit_millicores",
-          "memory_request_bytes",
-          "memory_limit_bytes",
-          "ephemeral_storage_bytes",
-          "persistent_storage_bytes"
-        ],
-        "title": "RuntimeExecutionResourceModule",
-        "description": "Kubernetes resources for the Runtime workload and Workspace volume."
-      },
-      "RuntimeExecutionResourceRestriction": {
-        "properties": {
-          "cpu_request_millicores": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cpu Request Millicores"
-          },
-          "cpu_limit_millicores": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Cpu Limit Millicores"
-          },
-          "memory_request_bytes": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Memory Request Bytes"
-          },
-          "memory_limit_bytes": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Memory Limit Bytes"
-          },
-          "ephemeral_storage_bytes": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ephemeral Storage Bytes"
-          },
-          "persistent_storage_bytes": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Persistent Storage Bytes"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "cpu_request_millicores",
-          "cpu_limit_millicores",
-          "memory_request_bytes",
-          "memory_limit_bytes",
-          "ephemeral_storage_bytes",
-          "persistent_storage_bytes"
-        ],
-        "title": "RuntimeExecutionResourceRestriction",
-        "description": "Optional lower-layer resource ceilings."
-      },
-      "RuntimeExecutionSnapshotSummaryResponse": {
-        "properties": {
-          "profile_id": {
-            "type": "string",
-            "title": "Profile Id"
-          },
-          "digest": {
-            "type": "string",
-            "title": "Digest"
-          },
-          "desired_generation": {
-            "type": "integer",
-            "title": "Desired Generation"
-          },
-          "capabilities": {
-            "items": {
-              "$ref": "#/components/schemas/RuntimeExecutionCapabilitySummaryResponse"
-            },
-            "type": "array",
-            "title": "Capabilities"
-          },
-          "storage_mode": {
-            "$ref": "#/components/schemas/RuntimeExecutionStorageMode"
-          },
-          "storage_capacity_bytes": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Storage Capacity Bytes"
-          }
-        },
-        "type": "object",
-        "required": [
-          "profile_id",
-          "digest",
-          "desired_generation",
-          "capabilities",
-          "storage_mode",
-          "storage_capacity_bytes"
-        ],
-        "title": "RuntimeExecutionSnapshotSummaryResponse",
-        "description": "Safe target or applied Runtime execution-policy summary."
-      },
-      "RuntimeExecutionSourceVersions": {
-        "properties": {
-          "profile": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Profile"
-          },
-          "workspace": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Workspace"
-          },
-          "agent": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Agent"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "profile",
-          "workspace",
-          "agent"
-        ],
-        "title": "RuntimeExecutionSourceVersions",
-        "description": "Current mutable source versions captured by one resolution."
-      },
-      "RuntimeExecutionStorageMode": {
-        "type": "string",
-        "enum": [
-          "none",
-          "ephemeral",
-          "persistent"
-        ],
-        "title": "RuntimeExecutionStorageMode",
-        "description": "Docker data-storage lifecycle ordered from narrowest to broadest."
+        }
       },
       "RuntimeLifecycleCommandType": {
         "type": "string",
@@ -24048,6 +23840,39 @@
         ],
         "title": "RuntimeLifecycleCommandType",
         "description": "Agent Runtime lifecycle command type."
+      },
+      "RuntimeNetworkPolicyModule": {
+        "properties": {
+          "allowed_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Cidrs",
+            "default": []
+          },
+          "denied_cidrs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Denied Cidrs",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "RuntimeNetworkPolicyModule",
+        "description": "Typed customer-traffic network boundary."
+      },
+      "RuntimeProfileLifecycle": {
+        "type": "string",
+        "enum": [
+          "active",
+          "disabled"
+        ],
+        "title": "RuntimeProfileLifecycle",
+        "description": "Mutable Profile lifecycle."
       },
       "RuntimeProviderConnectionState": {
         "type": "string",
@@ -24175,7 +24000,7 @@
             "type": "object",
             "title": "Capabilities"
           },
-          "accepted_contract_revision_id": {
+          "current_contract_revision_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -24184,7 +24009,7 @@
                 "type": "null"
               }
             ],
-            "title": "Accepted Contract Revision Id"
+            "title": "Current Contract Revision Id"
           },
           "active_config_revision_id": {
             "anyOf": [
@@ -24206,11 +24031,239 @@
           "scope",
           "availability_mode",
           "capabilities",
-          "accepted_contract_revision_id",
+          "current_contract_revision_id",
           "active_config_revision_id"
         ],
         "title": "RuntimeProviderOptionResponse",
         "description": "Safe Provider option for Workspace and Agent preference surfaces."
+      },
+      "RuntimeRecreationCreateRequest": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Version"
+          },
+          "concurrency_limit": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Concurrency Limit",
+            "default": 5
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_version"
+        ],
+        "title": "RuntimeRecreationCreateRequest",
+        "description": "Create one optimistic bounded recreation operation."
+      },
+      "RuntimeRecreationItemResponse": {
+        "properties": {
+          "runtime_id": {
+            "type": "string",
+            "title": "Runtime Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RuntimeRecreationItemStatus"
+          },
+          "attempt": {
+            "type": "integer",
+            "title": "Attempt"
+          },
+          "dispatched_generation": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dispatched Generation"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "failure_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Message"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runtime_id",
+          "status",
+          "attempt",
+          "dispatched_generation",
+          "failure_code",
+          "failure_message",
+          "updated_at"
+        ],
+        "title": "RuntimeRecreationItemResponse",
+        "description": "One non-success recreation item detail."
+      },
+      "RuntimeRecreationItemStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "succeeded",
+          "skipped",
+          "failed"
+        ],
+        "title": "RuntimeRecreationItemStatus",
+        "description": "One Runtime item in a scoped recreation operation."
+      },
+      "RuntimeRecreationOperationResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "target_kind": {
+            "$ref": "#/components/schemas/RuntimeRecreationTargetKind"
+          },
+          "target_id": {
+            "type": "string",
+            "title": "Target Id"
+          },
+          "target_version": {
+            "type": "string",
+            "title": "Target Version"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RuntimeRecreationOperationStatus"
+          },
+          "concurrency_limit": {
+            "type": "integer",
+            "title": "Concurrency Limit"
+          },
+          "total_count": {
+            "type": "integer",
+            "title": "Total Count"
+          },
+          "pending_count": {
+            "type": "integer",
+            "title": "Pending Count"
+          },
+          "running_count": {
+            "type": "integer",
+            "title": "Running Count"
+          },
+          "succeeded_count": {
+            "type": "integer",
+            "title": "Succeeded Count"
+          },
+          "skipped_count": {
+            "type": "integer",
+            "title": "Skipped Count"
+          },
+          "failed_count": {
+            "type": "integer",
+            "title": "Failed Count"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeRecreationItemResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "target_kind",
+          "target_id",
+          "target_version",
+          "status",
+          "concurrency_limit",
+          "total_count",
+          "pending_count",
+          "running_count",
+          "succeeded_count",
+          "skipped_count",
+          "failed_count",
+          "created_at",
+          "started_at",
+          "completed_at",
+          "items"
+        ],
+        "title": "RuntimeRecreationOperationResponse",
+        "description": "Durable recreation operation progress and bounded item details."
+      },
+      "RuntimeRecreationOperationStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "completed",
+          "completed_with_failures",
+          "failed"
+        ],
+        "title": "RuntimeRecreationOperationStatus",
+        "description": "Aggregate Runtime recreation operation state."
+      },
+      "RuntimeRecreationTargetKind": {
+        "type": "string",
+        "enum": [
+          "provider",
+          "infrastructure_profile",
+          "workspace_runtime_profile"
+        ],
+        "title": "RuntimeRecreationTargetKind",
+        "description": "Authority scope targeted by one recreation operation."
       },
       "RuntimeRunnerState": {
         "type": "string",
@@ -24240,6 +24293,94 @@
         ],
         "title": "RuntimeSummary",
         "description": "Server-computed Agent Runtime summary status."
+      },
+      "SelectableInfrastructureProfileListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SelectableInfrastructureProfileResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "SelectableInfrastructureProfileListResponse",
+        "description": "Workspace-selectable infrastructure Profile list."
+      },
+      "SelectableInfrastructureProfileResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "provider_display_name": {
+            "type": "string",
+            "title": "Provider Display Name"
+          },
+          "provider_kind": {
+            "type": "string",
+            "title": "Provider Kind"
+          },
+          "profile_kind": {
+            "type": "string",
+            "title": "Profile Kind"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/RuntimeInfrastructureProfileSpec"
+          },
+          "required_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required Capabilities"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest"
+          },
+          "capability_revision_id": {
+            "type": "string",
+            "title": "Capability Revision Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "provider_id",
+          "provider_display_name",
+          "provider_kind",
+          "profile_kind",
+          "display_name",
+          "description",
+          "spec",
+          "required_capabilities",
+          "version",
+          "digest",
+          "capability_revision_id"
+        ],
+        "title": "SelectableInfrastructureProfileResponse",
+        "description": "One Provider/Profile option currently selectable by the Workspace."
       },
       "SelectableModelOption": {
         "properties": {
@@ -26572,6 +26713,24 @@
             "title": "Handle",
             "description": "Workspace unique handle"
           },
+          "default_runtime_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Runtime Profile Id",
+            "description": "Runtime Profile copied to new Agents when currently available"
+          },
+          "default_runtime_profile_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Default Runtime Profile Version",
+            "description": "Optimistic version for the Workspace Runtime Profile default"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -26589,100 +26748,119 @@
         "required": [
           "name",
           "handle",
+          "default_runtime_profile_id",
+          "default_runtime_profile_version",
           "created_at",
           "updated_at"
         ],
         "title": "WorkspaceResponse",
         "description": "Workspace response schema."
       },
-      "WorkspaceRuntimeExecutionPolicyReplaceRequest": {
+      "WorkspaceRuntimeProfileCreateRequest": {
         "properties": {
-          "expected_version": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Expected Version"
+          "infrastructure_profile_id": {
+            "type": "string",
+            "title": "Infrastructure Profile Id"
           },
-          "restriction": {
-            "$ref": "#/components/schemas/RuntimeExecutionPolicyRestriction"
+          "display_name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Display Name"
           },
-          "allowed_profile_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "maxItems": 100,
-            "minItems": 1,
-            "uniqueItems": true,
-            "title": "Allowed Profile Ids"
+          "description": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Description"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/RuntimeProfileLifecycle",
+            "default": "active"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/WorkspaceRuntimeProfilePolicyV1"
           }
         },
         "type": "object",
         "required": [
-          "expected_version",
-          "restriction",
-          "allowed_profile_ids"
+          "infrastructure_profile_id",
+          "display_name",
+          "description",
+          "policy"
         ],
-        "title": "WorkspaceRuntimeExecutionPolicyReplaceRequest",
-        "description": "Complete optimistic Workspace policy replacement."
+        "title": "WorkspaceRuntimeProfileCreateRequest",
+        "description": "Create one complete Workspace Runtime Profile."
       },
-      "WorkspaceRuntimeExecutionPolicyResponse": {
+      "WorkspaceRuntimeProfileDefaultReplaceRequest": {
         "properties": {
-          "workspace_id": {
-            "type": "string",
-            "title": "Workspace Id"
-          },
-          "version": {
+          "expected_version": {
             "type": "integer",
-            "title": "Version"
+            "minimum": 1.0,
+            "title": "Expected Version"
           },
-          "restriction": {
-            "$ref": "#/components/schemas/RuntimeExecutionPolicyRestriction"
-          },
-          "digest": {
-            "type": "string",
-            "title": "Digest"
-          },
-          "allowed_profile_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Allowed Profile Ids"
-          },
-          "updated_at": {
+          "runtime_profile_id": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Updated At"
-          },
-          "capabilities": {
-            "$ref": "#/components/schemas/RuntimeExecutionManagementCapabilitiesResponse"
+            "title": "Runtime Profile Id"
           }
         },
         "type": "object",
         "required": [
-          "workspace_id",
-          "version",
-          "restriction",
-          "digest",
-          "allowed_profile_ids",
-          "updated_at",
-          "capabilities"
+          "expected_version",
+          "runtime_profile_id"
         ],
-        "title": "WorkspaceRuntimeExecutionPolicyResponse",
-        "description": "Current explicit or implicit Workspace execution policy."
+        "title": "WorkspaceRuntimeProfileDefaultReplaceRequest",
+        "description": "Optimistically set or clear the Workspace Runtime Profile default."
       },
-      "WorkspaceRuntimeExecutionProfileListResponse": {
+      "WorkspaceRuntimeProfileDefaultResponse": {
+        "properties": {
+          "runtime_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runtime Profile Id"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Version"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkspaceRuntimeProfileResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "runtime_profile_id",
+          "version",
+          "profile"
+        ],
+        "title": "WorkspaceRuntimeProfileDefaultResponse",
+        "description": "Current optimistic Workspace Runtime Profile default."
+      },
+      "WorkspaceRuntimeProfileListResponse": {
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/WorkspaceRuntimeExecutionProfileResponse"
+              "$ref": "#/components/schemas/WorkspaceRuntimeProfileResponse"
             },
             "type": "array",
             "title": "Items"
@@ -26692,14 +26870,90 @@
         "required": [
           "items"
         ],
-        "title": "WorkspaceRuntimeExecutionProfileListResponse",
-        "description": "Workspace-visible Profile availability collection."
+        "title": "WorkspaceRuntimeProfileListResponse",
+        "description": "Workspace-owned Runtime Profile list."
       },
-      "WorkspaceRuntimeExecutionProfileResponse": {
+      "WorkspaceRuntimeProfilePolicyV1": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schema Version"
+          },
+          "network_restriction": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeNetworkPolicyModule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "schema_version",
+          "network_restriction"
+        ],
+        "title": "WorkspaceRuntimeProfilePolicyV1",
+        "description": "Workspace-owned restrictions attached to one Runtime Profile."
+      },
+      "WorkspaceRuntimeProfileReplaceRequest": {
+        "properties": {
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "infrastructure_profile_id": {
+            "type": "string",
+            "title": "Infrastructure Profile Id"
+          },
+          "display_name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Display Name"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4000,
+            "title": "Description"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/RuntimeProfileLifecycle"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/WorkspaceRuntimeProfilePolicyV1"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expected_version",
+          "infrastructure_profile_id",
+          "display_name",
+          "description",
+          "lifecycle",
+          "policy"
+        ],
+        "title": "WorkspaceRuntimeProfileReplaceRequest",
+        "description": "Complete optimistic replacement of one Workspace Runtime Profile."
+      },
+      "WorkspaceRuntimeProfileResponse": {
         "properties": {
           "id": {
             "type": "string",
             "title": "Id"
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "infrastructure_profile_id": {
+            "type": "string",
+            "title": "Infrastructure Profile Id"
           },
           "display_name": {
             "type": "string",
@@ -26710,58 +26964,101 @@
             "title": "Description"
           },
           "lifecycle": {
-            "$ref": "#/components/schemas/RuntimeExecutionProfileLifecycle"
+            "$ref": "#/components/schemas/RuntimeProfileLifecycle"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/WorkspaceRuntimeProfilePolicyV1"
           },
           "version": {
             "type": "integer",
             "title": "Version"
           },
-          "policy": {
-            "$ref": "#/components/schemas/RuntimeExecutionPolicyDocument"
-          },
           "digest": {
             "type": "string",
             "title": "Digest"
-          },
-          "reserved": {
-            "type": "boolean",
-            "title": "Reserved"
-          },
-          "allowed": {
-            "type": "boolean",
-            "title": "Allowed"
           },
           "available": {
             "type": "boolean",
             "title": "Available"
           },
-          "reason": {
+          "availability_reason_code": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/RuntimeExecutionAvailabilityReason"
+                "type": "string"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Availability Reason Code"
+          },
+          "capability_revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capability Revision Id"
+          },
+          "infrastructure_profile_version": {
+            "type": "integer",
+            "title": "Infrastructure Profile Version"
+          },
+          "compatible": {
+            "type": "boolean",
+            "title": "Compatible"
+          },
+          "missing_capabilities": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Capabilities"
+          },
+          "incompatible_constraints": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Incompatible Constraints"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
           }
         },
         "type": "object",
         "required": [
           "id",
+          "provider_id",
+          "infrastructure_profile_id",
           "display_name",
           "description",
           "lifecycle",
-          "version",
           "policy",
+          "version",
           "digest",
-          "reserved",
-          "allowed",
           "available",
-          "reason"
+          "availability_reason_code",
+          "capability_revision_id",
+          "infrastructure_profile_version",
+          "compatible",
+          "missing_capabilities",
+          "incompatible_constraints",
+          "created_at",
+          "updated_at"
         ],
-        "title": "WorkspaceRuntimeExecutionProfileResponse",
-        "description": "Workspace availability of one execution Profile."
+        "title": "WorkspaceRuntimeProfileResponse",
+        "description": "One complete Workspace-owned Runtime choice."
       },
       "WorkspaceUserListResponse": {
         "properties": {
@@ -27211,8 +27508,8 @@
       "description": "\nLLM Provider Integration API (Public)\n\nWorkspace-scoped LLM provider integration CRUD endpoints.\nCredentials are not included in responses.\n"
     },
     {
-      "name": "Runtime Execution v1",
-      "description": "\nRuntime Execution API (Public)\n\nWorkspace policy and Agent execution-intent management.\n"
+      "name": "Runtime Profile v1",
+      "description": "\nRuntime Profile API (Public)\n\nWorkspace-owned complete Runtime choices and selectable Provider\ninfrastructure Profiles.\n"
     },
     {
       "name": "Runtime Provider v1",

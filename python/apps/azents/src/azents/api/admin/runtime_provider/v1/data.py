@@ -11,8 +11,12 @@ from azents.core.enums import (
     RuntimeProviderBindingAuditEventType,
     RuntimeProviderBindingOwner,
     RuntimeProviderBindingState,
-    RuntimeProviderContractStatus,
     RuntimeProviderLifecycleState,
+)
+from azents.core.runtime_profile import (
+    RuntimeInfrastructureProfileSpec,
+    RuntimeProfileLifecycle,
+    parse_runtime_infrastructure_profile_spec,
 )
 from azents.repos.runtime_provider.data import RuntimeProvider
 from azents.repos.runtime_provider_binding.data import (
@@ -20,6 +24,9 @@ from azents.repos.runtime_provider_binding.data import (
 )
 from azents.repos.runtime_provider_policy.data import (
     RuntimeProviderContractRevision,
+)
+from azents.services.runtime_profile_admin.service import (
+    RuntimeInfrastructureProfileProjection,
 )
 from azents.services.runtime_provider_binding_admin.service import (
     RuntimeProviderBindingAdminProjection,
@@ -40,7 +47,6 @@ class RuntimeProviderResponse(BaseModel):
     enabled: bool
     lifecycle_state: RuntimeProviderLifecycleState
     availability_mode: RuntimeProviderAvailabilityMode
-    accepted_contract_revision_id: str | None
     current_contract_revision_id: str | None
     active_config_revision_id: str | None
     admin_version: int
@@ -62,7 +68,6 @@ class RuntimeProviderResponse(BaseModel):
             enabled=provider.enabled,
             lifecycle_state=provider.lifecycle_state,
             availability_mode=provider.availability_mode,
-            accepted_contract_revision_id=provider.accepted_contract_revision_id,
             current_contract_revision_id=provider.current_contract_revision_id,
             active_config_revision_id=provider.active_config_revision_id,
             admin_version=provider.admin_version,
@@ -87,11 +92,6 @@ class RuntimeProviderContractResponse(BaseModel):
     protocol_version: str
     contract: dict[str, Any]
     compatibility: dict[str, Any]
-    status: RuntimeProviderContractStatus
-    validation_code: str | None
-    validation_message: str | None
-    accepted_by_user_id: str | None
-    accepted_at: datetime.datetime | None
     created_at: datetime.datetime
 
     @classmethod
@@ -107,11 +107,6 @@ class RuntimeProviderContractResponse(BaseModel):
             protocol_version=contract.protocol_version,
             contract=contract.contract,
             compatibility=contract.compatibility,
-            status=contract.status,
-            validation_code=contract.validation_code,
-            validation_message=contract.validation_message,
-            accepted_by_user_id=contract.accepted_by_user_id,
-            accepted_at=contract.accepted_at,
             created_at=contract.created_at,
         )
 
@@ -122,10 +117,81 @@ class RuntimeProviderContractListResponse(BaseModel):
     items: list[RuntimeProviderContractResponse]
 
 
-class RuntimeProviderContractAcceptRequest(BaseModel):
-    """Optimistic concurrency input for explicit contract acceptance."""
+class RuntimeInfrastructureProfileResponse(BaseModel):
+    """One Provider-owned infrastructure Profile with compatibility evidence."""
 
-    expected_admin_version: int = Field(ge=0)
+    id: str
+    profile_kind: str
+    display_name: str
+    description: str
+    lifecycle: RuntimeProfileLifecycle
+    contract_family: str
+    schema_version: int
+    spec: RuntimeInfrastructureProfileSpec
+    required_capabilities: list[str]
+    version: int
+    digest: str
+    compatible: bool
+    compatibility_reason_code: str | None
+    missing_capabilities: list[str]
+    incompatible_constraints: list[str]
+    capability_revision_id: str | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+    @classmethod
+    def convert_from(
+        cls,
+        projection: RuntimeInfrastructureProfileProjection,
+    ) -> "RuntimeInfrastructureProfileResponse":
+        """Convert one compatibility projection to an Admin response."""
+        profile = projection.profile
+        compatibility = projection.compatibility
+        return cls(
+            id=profile.id,
+            profile_kind=profile.profile_kind.value,
+            display_name=profile.display_name,
+            description=profile.description,
+            lifecycle=profile.lifecycle,
+            contract_family=profile.contract_family,
+            schema_version=profile.schema_version,
+            spec=parse_runtime_infrastructure_profile_spec(profile.spec),
+            required_capabilities=list(profile.required_capabilities),
+            version=profile.version,
+            digest=profile.digest,
+            compatible=compatibility.compatible,
+            compatibility_reason_code=compatibility.reason_code,
+            missing_capabilities=list(compatibility.missing_capabilities),
+            incompatible_constraints=list(compatibility.incompatible_constraints),
+            capability_revision_id=projection.capability_revision_id,
+            created_at=profile.created_at,
+            updated_at=profile.updated_at,
+        )
+
+
+class RuntimeInfrastructureProfileListResponse(BaseModel):
+    """Provider-scoped infrastructure Profile list."""
+
+    items: list[RuntimeInfrastructureProfileResponse]
+
+
+class RuntimeInfrastructureProfileCreateRequest(BaseModel):
+    """Create one Provider-owned typed infrastructure Profile."""
+
+    display_name: str = Field(min_length=1, max_length=120)
+    description: str = Field(max_length=4000)
+    lifecycle: RuntimeProfileLifecycle = RuntimeProfileLifecycle.ACTIVE
+    spec: RuntimeInfrastructureProfileSpec
+
+
+class RuntimeInfrastructureProfileReplaceRequest(BaseModel):
+    """Complete optimistic replacement of one infrastructure Profile."""
+
+    expected_version: int = Field(ge=1)
+    display_name: str = Field(min_length=1, max_length=120)
+    description: str = Field(max_length=4000)
+    lifecycle: RuntimeProfileLifecycle
+    spec: RuntimeInfrastructureProfileSpec
 
 
 class RuntimeProviderPolicyUpdateRequest(BaseModel):

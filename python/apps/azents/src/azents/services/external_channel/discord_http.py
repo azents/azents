@@ -225,7 +225,7 @@ class DiscordHTTPAdmissionService:
                 raise RuntimeError("Discord selector principal is unavailable.")
             try:
                 response: dict[str, object]
-                if materialization.admission is None:
+                if materialization.selector_interaction is None:
                     response = {
                         "type": 4,
                         "data": {
@@ -247,7 +247,7 @@ class DiscordHTTPAdmissionService:
                     }
                 else:
                     response = await self.selector_response_service.initial_response(
-                        admission_id=materialization.admission.id,
+                        selector_interaction_id=materialization.selector_interaction.id,
                         principal_id=principal_id,
                         now=received_at,
                     )

@@ -117,3 +117,25 @@ class ExternalChannelProviderControlService:
     async def attempt_delivery(self, delivery_attempt_id: str) -> None:
         """Attempt one committed provider control through the shared fence."""
         await self.action_service.attempt_delivery(delivery_attempt_id)
+
+
+def get_external_channel_provider_control_service(
+    session_manager: Annotated[
+        SessionManager[AsyncSession],
+        Depends(get_session_manager),
+    ],
+    repository: Annotated[
+        ExternalChannelWorkRepository,
+        Depends(ExternalChannelWorkRepository),
+    ],
+    action_service: Annotated[
+        ExternalChannelActionService,
+        Depends(ExternalChannelActionService),
+    ],
+) -> ExternalChannelProviderControlService:
+    """Compose provider-control delivery without exposing worker tuning as API input."""
+    return ExternalChannelProviderControlService(
+        session_manager=session_manager,
+        repository=repository,
+        action_service=action_service,
+    )

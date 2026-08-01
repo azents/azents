@@ -16,6 +16,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/slack_sdk_client.py
   - python/apps/azents/src/azents/services/external_channel/slack_socket.py
   - python/apps/azents/src/azents/services/external_channel/socket_manager.py
+  - python/apps/azents/src/azents/services/external_channel/gateway_runtime.py
   - python/apps/azents/src/azents/services/external_channel/slack_blocks.py
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
   - python/apps/azents/src/azents/services/external_channel/discord_http.py
@@ -32,7 +33,9 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/ingestion.py
   - python/apps/azents/src/azents/services/external_channel/ingestion_history.py
   - python/apps/azents/src/azents/services/external_channel/ingestion_replay.py
-  - python/apps/azents/src/azents/services/external_channel/ingestion_store.py
+  - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
+  - python/apps/azents/src/azents/services/external_channel/mailbox_wake.py
+  - python/apps/azents/src/azents/services/external_channel/selector_state.py
   - python/apps/azents/src/azents/services/external_channel/transport_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/connection_revocation.py
   - python/apps/azents/src/azents/services/external_channel/provider_control.py
@@ -40,15 +43,15 @@ code_paths:
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/services/external_channel/provider.py
   - python/apps/azents/src/azents/services/external_channel/slack_endpoint.py
-  - python/apps/azents/src/azents/worker/worker.py
+  - python/apps/azents/src/cli/externalchannelgateway.py
   - testenv/azents/e2e/src/support/slack_provider_fake.py
   - testenv/azents/e2e/src/support/discord_provider_fake.py
   - testenv/azents/e2e/src/tests/azents/public/test_external_channels.py
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-07-31
-spec_version: 19
+last_verified_at: 2026-08-01
+spec_version: 27
 ---
 
 # External Channel Provider Ingress
@@ -62,6 +65,12 @@ Connect, Discord DMs/group DMs, reactions, slash commands, and unrelated bot
 auto-triggers are outside the current scope. A tracked conversation is one provider
 thread rooted by an eligible App mention or message shortcut and resolved to one
 available Agent route whose Agent lifecycle is active.
+
+Slack invocation classification accepts the provider-native `app_mention` event and
+also a subtype-free human `message` whose bounded text explicitly references a
+same-Team Bot User identity from the authenticated callback authorization or current
+connection configuration. Other `message` callbacks remain context-only, including
+connected-App output, unrelated mentions, and visible message subtypes.
 
 ## HTTP Admission
 
@@ -78,9 +87,10 @@ Slack sends HTTP callbacks to the single fixed endpoint
 5. The fully parsed event identity must match the selected connection before the
    authenticated request is projected into a typed, content-free trigger locator.
 6. Original message triggers enter synchronous conversation ingestion. Provider
-   history is read, and durable Session input, wake state, and provider-control intent
-   are committed before acknowledgement. Any returned control delivery is scheduled
-   as a post-acknowledgement background attempt.
+   history is read; then one transaction commits the real Session, binding, canonical
+   mailbox input, conversation-position advance, running transition, and independent
+   provider-control intents. The mailbox item is also the pending wake-recovery
+   identity. Session-presence or Tracker delivery never gates Agent execution.
 7. Success is acknowledged only for a completed non-retryable outcome. A retryable
    coordination, history, position, or wake failure remains unacknowledged so the
    provider may retry.
@@ -89,9 +99,9 @@ Payload App/Team identity is an index key, not authentication. Missing, unknown,
 ambiguous candidates fail closed, and ordinary events never pass admission without
 successful HMAC verification.
 
-Duplicate callbacks converge through conversation position and immutable
-binding/trigger batch identity and still receive a successful acknowledgement after
-any pending wake is recovered.
+Duplicate callbacks converge through conversation position and deterministic mailbox
+identity and still receive a successful acknowledgement after any pending wake is
+recovered.
 
 ## Discord Interaction Admission
 
@@ -107,15 +117,15 @@ retained.
 4. It verifies the submitted Application and Guild identities against the selected
    connection.
 5. A verified endpoint PING returns its provider acknowledgement without durable
-   admission.
+   interaction state.
 6. A supported Message Command, component, autocomplete, or modal interaction creates
-   or reuses one token-free durable interaction admission before its provider
+   or reuses one token-free durable interaction before its provider
    acknowledgement is returned. Message Commands materialize their selected source
    through the same canonical source-before-selection boundary; selector responses use
    signed compact component scope and return before any post-response control delivery.
 
 Unknown selectors, malformed bodies, invalid signatures, mismatched Application/Guild
-identity, and unsupported interaction types fail before durable admission. Discord
+identity, and unsupported interaction types fail before durable interaction state. Discord
 interaction tokens, raw bodies, and signatures remain request-local and are neither
 persisted nor replayed.
 
@@ -126,23 +136,23 @@ selection as Events API payloads. JSON events and form-encoded interactions are
 bounded before parsing and authenticated against the selected connection's Signing
 Secret.
 
-Message shortcuts retain the selected source message and metadata-only files in a
-durable conversation admission before acknowledgement. A Multi App mention with no
-valid channel default also creates one pending admission and a selector control. The
-provider trigger ID is carried only in the in-memory handoff needed for the immediate
-modal mutation; it is never persisted, logged, or replayed.
+Message shortcuts retain a content-free provider locator and conversation-position
+boundary in the owning interaction before acknowledgement. A Multi App mention with no
+valid channel default uses the same interaction-owned selector state and creates one
+selector control. The provider trigger ID is carried only in the in-memory handoff
+needed for the immediate modal mutation; it is never persisted, logged, or replayed.
 
 Block actions open a paged/searchable modal from the current available route catalog.
-Private metadata is signed and binds connection, resource, admission, initiating
+Private metadata is signed and binds connection, resource, interaction, initiating
 principal, original interaction, and page offset. Navigation and submission recheck
-that scope, admission expiry, route availability, Workspace boundary, and callback
+that scope, interaction expiry, route availability, Workspace boundary, and callback
 actor before any selection. Duplicate callbacks reuse the durable interaction claim,
-and one admission can select at most once.
+preserve any selected route, and one interaction can select at most once.
 
 ## Socket Mode Admission
 
-A connection-selected Socket worker acquires a fenced lease before creating one public
-aiohttp `SocketModeClient` with SDK automatic reconnect enabled. The SDK owns
+The External Channel Gateway's Slack manager acquires a fenced lease before creating
+one public aiohttp `SocketModeClient` with SDK automatic reconnect enabled. The SDK owns
 `apps.connections.open`, secure endpoint selection and replacement, WebSocket
 establishment, Ping/Pong, stale-session detection, frame receipt, queue dispatch, and
 recoverable reconnect for that lease lifetime.
@@ -168,12 +178,13 @@ Production permits only secure Slack endpoints. Test-only HTTP and insecure WebS
 
 ## Discord Gateway Admission
 
-The dedicated Discord Gateway Worker, rather than an Agent Worker, owns Gateway
-protocol sessions. It claims a configured Discord connection with a lease owner,
-configuration generation, App-claim generation, and lease generation. A stale claim
-cannot renew, admit, record a gap, or release newer authority.
+The provider-neutral External Channel Gateway's Discord manager owns Gateway protocol
+sessions beside the Slack Socket manager. It claims a configured Discord connection
+with a lease owner, configuration generation, App-claim generation, and lease
+generation. A stale claim cannot renew, admit, record a gap, or release newer
+authority.
 
-The Worker uses only the public high-level `discord.py` client API. `Client.start`
+The manager uses only the public high-level `discord.py` client API. `Client.start`
 owns Gateway discovery, Identify, heartbeat, reconnect, and in-process Resume. Azents
 does not inspect Gateway frames, opcodes, session IDs, sequence numbers, Resume URLs,
 raw payload dictionaries, or private SDK state, and it does not persist or inject an
@@ -214,38 +225,59 @@ the canonical message source nor a durable queue item.
    use owner-token fencing; Redis unavailability is a retryable failure and never
    switches implicitly to memory.
 2. A short preparation transaction revalidates ingress authority, creates or reads the
-   PostgreSQL conversation position, resolves existing binding/admission state, and
-   returns the exclusive provider-history start position. It performs no provider I/O.
+   PostgreSQL conversation position, and resolves the resource and connected binding.
+   An ordinary non-invocation stops here when no binding exists or when the connected
+   binding is `mention_only`; this creates no principal, selector, access request,
+   mailbox input, wake, provider control, or position advance. Other requests resolve
+   the remaining route/selector/access state and return the exclusive provider-history
+   start position. Preparation performs no provider I/O.
 3. The provider adapter reads an exclusive-start, inclusive-trigger history range
    outside any database transaction. It retains the newest 20 eligible visible
    messages and records one leading omission reminder when earlier eligible context
    was omitted. The connected Azents App/Bot is excluded; raw REST pages, callbacks,
    tokens, private URLs, and attachment bodies are not retained.
-4. A short final transaction locks and revalidates the same authority, conversation
-   position, resource, route, binding/admission, and access boundary. PostgreSQL
-   compare-and-set restarts the read when another replica advanced the position.
-5. The transaction persists canonical provider-history messages and immutable accepted
-   revisions, creates or reuses the active binding and root Session, records immutable
-   invocation-batch membership, enqueues one wake-session mailbox item, establishes
-   initial Channel Work and provider-control intents, marks the Session running,
-   advances the position, and records recoverable wake-dispatch state atomically.
-6. After commit, the service claims the wake intent, sends routing-only
-   `SessionWakeUp(session_id)`, and marks dispatch complete. A crash or broker failure
-   resets or preserves recoverable state so duplicate transport delivery can complete
-   the same logical wake without creating another batch.
+   Slack display-name and permalink enrichment is optional and starts only while a
+   fixed reserve remains for durable acceptance and wake dispatch.
+4. A short admission transaction locks and revalidates the same authority,
+   conversation position, active resource, current connected binding response mode,
+   route/binding/selector, and access boundary. A mode change to `mention_only` during
+   provider-history I/O discards the fetched range without side effects or position
+   advancement. An admitted request creates or reuses the connected binding, real root
+   Session, initial Channel Work, deterministic canonical mailbox input, and
+   deterministic joined-presence and progress delivery intents. The same transaction
+   marks the Session running, initializes thread position, and compare-and-set advances
+   the conversation position.
+   PostgreSQL conversation position is the sole duplicate-prevention and ordering
+   authority; a mismatch restarts provider-history preparation.
+5. After commit, the service claims the pending mailbox item and sends routing-only
+   `SessionWakeUp(session_id)`. A crash or broker failure leaves that item recoverable,
+   so duplicate transport delivery can complete the same logical wake without creating
+   another Session input.
+6. The Agent Worker attempts committed joined-presence and progress controls through
+   the shared one-attempt delivery fence. Delivered, failed, unknown, not-attempted,
+   and cancelled outcomes remain provider-delivery evidence only; none gates mailbox
+   promotion, Session wake, or AgentRun creation.
 
-An existing active binding wins route resolution. Otherwise Single uses its sole
+An existing connected binding wins route resolution. Otherwise Single uses its sole
 route, Multi uses one valid channel default, and unresolved Multi traffic creates an
-immutable selection boundary. Empty, removed, stale, or ambiguous catalogs never fall
+interaction-owned typed selection boundary. Empty, removed, stale, or ambiguous catalogs never fall
 back to an arbitrary Agent. An already-granted first invocation snapshots the Agent's
 current automatic Project policy through the shared root Session creation boundary;
 an existing binding keeps its prior snapshot.
+
+The shared response predicate is provider-neutral: explicit invocations proceed in
+either mode; an ordinary message proceeds only for an existing connected
+`all_messages` binding. An unbound or disconnected conversation always requires a new
+explicit invocation. Ignored `mention_only` messages leave the conversation position
+unchanged, so a later eligible mention can include them through the existing bounded
+provider-history range. Already committed mailbox input, wake, Channel Work, or
+AgentRun state is never cancelled or reclassified by a later mode change.
 
 Restricted access persists the trigger source plus immutable conversation-position,
 range-start, and trigger-position replay authority and commits an approval-control
 intent without waking a Session. Allow invokes the same synchronous ingestion service
 with that durable replay boundary. Replay works whether the shared position is still
-before the trigger or has advanced, and converges on one batch and mailbox identity.
+before the trigger or has advanced, and converges on one mailbox identity.
 Deny, block, revocation, malformed triggers, and non-invoking edit/delete callbacks
 never release new Session input.
 
@@ -257,27 +289,36 @@ high-level `AsyncWebClient` methods with retries disabled; direct HTTP remains l
 to authenticated private-file streaming and presigned upload bodies.
 
 Authenticated Slack App uninstall and token revocation bypass normal message
-ingestion and directly apply fenced connection lifecycle handling. Provider-history,
-coordination, position, or wake failures return a retryable transport outcome. Invalid
-or stale authority and malformed replay boundaries fail closed. Committed selector,
-approval, Session-link, and initial progress controls are attempted after commit
-through the shared provider-control delivery fence.
+ingestion and directly apply fenced connection lifecycle handling. Token revocation
+moves the current connection to `reconnect_required` without terminating bindings.
+App uninstall terminally disconnects the connection, creates one leave-presence
+control for each newly disconnected binding, captures its provider target before
+credential purge, and attempts that target only after the terminal commit. Repeated
+uninstall delivery is idempotent. Provider-history, coordination, position, or wake
+failures return a retryable transport outcome. Invalid or stale authority and
+malformed replay boundaries fail closed. Committed selector, approval,
+joined-presence, leave-presence, and progress controls are attempted after their
+commit without gating accepted input or terminal lifecycle state. Presence-control
+Session links use only
+`/w/{workspace}/agents/{agent}/sessions/{session}` and target the same durable Session
+exposed by existing Agent Session list and detail APIs.
 
 ## File Metadata Projection
 
 Slack HTTP, Socket Mode, and provider-history projection use the same bounded Slack
 `files[]` metadata. At most 20 entries are retained. Text fields are
 bounded, malformed or truncated items fail closed, and no private URL or file body enters
-the canonical revision or Agent context.
+the mailbox projection or Agent context.
 
 Direct hosted uploads with an ID, non-negative declared size, supported mode, visible
-access, and no external or Slack Connect classification receive a provider-neutral,
-binding-scoped `external-file:v1` locator. External files, Slack Connect files, sparse
+access, and no external or Slack Connect classification receive a provider-addressed
+`external-file:v1:<provider>:<binding>:<channel>:<message>:<file>` key. Slack leaves
+channel and message empty; Discord includes both. External files, Slack Connect files, sparse
 access-check records, unsupported modes, missing IDs, and invalid sizes remain visible
 with stable unsupported reasons but cannot be downloaded.
 
 The first Agent turn, replay, filters, compaction continuity, structured visible values,
-and token accounting render the same ordered metadata and opaque locators. Rendering an
+and token accounting render the same ordered metadata and direct keys. Rendering an
 attachment never materializes its bytes. Explicit download later rechecks active
 ownership, directional capability, `files.info` metadata, provider authorization,
 declared size, and actual streamed bytes.
@@ -295,14 +336,44 @@ Slack SDK clients use dedicated non-propagating loggers so SDK diagnostics canno
 serialize provider request parameters, response bodies, or Socket endpoint details
 into application logs.
 
-The Agent Worker includes its Slack Socket manager task in the foreground supervision
-boundary. Unexpected manager return, cancellation, or failure terminates the Worker
-instead of leaving readiness alive without Socket supervision. Customer-specific
-terminal configuration remains durable connection-local health and does not by itself
-make the shared Worker unready.
+The first successful creation of a real External Channel root AgentSession emits one
+structured information log with only the provider and canonical provider event type.
+Session reuse and idempotent retries emit no creation log. Provider tenant, channel,
+participant, message, payload, and Session identifiers are excluded.
+
+The External Channel Gateway supervises Slack Socket and Discord Gateway manager loops
+as required process dependencies. Unexpected top-level return, cancellation, or failure
+terminates the gateway instead of leaving readiness alive without one transport class.
+Customer-specific terminal configuration remains durable connection-local health and
+does not by itself make the shared gateway unready. General Agent Workers own Session
+execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-01** (spec_version 27) — Added the shared binding response-mode
+  predicate at preparation and final admission, preserving ignored messages as later
+  bounded context without provider-history I/O, mailbox input, wake, or position
+  advancement.
+- **2026-08-01** (spec_version 26) — Replaced the initial button-only Session link
+  with a joined-presence control, added idempotent App-uninstall leave presence, and
+  preserved independent post-commit delivery.
+- **2026-08-01** (spec_version 25) — Made PostgreSQL conversation position the sole
+  duplicate-prevention authority and decoupled provider-control outcomes from
+  canonical mailbox acceptance, Session wake, and AgentRun creation.
+- **2026-07-31** (spec_version 24) — Recognized authenticated same-Team Slack Bot
+  User mentions delivered as subtype-free human `message` callbacks while preserving
+  fail-closed context handling for unrelated or App-authored messages.
+- **2026-07-31** (spec_version 23) — Corrected Session navigation to the canonical
+  `/w` route.
+- **2026-07-31** (spec_version 22) — Reserved Slack optional-enrichment time for
+  durable admission and made `disconnected_at` the binding relationship authority.
+- **2026-07-31** (spec_version 21) — Moved Slack Socket Mode and Discord Gateway
+  managers into one provider-neutral External Channel Gateway runtime, removed Socket
+  supervision from Agent Workers, and preserved direct shared-ingestion calls.
+- **2026-07-31** (spec_version 20) — Replaced conversation admissions,
+  provider-message/revision storage, invocation batches, and wake dispatch with
+  interaction/access replay boundaries and one canonical mailbox item; file keys now
+  carry direct provider coordinates.
 - **2026-07-31** (spec_version 19) — Delegated Slack Socket endpoint acquisition,
   queue control, stale detection, and recoverable reconnect to the SDK; added fenced
   Slack and Discord typed lifecycle health; moved Slack HTTP verification to the SDK

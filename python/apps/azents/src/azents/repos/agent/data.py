@@ -13,7 +13,11 @@ from azents.core.agent import (
     SelectableModelOption,
     SubagentSettings,
 )
-from azents.core.enums import AgentLifecycleStatus, AgentType
+from azents.core.enums import (
+    AgentLifecycleStatus,
+    AgentType,
+    ExternalChannelResponseMode,
+)
 from azents.services.uploads.schema import StoredImage
 
 
@@ -42,12 +46,19 @@ class Agent(BaseModel):
     )
     system_prompt: str | None = Field(default=None, description="System prompt")
     enabled: bool = Field(description="Enabled flag")
+    external_channel_default_response_mode: ExternalChannelResponseMode = Field(
+        description="Default response mode copied to new External Channel bindings"
+    )
     lifecycle_status: AgentLifecycleStatus = Field(
         description="Durable lifecycle admission state"
     )
     type: AgentType = Field(description="Visibility scope")
-    runtime_provider_id: str | None = Field(
-        default=None, description="Runtime Provider logical ID"
+    runtime_profile_id: str | None = Field(
+        description="Selected Workspace Runtime Profile ID"
+    )
+    runtime_profile_selection_version: int = Field(
+        ge=1,
+        description="Optimistic Agent Runtime Profile selection version",
     )
     shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")
@@ -98,9 +109,12 @@ class AgentCreate(BaseModel):
     )
     system_prompt: str | None = Field(default=None, description="System prompt")
     enabled: bool = Field(default=True, description="Enabled flag")
+    external_channel_default_response_mode: ExternalChannelResponseMode = Field(
+        description="Default response mode copied to new External Channel bindings"
+    )
     type: AgentType = Field(default=AgentType.PUBLIC, description="Visibility scope")
-    runtime_provider_id: str | None = Field(
-        default=None, description="Runtime Provider logical ID"
+    runtime_profile_id: str | None = Field(
+        description="Selected Workspace Runtime Profile ID"
     )
     shell_enabled: bool = Field(default=True, description="Shell Enabled flag")
     memory_enabled: bool = Field(default=True, description="Memory enabled flag")
@@ -144,9 +158,6 @@ class AgentUpdate(TypedDict, total=False):
     system_prompt: Annotated[str | None, Field(description="System prompt")]
     enabled: Annotated[bool, Field(description="Enabled flag")]
     type: Annotated[AgentType, Field(description="Visibility scope")]
-    runtime_provider_id: Annotated[
-        str | None, Field(description="Runtime Provider logical ID")
-    ]
     shell_enabled: Annotated[bool, Field(description="Shell Enabled flag")]
     memory_enabled: Annotated[bool, Field(description="Memory enabled flag")]
     tool_search_enabled: Annotated[bool, Field(description="Tool Search enabled flag")]

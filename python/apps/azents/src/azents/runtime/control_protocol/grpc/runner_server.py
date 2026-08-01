@@ -14,7 +14,8 @@ from typing import Protocol
 import grpc
 from azents_runtime_control.grpc_runner_client import (
     runner_event_from_message,
-    runner_execution_policy_evidence_from_message,
+    runner_runtime_configuration_evidence_from_message,
+    runner_runtime_configuration_evidence_to_message,
     runner_state_report_from_message,
     runner_transfer_result_from_message,
 )
@@ -26,6 +27,9 @@ from azents_runtime_control.proto import (
 from azents_runtime_control.runner import RunnerStateReport as SharedRunnerStateReport
 from azents_runtime_control.runner import RuntimeRunnerState as SharedRunnerState
 from azents_runtime_control.runner_transfer import RunnerTransferDirection
+from azents_runtime_control.runtime_configuration import (
+    RuntimeConfigurationEvidence,
+)
 from google.protobuf import timestamp_pb2
 
 from azents.core.runtime_runner_credential import RuntimeRunnerCredential
@@ -89,6 +93,14 @@ class RuntimeRunnerStateSink(Protocol):
         registration: RuntimeRunnerRegistration,
     ) -> bool:
         """Validate Runner policy evidence before accepting its stream."""
+        ...
+
+    async def configuration_evidence_for_runner_heartbeat(
+        self,
+        *,
+        runtime_id: str,
+    ) -> RuntimeConfigurationEvidence | None:
+        """Return exact pending evidence after Provider acknowledgement."""
         ...
 
 
@@ -155,7 +167,7 @@ class RuntimeRunnerControlGrpcServicer(
         if not await self._state_sink.validate_runner_registration(registration):
             await context.abort(
                 grpc.StatusCode.FAILED_PRECONDITION,
-                "Runner execution-policy evidence does not match the current target",
+                "Runner configuration evidence does not match the current target",
             )
             raise AssertionError("unreachable")
         try:
@@ -273,7 +285,7 @@ class RuntimeRunnerControlGrpcServicer(
                     },
                     workspace_path=registration.workspace_path,
                     reported_at=datetime.now(UTC),
-                    execution_policy=registration.execution_policy,
+                    runtime_configuration=registration.runtime_configuration,
                 )
             )
         except Exception:
@@ -338,12 +350,24 @@ class RuntimeRunnerControlGrpcServicer(
                         _error(message.request_id, "STALE_RUNNER_GENERATION")
                     )
                     return
+                heartbeat_ack = runtime_runner_control_pb2.RunnerHeartbeatAck(
+                    monotonic_sequence=message.heartbeat.monotonic_sequence,
+                )
+                runtime_configuration = (
+                    await self._state_sink.configuration_evidence_for_runner_heartbeat(
+                        runtime_id=runtime_id,
+                    )
+                )
+                if runtime_configuration is not None:
+                    heartbeat_ack.runtime_configuration.CopyFrom(
+                        runner_runtime_configuration_evidence_to_message(
+                            runtime_configuration
+                        )
+                    )
                 await outbound.put(
                     runtime_runner_control_pb2.RunnerControlMessage(
                         request_id=message.request_id,
-                        heartbeat_ack=runtime_runner_control_pb2.RunnerHeartbeatAck(
-                            monotonic_sequence=message.heartbeat.monotonic_sequence,
-                        ),
+                        heartbeat_ack=heartbeat_ack,
                     )
                 )
                 continue
@@ -870,8 +894,8 @@ def _registration(
     credential_id: str,
 ) -> RuntimeRunnerRegistration:
     register = message.register
-    if not register.HasField("execution_policy"):
-        raise ValueError("Runner registration execution-policy evidence is required.")
+    if not register.HasField("runtime_configuration"):
+        raise ValueError("Runner registration configuration evidence is required.")
     return RuntimeRunnerRegistration(
         runtime_id=runtime_id,
         runner_id=register.runner_id,
@@ -881,8 +905,8 @@ def _registration(
         workspace_path=register.workspace_path,
         metadata=dict(register.metadata),
         auth_credential_id=credential_id,
-        execution_policy=runner_execution_policy_evidence_from_message(
-            register.execution_policy
+        runtime_configuration=runner_runtime_configuration_evidence_from_message(
+            register.runtime_configuration
         ),
         connection_id=message.connection_id,
         owner_replica_id=owner_replica_id,

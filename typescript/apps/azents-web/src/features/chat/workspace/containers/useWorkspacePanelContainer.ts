@@ -214,6 +214,15 @@ export function useWorkspacePanelContainer({
           : false,
     },
   );
+  const runtimeQuery = trpc.chat.getAgentRuntime.useQuery(
+    { handle, agentId },
+    {
+      refetchInterval: (query): number | false =>
+        query.state.data?.configuration.status === "waiting_for_recreation"
+          ? WORKSPACE_TRANSITION_REFETCH_INTERVAL_MS
+          : false,
+    },
+  );
 
   const projectsQuery = trpc.chat.listAgentProjects.useQuery({
     agentId,
@@ -442,10 +451,16 @@ export function useWorkspacePanelContainer({
 
   const startRuntimeMutation = trpc.chat.startAgentRuntime.useMutation({
     onSuccess: async (_data, variables) => {
-      await utils.chat.getAgentWorkspace.invalidate({
-        agentId: variables.agentId,
-      });
-      await utils.chat.readAgentWorkspacePath.invalidate();
+      await Promise.all([
+        utils.chat.getAgentWorkspace.invalidate({
+          agentId: variables.agentId,
+        }),
+        utils.chat.getAgentRuntime.invalidate({
+          handle,
+          agentId: variables.agentId,
+        }),
+        utils.chat.readAgentWorkspacePath.invalidate(),
+      ]);
     },
   });
 
@@ -459,10 +474,16 @@ export function useWorkspacePanelContainer({
     onSuccess: async (_data, variables) => {
       clearWorkspaceSelection();
       setCurrentDirectoryPath(null);
-      await utils.chat.getAgentWorkspace.invalidate({
-        agentId: variables.agentId,
-      });
-      await utils.chat.readAgentWorkspacePath.invalidate();
+      await Promise.all([
+        utils.chat.getAgentWorkspace.invalidate({
+          agentId: variables.agentId,
+        }),
+        utils.chat.getAgentRuntime.invalidate({
+          handle,
+          agentId: variables.agentId,
+        }),
+        utils.chat.readAgentWorkspacePath.invalidate(),
+      ]);
     },
   });
 
@@ -471,10 +492,16 @@ export function useWorkspacePanelContainer({
       clearWorkspaceSelection();
       setCurrentDirectoryPath(null);
       setDirectoryEntriesByPath({});
-      await utils.chat.getAgentWorkspace.invalidate({
-        agentId: variables.agentId,
-      });
-      await utils.chat.readAgentWorkspacePath.invalidate();
+      await Promise.all([
+        utils.chat.getAgentWorkspace.invalidate({
+          agentId: variables.agentId,
+        }),
+        utils.chat.getAgentRuntime.invalidate({
+          handle,
+          agentId: variables.agentId,
+        }),
+        utils.chat.readAgentWorkspacePath.invalidate(),
+      ]);
     },
   });
 
@@ -483,10 +510,16 @@ export function useWorkspacePanelContainer({
       clearWorkspaceSelection();
       setCurrentDirectoryPath(null);
       setDirectoryEntriesByPath({});
-      await utils.chat.getAgentWorkspace.invalidate({
-        agentId: variables.agentId,
-      });
-      await utils.chat.readAgentWorkspacePath.invalidate();
+      await Promise.all([
+        utils.chat.getAgentWorkspace.invalidate({
+          agentId: variables.agentId,
+        }),
+        utils.chat.getAgentRuntime.invalidate({
+          handle,
+          agentId: variables.agentId,
+        }),
+        utils.chat.readAgentWorkspacePath.invalidate(),
+      ]);
     },
   });
 
@@ -655,6 +688,7 @@ export function useWorkspacePanelContainer({
     setIsManualRefreshing(true);
     void Promise.all([
       utils.chat.getAgentWorkspace.invalidate({ agentId }),
+      utils.chat.getAgentRuntime.invalidate({ handle, agentId }),
       utils.chat.readAgentWorkspacePath.invalidate({ agentId }),
       utils.chat.listAgentProjects.invalidate({ agentId, sessionId }),
       utils.chat.getSessionProjectBrowserManifest.invalidate({
@@ -664,8 +698,10 @@ export function useWorkspacePanelContainer({
     ]).finally(() => setIsManualRefreshing(false));
   }, [
     agentId,
+    handle,
     sessionId,
     utils.chat.getAgentWorkspace,
+    utils.chat.getAgentRuntime,
     utils.chat.getSessionProjectBrowserManifest,
     utils.chat.listAgentProjects,
     utils.chat.readAgentWorkspacePath,
@@ -925,6 +961,19 @@ export function useWorkspacePanelContainer({
     return {
       type: "SERVER",
       server: workspaceQuery.data,
+      runtimeConfiguration: runtimeQuery.isLoading
+        ? { type: "LOADING" }
+        : runtimeQuery.isError
+          ? {
+              type: "ERROR",
+              message: getErrorMessage(runtimeQuery.error),
+            }
+          : runtimeQuery.data
+            ? {
+                type: "LOADED",
+                configuration: runtimeQuery.data.configuration,
+              }
+            : { type: "LOADING" },
       manifest: browserManifest,
       projectBrowserManifest,
       browserMode,
@@ -1000,6 +1049,10 @@ export function useWorkspacePanelContainer({
     movePathMutation.isPending,
     resetRuntimeMutation.isPending,
     restartRuntimeMutation.isPending,
+    runtimeQuery.data,
+    runtimeQuery.error,
+    runtimeQuery.isError,
+    runtimeQuery.isLoading,
     selectedEntry,
     selectedFilePath,
     selectedPaths,

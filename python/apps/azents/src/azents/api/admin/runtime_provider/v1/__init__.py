@@ -5,7 +5,16 @@ from typing import Annotated, Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from azents.api.runtime_recreation import (
+    RuntimeRecreationCreateRequest,
+    RuntimeRecreationOperationResponse,
+)
 from azents.core.auth.deps import SystemAdmin, get_system_admin
+from azents.core.runtime_profile import RuntimeInfrastructureProfileKind
+from azents.services.runtime_profile_admin.service import (
+    RuntimeProfileAdminService,
+    RuntimeProfileAdminUnavailable,
+)
 from azents.services.runtime_provider_admin.service import (
     RuntimeProviderAdminService,
     RuntimeProviderAdminUnavailable,
@@ -18,9 +27,17 @@ from azents.services.runtime_provider_contract.service import (
     RuntimeProviderContractService,
     RuntimeProviderContractUnavailable,
 )
+from azents.services.runtime_recreation.service import (
+    RuntimeRecreationService,
+    RuntimeRecreationUnavailable,
+)
 from azents.utils.fastapi.route import RouteMounter
 
 from .data import (
+    RuntimeInfrastructureProfileCreateRequest,
+    RuntimeInfrastructureProfileListResponse,
+    RuntimeInfrastructureProfileReplaceRequest,
+    RuntimeInfrastructureProfileResponse,
     RuntimeProviderAuthenticationBindingAuditEventResponse,
     RuntimeProviderAuthenticationBindingAuditListResponse,
     RuntimeProviderAuthenticationBindingCreateRequest,
@@ -30,7 +47,6 @@ from .data import (
     RuntimeProviderAuthenticationBindingRotateRequest,
     RuntimeProviderAuthenticationBindingRotateResponse,
     RuntimeProviderAvailabilityRequest,
-    RuntimeProviderContractAcceptRequest,
     RuntimeProviderContractListResponse,
     RuntimeProviderContractResponse,
     RuntimeProviderListResponse,
@@ -41,13 +57,327 @@ from .data import (
 router = APIRouter()
 
 
+async def _list_infrastructure_profiles(
+    service: RuntimeProfileAdminService,
+    *,
+    provider_id: str,
+    profile_kind: RuntimeInfrastructureProfileKind,
+    include_disabled: bool,
+) -> RuntimeInfrastructureProfileListResponse:
+    try:
+        profiles = await service.list_profiles(
+            provider_id,
+            profile_kind=profile_kind,
+            include_disabled=include_disabled,
+        )
+    except RuntimeProfileAdminUnavailable as error:
+        _raise_profile_unavailable(error)
+    return RuntimeInfrastructureProfileListResponse(
+        items=[
+            RuntimeInfrastructureProfileResponse.convert_from(profile)
+            for profile in profiles
+        ]
+    )
+
+
+@router.get("/providers/{provider_id}/pod-profiles")
+async def list_pod_profiles(
+    service: Annotated[RuntimeProfileAdminService, Depends()],
+    *,
+    provider_id: str,
+    include_disabled: bool = False,
+) -> RuntimeInfrastructureProfileListResponse:
+    """List typed Pod Profiles owned by one Kubernetes Provider."""
+    return await _list_infrastructure_profiles(
+        service,
+        provider_id=provider_id,
+        profile_kind=RuntimeInfrastructureProfileKind.KUBERNETES_POD,
+        include_disabled=include_disabled,
+    )
+
+
+@router.get("/providers/{provider_id}/container-profiles")
+async def list_container_profiles(
+    service: Annotated[RuntimeProfileAdminService, Depends()],
+    *,
+    provider_id: str,
+    include_disabled: bool = False,
+) -> RuntimeInfrastructureProfileListResponse:
+    """List typed Container Profiles owned by one Docker Provider."""
+    return await _list_infrastructure_profiles(
+        service,
+        provider_id=provider_id,
+        profile_kind=RuntimeInfrastructureProfileKind.DOCKER_CONTAINER,
+        include_disabled=include_disabled,
+    )
+
+
+@router.post(
+    "/providers/{provider_id}/pod-profiles",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_pod_profile(
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[RuntimeProfileAdminService, Depends()],
+    request_body: RuntimeInfrastructureProfileCreateRequest,
+    *,
+    provider_id: str,
+) -> RuntimeInfrastructureProfileResponse:
+    """Create one typed infrastructure Profile under one Provider."""
+    try:
+        profile = await service.create_profile(
+            provider_id,
+            profile_kind=RuntimeInfrastructureProfileKind.KUBERNETES_POD,
+            display_name=request_body.display_name,
+            description=request_body.description,
+            lifecycle=request_body.lifecycle,
+            spec=request_body.spec,
+            actor_user_id=system_admin.user_id,
+        )
+    except RuntimeProfileAdminUnavailable as error:
+        _raise_profile_unavailable(error)
+    return RuntimeInfrastructureProfileResponse.convert_from(profile)
+
+
+@router.post(
+    "/providers/{provider_id}/container-profiles",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_container_profile(
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[RuntimeProfileAdminService, Depends()],
+    request_body: RuntimeInfrastructureProfileCreateRequest,
+    *,
+    provider_id: str,
+) -> RuntimeInfrastructureProfileResponse:
+    """Create one typed Container Profile under one Docker Provider."""
+    try:
+        profile = await service.create_profile(
+            provider_id,
+            profile_kind=RuntimeInfrastructureProfileKind.DOCKER_CONTAINER,
+            display_name=request_body.display_name,
+            description=request_body.description,
+            lifecycle=request_body.lifecycle,
+            spec=request_body.spec,
+            actor_user_id=system_admin.user_id,
+        )
+    except RuntimeProfileAdminUnavailable as error:
+        _raise_profile_unavailable(error)
+    return RuntimeInfrastructureProfileResponse.convert_from(profile)
+
+
+@router.get("/providers/{provider_id}/pod-profiles/{profile_id}")
+async def get_pod_profile(
+    service: Annotated[RuntimeProfileAdminService, Depends()],
+    *,
+    provider_id: str,
+    profile_id: str,
+) -> RuntimeInfrastructureProfileResponse:
+    """Inspect one exact Provider-owned infrastructure Profile."""
+    try:
+        profile = await service.get_profile(
+            provider_id,
+            profile_id,
+            profile_kind=RuntimeInfrastructureProfileKind.KUBERNETES_POD,
+        )
+    except RuntimeProfileAdminUnavailable as error:
+        _raise_profile_unavailable(error)
+    return RuntimeInfrastructureProfileResponse.convert_from(profile)
+
+
+@router.get("/providers/{provider_id}/container-profiles/{profile_id}")
+async def get_container_profile(
+    service: Annotated[RuntimeProfileAdminService, Depends()],
+    *,
+    provider_id: str,
+    profile_id: str,
+) -> RuntimeInfrastructureProfileResponse:
+    """Inspect one exact Docker Provider-owned Container Profile."""
+    try:
+        profile = await service.get_profile(
+            provider_id,
+            profile_id,
+            profile_kind=RuntimeInfrastructureProfileKind.DOCKER_CONTAINER,
+        )
+    except RuntimeProfileAdminUnavailable as error:
+        _raise_profile_unavailable(error)
+    return RuntimeInfrastructureProfileResponse.convert_from(profile)
+
+
+@router.put("/providers/{provider_id}/pod-profiles/{profile_id}")
+async def replace_pod_profile(
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[RuntimeProfileAdminService, Depends()],
+    request_body: RuntimeInfrastructureProfileReplaceRequest,
+    *,
+    provider_id: str,
+    profile_id: str,
+) -> RuntimeInfrastructureProfileResponse:
+    """Replace one infrastructure Profile with optimistic version fencing."""
+    try:
+        profile = await service.replace_profile(
+            provider_id,
+            profile_id,
+            profile_kind=RuntimeInfrastructureProfileKind.KUBERNETES_POD,
+            expected_version=request_body.expected_version,
+            display_name=request_body.display_name,
+            description=request_body.description,
+            lifecycle=request_body.lifecycle,
+            spec=request_body.spec,
+            actor_user_id=system_admin.user_id,
+        )
+    except RuntimeProfileAdminUnavailable as error:
+        _raise_profile_unavailable(error)
+    return RuntimeInfrastructureProfileResponse.convert_from(profile)
+
+
+@router.put("/providers/{provider_id}/container-profiles/{profile_id}")
+async def replace_container_profile(
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[RuntimeProfileAdminService, Depends()],
+    request_body: RuntimeInfrastructureProfileReplaceRequest,
+    *,
+    provider_id: str,
+    profile_id: str,
+) -> RuntimeInfrastructureProfileResponse:
+    """Replace one Container Profile with optimistic version fencing."""
+    try:
+        profile = await service.replace_profile(
+            provider_id,
+            profile_id,
+            profile_kind=RuntimeInfrastructureProfileKind.DOCKER_CONTAINER,
+            expected_version=request_body.expected_version,
+            display_name=request_body.display_name,
+            description=request_body.description,
+            lifecycle=request_body.lifecycle,
+            spec=request_body.spec,
+            actor_user_id=system_admin.user_id,
+        )
+    except RuntimeProfileAdminUnavailable as error:
+        _raise_profile_unavailable(error)
+    return RuntimeInfrastructureProfileResponse.convert_from(profile)
+
+
+async def _create_infrastructure_profile_recreation(
+    system_admin: SystemAdmin,
+    service: RuntimeRecreationService,
+    request_body: RuntimeRecreationCreateRequest,
+    *,
+    provider_id: str,
+    profile_id: str,
+    profile_kind: RuntimeInfrastructureProfileKind,
+) -> RuntimeRecreationOperationResponse:
+    try:
+        operation = await service.create_infrastructure_profile_operation(
+            provider_id,
+            profile_id,
+            profile_kind=profile_kind,
+            expected_version=request_body.expected_version,
+            concurrency_limit=request_body.concurrency_limit,
+            actor_user_id=system_admin.user_id,
+        )
+    except RuntimeRecreationUnavailable as error:
+        _raise_recreation_unavailable(error)
+    return RuntimeRecreationOperationResponse.convert_operation(operation)
+
+
+@router.post(
+    "/providers/{provider_id}/pod-profiles/{profile_id}/recreation-operations",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_pod_profile_recreation(
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[RuntimeRecreationService, Depends()],
+    request_body: RuntimeRecreationCreateRequest,
+    *,
+    provider_id: str,
+    profile_id: str,
+) -> RuntimeRecreationOperationResponse:
+    """Start bounded recreation for one Kubernetes Pod Profile."""
+    return await _create_infrastructure_profile_recreation(
+        system_admin,
+        service,
+        request_body,
+        provider_id=provider_id,
+        profile_id=profile_id,
+        profile_kind=RuntimeInfrastructureProfileKind.KUBERNETES_POD,
+    )
+
+
+@router.post(
+    "/providers/{provider_id}/container-profiles/{profile_id}/recreation-operations",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_container_profile_recreation(
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[RuntimeRecreationService, Depends()],
+    request_body: RuntimeRecreationCreateRequest,
+    *,
+    provider_id: str,
+    profile_id: str,
+) -> RuntimeRecreationOperationResponse:
+    """Start bounded recreation for one Docker Container Profile."""
+    return await _create_infrastructure_profile_recreation(
+        system_admin,
+        service,
+        request_body,
+        provider_id=provider_id,
+        profile_id=profile_id,
+        profile_kind=RuntimeInfrastructureProfileKind.DOCKER_CONTAINER,
+    )
+
+
+@router.post(
+    "/providers/{provider_id}/recreation-operations",
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_provider_recreation(
+    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
+    service: Annotated[RuntimeRecreationService, Depends()],
+    request_body: RuntimeRecreationCreateRequest,
+    *,
+    provider_id: str,
+) -> RuntimeRecreationOperationResponse:
+    """Start bounded recreation for one exact Runtime Provider."""
+    try:
+        operation = await service.create_provider_operation(
+            provider_id,
+            expected_admin_version=request_body.expected_version,
+            concurrency_limit=request_body.concurrency_limit,
+            actor_user_id=system_admin.user_id,
+        )
+    except RuntimeRecreationUnavailable as error:
+        _raise_recreation_unavailable(error)
+    return RuntimeRecreationOperationResponse.convert_operation(operation)
+
+
+@router.get("/recreation-operations/{operation_id}")
+async def get_platform_recreation(
+    service: Annotated[RuntimeRecreationService, Depends()],
+    *,
+    operation_id: str,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> RuntimeRecreationOperationResponse:
+    """Read Platform-scoped recreation progress and bounded failures."""
+    try:
+        projection = await service.get_platform_operation(
+            operation_id,
+            offset=offset,
+            limit=limit,
+        )
+    except RuntimeRecreationUnavailable as error:
+        _raise_recreation_unavailable(error)
+    return RuntimeRecreationOperationResponse.convert_projection(projection)
+
+
 @router.get("/providers/{provider_id}/contracts")
 async def list_contracts(
     service: Annotated[RuntimeProviderContractService, Depends()],
     *,
     provider_id: str,
 ) -> RuntimeProviderContractListResponse:
-    """List accepted and pending capability contract revisions."""
+    """List immutable Provider capability advertisement history."""
     try:
         contracts = await service.list_contracts(provider_id)
     except RuntimeProviderContractUnavailable as error:
@@ -55,28 +385,6 @@ async def list_contracts(
     return RuntimeProviderContractListResponse(
         items=[RuntimeProviderContractResponse.convert_from(item) for item in contracts]
     )
-
-
-@router.post("/providers/{provider_id}/contracts/{revision_id}/accept")
-async def accept_contract(
-    system_admin: Annotated[SystemAdmin, Depends(get_system_admin)],
-    service: Annotated[RuntimeProviderContractService, Depends()],
-    request_body: RuntimeProviderContractAcceptRequest,
-    *,
-    provider_id: str,
-    revision_id: str,
-) -> RuntimeProviderContractResponse:
-    """Explicitly accept one valid Provider capability contract candidate."""
-    try:
-        contract = await service.accept_contract(
-            provider_id,
-            revision_id,
-            expected_admin_version=request_body.expected_admin_version,
-            actor_user_id=system_admin.user_id,
-        )
-    except RuntimeProviderContractUnavailable as error:
-        _raise_contract_unavailable(error)
-    return RuntimeProviderContractResponse.convert_from(contract)
 
 
 @router.get("/providers/{provider_id}/authentication-bindings")
@@ -277,6 +585,56 @@ def _raise_unavailable(error: RuntimeProviderAdminUnavailable) -> NoReturn:
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail="Runtime Provider operation is unavailable.",
+    ) from None
+
+
+def _raise_profile_unavailable(
+    error: RuntimeProfileAdminUnavailable,
+) -> NoReturn:
+    """Convert infrastructure Profile failures to bounded Admin API errors."""
+    if error.code in {"provider_not_found", "profile_not_found"}:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": error.code},
+        ) from None
+    if error.code in {"profile_kind_mismatch", "profile_document_invalid"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": error.code},
+        ) from None
+    detail: dict[str, Any] = {"code": error.code}
+    if error.current_profile is not None:
+        detail["current_version"] = error.current_profile.version
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=detail,
+    ) from None
+
+
+def _raise_recreation_unavailable(
+    error: RuntimeRecreationUnavailable,
+) -> NoReturn:
+    """Convert scoped recreation failures to bounded Admin API errors."""
+    if error.code in {
+        "provider_not_found",
+        "profile_not_found",
+        "operation_not_found",
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": error.code},
+        ) from None
+    if error.code == "profile_kind_mismatch":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": error.code},
+        ) from None
+    detail: dict[str, object] = {"code": error.code}
+    if error.current_version is not None:
+        detail["current_version"] = error.current_version
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=detail,
     ) from None
 
 

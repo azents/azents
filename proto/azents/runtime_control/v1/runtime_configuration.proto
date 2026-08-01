@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package azents.runtime_control.v1;
+
+message RuntimeConfigurationEvidence {
+  string revision_id = 1;
+  string digest = 2;
+  uint64 desired_generation = 3;
+}
+
+message RuntimeConfigurationEnvelope {
+  RuntimeConfigurationEvidence evidence = 1;
+  string resolved_configuration_json = 2;
+}

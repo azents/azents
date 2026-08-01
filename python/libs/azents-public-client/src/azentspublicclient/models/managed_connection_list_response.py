@@ -19,6 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List
+from azentspublicclient.models.external_channel_response_mode import ExternalChannelResponseMode
 from azentspublicclient.models.managed_connection import ManagedConnection
 from azentspublicclient.models.managed_multi_connection import ManagedMultiConnection
 from typing import Optional, Set
@@ -30,8 +31,9 @@ class ManagedConnectionListResponse(BaseModel):
     """ # noqa: E501
     items: List[ManagedConnection]
     associated_multi_apps: List[ManagedMultiConnection]
+    default_response_mode: ExternalChannelResponseMode
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["items", "associated_multi_apps"]
+    __properties: ClassVar[List[str]] = ["items", "associated_multi_apps", "default_response_mode"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -106,7 +108,8 @@ class ManagedConnectionListResponse(BaseModel):
 
         _obj = cls.model_validate({
             "items": [ManagedConnection.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None,
-            "associated_multi_apps": [ManagedMultiConnection.from_dict(_item) for _item in obj["associated_multi_apps"]] if obj.get("associated_multi_apps") is not None else None
+            "associated_multi_apps": [ManagedMultiConnection.from_dict(_item) for _item in obj["associated_multi_apps"]] if obj.get("associated_multi_apps") is not None else None,
+            "default_response_mode": obj.get("default_response_mode")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

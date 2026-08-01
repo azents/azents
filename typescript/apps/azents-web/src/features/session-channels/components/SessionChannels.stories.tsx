@@ -26,7 +26,10 @@ const agent: AgentResponse = {
   effective_auto_compaction_threshold_tokens: 96000,
   model_parameters: null,
   system_prompt: "Coordinate incident response.",
-  runtime_provider_id: null,
+  runtime_profile_id: null,
+  runtime_profile_selection_version: 1,
+  runtime_profile_available: false,
+  runtime_profile_availability_reason_code: "runtime_profile_unconfigured",
   shell_enabled: true,
   memory_enabled: true,
   tool_search_enabled: false,
@@ -61,9 +64,9 @@ const binding: ManagedBinding = {
   id: "binding_01",
   agent_session_id: session.id,
   provider: "slack",
+  response_mode: "all_messages",
   resource_type: "private_channel_thread",
   resource_label: "#incident-database · thread",
-  status: "active",
   connected_at: "2026-07-22T02:05:00Z",
   disconnected_at: null,
   disconnect_reason: null,
@@ -160,7 +163,12 @@ const meta = {
     },
     actionError: null,
     disconnectingId: null,
+    responseModeDrafts: {},
+    updatingResponseModeId: null,
+    responseModeError: null,
     onDisconnect: noop,
+    onResponseModeChange: noop,
+    onSaveResponseMode: noop,
   },
 } satisfies Meta<typeof SessionChannels>;
 
@@ -185,7 +193,6 @@ export const Archived = {
       bindings: [
         {
           ...binding,
-          status: "disconnected",
           disconnected_at: "2026-07-22T05:30:00Z",
           disconnect_reason: "Session archived.",
         },
@@ -222,6 +229,40 @@ export const Error = {
 export const Busy = {
   args: {
     disconnectingId: binding.id,
+  },
+} satisfies Story;
+
+export const MentionsOnly = {
+  args: {
+    state: {
+      type: "LOADED",
+      session,
+      bindings: [{ ...binding, response_mode: "mention_only" }],
+      grants: [grant],
+    },
+  },
+} satisfies Story;
+
+export const ModeDraftChanged = {
+  args: {
+    responseModeDrafts: { [binding.id]: "mention_only" },
+  },
+} satisfies Story;
+
+export const ModeSaving = {
+  args: {
+    responseModeDrafts: { [binding.id]: "mention_only" },
+    updatingResponseModeId: binding.id,
+  },
+} satisfies Story;
+
+export const ModeError = {
+  args: {
+    responseModeDrafts: { [binding.id]: "mention_only" },
+    responseModeError: {
+      bindingId: binding.id,
+      message: "The response mode could not be saved.",
+    },
   },
 } satisfies Story;
 

@@ -66,7 +66,7 @@ from azents.repos.action_execution.data import ActionExecution, ActionExecutionC
 from azents.repos.agent_execution import AgentRunRepository, EventTranscriptRepository
 from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.external_channel.data import ExternalChannelInvocationProjectionItem
+from azents.repos.external_channel.data import ExternalChannelMailboxProjectionItem
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import (
@@ -86,9 +86,6 @@ logger = logging.getLogger(__name__)
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
 _CHAT_ACTION_ADAPTER = TypeAdapter(ChatAction)
 _AGENT_MESSAGE_ADAPTER = TypeAdapter(AgentMessagePayload)
-EXTERNAL_CHANNEL_INVOCATION_BATCH_ID_METADATA_KEY = (
-    "external_channel_invocation_batch_id"
-)
 _EXTERNAL_CHANNEL_CONTEXT_OMITTED_REMINDER = (
     "Earlier messages from this external conversation were omitted. "
     "Only the newest 20 provider messages are included below."
@@ -367,6 +364,22 @@ class MailboxService:
         """Fetch a pending MailboxItem by its durable acceptance identity."""
         return await self.mailbox_item_repository.get_by_id(session, buffer_id)
 
+    async def get_by_idempotency_key(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        kind: MailboxItemKind,
+        idempotency_key: str,
+    ) -> MailboxItem | None:
+        """Fetch one pending mailbox item by its producer identity."""
+        return await self.mailbox_item_repository.get_by_idempotency_key(
+            session,
+            session_id=session_id,
+            kind=kind,
+            idempotency_key=idempotency_key,
+        )
+
     async def delete_by_session_and_id(
         self,
         session: AsyncSession,
@@ -412,41 +425,37 @@ class MailboxService:
     ) -> PendingInputInferenceProfile:
         """Read the next pending input profile without consuming the buffer."""
         async with self.session_manager() as session:
-            pending = await self.mailbox_item_repository.list_for_flush(
-                session,
-                session_id,
-                limit=1,
-            )
+            buffer = await self._first_promotable_mailbox_item(session, session_id)
         return PendingInputInferenceProfile(
-            mailbox_item_id=pending[0].id if pending else None,
-            exists=bool(pending),
+            mailbox_item_id=buffer.id if buffer is not None else None,
+            exists=buffer is not None,
             requires_inference=(
-                _buffer_requires_inference(pending[0]) if pending else False
+                _buffer_requires_inference(buffer) if buffer is not None else False
             ),
             requested_inference_profile=(
-                _requested_inference_profile(pending[0]) if pending else None
+                _requested_inference_profile(buffer) if buffer is not None else None
             ),
         )
 
     async def has_pending_session_mailbox_items(self, session_id: str) -> bool:
         """Check whether session still has unflushed MailboxItem."""
         async with self.session_manager() as session:
-            pending = await self.mailbox_item_repository.list_for_flush(
-                session,
-                session_id,
-                limit=1,
+            return (
+                await self._first_promotable_mailbox_item(session, session_id)
+                is not None
             )
-        return bool(pending)
 
     async def has_pending_wake_session_mailbox_items(self, session_id: str) -> bool:
         """Check whether pending input can start or resume an idle session."""
         async with self.session_manager() as session:
-            repository = self.mailbox_item_repository
-            return await repository.has_by_session_id_and_scheduling_mode(
+            pending = await self.mailbox_item_repository.list_for_flush(
                 session,
-                session_id=session_id,
-                scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+                session_id,
             )
+            for buffer in pending:
+                if buffer.scheduling_mode is MailboxSchedulingMode.WAKE_SESSION:
+                    return True
+            return False
 
     async def has_pending_agent_messages(self, session_id: str) -> bool:
         """Check whether the session mailbox has pending agent input."""
@@ -728,14 +737,9 @@ class MailboxService:
                 session,
                 session_id,
             )
-            pending = await self.mailbox_item_repository.list_for_flush(
-                session,
-                session_id,
-                limit=1,
-            )
+            buffer = await self._first_promotable_mailbox_item(session, session_id)
         if agent_session is None:
             raise ValueError("AgentSession not found")
-        buffer = pending[0] if pending else None
         actual_buffer_id = buffer.id if buffer is not None else None
         if actual_buffer_id != expected_buffer_id:
             raise MailboxPreparationStaleError(
@@ -823,6 +827,19 @@ class MailboxService:
                 part.model_file_id for part in materialized.file_parts
             ],
         )
+
+    async def _first_promotable_mailbox_item(
+        self,
+        session: AsyncSession,
+        session_id: str,
+    ) -> MailboxItem | None:
+        """Return the current FIFO head without consuming it."""
+        pending = await self.mailbox_item_repository.list_for_flush(
+            session,
+            session_id,
+            limit=1,
+        )
+        return pending[0] if pending else None
 
     @asynccontextmanager
     async def _discard_prepared_model_files_on_failure(
@@ -919,6 +936,8 @@ class MailboxService:
                 return _UserMessageMailboxProcessor(self)
             case MailboxItemKind.GOAL_CONTINUATION:
                 return _GoalContinuationMailboxProcessor(self)
+            case MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION:
+                return _ExternalChannelContinuationMailboxProcessor(self)
             case MailboxItemKind.AGENT_MESSAGE:
                 return _AgentMessageMailboxProcessor(self)
             case MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION:
@@ -1242,6 +1261,38 @@ class _GoalContinuationMailboxProcessor:
 
 
 @dataclasses.dataclass(frozen=True)
+class _ExternalChannelContinuationMailboxProcessor:
+    """Prepare an External Channel continuation event."""
+
+    service: MailboxService
+
+    async def process(
+        self,
+        context: MailboxPreparationContext,
+        buffer: MailboxItem,
+    ) -> MailboxPreparationOutcome:
+        user_message = self.service.buffer_to_user_message(
+            buffer,
+            external_id=f"{buffer.id}:external_channel_continuation",
+            fallback_profile=context.required_inference_profile,
+            prepared_inference_state=context.prepared_inference_state,
+            prepared_files=context.prepared_files,
+        )
+        return _preparation_outcome(
+            [
+                _PromotedMailboxItem(
+                    buffer=buffer,
+                    user_message=user_message,
+                    event_kind=EventKind.EXTERNAL_CHANNEL_CONTINUATION,
+                    payload=_user_message_payload_json(user_message),
+                    external_id=user_message.external_id,
+                )
+            ],
+            TurnEffect.ELIGIBLE,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
 class _AgentMessageMailboxProcessor:
     """Prepare one inter-agent mailbox message."""
 
@@ -1276,7 +1327,7 @@ class _AgentMessageMailboxProcessor:
 
 
 def build_external_channel_mailbox_payload(
-    items: Sequence[ExternalChannelInvocationProjectionItem],
+    items: Sequence[ExternalChannelMailboxProjectionItem],
 ) -> ExternalChannelInvocationMailboxPayload:
     """Materialize immutable External Channel message snapshots at admission."""
     if not items:
@@ -1308,9 +1359,11 @@ def build_external_channel_mailbox_payload(
             resource_label=_external_resource_label(item),
             resource_type=item.resource_type,
             binding_id=item.binding_id,
-            invocation_batch_id=item.batch_id,
-            external_message_id=item.message_id,
-            projection_root_id=f"external-channel:{item.binding_id}:{item.message_id}",
+            invocation_batch_id=item.invocation_id,
+            external_message_id=item.provider_message_key,
+            projection_root_id=(
+                f"external-channel:{item.binding_id}:{item.provider_message_key}"
+            ),
             provider_message_key=item.provider_message_key,
             provider_position=item.provider_position,
             principal_id=item.principal_id,
@@ -1319,13 +1372,14 @@ def build_external_channel_mailbox_payload(
             author_type=item.author_type,
             authorization=(
                 "authorized_invocation"
-                if item.message_id == item.trigger_message_id
+                if item.provider_message_key == item.trigger_provider_message_key
                 else "context_only"
             ),
-            body=item.revision_body,
+            body=item.body,
             attachment_metadata=add_external_channel_file_locators(
                 item.attachment_metadata or {},
                 binding_id=item.binding_id,
+                provider_message_key=item.provider_message_key,
             ),
             reference_mappings=_external_reference_mappings(item.reference_mappings),
             provider_created_at=item.provider_created_at,
@@ -1338,7 +1392,7 @@ def build_external_channel_mailbox_payload(
             MailboxPresentationItem(
                 item_key=f"external_channel:{item.sequence + sequence_offset}",
                 presentation_kind="external_channel_message",
-                content=item.revision_body or "",
+                content=item.body or "",
                 metadata={"external_channel_message": payload.model_dump(mode="json")},
             )
         )
@@ -1504,7 +1558,7 @@ def _turn_effect_for_promoted(
     return TurnEffect.NEUTRAL
 
 
-def _external_resource_label(item: ExternalChannelInvocationProjectionItem) -> str:
+def _external_resource_label(item: ExternalChannelMailboxProjectionItem) -> str:
     """Return the validated provider resource label for one projection item."""
     labels = item.resource_labels
     provider_resource_key = item.provider_resource_key
@@ -1559,6 +1613,7 @@ def _buffer_requires_inference(buffer: MailboxItem) -> bool:
         case (
             MailboxItemKind.USER_MESSAGE
             | MailboxItemKind.GOAL_CONTINUATION
+            | MailboxItemKind.EXTERNAL_CHANNEL_CONTINUATION
             | MailboxItemKind.AGENT_MESSAGE
             | MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION
         ):

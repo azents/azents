@@ -20,9 +20,15 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_provider_control/**
   - python/apps/azents/src/azents/services/runtime_provider_contract/**
   - python/apps/azents/src/azents/services/runtime_provider_public/**
-  - python/apps/azents/src/azents/services/runtime_provider_selection/**
-  - python/apps/azents/src/azents/services/runtime_execution_policy/**
-  - python/apps/azents/src/azents/repos/runtime_execution_policy/**
+  - python/apps/azents/src/azents/core/runtime_profile.py
+  - python/apps/azents/src/azents/rdb/models/runtime_profile.py
+  - python/apps/azents/src/azents/repos/runtime_profile/**
+  - python/apps/azents/src/azents/services/runtime_profile_admin/**
+  - python/apps/azents/src/azents/services/runtime_profile_compatibility/**
+  - python/apps/azents/src/azents/services/runtime_profile_reconciliation/**
+  - python/apps/azents/src/azents/services/runtime_profile_resolution/**
+  - python/apps/azents/src/azents/services/runtime_profile_workspace/**
+  - python/apps/azents/src/azents/services/runtime_recreation/**
   - python/apps/azents/src/azents/api/admin/runtime_provider/**
   - python/apps/azents/src/azents/api/admin/runtime_provider_enrollment/**
   - python/apps/azents/src/azents/api/public/runtime_provider/**
@@ -40,117 +46,101 @@ code_paths:
   - infra/charts/azents/values.schema.json
   - typescript/apps/azents-admin-web/src/app/runtime-providers/**
   - typescript/apps/azents-admin-web/src/features/runtime-providers/**
-  - typescript/apps/azents-admin-web/src/features/runtime-execution/**
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
-  - typescript/apps/azents-admin-web/src/trpc/routers/runtimeExecution.ts
-last_verified_at: 2026-07-28
-spec_version: 13
+  - typescript/apps/azents-web/src/features/runtime-profiles/**
+last_verified_at: 2026-07-31
+spec_version: 14
 ---
 
 # Runtime Provider
 
 ## Overview
 
-A Runtime Provider is a durable operational resource identified by an opaque logical Provider ID and an internal resource ID. Providers may be registered by an Admin or by a trusted bootstrap declaration; both origins reconcile into the same Provider aggregate and management APIs. Provider controller connections do not create or discover Provider resources.
+A Runtime Provider is a durable operational resource identified by an opaque logical Provider ID
+and an internal resource ID. Providers may be registered by an Admin or by a trusted bootstrap
+declaration; both origins reconcile into the same Provider aggregate and management APIs. Provider
+controller connections do not create or discover Provider resources.
 
 Provider authentication is a separate durable binding domain. A connection selects one explicit authentication method, verifies its evidence, resolves exactly one active binding, and derives the Provider identity from that binding. Registration payload fields are consistency checks only and cannot select a Provider or grant authority.
 
-Providers are optional. A Provider must be enabled, active, connected, Workspace-eligible, and capable of satisfying the requested Runtime before a new logical Runtime can bind to it. Decommissioning, force-retired, disabled, disconnected, and contract-unaccepted Providers remain durable for Admin inventory but are not offered for new public discovery or selection.
+Providers are optional. A Provider must be enabled, active, connected, Workspace-eligible, and
+currently advertise a valid capability contract that satisfies the exact selected infrastructure
+Profile before a new Runtime incarnation can be created. Decommissioning, force-retired, disabled,
+disconnected, invalid-capability, and incompatible Providers remain durable for Admin inventory but
+cannot satisfy new Runtime creation or recreation.
 
-## Policy and contract state
+## Policy and capability state
 
-The aggregate stores lifecycle state, enablement, scope, Workspace availability mode, declared capabilities, the currently advertised contract revision, the accepted contract revision, active configuration revision, and an incrementing Admin policy version. The current pointer is Provider-reported state; the accepted pointer is Admin authority. Equality means the live advertisement is accepted, while inequality means the exact current advertisement requires review. Accepted contract revisions are immutable history. Never-accepted proposals are transient approval targets: a newer or restored Provider advertisement deletes every other unapproved row so only the current proposal remains actionable. Configuration revisions are immutable candidates that require Provider validation and explicit activation; active configuration is tied to the accepted contract and is never returned with secret plaintext.
+The aggregate stores lifecycle state, enablement, scope, Workspace availability mode, declared
+capabilities, the currently advertised capability revision, active Provider-global operational
+configuration revision, and an incrementing Admin policy version. The exact current valid
+advertisement is immediately authoritative for compatibility and command readiness. Capability
+history is immutable audit evidence; there is no Admin acceptance pointer, acceptance route, or
+historical revision pinning authority.
 
 After workload authentication and identity matching, Provider registration submits the complete
-restricted capability contract. Runtime Control validates its implementation and protocol identity,
-canonicalizes the payload, and creates or finds the Provider-local digest revision before accepting
-the connection. A first or changed valid digest remains a candidate: the Provider may stay connected
-for observation, but it is not provisioning-ready until a System Admin explicitly accepts that exact
-revision. Admin routes expose contract history and expected-`admin_version` acceptance. Admin
-Provider detail presents the current advertisement before immutable contract history and offers
-acceptance only on that current candidate. List readiness is derived from the current and accepted
-pointers; accepted history by itself never produces a review-ready state.
-Only the Provider's current advertised contract may remain a candidate or be accepted. A newer
-proposal deletes older never-accepted proposals, and an older revision cannot later replace the
-current candidate. If the Provider advertises a digest that was accepted and later superseded,
-that current drift creates a new candidate revision even though the same digest exists in accepted
-history. Admin can therefore always review and restore the contract the connected Provider actually
-advertises.
+capability contract. Runtime Control validates implementation/protocol identity and the complete
+typed contract, canonicalizes it, and creates or reuses the Provider-local digest revision before
+registering the connection. A changed valid advertisement immediately changes current compatibility.
+An invalid advertisement is rejected and cannot retain command authority through older history.
+
+Provider-global operational configuration revisions remain a separate Provider-owned mechanism.
+They may configure the Provider process but cannot contain Workspace or Agent Runtime Profile
+authority. Configuration candidates require Provider validation and explicit Admin activation, and
+secret plaintext is never returned.
 
 Admin routes expose inventory and mutable policy/availability operations under `/runtime-provider/v1/providers`. Public discovery exposes only safe option metadata under `/runtime-provider/v1/workspaces/{handle}/providers`; credentials, authentication evidence, encrypted secrets, audit state, and mutable Runtime bindings are excluded.
 
 ## Runtime binding
 
-New logical Runtime creation uses one exact Provider candidate. Agent preference is evaluated before the Platform Runtime System Setting default, and no fallback occurs after an explicit candidate is ineligible. The resolver checks lifecycle, enablement, Platform scope, Workspace allow-list, connection readiness, accepted contract ownership/status, configuration validity, and requested capabilities.
+An Agent selection points to one Workspace Runtime Profile. That Profile names one exact Provider
+resource and one infrastructure Profile owned by that Provider. The resolver does not evaluate an
+Agent Provider preference, Platform default, environment default, or fallback Provider. It checks
+the exact Profile ownership, lifecycle, Provider lifecycle/enablement/scope/Workspace eligibility,
+live connection, current capability, infrastructure compatibility, and Workspace policy.
 
-The selected Provider resource ID, opaque logical ID, binding origin, contract/configuration revision identifiers, and policy digest are persisted on the logical Runtime. An immutable effective policy snapshot is attached before lifecycle dispatch. Later default, availability, contract, or configuration changes never move an existing logical Runtime.
+The logical Runtime stores routing identity plus the exact infrastructure Profile, Workspace
+Runtime Profile, desired configuration revision, and applied configuration revision. The immutable
+configuration revision stores the Provider capability revision and complete source identity.
+Provider/Profile changes create a new authoritative desired revision; they do not silently move the
+Agent to another Profile or Provider.
 
-A pre-contract Runtime with only its historical logical Provider ID is upgraded lazily at the same
-selection boundary. The service resolves that exact logical ID, validates the accepted contract,
-stores a `migration` resource binding, and attaches the initial immutable policy snapshot in one
-transaction. This compatibility path preserves the logical Runtime, desired generation, and
-Provider-owned workspace storage; it neither invokes reset nor selects a different Provider.
+When the exact selection is missing or unavailable, Public Runtime creation/start/restart/reset/
+recreate returns a bounded `409` conflict instead of persisting a substitute target. Stop and
+terminal delete remain available where required to reduce authority or finalize decommissioning.
 
-When no eligible Provider exists, Public Agent Runtime lifecycle endpoints return a stable `409` unavailable outcome instead of creating a partial Runtime or selecting a deployment/environment default.
+## Infrastructure Profile compatibility and customer authority
 
-## Runtime execution policy compatibility
+Each Provider owns typed infrastructure Profiles for its native substrate:
 
-Runtime execution policy is Provider-neutral typed product intent. Each Profile is a complete
-authority ceiling; Workspace may only tighten every Profile it allows, and Agent may select an
-allowed Profile and add only supported restrictive overrides. There is no separate installation-wide
-execution-policy layer. `system-standard` is the reserved, editable baseline Profile. Ordinary Profiles are active or
-retired and use expected-version mutation. Retiring an ordinary Profile preserves existing Agent
-intent but makes affected selection unavailable until a valid Profile is chosen. Profile writes are
-capability-gated, so unsupported authority cannot be introduced by profile creation or
-replacement.
+- Kubernetes Providers own Pod Profiles containing typed Runner resources, scheduling, Workspace
+  PVC, network preset, and optional DinD modules.
+- Docker Providers own Container Profiles containing typed resources and Docker-network placement.
 
-The reserved `system-standard` default does not grant Docker authority. A Profile may enable one
-complete Docker capability; build, run, Compose, SDK, Testcontainers, port-binding, and daemon API
-behavior are not separately gated.
+Infrastructure Profile writes are Provider-kind-specific, expected-version-fenced, and validated
+against the Provider's current capability contract. Missing or removed capability makes dependent
+Profiles unavailable; the server never drops an unsupported field or lowers to a weaker Profile.
 
-Raw Provider registration metadata is not product capability authority. The server-owned
-management/status gate is authoritative: the resolver marks an unsatisfied Profile unavailable and
-provisioning fails closed rather than dropping an unsupported module or selecting a weaker Runtime.
-The immutable contract may include a typed `execution_policy` section declaring exact module
-versions, Docker storage modes, and optional resource maxima. Runtime resolution uses only the
-bound Provider's current accepted contract;
-missing, candidate, rejected, malformed, or superseded declarations cannot grant authority. A new
-target snapshot records and references that accepted contract revision even when the previous
-snapshot used an older revision. A stale non-null Provider configuration remains unavailable until
-it is validated against the newly accepted contract.
+A Workspace Runtime Profile is the complete customer choice. It selects one infrastructure Profile
+and may add only the Workspace policy supported by that contract. Kubernetes network policy is
+restrictive-only and composes with Provider and infrastructure hard boundaries. Required DNS and
+Runtime Control communication remains Platform protected. Docker rejects Workspace network policy.
 
-All execution-policy modules use version `1` until the contract is formally released. The current
-resource shape replaces the earlier development shape in place; policy rows and snapshots are
-migrated to v1, and Runtime Control contains no v2 parser or fallback. The immutable Provider
-command envelope transports the effective policy as canonical JSON text, not protobuf `Struct`.
-Snapshot persistence uses the same canonical JSON text and does not retain the removed JSONB field.
+The complete resolved configuration travels through the canonical Runtime configuration envelope.
+The Provider reports exact configuration evidence for the current desired generation. Applied state
+is promoted only after the Provider acknowledgement and a matching ordinary Runner state report.
+There is no policy snapshot, separate Apply action, dedicated Runner configuration-update
+operation, or legacy parser fallback.
 
-Agent intent is independent from a physical Runtime. Saving Agent Profile/override intent does not
-advance Runtime desired generation. Explicit Apply attaches an immutable target snapshot and
-generation. Profile or Workspace tightening automatically creates a narrower target without a
-second Agent Apply, while authority expansion remains pending until explicit Apply; convergence
-preserves Agent Workspace storage and does not invoke reset or terminal delete. Mode changes and their
-dependent fields are projected atomically: Docker storage mode travels with Docker storage capacity,
-as one atomic module. Selective Kubernetes resource tightening also normalizes CPU and memory
-requests so neither can exceed its resulting limit. Audit and public projections contain only bounded policy metadata, reason codes, source
-layers, digests, and generations.
+NetworkPolicy-only Kubernetes changes may be adopted in place. PodSpec, PVC, and Docker changes
+require explicit durable recreation. Provider-, infrastructure-Profile-, and Workspace-Profile-
+scoped recreation operations snapshot exact target IDs and versions, use bounded concurrency and
+retries, skip stale or superseded targets, and preserve Workspace storage. PVC expansion may apply
+to the current claim; shrink waits for an explicit destructive reset or terminal delete.
 
-The installation management gate exposes `docker/v1`, `runtime.resources/v1`, and `none` or
-`ephemeral` Docker storage. `runtime.resources/v1` separates optional Kubernetes CPU and memory
-requests from optional limits. Ephemeral storage is one fixed allocation applied as the same
-request and limit. Temporary Docker image/container data uses a separate bounded engine-only
-`emptyDir`. Persistent Workspace storage configures the Runtime PVC request: expansion is applied
-in place, but a smaller configured value is retained until an explicit operation deletes and
-recreates the PVC. PID, nested-container count, and Profile network fields are absent because a
-direct privileged Docker socket cannot reliably enforce them.
-
-The Kubernetes Provider applies a generation-fenced NetworkPolicy to the complete Runtime Pod. It
-always permits required DNS and Runtime Control traffic and IPv4/IPv6 outbound traffic subject to
-the Helm deployment hard cap. Deployment-owned denied CIDRs, explicit CIDR exceptions, and
-selector/port egress rules remain the installation boundary and are not Profile settings.
-Persistent Docker data remains unavailable because the Provider does not advertise it.
-Admin/Public surfaces must not expose Provider credentials, socket paths, raw manifests, Kubernetes
-resource names, or generic privileged controls.
+Admin/Public surfaces expose typed values, current compatibility, impact, desired/applied status,
+and bounded recreation progress. They do not expose Provider credentials, socket paths, raw
+manifests, Kubernetes resource names, or generic privileged controls.
 
 ## Authentication bindings
 
@@ -189,6 +179,10 @@ Authentication rollout does not render, own, select, delete, rename, or recreate
 
 ## Version history
 
+- **14 (2026-07-31):** Replaced accepted-contract and hierarchical execution-policy authority with
+  the authenticated current valid capability, Provider-owned typed infrastructure Profiles,
+  Workspace-owned exact Runtime Profiles, desired/applied configuration evidence, and scoped
+  recreation.
 - **13 (2026-07-28):** Removed the Container Policy Gateway and unenforceable granular Docker, network, PID, and nested-container controls; Docker is one complete direct-DIND capability bounded by Kubernetes resources, storage, and the deployment NetworkPolicy hard cap.
 - **12 (2026-07-27):** Persisted the exact current Provider advertisement separately from accepted history, made Admin readiness and acceptance follow that pointer, and made dependent storage/network policy projection atomic.
 - **11 (2026-07-27):** Made the currently advertised Provider contract the sole approval target, deleted stale never-accepted proposals, and allowed a previously accepted digest to be proposed again after drift.

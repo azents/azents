@@ -14,7 +14,11 @@ from azents.core.agent import (
     AgentModelSelectionInput,
     SelectableModelOption,
 )
-from azents.core.enums import AgentLifecycleStatus, AgentType
+from azents.core.enums import (
+    AgentLifecycleStatus,
+    AgentType,
+    ExternalChannelResponseMode,
+)
 from azents.repos.agent.data import Agent
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -49,9 +53,11 @@ def _make_agent(agent_id: str = "agent-1") -> Agent:
         model_parameters=None,
         system_prompt=None,
         enabled=True,
+        external_channel_default_response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
         lifecycle_status=AgentLifecycleStatus.ACTIVE,
         type=AgentType.PUBLIC,
-        runtime_provider_id=None,
+        runtime_profile_id=None,
+        runtime_profile_selection_version=1,
         shell_enabled=True,
         memory_enabled=True,
         tool_search_enabled=False,
@@ -72,6 +78,9 @@ def _make_service() -> AgentService:
     workspace_user_repository = AsyncMock()
     agent_decommission_repository = AsyncMock()
     archived_session_retention_repository = AsyncMock()
+    runtime_profile_repository = AsyncMock()
+    runtime_profile_service = AsyncMock()
+    runtime_profile_service.resolve_agent_create_profile.return_value = None
     upload_service = AsyncMock()
     avatar_handler = AsyncMock()
     s3_service = AsyncMock()
@@ -88,6 +97,8 @@ def _make_service() -> AgentService:
         workspace_user_repository=workspace_user_repository,
         agent_decommission_repository=agent_decommission_repository,
         archived_session_retention_repository=archived_session_retention_repository,
+        runtime_profile_repository=runtime_profile_repository,
+        runtime_profile_service=runtime_profile_service,
         upload_service=upload_service,
         avatar_handler=avatar_handler,
         s3_service=s3_service,
@@ -156,7 +167,7 @@ class TestAgentServiceModelSelection:
         assert isinstance(result, Success)
         settings_repo.set_default_model_if_empty.assert_awaited_once()
         repository_create = agent_repo.create.await_args.args[1]
-        assert repository_create.runtime_provider_id is None
+        assert repository_create.runtime_profile_id is None
         assert repository_create.tool_search_enabled is True
 
     async def test_create_preserves_explicit_tool_search_opt_out(self) -> None:

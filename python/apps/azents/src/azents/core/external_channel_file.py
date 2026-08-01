@@ -2,6 +2,7 @@
 
 import copy
 import enum
+from collections.abc import Mapping
 from dataclasses import dataclass
 from urllib.parse import quote, unquote
 
@@ -117,12 +118,18 @@ class ExternalChannelFileLocator:
     provider: ExternalChannelProvider
     binding_id: str
     provider_file_id: str
+    provider_channel_id: str | None = None
+    provider_message_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.binding_id.strip():
             raise ValueError("External Channel file locator binding ID is blank.")
         if not self.provider_file_id.strip():
             raise ValueError("External Channel file locator provider file ID is blank.")
+        if self.provider is ExternalChannelProvider.DISCORD and (
+            not self.provider_channel_id or not self.provider_message_id
+        ):
+            raise ValueError("Discord file locator source is incomplete.")
 
     def encode(self) -> str:
         """Encode the locator as a versioned opaque Agent-visible value."""
@@ -131,6 +138,8 @@ class ExternalChannelFileLocator:
                 EXTERNAL_CHANNEL_FILE_LOCATOR_PREFIX,
                 self.provider.value,
                 quote(self.binding_id, safe=""),
+                quote(self.provider_channel_id or "", safe=""),
+                quote(self.provider_message_id or "", safe=""),
                 quote(self.provider_file_id, safe=""),
             )
         )
@@ -138,9 +147,9 @@ class ExternalChannelFileLocator:
     @classmethod
     def parse(cls, value: str) -> "ExternalChannelFileLocator":
         """Parse one versioned locator and reject unknown or malformed values."""
-        parts = value.split(":", 4)
+        parts = value.split(":", 6)
         valid_prefix = (
-            len(parts) == 5
+            len(parts) == 7
             and ":".join(parts[:2]) == EXTERNAL_CHANNEL_FILE_LOCATOR_PREFIX
         )
         if not valid_prefix:
@@ -152,16 +161,20 @@ class ExternalChannelFileLocator:
                 "External Channel file locator provider is unsupported."
             ) from error
         binding_id = unquote(parts[3])
-        provider_file_id = unquote(parts[4])
+        provider_channel_id = unquote(parts[4]) or None
+        provider_message_id = unquote(parts[5]) or None
+        provider_file_id = unquote(parts[6])
         return cls(
             provider=provider,
             binding_id=binding_id,
             provider_file_id=provider_file_id,
+            provider_channel_id=provider_channel_id,
+            provider_message_id=provider_message_id,
         )
 
 
 def external_channel_file_metadata_items(
-    attachment_metadata: dict[str, object],
+    attachment_metadata: Mapping[str, object],
 ) -> tuple[dict[str, object], ...]:
     """Return only object-shaped file entries from bounded attachment metadata."""
     files = attachment_metadata.get("files")
@@ -174,6 +187,7 @@ def add_external_channel_file_locators(
     attachment_metadata: dict[str, object],
     *,
     binding_id: str,
+    provider_message_key: str | None = None,
 ) -> dict[str, object]:
     """Return a detached metadata copy with binding-scoped Agent-visible locators."""
     enriched = copy.deepcopy(attachment_metadata)
@@ -191,9 +205,28 @@ def add_external_channel_file_locators(
             provider = ExternalChannelProvider(provider_value)
         except ValueError:
             continue
+        provider_channel_id = None
+        provider_message_id = None
+        if provider is ExternalChannelProvider.DISCORD:
+            provider_channel_id = item.get("source_channel_id")
+            if provider_message_key is None:
+                continue
+            provider_message_key_parts = provider_message_key.split(":")
+            if (
+                len(provider_message_key_parts) != 3
+                or provider_message_key_parts[0] != provider.value
+                or not provider_message_key_parts[1]
+                or not provider_message_key_parts[2]
+            ):
+                continue
+            provider_message_id = provider_message_key_parts[2]
+            if not isinstance(provider_channel_id, str) or not provider_message_id:
+                continue
         item["file"] = ExternalChannelFileLocator(
             provider=provider,
             binding_id=binding_id,
             provider_file_id=provider_file_id,
+            provider_channel_id=provider_channel_id,
+            provider_message_id=provider_message_id,
         ).encode()
     return enriched

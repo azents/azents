@@ -8,6 +8,7 @@ touches_domains: [external-channel, agent, conversation, toolkit]
 code_paths:
   - python/apps/azents/src/azents/core/external_channel_progress.py
   - python/apps/azents/src/azents/core/external_channel_file.py
+  - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/slack_external_channel_progress.py
   - python/apps/azents/src/azents/engine/tools/external_channel.py
   - python/apps/azents/src/azents/engine/tools/deps.py
@@ -16,7 +17,7 @@ code_paths:
   - python/apps/azents/src/azents/runtime/transfer/runtime_to_provider.py
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/services/external_channel/file_transfer.py
-  - python/apps/azents/src/azents/services/external_channel/ingestion_store.py
+  - python/apps/azents/src/azents/services/external_channel/mailbox_ingestion_store.py
   - python/apps/azents/src/azents/services/external_channel/presentation.py
   - python/apps/azents/src/azents/services/external_channel/provider_control.py
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
@@ -30,8 +31,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_data.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-07-30
-spec_version: 23
+last_verified_at: 2026-08-01
+spec_version: 28
 ---
 
 # External Channel Delivery and Channel Work
@@ -40,7 +41,7 @@ spec_version: 23
 
 Normal model output is never relayed to a provider. The only model-facing publication
 path is the unprefixed `channel_action` tool. It is available only when the root
-AgentSession has at least one active External Channel binding. When Tool Search is
+AgentSession has at least one connected External Channel binding. When Tool Search is
 enabled, `channel_action` and `download_external_file` are deferred discovery targets;
 when disabled, the complete catalog exposes them directly.
 
@@ -112,6 +113,10 @@ Provider controls created by synchronous ingestion or lifecycle operations use t
 same delivery fence. The Agent Worker periodically recovers stale `attempting`
 controls to `unknown`, lists bounded pending control IDs, and delegates each attempt to
 the shared action service. It never reconstructs provider content from callbacks.
+Initial joined-presence and progress controls are independent post-acceptance work.
+`failed`, `unknown`, `not_attempted`, or cancelled delivery remains durable provider
+evidence but does not gate canonical mailbox promotion, Session wake, or AgentRun
+creation.
 After provider I/O, final settlement opens a new transaction, locks the delivery and
 current connection/binding/work authority, and verifies that the same claimed attempt
 still owns settlement before recording the provider result. A stale owner or changed
@@ -123,6 +128,23 @@ converges duplicate creates. Credential, permission, missing-message, rate-limit
 confirmed provider rejection outcomes are `failed`; network, timeout, invalid success
 payload, and server ambiguity are `unknown`. An unknown Discord write is never blindly
 replayed.
+
+## Provider File Download
+
+A model-visible file key uses the single direct-address contract:
+
+```text
+external-file:v1:<provider>:<binding>:<channel>:<message>:<file>
+```
+
+Slack leaves channel and message empty and resolves the provider file ID through the
+configured App. Discord requires channel, message, and attachment identity and calls the
+provider directly with those coordinates. The download path validates current Agent,
+Session, connected binding, route, configured credentials, capability, and the
+displayed declared size before streaming. Transient Gateway/Socket health is not an
+outbound authorization input. Provider credentials and permissions are authoritative. It
+does not query Session event history to recover provider coordinates and retains no
+fallback for the replaced shorter key shape.
 
 ## File-bearing Reply Delivery
 
@@ -187,6 +209,9 @@ manifests and delivery evidence, never file bytes.
 
 For a Discord root-message resource, the first route-resolved outbound intent ensures
 one provider thread and records its returned channel ID on the resource under a lock.
+New thread creation uses the current routed Agent name after trimming and provider
+length bounding, with the safe product fallback only for a blank name. Existing
+threads are reused without rename, and later Agent renames do not rename them.
 New provider threads explicitly use Discord's minimum supported 60-minute automatic
 archive duration instead of inheriting the parent channel default.
 All later newly planned approval, Session navigation, reply, file, progress, recovery,
@@ -198,9 +223,14 @@ delivery outcome and never causes an unsafe replay.
 
 - Conversational replies use `chat.postMessage` with Slack `markdown_text` in the bound thread. The Tool schema and the provider delivery boundary enforce Slack's current 12,000-character Markdown limit before a mutation request.
 - Releasing the first eligible invocation while a binding has no unanswered work creates Channel Work and one Block Kit Activity Tracker intent before Session wake-up. Creation does not depend on Todo state or a `channel_action` call.
-- Initial binding acceptance separately creates one button-only `Open Azents session`
-  control message. Later invocations on the binding do not repeat it, and Activity
-  Tracker desired state never contains the Session URL.
+- Initial binding acceptance separately creates one Session presence control and the
+  initial Activity Tracker in the same durable transaction as the triggering mailbox
+  input. The presence control replaces the former button-only Session link. Slack uses
+  Block Kit and Discord uses an Embed; both state that the current Agent joined the
+  conversation and place one `View session` URL button below the message. The Worker
+  attempts those controls independently after commit. Retries reuse the same mailbox
+  and delivery attempts. Later invocations on the binding do not repeat the provider
+  mutation, and Activity Tracker desired state never contains the Session URL.
 - The initial Tracker states that the Agent is checking the message with one
   `task_card` carrying the `in_progress` state. Once Channel Work exists, one
   `plan` block carries the Agent-authored title and complete ordered task list.
@@ -217,9 +247,9 @@ delivery outcome and never causes an unsafe replay.
   not-attempted replies leave deletion `not_attempted`.
 - A later work cycle creates a new Tracker rather than reusing the deleted cycle's
   provider identity.
-- Discord creates one Session-link control and an initial compact Channel Work Embed
-  containing `◉ Agent is checking your message` through the same durable activation
-  release. Later complete snapshots replace that retained message's content with an
+- Discord creates one joined-presence control and an initial compact Channel Work Embed
+  containing `◉ Agent is checking your message` from the same accepted binding
+  transaction. Later complete snapshots replace that retained message's content with an
   empty string and its Embed with the current bounded title, status summary, ordered
   checklist, prioritized context, and labeled sources. Update, delete, replacement,
   recovery, and final-reply cleanup use the same durable Tracker identity and gating.
@@ -287,14 +317,39 @@ Channel Work state.
 
 ## Continuation
 
-A successfully completed run with unfinished Channel Work remains eligible for idle continuation. Continuation is binding-aware and includes the current unfinished work snapshot. Sending an intermediate reply does not finish active work. Completing/clearing tasks, or explicitly finishing with no follow-up work, stops continuation for that binding. Other active bindings can still require continuation in the same Session.
+A successfully completed run with unfinished Channel Work remains eligible for idle continuation. Continuation is binding-aware and includes the current unfinished work snapshot. Sending an intermediate reply does not finish active work. Completing/clearing tasks, or explicitly finishing with no follow-up work, stops continuation for that binding. Other connected bindings can still require continuation in the same Session.
 
 ## Cleanup Delivery
 
-Binding disconnect, connection disconnect, Session archive, and decommission may commit Tracker-delete intents. Lifecycle transactions never call Slack directly. The post-commit consumer attempts each current cleanup intent once; unresolved attempts remain visible as failed or unknown without rolling back the terminal lifecycle transition.
+Every binding termination commits one leave-presence control in addition to any
+required Tracker-delete intents. Slack renders `Agent name left this conversation.`
+in Block Kit and Discord renders the same statement in an Embed; both retain the
+`View session` button. Manual binding disconnect, route or connection termination,
+Session archive, and Agent decommission use this common delivery identity. Lifecycle
+transactions never call a provider directly. When terminal connection cleanup purges
+provider credentials, the service captures the delivery target in memory before the
+purge. Its post-commit claim accepts only the same pending binding-disconnect
+presence or Tracker-delete attempt after revalidating the durable connection, route,
+resource, binding, Session, and terminal state. The captured credential is never
+persisted in the delivery ledger. Other cleanup paths continue to resolve current
+credentials normally. The post-commit consumer attempts each current disconnect
+intent once; unresolved attempts remain visible as failed or unknown without rolling
+back the terminal lifecycle transition.
 
 ## Changelog
 
+- **2026-08-01** (spec_version 28) — Replaced the button-only Session link with
+  joined-presence controls and added one leave-presence control to every binding
+  termination path, including post-purge delivery through an in-memory captured
+  target that retains the same durable one-attempt fence.
+- **2026-08-01** (spec_version 27) — Decoupled initial Session-link and progress
+  provider-control outcomes from canonical mailbox promotion, Session wake, and
+  AgentRun creation.
+- **2026-07-31** (spec_version 25) — Required durable Session-link and initial
+  progress intents, removed transient ingress health from outbound REST authority,
+  and derived new Discord thread titles from the routed Agent name.
+- **2026-07-31** (spec_version 24) — Replaced the file key in place with direct
+  provider coordinates and removed Session-event source lookup and legacy key fallback.
 - **2026-07-30** (spec_version 22) — Added Worker-owned bounded provider-control
   recovery and clarified the claim, provider-I/O, and final-settlement split with
   same-attempt authority revalidation.

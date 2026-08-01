@@ -5,10 +5,6 @@ domain: workspace
 owner: "@Hardtack"
 code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/995d915ed6d6_add_agent_automatic_project_policy.py
-  - python/apps/azents/src/azents/workspace/**
-  - python/apps/azents/src/azents/workspace_user/**
-  - python/apps/azents/src/azents/workspace_invitation/**
-  - python/apps/azents/src/azents/workspace_join_request/**
   - python/apps/azents/src/azents/services/workspace/**
   - python/apps/azents/src/azents/services/workspace_user/**
   - python/apps/azents/src/azents/services/workspace_invitation/**
@@ -32,6 +28,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_project_catalog.py
   - python/apps/azents/src/azents/rdb/models/session_git_worktree.py
   - python/apps/azents/src/azents/rdb/models/action_execution.py
+  - python/apps/azents/src/azents/rdb/models/runtime_profile.py
+  - python/apps/azents/src/azents/rdb/models/workspace.py
   - python/apps/azents/src/azents/rdb/models/git_worktree_cleanup_claim.py
   - python/apps/azents/src/azents/services/agent_project_catalog/**
   - python/apps/azents/src/azents/services/agent_automatic_project/**
@@ -39,10 +37,13 @@ code_paths:
   - python/apps/azents/src/azents/services/runtime_directory_validation.py
   - python/apps/azents/src/azents/services/session_git_worktree/**
   - python/apps/azents/src/azents/services/archived_session_purge.py
+  - python/apps/azents/src/azents/services/runtime_profile_workspace/**
+  - python/apps/azents/src/azents/services/runtime_profile_reconciliation/**
+  - python/apps/azents/src/azents/services/runtime_recreation/**
   - python/apps/azents/src/azents/repos/session_git_worktree/**
   - python/apps/azents/src/azents/repos/action_execution/**
   - python/apps/azents/src/azents/api/public/chat/v1/**
-  - python/apps/azents/src/azents/api/internal/agent_home/v1/projects.py
+  - python/apps/azents/src/azents/api/public/runtime_profile/**
   - typescript/apps/azents-web/src/features/chat/workspace/**
   - typescript/apps/azents-web/src/features/workspace/**
   - typescript/apps/azents-web/src/features/external-channel-workspace/**
@@ -53,6 +54,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
   - typescript/apps/azents-web/src/features/workspace-settings/**
   - typescript/apps/azents-web/src/features/llm-settings/**
+  - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/**
   - typescript/apps/azents-web/src/app/(app)/join/[handle]/page.tsx
   - python/apps/azents/src/azents/repos/agent_runtime/**
@@ -75,13 +77,19 @@ api_routes:
   - /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview
   - /chat/v1/agents/{agent_id}/git-refs
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/automatic-session-projects
+  - /runtime-profile/v1/workspaces/{handle}/infrastructure-profiles
+  - /runtime-profile/v1/workspaces/{handle}/profiles
+  - /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id}
+  - /runtime-profile/v1/workspaces/{handle}/default
+  - /runtime-profile/v1/workspaces/{handle}/profiles/{profile_id}/recreation-operations
+  - /runtime-profile/v1/workspaces/{handle}/recreation-operations/{operation_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-08-01
-spec_version: 53
+spec_version: 54
 ---
 
 # Workspace & Membership
@@ -221,18 +229,40 @@ File list/read/write/upload/download APIs work only when Runtime is `RUNNING`, P
 
 Agent Workspace path preview first uses Runner `file.stat` to classify the path. Text-preview candidates use bounded `file.read_text` with UTF-8 strict decoding; binary preview candidates return no text body and do not use Control file chunks. Complete Workspace downloads authorize the requester before Runtime access, stat the regular file, and consume one verified Runtime transfer object in the API response adapter. Neither surface reconstructs a complete file body from Runner Control Base64 events. Directory paths return `DIRECTORY` listing data for tree navigation; azents-web opens directories in the file tree instead of rendering a separate directory preview page.
 
-Lifecycle API is desired-state declaration. `start`/`stop`/`restart`/`recover`/reconcile do not delete Agent Workspace data. Only `reset` may delete Agent Workspace.
+Lifecycle API is desired-state declaration. `start`/`stop`/`restart`/`recover`/reconcile and ordinary
+recreation do not delete Agent Workspace data. Only explicit `reset` and terminal delete may delete
+Agent Workspace data.
 
-### Runtime execution policy
+### Workspace Runtime Profiles
 
-Workspace controls the Profiles its Agents may use and may add only restrictive typed limits to
-every allowed Profile ceiling. Expected-version writes prevent stale replacement. A Workspace tightening
-automatically attaches a narrower Runtime target without an Agent Apply; it preserves Agent
-Workspace data and may restart compute but never resets or terminal-deletes it. Workspace and Agent
-views expose only server-computed availability, governing layer, reductions, audit metadata, and
-bounded action/status. Workspace policy is writable only by the applicable Workspace authority;
-Agent intent/Apply separately permits a Workspace owner or Agent administrator. Backend
-authorization is final.
+A Workspace owns a catalog of complete Runtime choices. Each Workspace Runtime Profile binds one
+exact durable Runtime Provider resource to one Provider-owned infrastructure Profile and adds only
+Workspace-owned policy that the selected infrastructure contract permits. The infrastructure
+Profile must belong to that exact Provider and match its Provider kind, and the Workspace Runtime
+Profile cannot be read or mutated through another Workspace.
+
+The current Workspace policy surface is restrictive-only network policy for Kubernetes Profiles.
+It may preserve or narrow the Provider/infrastructure boundary and required Platform communication,
+but cannot expand either. Docker Profiles reject Workspace network policy rather than claiming
+false parity. Missing optional fields mean no Workspace-added restriction; they do not inherit
+hidden Provider or global customer policy.
+
+Profile create and complete replacement require `RUNTIME_PROFILES_WRITE`; reads require
+`RUNTIME_PROFILES_READ`. Replacement uses an expected Profile version. Lifecycle can make a Profile
+unavailable without deleting it, its Agent selections, or its Runtime references. Availability is
+computed from the exact Provider lifecycle/connection/current capability, infrastructure Profile
+compatibility, and Workspace Profile state. No arbitrary substitute is selected.
+
+Each Workspace also stores a nullable default Runtime Profile and an optimistic default version.
+The default is copied once when a new Agent omits an explicit selection. Changing or clearing the
+default does not modify existing Agents.
+
+Parent Profile changes enqueue authoritative desired-configuration reconciliation for affected
+Agents. NetworkPolicy-only Kubernetes changes may be adopted in place after exact evidence.
+PodSpec, PVC, and Docker changes remain `waiting_for_recreation` until an authorized actor creates a
+durable scoped recreation operation. Recreation snapshots target IDs and versions, uses bounded
+concurrency, reports progress and bounded failures, skips stale/superseded targets, and preserves
+Agent Workspace data. No Agent Apply action exists.
 
 ### Agent Workspace Projects
 
@@ -301,22 +331,27 @@ Membership UI has these routes:
 ### Workspace Settings UI
 
 azents-web `/w/[handle]/settings` is the Workspace settings overview inside
-`WorkspaceShell`. The overview identifies the current Workspace by name and handle and links to two
+`WorkspaceShell`. The overview identifies the current Workspace by name and handle and links to three
 focused settings areas:
 
 - `/w/[handle]/settings/models` — Workspace selectable model options and default main/lightweight
   labels;
 - `/w/[handle]/settings/llm-integrations` — LLM provider credentials, connection state, enablement,
-  subscription usage, and integration lifecycle controls.
+  subscription usage, and integration lifecycle controls;
+- `/w/[handle]/settings/runtime-profiles` — exact Runtime Provider and infrastructure choices,
+  Workspace defaults for new Agents, lifecycle controls, and scoped Runtime recreation.
 
-Both detail pages provide an explicit return to the settings overview. Unknown settings sections
-return 404. Members, Toolkits, External channels, Runtime execution, and My Profile remain
-independent Workspace sidebar destinations and are not duplicated in the settings overview.
+All detail pages use the Workspace identity header and provide an explicit return to the settings
+overview. The dynamic settings route accepts only `models` and `llm-integrations`; unknown settings
+sections return 404, while Runtime Profiles retains its dedicated static route. Members, Toolkits,
+External channels, and My Profile remain independent Workspace sidebar destinations and are not
+duplicated in the settings overview.
 
-Every Workspace member may read both settings areas. Existing Owner-only management behavior remains:
-only the Owner receives model save and integration create/edit/delete/enable controls, and backend
-authorization is final. The two detail pages use independent query and mutation state, while tRPC
-cache remains the shared server-state authority across navigation.
+Every Workspace member may read all three settings areas. Existing Owner-only management behavior
+remains for model and LLM integration settings: only the Owner receives model save and integration
+create/edit/delete/enable controls. Runtime Profile management remains available to Owners and
+Managers. Backend authorization is final for every mutation. Each detail page owns independent query
+and mutation state, while tRPC cache remains the shared server-state authority across navigation.
 
 ### Membership Lifecycle
 
@@ -578,9 +613,12 @@ stateDiagram-v2
 
 ## Changelog
 
-- **2026-08-01 (spec_version=53)** — Replaced the combined Workspace LLM settings page with a
-  Workspace-identified settings overview and focused model and LLM integration routes, preserving
-  member visibility, Owner-only management, and existing backend settings authority.
+- **2026-08-01 (spec_version=54)** — Replaced the combined Workspace LLM settings page with a
+  Workspace-identified settings overview and focused model, LLM integration, and Runtime Profile
+  routes, preserving each area's existing read and management authorization.
+- **2026-07-31 (spec_version=53)** — Replaced global Profile allowance and Workspace restriction
+  hierarchy with Workspace-owned exact Runtime Profiles, a creation-time default, restrictive-only
+  network policy, authoritative reconciliation, and explicit scoped recreation.
 - **2026-07-27 (spec_version=51)** — Made allowed Profiles the complete Runtime execution ceilings and removed the separate Platform envelope.
 - **2026-07-26 (spec_version=50)** — Added Workspace Profile allowance, restrictive Runtime execution policy, and reset-free automatic tightening convergence.
 - **2026-07-26 (spec_version=49)** — Added the manual orphan Git-worktree cleanup TurnAction,

@@ -1,0 +1,230 @@
+import { rem } from "@mantine/core";
+import { expect, within } from "storybook/test";
+import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
+import { RuntimeProfiles } from "./RuntimeProfiles";
+import type { RuntimeProfilesContainerOutput } from "../containers/useRuntimeProfilesContainer";
+import type {
+  RuntimeRecreationOperationResponse,
+  SelectableInfrastructureProfileResponse,
+  WorkspaceRuntimeProfileResponse,
+} from "@azents/public-client";
+import type { Meta, StoryObj } from "@storybook/nextjs-vite";
+
+const noop = (): void => {};
+
+const infrastructureProfile: SelectableInfrastructureProfileResponse = {
+  id: "infrastructure-profile-docker-standard",
+  provider_id: "runtime-provider-docker",
+  provider_display_name: "Docker production",
+  provider_kind: "docker",
+  profile_kind: "docker_container",
+  display_name: "Standard container",
+  description: "Balanced resources for general agent workloads.",
+  spec: {
+    profile_kind: "docker_container",
+    contract_family: "docker.container-profile",
+    schema_version: 1,
+    runner_resources: {
+      cpu_reservation_millicores: 500,
+      cpu_limit_millicores: 2000,
+      memory_reservation_bytes: 1_073_741_824,
+      memory_limit_bytes: 4_294_967_296,
+    },
+    network_name: "azents-runtimes",
+  },
+  required_capabilities: ["runtime.docker.container-profile.v1"],
+  version: 3,
+  digest: "sha256:infrastructure-profile-digest",
+  capability_revision_id: "capability-revision-9",
+};
+
+const availableProfile: WorkspaceRuntimeProfileResponse = {
+  id: "workspace-runtime-profile-standard",
+  provider_id: infrastructureProfile.provider_id,
+  infrastructure_profile_id: infrastructureProfile.id,
+  display_name: "Standard runtime",
+  description: "Default runtime for general workspace agents.",
+  lifecycle: "active",
+  policy: {
+    schema_version: 1,
+    network_restriction: {
+      allowed_cidrs: ["10.0.0.0/8"],
+      denied_cidrs: [],
+    },
+  },
+  version: 7,
+  digest: "sha256:workspace-runtime-profile-digest",
+  available: true,
+  availability_reason_code: null,
+  capability_revision_id: infrastructureProfile.capability_revision_id,
+  infrastructure_profile_version: infrastructureProfile.version,
+  compatible: true,
+  missing_capabilities: [],
+  incompatible_constraints: [],
+  created_at: "2026-07-31T06:00:00Z",
+  updated_at: "2026-07-31T06:00:00Z",
+};
+
+const unavailableProfile: WorkspaceRuntimeProfileResponse = {
+  ...availableProfile,
+  id: "workspace-runtime-profile-gpu",
+  display_name: "GPU runtime",
+  description: "Preserved selection whose provider is currently unavailable.",
+  version: 4,
+  available: false,
+  availability_reason_code: "provider_unavailable",
+  capability_revision_id: null,
+  compatible: false,
+  missing_capabilities: ["runtime.gpu"],
+};
+
+const recreation: RuntimeRecreationOperationResponse = {
+  id: "runtime-recreation-operation",
+  target_kind: "workspace_runtime_profile",
+  target_id: availableProfile.id,
+  target_version: availableProfile.version.toString(),
+  status: "running",
+  concurrency_limit: 4,
+  total_count: 5,
+  pending_count: 1,
+  running_count: 1,
+  succeeded_count: 2,
+  skipped_count: 0,
+  failed_count: 1,
+  created_at: "2026-07-31T06:05:00Z",
+  started_at: "2026-07-31T06:05:01Z",
+  completed_at: null,
+  items: [
+    {
+      runtime_id: "runtime-failed",
+      status: "failed",
+      attempt: 1,
+      dispatched_generation: 24,
+      failure_code: "provider_rejected",
+      failure_message: "The provider rejected the replacement request.",
+      updated_at: "2026-07-31T06:06:00Z",
+    },
+  ],
+};
+
+const baseArgs: RuntimeProfilesContainerOutput = {
+  handle: "acme",
+  state: {
+    type: "READY",
+    profiles: [availableProfile, unavailableProfile],
+    infrastructureProfiles: [infrastructureProfile],
+    defaultProfile: {
+      runtime_profile_id: availableProfile.id,
+      version: 5,
+      profile: availableProfile,
+    },
+  },
+  editorState: { type: "CLOSED" },
+  mutationState: { type: "IDLE", error: null },
+  operationState: { type: "IDLE" },
+  canManage: true,
+  onOpenCreate: noop,
+  onOpenEdit: noop,
+  onCloseEditor: noop,
+  onSubmit: noop,
+  onSetDefault: noop,
+  onRecreate: noop,
+};
+
+const meta = {
+  component: RuntimeProfiles,
+  decorators: [
+    (Story) => (
+      <StorybookCanvas maxWidth={rem(1080)}>
+        <Story />
+      </StorybookCanvas>
+    ),
+  ],
+  args: baseArgs,
+} satisfies Meta<typeof RuntimeProfiles>;
+
+export default meta;
+
+type Story = StoryObj<typeof meta>;
+
+export const Populated = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Runtime profiles")).toBeVisible();
+    await expect(canvas.getByText("Standard runtime")).toBeVisible();
+    await expect(canvas.getByText("GPU runtime")).toBeVisible();
+    await expect(canvas.getByText("Default")).toBeVisible();
+  },
+} satisfies Story;
+
+export const Empty = {
+  args: {
+    state: {
+      type: "READY",
+      profiles: [],
+      infrastructureProfiles: [infrastructureProfile],
+      defaultProfile: {
+        runtime_profile_id: null,
+        version: 1,
+        profile: null,
+      },
+    },
+  },
+} satisfies Story;
+
+export const NoInfrastructureProfiles = {
+  args: {
+    state: {
+      type: "READY",
+      profiles: [],
+      infrastructureProfiles: [],
+      defaultProfile: {
+        runtime_profile_id: null,
+        version: 1,
+        profile: null,
+      },
+    },
+  },
+} satisfies Story;
+
+export const UnavailableDefaultPreserved = {
+  args: {
+    state: {
+      type: "READY",
+      profiles: [availableProfile, unavailableProfile],
+      infrastructureProfiles: [infrastructureProfile],
+      defaultProfile: {
+        runtime_profile_id: unavailableProfile.id,
+        version: 6,
+        profile: unavailableProfile,
+      },
+    },
+  },
+} satisfies Story;
+
+export const RecreationRunning = {
+  args: {
+    operationState: { type: "LOADED", operation: recreation },
+  },
+} satisfies Story;
+
+export const CreateModal = {
+  args: {
+    editorState: { type: "CREATE" },
+  },
+} satisfies Story;
+
+export const Loading = {
+  args: {
+    state: { type: "LOADING" },
+  },
+} satisfies Story;
+
+export const Error = {
+  args: {
+    state: {
+      type: "ERROR",
+      message: "Runtime Profiles could not be loaded.",
+    },
+  },
+} satisfies Story;
