@@ -896,11 +896,12 @@ class SlackWebSocketHandler(socketserver.BaseRequestHandler):
     """Serve a minimal deterministic Socket Mode WebSocket."""
 
     state: ClassVar[FakeState] = STATE
+    socket_timeout_seconds: ClassVar[float] = 10
 
     def handle(self) -> None:
         """Perform the handshake, send configured envelopes, and capture ACKs."""
         request = cast(socket.socket, self.request)
-        request.settimeout(10)
+        request.settimeout(self.socket_timeout_seconds)
         headers = _read_http_headers(request)
         key = headers.get("sec-websocket-key")
         if key is None:
@@ -936,19 +937,11 @@ class SlackWebSocketHandler(socketserver.BaseRequestHandler):
                 request,
                 json.dumps(envelope, separators=(",", ":")),
             )
-            acknowledgement = _receive_websocket_text(request)
-            try:
-                payload: object = json.loads(acknowledgement)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(payload, dict):
-                acknowledged_id = cast(
-                    dict[str, object],
-                    payload,
-                ).get("envelope_id")
-                if isinstance(acknowledged_id, str):
-                    with self.state.lock:
-                        self.state.socket_acknowledgements.append(acknowledged_id)
+            acknowledged_id = _receive_websocket_acknowledgement(request)
+            if acknowledged_id is None:
+                return
+            with self.state.lock:
+                self.state.socket_acknowledgements.append(acknowledged_id)
         if disconnect_reason is not None:
             _send_websocket_text(
                 request,
@@ -1266,6 +1259,31 @@ def _receive_websocket_text(connection: socket.socket) -> str:
         if opcode == 0x1:
             return payload.decode()
         raise ConnectionError("Unsupported WebSocket frame.")
+
+
+def _receive_websocket_acknowledgement(connection: socket.socket) -> str | None:
+    """Wait for one ACK while the client connection remains open."""
+    previous_timeout = connection.gettimeout()
+    connection.settimeout(None)
+    try:
+        while True:
+            try:
+                acknowledgement = _receive_websocket_text(connection)
+            except OSError:
+                return None
+            if not acknowledgement:
+                return None
+            try:
+                payload: object = json.loads(acknowledgement)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            acknowledged_id = cast(dict[str, object], payload).get("envelope_id")
+            if isinstance(acknowledged_id, str):
+                return acknowledged_id
+    finally:
+        connection.settimeout(previous_timeout)
 
 
 def _receive_exact(connection: socket.socket, size: int) -> bytes:
