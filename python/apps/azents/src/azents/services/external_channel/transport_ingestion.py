@@ -11,6 +11,7 @@ from azents.core.enums import (
     ExternalChannelConversationScopeKind,
     ExternalChannelMessageRevisionKind,
     ExternalChannelProvider,
+    ExternalChannelResourceType,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -273,6 +274,7 @@ class ExternalChannelTransportIngestionService:
             resource = await self.repository.get_resource_by_provider_key(
                 session,
                 connection_id=connection_id,
+                resource_type=ExternalChannelResourceType.THREAD,
                 provider_resource_key=_discord_resource_key(
                     guild_id=guild_id,
                     conversation_id=conversation_id,

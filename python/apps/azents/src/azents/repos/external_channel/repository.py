@@ -21,17 +21,21 @@ from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
+    ExternalChannelConversationLocation,
     ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
+    ExternalChannelParticipationSettingStatus,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
+    ExternalChannelResourceType,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
+    ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
@@ -53,8 +57,10 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelIngressLease,
     RDBExternalChannelInteraction,
+    RDBExternalChannelParticipationSetting,
     RDBExternalChannelPrincipal,
     RDBExternalChannelResource,
+    RDBExternalChannelSetupClaim,
     RDBExternalChannelWork,
 )
 
@@ -86,10 +92,14 @@ from .data import (
     ExternalChannelInteraction,
     ExternalChannelInteractionAdmission,
     ExternalChannelInteractionCreate,
+    ExternalChannelParticipationSetting,
+    ExternalChannelParticipationSettingCreate,
     ExternalChannelPrincipal,
     ExternalChannelPrincipalCreate,
     ExternalChannelResource,
     ExternalChannelResourceCreate,
+    ExternalChannelSetupClaim,
+    ExternalChannelSetupClaimCreate,
     ExternalChannelWork,
     ExternalChannelWorkCreate,
 )
@@ -1707,6 +1717,12 @@ class ExternalChannelRepository:
         create: ExternalChannelChannelDefaultCreate,
     ) -> ExternalChannelChannelDefault:
         """Create an active, eligible Multi App channel default."""
+        if (create.configured_by_user_id is None) == (
+            create.configured_by_principal_id is None
+        ):
+            raise ValueError(
+                "External Channel default requires exactly one configuration actor."
+            )
         if create.status is not ExternalChannelChannelDefaultStatus.ACTIVE:
             raise ValueError("New External Channel defaults must be active.")
         if create.invalidated_at is not None or create.invalidation_reason is not None:
@@ -1755,9 +1771,173 @@ class ExternalChannelRepository:
             or agent.workspace_id != connection.workspace_id
         ):
             raise ValueError("External Channel default route is not eligible.")
+        if create.configured_by_principal_id is not None:
+            await self._lock_eligible_provider_actor(
+                session,
+                connection=connection,
+                principal_id=create.configured_by_principal_id,
+                error_message=(
+                    "External Channel default provider actor is not eligible."
+                ),
+            )
         return ExternalChannelChannelDefault.model_validate(
             await self._create(session, RDBExternalChannelChannelDefault, create)
         )
+
+    async def create_participation_setting(
+        self,
+        session: AsyncSession,
+        create: ExternalChannelParticipationSettingCreate,
+    ) -> ExternalChannelParticipationSetting:
+        """Create one active selected-route parent-channel setting."""
+        if create.status is not ExternalChannelParticipationSettingStatus.ACTIVE:
+            raise ValueError("New participation settings must be active.")
+        if create.settings_generation <= 0:
+            raise ValueError("Participation setting generation must be positive.")
+        if create.invalidated_at is not None or create.invalidation_reason is not None:
+            raise ValueError(
+                "Active participation settings cannot include invalidation metadata."
+            )
+        if (create.configured_by_user_id is None) == (
+            create.configured_by_principal_id is None
+        ):
+            raise ValueError(
+                "Participation settings require exactly one configuration actor."
+            )
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(RDBExternalChannelConnection.id == create.connection_id)
+            .with_for_update()
+        )
+        route = await session.scalar(
+            sa.select(RDBExternalChannelAgentRoute)
+            .where(
+                RDBExternalChannelAgentRoute.id == create.route_id,
+                RDBExternalChannelAgentRoute.connection_id == create.connection_id,
+            )
+            .with_for_update()
+        )
+        if connection is None or route is None or route.agent_id is None:
+            raise ValueError("Participation setting owners do not exist.")
+        agent = await session.scalar(
+            sa.select(RDBAgent)
+            .where(
+                RDBAgent.id == route.agent_id,
+                RDBAgent.workspace_id == connection.workspace_id,
+                RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+            )
+            .with_for_update()
+        )
+        if (
+            agent is None
+            or route.connection_app_mode is not connection.app_mode
+            or route.catalog_status is not ExternalChannelRouteCatalogStatus.AVAILABLE
+        ):
+            raise ValueError("Participation setting route is not eligible.")
+        if connection.app_mode is ExternalChannelAppMode.MULTI:
+            channel_default = await session.scalar(
+                sa.select(RDBExternalChannelChannelDefault)
+                .where(
+                    RDBExternalChannelChannelDefault.connection_id == connection.id,
+                    RDBExternalChannelChannelDefault.provider_channel_id
+                    == create.provider_parent_channel_id,
+                    RDBExternalChannelChannelDefault.route_id == route.id,
+                    RDBExternalChannelChannelDefault.status
+                    == ExternalChannelChannelDefaultStatus.ACTIVE,
+                )
+                .with_for_update()
+            )
+            if channel_default is None:
+                raise ValueError(
+                    "Participation setting route is not the selected channel route."
+                )
+        if create.configured_by_principal_id is not None:
+            await self._lock_eligible_provider_actor(
+                session,
+                connection=connection,
+                principal_id=create.configured_by_principal_id,
+                error_message="Participation setting provider actor is not eligible.",
+            )
+        return ExternalChannelParticipationSetting.model_validate(
+            await self._create(
+                session,
+                RDBExternalChannelParticipationSetting,
+                create,
+            )
+        )
+
+    async def get_active_participation_setting(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        provider_parent_channel_id: str,
+    ) -> ExternalChannelParticipationSetting | None:
+        """Fetch the one active setting for a provider parent channel."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelParticipationSetting).where(
+                RDBExternalChannelParticipationSetting.connection_id == connection_id,
+                RDBExternalChannelParticipationSetting.provider_parent_channel_id
+                == provider_parent_channel_id,
+                RDBExternalChannelParticipationSetting.status
+                == ExternalChannelParticipationSettingStatus.ACTIVE,
+            )
+        )
+        return self._as(ExternalChannelParticipationSetting, rdb)
+
+    async def lock_active_participation_setting(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        provider_parent_channel_id: str,
+    ) -> ExternalChannelParticipationSetting | None:
+        """Lock the one active setting after connection and route authority."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelParticipationSetting)
+            .where(
+                RDBExternalChannelParticipationSetting.connection_id == connection_id,
+                RDBExternalChannelParticipationSetting.provider_parent_channel_id
+                == provider_parent_channel_id,
+                RDBExternalChannelParticipationSetting.status
+                == ExternalChannelParticipationSettingStatus.ACTIVE,
+            )
+            .with_for_update()
+        )
+        return self._as(ExternalChannelParticipationSetting, rdb)
+
+    async def invalidate_participation_setting(
+        self,
+        session: AsyncSession,
+        *,
+        setting_id: str,
+        expected_settings_generation: int,
+        invalidated_at: datetime.datetime,
+        invalidation_reason: str,
+    ) -> ExternalChannelParticipationSetting | None:
+        """Terminally invalidate one current setting behind its generation."""
+        if not invalidation_reason:
+            raise ValueError("Participation invalidation reason must not be blank.")
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelParticipationSetting)
+            .where(
+                RDBExternalChannelParticipationSetting.id == setting_id,
+                RDBExternalChannelParticipationSetting.status
+                == ExternalChannelParticipationSettingStatus.ACTIVE,
+                RDBExternalChannelParticipationSetting.settings_generation
+                == expected_settings_generation,
+            )
+            .with_for_update()
+        )
+        if rdb is None:
+            return None
+        rdb.status = ExternalChannelParticipationSettingStatus.INVALIDATED
+        rdb.settings_generation += 1
+        rdb.invalidated_at = invalidated_at
+        rdb.invalidation_reason = invalidation_reason
+        await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
+        return ExternalChannelParticipationSetting.model_validate(rdb)
 
     async def lock_connection_for_routing(
         self,
@@ -2048,12 +2228,14 @@ class ExternalChannelRepository:
         session: AsyncSession,
         *,
         connection_id: str,
+        resource_type: ExternalChannelResourceType,
         provider_resource_key: str,
     ) -> ExternalChannelResource | None:
-        """Fetch one canonical resource by connection-scoped provider identity."""
+        """Fetch one canonical resource by typed connection-scoped identity."""
         rdb = await session.scalar(
             sa.select(RDBExternalChannelResource).where(
                 RDBExternalChannelResource.connection_id == connection_id,
+                RDBExternalChannelResource.resource_type == resource_type,
                 RDBExternalChannelResource.provider_resource_key
                 == provider_resource_key,
             )
@@ -2231,6 +2413,446 @@ class ExternalChannelRepository:
             ExternalChannelPrincipal,
             await session.get(RDBExternalChannelPrincipal, principal_id),
         )
+
+    async def create_setup_claim(
+        self,
+        session: AsyncSession,
+        create: ExternalChannelSetupClaimCreate,
+    ) -> ExternalChannelSetupClaim:
+        """Create one pending setup claim with no Session-owned state."""
+        if create.status not in {
+            ExternalChannelSetupClaimStatus.PENDING_AGENT,
+            ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+        }:
+            raise ValueError("New setup claims must be pending.")
+        if (create.status is ExternalChannelSetupClaimStatus.PENDING_AGENT) != (
+            create.route_id is None
+        ):
+            raise ValueError("Pending Agent setup must not retain a selected route.")
+        if create.source_revision != 1 or create.claim_generation != 1:
+            raise ValueError("New setup claim revisions must start at one.")
+        if any(
+            value is not None
+            for value in (
+                create.selected_setting_id,
+                create.selected_resource_id,
+                create.selected_source_revision,
+                create.selected_at,
+                create.completed_at,
+            )
+        ):
+            raise ValueError("Pending setup claims cannot include selection metadata.")
+        validate_interaction_projection(create.source_projection)
+        await self._validate_setup_source_owners(
+            session,
+            connection_id=create.connection_id,
+            provider_parent_channel_id=create.provider_parent_channel_id,
+            route_id=create.route_id,
+            conversation_position_id=create.conversation_position_id,
+            source_resource_id=create.source_resource_id,
+            principal_id=create.principal_id,
+        )
+        return ExternalChannelSetupClaim.model_validate(
+            await self._create(session, RDBExternalChannelSetupClaim, create)
+        )
+
+    async def get_nonterminal_setup_claim(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        provider_parent_channel_id: str,
+    ) -> ExternalChannelSetupClaim | None:
+        """Fetch the one pending or selected claim for a provider parent channel."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelSetupClaim).where(
+                RDBExternalChannelSetupClaim.connection_id == connection_id,
+                RDBExternalChannelSetupClaim.provider_parent_channel_id
+                == provider_parent_channel_id,
+                RDBExternalChannelSetupClaim.status.in_(
+                    (
+                        ExternalChannelSetupClaimStatus.PENDING_AGENT,
+                        ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+                        ExternalChannelSetupClaimStatus.SELECTED,
+                    )
+                ),
+            )
+        )
+        return self._as(ExternalChannelSetupClaim, rdb)
+
+    async def lock_nonterminal_setup_claim(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        provider_parent_channel_id: str,
+    ) -> ExternalChannelSetupClaim | None:
+        """Lock the current setup claim after connection and selected-route rows."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelSetupClaim)
+            .where(
+                RDBExternalChannelSetupClaim.connection_id == connection_id,
+                RDBExternalChannelSetupClaim.provider_parent_channel_id
+                == provider_parent_channel_id,
+                RDBExternalChannelSetupClaim.status.in_(
+                    (
+                        ExternalChannelSetupClaimStatus.PENDING_AGENT,
+                        ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+                        ExternalChannelSetupClaimStatus.SELECTED,
+                    )
+                ),
+            )
+            .with_for_update()
+        )
+        return self._as(ExternalChannelSetupClaim, rdb)
+
+    async def replace_setup_claim_source(
+        self,
+        session: AsyncSession,
+        *,
+        claim_id: str,
+        expected_claim_generation: int,
+        expected_source_revision: int,
+        conversation_position_id: str,
+        source_resource_id: str,
+        principal_id: str,
+        source_projection: dict[str, Any],
+        expires_at: datetime.datetime,
+    ) -> ExternalChannelSetupClaim | None:
+        """Replace the pending latest source behind exact revision fences."""
+        validate_interaction_projection(source_projection)
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelSetupClaim)
+            .where(
+                RDBExternalChannelSetupClaim.id == claim_id,
+                RDBExternalChannelSetupClaim.status.in_(
+                    (
+                        ExternalChannelSetupClaimStatus.PENDING_AGENT,
+                        ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+                    )
+                ),
+                RDBExternalChannelSetupClaim.claim_generation
+                == expected_claim_generation,
+                RDBExternalChannelSetupClaim.source_revision
+                == expected_source_revision,
+            )
+            .with_for_update()
+        )
+        if rdb is None:
+            return None
+        await self._validate_setup_source_owners(
+            session,
+            connection_id=rdb.connection_id,
+            provider_parent_channel_id=rdb.provider_parent_channel_id,
+            route_id=rdb.route_id,
+            conversation_position_id=conversation_position_id,
+            source_resource_id=source_resource_id,
+            principal_id=principal_id,
+        )
+        rdb.conversation_position_id = conversation_position_id
+        rdb.source_resource_id = source_resource_id
+        rdb.principal_id = principal_id
+        rdb.source_projection = source_projection
+        rdb.source_revision += 1
+        rdb.claim_generation += 1
+        rdb.expires_at = expires_at
+        await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
+        return ExternalChannelSetupClaim.model_validate(rdb)
+
+    async def assign_setup_claim_route(
+        self,
+        session: AsyncSession,
+        *,
+        claim_id: str,
+        expected_claim_generation: int,
+        route_id: str,
+    ) -> ExternalChannelSetupClaim | None:
+        """Move a pending Multi claim to location selection for one route."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelSetupClaim)
+            .where(
+                RDBExternalChannelSetupClaim.id == claim_id,
+                RDBExternalChannelSetupClaim.status
+                == ExternalChannelSetupClaimStatus.PENDING_AGENT,
+                RDBExternalChannelSetupClaim.claim_generation
+                == expected_claim_generation,
+            )
+            .with_for_update()
+        )
+        if rdb is None:
+            return None
+        route = await session.scalar(
+            sa.select(RDBExternalChannelAgentRoute)
+            .where(
+                RDBExternalChannelAgentRoute.id == route_id,
+                RDBExternalChannelAgentRoute.connection_id == rdb.connection_id,
+                RDBExternalChannelAgentRoute.connection_app_mode
+                == ExternalChannelAppMode.MULTI,
+                RDBExternalChannelAgentRoute.catalog_status
+                == ExternalChannelRouteCatalogStatus.AVAILABLE,
+            )
+            .with_for_update()
+        )
+        channel_default = await session.scalar(
+            sa.select(RDBExternalChannelChannelDefault)
+            .where(
+                RDBExternalChannelChannelDefault.connection_id == rdb.connection_id,
+                RDBExternalChannelChannelDefault.provider_channel_id
+                == rdb.provider_parent_channel_id,
+                RDBExternalChannelChannelDefault.route_id == route_id,
+                RDBExternalChannelChannelDefault.status
+                == ExternalChannelChannelDefaultStatus.ACTIVE,
+            )
+            .with_for_update()
+        )
+        if (
+            route is None
+            or route.agent_id is None
+            or channel_default is None
+            or not await self._lock_active_route_agent(session, route=route)
+        ):
+            raise ValueError("Setup claim route is not the selected channel route.")
+        rdb.route_id = route.id
+        rdb.status = ExternalChannelSetupClaimStatus.PENDING_LOCATION
+        rdb.claim_generation += 1
+        await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
+        return ExternalChannelSetupClaim.model_validate(rdb)
+
+    async def select_setup_claim(
+        self,
+        session: AsyncSession,
+        *,
+        claim_id: str,
+        expected_claim_generation: int,
+        expected_source_revision: int,
+        selected_setting_id: str,
+        selected_resource_id: str,
+        selected_at: datetime.datetime,
+    ) -> ExternalChannelSetupClaim | None:
+        """Freeze one pending-location source and its selected target."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelSetupClaim)
+            .where(
+                RDBExternalChannelSetupClaim.id == claim_id,
+                RDBExternalChannelSetupClaim.status
+                == ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+                RDBExternalChannelSetupClaim.claim_generation
+                == expected_claim_generation,
+                RDBExternalChannelSetupClaim.source_revision
+                == expected_source_revision,
+            )
+            .with_for_update()
+        )
+        if rdb is None:
+            return None
+        setting = await session.scalar(
+            sa.select(RDBExternalChannelParticipationSetting)
+            .where(
+                RDBExternalChannelParticipationSetting.id == selected_setting_id,
+                RDBExternalChannelParticipationSetting.connection_id
+                == rdb.connection_id,
+                RDBExternalChannelParticipationSetting.provider_parent_channel_id
+                == rdb.provider_parent_channel_id,
+                RDBExternalChannelParticipationSetting.route_id == rdb.route_id,
+                RDBExternalChannelParticipationSetting.status
+                == ExternalChannelParticipationSettingStatus.ACTIVE,
+            )
+            .with_for_update()
+        )
+        resource = await session.scalar(
+            sa.select(RDBExternalChannelResource)
+            .where(
+                RDBExternalChannelResource.id == selected_resource_id,
+                RDBExternalChannelResource.connection_id == rdb.connection_id,
+                RDBExternalChannelResource.status
+                == ExternalChannelResourceStatus.ACTIVE,
+            )
+            .with_for_update()
+        )
+        if setting is None or resource is None:
+            raise ValueError("Setup claim selection owners are incompatible.")
+        if setting.location is ExternalChannelConversationLocation.THREADS:
+            resource_matches_location = (
+                resource.id == rdb.source_resource_id
+                and resource.resource_type is ExternalChannelResourceType.THREAD
+            )
+        else:
+            resource_matches_location = (
+                resource.resource_type is ExternalChannelResourceType.PARENT_CHANNEL
+                and resource.provider_resource_key == rdb.provider_parent_channel_id
+            )
+        if not resource_matches_location:
+            raise ValueError("Setup claim selected Resource does not match location.")
+        rdb.status = ExternalChannelSetupClaimStatus.SELECTED
+        rdb.selected_setting_id = setting.id
+        rdb.selected_resource_id = resource.id
+        rdb.selected_source_revision = rdb.source_revision
+        rdb.selected_at = selected_at
+        rdb.claim_generation += 1
+        await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
+        return ExternalChannelSetupClaim.model_validate(rdb)
+
+    async def complete_setup_claim(
+        self,
+        session: AsyncSession,
+        *,
+        claim_id: str,
+        expected_claim_generation: int,
+        expected_selected_source_revision: int,
+        completed_at: datetime.datetime,
+    ) -> ExternalChannelSetupClaim | None:
+        """Mark one selected claim complete after canonical acceptance."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelSetupClaim)
+            .where(
+                RDBExternalChannelSetupClaim.id == claim_id,
+                RDBExternalChannelSetupClaim.status
+                == ExternalChannelSetupClaimStatus.SELECTED,
+                RDBExternalChannelSetupClaim.claim_generation
+                == expected_claim_generation,
+                RDBExternalChannelSetupClaim.selected_source_revision
+                == expected_selected_source_revision,
+            )
+            .with_for_update()
+        )
+        if rdb is None:
+            return None
+        rdb.status = ExternalChannelSetupClaimStatus.COMPLETED
+        rdb.claim_generation += 1
+        rdb.completed_at = completed_at
+        await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
+        return ExternalChannelSetupClaim.model_validate(rdb)
+
+    async def terminate_setup_claim(
+        self,
+        session: AsyncSession,
+        *,
+        claim_id: str,
+        expected_claim_generation: int,
+        status: ExternalChannelSetupClaimStatus,
+    ) -> ExternalChannelSetupClaim | None:
+        """Expire or invalidate one nonterminal setup claim."""
+        if status not in {
+            ExternalChannelSetupClaimStatus.EXPIRED,
+            ExternalChannelSetupClaimStatus.INVALIDATED,
+        }:
+            raise ValueError("Setup claim termination status is invalid.")
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelSetupClaim)
+            .where(
+                RDBExternalChannelSetupClaim.id == claim_id,
+                RDBExternalChannelSetupClaim.status.in_(
+                    (
+                        ExternalChannelSetupClaimStatus.PENDING_AGENT,
+                        ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+                        ExternalChannelSetupClaimStatus.SELECTED,
+                    )
+                ),
+                RDBExternalChannelSetupClaim.claim_generation
+                == expected_claim_generation,
+            )
+            .with_for_update()
+        )
+        if rdb is None:
+            return None
+        rdb.status = status
+        rdb.claim_generation += 1
+        await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
+        return ExternalChannelSetupClaim.model_validate(rdb)
+
+    @staticmethod
+    async def _lock_eligible_provider_actor(
+        session: AsyncSession,
+        *,
+        connection: RDBExternalChannelConnection,
+        principal_id: str,
+        error_message: str,
+    ) -> RDBExternalChannelPrincipal:
+        """Lock a human provider actor owned by the connection identity."""
+        principal = await session.scalar(
+            sa.select(RDBExternalChannelPrincipal)
+            .where(
+                RDBExternalChannelPrincipal.id == principal_id,
+                RDBExternalChannelPrincipal.provider == connection.provider,
+                RDBExternalChannelPrincipal.author_type
+                == ExternalChannelPrincipalAuthorType.HUMAN,
+            )
+            .with_for_update()
+        )
+        if principal is None or (
+            connection.provider_tenant_id is not None
+            and principal.provider_tenant_id != connection.provider_tenant_id
+        ):
+            raise ValueError(error_message)
+        return principal
+
+    @staticmethod
+    async def _validate_setup_source_owners(
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        provider_parent_channel_id: str,
+        route_id: str | None,
+        conversation_position_id: str,
+        source_resource_id: str,
+        principal_id: str,
+    ) -> None:
+        """Validate typed, route-neutral setup source ownership."""
+        connection = await session.get(RDBExternalChannelConnection, connection_id)
+        position = await session.get(
+            RDBExternalChannelConversationPosition,
+            conversation_position_id,
+        )
+        resource = await session.get(RDBExternalChannelResource, source_resource_id)
+        principal = await session.get(RDBExternalChannelPrincipal, principal_id)
+        route = (
+            None
+            if route_id is None
+            else await session.get(RDBExternalChannelAgentRoute, route_id)
+        )
+        if (
+            connection is None
+            or position is None
+            or resource is None
+            or principal is None
+            or position.connection_id != connection.id
+            or position.scope_kind
+            is not ExternalChannelConversationScopeKind.PARENT_CHANNEL
+            or position.provider_channel_id != provider_parent_channel_id
+            or resource.connection_id != connection.id
+            or resource.resource_type is not ExternalChannelResourceType.THREAD
+            or resource.status is not ExternalChannelResourceStatus.ACTIVE
+            or principal.provider is not connection.provider
+            or principal.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
+            or (
+                connection.provider_tenant_id is not None
+                and principal.provider_tenant_id != connection.provider_tenant_id
+            )
+            or (
+                route_id is not None
+                and (
+                    route is None
+                    or route.connection_id != connection.id
+                    or route.connection_app_mode is not connection.app_mode
+                    or route.catalog_status
+                    is not ExternalChannelRouteCatalogStatus.AVAILABLE
+                )
+            )
+        ):
+            raise ValueError("Setup claim source owners are incompatible.")
+        if (
+            route is not None
+            and not await ExternalChannelRepository._lock_active_route_agent(
+                session,
+                route=route,
+            )
+        ):
+            raise ValueError("Setup claim route Agent is not active.")
 
     async def create_binding_idempotent(
         self,

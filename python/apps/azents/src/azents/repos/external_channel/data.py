@@ -12,6 +12,7 @@ from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
+    ExternalChannelConversationLocation,
     ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
@@ -20,6 +21,7 @@ from azents.core.enums import (
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
     ExternalChannelMessageRevisionKind,
+    ExternalChannelParticipationSettingStatus,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
@@ -27,6 +29,7 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
+    ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
@@ -260,6 +263,7 @@ class ExternalChannelInteraction(_Record):
     callback_id: str | None
     action_id: str | None
     principal_id: str | None
+    setup_claim_id: str | None
     resource_correlation_key: str | None
     projection: dict[str, Any]
     status: ExternalChannelInteractionStatus
@@ -280,6 +284,7 @@ class ExternalChannelInteractionCreate(_Record):
     callback_id: str | None
     action_id: str | None
     principal_id: str | None
+    setup_claim_id: str | None
     resource_correlation_key: str | None
     projection: dict[str, Any]
     status: ExternalChannelInteractionStatus
@@ -303,7 +308,8 @@ class ExternalChannelChannelDefault(_Record):
     provider_channel_id: str
     route_id: str
     status: ExternalChannelChannelDefaultStatus
-    configured_by_user_id: str
+    configured_by_user_id: str | None
+    configured_by_principal_id: str | None
     invalidated_at: datetime.datetime | None
     invalidation_reason: str | None
     created_at: datetime.datetime
@@ -317,7 +323,43 @@ class ExternalChannelChannelDefaultCreate(_Record):
     provider_channel_id: str
     route_id: str
     status: ExternalChannelChannelDefaultStatus
-    configured_by_user_id: str
+    configured_by_user_id: str | None
+    configured_by_principal_id: str | None
+    invalidated_at: datetime.datetime | None
+    invalidation_reason: str | None
+
+
+class ExternalChannelParticipationSetting(_Record):
+    """Selected parent-channel conversation behavior."""
+
+    id: str
+    connection_id: str
+    provider_parent_channel_id: str
+    route_id: str
+    location: ExternalChannelConversationLocation
+    response_mode: ExternalChannelResponseMode
+    settings_generation: int
+    configured_by_user_id: str | None
+    configured_by_principal_id: str | None
+    status: ExternalChannelParticipationSettingStatus
+    invalidated_at: datetime.datetime | None
+    invalidation_reason: str | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class ExternalChannelParticipationSettingCreate(_Record):
+    """Participation-setting creation payload."""
+
+    connection_id: str
+    provider_parent_channel_id: str
+    route_id: str
+    location: ExternalChannelConversationLocation
+    response_mode: ExternalChannelResponseMode
+    settings_generation: int
+    configured_by_user_id: str | None
+    configured_by_principal_id: str | None
+    status: ExternalChannelParticipationSettingStatus
     invalidated_at: datetime.datetime | None
     invalidation_reason: str | None
 
@@ -349,6 +391,51 @@ class ExternalChannelPrincipalCreate(_Record):
     display_name: str | None
     avatar_url: str | None
     profile: dict[str, Any] | None
+
+
+class ExternalChannelSetupClaim(_Record):
+    """Latest eligible setup continuation for one provider parent channel."""
+
+    id: str
+    connection_id: str
+    provider_parent_channel_id: str
+    route_id: str | None
+    conversation_position_id: str
+    source_resource_id: str
+    principal_id: str
+    source_projection: dict[str, Any]
+    source_revision: int
+    claim_generation: int
+    status: ExternalChannelSetupClaimStatus
+    selected_setting_id: str | None
+    selected_resource_id: str | None
+    selected_source_revision: int | None
+    expires_at: datetime.datetime
+    selected_at: datetime.datetime | None
+    completed_at: datetime.datetime | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class ExternalChannelSetupClaimCreate(_Record):
+    """Setup-claim creation payload."""
+
+    connection_id: str
+    provider_parent_channel_id: str
+    route_id: str | None
+    conversation_position_id: str
+    source_resource_id: str
+    principal_id: str
+    source_projection: dict[str, Any]
+    source_revision: int
+    claim_generation: int
+    status: ExternalChannelSetupClaimStatus
+    selected_setting_id: str | None
+    selected_resource_id: str | None
+    selected_source_revision: int | None
+    expires_at: datetime.datetime
+    selected_at: datetime.datetime | None
+    completed_at: datetime.datetime | None
 
 
 class ExternalChannelBinding(_Record):
@@ -415,6 +502,7 @@ class ExternalChannelAccessRequest(_Record):
     trigger_provider_message_key: str
     principal_id: str
     agent_session_id: str | None
+    setup_claim_id: str | None
     status: ExternalChannelAccessRequestStatus
     decision_policy_snapshot: dict[str, Any]
     decided_by_user_id: str | None
@@ -437,6 +525,7 @@ class ExternalChannelAccessRequestCreate(_Record):
     trigger_provider_message_key: str
     principal_id: str
     agent_session_id: str | None
+    setup_claim_id: str | None
     status: ExternalChannelAccessRequestStatus
     decision_policy_snapshot: dict[str, Any]
     decided_by_user_id: str | None

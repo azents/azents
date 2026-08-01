@@ -128,6 +128,7 @@ def discord_interaction_admission_inputs(
             callback_id=None,
             action_id=None,
             principal_id=None,
+            setup_claim_id=None,
             resource_correlation_key=envelope.channel_id,
             projection={
                 "interaction_type": interaction_type.value,

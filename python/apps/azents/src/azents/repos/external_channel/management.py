@@ -716,6 +716,7 @@ class ExternalChannelManagementRepository:
             route_id=route.id,
             status=ExternalChannelChannelDefaultStatus.ACTIVE,
             configured_by_user_id=configured_by_user_id,
+            configured_by_principal_id=None,
             invalidated_at=None,
             invalidation_reason=None,
         )
@@ -1727,6 +1728,10 @@ def _channel_default(
     route: RDBExternalChannelAgentRoute,
     agent_name: str | None,
 ) -> ManagedChannelDefault:
+    if channel_default.configured_by_user_id is None:
+        raise ValueError(
+            "Provider-authored channel defaults are not exposed before rollout."
+        )
     return ManagedChannelDefault(
         id=channel_default.id,
         provider_channel_id=channel_default.provider_channel_id,

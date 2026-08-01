@@ -16,11 +16,14 @@ from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
+    ExternalChannelConversationLocation,
+    ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
+    ExternalChannelParticipationSettingStatus,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
@@ -28,6 +31,7 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
+    ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
     LLMProvider,
 )
@@ -55,10 +59,14 @@ from .data import (
     ExternalChannelBindingCreate,
     ExternalChannelChannelDefaultCreate,
     ExternalChannelConnectionCreate,
+    ExternalChannelConversationPositionCreate,
     ExternalChannelInteractionCreate,
+    ExternalChannelParticipationSettingCreate,
     ExternalChannelPrincipalCreate,
     ExternalChannelResource,
     ExternalChannelResourceCreate,
+    ExternalChannelSetupClaim,
+    ExternalChannelSetupClaimCreate,
 )
 from .lifecycle import ExternalChannelLifecycleRepository
 from .management import ExternalChannelManagementRepository
@@ -202,6 +210,7 @@ def _interaction_create(
         callback_id="callback",
         action_id="action",
         principal_id=principal_id,
+        setup_claim_id=None,
         resource_correlation_key="slack:T1:C1:1.000001",
         projection=projection or {"interaction_id": "opaque"},
         status=ExternalChannelInteractionStatus.ACCEPTED,
@@ -510,6 +519,7 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
             route_id=first_route.id,
             status=ExternalChannelChannelDefaultStatus.ACTIVE,
             configured_by_user_id=user.id,
+            configured_by_principal_id=None,
             invalidated_at=None,
             invalidation_reason=None,
         ),
@@ -525,6 +535,7 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
                     route_id=second_route.id,
                     status=ExternalChannelChannelDefaultStatus.ACTIVE,
                     configured_by_user_id=user.id,
+                    configured_by_principal_id=None,
                     invalidated_at=None,
                     invalidation_reason=None,
                 ),
@@ -538,6 +549,7 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
                 route_id=second_route.id,
                 status=ExternalChannelChannelDefaultStatus.ACTIVE,
                 configured_by_user_id=user.id,
+                configured_by_principal_id=None,
                 invalidated_at=_at(5),
                 invalidation_reason="not-valid-at-create",
             ),
@@ -551,6 +563,7 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
                 route_id=second_route.id,
                 status=ExternalChannelChannelDefaultStatus.ACTIVE,
                 configured_by_user_id=user.id,
+                configured_by_principal_id=None,
                 invalidated_at=_at(5),
                 invalidation_reason=None,
             ),
@@ -564,6 +577,7 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
                 route_id=second_route.id,
                 status=ExternalChannelChannelDefaultStatus.ACTIVE,
                 configured_by_user_id=user.id,
+                configured_by_principal_id=None,
                 invalidated_at=None,
                 invalidation_reason="not-valid-at-create",
             ),
@@ -575,6 +589,7 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
             route_id=second_route.id,
             status=ExternalChannelChannelDefaultStatus.INVALIDATED,
             configured_by_user_id=user.id,
+            configured_by_principal_id=None,
             invalidated_at=_at(5),
             invalidation_reason="historical",
         )
@@ -588,6 +603,7 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
             route_id=first_route.id,
             status=ExternalChannelChannelDefaultStatus.ACTIVE,
             configured_by_user_id=user.id,
+            configured_by_principal_id=None,
             invalidated_at=None,
             invalidation_reason=None,
         ),
@@ -684,6 +700,7 @@ async def test_channel_default_rejects_invalid_owner_and_lifecycle_boundaries(
         route_id=route.id,
         status=ExternalChannelChannelDefaultStatus.ACTIVE,
         configured_by_user_id=user.id,
+        configured_by_principal_id=None,
         invalidated_at=None,
         invalidation_reason=None,
     )
@@ -808,6 +825,335 @@ async def test_channel_default_rejects_invalid_owner_and_lifecycle_boundaries(
                 update={"connection_id": multi.id, "route_id": multi_route.id}
             ),
         )
+
+
+async def test_provider_configuration_actor_must_match_connection_identity(
+    rdb_session: AsyncSession,
+) -> None:
+    """Provider-authored defaults and settings reject foreign provider principals."""
+    workspace_id = await _workspace(rdb_session, "provider-actor-boundary")
+    agent = await _agent(rdb_session, workspace_id, "provider-actor-boundary")
+    repo = ExternalChannelRepository()
+    single = await repo.create_connection(
+        rdb_session,
+        _connection_create(workspace_id),
+    )
+    single_route = await repo.create_agent_route(
+        rdb_session,
+        _route_create(single.id, agent.id, mode=ExternalChannelAppMode.SINGLE),
+    )
+    multi = RDBExternalChannelConnection(
+        **_connection_create(
+            workspace_id,
+            provider_app_id="actor-multi-app",
+            provider_tenant_id="T1",
+        )
+        .model_copy(update={"app_mode": ExternalChannelAppMode.MULTI})
+        .model_dump()
+    )
+    rdb_session.add(multi)
+    await rdb_session.flush()
+    multi_route = await repo.create_agent_route(
+        rdb_session,
+        _route_create(multi.id, agent.id, mode=ExternalChannelAppMode.MULTI),
+    )
+    valid_principal = await repo.create_principal_idempotent(
+        rdb_session,
+        ExternalChannelPrincipalCreate(
+            provider=ExternalChannelProvider.SLACK,
+            provider_tenant_id="T1",
+            provider_user_id="U-valid",
+            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+            display_name=None,
+            avatar_url=None,
+            profile=None,
+        ),
+    )
+    foreign_principals = (
+        await repo.create_principal_idempotent(
+            rdb_session,
+            ExternalChannelPrincipalCreate(
+                provider=ExternalChannelProvider.SLACK,
+                provider_tenant_id="T2",
+                provider_user_id="U-foreign-tenant",
+                author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+                display_name=None,
+                avatar_url=None,
+                profile=None,
+            ),
+        ),
+        await repo.create_principal_idempotent(
+            rdb_session,
+            ExternalChannelPrincipalCreate(
+                provider=ExternalChannelProvider.DISCORD,
+                provider_tenant_id="G1",
+                provider_user_id="U-foreign-provider",
+                author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+                display_name=None,
+                avatar_url=None,
+                profile=None,
+            ),
+        ),
+    )
+
+    for index, principal in enumerate(foreign_principals):
+        with pytest.raises(ValueError, match="provider actor is not eligible"):
+            await repo.create_channel_default(
+                rdb_session,
+                ExternalChannelChannelDefaultCreate(
+                    connection_id=multi.id,
+                    provider_channel_id=f"C-foreign-{index}",
+                    route_id=multi_route.id,
+                    status=ExternalChannelChannelDefaultStatus.ACTIVE,
+                    configured_by_user_id=None,
+                    configured_by_principal_id=principal.id,
+                    invalidated_at=None,
+                    invalidation_reason=None,
+                ),
+            )
+        with pytest.raises(ValueError, match="provider actor is not eligible"):
+            await repo.create_participation_setting(
+                rdb_session,
+                ExternalChannelParticipationSettingCreate(
+                    connection_id=single.id,
+                    provider_parent_channel_id=f"C-foreign-{index}",
+                    route_id=single_route.id,
+                    location=ExternalChannelConversationLocation.THREADS,
+                    response_mode=ExternalChannelResponseMode.MENTION_ONLY,
+                    settings_generation=1,
+                    configured_by_user_id=None,
+                    configured_by_principal_id=principal.id,
+                    status=ExternalChannelParticipationSettingStatus.ACTIVE,
+                    invalidated_at=None,
+                    invalidation_reason=None,
+                ),
+            )
+
+    default = await repo.create_channel_default(
+        rdb_session,
+        ExternalChannelChannelDefaultCreate(
+            connection_id=multi.id,
+            provider_channel_id="C-valid",
+            route_id=multi_route.id,
+            status=ExternalChannelChannelDefaultStatus.ACTIVE,
+            configured_by_user_id=None,
+            configured_by_principal_id=valid_principal.id,
+            invalidated_at=None,
+            invalidation_reason=None,
+        ),
+    )
+    setting = await repo.create_participation_setting(
+        rdb_session,
+        ExternalChannelParticipationSettingCreate(
+            connection_id=single.id,
+            provider_parent_channel_id="C-valid",
+            route_id=single_route.id,
+            location=ExternalChannelConversationLocation.THREADS,
+            response_mode=ExternalChannelResponseMode.MENTION_ONLY,
+            settings_generation=1,
+            configured_by_user_id=None,
+            configured_by_principal_id=valid_principal.id,
+            status=ExternalChannelParticipationSettingStatus.ACTIVE,
+            invalidated_at=None,
+            invalidation_reason=None,
+        ),
+    )
+
+    assert default.configured_by_principal_id == valid_principal.id
+    assert setting.configured_by_principal_id == valid_principal.id
+
+
+async def test_setup_claim_selection_enforces_location_resource_identity(
+    rdb_session: AsyncSession,
+) -> None:
+    """Threads freeze the source Resource and Channel freezes its parent Resource."""
+    workspace_id = await _workspace(rdb_session, "setup-location-resource")
+    agent = await _agent(rdb_session, workspace_id, "setup-location-resource")
+    repo = ExternalChannelRepository()
+    connection = await repo.create_connection(
+        rdb_session,
+        _connection_create(workspace_id),
+    )
+    route = await repo.create_agent_route(
+        rdb_session,
+        _route_create(connection.id, agent.id, mode=ExternalChannelAppMode.SINGLE),
+    )
+    principal = await repo.create_principal_idempotent(
+        rdb_session,
+        ExternalChannelPrincipalCreate(
+            provider=ExternalChannelProvider.SLACK,
+            provider_tenant_id="T1",
+            provider_user_id="U1",
+            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+            display_name=None,
+            avatar_url=None,
+            profile=None,
+        ),
+    )
+
+    async def create_resource(
+        *,
+        resource_type: ExternalChannelResourceType,
+        key: str,
+    ) -> ExternalChannelResource:
+        return await repo.create_resource_idempotent(
+            rdb_session,
+            ExternalChannelResourceCreate(
+                connection_id=connection.id,
+                resource_type=resource_type,
+                provider_resource_key=key,
+                labels=None,
+                status=ExternalChannelResourceStatus.ACTIVE,
+                latest_activity_at=None,
+                unavailable_at=None,
+                deleted_at=None,
+            ),
+        )
+
+    async def create_claim(
+        *,
+        parent_channel_id: str,
+        source_resource: ExternalChannelResource,
+    ) -> ExternalChannelSetupClaim:
+        position = await repo.create_conversation_position_idempotent(
+            rdb_session,
+            ExternalChannelConversationPositionCreate(
+                connection_id=connection.id,
+                scope_kind=ExternalChannelConversationScopeKind.PARENT_CHANNEL,
+                provider_channel_id=parent_channel_id,
+                provider_thread_key=None,
+                read_through_position=None,
+            ),
+        )
+        return await repo.create_setup_claim(
+            rdb_session,
+            ExternalChannelSetupClaimCreate(
+                connection_id=connection.id,
+                provider_parent_channel_id=parent_channel_id,
+                route_id=route.id,
+                conversation_position_id=position.id,
+                source_resource_id=source_resource.id,
+                principal_id=principal.id,
+                source_projection={
+                    "schema_version": 1,
+                    "trigger_message_id": f"message-{parent_channel_id}",
+                },
+                source_revision=1,
+                claim_generation=1,
+                status=ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+                selected_setting_id=None,
+                selected_resource_id=None,
+                selected_source_revision=None,
+                expires_at=_at(30),
+                selected_at=None,
+                completed_at=None,
+            ),
+        )
+
+    threads_source = await create_resource(
+        resource_type=ExternalChannelResourceType.THREAD,
+        key="thread-source",
+    )
+    other_thread = await create_resource(
+        resource_type=ExternalChannelResourceType.THREAD,
+        key="thread-other",
+    )
+    threads_setting = await repo.create_participation_setting(
+        rdb_session,
+        ExternalChannelParticipationSettingCreate(
+            connection_id=connection.id,
+            provider_parent_channel_id="C-threads",
+            route_id=route.id,
+            location=ExternalChannelConversationLocation.THREADS,
+            response_mode=ExternalChannelResponseMode.MENTION_ONLY,
+            settings_generation=1,
+            configured_by_user_id=None,
+            configured_by_principal_id=principal.id,
+            status=ExternalChannelParticipationSettingStatus.ACTIVE,
+            invalidated_at=None,
+            invalidation_reason=None,
+        ),
+    )
+    threads_claim = await create_claim(
+        parent_channel_id="C-threads",
+        source_resource=threads_source,
+    )
+    with pytest.raises(ValueError, match="does not match location"):
+        await repo.select_setup_claim(
+            rdb_session,
+            claim_id=threads_claim.id,
+            expected_claim_generation=threads_claim.claim_generation,
+            expected_source_revision=threads_claim.source_revision,
+            selected_setting_id=threads_setting.id,
+            selected_resource_id=other_thread.id,
+            selected_at=_at(1),
+        )
+    selected_threads = await repo.select_setup_claim(
+        rdb_session,
+        claim_id=threads_claim.id,
+        expected_claim_generation=threads_claim.claim_generation,
+        expected_source_revision=threads_claim.source_revision,
+        selected_setting_id=threads_setting.id,
+        selected_resource_id=threads_source.id,
+        selected_at=_at(2),
+    )
+    assert selected_threads is not None
+    assert selected_threads.selected_resource_id == threads_source.id
+
+    channel_source = await create_resource(
+        resource_type=ExternalChannelResourceType.THREAD,
+        key="channel-source",
+    )
+    wrong_parent = await create_resource(
+        resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+        key="C-other",
+    )
+    selected_parent = await create_resource(
+        resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+        key="C-channel",
+    )
+    channel_setting = await repo.create_participation_setting(
+        rdb_session,
+        ExternalChannelParticipationSettingCreate(
+            connection_id=connection.id,
+            provider_parent_channel_id="C-channel",
+            route_id=route.id,
+            location=ExternalChannelConversationLocation.CHANNEL,
+            response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+            settings_generation=1,
+            configured_by_user_id=None,
+            configured_by_principal_id=principal.id,
+            status=ExternalChannelParticipationSettingStatus.ACTIVE,
+            invalidated_at=None,
+            invalidation_reason=None,
+        ),
+    )
+    channel_claim = await create_claim(
+        parent_channel_id="C-channel",
+        source_resource=channel_source,
+    )
+    for invalid_resource in (channel_source, wrong_parent):
+        with pytest.raises(ValueError, match="does not match location"):
+            await repo.select_setup_claim(
+                rdb_session,
+                claim_id=channel_claim.id,
+                expected_claim_generation=channel_claim.claim_generation,
+                expected_source_revision=channel_claim.source_revision,
+                selected_setting_id=channel_setting.id,
+                selected_resource_id=invalid_resource.id,
+                selected_at=_at(3),
+            )
+    selected_channel = await repo.select_setup_claim(
+        rdb_session,
+        claim_id=channel_claim.id,
+        expected_claim_generation=channel_claim.claim_generation,
+        expected_source_revision=channel_claim.source_revision,
+        selected_setting_id=channel_setting.id,
+        selected_resource_id=selected_parent.id,
+        selected_at=_at(4),
+    )
+    assert selected_channel is not None
+    assert selected_channel.selected_resource_id == selected_parent.id
 
 
 async def test_binding_creation_serializes_on_resource_lock(

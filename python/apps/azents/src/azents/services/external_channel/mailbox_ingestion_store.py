@@ -315,6 +315,7 @@ class ExternalChannelMailboxIngestionStore:
             resource = await self.repository.get_resource_by_provider_key(
                 session,
                 connection_id=connection.id,
+                resource_type=ExternalChannelResourceType.THREAD,
                 provider_resource_key=request.locator.provider_resource_key,
             )
             if (
@@ -409,6 +410,7 @@ class ExternalChannelMailboxIngestionStore:
                             if conversation.binding is None
                             else conversation.binding.agent_session_id
                         ),
+                        setup_claim_id=None,
                         status=ExternalChannelAccessRequestStatus.PENDING,
                         decision_policy_snapshot={"policy_version": 2},
                         decided_by_user_id=None,
@@ -552,6 +554,7 @@ class ExternalChannelMailboxIngestionStore:
         resource = await self.repository.get_resource_by_provider_key(
             session,
             connection_id=request.locator.connection_id,
+            resource_type=ExternalChannelResourceType.THREAD,
             provider_resource_key=request.locator.provider_resource_key,
         )
         if resource is not None:
@@ -734,6 +737,7 @@ class ExternalChannelMailboxIngestionStore:
                 callback_id=None,
                 action_id="agent_selector",
                 principal_id=principal_id,
+                setup_claim_id=None,
                 resource_correlation_key=None,
                 projection=projection_with_selector_state({}, expected),
                 status=ExternalChannelInteractionStatus.ACCEPTED,

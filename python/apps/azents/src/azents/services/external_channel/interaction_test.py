@@ -17,6 +17,7 @@ from azents.core.enums import (
     ExternalChannelInteractionType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
+    ExternalChannelResourceType,
 )
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
@@ -146,6 +147,7 @@ class _Repository:
         session: AsyncSession,
         *,
         connection_id: str,
+        resource_type: ExternalChannelResourceType,
         provider_resource_key: str,
     ) -> ExternalChannelResource | None:
         del session
@@ -153,6 +155,7 @@ class _Repository:
             self.resource
             if (
                 connection_id == self.resource.connection_id
+                and resource_type is self.resource.resource_type
                 and provider_resource_key == self.resource.provider_resource_key
             )
             else None
