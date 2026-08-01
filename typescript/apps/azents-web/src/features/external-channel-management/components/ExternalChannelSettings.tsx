@@ -15,6 +15,7 @@ import {
   Modal,
   Paper,
   PasswordInput,
+  Radio,
   rem,
   SegmentedControl,
   SimpleGrid,
@@ -816,7 +817,14 @@ export function ExternalChannelSettings({
   actionError,
   actionTarget,
   actionsBusy,
+  defaultResponseMode,
+  defaultResponseModeDraft,
+  defaultResponseModeSaving,
+  defaultResponseModeError,
+  defaultResponseModeSaved,
   canManageWorkspaceMultiApps,
+  onDefaultResponseModeChange,
+  onSaveDefaultResponseMode,
   onOpenSetup,
   onOpenDiscordSetup,
   onOpenEdit,
@@ -900,6 +908,70 @@ export function ExternalChannelSettings({
         {state.type === "ERROR" && <Alert color="red">{state.message}</Alert>}
         {loaded && (
           <>
+            <Paper
+              withBorder
+              radius="lg"
+              p="md"
+              data-testid="external-default-response-mode"
+            >
+              <Stack gap="md">
+                <Box>
+                  <Text fw={700}>{t("defaultResponseModeTitle")}</Text>
+                  <Text size="sm" c="dimmed">
+                    {t("defaultResponseModeDescription")}
+                  </Text>
+                </Box>
+                <Radio.Group
+                  value={defaultResponseModeDraft}
+                  onChange={(value) =>
+                    onDefaultResponseModeChange(
+                      value === "mention_only"
+                        ? "mention_only"
+                        : "all_messages",
+                    )
+                  }
+                >
+                  <Stack gap="sm">
+                    <Radio
+                      value="all_messages"
+                      label={t("responseMode.all_messages.label")}
+                      description={t("responseMode.all_messages.description")}
+                      disabled={defaultResponseModeSaving}
+                    />
+                    <Radio
+                      value="mention_only"
+                      label={t("responseMode.mention_only.label")}
+                      description={t("responseMode.mention_only.description")}
+                      disabled={defaultResponseModeSaving}
+                    />
+                  </Stack>
+                </Radio.Group>
+                {defaultResponseModeError && (
+                  <Alert color="red">{defaultResponseModeError}</Alert>
+                )}
+                {defaultResponseModeSaved &&
+                  defaultResponseModeDraft === defaultResponseMode && (
+                    <Text size="sm" c="teal">
+                      {t("defaultResponseModeSaved")}
+                    </Text>
+                  )}
+                <Group justify="flex-end">
+                  <Button
+                    size="xs"
+                    loading={defaultResponseModeSaving}
+                    data-testid="save-external-default-response-mode"
+                    disabled={
+                      defaultResponseModeSaving ||
+                      defaultResponseModeDraft === defaultResponseMode
+                    }
+                    onClick={onSaveDefaultResponseMode}
+                  >
+                    {t("saveResponseMode")}
+                  </Button>
+                </Group>
+              </Stack>
+            </Paper>
+
             <Stack gap="sm">
               <Text fw={700}>{t("connectionsTitle")}</Text>
               {loaded.connections.length === 0 ? (

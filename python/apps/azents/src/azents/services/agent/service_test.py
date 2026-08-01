@@ -14,7 +14,11 @@ from azents.core.agent import (
     AgentModelSelectionInput,
     SelectableModelOption,
 )
-from azents.core.enums import AgentLifecycleStatus, AgentType
+from azents.core.enums import (
+    AgentLifecycleStatus,
+    AgentType,
+    ExternalChannelResponseMode,
+)
 from azents.repos.agent.data import Agent
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -49,6 +53,7 @@ def _make_agent(agent_id: str = "agent-1") -> Agent:
         model_parameters=None,
         system_prompt=None,
         enabled=True,
+        external_channel_default_response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
         lifecycle_status=AgentLifecycleStatus.ACTIVE,
         type=AgentType.PUBLIC,
         runtime_profile_id=None,

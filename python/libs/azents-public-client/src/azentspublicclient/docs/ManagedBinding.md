@@ -8,6 +8,7 @@ Name | Type | Description | Notes
 **id** | **str** |  | 
 **agent_session_id** | **str** |  | 
 **provider** | [**ExternalChannelProvider**](ExternalChannelProvider.md) |  | 
+**response_mode** | [**ExternalChannelResponseMode**](ExternalChannelResponseMode.md) |  | 
 **resource_type** | **str** |  | 
 **resource_label** | **str** |  | 
 **connected_at** | **datetime** |  | 

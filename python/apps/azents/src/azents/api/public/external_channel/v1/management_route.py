@@ -16,7 +16,11 @@ from azents.core.auth.deps import (
 from azents.core.auth.permissions import Permission, Permissions
 from azents.core.config import Config
 from azents.core.deps import get_config
-from azents.core.enums import ExternalChannelProvider, ExternalChannelTransport
+from azents.core.enums import (
+    ExternalChannelProvider,
+    ExternalChannelResponseMode,
+    ExternalChannelTransport,
+)
 from azents.repos.external_channel.data import (
     ExternalChannelMultiConnectionImpact,
     ExternalChannelMultiRouteImpact,
@@ -58,6 +62,7 @@ from azents.services.external_channel.management import (
     ExternalChannelManagementGenerationChanged,
     ExternalChannelManagementNotFound,
     ExternalChannelManagementService,
+    ExternalChannelResponseModeSetting,
     ManagedConnectionSetup,
     ManagedMultiConnectionSetup,
     SlackManifestGuidance,
@@ -89,6 +94,7 @@ class DiscordConnectionSetupRequest(BaseModel):
 class ManagedConnectionListResponse(BaseModel):
     items: list[ManagedConnection]
     associated_multi_apps: list[ManagedMultiConnection]
+    default_response_mode: ExternalChannelResponseMode
 
 
 class ManagedBindingListResponse(BaseModel):
@@ -131,6 +137,10 @@ class MultiChannelDefaultRequest(GenerationFenceRequest):
 
 class ConnectionAccessPolicyRequest(ExternalChannelAccessPolicyInput):
     """Dedicated External Channel ingress policy request."""
+
+
+class ResponseModeRequest(ExternalChannelResponseModeSetting):
+    """Required full-value response-mode request."""
 
 
 @router.get("/workspaces/{handle}/external-channels/multi")
@@ -1019,6 +1029,35 @@ async def list_connections(
                 agent_id=agent_id,
                 workspace_user_id=member.workspace_user_id,
             ),
+            default_response_mode=(
+                await service.get_default_response_mode(
+                    workspace_id=member.workspace_id,
+                    agent_id=agent_id,
+                    workspace_user_id=member.workspace_user_id,
+                )
+            ).response_mode,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
+
+
+@router.put(
+    "/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode"
+)
+async def update_default_response_mode(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    agent_id: str,
+    request_body: ResponseModeRequest,
+) -> ExternalChannelResponseModeSetting:
+    """Replace the default copied to newly connected conversations."""
+    try:
+        return await service.update_default_response_mode(
+            workspace_id=member.workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=member.workspace_user_id,
+            setting=request_body,
         )
     except ExternalChannelManagementNotFound as error:
         raise _not_found() from error
@@ -1376,6 +1415,33 @@ async def disconnect_session_channel(
             agent_session_id=session_id,
         ),
     )
+
+
+@router.put(
+    "/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/"
+    "external-channels/{binding_id}/response-mode"
+)
+async def update_session_channel_response_mode(
+    member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
+    service: Annotated[ExternalChannelManagementService, Depends()],
+    *,
+    agent_id: str,
+    session_id: str,
+    binding_id: str,
+    request_body: ResponseModeRequest,
+) -> ManagedBinding:
+    """Replace one connected conversation binding's response mode."""
+    try:
+        return await service.update_binding_response_mode(
+            workspace_id=member.workspace_id,
+            agent_id=agent_id,
+            workspace_user_id=member.workspace_user_id,
+            agent_session_id=session_id,
+            binding_id=binding_id,
+            setting=request_body,
+        )
+    except ExternalChannelManagementNotFound as error:
+        raise _not_found() from error
 
 
 @router.get("/approval-requests/{access_request_id}")

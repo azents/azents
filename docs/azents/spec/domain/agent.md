@@ -8,6 +8,7 @@ owner: "@Hardtack"
 code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/995d915ed6d6_add_agent_automatic_project_policy.py
   - python/apps/azents/db-schemas/rdb/migrations/versions/10d8111b556c_add_session_auto_archive_fields.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/d0a55d801644_add_external_channel_response_modes.py
   - python/apps/azents/src/azents/core/agent.py
   - python/apps/azents/src/azents/core/builtin_tools.py
   - python/apps/azents/src/azents/core/credentials.py
@@ -77,9 +78,11 @@ api_routes:
   - /llm-provider-integration/v1/workspaces/{handle}/chatgpt-oauth/device/{session_id}
   - /chat/v1
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels
+  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
+  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
 last_verified_at: 2026-08-01
-spec_version: 60
+spec_version: 61
 ---
 
 # Agent Domain Spec
@@ -112,12 +115,19 @@ Agent is central execution unit of azents. Within Workspace, it bundles an order
 | `memory_enabled` | whether memory prompt/tool is exposed |
 | `max_turns` | run turn limit. null means unlimited |
 | `auto_archive_ttl_days` | positive whole-day inactivity TTL for automatic archive of this Agent's non-primary root Sessions. Defaults to `30` and applies dynamically to existing active Sessions |
+| `external_channel_default_response_mode` | required `mention_only` or `all_messages` value copied into each newly created External Channel binding. Existing Agents default to `all_messages` |
 | `subagent_settings` | JSON settings for session-scoped subagent execution limits. Default is `{ "max_subagents": 3, "max_depth": 1 }` |
 | `avatar` | Agent avatar stored image metadata |
 
 `subagent_settings.max_subagents` is the maximum active subagent count under one root session. It is equivalent to Codex `max_concurrent_threads_per_session - 1`; the root/current agent is not counted in the stored value. `subagent_settings.max_depth` is the maximum `SessionAgent` tree depth below `/root`, where `1` allows root-to-child spawning only. Both values are non-negative integers.
 
 `auto_archive_ttl_days` is required and must be positive. Agent create and patch responses expose the configured value. Updating it changes eligibility for all existing active root Session trees at their next scheduler evaluation; it does not snapshot a TTL onto the Session.
+
+`external_channel_default_response_mode` belongs to External Channel management rather
+than the generic Agent create, response, or patch contract. Agent administrators read
+and replace it through the Agent-scoped External Channel settings API. A binding
+creation transaction copies the current concrete value; later default changes never
+rewrite existing bindings.
 
 ### 1.2 Runtime Profile selection
 
@@ -491,6 +501,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-08-01 | 61 | Added the Agent-owned External Channel default response mode, AgentAdmin-managed External Channel API, and creation-time copy semantics without generic Agent API exposure or retroactive binding updates. |
 | 2026-08-01 | 60 | Added binding leave-presence and purge-safe post-commit provider cleanup to Agent decommission while preserving shared Multi App authority. |
 | 2026-07-31 | 59 | Replaced Agent Provider preference and execution-policy intent with exact Workspace Runtime Profile selection, creation-time default precedence, optimistic replacement, availability projection, and no Apply path. |
 | 2026-07-27 | 58 | Made the selected Profile the complete Runtime execution ceiling without a separate Platform policy. |

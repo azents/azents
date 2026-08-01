@@ -1027,6 +1027,20 @@
       "externalChannels": {
         "title": "외부 채널",
         "description": "전용 Slack 및 Discord 연결을 운영하고 이 에이전트를 호출할 수 있는 참여자를 관리합니다.",
+        "defaultResponseModeTitle": "기본 응답 모드",
+        "defaultResponseModeDescription": "새로 연결되는 대화에만 이 값이 복사됩니다. 기존 대화의 모드는 바뀌지 않습니다.",
+        "defaultResponseModeSaved": "기본 응답 모드를 저장했습니다.",
+        "saveResponseMode": "저장",
+        "responseMode": {
+          "all_messages": {
+            "label": "모든 대상 메시지",
+            "description": "대상 참여자가 일반 메시지를 보내도 계속 대화에 참여합니다."
+          },
+          "mention_only": {
+            "label": "멘션만",
+            "description": "일반 메시지는 문맥으로만 유지하고 에이전트를 명시적으로 멘션할 때 응답합니다."
+          }
+        },
         "addConnection": "Slack 연결",
         "connectionsTitle": "연결",
         "emptyConnectionsTitle": "외부 채널 연결이 없습니다",
@@ -1190,6 +1204,15 @@
       "sessionChannels": {
         "title": "채널",
         "description": "외부 채널 binding, work projection, delivery 결과, 유지된 접근 권한을 확인합니다.",
+        "responseModeTitle": "응답 모드",
+        "responseModeLabel": "에이전트를 실행할 메시지",
+        "responseModeDescription": "연결된 이 대화에서 앞으로 수신하는 메시지부터 적용됩니다.",
+        "responseModeReadOnlyDescription": "연결 해제되었거나 보관된 대화의 마지막 저장 모드입니다.",
+        "saveResponseMode": "저장",
+        "responseMode": {
+          "all_messages": "모든 대상 메시지",
+          "mention_only": "멘션만"
+        },
         "archivedTitle": "보관된 세션",
         "archivedDescription": "보관 시점에 외부 채널 연결이 영구적으로 해제되었습니다. 이 화면은 읽기 전용입니다.",
         "retentionUnlimited": "보존 기간: 제한 없음",

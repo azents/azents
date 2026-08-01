@@ -1027,6 +1027,20 @@
       "externalChannels": {
         "title": "External channels",
         "description": "Operate dedicated Slack and Discord connections and control who can invoke this agent.",
+        "defaultResponseModeTitle": "Default response mode",
+        "defaultResponseModeDescription": "This value is copied to newly connected conversations only. Existing conversations keep their current mode.",
+        "defaultResponseModeSaved": "Default response mode saved.",
+        "saveResponseMode": "Save",
+        "responseMode": {
+          "all_messages": {
+            "label": "All eligible messages",
+            "description": "Continue participating when eligible people send ordinary messages."
+          },
+          "mention_only": {
+            "label": "Mentions only",
+            "description": "Keep ordinary messages as context until someone explicitly mentions the agent."
+          }
+        },
         "addConnection": "Connect Slack",
         "connectionsTitle": "Connections",
         "emptyConnectionsTitle": "No external channel connection",
@@ -1190,6 +1204,15 @@
       "sessionChannels": {
         "title": "Channels",
         "description": "Inspect external channel bindings, work projection, delivery outcomes, and retained access.",
+        "responseModeTitle": "Response mode",
+        "responseModeLabel": "Messages that trigger this agent",
+        "responseModeDescription": "This setting affects future messages in this connected conversation.",
+        "responseModeReadOnlyDescription": "The saved mode is retained for this disconnected or archived conversation.",
+        "saveResponseMode": "Save",
+        "responseMode": {
+          "all_messages": "All eligible messages",
+          "mention_only": "Mentions only"
+        },
         "archivedTitle": "Archived session",
         "archivedDescription": "External channels were terminally disconnected at archive time. This projection is read-only.",
         "retentionUnlimited": "Retention: unlimited",

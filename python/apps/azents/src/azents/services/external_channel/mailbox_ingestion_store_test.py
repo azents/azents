@@ -1,5 +1,6 @@
 """Tests for canonical External Channel mailbox ingestion helpers."""
 
+import dataclasses
 import datetime
 from types import SimpleNamespace
 from typing import cast
@@ -18,6 +19,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
+    ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
     ExternalChannelTransport,
@@ -41,6 +43,7 @@ from azents.services.external_channel.conversation import (
 )
 from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionOperation,
+    ExternalChannelIngestionReason,
     ExternalChannelIngestionRequest,
     ExternalChannelIngressAuthority,
     ExternalChannelIngressAuthorityKind,
@@ -48,6 +51,7 @@ from azents.services.external_channel.ingestion import (
 )
 from azents.services.external_channel.mailbox_ingestion_store import (
     ExternalChannelMailboxIngestionStore,
+    _response_mode_ignored_reason,  # pyright: ignore[reportPrivateUsage]
 )
 
 
@@ -115,6 +119,74 @@ def _slack_request() -> ExternalChannelIngestionRequest:
         operation=ExternalChannelIngestionOperation.CURRENT_TRIGGER,
         selected_route_id=None,
         replay_boundary=None,
+    )
+
+
+def test_response_mode_accepts_every_explicit_invocation() -> None:
+    """An explicit provider invocation triggers every connected response mode."""
+    request = _slack_request()
+    for mode in ExternalChannelResponseMode:
+        binding = ExternalChannelBinding.model_construct(response_mode=mode)
+        assert (
+            _response_mode_ignored_reason(
+                request=request,
+                binding=binding,
+            )
+            is None
+        )
+
+
+def test_response_mode_requires_invocation_without_connected_binding() -> None:
+    """An ordinary message cannot create or recreate a disconnected binding."""
+    request = _slack_request()
+    ordinary = dataclasses.replace(
+        request,
+        locator=dataclasses.replace(request.locator, invocation=False),
+    )
+    assert (
+        _response_mode_ignored_reason(
+            request=ordinary,
+            binding=None,
+        )
+        is ExternalChannelIngestionReason.NOT_AN_INVOCATION
+    )
+
+
+def test_response_mode_ignores_ordinary_message_for_mention_only() -> None:
+    """Mention-only bindings retain ordinary provider messages as later context."""
+    request = _slack_request()
+    ordinary = dataclasses.replace(
+        request,
+        locator=dataclasses.replace(request.locator, invocation=False),
+    )
+    binding = ExternalChannelBinding.model_construct(
+        response_mode=ExternalChannelResponseMode.MENTION_ONLY
+    )
+    assert (
+        _response_mode_ignored_reason(
+            request=ordinary,
+            binding=binding,
+        )
+        is ExternalChannelIngestionReason.RESPONSE_MODE_NOT_TRIGGERED
+    )
+
+
+def test_response_mode_accepts_ordinary_message_for_all_messages() -> None:
+    """All-messages bindings preserve ordinary eligible continuation."""
+    request = _slack_request()
+    ordinary = dataclasses.replace(
+        request,
+        locator=dataclasses.replace(request.locator, invocation=False),
+    )
+    binding = ExternalChannelBinding.model_construct(
+        response_mode=ExternalChannelResponseMode.ALL_MESSAGES
+    )
+    assert (
+        _response_mode_ignored_reason(
+            request=ordinary,
+            binding=binding,
+        )
+        is None
     )
 
 
@@ -229,6 +301,7 @@ async def test_conversation_resolution_does_not_create_session_before_acceptance
         connection=ExternalChannelConnection.model_construct(id="connection-1"),
         resource=ExternalChannelResource.model_construct(id="resource-1"),
         position=ExternalChannelConversationPosition.model_construct(id="position-1"),
+        binding=None,
         now=datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC),
     )
 
@@ -254,6 +327,9 @@ async def test_create_binding_reports_only_the_new_root_session() -> None:
             id="agent-1",
             workspace_id="workspace-1",
             lifecycle_status=AgentLifecycleStatus.ACTIVE,
+            external_channel_default_response_mode=(
+                ExternalChannelResponseMode.ALL_MESSAGES
+            ),
         )
     )
     root_creation_service = MagicMock()

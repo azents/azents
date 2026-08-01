@@ -13,7 +13,11 @@ from azents.core.agent import (
     SelectableModelOption,
     SubagentSettings,
 )
-from azents.core.enums import AgentLifecycleStatus, AgentType
+from azents.core.enums import (
+    AgentLifecycleStatus,
+    AgentType,
+    ExternalChannelResponseMode,
+)
 from azents.services.uploads.schema import StoredImage
 
 
@@ -42,6 +46,9 @@ class Agent(BaseModel):
     )
     system_prompt: str | None = Field(default=None, description="System prompt")
     enabled: bool = Field(description="Enabled flag")
+    external_channel_default_response_mode: ExternalChannelResponseMode = Field(
+        description="Default response mode copied to new External Channel bindings"
+    )
     lifecycle_status: AgentLifecycleStatus = Field(
         description="Durable lifecycle admission state"
     )
@@ -102,6 +109,9 @@ class AgentCreate(BaseModel):
     )
     system_prompt: str | None = Field(default=None, description="System prompt")
     enabled: bool = Field(default=True, description="Enabled flag")
+    external_channel_default_response_mode: ExternalChannelResponseMode = Field(
+        description="Default response mode copied to new External Channel bindings"
+    )
     type: AgentType = Field(default=AgentType.PUBLIC, description="Visibility scope")
     runtime_profile_id: str | None = Field(
         description="Selected Workspace Runtime Profile ID"

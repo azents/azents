@@ -18,6 +18,7 @@ from azents.core.enums import (
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
     ExternalChannelProvider,
+    ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
@@ -1072,6 +1073,7 @@ class ExternalChannelManagementRepository:
                     id=binding.id,
                     agent_session_id=binding.agent_session_id,
                     provider=connection.provider,
+                    response_mode=binding.response_mode,
                     resource_type=resource.resource_type.value,
                     resource_label=_resource_label(resource.labels, binding.id),
                     connected_at=binding.connected_at,
@@ -1087,6 +1089,38 @@ class ExternalChannelManagementRepository:
                 )
             )
         return result
+
+    async def update_binding_response_mode(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        agent_session_id: str,
+        binding_id: str,
+        response_mode: ExternalChannelResponseMode,
+    ) -> bool:
+        """Update one connected binding owned by the requested Agent Session."""
+        binding = await session.scalar(
+            sa.select(RDBExternalChannelBinding)
+            .join(
+                RDBAgentSession,
+                RDBAgentSession.id == RDBExternalChannelBinding.agent_session_id,
+            )
+            .where(
+                RDBExternalChannelBinding.id == binding_id,
+                RDBExternalChannelBinding.agent_session_id == agent_session_id,
+                RDBExternalChannelBinding.disconnected_at.is_(None),
+                RDBAgentSession.workspace_id == workspace_id,
+                RDBAgentSession.agent_id == agent_id,
+            )
+            .with_for_update()
+        )
+        if binding is None:
+            return False
+        binding.response_mode = response_mode
+        await session.flush()
+        return True
 
     async def get_latest_work_progress_delivery(
         self,

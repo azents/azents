@@ -258,6 +258,7 @@ class ExternalChannelAccessService:
                     resource_id=request.resource_id,
                     route_id=request.route_id,
                     agent_session_id=agent_session_id,
+                    response_mode=agent.external_channel_default_response_mode,
                     disconnected_at=None,
                     disconnect_reason=None,
                 ),

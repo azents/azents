@@ -9,6 +9,7 @@ from azents.core.agent import (
     DEFAULT_MAIN_MODEL_OPTION_LABEL,
     SelectableModelOption,
 )
+from azents.core.enums import ExternalChannelResponseMode
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
@@ -43,6 +44,9 @@ def _agent_create(*, tool_search_enabled: bool = True) -> AgentCreate:
         main_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
         lightweight_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
         runtime_profile_id=None,
+        external_channel_default_response_mode=(
+            ExternalChannelResponseMode.ALL_MESSAGES
+        ),
         tool_search_enabled=tool_search_enabled,
     )
 

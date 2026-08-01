@@ -51,7 +51,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-08-01
-spec_version: 26
+spec_version: 27
 ---
 
 # External Channel Provider Ingress
@@ -225,8 +225,12 @@ the canonical message source nor a durable queue item.
    use owner-token fencing; Redis unavailability is a retryable failure and never
    switches implicitly to memory.
 2. A short preparation transaction revalidates ingress authority, creates or reads the
-   PostgreSQL conversation position, resolves existing binding/selector/access state, and
-   returns the exclusive provider-history start position. It performs no provider I/O.
+   PostgreSQL conversation position, and resolves the resource and connected binding.
+   An ordinary non-invocation stops here when no binding exists or when the connected
+   binding is `mention_only`; this creates no principal, selector, access request,
+   mailbox input, wake, provider control, or position advance. Other requests resolve
+   the remaining route/selector/access state and return the exclusive provider-history
+   start position. Preparation performs no provider I/O.
 3. The provider adapter reads an exclusive-start, inclusive-trigger history range
    outside any database transaction. It retains the newest 20 eligible visible
    messages and records one leading omission reminder when earlier eligible context
@@ -235,12 +239,14 @@ the canonical message source nor a durable queue item.
    Slack display-name and permalink enrichment is optional and starts only while a
    fixed reserve remains for durable acceptance and wake dispatch.
 4. A short admission transaction locks and revalidates the same authority,
-   conversation position, active resource, route/binding/selector, and access
-   boundary. It creates or reuses the connected binding, real root Session, initial
-   Channel Work, deterministic canonical mailbox input, and deterministic joined-
-   presence and progress delivery intents. The same transaction marks the Session
-   running, initializes thread position, and compare-and-set advances the conversation
-   position.
+   conversation position, active resource, current connected binding response mode,
+   route/binding/selector, and access boundary. A mode change to `mention_only` during
+   provider-history I/O discards the fetched range without side effects or position
+   advancement. An admitted request creates or reuses the connected binding, real root
+   Session, initial Channel Work, deterministic canonical mailbox input, and
+   deterministic joined-presence and progress delivery intents. The same transaction
+   marks the Session running, initializes thread position, and compare-and-set advances
+   the conversation position.
    PostgreSQL conversation position is the sole duplicate-prevention and ordering
    authority; a mismatch restarts provider-history preparation.
 5. After commit, the service claims the pending mailbox item and sends routing-only
@@ -258,6 +264,14 @@ interaction-owned typed selection boundary. Empty, removed, stale, or ambiguous 
 back to an arbitrary Agent. An already-granted first invocation snapshots the Agent's
 current automatic Project policy through the shared root Session creation boundary;
 an existing binding keeps its prior snapshot.
+
+The shared response predicate is provider-neutral: explicit invocations proceed in
+either mode; an ordinary message proceeds only for an existing connected
+`all_messages` binding. An unbound or disconnected conversation always requires a new
+explicit invocation. Ignored `mention_only` messages leave the conversation position
+unchanged, so a later eligible mention can include them through the existing bounded
+provider-history range. Already committed mailbox input, wake, Channel Work, or
+AgentRun state is never cancelled or reclassified by a later mode change.
 
 Restricted access persists the trigger source plus immutable conversation-position,
 range-start, and trigger-position replay authority and commits an approval-control
@@ -336,6 +350,10 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-01** (spec_version 27) — Added the shared binding response-mode
+  predicate at preparation and final admission, preserving ignored messages as later
+  bounded context without provider-history I/O, mailbox input, wake, or position
+  advancement.
 - **2026-08-01** (spec_version 26) — Replaced the initial button-only Session link
   with a joined-presence control, added idempotent App-uninstall leave presence, and
   preserved independent post-commit delivery.

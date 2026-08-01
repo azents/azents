@@ -16,6 +16,7 @@ from azents.core.enums import (
     ExternalChannelAccessRequestStatus,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
+    ExternalChannelResponseMode,
 )
 from azents.services.external_channel.access import ExternalChannelAccessService
 from azents.services.external_channel.ingestion import (
@@ -120,6 +121,9 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
             id="agent-1",
             workspace_id="workspace-secret",
             lifecycle_status=AgentLifecycleStatus.ACTIVE,
+            external_channel_default_response_mode=(
+                ExternalChannelResponseMode.MENTION_ONLY
+            ),
         )
     )
     root_creation = MagicMock()
@@ -172,3 +176,5 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
     assert "channel-secret" not in caplog.text
     assert "principal-secret" not in caplog.text
     assert "session-secret" not in caplog.text
+    created_binding = repository.create_binding_idempotent.await_args.args[1]
+    assert created_binding.response_mode is ExternalChannelResponseMode.MENTION_ONLY

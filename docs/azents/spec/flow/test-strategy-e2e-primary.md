@@ -23,8 +23,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-07-31
-spec_version: 16
+last_verified_at: 2026-08-01
+spec_version: 17
 ---
 
 # E2E Primary Test Strategy
@@ -127,7 +127,11 @@ Always-on required CI does not depend on external credentials.
   Discord HTTP interactions, and Discord Gateway synchronous admission; durable admission before acknowledgement;
   SDK-owned Slack endpoint replacement; Discord Identify-to-Resume recovery; eager or
   reused thread targeting; bound continuation; mixed-author bounded history; duplicate
-  convergence; access replay; and content-free evidence. Slack Socket and Discord
+  convergence; access replay; Agent default and binding response-mode management;
+  Slack `mention_only` early ignore without provider-history I/O; retained context on
+  a later mention; `all_messages` continuation after a connected binding edit; Discord
+  creation-time default copy; disconnected binding mutation rejection; and
+  content-free evidence. Slack Socket and Discord
   Gateway journeys start the same provider-neutral External Channel gateway fixture,
   while the Agent Worker fixture remains responsible only for Session execution.
 - Backend contract tests run both independent in-memory conversation locks and two
@@ -181,6 +185,10 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-08-01** — v17. Added public-API and Web Surface verification for Agent and
+  binding response modes, including Slack mention gating/context preservation,
+  all-messages continuation, Discord creation-time copy, and disconnected mutation
+  rejection.
 - **2026-07-31** — v16. Allowed fake-provider evidence to retain only the canonical
   relative Azents Session route needed to verify provider links against public
   Session list/detail projections.

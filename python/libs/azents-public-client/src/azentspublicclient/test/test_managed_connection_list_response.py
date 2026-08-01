@@ -79,7 +79,8 @@ class TestManagedConnectionListResponse(unittest.TestCase):
                         generation = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         active_agent_count = 56, 
                         configured_default_count = 56, )
-                    ]
+                    ],
+                default_response_mode = 'mention_only'
             )
         else:
             return ManagedConnectionListResponse(
@@ -128,6 +129,7 @@ class TestManagedConnectionListResponse(unittest.TestCase):
                         active_agent_count = 56, 
                         configured_default_count = 56, )
                     ],
+                default_response_mode = 'mention_only',
         )
         """
 

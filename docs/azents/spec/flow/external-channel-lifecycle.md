@@ -31,7 +31,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-01
-spec_version: 26
+spec_version: 27
 ---
 
 # External Channel Lifecycle
@@ -46,6 +46,12 @@ Provider conversation positions and already projected AgentSession history remai
 The timestamp is the only binding connectedness authority; no lifecycle path clears
 it or reactivates history. Repeating a manual binding disconnect does not create a
 second leave-presence control.
+
+Replacing a connected binding's concrete response mode preserves its binding,
+Session, work, delivery, and conversation-position lifecycle state. The management
+boundary scopes the mutation to the requested Workspace, Agent, Session, and connected
+binding. Once `disconnected_at` is set, the retained final mode is read-only and the
+same mutation returns the not-found-shaped management result.
 
 Disconnecting a connection accepts every lifecycle and credential state. It
 terminalizes the connection, terminates owned active resources/bindings/work, commits
@@ -236,6 +242,9 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-08-01** (spec_version 27) — Added connected-only binding response-mode
+  replacement as a lifecycle-preserving management transition and retained the final
+  mode as read-only terminal history.
 - **2026-08-01** (spec_version 26) — Added one durable leave-presence control to every
   binding termination path, including manual disconnect, route or connection removal,
   Session archive, Agent decommission, and authenticated App uninstall. Terminal

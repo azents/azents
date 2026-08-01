@@ -27,6 +27,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
+    ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
     ExternalChannelTransport,
@@ -81,6 +82,12 @@ external_channel_app_mode_enum = ENUM(
 external_channel_route_mode_enum = ENUM(
     ExternalChannelRouteMode,
     name="external_channel_route_mode",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_response_mode_enum = ENUM(
+    ExternalChannelResponseMode,
+    name="external_channel_response_mode",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -1080,6 +1087,11 @@ class RDBExternalChannelBinding(RDBModel):
         sa.String(32),
         sa.ForeignKey("agent_sessions.id", ondelete="RESTRICT"),
         nullable=False,
+    )
+    response_mode: Mapped[ExternalChannelResponseMode] = mapped_column(
+        external_channel_response_mode_enum,
+        nullable=False,
+        server_default=ExternalChannelResponseMode.ALL_MESSAGES.value,
     )
     connected_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,

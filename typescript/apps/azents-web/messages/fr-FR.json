@@ -1027,6 +1027,20 @@
       "externalChannels": {
         "title": "Canaux externes",
         "description": "Gérez les connexions Slack et Discord dédiées et les participants autorisés à appeler cet agent.",
+        "defaultResponseModeTitle": "Mode de réponse par défaut",
+        "defaultResponseModeDescription": "Cette valeur est copiée uniquement dans les nouvelles conversations connectées. Les conversations existantes conservent leur mode.",
+        "defaultResponseModeSaved": "Mode de réponse par défaut enregistré.",
+        "saveResponseMode": "Enregistrer",
+        "responseMode": {
+          "all_messages": {
+            "label": "Tous les messages admissibles",
+            "description": "Continuez à participer lorsque les personnes admissibles envoient des messages ordinaires."
+          },
+          "mention_only": {
+            "label": "Mentions uniquement",
+            "description": "Conservez les messages ordinaires comme contexte jusqu’à ce qu’une personne mentionne explicitement l’agent."
+          }
+        },
         "addConnection": "Connecter Slack",
         "connectionsTitle": "Connexions",
         "emptyConnectionsTitle": "Aucune connexion de canal externe",
@@ -1190,6 +1204,15 @@
       "sessionChannels": {
         "title": "Canaux",
         "description": "Inspectez les liaisons externes, la projection du travail, les livraisons et les accès conservés.",
+        "responseModeTitle": "Mode de réponse",
+        "responseModeLabel": "Messages qui déclenchent cet agent",
+        "responseModeDescription": "Ce réglage s’applique aux futurs messages de cette conversation connectée.",
+        "responseModeReadOnlyDescription": "Le mode enregistré est conservé pour cette conversation déconnectée ou archivée.",
+        "saveResponseMode": "Enregistrer",
+        "responseMode": {
+          "all_messages": "Tous les messages admissibles",
+          "mention_only": "Mentions uniquement"
+        },
         "archivedTitle": "Session archivée",
         "archivedDescription": "Les canaux externes ont été définitivement déconnectés lors de l’archivage. Cette vue est en lecture seule.",
         "retentionUnlimited": "Conservation : illimitée",

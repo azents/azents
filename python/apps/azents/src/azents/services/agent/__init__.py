@@ -21,7 +21,11 @@ from azents.core.agent import (
 )
 from azents.core.config import Config
 from azents.core.deps import get_config
-from azents.core.enums import AgentType, WorkspaceUserRole
+from azents.core.enums import (
+    AgentType,
+    ExternalChannelResponseMode,
+    WorkspaceUserRole,
+)
 from azents.core.llm_mapping import to_runtime_model
 from azents.core.runtime_profile import RuntimeReconcileSourceKind
 from azents.core.s3.deps import get_s3_service
@@ -384,6 +388,9 @@ class AgentService:
             model_parameters=create.model_parameters,
             system_prompt=create.system_prompt,
             enabled=create.enabled,
+            external_channel_default_response_mode=(
+                ExternalChannelResponseMode.ALL_MESSAGES
+            ),
             type=create.type,
             runtime_profile_id=None,
             shell_enabled=create.shell_enabled,

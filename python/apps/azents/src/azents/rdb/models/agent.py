@@ -12,7 +12,11 @@ from azents.core.agent import (
     DEFAULT_SUBAGENT_MAX_DEPTH,
     DEFAULT_SUBAGENT_MAX_SUBAGENTS,
 )
-from azents.core.enums import AgentLifecycleStatus, AgentType
+from azents.core.enums import (
+    AgentLifecycleStatus,
+    AgentType,
+    ExternalChannelResponseMode,
+)
 from azents.rdb.models.base import RDBModel
 from azents.rdb.types.datetime import TimeZoneDateTime
 
@@ -31,6 +35,12 @@ agent_type_enum = ENUM(
 agent_lifecycle_status_enum = ENUM(
     AgentLifecycleStatus,
     name="agent_lifecycle_status",
+    create_type=False,
+    values_callable=_agent_type_values,
+)
+external_channel_response_mode_enum = ENUM(
+    ExternalChannelResponseMode,
+    name="external_channel_response_mode",
     create_type=False,
     values_callable=_agent_type_values,
 )
@@ -125,6 +135,14 @@ class RDBAgent(RDBModel):
         sa.Text, nullable=True, default=None
     )
     enabled: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)
+    external_channel_default_response_mode: Mapped[ExternalChannelResponseMode] = (
+        mapped_column(
+            external_channel_response_mode_enum,
+            nullable=False,
+            default=ExternalChannelResponseMode.ALL_MESSAGES,
+            server_default=ExternalChannelResponseMode.ALL_MESSAGES.value,
+        )
+    )
     lifecycle_status: Mapped[AgentLifecycleStatus] = mapped_column(
         agent_lifecycle_status_enum,
         nullable=False,

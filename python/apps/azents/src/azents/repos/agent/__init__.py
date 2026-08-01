@@ -11,7 +11,11 @@ from azents.core.agent import (
     SelectableModelOption,
     SubagentSettings,
 )
-from azents.core.enums import AgentLifecycleStatus, AgentType
+from azents.core.enums import (
+    AgentLifecycleStatus,
+    AgentType,
+    ExternalChannelResponseMode,
+)
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_admin import RDBAgentAdmin
 from azents.rdb.models.agent_automatic_project_setting import (
@@ -66,6 +70,9 @@ class AgentRepository:
             model_parameters=params_dict,
             system_prompt=create.system_prompt,
             enabled=create.enabled,
+            external_channel_default_response_mode=(
+                create.external_channel_default_response_mode
+            ),
             type=create.type,
             runtime_profile_id=create.runtime_profile_id,
             shell_enabled=create.shell_enabled,
@@ -260,6 +267,24 @@ class AgentRepository:
         await session.flush()
         return self._build_row(rdb_agent) if rdb_agent is not None else None
 
+    async def update_external_channel_default_response_mode(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        response_mode: ExternalChannelResponseMode,
+    ) -> Agent | None:
+        """Replace the default copied to subsequently created channel bindings."""
+        result = await session.execute(
+            sa.update(RDBAgent)
+            .where(RDBAgent.id == agent_id)
+            .values(external_channel_default_response_mode=response_mode)
+            .returning(RDBAgent)
+        )
+        rdb_agent = result.scalar_one_or_none()
+        await session.flush()
+        return self._build_row(rdb_agent) if rdb_agent is not None else None
+
     async def mark_decommissioning(
         self,
         session: AsyncSession,
@@ -314,6 +339,9 @@ class AgentRepository:
             model_parameters=model_parameters,
             system_prompt=rdb.system_prompt,
             enabled=rdb.enabled,
+            external_channel_default_response_mode=(
+                rdb.external_channel_default_response_mode
+            ),
             lifecycle_status=rdb.lifecycle_status,
             type=rdb.type,
             runtime_profile_id=rdb.runtime_profile_id,

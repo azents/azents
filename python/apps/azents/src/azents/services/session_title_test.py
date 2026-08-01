@@ -23,6 +23,7 @@ from azents.core.enums import (
     AgentSessionTitleSource,
     AgentType,
     EventKind,
+    ExternalChannelResponseMode,
     LLMModelDeveloper,
     LLMProvider,
 )
@@ -505,6 +506,7 @@ class _AgentRepository:
             main_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
             lightweight_model_label=DEFAULT_MAIN_MODEL_OPTION_LABEL,
             tool_search_enabled=False,
+            external_channel_default_response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
             auto_archive_ttl_days=30,
             enabled=True,
             lifecycle_status=AgentLifecycleStatus.ACTIVE,
