@@ -312,9 +312,12 @@ function BindingPanel({
               <Badge color={connected ? "green" : "gray"} variant="light">
                 {t(connected ? "connected" : "disconnected")}
               </Badge>
+              <Badge color="blue" variant="outline">
+                {t(`conversationLocation.${binding.conversation_location}`)}
+              </Badge>
             </Group>
             <Text size="sm" c="dimmed" mt={4}>
-              {binding.provider} · {binding.resource_type}
+              {binding.provider} · {t(`resourceType.${binding.resource_type}`)}
             </Text>
           </Box>
           <Button

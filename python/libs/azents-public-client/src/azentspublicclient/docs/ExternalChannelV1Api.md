@@ -225,7 +225,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **external_channel_v1_clear_multi_discord_channel_default**
-> external_channel_v1_clear_multi_discord_channel_default(connection_id, provider_channel_id, handle, generation_fence_request)
+> ManagedChannelDefaultMutation external_channel_v1_clear_multi_discord_channel_default(connection_id, provider_channel_id, handle, generation_fence_request)
 
 Clear Multi Discord Channel Default
 
@@ -238,6 +238,7 @@ Generation-fence clearing one active Multi App channel default.
 ```python
 import azentspublicclient
 from azentspublicclient.models.generation_fence_request import GenerationFenceRequest
+from azentspublicclient.models.managed_channel_default_mutation import ManagedChannelDefaultMutation
 from azentspublicclient.rest import ApiException
 from pprint import pprint
 
@@ -268,7 +269,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
     try:
         # Clear Multi Discord Channel Default
-        api_instance.external_channel_v1_clear_multi_discord_channel_default(connection_id, provider_channel_id, handle, generation_fence_request)
+        api_response = api_instance.external_channel_v1_clear_multi_discord_channel_default(connection_id, provider_channel_id, handle, generation_fence_request)
+        print("The response of ExternalChannelV1Api->external_channel_v1_clear_multi_discord_channel_default:\n")
+        pprint(api_response)
     except Exception as e:
         print("Exception when calling ExternalChannelV1Api->external_channel_v1_clear_multi_discord_channel_default: %s\n" % e)
 ```
@@ -287,7 +290,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-void (empty response body)
+[**ManagedChannelDefaultMutation**](ManagedChannelDefaultMutation.md)
 
 ### Authorization
 
@@ -302,13 +305,13 @@ void (empty response body)
 
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-**204** | Successful Response |  -  |
+**200** | Successful Response |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **external_channel_v1_clear_multi_slack_channel_default**
-> external_channel_v1_clear_multi_slack_channel_default(connection_id, provider_channel_id, handle, generation_fence_request)
+> ManagedChannelDefaultMutation external_channel_v1_clear_multi_slack_channel_default(connection_id, provider_channel_id, handle, generation_fence_request)
 
 Clear Multi Slack Channel Default
 
@@ -321,6 +324,7 @@ Generation-fence clearing one active Multi App channel default.
 ```python
 import azentspublicclient
 from azentspublicclient.models.generation_fence_request import GenerationFenceRequest
+from azentspublicclient.models.managed_channel_default_mutation import ManagedChannelDefaultMutation
 from azentspublicclient.rest import ApiException
 from pprint import pprint
 
@@ -351,7 +355,9 @@ with azentspublicclient.ApiClient(configuration) as api_client:
 
     try:
         # Clear Multi Slack Channel Default
-        api_instance.external_channel_v1_clear_multi_slack_channel_default(connection_id, provider_channel_id, handle, generation_fence_request)
+        api_response = api_instance.external_channel_v1_clear_multi_slack_channel_default(connection_id, provider_channel_id, handle, generation_fence_request)
+        print("The response of ExternalChannelV1Api->external_channel_v1_clear_multi_slack_channel_default:\n")
+        pprint(api_response)
     except Exception as e:
         print("Exception when calling ExternalChannelV1Api->external_channel_v1_clear_multi_slack_channel_default: %s\n" % e)
 ```
@@ -370,7 +376,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-void (empty response body)
+[**ManagedChannelDefaultMutation**](ManagedChannelDefaultMutation.md)
 
 ### Authorization
 
@@ -385,7 +391,7 @@ void (empty response body)
 
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
-**204** | Successful Response |  -  |
+**200** | Successful Response |  -  |
 **422** | Validation Error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
@@ -2797,7 +2803,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **external_channel_v1_replace_multi_discord_channel_default**
-> ManagedChannelDefault external_channel_v1_replace_multi_discord_channel_default(connection_id, provider_channel_id, handle, multi_channel_default_request)
+> ManagedChannelDefaultMutation external_channel_v1_replace_multi_discord_channel_default(connection_id, provider_channel_id, handle, multi_channel_default_request)
 
 Replace Multi Discord Channel Default
 
@@ -2809,7 +2815,7 @@ Generation-fence replacement of one Multi App channel default.
 
 ```python
 import azentspublicclient
-from azentspublicclient.models.managed_channel_default import ManagedChannelDefault
+from azentspublicclient.models.managed_channel_default_mutation import ManagedChannelDefaultMutation
 from azentspublicclient.models.multi_channel_default_request import MultiChannelDefaultRequest
 from azentspublicclient.rest import ApiException
 from pprint import pprint
@@ -2862,7 +2868,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**ManagedChannelDefault**](ManagedChannelDefault.md)
+[**ManagedChannelDefaultMutation**](ManagedChannelDefaultMutation.md)
 
 ### Authorization
 
@@ -2883,7 +2889,7 @@ Name | Type | Description  | Notes
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
 # **external_channel_v1_replace_multi_slack_channel_default**
-> ManagedChannelDefault external_channel_v1_replace_multi_slack_channel_default(connection_id, provider_channel_id, handle, multi_channel_default_request)
+> ManagedChannelDefaultMutation external_channel_v1_replace_multi_slack_channel_default(connection_id, provider_channel_id, handle, multi_channel_default_request)
 
 Replace Multi Slack Channel Default
 
@@ -2895,7 +2901,7 @@ Generation-fence replacement of one Multi App channel default.
 
 ```python
 import azentspublicclient
-from azentspublicclient.models.managed_channel_default import ManagedChannelDefault
+from azentspublicclient.models.managed_channel_default_mutation import ManagedChannelDefaultMutation
 from azentspublicclient.models.multi_channel_default_request import MultiChannelDefaultRequest
 from azentspublicclient.rest import ApiException
 from pprint import pprint
@@ -2948,7 +2954,7 @@ Name | Type | Description  | Notes
 
 ### Return type
 
-[**ManagedChannelDefault**](ManagedChannelDefault.md)
+[**ManagedChannelDefaultMutation**](ManagedChannelDefaultMutation.md)
 
 ### Authorization
 

@@ -34,6 +34,7 @@ from azents.core.external_channel_session_presence import (
 )
 from azents.core.slack_external_channel_progress import (
     render_slack_session_presence,
+    render_slack_settings_available,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -66,6 +67,7 @@ from azents.services.external_channel.discord_delivery import (
 )
 from azents.services.external_channel.discord_presentation import (
     render_discord_session_presence,
+    render_discord_settings_available,
 )
 from azents.services.external_channel.discord_settings_scope import (
     build_discord_binding_settings_open_custom_id,
@@ -112,6 +114,14 @@ class _SessionPresenceContext:
     agent_name: str
     session_url: str
     state: ExternalChannelSessionPresenceState
+
+
+@dataclass(frozen=True)
+class _SessionNavigationContext:
+    """Validated Session navigation and current Agent identity."""
+
+    agent_name: str
+    session_url: str
 
 
 def get_slack_delivery_client(
@@ -849,6 +859,40 @@ class ExternalChannelActionService:
                         components=control.components,
                         embeds=control.embeds,
                     )
+                if (
+                    target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+                    and payload.get("control_kind") == "binding_settings_available"
+                ):
+                    context = _session_navigation_context(
+                        target,
+                        web_url=self.config.web_url,
+                    )
+                    if (
+                        context is None
+                        or files
+                        or not isinstance(target.binding_id, str)
+                        or not target.binding_id
+                    ):
+                        return _discord_invalid_payload()
+                    control = render_discord_settings_available(
+                        agent_name=context.agent_name,
+                        session_url=context.session_url,
+                        settings_custom_id=(
+                            build_discord_binding_settings_open_custom_id(
+                                secret=self.config.auth.jwt.secret_key,
+                                binding_id=target.binding_id,
+                            )
+                        ),
+                    )
+                    return await self.discord_client.create_message(
+                        bot_token=bot_token,
+                        guild_id=guild_id,
+                        channel_id=delivery_channel_id,
+                        content=control.text,
+                        delivery_attempt_id=target.delivery_attempt_id,
+                        components=control.components,
+                        embeds=control.embeds,
+                    )
                 text = payload.get("text")
                 if not isinstance(text, str):
                     return _discord_invalid_payload()
@@ -1157,6 +1201,38 @@ class ExternalChannelActionService:
                         and target.binding_id is not None
                     )
                     else None
+                ),
+            )
+            return await self.slack_client.post_blocks(
+                bot_token=bot_token,
+                tenant_id=tenant_id,
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text=control.text,
+                blocks=control.blocks,
+                icon_url=None,
+            )
+        if control_kind == "binding_settings_available":
+            context = _session_navigation_context(
+                target,
+                web_url=self.config.web_url,
+            )
+            if (
+                context is None
+                or target.resource_id is None
+                or target.binding_id is None
+            ):
+                return _invalid_payload()
+            control = render_slack_settings_available(
+                agent_name=context.agent_name,
+                session_url=context.session_url,
+                settings_action_id=SLACK_SETTINGS_OPEN_ACTION_ID,
+                settings_action_value=build_slack_settings_locator(
+                    secret=self.config.auth.jwt.secret_key,
+                    connection_id=target.connection_id,
+                    provider_parent_channel_id=channel_id,
+                    resource_id=target.resource_id,
+                    binding_id=target.binding_id,
                 ),
             )
             return await self.slack_client.post_blocks(
@@ -1682,6 +1758,22 @@ def _session_presence_context(
             state = "left"
         case _:
             return None
+    context = _session_navigation_context(target, web_url=web_url)
+    if context is None:
+        return None
+    return _SessionPresenceContext(
+        agent_name=context.agent_name,
+        session_url=context.session_url,
+        state=state,
+    )
+
+
+def _session_navigation_context(
+    target: ChannelDeliveryTarget,
+    *,
+    web_url: str,
+) -> _SessionNavigationContext | None:
+    """Resolve one current Session URL without trusting persisted display content."""
     if (
         not isinstance(target.agent_name, str)
         or not target.agent_name
@@ -1701,10 +1793,9 @@ def _session_presence_context(
     )
     if session_url is None:
         return None
-    return _SessionPresenceContext(
+    return _SessionNavigationContext(
         agent_name=target.agent_name,
         session_url=session_url,
-        state=state,
     )
 
 

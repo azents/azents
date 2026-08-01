@@ -831,7 +831,10 @@ class ExternalChannelMultiRouteImpact(_Record):
     route_id: str
     generation: datetime.datetime
     active_default_count: int
+    active_participation_setting_count: int
+    nonterminal_setup_claim_count: int
     active_binding_count: int
+    connected_parent_binding_count: int
     bound_resource_count: int
     open_admission_count: int
     pending_access_request_count: int
@@ -846,7 +849,10 @@ class ExternalChannelMultiConnectionImpact(_Record):
     generation: datetime.datetime
     active_route_count: int
     active_default_count: int
+    active_participation_setting_count: int
+    nonterminal_setup_claim_count: int
     active_binding_count: int
+    connected_parent_binding_count: int
     bound_resource_count: int
     open_admission_count: int
     pending_access_request_count: int
@@ -866,6 +872,8 @@ class ExternalChannelMultiConnectionDisconnect(_Record):
 
     disconnected_route_count: int
     invalidated_default_count: int
+    invalidated_participation_setting_count: int
+    terminated_setup_claim_count: int
     expired_admission_count: int
     expired_access_request_count: int
     unavailable_resource_count: int

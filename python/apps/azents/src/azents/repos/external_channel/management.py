@@ -1,6 +1,7 @@
 """External Channel management queries and lifecycle mutations."""
 
 import datetime
+from dataclasses import dataclass
 from typing import Literal
 
 import sqlalchemy as sa
@@ -12,15 +13,18 @@ from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
+    ExternalChannelConversationLocation,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
+    ExternalChannelParticipationSettingStatus,
     ExternalChannelProvider,
     ExternalChannelResourceType,
     ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
+    ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
@@ -40,8 +44,10 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelConnection,
     RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelInteraction,
+    RDBExternalChannelParticipationSetting,
     RDBExternalChannelPrincipal,
     RDBExternalChannelResource,
+    RDBExternalChannelSetupClaim,
     RDBExternalChannelWork,
 )
 from azents.repos.external_channel.management_data import (
@@ -59,6 +65,28 @@ from azents.repos.external_channel.management_data import (
     ManagedWorkSource,
     ManagedWorkTask,
 )
+
+
+@dataclass(frozen=True)
+class ExternalChannelChannelDefaultTransition:
+    """Committed selected-Agent transition and independent cleanup intents."""
+
+    channel_default: ManagedChannelDefault | None
+    changed: bool
+    invalidated_setting_count: int
+    terminated_setup_claim_count: int
+    expired_interaction_count: int
+    disconnected_parent_binding_count: int
+    cleanup_intent_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ExternalChannelBindingMutationScope:
+    """Stable provider conversation scope required before binding mutation."""
+
+    connection_id: str
+    provider_parent_channel_id: str
+    resource_type: ExternalChannelResourceType
 
 
 class ExternalChannelManagementRepository:
@@ -660,7 +688,7 @@ class ExternalChannelManagementRepository:
         route_id: str,
         configured_by_user_id: str,
         now: datetime.datetime,
-    ) -> ManagedChannelDefault | None:
+    ) -> ExternalChannelChannelDefaultTransition | None:
         """Replace one active channel default after validating its Multi route."""
         connection = await self.get_multi_connection(
             session,
@@ -707,6 +735,25 @@ class ExternalChannelManagementRepository:
             )
             .with_for_update()
         )
+        if existing is not None and existing.route_id == route.id:
+            return ExternalChannelChannelDefaultTransition(
+                channel_default=_channel_default(existing, route, agent.name),
+                changed=False,
+                invalidated_setting_count=0,
+                terminated_setup_claim_count=0,
+                expired_interaction_count=0,
+                disconnected_parent_binding_count=0,
+                cleanup_intent_ids=(),
+            )
+        transition = await self._terminalize_channel_participation(
+            session,
+            connection_id=connection.id,
+            provider_parent_channel_id=provider_channel_id,
+            old_route_id=None if existing is None else existing.route_id,
+            now=now,
+            reason="selected_agent_replaced",
+            claim_status=ExternalChannelSetupClaimStatus.INVALIDATED,
+        )
         if existing is not None:
             existing.status = ExternalChannelChannelDefaultStatus.INVALIDATED
             existing.invalidated_at = now
@@ -727,7 +774,17 @@ class ExternalChannelManagementRepository:
             channel_default,
             attribute_names=["created_at", "updated_at"],
         )
-        return _channel_default(channel_default, route, agent.name)
+        return ExternalChannelChannelDefaultTransition(
+            channel_default=_channel_default(channel_default, route, agent.name),
+            changed=True,
+            invalidated_setting_count=transition.invalidated_setting_count,
+            terminated_setup_claim_count=transition.terminated_setup_claim_count,
+            expired_interaction_count=transition.expired_interaction_count,
+            disconnected_parent_binding_count=(
+                transition.disconnected_parent_binding_count
+            ),
+            cleanup_intent_ids=transition.cleanup_intent_ids,
+        )
 
     async def clear_multi_channel_default(
         self,
@@ -738,8 +795,8 @@ class ExternalChannelManagementRepository:
         provider: ExternalChannelProvider,
         provider_channel_id: str,
         now: datetime.datetime,
-    ) -> bool | None:
-        """Invalidate one active default; false means the channel had no default."""
+    ) -> ExternalChannelChannelDefaultTransition | None:
+        """Invalidate one active default and all selected-Agent parent state."""
         connection = await self.get_multi_connection(
             session,
             workspace_id=workspace_id,
@@ -761,12 +818,144 @@ class ExternalChannelManagementRepository:
             .with_for_update()
         )
         if channel_default is None:
-            return False
+            return None
+        transition = await self._terminalize_channel_participation(
+            session,
+            connection_id=connection.id,
+            provider_parent_channel_id=provider_channel_id,
+            old_route_id=channel_default.route_id,
+            now=now,
+            reason="selected_agent_cleared",
+            claim_status=ExternalChannelSetupClaimStatus.EXPIRED,
+        )
         channel_default.status = ExternalChannelChannelDefaultStatus.INVALIDATED
         channel_default.invalidated_at = now
         channel_default.invalidation_reason = "cleared"
         await session.flush()
-        return True
+        return transition
+
+    async def _terminalize_channel_participation(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        provider_parent_channel_id: str,
+        old_route_id: str | None,
+        now: datetime.datetime,
+        reason: str,
+        claim_status: ExternalChannelSetupClaimStatus,
+    ) -> ExternalChannelChannelDefaultTransition:
+        """Terminalize only selected-Agent parent state in canonical lock order."""
+        setting = await session.scalar(
+            sa.select(RDBExternalChannelParticipationSetting)
+            .where(
+                RDBExternalChannelParticipationSetting.connection_id == connection_id,
+                RDBExternalChannelParticipationSetting.provider_parent_channel_id
+                == provider_parent_channel_id,
+                RDBExternalChannelParticipationSetting.status
+                == ExternalChannelParticipationSettingStatus.ACTIVE,
+            )
+            .with_for_update()
+        )
+        claim = await session.scalar(
+            sa.select(RDBExternalChannelSetupClaim)
+            .where(
+                RDBExternalChannelSetupClaim.connection_id == connection_id,
+                RDBExternalChannelSetupClaim.provider_parent_channel_id
+                == provider_parent_channel_id,
+                RDBExternalChannelSetupClaim.status.in_(
+                    (
+                        ExternalChannelSetupClaimStatus.PENDING_AGENT,
+                        ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+                        ExternalChannelSetupClaimStatus.SELECTED,
+                    )
+                ),
+            )
+            .with_for_update()
+        )
+        interactions = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelInteraction)
+                    .where(
+                        RDBExternalChannelInteraction.connection_id == connection_id,
+                        RDBExternalChannelInteraction.status.in_(
+                            (
+                                ExternalChannelInteractionStatus.ACCEPTED,
+                                ExternalChannelInteractionStatus.PROCESSING,
+                                ExternalChannelInteractionStatus.COMPLETED,
+                            )
+                        ),
+                        RDBExternalChannelInteraction.expires_at > now,
+                        RDBExternalChannelInteraction.projection[
+                            "provider_parent_channel_id"
+                        ].as_string()
+                        == provider_parent_channel_id,
+                    )
+                    .order_by(RDBExternalChannelInteraction.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        resource = await session.scalar(
+            sa.select(RDBExternalChannelResource)
+            .where(
+                RDBExternalChannelResource.connection_id == connection_id,
+                RDBExternalChannelResource.resource_type
+                == ExternalChannelResourceType.PARENT_CHANNEL,
+                RDBExternalChannelResource.provider_resource_key
+                == provider_parent_channel_id,
+            )
+            .with_for_update()
+        )
+        binding = (
+            None
+            if resource is None or old_route_id is None
+            else await session.scalar(
+                sa.select(RDBExternalChannelBinding)
+                .where(
+                    RDBExternalChannelBinding.resource_id == resource.id,
+                    RDBExternalChannelBinding.route_id == old_route_id,
+                    RDBExternalChannelBinding.disconnected_at.is_(None),
+                )
+                .with_for_update()
+            )
+        )
+        invalidated_setting_count = 0
+        if setting is not None:
+            setting.status = ExternalChannelParticipationSettingStatus.INVALIDATED
+            setting.settings_generation += 1
+            setting.invalidated_at = now
+            setting.invalidation_reason = reason
+            invalidated_setting_count = 1
+        terminated_setup_claim_count = 0
+        if claim is not None:
+            claim.status = claim_status
+            claim.claim_generation += 1
+            terminated_setup_claim_count = 1
+        for interaction in interactions:
+            interaction.status = ExternalChannelInteractionStatus.EXPIRED
+        cleanup_intent_ids: tuple[str, ...] = ()
+        disconnected_parent_binding_count = 0
+        if resource is not None and binding is not None:
+            cleanup_intent_ids = await self._terminate_binding(
+                session,
+                binding=binding,
+                resource=resource,
+                now=now,
+                reason=reason,
+            )
+            disconnected_parent_binding_count = 1
+        await session.flush()
+        return ExternalChannelChannelDefaultTransition(
+            channel_default=None,
+            changed=True,
+            invalidated_setting_count=invalidated_setting_count,
+            terminated_setup_claim_count=terminated_setup_claim_count,
+            expired_interaction_count=len(interactions),
+            disconnected_parent_binding_count=disconnected_parent_binding_count,
+            cleanup_intent_ids=cleanup_intent_ids,
+        )
 
     async def load_multi_management_handoff(
         self,
@@ -1076,7 +1265,13 @@ class ExternalChannelManagementRepository:
                     agent_session_id=binding.agent_session_id,
                     provider=connection.provider,
                     response_mode=binding.response_mode,
-                    resource_type=resource.resource_type.value,
+                    resource_type=resource.resource_type,
+                    conversation_location=(
+                        ExternalChannelConversationLocation.CHANNEL
+                        if resource.resource_type
+                        is ExternalChannelResourceType.PARENT_CHANNEL
+                        else ExternalChannelConversationLocation.THREADS
+                    ),
                     resource_label=_resource_label(resource.labels, binding.id),
                     connected_at=binding.connected_at,
                     disconnected_at=binding.disconnected_at,
@@ -1092,6 +1287,55 @@ class ExternalChannelManagementRepository:
             )
         return result
 
+    async def get_binding_mutation_scope(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        agent_id: str,
+        agent_session_id: str,
+        binding_id: str,
+    ) -> ExternalChannelBindingMutationScope | None:
+        """Resolve the provider scope needed for a coordinated binding mutation."""
+        row = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelAgentRoute.connection_id,
+                    RDBExternalChannelResource.provider_resource_key,
+                    RDBExternalChannelResource.resource_type,
+                )
+                .join(
+                    RDBExternalChannelBinding,
+                    RDBExternalChannelBinding.route_id
+                    == RDBExternalChannelAgentRoute.id,
+                )
+                .join(
+                    RDBExternalChannelResource,
+                    RDBExternalChannelResource.id
+                    == RDBExternalChannelBinding.resource_id,
+                )
+                .join(
+                    RDBAgentSession,
+                    RDBAgentSession.id == RDBExternalChannelBinding.agent_session_id,
+                )
+                .where(
+                    RDBExternalChannelBinding.id == binding_id,
+                    RDBExternalChannelBinding.agent_session_id == agent_session_id,
+                    RDBExternalChannelBinding.disconnected_at.is_(None),
+                    RDBAgentSession.workspace_id == workspace_id,
+                    RDBAgentSession.agent_id == agent_id,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        connection_id, provider_resource_key, resource_type = row
+        return ExternalChannelBindingMutationScope(
+            connection_id=connection_id,
+            provider_parent_channel_id=provider_resource_key,
+            resource_type=resource_type,
+        )
+
     async def update_binding_response_mode(
         self,
         session: AsyncSession,
@@ -1100,26 +1344,101 @@ class ExternalChannelManagementRepository:
         agent_id: str,
         agent_session_id: str,
         binding_id: str,
+        configured_by_user_id: str,
         response_mode: ExternalChannelResponseMode,
     ) -> bool:
-        """Update one connected binding owned by the requested Agent Session."""
+        """Update a thread Binding or one parent setting and Binding atomically."""
+        snapshot = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelBinding.route_id,
+                    RDBExternalChannelBinding.resource_id,
+                    RDBExternalChannelAgentRoute.connection_id,
+                )
+                .join(
+                    RDBExternalChannelAgentRoute,
+                    RDBExternalChannelAgentRoute.id
+                    == RDBExternalChannelBinding.route_id,
+                )
+                .join(
+                    RDBAgentSession,
+                    RDBAgentSession.id == RDBExternalChannelBinding.agent_session_id,
+                )
+                .where(
+                    RDBExternalChannelBinding.id == binding_id,
+                    RDBExternalChannelBinding.agent_session_id == agent_session_id,
+                    RDBExternalChannelBinding.disconnected_at.is_(None),
+                    RDBAgentSession.workspace_id == workspace_id,
+                    RDBAgentSession.agent_id == agent_id,
+                )
+            )
+        ).one_or_none()
+        if snapshot is None:
+            return False
+        route_id, resource_id, connection_id = snapshot
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.workspace_id == workspace_id,
+            )
+            .with_for_update()
+        )
+        if connection is None:
+            return False
+        route = await session.scalar(
+            sa.select(RDBExternalChannelAgentRoute)
+            .where(
+                RDBExternalChannelAgentRoute.id == route_id,
+                RDBExternalChannelAgentRoute.connection_id == connection.id,
+            )
+            .with_for_update()
+        )
+        if route is None:
+            return False
+        resource = await session.scalar(
+            sa.select(RDBExternalChannelResource)
+            .where(
+                RDBExternalChannelResource.id == resource_id,
+                RDBExternalChannelResource.connection_id == connection.id,
+            )
+            .with_for_update()
+        )
+        if resource is None:
+            return False
         binding = await session.scalar(
             sa.select(RDBExternalChannelBinding)
-            .join(
-                RDBAgentSession,
-                RDBAgentSession.id == RDBExternalChannelBinding.agent_session_id,
-            )
             .where(
                 RDBExternalChannelBinding.id == binding_id,
+                RDBExternalChannelBinding.route_id == route.id,
+                RDBExternalChannelBinding.resource_id == resource.id,
                 RDBExternalChannelBinding.agent_session_id == agent_session_id,
                 RDBExternalChannelBinding.disconnected_at.is_(None),
-                RDBAgentSession.workspace_id == workspace_id,
-                RDBAgentSession.agent_id == agent_id,
             )
             .with_for_update()
         )
         if binding is None:
             return False
+        if resource.resource_type is ExternalChannelResourceType.PARENT_CHANNEL:
+            setting = await session.scalar(
+                sa.select(RDBExternalChannelParticipationSetting)
+                .where(
+                    RDBExternalChannelParticipationSetting.connection_id
+                    == connection.id,
+                    RDBExternalChannelParticipationSetting.provider_parent_channel_id
+                    == resource.provider_resource_key,
+                    RDBExternalChannelParticipationSetting.route_id == route.id,
+                    RDBExternalChannelParticipationSetting.status
+                    == ExternalChannelParticipationSettingStatus.ACTIVE,
+                )
+                .with_for_update()
+            )
+            if setting is None:
+                return False
+            setting.response_mode = response_mode
+            setting.settings_generation += 1
+            setting.configured_by_user_id = configured_by_user_id
+            setting.configured_by_principal_id = None
         binding.response_mode = response_mode
         await session.flush()
         return True
@@ -1782,10 +2101,6 @@ def _channel_default(
     route: RDBExternalChannelAgentRoute,
     agent_name: str | None,
 ) -> ManagedChannelDefault:
-    if channel_default.configured_by_user_id is None:
-        raise ValueError(
-            "Provider-authored channel defaults are not exposed before rollout."
-        )
     return ManagedChannelDefault(
         id=channel_default.id,
         provider_channel_id=channel_default.provider_channel_id,
@@ -1794,6 +2109,7 @@ def _channel_default(
         agent_name=agent_name,
         status=channel_default.status,
         configured_by_user_id=channel_default.configured_by_user_id,
+        configured_by_principal_id=channel_default.configured_by_principal_id,
         invalidated_at=channel_default.invalidated_at,
         invalidation_reason=channel_default.invalidation_reason,
         created_at=channel_default.created_at,

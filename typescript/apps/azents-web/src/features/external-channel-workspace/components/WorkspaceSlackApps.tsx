@@ -40,7 +40,10 @@ import type {
   DiscordMultiConnectionDraft,
   MultiConnectionDraft,
 } from "../types";
-import type { ExternalChannelTransport } from "@azents/public-client";
+import type {
+  ExternalChannelTransport,
+  ManagedChannelDefaultMutation,
+} from "@azents/public-client";
 import type { ReactElement } from "react";
 
 function statusColor(status: string): string {
@@ -289,6 +292,34 @@ function Pagination({
   );
 }
 
+function DefaultMutationAlert({
+  mutation,
+}: {
+  mutation: ManagedChannelDefaultMutation;
+}): ReactElement {
+  const t = useTranslations("workspace.integrations");
+
+  return (
+    <Alert
+      color={mutation.changed ? "green" : "blue"}
+      title={t(
+        mutation.changed
+          ? "defaultMutationChangedTitle"
+          : "defaultMutationUnchangedTitle",
+      )}
+      data-testid="channel-default-mutation-impact"
+    >
+      {t("defaultMutationImpact", {
+        settings: mutation.invalidated_participation_setting_count,
+        claims: mutation.terminated_setup_claim_count,
+        interactions: mutation.expired_interaction_count,
+        bindings: mutation.disconnected_parent_binding_count,
+        deliveries: mutation.cleanup_delivery_count,
+      })}
+    </Alert>
+  );
+}
+
 function FocusedHandoff({
   props,
 }: {
@@ -457,6 +488,9 @@ function FocusedHandoff({
               {t("setDefault")}
             </Button>
           </Group>
+          {props.defaultMutation && (
+            <DefaultMutationAlert mutation={props.defaultMutation} />
+          )}
         </Stack>
       </Paper>
     </Stack>
@@ -909,7 +943,14 @@ export function WorkspaceSlackApps(
                     : props.routeImpact
                       ? t("routeImpactDescription", {
                           defaults: props.routeImpact.active_default_count,
+                          settings:
+                            props.routeImpact
+                              .active_participation_setting_count,
+                          claims:
+                            props.routeImpact.nonterminal_setup_claim_count,
                           bindings: props.routeImpact.active_binding_count,
+                          parentBindings:
+                            props.routeImpact.connected_parent_binding_count,
                           admissions: props.routeImpact.open_admission_count,
                         })
                       : t("loadingImpact")}
@@ -950,6 +991,9 @@ export function WorkspaceSlackApps(
             <Divider />
             <Stack gap="sm">
               <Text fw={700}>{t("defaultsTitle")}</Text>
+              {props.defaultMutation && (
+                <DefaultMutationAlert mutation={props.defaultMutation} />
+              )}
               {props.canManage && !selectedConnectionIsDisconnected && (
                 <Group align="end" grow>
                   <TextInput
@@ -1080,8 +1124,17 @@ export function WorkspaceSlackApps(
                             routes: props.connectionImpact.active_route_count,
                             defaults:
                               props.connectionImpact.active_default_count,
+                            settings:
+                              props.connectionImpact
+                                .active_participation_setting_count,
+                            claims:
+                              props.connectionImpact
+                                .nonterminal_setup_claim_count,
                             bindings:
                               props.connectionImpact.active_binding_count,
+                            parentBindings:
+                              props.connectionImpact
+                                .connected_parent_binding_count,
                           })
                         : t("loadingImpact")}
                     <Group mt="sm">

@@ -1213,6 +1213,14 @@
           "all_messages": "모든 대상 메시지",
           "mention_only": "멘션만"
         },
+        "conversationLocation": {
+          "channel": "채널 대화",
+          "threads": "스레드 대화"
+        },
+        "resourceType": {
+          "parent_channel": "상위 채널",
+          "thread": "스레드"
+        },
         "archivedTitle": "보관된 세션",
         "archivedDescription": "보관 시점에 외부 채널 연결이 영구적으로 해제되었습니다. 이 화면은 읽기 전용입니다.",
         "retentionUnlimited": "보존 기간: 제한 없음",
@@ -1742,7 +1750,7 @@
       "reenable": "다시 활성화",
       "remove": "제거",
       "routeImpactTitle": "에이전트 연결 제거 영향 확인",
-      "routeImpactDescription": "채널 기본값 {defaults}개를 제거하고, 활성 연결 {bindings}개를 종료하며, 진행 중인 선택 요청 {admissions}개를 만료시킵니다.",
+      "routeImpactDescription": "채널 기본값 {defaults}개를 제거하고, 참여 설정 {settings}개를 무효화하며, 설정 요청 {claims}개를 종료하고, 연결된 상위 대화 {parentBindings}개를 포함한 활성 연결 {bindings}개를 종료하며, 진행 중인 선택 요청 {admissions}개를 만료시킵니다.",
       "loadingImpact": "현재 영향 미리보기를 불러오는 중…",
       "retry": "다시 시도",
       "confirmRemove": "에이전트 제거",
@@ -1752,6 +1760,9 @@
       "channelId": "Slack 채널 ID",
       "route": "에이전트",
       "setDefault": "기본값 설정",
+      "defaultMutationChangedTitle": "채널 선택을 업데이트했습니다",
+      "defaultMutationUnchangedTitle": "채널 선택이 이미 최신 상태입니다",
+      "defaultMutationImpact": "참여 상태 정리 결과: 설정 {settings}개 무효화, 설정 요청 {claims}개 종료, 대기 중인 제어 {interactions}개 만료, 상위 대화 {bindings}개 연결 해제, 정리 메시지 {deliveries}개 대기열 추가.",
       "channel": "채널",
       "defaultAgent": "기본 에이전트",
       "defaultStatus": "기본값 상태",
@@ -1760,7 +1771,7 @@
       "disconnectDescription": "연결을 해제하면 활성 경로, 기본값 및 연결된 Provider 대화가 제거됩니다.",
       "disconnect": "연결 해제",
       "connectionImpactTitle": "전체 연결 해제 영향 확인",
-      "connectionImpactDescription": "활성 경로 {routes}개를 연결 해제하고, 채널 기본값 {defaults}개를 무효화하며, 활성 연결 {bindings}개를 종료합니다.",
+      "connectionImpactDescription": "활성 경로 {routes}개를 연결 해제하고, 채널 기본값 {defaults}개와 참여 설정 {settings}개를 무효화하며, 설정 요청 {claims}개를 종료하고, 연결된 상위 대화 {parentBindings}개를 포함한 활성 연결 {bindings}개를 종료합니다.",
       "confirmDisconnect": "워크스페이스 App 연결 해제",
       "transport": {
         "http": "HTTP",

@@ -37,6 +37,7 @@ server:
     pullPolicy: IfNotPresent
   env:
     AZ_RUNTIME_ENV: deployed
+    AZ_EXTERNAL_CHANNEL_PARTICIPATION_ENABLED: "false"
   systemBootstrap:
     existingSecret: ""
     tokenKey: setup-token

@@ -33,14 +33,17 @@ class ExternalChannelMultiConnectionImpact(BaseModel):
     generation: datetime
     active_route_count: StrictInt
     active_default_count: StrictInt
+    active_participation_setting_count: StrictInt
+    nonterminal_setup_claim_count: StrictInt
     active_binding_count: StrictInt
+    connected_parent_binding_count: StrictInt
     bound_resource_count: StrictInt
     open_admission_count: StrictInt
     pending_access_request_count: StrictInt
     affected_defaults: List[ExternalChannelMultiImpactDefault]
     affected_bindings: List[ExternalChannelMultiImpactBinding]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["connection_id", "generation", "active_route_count", "active_default_count", "active_binding_count", "bound_resource_count", "open_admission_count", "pending_access_request_count", "affected_defaults", "affected_bindings"]
+    __properties: ClassVar[List[str]] = ["connection_id", "generation", "active_route_count", "active_default_count", "active_participation_setting_count", "nonterminal_setup_claim_count", "active_binding_count", "connected_parent_binding_count", "bound_resource_count", "open_admission_count", "pending_access_request_count", "affected_defaults", "affected_bindings"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -118,7 +121,10 @@ class ExternalChannelMultiConnectionImpact(BaseModel):
             "generation": obj.get("generation"),
             "active_route_count": obj.get("active_route_count"),
             "active_default_count": obj.get("active_default_count"),
+            "active_participation_setting_count": obj.get("active_participation_setting_count"),
+            "nonterminal_setup_claim_count": obj.get("nonterminal_setup_claim_count"),
             "active_binding_count": obj.get("active_binding_count"),
+            "connected_parent_binding_count": obj.get("connected_parent_binding_count"),
             "bound_resource_count": obj.get("bound_resource_count"),
             "open_admission_count": obj.get("open_admission_count"),
             "pending_access_request_count": obj.get("pending_access_request_count"),

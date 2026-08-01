@@ -30,6 +30,7 @@ from azents.repos.external_channel.management_data import (
     ManagedBinding,
     ManagedBlock,
     ManagedChannelDefault,
+    ManagedChannelDefaultMutation,
     ManagedConnection,
     ManagedGrant,
     ManagedMultiConnection,
@@ -593,7 +594,7 @@ async def replace_multi_slack_channel_default(
     connection_id: str,
     provider_channel_id: str,
     request_body: MultiChannelDefaultRequest,
-) -> ManagedChannelDefault:
+) -> ManagedChannelDefaultMutation:
     """Generation-fence replacement of one Multi App channel default."""
     _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
     try:
@@ -614,8 +615,7 @@ async def replace_multi_slack_channel_default(
 
 @router.delete(
     "/workspaces/{handle}/external-channels/slack/multi/{connection_id}/"
-    "channel-defaults/{provider_channel_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    "channel-defaults/{provider_channel_id}"
 )
 async def clear_multi_slack_channel_default(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
@@ -624,11 +624,11 @@ async def clear_multi_slack_channel_default(
     connection_id: str,
     provider_channel_id: str,
     request_body: GenerationFenceRequest,
-) -> None:
+) -> ManagedChannelDefaultMutation:
     """Generation-fence clearing one active Multi App channel default."""
     _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
     try:
-        await service.clear_multi_channel_default(
+        return await service.clear_multi_channel_default(
             workspace_id=member.workspace_id,
             connection_id=connection_id,
             provider=ExternalChannelProvider.SLACK,
@@ -909,7 +909,7 @@ async def replace_multi_discord_channel_default(
     connection_id: str,
     provider_channel_id: str,
     request_body: MultiChannelDefaultRequest,
-) -> ManagedChannelDefault:
+) -> ManagedChannelDefaultMutation:
     """Generation-fence replacement of one Multi App channel default."""
     _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
     try:
@@ -930,8 +930,7 @@ async def replace_multi_discord_channel_default(
 
 @router.delete(
     "/workspaces/{handle}/external-channels/discord/multi/{connection_id}/"
-    "channel-defaults/{provider_channel_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    "channel-defaults/{provider_channel_id}"
 )
 async def clear_multi_discord_channel_default(
     member: Annotated[WorkspaceMember, Depends(get_workspace_member)],
@@ -940,11 +939,11 @@ async def clear_multi_discord_channel_default(
     connection_id: str,
     provider_channel_id: str,
     request_body: GenerationFenceRequest,
-) -> None:
+) -> ManagedChannelDefaultMutation:
     """Generation-fence clearing one active Multi App channel default."""
     _require_workspace_permission(member, Permissions.EXTERNAL_CHANNELS_WRITE)
     try:
-        await service.clear_multi_channel_default(
+        return await service.clear_multi_channel_default(
             workspace_id=member.workspace_id,
             connection_id=connection_id,
             provider=ExternalChannelProvider.DISCORD,
@@ -1436,6 +1435,7 @@ async def update_session_channel_response_mode(
             workspace_id=member.workspace_id,
             agent_id=agent_id,
             workspace_user_id=member.workspace_user_id,
+            user_id=member.user_id,
             agent_session_id=session_id,
             binding_id=binding_id,
             setting=request_body,

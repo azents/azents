@@ -13,6 +13,7 @@ Name | Type | Description | Notes
 **agent_name** | **str** |  | 
 **status** | [**ExternalChannelChannelDefaultStatus**](ExternalChannelChannelDefaultStatus.md) |  | 
 **configured_by_user_id** | **str** |  | 
+**configured_by_principal_id** | **str** |  | 
 **invalidated_at** | **datetime** |  | 
 **invalidation_reason** | **str** |  | 
 **created_at** | **datetime** |  | 

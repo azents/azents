@@ -5,6 +5,7 @@ import { WorkspaceSlackApps } from "./WorkspaceSlackApps";
 import type { WorkspaceSlackAppsContainerOutput } from "../containers/useWorkspaceSlackAppsContainer";
 import type {
   ManagedChannelDefault,
+  ManagedChannelDefaultMutation,
   ManagedMultiConnection,
   ManagedMultiRoute,
   ManagedSlackManagementHandoff,
@@ -70,6 +71,7 @@ const activeDefault: ManagedChannelDefault = {
   agent_name: availableRoute.agent_name,
   status: "active",
   configured_by_user_id: "user_01",
+  configured_by_principal_id: null,
   invalidated_at: null,
   invalidation_reason: null,
   created_at: "2026-07-25T02:00:00Z",
@@ -77,6 +79,16 @@ const activeDefault: ManagedChannelDefault = {
 };
 
 const defaults: ManagedChannelDefault[] = [activeDefault];
+
+const defaultMutation: ManagedChannelDefaultMutation = {
+  channel_default: activeDefault,
+  changed: true,
+  invalidated_participation_setting_count: 1,
+  terminated_setup_claim_count: 1,
+  expired_interaction_count: 2,
+  disconnected_parent_binding_count: 1,
+  cleanup_delivery_count: 1,
+};
 
 const handoff: ManagedSlackManagementHandoff = {
   interaction_id: "interaction_01",
@@ -102,6 +114,7 @@ const args: WorkspaceSlackAppsContainerOutput = {
   defaultOffset: 0,
   routeImpact: null,
   connectionImpact: null,
+  defaultMutation: null,
   previewRouteId: null,
   previewDisconnect: false,
   setupDraft: {
@@ -294,7 +307,10 @@ export const RouteImpactPreview = {
       route_id: availableRoute.id,
       generation: "generation_02",
       active_default_count: 1,
+      active_participation_setting_count: 1,
+      nonterminal_setup_claim_count: 1,
       active_binding_count: 2,
+      connected_parent_binding_count: 1,
       bound_resource_count: 2,
       open_admission_count: 1,
       pending_access_request_count: 0,
@@ -321,7 +337,10 @@ export const DisconnectImpactPreview = {
       generation: "generation_02",
       active_route_count: 1,
       active_default_count: 1,
+      active_participation_setting_count: 1,
+      nonterminal_setup_claim_count: 1,
       active_binding_count: 2,
+      connected_parent_binding_count: 1,
       bound_resource_count: 2,
       open_admission_count: 1,
       pending_access_request_count: 0,
@@ -345,6 +364,21 @@ export const FocusedSlackHandoff = {
     focusedHandoff: true,
     providerChannelId: handoff.provider_channel_id,
     handoffState: { handoff, message: null },
+  },
+} satisfies Story;
+
+export const DefaultMutationImpact = {
+  args: {
+    defaultMutation,
+  },
+} satisfies Story;
+
+export const FocusedHandoffMutationImpact = {
+  args: {
+    focusedHandoff: true,
+    providerChannelId: handoff.provider_channel_id,
+    handoffState: { handoff, message: null },
+    defaultMutation,
   },
 } satisfies Story;
 

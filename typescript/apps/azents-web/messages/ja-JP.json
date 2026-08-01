@@ -1213,6 +1213,14 @@
           "all_messages": "対象となるすべてのメッセージ",
           "mention_only": "メンションのみ"
         },
+        "conversationLocation": {
+          "channel": "チャンネル会話",
+          "threads": "スレッド会話"
+        },
+        "resourceType": {
+          "parent_channel": "親チャンネル",
+          "thread": "スレッド"
+        },
         "archivedTitle": "アーカイブ済みセッション",
         "archivedDescription": "アーカイブ時に外部チャンネルは完全に切断されました。この画面は読み取り専用です。",
         "retentionUnlimited": "保持期間：無期限",
@@ -1742,7 +1750,7 @@
       "reenable": "再有効化",
       "remove": "削除",
       "routeImpactTitle": "ルート削除の影響を確認",
-      "routeImpactDescription": "チャンネル既定値 {defaults} 件を削除し、アクティブなバインディング {bindings} 件を終了し、未完了の選択要求 {admissions} 件を期限切れにします。",
+      "routeImpactDescription": "チャンネル既定値 {defaults} 件を削除し、参加設定 {settings} 件を無効化し、セットアップ要求 {claims} 件を終了し、接続中の親会話 {parentBindings} 件を含むアクティブなバインディング {bindings} 件を終了し、未完了の選択要求 {admissions} 件を期限切れにします。",
       "loadingImpact": "現在の影響プレビューを読み込み中…",
       "retry": "再試行",
       "confirmRemove": "エージェントを削除",
@@ -1752,6 +1760,9 @@
       "channelId": "Slack チャンネル ID",
       "route": "エージェント",
       "setDefault": "既定値を設定",
+      "defaultMutationChangedTitle": "チャンネル選択を更新しました",
+      "defaultMutationUnchangedTitle": "チャンネル選択はすでに最新です",
+      "defaultMutationImpact": "参加状態のクリーンアップ: 設定 {settings} 件を無効化し、セットアップ要求 {claims} 件を終了し、保留中の操作 {interactions} 件を期限切れにし、親会話 {bindings} 件を切断し、クリーンアップメッセージ {deliveries} 件をキューに追加しました。",
       "channel": "チャンネル",
       "defaultAgent": "既定エージェント",
       "defaultStatus": "既定値の状態",
@@ -1760,7 +1771,7 @@
       "disconnectDescription": "切断すると、アクティブなルート、既定値、および紐付けられた Provider 会話が削除されます。",
       "disconnect": "切断",
       "connectionImpactTitle": "完全な切断の影響を確認",
-      "connectionImpactDescription": "アクティブなルート {routes} 件を切断し、チャンネル既定値 {defaults} 件を無効化し、アクティブなバインディング {bindings} 件を終了します。",
+      "connectionImpactDescription": "アクティブなルート {routes} 件を切断し、チャンネル既定値 {defaults} 件と参加設定 {settings} 件を無効化し、セットアップ要求 {claims} 件を終了し、接続中の親会話 {parentBindings} 件を含むアクティブなバインディング {bindings} 件を終了します。",
       "confirmDisconnect": "ワークスペース App を切断",
       "transport": {
         "http": "HTTP",

@@ -13,8 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     ExternalChannelAccessGrantScope,
     ExternalChannelAppMode,
+    ExternalChannelConversationScopeKind,
     ExternalChannelIngressProfile,
     ExternalChannelProvider,
+    ExternalChannelResourceType,
     ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
@@ -36,6 +38,7 @@ from azents.repos.external_channel.lifecycle import (
     ExternalChannelLifecycleRepository,
 )
 from azents.repos.external_channel.management import (
+    ExternalChannelChannelDefaultTransition,
     ExternalChannelManagementRepository,
 )
 from azents.repos.external_channel.management_data import (
@@ -43,6 +46,7 @@ from azents.repos.external_channel.management_data import (
     ManagedBinding,
     ManagedBlock,
     ManagedChannelDefault,
+    ManagedChannelDefaultMutation,
     ManagedConnection,
     ManagedGrant,
     ManagedMultiConnection,
@@ -57,12 +61,23 @@ from azents.services.external_channel.channel_action import ExternalChannelActio
 from azents.services.external_channel.connection import (
     ExternalChannelConnectionService,
 )
+from azents.services.external_channel.conversation import (
+    ExternalChannelConversationLock,
+    ExternalChannelConversationScope,
+    ExternalChannelOperationDeadline,
+    ExternalChannelParticipationLock,
+    ExternalChannelParticipationScope,
+)
 from azents.services.external_channel.data import (
     DiscordConnectionConfiguration,
     DiscordConnectionCredentials,
     ExternalChannelConnectionCredentialPayload,
     ExternalChannelConnectionStatusSnapshot,
     SlackConnectionCredentials,
+)
+from azents.services.external_channel.deps import (
+    get_external_channel_conversation_lock,
+    get_external_channel_participation_lock,
 )
 from azents.services.external_channel.discord_activation import (
     DiscordConnectionActivationService,
@@ -182,6 +197,14 @@ class ExternalChannelManagementService:
     access_service: Annotated[
         ExternalChannelAccessService,
         Depends(ExternalChannelAccessService),
+    ]
+    conversation_lock: Annotated[
+        ExternalChannelConversationLock,
+        Depends(get_external_channel_conversation_lock),
+    ]
+    participation_lock: Annotated[
+        ExternalChannelParticipationLock,
+        Depends(get_external_channel_participation_lock),
     ]
 
     async def list_connections(
@@ -819,32 +842,58 @@ class ExternalChannelManagementService:
         route_id: str,
         user_id: str,
         expected_generation: datetime.datetime,
-    ) -> ManagedChannelDefault:
+    ) -> ManagedChannelDefaultMutation:
         """Generation-fence replacement of one Multi App channel default."""
         now = datetime.datetime.now(datetime.UTC)
-        async with self.session_manager() as session:
-            connection = await self._lock_multi_connection_generation(
-                session,
-                workspace_id=workspace_id,
-                connection_id=connection_id,
-                provider=provider,
-                expected_generation=expected_generation,
-            )
-            channel_default = await self.repository.replace_multi_channel_default(
-                session,
-                workspace_id=workspace_id,
-                connection_id=connection.id,
-                provider=provider,
-                provider_channel_id=provider_channel_id,
-                route_id=route_id,
-                configured_by_user_id=user_id,
-                now=now,
-            )
-            if channel_default is None:
-                raise ExternalChannelManagementNotFound(route_id)
-            connection.updated_at = now
-            await session.commit()
-        return channel_default
+        deadline = ExternalChannelOperationDeadline(
+            now + datetime.timedelta(seconds=30)
+        )
+        conversation_scope = ExternalChannelConversationScope(
+            connection_id=connection_id,
+            kind=ExternalChannelConversationScopeKind.PARENT_CHANNEL,
+            provider_channel_id=provider_channel_id,
+            provider_thread_key=None,
+        )
+        participation_scope = ExternalChannelParticipationScope(
+            connection_id=connection_id,
+            provider_parent_channel_id=provider_channel_id,
+        )
+        async with self.conversation_lock.acquire(
+            scope=conversation_scope,
+            deadline=deadline,
+        ) as conversation_lease:
+            await conversation_lease.assert_owned()
+            async with self.participation_lock.acquire(
+                scope=participation_scope,
+                deadline=deadline,
+            ) as participation_lease:
+                await participation_lease.assert_owned()
+                async with self.session_manager() as session:
+                    connection = await self._lock_multi_connection_generation(
+                        session,
+                        workspace_id=workspace_id,
+                        connection_id=connection_id,
+                        provider=provider,
+                        expected_generation=expected_generation,
+                    )
+                    transition = await self.repository.replace_multi_channel_default(
+                        session,
+                        workspace_id=workspace_id,
+                        connection_id=connection.id,
+                        provider=provider,
+                        provider_channel_id=provider_channel_id,
+                        route_id=route_id,
+                        configured_by_user_id=user_id,
+                        now=now,
+                    )
+                    if transition is None or transition.channel_default is None:
+                        raise ExternalChannelManagementNotFound(route_id)
+                    if transition.changed:
+                        connection.updated_at = now
+                    await session.commit()
+        for delivery_id in transition.cleanup_intent_ids:
+            await self.action_service.attempt_delivery(delivery_id)
+        return _managed_channel_default_mutation(transition)
 
     async def clear_multi_channel_default(
         self,
@@ -854,31 +903,55 @@ class ExternalChannelManagementService:
         provider: ExternalChannelProvider,
         provider_channel_id: str,
         expected_generation: datetime.datetime,
-    ) -> None:
+    ) -> ManagedChannelDefaultMutation:
         """Generation-fence removal of one active Multi App channel default."""
         now = datetime.datetime.now(datetime.UTC)
-        async with self.session_manager() as session:
-            connection = await self._lock_multi_connection_generation(
-                session,
-                workspace_id=workspace_id,
-                connection_id=connection_id,
-                provider=provider,
-                expected_generation=expected_generation,
-            )
-            cleared = await self.repository.clear_multi_channel_default(
-                session,
-                workspace_id=workspace_id,
-                connection_id=connection.id,
-                provider=provider,
-                provider_channel_id=provider_channel_id,
-                now=now,
-            )
-            if cleared is None:
-                raise ExternalChannelManagementNotFound(connection_id)
-            if not cleared:
-                raise ExternalChannelManagementNotFound(provider_channel_id)
-            connection.updated_at = now
-            await session.commit()
+        deadline = ExternalChannelOperationDeadline(
+            now + datetime.timedelta(seconds=30)
+        )
+        conversation_scope = ExternalChannelConversationScope(
+            connection_id=connection_id,
+            kind=ExternalChannelConversationScopeKind.PARENT_CHANNEL,
+            provider_channel_id=provider_channel_id,
+            provider_thread_key=None,
+        )
+        participation_scope = ExternalChannelParticipationScope(
+            connection_id=connection_id,
+            provider_parent_channel_id=provider_channel_id,
+        )
+        async with self.conversation_lock.acquire(
+            scope=conversation_scope,
+            deadline=deadline,
+        ) as conversation_lease:
+            await conversation_lease.assert_owned()
+            async with self.participation_lock.acquire(
+                scope=participation_scope,
+                deadline=deadline,
+            ) as participation_lease:
+                await participation_lease.assert_owned()
+                async with self.session_manager() as session:
+                    connection = await self._lock_multi_connection_generation(
+                        session,
+                        workspace_id=workspace_id,
+                        connection_id=connection_id,
+                        provider=provider,
+                        expected_generation=expected_generation,
+                    )
+                    transition = await self.repository.clear_multi_channel_default(
+                        session,
+                        workspace_id=workspace_id,
+                        connection_id=connection.id,
+                        provider=provider,
+                        provider_channel_id=provider_channel_id,
+                        now=now,
+                    )
+                    if transition is None:
+                        raise ExternalChannelManagementNotFound(provider_channel_id)
+                    connection.updated_at = now
+                    await session.commit()
+        for delivery_id in transition.cleanup_intent_ids:
+            await self.action_service.attempt_delivery(delivery_id)
+        return _managed_channel_default_mutation(transition)
 
     async def disconnect_multi_connection(
         self,
@@ -1213,6 +1286,7 @@ class ExternalChannelManagementService:
         workspace_id: str,
         agent_id: str,
         workspace_user_id: str,
+        user_id: str,
         agent_session_id: str,
         binding_id: str,
         setting: ExternalChannelResponseModeSetting,
@@ -1225,17 +1299,67 @@ class ExternalChannelManagementService:
             admin=True,
         )
         async with self.session_manager() as session:
-            updated = await self.repository.update_binding_response_mode(
+            scope = await self.repository.get_binding_mutation_scope(
                 session,
                 workspace_id=workspace_id,
                 agent_id=agent_id,
                 agent_session_id=agent_session_id,
                 binding_id=binding_id,
-                response_mode=setting.response_mode,
             )
-            if not updated:
-                raise ExternalChannelManagementNotFound(binding_id)
-            await session.commit()
+        if scope is None:
+            raise ExternalChannelManagementNotFound(binding_id)
+        if scope.resource_type is ExternalChannelResourceType.PARENT_CHANNEL:
+            now = datetime.datetime.now(datetime.UTC)
+            deadline = ExternalChannelOperationDeadline(
+                now + datetime.timedelta(seconds=30)
+            )
+            conversation_scope = ExternalChannelConversationScope(
+                connection_id=scope.connection_id,
+                kind=ExternalChannelConversationScopeKind.PARENT_CHANNEL,
+                provider_channel_id=scope.provider_parent_channel_id,
+                provider_thread_key=None,
+            )
+            participation_scope = ExternalChannelParticipationScope(
+                connection_id=scope.connection_id,
+                provider_parent_channel_id=scope.provider_parent_channel_id,
+            )
+            async with self.conversation_lock.acquire(
+                scope=conversation_scope,
+                deadline=deadline,
+            ) as conversation_lease:
+                await conversation_lease.assert_owned()
+                async with self.participation_lock.acquire(
+                    scope=participation_scope,
+                    deadline=deadline,
+                ) as participation_lease:
+                    await participation_lease.assert_owned()
+                    async with self.session_manager() as session:
+                        updated = await self.repository.update_binding_response_mode(
+                            session,
+                            workspace_id=workspace_id,
+                            agent_id=agent_id,
+                            agent_session_id=agent_session_id,
+                            binding_id=binding_id,
+                            configured_by_user_id=user_id,
+                            response_mode=setting.response_mode,
+                        )
+                        if not updated:
+                            raise ExternalChannelManagementNotFound(binding_id)
+                        await session.commit()
+        else:
+            async with self.session_manager() as session:
+                updated = await self.repository.update_binding_response_mode(
+                    session,
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    agent_session_id=agent_session_id,
+                    binding_id=binding_id,
+                    configured_by_user_id=user_id,
+                    response_mode=setting.response_mode,
+                )
+                if not updated:
+                    raise ExternalChannelManagementNotFound(binding_id)
+                await session.commit()
         bindings = await self.list_bindings(
             workspace_id=workspace_id,
             agent_id=agent_id,
@@ -1500,10 +1624,31 @@ def _managed_multi_disconnect(
     return ManagedMultiConnectionDisconnect(
         disconnected_route_count=disconnected.disconnected_route_count,
         invalidated_default_count=disconnected.invalidated_default_count,
+        invalidated_participation_setting_count=(
+            disconnected.invalidated_participation_setting_count
+        ),
+        terminated_setup_claim_count=disconnected.terminated_setup_claim_count,
         expired_admission_count=disconnected.expired_admission_count,
         expired_access_request_count=disconnected.expired_access_request_count,
         unavailable_resource_count=disconnected.unavailable_resource_count,
         disconnected_binding_count=disconnected.disconnected_binding_count,
+    )
+
+
+def _managed_channel_default_mutation(
+    transition: ExternalChannelChannelDefaultTransition,
+) -> ManagedChannelDefaultMutation:
+    """Project one committed selected-Agent transition without intent identifiers."""
+    return ManagedChannelDefaultMutation(
+        channel_default=transition.channel_default,
+        changed=transition.changed,
+        invalidated_participation_setting_count=transition.invalidated_setting_count,
+        terminated_setup_claim_count=transition.terminated_setup_claim_count,
+        expired_interaction_count=transition.expired_interaction_count,
+        disconnected_parent_binding_count=(
+            transition.disconnected_parent_binding_count
+        ),
+        cleanup_delivery_count=len(transition.cleanup_intent_ids),
     )
 
 

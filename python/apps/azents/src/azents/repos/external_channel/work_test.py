@@ -1353,6 +1353,93 @@ async def test_provider_control_final_settlement_revalidates_current_authority(
     assert attempt.completed_at == _at(3)
 
 
+@pytest.mark.parametrize(
+    "terminal_status",
+    [
+        ExternalChannelDeliveryStatus.DELIVERED,
+        ExternalChannelDeliveryStatus.FAILED,
+        ExternalChannelDeliveryStatus.UNKNOWN,
+    ],
+)
+async def test_binding_settings_reconciliation_never_retries_terminal_evidence(
+    rdb_session: AsyncSession,
+    terminal_status: ExternalChannelDeliveryStatus,
+) -> None:
+    """Delivered, failed, and unknown rollout attempts each remain final evidence."""
+    _agent_id, binding_id = await _setup_binding(rdb_session)
+    binding = await rdb_session.get(RDBExternalChannelBinding, binding_id)
+    assert binding is not None
+    resource = await rdb_session.get(RDBExternalChannelResource, binding.resource_id)
+    assert resource is not None
+    resource.labels = {
+        "provider": "slack",
+        "tenant_id": "T1",
+        "channel_id": "C1",
+        "thread_ts": "1.000001",
+    }
+    repository = ExternalChannelWorkRepository()
+
+    delivery_ids = await repository.ensure_binding_settings_available_delivery_ids(
+        rdb_session,
+        limit=10,
+    )
+
+    assert len(delivery_ids) == 1
+    attempt = await rdb_session.get(
+        RDBExternalChannelDeliveryAttempt,
+        delivery_ids[0],
+    )
+    assert attempt is not None
+    assert (
+        attempt.origin_type
+        is ExternalChannelDeliveryOriginType.BINDING_SETTINGS_AVAILABLE
+    )
+    assert attempt.request_payload == {
+        "control_kind": "binding_settings_available",
+        "control_version": 2,
+        "tenant_id": "T1",
+        "channel_id": "C1",
+        "thread_ts": "1.000001",
+    }
+    assert (
+        await repository.ensure_binding_settings_available_delivery_ids(
+            rdb_session,
+            limit=10,
+        )
+        == []
+    )
+    attempt.status = terminal_status
+    attempt.completed_at = _at(3)
+    await rdb_session.flush()
+
+    duplicate_ids = await repository.ensure_binding_settings_available_delivery_ids(
+        rdb_session,
+        limit=10,
+    )
+
+    assert duplicate_ids == []
+
+
+async def test_binding_settings_reconciliation_excludes_disconnected_bindings(
+    rdb_session: AsyncSession,
+) -> None:
+    """A disconnected Binding without rollout evidence remains untouched."""
+    _agent_id, binding_id = await _setup_binding(rdb_session)
+    binding = await rdb_session.get(RDBExternalChannelBinding, binding_id)
+    assert binding is not None
+    binding.disconnected_at = _at(2)
+    binding.disconnect_reason = "test_disconnected"
+    await rdb_session.flush()
+
+    repository = ExternalChannelWorkRepository()
+    delivery_ids = await repository.ensure_binding_settings_available_delivery_ids(
+        rdb_session,
+        limit=10,
+    )
+
+    assert delivery_ids == []
+
+
 async def test_initial_discord_delivery_uses_active_binding_authority(
     rdb_session: AsyncSession,
 ) -> None:
