@@ -13,6 +13,7 @@ from azents.core.enums import (
     AgentRunStatus,
     AgentSessionStatus,
     ExternalChannelActionMode,
+    ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
@@ -54,6 +55,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelWork,
     RDBExternalChannelWorkProjectionPart,
 )
+from azents.rdb.models.workspace import RDBWorkspace
 from azents.repos.external_channel.work_data import (
     ChannelActionCommit,
     ChannelDeliveryTarget,
@@ -949,6 +951,11 @@ class ExternalChannelWorkRepository:
                 connection_id = target.connection_id
             else:
                 return None
+            workspace = (
+                None
+                if agent is None
+                else await session.get(RDBWorkspace, agent.workspace_id)
+            )
             return ChannelDeliveryTarget(
                 delivery_attempt_id=attempt.id,
                 operation=attempt.operation,
@@ -961,6 +968,9 @@ class ExternalChannelWorkRepository:
                 encrypted_credentials=connection.encrypted_credentials,
                 provider_tenant_id=connection.provider_tenant_id,
                 capabilities=connection.capabilities,
+                workspace_handle=None if workspace is None else workspace.handle,
+                agent_id=None if agent is None else agent.id,
+                agent_session_id=None,
                 agent_name=None if agent is None else agent.name,
                 agent_avatar=None if agent is None else agent.avatar,
                 request_payload=dict(attempt.request_payload),
@@ -973,6 +983,7 @@ class ExternalChannelWorkRepository:
                     RDBExternalChannelConnection,
                     RDBAgent,
                     RDBExternalChannelBinding.resource_id,
+                    RDBExternalChannelBinding.agent_session_id,
                 )
                 .join(
                     RDBExternalChannelBinding,
@@ -989,16 +1000,25 @@ class ExternalChannelWorkRepository:
                     RDBExternalChannelConnection.id
                     == RDBExternalChannelAgentRoute.connection_id,
                 )
-                .outerjoin(
+                .join(
+                    RDBAgentSession,
+                    RDBAgentSession.id == RDBExternalChannelBinding.agent_session_id,
+                )
+                .join(
                     RDBAgent,
-                    RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
+                    RDBAgent.id == RDBAgentSession.agent_id,
                 )
                 .where(RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id)
             )
         ).one_or_none()
         if row is None:
             return None
-        attempt, route, connection, agent, resource_id = row
+        attempt, route, connection, agent, resource_id, agent_session_id = row
+        workspace = (
+            None
+            if agent is None
+            else await session.get(RDBWorkspace, agent.workspace_id)
+        )
         return ChannelDeliveryTarget(
             delivery_attempt_id=attempt.id,
             operation=attempt.operation,
@@ -1011,6 +1031,9 @@ class ExternalChannelWorkRepository:
             encrypted_credentials=connection.encrypted_credentials,
             provider_tenant_id=connection.provider_tenant_id,
             capabilities=connection.capabilities,
+            workspace_handle=None if workspace is None else workspace.handle,
+            agent_id=None if agent is None else agent.id,
+            agent_session_id=agent_session_id,
             agent_name=None if agent is None else agent.name,
             agent_avatar=None if agent is None else agent.avatar,
             request_payload=dict(attempt.request_payload),
@@ -1043,6 +1066,127 @@ class ExternalChannelWorkRepository:
         resource.labels = labels
         await session.flush()
         return delivery_channel_id
+
+    async def start_captured_terminal_delivery(
+        self,
+        session: AsyncSession,
+        *,
+        target: ChannelDeliveryTarget,
+        now: datetime.datetime,
+    ) -> ChannelDeliveryTarget | None:
+        """Claim terminal cleanup using provider authority captured before purge."""
+        if (
+            target.status is not ExternalChannelDeliveryStatus.PENDING
+            or target.binding_id is None
+            or target.resource_id is None
+            or target.agent_session_id is None
+            or target.encrypted_credentials is None
+        ):
+            return None
+        attempt_snapshot = await session.get(
+            RDBExternalChannelDeliveryAttempt,
+            target.delivery_attempt_id,
+        )
+        binding_snapshot = await session.get(
+            RDBExternalChannelBinding,
+            target.binding_id,
+        )
+        if attempt_snapshot is None or binding_snapshot is None:
+            return None
+        route_snapshot = await session.get(
+            RDBExternalChannelAgentRoute,
+            binding_snapshot.route_id,
+        )
+        if route_snapshot is None:
+            return None
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(RDBExternalChannelConnection.id == route_snapshot.connection_id)
+            .with_for_update()
+        )
+        route = await session.scalar(
+            sa.select(RDBExternalChannelAgentRoute)
+            .where(
+                RDBExternalChannelAgentRoute.id == route_snapshot.id,
+                RDBExternalChannelAgentRoute.connection_id
+                == route_snapshot.connection_id,
+            )
+            .with_for_update()
+        )
+        resource = await session.scalar(
+            sa.select(RDBExternalChannelResource)
+            .where(
+                RDBExternalChannelResource.id == binding_snapshot.resource_id,
+                RDBExternalChannelResource.connection_id
+                == route_snapshot.connection_id,
+            )
+            .with_for_update()
+        )
+        binding = await session.scalar(
+            sa.select(RDBExternalChannelBinding)
+            .where(
+                RDBExternalChannelBinding.id == binding_snapshot.id,
+                RDBExternalChannelBinding.route_id == route_snapshot.id,
+                RDBExternalChannelBinding.resource_id == binding_snapshot.resource_id,
+                RDBExternalChannelBinding.agent_session_id
+                == binding_snapshot.agent_session_id,
+            )
+            .with_for_update()
+        )
+        attempt = await session.scalar(
+            sa.select(RDBExternalChannelDeliveryAttempt)
+            .where(
+                RDBExternalChannelDeliveryAttempt.id == target.delivery_attempt_id,
+                RDBExternalChannelDeliveryAttempt.status
+                == ExternalChannelDeliveryStatus.PENDING,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if attempt is None:
+            return None
+        valid = (
+            connection is not None
+            and route is not None
+            and resource is not None
+            and binding is not None
+            and connection.status is ExternalChannelConnectionStatus.DISCONNECTED
+            and connection.encrypted_credentials is None
+            and binding.disconnected_at is not None
+            and attempt.origin_type
+            is ExternalChannelDeliveryOriginType.BINDING_DISCONNECT
+            and attempt.origin_id == binding.id
+            and attempt.binding_id == binding.id
+            and attempt.channel_action_id is None
+            and attempt.operation
+            in {
+                ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+            }
+            and attempt.operation is target.operation
+            and dict(attempt.request_payload) == target.request_payload
+            and target.binding_id == binding.id
+            and target.resource_id == resource.id
+            and target.connection_id == connection.id
+            and target.agent_session_id == binding.agent_session_id
+            and target.provider is connection.provider
+            and target.app_mode is connection.app_mode
+        )
+        if not valid:
+            return await self._reject_delivery_start(
+                attempt,
+                error_kind="captured_delivery_authority_revoked",
+                error_summary=(
+                    "The captured terminal provider delivery authority is unavailable."
+                ),
+                now=now,
+            )
+        attempt.status = ExternalChannelDeliveryStatus.ATTEMPTING
+        attempt.attempted_at = now
+        await session.flush()
+        return target.model_copy(
+            update={"status": ExternalChannelDeliveryStatus.ATTEMPTING}
+        )
 
     async def start_delivery(
         self,
@@ -1219,13 +1363,28 @@ class ExternalChannelWorkRepository:
                 error_summary="The current External Channel authority is unavailable.",
                 now=now,
             )
+        binding_disconnect_delivery = (
+            attempt.origin_type is ExternalChannelDeliveryOriginType.BINDING_DISCONNECT
+            and attempt.operation
+            in {
+                ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+            }
+        )
+        authority_revoked = (
+            binding.disconnected_at is None
+            if binding_disconnect_delivery
+            else (
+                binding.disconnected_at is not None
+                or agent_session.status is not AgentSessionStatus.ACTIVE
+                or agent_session.stop_requested_at is not None
+                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
+                or route.agent_id != agent.id
+                or resource.status is not ExternalChannelResourceStatus.ACTIVE
+            )
+        )
         if (
-            binding.disconnected_at is not None
-            or agent_session.status is not AgentSessionStatus.ACTIVE
-            or agent_session.stop_requested_at is not None
-            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-            or route.agent_id != agent.id
-            or resource.status is not ExternalChannelResourceStatus.ACTIVE
+            authority_revoked
             or resource.connection_id != connection.id
             or connection.encrypted_credentials is None
         ):
@@ -1333,6 +1492,7 @@ class ExternalChannelWorkRepository:
                 )
         attempt.status = ExternalChannelDeliveryStatus.ATTEMPTING
         attempt.attempted_at = now
+        workspace = await session.get(RDBWorkspace, agent.workspace_id)
         await session.flush()
         return ChannelDeliveryTarget(
             delivery_attempt_id=attempt.id,
@@ -1346,6 +1506,9 @@ class ExternalChannelWorkRepository:
             encrypted_credentials=connection.encrypted_credentials,
             provider_tenant_id=connection.provider_tenant_id,
             capabilities=connection.capabilities,
+            workspace_handle=None if workspace is None else workspace.handle,
+            agent_id=agent.id,
+            agent_session_id=agent_session.id,
             agent_name=agent.name,
             agent_avatar=agent.avatar,
             request_payload=dict(attempt.request_payload),

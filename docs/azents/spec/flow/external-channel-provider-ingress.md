@@ -51,7 +51,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-08-01
-spec_version: 25
+spec_version: 26
 ---
 
 # External Channel Provider Ingress
@@ -90,7 +90,7 @@ Slack sends HTTP callbacks to the single fixed endpoint
    history is read; then one transaction commits the real Session, binding, canonical
    mailbox input, conversation-position advance, running transition, and independent
    provider-control intents. The mailbox item is also the pending wake-recovery
-   identity. Session-link or Tracker delivery never gates Agent execution.
+   identity. Session-presence or Tracker delivery never gates Agent execution.
 7. Success is acknowledged only for a completed non-retryable outcome. A retryable
    coordination, history, position, or wake failure remains unacknowledged so the
    provider may retry.
@@ -237,18 +237,19 @@ the canonical message source nor a durable queue item.
 4. A short admission transaction locks and revalidates the same authority,
    conversation position, active resource, route/binding/selector, and access
    boundary. It creates or reuses the connected binding, real root Session, initial
-   Channel Work, deterministic canonical mailbox input, and deterministic Session-link
-   and progress delivery intents. The same transaction marks the Session running,
-   initializes thread position, and compare-and-set advances the conversation position.
+   Channel Work, deterministic canonical mailbox input, and deterministic joined-
+   presence and progress delivery intents. The same transaction marks the Session
+   running, initializes thread position, and compare-and-set advances the conversation
+   position.
    PostgreSQL conversation position is the sole duplicate-prevention and ordering
    authority; a mismatch restarts provider-history preparation.
 5. After commit, the service claims the pending mailbox item and sends routing-only
    `SessionWakeUp(session_id)`. A crash or broker failure leaves that item recoverable,
    so duplicate transport delivery can complete the same logical wake without creating
    another Session input.
-6. The Agent Worker attempts committed Session-link and progress controls through the
-   shared one-attempt delivery fence. Delivered, failed, unknown, not-attempted, and
-   cancelled outcomes remain provider-delivery evidence only; none gates mailbox
+6. The Agent Worker attempts committed joined-presence and progress controls through
+   the shared one-attempt delivery fence. Delivered, failed, unknown, not-attempted,
+   and cancelled outcomes remain provider-delivery evidence only; none gates mailbox
    promotion, Session wake, or AgentRun creation.
 
 An existing connected binding wins route resolution. Otherwise Single uses its sole
@@ -274,11 +275,17 @@ high-level `AsyncWebClient` methods with retries disabled; direct HTTP remains l
 to authenticated private-file streaming and presigned upload bodies.
 
 Authenticated Slack App uninstall and token revocation bypass normal message
-ingestion and directly apply fenced connection lifecycle handling. Provider-history,
-coordination, position, or wake failures return a retryable transport outcome. Invalid
-or stale authority and malformed replay boundaries fail closed. Committed selector,
-approval, Session-link, and initial-progress controls are attempted after their commit
-without gating accepted input. Provider Session links use only
+ingestion and directly apply fenced connection lifecycle handling. Token revocation
+moves the current connection to `reconnect_required` without terminating bindings.
+App uninstall terminally disconnects the connection, creates one leave-presence
+control for each newly disconnected binding, captures its provider target before
+credential purge, and attempts that target only after the terminal commit. Repeated
+uninstall delivery is idempotent. Provider-history, coordination, position, or wake
+failures return a retryable transport outcome. Invalid or stale authority and
+malformed replay boundaries fail closed. Committed selector, approval,
+joined-presence, leave-presence, and progress controls are attempted after their
+commit without gating accepted input or terminal lifecycle state. Presence-control
+Session links use only
 `/w/{workspace}/agents/{agent}/sessions/{session}` and target the same durable Session
 exposed by existing Agent Session list and detail APIs.
 
@@ -329,6 +336,9 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-01** (spec_version 26) — Replaced the initial button-only Session link
+  with a joined-presence control, added idempotent App-uninstall leave presence, and
+  preserved independent post-commit delivery.
 - **2026-08-01** (spec_version 25) — Made PostgreSQL conversation position the sole
   duplicate-prevention authority and decoupled provider-control outcomes from
   canonical mailbox acceptance, Session wake, and AgentRun creation.

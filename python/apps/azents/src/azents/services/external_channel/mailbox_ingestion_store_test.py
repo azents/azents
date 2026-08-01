@@ -1,7 +1,6 @@
 """Tests for canonical External Channel mailbox ingestion helpers."""
 
 import datetime
-import json
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
@@ -23,6 +22,9 @@ from azents.core.enums import (
     ExternalChannelRouteMode,
     ExternalChannelTransport,
 )
+from azents.core.external_channel_session_presence import (
+    build_external_channel_session_url,
+)
 from azents.repos.agent.data import Agent
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
@@ -33,7 +35,6 @@ from azents.repos.external_channel.data import (
     ExternalChannelResource,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.repos.workspace.data import Workspace
 from azents.services.external_channel.conversation import (
     ExternalChannelConversationScope,
     ExternalChannelOperationDeadline,
@@ -47,7 +48,6 @@ from azents.services.external_channel.ingestion import (
 )
 from azents.services.external_channel.mailbox_ingestion_store import (
     ExternalChannelMailboxIngestionStore,
-    build_external_channel_session_url,
 )
 
 
@@ -122,7 +122,6 @@ def _store(
     *,
     repository: object,
     agent_repository: object | None = None,
-    workspace_repository: object | None = None,
     root_creation_service: object | None = None,
 ) -> ExternalChannelMailboxIngestionStore:
     return ExternalChannelMailboxIngestionStore(
@@ -130,7 +129,6 @@ def _store(
         repository=cast(ExternalChannelRepository, repository),
         work_repository=MagicMock(),
         agent_repository=agent_repository or MagicMock(),
-        workspace_repository=workspace_repository or MagicMock(),
         agent_session_repository=MagicMock(),
         root_agent_session_creation_service=root_creation_service or MagicMock(),
         mailbox_service=MagicMock(),
@@ -138,20 +136,8 @@ def _store(
     )
 
 
-async def test_session_link_intent_contains_the_retained_session_route() -> None:
-    """The provider payload links to the exact retained Session."""
-    now = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
-    workspace_repository = MagicMock()
-    workspace_repository.get_by_id = AsyncMock(
-        return_value=Workspace(
-            name="Workspace",
-            handle="workspace name",
-            default_runtime_profile_id=None,
-            default_runtime_profile_version=1,
-            created_at=now,
-            updated_at=now,
-        )
-    )
+async def test_session_presence_intent_replaces_open_session_control() -> None:
+    """A new binding commits provider-neutral joined presence instead of link copy."""
     repository = MagicMock()
     repository.create_delivery_attempt_idempotent = AsyncMock(
         return_value=ExternalChannelDeliveryAttempt.model_construct(
@@ -159,10 +145,7 @@ async def test_session_link_intent_contains_the_retained_session_route() -> None
             status=ExternalChannelDeliveryStatus.PENDING,
         )
     )
-    store = _store(
-        repository=repository,
-        workspace_repository=workspace_repository,
-    )
+    store = _store(repository=repository)
     connection = ExternalChannelConnection.model_construct(
         id="connection-1",
         workspace_id="workspace-1",
@@ -185,7 +168,12 @@ async def test_session_link_intent_contains_the_retained_session_route() -> None
         connection_id=connection.id,
         resource_type=ExternalChannelResourceType.THREAD,
         provider_resource_key="resource-key-1",
-        labels=None,
+        labels={
+            "provider": "slack",
+            "tenant_id": "tenant-1",
+            "channel_id": "channel-1",
+            "thread_ts": "thread-1",
+        },
         status=ExternalChannelResourceStatus.ACTIVE,
     )
     binding = ExternalChannelBinding.model_construct(
@@ -196,22 +184,21 @@ async def test_session_link_intent_contains_the_retained_session_route() -> None
         disconnected_at=None,
     )
 
-    delivery_id = await store._create_session_link_intent(  # pyright: ignore[reportPrivateUsage]
+    delivery_id = await store._create_session_presence_intent(  # pyright: ignore[reportPrivateUsage]
         cast(AsyncSession, MagicMock()),
-        request=_slack_request(),
-        connection=connection,
-        route=route,
         resource=resource,
         binding=binding,
     )
 
     assert delivery_id == "delivery-1"
     create = repository.create_delivery_attempt_idempotent.await_args.args[1]
-    rendered_payload = json.dumps(create.request_payload, sort_keys=True)
-    assert (
-        "https://azents.example/w/workspace%20name/agents/agent%2Fid/"
-        "sessions/session%20id"
-    ) in rendered_payload
+    assert create.request_payload == {
+        "control_kind": "session_presence",
+        "presence_state": "joined",
+        "tenant_id": "tenant-1",
+        "channel_id": "channel-1",
+        "thread_ts": "thread-1",
+    }
 
 
 async def test_conversation_resolution_does_not_create_session_before_acceptance() -> (

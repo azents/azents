@@ -78,8 +78,8 @@ api_routes:
   - /chat/v1
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-07-31
-spec_version: 59
+last_verified_at: 2026-08-01
+spec_version: 60
 ---
 
 # Agent Domain Spec
@@ -410,12 +410,15 @@ path exists.
 External Channel state follows the same irreversible coordinator boundary.
 Decommission disconnects an Agent-owned Single App, removes only the Agent's route
 from Workspace-owned Multi Apps, terminalizes affected active bindings, ends Channel
-Work, commits provider cleanup intents without calling the provider inside the
-lifecycle transaction, and removes direct Agent-owned grants/blocks only after
-Session lifecycle ownership is satisfied. Historical Multi routes retain an
-immutable Agent snapshot with no routable Agent ID. Canonical provider resources,
-messages, revisions, and delivery audit roots are not cascade-deleted through the
-AgentSession tree.
+Work, commits one leave-presence control per newly disconnected binding plus required
+Tracker cleanup without calling the provider inside the lifecycle transaction, and
+removes direct Agent-owned grants/blocks only after Session lifecycle ownership is
+satisfied. Single App cleanup captures its provider target before credential purge
+and revalidates durable terminal identity after commit; Multi route cleanup continues
+through current connection authority without purging the shared App. Historical Multi
+routes retain an immutable Agent snapshot with no routable Agent ID. Canonical
+provider resources, messages, revisions, and delivery audit roots are not
+cascade-deleted through the AgentSession tree.
 
 ### 2.7 External Channel Single App ownership
 
@@ -488,6 +491,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-08-01 | 60 | Added binding leave-presence and purge-safe post-commit provider cleanup to Agent decommission while preserving shared Multi App authority. |
 | 2026-07-31 | 59 | Replaced Agent Provider preference and execution-policy intent with exact Workspace Runtime Profile selection, creation-time default precedence, optimistic replacement, availability projection, and no Apply path. |
 | 2026-07-27 | 58 | Made the selected Profile the complete Runtime execution ceiling without a separate Platform policy. |
 | 2026-07-26 | 57 | Added Agent Runtime execution intent, explicit Apply, and server-authoritative status projection. |

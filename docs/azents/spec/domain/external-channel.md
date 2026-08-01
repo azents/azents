@@ -11,6 +11,7 @@ code_paths:
   - python/apps/azents/src/azents/core/external_channel.py
   - python/apps/azents/src/azents/core/external_channel_file.py
   - python/apps/azents/src/azents/core/external_channel_progress.py
+  - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/slack_external_channel_progress.py
   - python/apps/azents/src/azents/core/enums.py
   - python/apps/azents/src/azents/engine/events/external_channel_rendering.py
@@ -54,7 +55,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-08-01
-spec_version: 36
+spec_version: 37
 ---
 
 # External Channel
@@ -195,11 +196,11 @@ contain multiple independent bindings.
   remain outside durable External Channel state.
 - Initial synchronous binding acceptance atomically commits the binding, real Session,
   canonical mailbox input, conversation-position advance, running transition, one
-  separate Session navigation intent, and one checking work projection. Broker wake
-  follows that commit using the mailbox item as its recovery identity. Provider-control
-  delivery is independent background work: failed, unknown, or cancelled Session-link
-  or progress delivery never blocks mailbox promotion, Session wake, or AgentRun
-  creation. Slack lowers work through its
+  joined-presence intent with Session navigation, and one checking work projection.
+  Broker wake follows that commit using the mailbox item as its recovery identity.
+  Provider-control delivery is independent background work: failed, unknown, or
+  cancelled presence or progress delivery never blocks mailbox promotion, Session
+  wake, or AgentRun creation. Slack lowers work through its
   retained Tracker message; Discord lowers each work snapshot to one retained compact
   Embed Tracker. The Embed title carries the current-work title, while its bounded
   description carries the status summary, every ordered task title and status marker,
@@ -325,6 +326,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-01** (spec_version 37) — Replaced the initial button-only Session
+  navigation control with joined-presence copy and added leave-presence delivery to
+  binding termination while retaining the canonical Session link.
 - **2026-08-01** (spec_version 36) — Made the conversation position the sole
   duplicate-prevention authority and made Session-link and progress delivery
   independent from canonical mailbox acceptance, Session wake, and Agent execution.

@@ -1636,7 +1636,7 @@ class ExternalChannelV1Api:
     ) -> ManagedConnection:
         """Disconnect Connection
 
-        Terminally disconnect a connection after one-attempt progress cleanup.
+        Terminally disconnect a connection after one-attempt provider cleanup.
 
         :param agent_id: (required)
         :type agent_id: str
@@ -1712,7 +1712,7 @@ class ExternalChannelV1Api:
     ) -> ApiResponse[ManagedConnection]:
         """Disconnect Connection
 
-        Terminally disconnect a connection after one-attempt progress cleanup.
+        Terminally disconnect a connection after one-attempt provider cleanup.
 
         :param agent_id: (required)
         :type agent_id: str
@@ -1788,7 +1788,7 @@ class ExternalChannelV1Api:
     ) -> RESTResponseType:
         """Disconnect Connection
 
-        Terminally disconnect a connection after one-attempt progress cleanup.
+        Terminally disconnect a connection after one-attempt provider cleanup.
 
         :param agent_id: (required)
         :type agent_id: str

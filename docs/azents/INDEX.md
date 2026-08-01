@@ -15,9 +15,9 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-07-31 | 59 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-01 | 60 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-01 | 137 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-01 | 36 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-01 | 37 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
@@ -37,10 +37,10 @@ Design documents are accumulated records and are not listed individually in this
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
-| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-01 | 16 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-01 | 27 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-01 | 25 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-01 | 25 |
+| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-01 | 17 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-01 | 28 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-01 | 26 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-01 | 26 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-30 | 36 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |

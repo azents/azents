@@ -89,8 +89,8 @@ class _RepositoryDouble(ExternalChannelLifecycleRepository):
         return ExternalChannelArchiveTermination(
             disconnected_binding_count=1,
             finished_work_count=1,
-            created_progress_delete_intent_count=1,
-            progress_delete_intent_ids=("delivery-1",),
+            created_cleanup_intent_count=1,
+            cleanup_intent_ids=("delivery-1",),
         )
 
     async def validate_restore_session_tree(
@@ -247,7 +247,16 @@ async def test_archive_selects_only_active_work_for_progress_cleanup() -> None:
         desired_progress_revision=3,
         progress_provider_message_key="progress-message-1",
     )
-    session = _LifecycleSessionDouble([[binding], [active_work]])
+    resource = SimpleNamespace(
+        id="resource-1",
+        labels={
+            "provider": "slack",
+            "tenant_id": "tenant-1",
+            "channel_id": "channel-1",
+            "thread_ts": "thread-1",
+        },
+    )
+    session = _LifecycleSessionDouble([[binding], [resource], [active_work]])
 
     await ExternalChannelLifecycleRepository().terminate_session_tree(
         cast(AsyncSession, session),
@@ -255,7 +264,7 @@ async def test_archive_selects_only_active_work_for_progress_cleanup() -> None:
         now=datetime.datetime(2026, 7, 21, tzinfo=datetime.UTC),
     )
 
-    work_select = str(session.scalar_statements[1])
+    work_select = str(session.scalar_statements[2])
     progress_insert = session.execute_statements[0].compile().params
     assert progress_insert is not None
     assert "external_channel_works.status =" in work_select
@@ -264,6 +273,14 @@ async def test_archive_selects_only_active_work_for_progress_cleanup() -> None:
     assert active_work.desired_progress_revision == 4
     assert progress_insert["id"]
     assert progress_insert["origin_id"] == "binding-1"
+    presence = cast(RDBExternalChannelDeliveryAttempt, session.added[0])
+    assert presence.request_payload == {
+        "control_kind": "session_presence",
+        "presence_state": "left",
+        "tenant_id": "tenant-1",
+        "channel_id": "channel-1",
+        "thread_ts": "thread-1",
+    }
     assert all(
         "external_channel_pending_contexts" not in str(statement)
         for statement in session.execute_statements

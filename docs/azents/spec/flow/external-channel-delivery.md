@@ -8,6 +8,7 @@ touches_domains: [external-channel, agent, conversation, toolkit]
 code_paths:
   - python/apps/azents/src/azents/core/external_channel_progress.py
   - python/apps/azents/src/azents/core/external_channel_file.py
+  - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/slack_external_channel_progress.py
   - python/apps/azents/src/azents/engine/tools/external_channel.py
   - python/apps/azents/src/azents/engine/tools/deps.py
@@ -31,7 +32,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-01
-spec_version: 27
+spec_version: 28
 ---
 
 # External Channel Delivery and Channel Work
@@ -112,7 +113,7 @@ Provider controls created by synchronous ingestion or lifecycle operations use t
 same delivery fence. The Agent Worker periodically recovers stale `attempting`
 controls to `unknown`, lists bounded pending control IDs, and delegates each attempt to
 the shared action service. It never reconstructs provider content from callbacks.
-Initial Session-link and progress controls are independent post-acceptance work.
+Initial joined-presence and progress controls are independent post-acceptance work.
 `failed`, `unknown`, `not_attempted`, or cancelled delivery remains durable provider
 evidence but does not gate canonical mailbox promotion, Session wake, or AgentRun
 creation.
@@ -222,12 +223,14 @@ delivery outcome and never causes an unsafe replay.
 
 - Conversational replies use `chat.postMessage` with Slack `markdown_text` in the bound thread. The Tool schema and the provider delivery boundary enforce Slack's current 12,000-character Markdown limit before a mutation request.
 - Releasing the first eligible invocation while a binding has no unanswered work creates Channel Work and one Block Kit Activity Tracker intent before Session wake-up. Creation does not depend on Todo state or a `channel_action` call.
-- Initial binding acceptance separately creates one button-only `Open Azents session`
-  control message and the initial Activity Tracker in the same durable transaction as
-  the triggering mailbox input. The Worker attempts those controls independently after
-  commit. Retries reuse the same mailbox and delivery attempts.
-  Later invocations on the binding do not repeat the provider mutation, and Activity
-  Tracker desired state never contains the Session URL.
+- Initial binding acceptance separately creates one Session presence control and the
+  initial Activity Tracker in the same durable transaction as the triggering mailbox
+  input. The presence control replaces the former button-only Session link. Slack uses
+  Block Kit and Discord uses an Embed; both state that the current Agent joined the
+  conversation and place one `View session` URL button below the message. The Worker
+  attempts those controls independently after commit. Retries reuse the same mailbox
+  and delivery attempts. Later invocations on the binding do not repeat the provider
+  mutation, and Activity Tracker desired state never contains the Session URL.
 - The initial Tracker states that the Agent is checking the message with one
   `task_card` carrying the `in_progress` state. Once Channel Work exists, one
   `plan` block carries the Agent-authored title and complete ordered task list.
@@ -244,7 +247,7 @@ delivery outcome and never causes an unsafe replay.
   not-attempted replies leave deletion `not_attempted`.
 - A later work cycle creates a new Tracker rather than reusing the deleted cycle's
   provider identity.
-- Discord creates one Session-link control and an initial compact Channel Work Embed
+- Discord creates one joined-presence control and an initial compact Channel Work Embed
   containing `◉ Agent is checking your message` from the same accepted binding
   transaction. Later complete snapshots replace that retained message's content with an
   empty string and its Embed with the current bounded title, status summary, ordered
@@ -318,10 +321,27 @@ A successfully completed run with unfinished Channel Work remains eligible for i
 
 ## Cleanup Delivery
 
-Binding disconnect, connection disconnect, Session archive, and decommission may commit Tracker-delete intents. Lifecycle transactions never call Slack directly. The post-commit consumer attempts each current cleanup intent once; unresolved attempts remain visible as failed or unknown without rolling back the terminal lifecycle transition.
+Every binding termination commits one leave-presence control in addition to any
+required Tracker-delete intents. Slack renders `Agent name left this conversation.`
+in Block Kit and Discord renders the same statement in an Embed; both retain the
+`View session` button. Manual binding disconnect, route or connection termination,
+Session archive, and Agent decommission use this common delivery identity. Lifecycle
+transactions never call a provider directly. When terminal connection cleanup purges
+provider credentials, the service captures the delivery target in memory before the
+purge. Its post-commit claim accepts only the same pending binding-disconnect
+presence or Tracker-delete attempt after revalidating the durable connection, route,
+resource, binding, Session, and terminal state. The captured credential is never
+persisted in the delivery ledger. Other cleanup paths continue to resolve current
+credentials normally. The post-commit consumer attempts each current disconnect
+intent once; unresolved attempts remain visible as failed or unknown without rolling
+back the terminal lifecycle transition.
 
 ## Changelog
 
+- **2026-08-01** (spec_version 28) — Replaced the button-only Session link with
+  joined-presence controls and added one leave-presence control to every binding
+  termination path, including post-purge delivery through an in-memory captured
+  target that retains the same durable one-attempt fence.
 - **2026-08-01** (spec_version 27) — Decoupled initial Session-link and progress
   provider-control outcomes from canonical mailbox promotion, Session wake, and
   AgentRun creation.

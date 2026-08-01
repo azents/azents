@@ -1218,6 +1218,293 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
     assert terminal_then_active.route_id == second_route.id
 
 
+async def test_manual_binding_disconnect_creates_one_leave_presence(
+    rdb_session: AsyncSession,
+) -> None:
+    """A repeated manager disconnect retains one durable leave control."""
+    workspace_id = await _workspace(rdb_session, "binding-leave-presence")
+    agent = await _agent(rdb_session, workspace_id, "binding-leave-presence")
+    repository = ExternalChannelRepository()
+    management = ExternalChannelManagementRepository()
+    connection = RDBExternalChannelConnection(
+        **_connection_create(
+            workspace_id,
+            provider_app_id="presence-app",
+            provider_tenant_id="presence-team",
+        ).model_dump()
+    )
+    rdb_session.add(connection)
+    await rdb_session.flush()
+    route = await repository.create_agent_route(
+        rdb_session,
+        _route_create(
+            connection.id,
+            agent.id,
+            mode=ExternalChannelAppMode.SINGLE,
+        ),
+    )
+    resource = await repository.create_resource_idempotent(
+        rdb_session,
+        ExternalChannelResourceCreate(
+            connection_id=connection.id,
+            resource_type=ExternalChannelResourceType.THREAD,
+            provider_resource_key="presence-resource",
+            labels={
+                "provider": "slack",
+                "tenant_id": "presence-team",
+                "channel_id": "presence-channel",
+                "thread_ts": "1.000001",
+            },
+            status=ExternalChannelResourceStatus.ACTIVE,
+            latest_activity_at=_at(1),
+            unavailable_at=None,
+            deleted_at=None,
+        ),
+    )
+    agent_session = await AgentSessionRepository().create(
+        rdb_session,
+        AgentSessionCreate(
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            title=None,
+        ),
+    )
+    binding = RDBExternalChannelBinding(
+        resource_id=resource.id,
+        route_id=route.id,
+        agent_session_id=agent_session.id,
+    )
+    rdb_session.add(binding)
+    await rdb_session.flush()
+
+    first = await management.disconnect_binding(
+        rdb_session,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        agent_session_id=agent_session.id,
+        binding_id=binding.id,
+        now=_at(30),
+        reason="manager_disconnected",
+    )
+    retry = await management.disconnect_binding(
+        rdb_session,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+        agent_session_id=agent_session.id,
+        binding_id=binding.id,
+        now=_at(31),
+        reason="manager_disconnected",
+    )
+
+    assert first is not None
+    assert retry == first
+    assert binding.disconnect_reason == "manager_disconnected"
+    attempts = list(
+        (
+            await rdb_session.scalars(
+                sa.select(RDBExternalChannelDeliveryAttempt).where(
+                    RDBExternalChannelDeliveryAttempt.origin_type
+                    == ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
+                    RDBExternalChannelDeliveryAttempt.origin_id == binding.id,
+                    RDBExternalChannelDeliveryAttempt.operation
+                    == ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                )
+            )
+        ).all()
+    )
+    assert len(attempts) == 1
+    assert first == (attempts[0].id,)
+    assert attempts[0].request_payload == {
+        "control_kind": "session_presence",
+        "presence_state": "left",
+        "tenant_id": "presence-team",
+        "channel_id": "presence-channel",
+        "thread_ts": "1.000001",
+    }
+
+
+async def test_multi_route_removal_creates_leave_presence_before_detach(
+    rdb_session: AsyncSession,
+) -> None:
+    """A route terminalization retains one deliverable leave control."""
+    workspace_id = await _workspace(rdb_session, "route-leave-presence")
+    agent = await _agent(rdb_session, workspace_id, "route-leave-presence")
+    repository = ExternalChannelRepository()
+    lifecycle = ExternalChannelLifecycleRepository()
+    connection = RDBExternalChannelConnection(
+        **_connection_create(
+            workspace_id,
+            provider_app_id="route-presence-app",
+            provider_tenant_id="route-presence-team",
+        )
+        .model_copy(update={"app_mode": ExternalChannelAppMode.MULTI})
+        .model_dump()
+    )
+    rdb_session.add(connection)
+    await rdb_session.flush()
+    route = await repository.create_agent_route(
+        rdb_session,
+        _route_create(
+            connection.id,
+            agent.id,
+            mode=ExternalChannelAppMode.MULTI,
+        ),
+    )
+    resource = await repository.create_resource_idempotent(
+        rdb_session,
+        ExternalChannelResourceCreate(
+            connection_id=connection.id,
+            resource_type=ExternalChannelResourceType.THREAD,
+            provider_resource_key="route-presence-resource",
+            labels={
+                "provider": "slack",
+                "tenant_id": "route-presence-team",
+                "channel_id": "route-presence-channel",
+                "thread_ts": "2.000001",
+            },
+            status=ExternalChannelResourceStatus.ACTIVE,
+            latest_activity_at=_at(1),
+            unavailable_at=None,
+            deleted_at=None,
+        ),
+    )
+    agent_session = await AgentSessionRepository().create(
+        rdb_session,
+        AgentSessionCreate(
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            title=None,
+        ),
+    )
+    binding = RDBExternalChannelBinding(
+        resource_id=resource.id,
+        route_id=route.id,
+        agent_session_id=agent_session.id,
+    )
+    rdb_session.add(binding)
+    await rdb_session.flush()
+
+    removal = await lifecycle.remove_multi_route(
+        rdb_session,
+        connection_id=connection.id,
+        route_id=route.id,
+        removed_by_user_id=None,
+        now=_at(30),
+    )
+
+    assert removal is not None
+    assert len(removal.cleanup_intent_ids) == 1
+    persisted_route = await rdb_session.get(RDBExternalChannelAgentRoute, route.id)
+    assert persisted_route is not None
+    assert persisted_route.agent_id is None
+    attempt = await rdb_session.get(
+        RDBExternalChannelDeliveryAttempt,
+        removal.cleanup_intent_ids[0],
+    )
+    assert attempt is not None
+    assert attempt.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+    assert attempt.request_payload == {
+        "control_kind": "session_presence",
+        "presence_state": "left",
+        "tenant_id": "route-presence-team",
+        "channel_id": "route-presence-channel",
+        "thread_ts": "2.000001",
+    }
+
+
+async def test_provider_uninstall_creates_one_leave_presence(
+    rdb_session: AsyncSession,
+) -> None:
+    """A repeated provider termination retains one durable leave control."""
+    workspace_id = await _workspace(rdb_session, "uninstall-leave-presence")
+    agent = await _agent(rdb_session, workspace_id, "uninstall-leave-presence")
+    repository = ExternalChannelRepository()
+    connection = await repository.create_connection(
+        rdb_session,
+        _connection_create(
+            workspace_id,
+            provider_app_id="uninstall-presence-app",
+            provider_tenant_id="uninstall-presence-team",
+        ),
+    )
+    route = await repository.create_agent_route(
+        rdb_session,
+        _route_create(
+            connection.id,
+            agent.id,
+            mode=ExternalChannelAppMode.SINGLE,
+        ),
+    )
+    resource = await repository.create_resource_idempotent(
+        rdb_session,
+        ExternalChannelResourceCreate(
+            connection_id=connection.id,
+            resource_type=ExternalChannelResourceType.THREAD,
+            provider_resource_key="uninstall-presence-resource",
+            labels={
+                "provider": "slack",
+                "tenant_id": "uninstall-presence-team",
+                "channel_id": "uninstall-presence-channel",
+                "thread_ts": "3.000001",
+            },
+            status=ExternalChannelResourceStatus.ACTIVE,
+            latest_activity_at=_at(1),
+            unavailable_at=None,
+            deleted_at=None,
+        ),
+    )
+    agent_session = await AgentSessionRepository().create(
+        rdb_session,
+        AgentSessionCreate(
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            title=None,
+        ),
+    )
+    binding = RDBExternalChannelBinding(
+        resource_id=resource.id,
+        route_id=route.id,
+        agent_session_id=agent_session.id,
+    )
+    rdb_session.add(binding)
+    await rdb_session.flush()
+
+    first = await repository.terminate_connection_for_provider_event(
+        rdb_session,
+        connection_id=connection.id,
+        status=ExternalChannelConnectionStatus.DISCONNECTED,
+        reason="app_uninstalled",
+        now=_at(30),
+        required_configuration_generation=None,
+        required_socket_lease_owner=None,
+        defer_provider_state_purge=True,
+    )
+    repeated = await repository.terminate_connection_for_provider_event(
+        rdb_session,
+        connection_id=connection.id,
+        status=ExternalChannelConnectionStatus.DISCONNECTED,
+        reason="app_uninstalled",
+        now=_at(31),
+        required_configuration_generation=None,
+        required_socket_lease_owner=None,
+        defer_provider_state_purge=True,
+    )
+
+    assert first is not None
+    assert len(first) == 1
+    assert repeated == ()
+    attempt = await rdb_session.get(RDBExternalChannelDeliveryAttempt, first[0])
+    assert attempt is not None
+    assert attempt.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+    assert attempt.request_payload == {
+        "control_kind": "session_presence",
+        "presence_state": "left",
+        "tenant_id": "uninstall-presence-team",
+        "channel_id": "uninstall-presence-channel",
+        "thread_ts": "3.000001",
+    }
+
+
 async def test_agent_scoped_management_excludes_multi_and_corrupt_single_routes(
     rdb_session: AsyncSession,
 ) -> None:

@@ -1216,7 +1216,7 @@ async def disconnect_connection(
     agent_id: str,
     connection_id: str,
 ) -> ManagedConnection:
-    """Terminally disconnect a connection after one-attempt progress cleanup."""
+    """Terminally disconnect a connection after one-attempt provider cleanup."""
     try:
         return await service.disconnect_connection(
             workspace_id=member.workspace_id,

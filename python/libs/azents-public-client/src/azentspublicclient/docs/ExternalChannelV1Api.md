@@ -475,7 +475,7 @@ Name | Type | Description  | Notes
 
 Disconnect Connection
 
-Terminally disconnect a connection after one-attempt progress cleanup.
+Terminally disconnect a connection after one-attempt provider cleanup.
 
 ### Example
 
