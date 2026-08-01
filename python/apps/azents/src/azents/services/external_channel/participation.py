@@ -193,6 +193,9 @@ class ExternalChannelParticipationService:
                         resource=resource,
                         binding=binding,
                     )
+                raise ExternalChannelParticipationError(
+                    "External Channel thread settings are unavailable."
+                )
             setting = await self.repository.get_active_participation_setting(
                 session,
                 connection_id=connection.id,

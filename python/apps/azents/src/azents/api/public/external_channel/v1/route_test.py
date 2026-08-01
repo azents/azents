@@ -58,7 +58,14 @@ def test_discord_admission_returns_matching_initial_response(
             application_id="app-1",
             guild_id="guild-1",
             channel_id="channel-1",
+            provider_parent_channel_id="channel-1",
+            provider_thread_id=None,
             actor_user_id="user-1",
+            command=None,
+            message_command_source=None,
+            component_custom_id=None,
+            selected_value=None,
+            modal_custom_id=None,
         ),
         admission=None,
     )
@@ -77,6 +84,52 @@ def test_discord_admission_returns_matching_initial_response(
     call = service.handle.await_args.kwargs
     assert call["selector"] == "opaque-selector"
     assert call["raw_body"] == b'{"token":"request-local-only"}'
+
+
+def test_discord_control_deliveries_run_after_provider_response() -> None:
+    """Attempt every committed cleanup intent after returning the response."""
+    service = AsyncMock(spec=DiscordHTTPAdmissionService)
+    service.handle.return_value = DiscordHTTPAdmissionResult(
+        envelope=DiscordInteractionEnvelope(
+            interaction_id="interaction-1",
+            interaction_type=3,
+            application_id="app-1",
+            guild_id="guild-1",
+            channel_id="channel-1",
+            provider_parent_channel_id="channel-1",
+            provider_thread_id=None,
+            actor_user_id="user-1",
+            command=None,
+            message_command_source=None,
+            component_custom_id="a:pc:interaction-1:setting-1:1:signature",
+            selected_value=None,
+            modal_custom_id=None,
+        ),
+        admission=None,
+        response={"type": 7, "data": {"content": "Saved.", "components": []}},
+        control_delivery_attempt_ids=("delivery-1", "delivery-2"),
+        control_delivery_connection_id="connection-1",
+    )
+
+    response = _discord_client(service).post(
+        "/external-channel/v1/discord/interactions/opaque-selector",
+        content=b'{"token":"request-local-only"}',
+        headers={
+            "X-Signature-Ed25519": "signature",
+            "X-Signature-Timestamp": "1784682000",
+        },
+    )
+
+    assert response.status_code == 200
+    assert service.attempt_control_delivery.await_count == 2
+    assert service.attempt_control_delivery.await_args_list[0].kwargs == {
+        "connection_id": "connection-1",
+        "delivery_attempt_id": "delivery-1",
+    }
+    assert service.attempt_control_delivery.await_args_list[1].kwargs == {
+        "connection_id": "connection-1",
+        "delivery_attempt_id": "delivery-2",
+    }
 
 
 def test_discord_authentication_failure_uses_one_safe_response(

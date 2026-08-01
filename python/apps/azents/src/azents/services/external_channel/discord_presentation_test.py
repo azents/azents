@@ -14,17 +14,19 @@ from azents.services.external_channel.discord_presentation import (
 )
 
 
-def test_session_presence_uses_titleless_embed_and_session_link() -> None:
-    """Discord Session presence stays compact while retaining navigation."""
+def test_session_presence_uses_titleless_embed_navigation_and_settings() -> None:
+    """Connected Discord presence exposes navigation and conversation settings."""
     joined = render_discord_session_presence(
         agent_name="Research Agent",
         session_url="https://azents.example/session",
         state="joined",
+        settings_custom_id="signed-settings",
     )
     left = render_discord_session_presence(
         agent_name="Research Agent",
         session_url="https://azents.example/session",
         state="left",
+        settings_custom_id="must-not-be-rendered",
     )
 
     assert joined.embeds == [
@@ -39,23 +41,38 @@ def test_session_presence_uses_titleless_embed_and_session_link() -> None:
             "color": 0x99AAB5,
         }
     ]
-    assert (
-        joined.components
-        == left.components
-        == [
-            {
-                "type": 1,
-                "components": [
-                    {
-                        "type": 2,
-                        "style": 5,
-                        "label": "View session",
-                        "url": "https://azents.example/session",
-                    }
-                ],
-            }
-        ]
-    )
+    assert joined.components == [
+        {
+            "type": 1,
+            "components": [
+                {
+                    "type": 2,
+                    "style": 5,
+                    "label": "View session",
+                    "url": "https://azents.example/session",
+                },
+                {
+                    "type": 2,
+                    "style": 2,
+                    "label": "Conversation settings",
+                    "custom_id": "signed-settings",
+                },
+            ],
+        }
+    ]
+    assert left.components == [
+        {
+            "type": 1,
+            "components": [
+                {
+                    "type": 2,
+                    "style": 5,
+                    "label": "View session",
+                    "url": "https://azents.example/session",
+                }
+            ],
+        }
+    ]
 
 
 def test_splits_long_text_at_readable_boundaries() -> None:

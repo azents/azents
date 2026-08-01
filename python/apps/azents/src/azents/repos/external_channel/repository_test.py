@@ -59,6 +59,18 @@ def _discord_capabilities() -> dict[str, object]:
     }
 
 
+def _discord_command_set() -> dict[str, object]:
+    """Return one complete versioned Discord command capability proof."""
+    return {
+        "schema_version": 1,
+        "command_ids": {
+            "message_action": "123456789012345671",
+            "azents_settings": "123456789012345672",
+            "conversation_settings": "123456789012345673",
+        },
+    }
+
+
 async def _create_workspace(
     session: AsyncSession,
     handle: str = "external-channel-repository-test",
@@ -504,13 +516,15 @@ class TestExternalChannelRepository:
             provider_tenant_id="guild-1",
             provider_bot_user_id=None,
             interaction_public_key="a" * 64,
-            message_command_id="123456789012345678",
+            command_set=_discord_command_set(),
             capabilities=_discord_capabilities(),
             callback_selector_hash="reclaimed-selector-hash",
             checked_at=_at(1),
         )
 
         assert activated is not None
+        assert activated.capabilities is not None
+        assert activated.capabilities["discord_command_set"] == _discord_command_set()
         claim = await rdb_session.scalar(
             sa.select(RDBExternalChannelAppClaim).where(
                 RDBExternalChannelAppClaim.provider == ExternalChannelProvider.DISCORD,
@@ -564,7 +578,7 @@ class TestExternalChannelRepository:
             provider_tenant_id="guild-terminal-1",
             provider_bot_user_id=None,
             interaction_public_key="a" * 64,
-            message_command_id="123456789012345678",
+            command_set=_discord_command_set(),
             capabilities=_discord_capabilities(),
             callback_selector_hash="terminal-selector-hash",
             checked_at=_at(1),
@@ -670,7 +684,7 @@ class TestExternalChannelRepository:
             provider_tenant_id="guild-lifecycle-1",
             provider_bot_user_id=None,
             interaction_public_key="a" * 64,
-            message_command_id="123456789012345678",
+            command_set=_discord_command_set(),
             capabilities=_discord_capabilities(),
             callback_selector_hash="lifecycle-selector-hash",
             checked_at=_at(1),

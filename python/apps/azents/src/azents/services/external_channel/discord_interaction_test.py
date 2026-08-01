@@ -83,6 +83,11 @@ def test_parses_bounded_routing_facts() -> None:
                 "channel_id": "channel-1",
                 "member": {"user": {"id": "user-1"}},
                 "token": "must-not-be-projected",
+                "data": {
+                    "id": "100",
+                    "name": "Ask an Azents Agent",
+                    "type": 3,
+                },
             }
         ).encode()
     )

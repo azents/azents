@@ -409,7 +409,7 @@ class ExternalChannelRepository:
         provider_tenant_id: str,
         provider_bot_user_id: str | None,
         interaction_public_key: str,
-        message_command_id: str,
+        command_set: dict[str, object],
         capabilities: dict[str, object],
         callback_selector_hash: str,
         checked_at: datetime.datetime,
@@ -476,7 +476,7 @@ class ExternalChannelRepository:
         connection.capabilities = {
             **capabilities,
             "interaction_public_key": interaction_public_key,
-            "message_command_id": message_command_id,
+            "discord_command_set": command_set,
         }
         connection.configuration_generation += 1
         connection.status = ExternalChannelConnectionStatus.ACTIVE
