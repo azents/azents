@@ -18,6 +18,7 @@ from azents.core.enums import (
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
     ExternalChannelProvider,
+    ExternalChannelResourceType,
     ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelTransport,
@@ -1258,6 +1259,59 @@ class ExternalChannelManagementRepository:
             resource=resource,
             now=now,
             reason=reason,
+        )
+
+    async def disconnect_parent_binding_for_participation(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        route_id: str,
+        resource_id: str,
+        binding_id: str,
+        now: datetime.datetime,
+    ) -> tuple[str, ...] | None:
+        """Disconnect one exact parent binding after participation locks are held."""
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(RDBExternalChannelConnection.id == connection_id)
+            .with_for_update()
+        )
+        route = await session.scalar(
+            sa.select(RDBExternalChannelAgentRoute)
+            .where(
+                RDBExternalChannelAgentRoute.id == route_id,
+                RDBExternalChannelAgentRoute.connection_id == connection_id,
+            )
+            .with_for_update()
+        )
+        resource = await session.scalar(
+            sa.select(RDBExternalChannelResource)
+            .where(
+                RDBExternalChannelResource.id == resource_id,
+                RDBExternalChannelResource.connection_id == connection_id,
+                RDBExternalChannelResource.resource_type
+                == ExternalChannelResourceType.PARENT_CHANNEL,
+            )
+            .with_for_update()
+        )
+        binding = await session.scalar(
+            sa.select(RDBExternalChannelBinding)
+            .where(
+                RDBExternalChannelBinding.id == binding_id,
+                RDBExternalChannelBinding.route_id == route_id,
+                RDBExternalChannelBinding.resource_id == resource_id,
+            )
+            .with_for_update()
+        )
+        if connection is None or route is None or resource is None or binding is None:
+            return None
+        return await self._terminate_binding(
+            session,
+            binding=binding,
+            resource=resource,
+            now=now,
+            reason="participation_location_changed",
         )
 
     async def begin_connection_disconnect(

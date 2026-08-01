@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import (
-    ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
@@ -200,11 +199,10 @@ class SlackSocketManagerService:
                     raise SlackSocketInvalidEnvelope(
                         "Slack Socket connection is no longer authorized."
                     )
-                selector_supported = (
-                    configuration.app_mode is ExternalChannelAppMode.MULTI
-                    and callback.requires_selector_processing()
+                interaction_supported = callback.requires_provider_processing(
+                    app_mode=configuration.app_mode,
                 )
-                if not selector_supported:
+                if callback.handler != "selector_open":
                     shortcut_source_event = None
                 admission = await self.admission_service.admit_interaction(
                     create=callback.interaction_create(
@@ -224,21 +222,29 @@ class SlackSocketManagerService:
                         interaction_id=admission.interaction.id,
                         now=_utc_now(),
                     )
-                    if selector_supported
+                    if interaction_supported
                     else None
                 )
-                if not selector_supported:
+                if not interaction_supported:
                     await self.admission_service.finish_interaction_provider_mutation(
                         interaction_id=admission.interaction.id,
                         status=ExternalChannelInteractionStatus.REJECTED,
                         error_kind="interaction_unsupported",
                         error_summary=(
-                            "Slack interaction is outside the supported selector flow."
+                            "Slack interaction has no supported callback handler."
                         ),
                     )
                 return (
                     ExternalChannelInteractionHandoff(
                         interaction_id=claim.interaction.id,
+                        handler=callback.handler,
+                        provider_parent_channel_id=(
+                            callback.provider_parent_channel_id
+                        ),
+                        provider_thread_key=callback.provider_thread_key,
+                        settings_metadata=callback.settings_metadata,
+                        settings_location=callback.settings_location,
+                        settings_response_mode=callback.settings_response_mode,
                         trigger_id=callback.trigger_id,
                         selector_interaction_id=callback.selector_interaction_id,
                         selector_metadata=callback.selector_metadata,

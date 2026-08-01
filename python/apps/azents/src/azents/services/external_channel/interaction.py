@@ -6,7 +6,7 @@ import hashlib
 import hmac
 import json
 from dataclasses import dataclass, field
-from typing import Annotated, assert_never
+from typing import Annotated, Literal, assert_never
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,8 +16,10 @@ from azents.core.deps import get_config
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
+    ExternalChannelConversationLocation,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
+    ExternalChannelResponseMode,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -40,6 +42,11 @@ from azents.services.external_channel.ingestion_replay import (
     ExternalChannelIngestionReplayService,
     external_channel_replay_deadline,
 )
+from azents.services.external_channel.participation import (
+    ExternalChannelParticipationError,
+    ExternalChannelParticipationService,
+    ExternalChannelParticipationSettings,
+)
 from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
     get_external_channel_provider_control_service,
@@ -55,12 +62,20 @@ from azents.services.external_channel.slack_events import (
     SlackConversationClient,
     SlackInteractionView,
 )
+from azents.services.external_channel.slack_http import (
+    SLACK_SELECTOR_VIEW_CALLBACK_ID,
+    SLACK_SETTINGS_VIEW_CALLBACK_ID,
+    SLACK_SETUP_VIEW_CALLBACK_ID,
+)
+from azents.services.external_channel.slack_settings import (
+    parse_slack_settings_locator,
+)
 
-_SELECTOR_CALLBACK_ID = "azents_agent_selector"
 _SELECTOR_TITLE = "Select an Agent"
 _SELECTOR_PAGE_OFFSET = 0
 _SELECTOR_PAGE_SIZE = 20
 _SELECTOR_METADATA_VERSION = 1
+_SETTINGS_METADATA_VERSION = 1
 
 
 class SlackInteractionTriggerExpired(RuntimeError):
@@ -72,6 +87,19 @@ class ExternalChannelInteractionHandoff:
     """One committed interaction claim with an in-memory-only provider trigger."""
 
     interaction_id: str
+    handler: Literal[
+        "selector_open",
+        "selector_navigation",
+        "selector_submission",
+        "settings_open",
+        "settings_submission",
+        "unsupported",
+    ]
+    provider_parent_channel_id: str | None = field(repr=False)
+    provider_thread_key: str | None = field(repr=False)
+    settings_metadata: str | None = field(repr=False)
+    settings_location: ExternalChannelConversationLocation | None = field(repr=False)
+    settings_response_mode: ExternalChannelResponseMode | None = field(repr=False)
     trigger_id: str | None = field(default=None, repr=False)
     selector_interaction_id: str | None = field(default=None, repr=False)
     selector_metadata: str | None = field(default=None, repr=False)
@@ -92,6 +120,26 @@ class _SelectorMetadata:
     interaction_id: str
     principal_id: str
     offset: int
+
+
+@dataclass(frozen=True)
+class _SettingsMetadata:
+    """Verified settings-modal scope bound to one authenticated interaction."""
+
+    target: Literal["setup", "parent", "thread"]
+    connection_id: str
+    provider_parent_channel_id: str
+    principal_id: str
+    interaction_id: str
+    setup_claim_id: str | None
+    claim_generation: int | None
+    source_revision: int | None
+    setting_id: str | None
+    settings_generation: int | None
+    resource_id: str | None
+    binding_id: str | None
+    binding_response_mode: ExternalChannelResponseMode | None
+    binding_updated_at: datetime.datetime | None
 
 
 @dataclass
@@ -126,11 +174,29 @@ class ExternalChannelInteractionProcessor:
         ExternalChannelIngestionReplayService,
         Depends(ExternalChannelIngestionReplayService),
     ]
+    participation_service: Annotated[
+        ExternalChannelParticipationService,
+        Depends(ExternalChannelParticipationService),
+    ]
     config: Annotated[Config, Depends(get_config)]
 
     async def process(self, handoff: ExternalChannelInteractionHandoff) -> None:
-        """Open, navigate, or submit one selector interaction."""
+        """Dispatch one explicitly identified selector or settings interaction."""
         now = datetime.datetime.now(datetime.UTC)
+        if handoff.handler == "settings_open":
+            await self._process_settings_open(handoff, now=now)
+            return
+        if handoff.handler == "settings_submission":
+            await self._process_settings_submission(handoff, now=now)
+            return
+        if handoff.handler == "unsupported":
+            raise ValueError("Slack interaction has no supported callback handler.")
+        if handoff.handler not in {
+            "selector_open",
+            "selector_navigation",
+            "selector_submission",
+        }:
+            raise AssertionError("Slack interaction handler is not exhaustive.")
         if handoff.selector_navigation is not None:
             await self._process_selector_navigation(handoff, now=now)
             return
@@ -255,7 +321,13 @@ class ExternalChannelInteractionProcessor:
         now: datetime.datetime,
     ) -> None:
         """Revalidate a signed modal submission before applying one selection."""
-        interaction, _, _, selector, metadata = await self._load_submission_scope(
+        (
+            interaction,
+            configuration,
+            _,
+            selector,
+            metadata,
+        ) = await self._load_submission_scope(
             handoff,
             now=now,
         )
@@ -272,7 +344,42 @@ class ExternalChannelInteractionProcessor:
         if selection.status == "already_bound":
             return
         if selection.status == "setup_pending_location":
-            return
+            setup_claim_id = selection.selector_interaction.setup_claim_id
+            if setup_claim_id is None or handoff.trigger_id is None:
+                raise ValueError("Slack setup location interaction is unavailable.")
+            async with self.session_manager() as session:
+                claim = await self.repository.get_setup_claim(
+                    session,
+                    claim_id=setup_claim_id,
+                )
+            if claim is None:
+                raise ValueError("Slack setup location interaction is unavailable.")
+            settings = await self.participation_service.resolve_settings(
+                connection_id=configuration.id,
+                provider_parent_channel_id=claim.provider_parent_channel_id,
+                provider_thread_resource_key=None,
+                principal_id=interaction.principal_id,
+            )
+            result = await self.slack_client.open_interaction_view(
+                bot_token=self._slack_credentials(configuration).bot_token,
+                trigger_id=handoff.trigger_id,
+                view=_settings_view(
+                    settings=settings,
+                    metadata=build_settings_metadata(
+                        secret=self.config.auth.jwt.secret_key,
+                        settings=settings,
+                        connection_id=configuration.id,
+                        provider_parent_channel_id=(claim.provider_parent_channel_id),
+                        principal_id=interaction.principal_id,
+                        interaction_id=interaction.id,
+                    ),
+                ),
+            )
+            if result.status == "opened":
+                return
+            if result.status == "expired":
+                raise SlackInteractionTriggerExpired
+            raise RuntimeError("Slack setup location modal could not be opened.")
         if selection.selector_interaction.id != metadata.selector_interaction_id:
             raise ValueError("Slack selector interaction is unavailable.")
         outcome = await self.ingestion_replay_service.replay_selected_interaction(
@@ -303,6 +410,239 @@ class ExternalChannelInteractionProcessor:
                 raise RuntimeError("Slack selector ingestion could not be completed.")
             case _ as unreachable:
                 assert_never(unreachable)
+
+    async def _process_settings_open(
+        self,
+        handoff: ExternalChannelInteractionHandoff,
+        *,
+        now: datetime.datetime,
+    ) -> None:
+        """Open one current setup, parent, or connected-thread settings modal."""
+        if handoff.trigger_id is None:
+            raise SlackInteractionTriggerExpired
+        interaction, configuration = await self._load_processing_interaction(
+            handoff,
+        )
+        assert interaction.principal_id is not None
+        provider_parent_channel_id = handoff.provider_parent_channel_id
+        locator = None
+        if handoff.settings_metadata is not None:
+            locator = parse_slack_settings_locator(
+                metadata=handoff.settings_metadata,
+                secret=self.config.auth.jwt.secret_key,
+            )
+            if locator.connection_id != configuration.id:
+                raise ValueError("Slack settings locator is unavailable.")
+            provider_parent_channel_id = locator.provider_parent_channel_id
+        if provider_parent_channel_id is None:
+            raise ValueError("Slack conversation settings scope is unavailable.")
+        provider_thread_resource_key = (
+            None
+            if handoff.provider_thread_key is None
+            else _slack_thread_resource_key(
+                tenant_id=configuration.provider_tenant_id,
+                channel_id=provider_parent_channel_id,
+                thread_key=handoff.provider_thread_key,
+            )
+        )
+        try:
+            settings = await self.participation_service.resolve_settings(
+                connection_id=configuration.id,
+                provider_parent_channel_id=provider_parent_channel_id,
+                provider_thread_resource_key=provider_thread_resource_key,
+                principal_id=interaction.principal_id,
+            )
+            if locator is not None and (
+                settings.resource is None
+                or settings.binding is None
+                or settings.resource.id != locator.resource_id
+                or settings.binding.id != locator.binding_id
+            ):
+                raise ExternalChannelParticipationError(
+                    "External Channel conversation settings changed."
+                )
+            view = _settings_view(
+                settings=settings,
+                metadata=build_settings_metadata(
+                    secret=self.config.auth.jwt.secret_key,
+                    settings=settings,
+                    connection_id=configuration.id,
+                    provider_parent_channel_id=provider_parent_channel_id,
+                    principal_id=interaction.principal_id,
+                    interaction_id=interaction.id,
+                ),
+            )
+        except ExternalChannelParticipationError as error:
+            view = _settings_notice_view(str(error))
+        result = await self.slack_client.open_interaction_view(
+            bot_token=self._slack_credentials(configuration).bot_token,
+            trigger_id=handoff.trigger_id,
+            view=view,
+        )
+        if result.status == "opened":
+            return
+        if result.status == "expired":
+            raise SlackInteractionTriggerExpired
+        raise RuntimeError("Slack conversation settings modal could not be opened.")
+
+    async def _process_settings_submission(
+        self,
+        handoff: ExternalChannelInteractionHandoff,
+        *,
+        now: datetime.datetime,
+    ) -> None:
+        """Revalidate signed modal scope and commit one provider setting mutation."""
+        if handoff.settings_metadata is None:
+            raise ValueError("Slack settings submission metadata is unavailable.")
+        metadata = _parse_settings_metadata(
+            metadata=handoff.settings_metadata,
+            secret=self.config.auth.jwt.secret_key,
+        )
+        interaction, configuration = await self._load_processing_interaction(
+            handoff,
+        )
+        if (
+            interaction.principal_id is None
+            or interaction.principal_id != metadata.principal_id
+            or interaction.id != metadata.interaction_id
+            or configuration.id != metadata.connection_id
+        ):
+            raise ValueError("Slack settings submission scope is unavailable.")
+        deadline = external_channel_replay_deadline(now=now)
+        try:
+            if metadata.target == "setup":
+                if (
+                    metadata.setup_claim_id is None
+                    or metadata.claim_generation is None
+                    or metadata.source_revision is None
+                    or handoff.settings_location is None
+                    or handoff.settings_response_mode is not None
+                ):
+                    raise ValueError("Slack setup selection is incomplete.")
+                await self.participation_service.select_location(
+                    setup_claim_id=metadata.setup_claim_id,
+                    expected_claim_generation=metadata.claim_generation,
+                    expected_source_revision=metadata.source_revision,
+                    location=handoff.settings_location,
+                    configured_by_principal_id=interaction.principal_id,
+                    now=now,
+                    deadline=deadline,
+                )
+                settings = await self.participation_service.resolve_settings(
+                    connection_id=configuration.id,
+                    provider_parent_channel_id=metadata.provider_parent_channel_id,
+                    provider_thread_resource_key=None,
+                    principal_id=interaction.principal_id,
+                )
+                cleanup_delivery_ids: tuple[str, ...] = ()
+            elif metadata.target == "parent":
+                if (
+                    metadata.setting_id is None
+                    or metadata.settings_generation is None
+                    or handoff.settings_location is None
+                    or handoff.settings_response_mode is None
+                ):
+                    raise ValueError("Slack parent settings submission is incomplete.")
+                mutation = await self.participation_service.mutate_parent_settings(
+                    connection_id=configuration.id,
+                    provider_parent_channel_id=metadata.provider_parent_channel_id,
+                    principal_id=interaction.principal_id,
+                    expected_setting_id=metadata.setting_id,
+                    expected_settings_generation=metadata.settings_generation,
+                    location=handoff.settings_location,
+                    response_mode=handoff.settings_response_mode,
+                    now=now,
+                    deadline=deadline,
+                )
+                if mutation.settings.setting is None:
+                    raise ExternalChannelParticipationError(
+                        "External Channel parent settings changed."
+                    )
+                settings = mutation.settings
+                cleanup_delivery_ids = mutation.cleanup_delivery_ids
+            else:
+                if (
+                    metadata.resource_id is None
+                    or metadata.binding_id is None
+                    or metadata.binding_response_mode is None
+                    or metadata.binding_updated_at is None
+                    or handoff.settings_location is not None
+                    or handoff.settings_response_mode is None
+                ):
+                    raise ValueError("Slack thread settings submission is incomplete.")
+                mutation = await self.participation_service.mutate_thread_settings(
+                    connection_id=configuration.id,
+                    provider_parent_channel_id=(metadata.provider_parent_channel_id),
+                    resource_id=metadata.resource_id,
+                    binding_id=metadata.binding_id,
+                    principal_id=interaction.principal_id,
+                    expected_response_mode=metadata.binding_response_mode,
+                    expected_binding_updated_at=metadata.binding_updated_at,
+                    response_mode=handoff.settings_response_mode,
+                    now=now,
+                    deadline=deadline,
+                )
+                settings = mutation.settings
+                cleanup_delivery_ids = mutation.cleanup_delivery_ids
+            for delivery_id in cleanup_delivery_ids:
+                await self.provider_control.attempt_delivery(delivery_id)
+            view = _settings_confirmation_view(settings)
+        except ExternalChannelParticipationError as error:
+            view = _settings_notice_view(str(error))
+        if handoff.trigger_id is None:
+            return
+        result = await self.slack_client.open_interaction_view(
+            bot_token=self._slack_credentials(configuration).bot_token,
+            trigger_id=handoff.trigger_id,
+            view=view,
+        )
+        if result.status == "opened":
+            return
+        if result.status == "expired":
+            raise SlackInteractionTriggerExpired
+        raise RuntimeError("Slack settings confirmation could not be opened.")
+
+    async def _load_processing_interaction(
+        self,
+        handoff: ExternalChannelInteractionHandoff,
+    ) -> tuple[
+        ExternalChannelInteraction,
+        ExternalChannelConnectionConfiguration,
+    ]:
+        """Reload one authenticated processing interaction and its connection."""
+        async with self.session_manager() as session:
+            interaction = await self.repository.lock_interaction(
+                session,
+                interaction_id=handoff.interaction_id,
+            )
+            if (
+                interaction is None
+                or interaction.status is not ExternalChannelInteractionStatus.PROCESSING
+                or interaction.principal_id is None
+            ):
+                raise ValueError("Slack interaction is unavailable.")
+            configuration = await self.repository.get_connection_configuration(
+                session,
+                connection_id=interaction.connection_id,
+            )
+            if configuration is None or configuration.status not in {
+                ExternalChannelConnectionStatus.ACTIVE,
+                ExternalChannelConnectionStatus.DEGRADED,
+            }:
+                raise ValueError("Slack interaction connection is unavailable.")
+            return interaction, configuration
+
+    def _slack_credentials(
+        self,
+        configuration: ExternalChannelConnectionConfiguration,
+    ) -> SlackConnectionCredentials:
+        """Decrypt one already-authorized Slack interaction credential."""
+        credentials = self.credentials_codec.decrypt(
+            _required_ciphertext(configuration)
+        )
+        if not isinstance(credentials, SlackConnectionCredentials):
+            raise RuntimeError("Slack interaction credentials are unavailable.")
+        return credentials
 
     async def attempt_control_delivery(
         self,
@@ -472,6 +812,365 @@ class ExternalChannelInteractionProcessor:
         ):
             raise ValueError("Slack selector interaction is unavailable.")
         return configuration, resource
+
+
+def build_settings_metadata(
+    *,
+    secret: str,
+    settings: ExternalChannelParticipationSettings,
+    connection_id: str,
+    provider_parent_channel_id: str,
+    principal_id: str,
+    interaction_id: str,
+) -> str:
+    """Build signed modal scope from current canonical settings generations."""
+    payload: dict[str, object] = {
+        "v": _SETTINGS_METADATA_VERSION,
+        "k": settings.target,
+        "c": connection_id,
+        "h": provider_parent_channel_id,
+        "p": principal_id,
+        "i": interaction_id,
+    }
+    if settings.target == "setup":
+        claim = settings.claim
+        if claim is None:
+            raise ValueError("Slack setup settings scope is incomplete.")
+        payload.update(
+            {
+                "a": claim.id,
+                "g": claim.claim_generation,
+                "s": claim.source_revision,
+            }
+        )
+    elif settings.target == "parent":
+        setting = settings.setting
+        if setting is None:
+            raise ValueError("Slack parent settings scope is incomplete.")
+        payload.update({"e": setting.id, "n": setting.settings_generation})
+    else:
+        resource = settings.resource
+        binding = settings.binding
+        if resource is None or binding is None:
+            raise ValueError("Slack thread settings scope is incomplete.")
+        payload.update(
+            {
+                "r": resource.id,
+                "b": binding.id,
+                "m": binding.response_mode.value,
+                "u": binding.updated_at.isoformat(),
+            }
+        )
+    encoded = _selector_metadata_payload(payload)
+    signature = hmac.new(secret.encode(), encoded, hashlib.sha256).digest()
+    return (
+        base64.urlsafe_b64encode(encoded).decode().rstrip("=")
+        + "."
+        + base64.urlsafe_b64encode(signature).decode().rstrip("=")
+    )
+
+
+def _parse_settings_metadata(
+    *,
+    metadata: str,
+    secret: str,
+) -> _SettingsMetadata:
+    """Verify one settings modal envelope before reading its durable scope."""
+    encoded_part, separator, signature_part = metadata.partition(".")
+    if not separator or not encoded_part or not signature_part:
+        raise ValueError("Slack settings metadata is invalid.")
+    try:
+        encoded = _base64url_decode(encoded_part)
+        signature = _base64url_decode(signature_part)
+        payload = json.loads(encoded)
+    except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError("Slack settings metadata is invalid.") from error
+    if not isinstance(payload, dict):
+        raise ValueError("Slack settings metadata is invalid.")
+    expected_signature = hmac.new(secret.encode(), encoded, hashlib.sha256).digest()
+    if not hmac.compare_digest(signature, expected_signature):
+        raise ValueError("Slack settings metadata is invalid.")
+    if payload.get("v") != _SETTINGS_METADATA_VERSION:
+        raise ValueError("Slack settings metadata is invalid.")
+    target = payload.get("k")
+    if target not in {"setup", "parent", "thread"}:
+        raise ValueError("Slack settings metadata is invalid.")
+    common = {
+        key: _settings_metadata_string(payload, field)
+        for key, field in {
+            "connection_id": "c",
+            "provider_parent_channel_id": "h",
+            "principal_id": "p",
+            "interaction_id": "i",
+        }.items()
+    }
+    if target == "setup":
+        return _SettingsMetadata(
+            target="setup",
+            setup_claim_id=_settings_metadata_string(payload, "a"),
+            claim_generation=_settings_metadata_positive_int(payload, "g"),
+            source_revision=_settings_metadata_positive_int(payload, "s"),
+            setting_id=None,
+            settings_generation=None,
+            resource_id=None,
+            binding_id=None,
+            binding_response_mode=None,
+            binding_updated_at=None,
+            **common,
+        )
+    if target == "parent":
+        return _SettingsMetadata(
+            target="parent",
+            setup_claim_id=None,
+            claim_generation=None,
+            source_revision=None,
+            setting_id=_settings_metadata_string(payload, "e"),
+            settings_generation=_settings_metadata_positive_int(payload, "n"),
+            resource_id=None,
+            binding_id=None,
+            binding_response_mode=None,
+            binding_updated_at=None,
+            **common,
+        )
+    mode_value = _settings_metadata_string(payload, "m")
+    updated_value = _settings_metadata_string(payload, "u")
+    try:
+        mode = ExternalChannelResponseMode(mode_value)
+        updated_at = datetime.datetime.fromisoformat(updated_value)
+    except ValueError as error:
+        raise ValueError("Slack settings metadata is invalid.") from error
+    if updated_at.tzinfo is None:
+        raise ValueError("Slack settings metadata is invalid.")
+    return _SettingsMetadata(
+        target="thread",
+        setup_claim_id=None,
+        claim_generation=None,
+        source_revision=None,
+        setting_id=None,
+        settings_generation=None,
+        resource_id=_settings_metadata_string(payload, "r"),
+        binding_id=_settings_metadata_string(payload, "b"),
+        binding_response_mode=mode,
+        binding_updated_at=updated_at,
+        **common,
+    )
+
+
+def _settings_metadata_string(
+    payload: dict[str, object],
+    key: str,
+) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value or len(value) > 255:
+        raise ValueError("Slack settings metadata is invalid.")
+    return value
+
+
+def _settings_metadata_positive_int(
+    payload: dict[str, object],
+    key: str,
+) -> int:
+    value = payload.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError("Slack settings metadata is invalid.")
+    return value
+
+
+def _settings_view(
+    *,
+    settings: ExternalChannelParticipationSettings,
+    metadata: str,
+) -> SlackInteractionView:
+    """Render one bounded canonical setup or settings modal."""
+    blocks: list[dict[str, object]] = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"*Agent:* {_slack_literal(settings.agent_name)}",
+            },
+        }
+    ]
+    if settings.target in {"setup", "parent"}:
+        selected_location = (
+            None if settings.setting is None else settings.setting.location
+        )
+        blocks.append(
+            _settings_select_block(
+                block_id="azents_conversation_location",
+                label="Conversation location",
+                options=(
+                    ("Channel", ExternalChannelConversationLocation.CHANNEL.value),
+                    ("Threads", ExternalChannelConversationLocation.THREADS.value),
+                ),
+                selected_value=(
+                    None if selected_location is None else selected_location.value
+                ),
+            )
+        )
+    selected_mode = (
+        settings.setting.response_mode
+        if settings.setting is not None
+        else settings.binding.response_mode
+        if settings.binding is not None
+        else None
+    )
+    if settings.target != "setup":
+        blocks.append(
+            _settings_select_block(
+                block_id="azents_conversation_response_mode",
+                label="Response mode",
+                options=(
+                    ("Mentions only", ExternalChannelResponseMode.MENTION_ONLY.value),
+                    ("All messages", ExternalChannelResponseMode.ALL_MESSAGES.value),
+                ),
+                selected_value=(None if selected_mode is None else selected_mode.value),
+            )
+        )
+    if settings.target == "thread":
+        guidance = "This change applies only to this connected thread."
+    elif selected_mode is ExternalChannelResponseMode.ALL_MESSAGES:
+        guidance = (
+            "All messages allows the Agent to respond to every eligible message "
+            "in the selected conversation location."
+        )
+    else:
+        guidance = (
+            "Mentions only requires an explicit App mention or provider-native "
+            "invocation."
+        )
+    blocks.append(
+        {
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": guidance}],
+        }
+    )
+    return SlackInteractionView(
+        callback_id=(
+            SLACK_SETUP_VIEW_CALLBACK_ID
+            if settings.target == "setup"
+            else SLACK_SETTINGS_VIEW_CALLBACK_ID
+        ),
+        title="Conversation settings",
+        private_metadata=metadata,
+        blocks=blocks,
+        submit_title="Continue" if settings.target == "setup" else "Save",
+        close_title="Cancel",
+    )
+
+
+def _settings_confirmation_view(
+    settings: ExternalChannelParticipationSettings,
+) -> SlackInteractionView:
+    """Render a bounded confirmation from the committed canonical state."""
+    if settings.target == "thread":
+        assert settings.binding is not None
+        summary = (
+            "This thread now responds to "
+            f"*{_response_mode_label(settings.binding.response_mode)}*."
+        )
+    else:
+        assert settings.setting is not None
+        summary = (
+            "Conversation settings were saved: "
+            f"*{settings.setting.location.value}*, "
+            f"*{_response_mode_label(settings.setting.response_mode)}*."
+        )
+    return SlackInteractionView(
+        callback_id=SLACK_SETTINGS_VIEW_CALLBACK_ID,
+        title="Settings saved",
+        private_metadata="completed",
+        blocks=[
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": summary},
+            }
+        ],
+        submit_title=None,
+        close_title="Close",
+    )
+
+
+def _settings_notice_view(message: str) -> SlackInteractionView:
+    """Render one bounded stale, unsupported, or unavailable settings result."""
+    normalized = " ".join(message.split())[:500]
+    return SlackInteractionView(
+        callback_id=SLACK_SETTINGS_VIEW_CALLBACK_ID,
+        title="Conversation settings",
+        private_metadata="unavailable",
+        blocks=[
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": _slack_literal(normalized or "Settings are unavailable."),
+                },
+            }
+        ],
+        submit_title=None,
+        close_title="Close",
+    )
+
+
+def _settings_select_block(
+    *,
+    block_id: str,
+    label: str,
+    options: tuple[tuple[str, str], ...],
+    selected_value: str | None,
+) -> dict[str, object]:
+    rendered_options = [
+        {
+            "text": {"type": "plain_text", "text": option_label},
+            "value": option_value,
+        }
+        for option_label, option_value in options
+    ]
+    element: dict[str, object] = {
+        "type": "static_select",
+        "action_id": block_id,
+        "options": rendered_options,
+    }
+    if selected_value is not None:
+        initial = next(
+            (
+                option
+                for option in rendered_options
+                if option["value"] == selected_value
+            ),
+            None,
+        )
+        if initial is not None:
+            element["initial_option"] = initial
+    return {
+        "type": "input",
+        "block_id": block_id,
+        "label": {"type": "plain_text", "text": label},
+        "element": element,
+    }
+
+
+def _response_mode_label(mode: ExternalChannelResponseMode) -> str:
+    return (
+        "mentions only"
+        if mode is ExternalChannelResponseMode.MENTION_ONLY
+        else ("all messages")
+    )
+
+
+def _slack_literal(value: str) -> str:
+    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _slack_thread_resource_key(
+    *,
+    tenant_id: str | None,
+    channel_id: str,
+    thread_key: str,
+) -> str:
+    if tenant_id is None:
+        raise ValueError("Slack interaction tenant is unavailable.")
+    return f"slack:{tenant_id}:{channel_id}:{thread_key}"
 
 
 def build_selector_metadata(
@@ -662,7 +1361,7 @@ def _selector_view(
         )
     blocks.append({"type": "actions", "elements": actions})
     return SlackInteractionView(
-        callback_id=_SELECTOR_CALLBACK_ID,
+        callback_id=SLACK_SELECTOR_VIEW_CALLBACK_ID,
         title=_SELECTOR_TITLE,
         private_metadata=metadata,
         blocks=blocks,

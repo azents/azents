@@ -88,6 +88,12 @@ async def test_post_claim_mutation_terminalizes_once_without_trigger_retention(
 
     handoff = ExternalChannelInteractionHandoff(
         interaction_id="interaction-1",
+        handler="selector_open",
+        provider_parent_channel_id=None,
+        provider_thread_key=None,
+        settings_metadata=None,
+        settings_location=None,
+        settings_response_mode=None,
         trigger_id="trigger-secret-must-not-persist",
     )
 
@@ -236,7 +242,15 @@ async def test_provider_mutation_timeout_terminalizes_without_replay() -> None:
         provider_mutation_timeout=datetime.timedelta(milliseconds=1),
         processing_lease=datetime.timedelta(seconds=1),
     ).run_interaction_provider_mutation(
-        handoff=ExternalChannelInteractionHandoff(interaction_id="interaction-1"),
+        handoff=ExternalChannelInteractionHandoff(
+            interaction_id="interaction-1",
+            handler="selector_open",
+            provider_parent_channel_id=None,
+            provider_thread_key=None,
+            settings_metadata=None,
+            settings_location=None,
+            settings_response_mode=None,
+        ),
         callback=callback,
     )
 

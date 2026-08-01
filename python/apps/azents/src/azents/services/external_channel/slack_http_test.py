@@ -13,7 +13,11 @@ import pytest
 from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
-from azents.core.enums import ExternalChannelTransport
+from azents.core.enums import (
+    ExternalChannelConversationLocation,
+    ExternalChannelResponseMode,
+    ExternalChannelTransport,
+)
 from azents.services.external_channel.slack_endpoint import (
     slack_api_base_url,
     slack_file_url_allowed,
@@ -208,7 +212,6 @@ def _interaction_body(*, interaction_type: str = "message_action") -> bytes:
         "api_app_id": "A-1",
         "team": {"id": "T-1"},
         "user": {"id": "U-1"},
-        "callback_id": "ask-agent",
         "trigger_id": "trigger-secret-must-not-persist",
         "response_url": "https://hooks.slack.com/actions/private",
         "channel": {"id": "C-1"},
@@ -218,8 +221,12 @@ def _interaction_body(*, interaction_type: str = "message_action") -> bytes:
             "text": "private source text",
         },
     }
+    if interaction_type != "view_submission":
+        payload["callback_id"] = "azents_ask_agent"
     if interaction_type in {"block_actions", "block_suggestion"}:
-        payload["actions"] = [{"action_id": "agent-selector", "value": "route-1"}]
+        payload["actions"] = [
+            {"action_id": "azents_agent_selector_open", "value": "route-1"}
+        ]
     if interaction_type == "view_submission":
         payload["view"] = {
             "callback_id": "azents_agent_selector",
@@ -302,18 +309,90 @@ def test_interaction_callback_exposes_only_untrusted_routing_identity() -> None:
     assert result == SlackInteractionRouteIdentity(app_id="A-1", tenant_id="T-1")
 
 
+def test_slash_settings_command_projects_explicit_settings_handler() -> None:
+    """Route the exact settings command without retaining arbitrary command text."""
+    body = urlencode(
+        {
+            "api_app_id": "A-1",
+            "team_id": "T-1",
+            "user_id": "U-1",
+            "channel_id": "C-1",
+            "command": "/azents",
+            "text": "settings",
+            "trigger_id": "trigger-secret",
+        }
+    ).encode()
+
+    route = parse_slack_callback_route(body)
+    callback = parse_slack_callback(
+        connection_id="connection-1",
+        raw_body=body,
+        received_at=_NOW,
+    )
+
+    assert route == SlackInteractionRouteIdentity(app_id="A-1", tenant_id="T-1")
+    assert isinstance(callback, SlackInteractionCallback)
+    assert callback.handler == "settings_open"
+    assert callback.provider_parent_channel_id == "C-1"
+    assert callback.projection == {
+        "interaction_type": "management_action",
+        "handler": "settings_open",
+        "surface": "command",
+    }
+    assert "trigger-secret" not in repr(callback)
+
+
+def test_settings_modal_projects_only_typed_signed_scope_and_selections() -> None:
+    """Keep opaque scope and known enum selections only in transient handoff state."""
+    callback = parse_slack_interaction_payload(
+        payload={
+            "type": "view_submission",
+            "api_app_id": "A-1",
+            "team": {"id": "T-1"},
+            "user": {"id": "U-1"},
+            "view": {
+                "callback_id": "azents_conversation_settings",
+                "private_metadata": "signed-settings-scope",
+                "state": {
+                    "values": {
+                        "azents_conversation_location": {
+                            "azents_conversation_location": {
+                                "selected_option": {"value": "channel"}
+                            }
+                        },
+                        "azents_conversation_response_mode": {
+                            "azents_conversation_response_mode": {
+                                "selected_option": {"value": "mention_only"}
+                            }
+                        },
+                    }
+                },
+            },
+        },
+        provider_interaction_key="http-settings",
+        received_at=_NOW,
+    )
+
+    assert callback.handler == "settings_submission"
+    assert callback.settings_metadata == "signed-settings-scope"
+    assert callback.settings_location is ExternalChannelConversationLocation.CHANNEL
+    assert callback.settings_response_mode is ExternalChannelResponseMode.MENTION_ONLY
+    assert "signed-settings-scope" not in repr(callback)
+
+
 @pytest.mark.parametrize(
-    ("interaction_type", "expected_type", "expected_surface"),
+    ("interaction_type", "expected_type", "expected_handler", "expected_surface"),
     [
-        ("message_action", "shortcut", "unknown"),
-        ("block_actions", "block_action", "unknown"),
-        ("block_suggestion", "options", "unknown"),
-        ("view_submission", "view_submission", "modal"),
+        ("message_action", "shortcut", "selector_open", "unknown"),
+        ("block_actions", "block_action", "selector_open", "unknown"),
+        ("block_suggestion", "options", "unsupported", "unknown"),
+        ("view_submission", "view_submission", "selector_submission", "modal"),
     ],
 )
 def test_interaction_callback_projects_only_bounded_safe_metadata(
     interaction_type: str,
     expected_type: str,
+    expected_handler: str,
     expected_surface: str,
 ) -> None:
     """Do not retain form text, trigger IDs, response URLs, or action values."""
@@ -330,6 +409,7 @@ def test_interaction_callback_projects_only_bounded_safe_metadata(
     assert result.provider_interaction_key.startswith("http-")
     assert result.projection == {
         "interaction_type": expected_type,
+        "handler": expected_handler,
         "surface": expected_surface,
     }
     if interaction_type == "view_submission":
@@ -647,7 +727,7 @@ async def test_auth_test_derives_optional_internal_capabilities_independently(
     """Optional scopes never gate unrelated text connection behavior."""
     required_scopes = (
         "app_mentions:read,channels:history,channels:read,groups:history,"
-        "groups:read,chat:write,users:read"
+        "groups:read,chat:write,commands,users:read"
     )
 
     def handler(request: httpx.Request) -> httpx.Response:

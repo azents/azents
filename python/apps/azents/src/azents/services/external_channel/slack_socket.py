@@ -13,7 +13,6 @@ from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
 
-from azents.core.enums import ExternalChannelInteractionType
 from azents.repos.external_channel.data import ExternalChannelTrigger
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
@@ -341,7 +340,7 @@ class SlackSocketModeRunner:
                     provider_interaction_key=callback.provider_interaction_key,
                     received_at=self.clock(),
                 )
-                if callback.interaction_type is ExternalChannelInteractionType.SHORTCUT
+                if callback.handler == "selector_open"
                 else None
             )
             handoff = await self.admit_interaction(callback, shortcut_source_event)

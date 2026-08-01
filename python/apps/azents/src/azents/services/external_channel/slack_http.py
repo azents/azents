@@ -4,7 +4,7 @@ import datetime
 import hashlib
 import json
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, assert_never
 from urllib.parse import parse_qsl
 
 import aiohttp
@@ -14,10 +14,13 @@ from slack_sdk.web.async_client import AsyncWebClient
 from slack_sdk.web.async_slack_response import AsyncSlackResponse
 
 from azents.core.enums import (
+    ExternalChannelAppMode,
+    ExternalChannelConversationLocation,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
+    ExternalChannelResponseMode,
     ExternalChannelTransport,
 )
 from azents.core.external_channel_file import (
@@ -39,9 +42,16 @@ MAX_SLACK_HTTP_BODY_BYTES = 256 * 1024
 MAX_SLACK_URL_VERIFICATION_CHALLENGE_BYTES = 4 * 1024
 SLACK_SIGNATURE_TOLERANCE_SECONDS = 5 * 60
 SLACK_INTERACTION_TTL = datetime.timedelta(minutes=15)
-_MAX_SLACK_INTERACTION_FORM_FIELDS = 8
+_MAX_SLACK_INTERACTION_FORM_FIELDS = 32
 _MAX_SLACK_AUTHORIZATIONS = 20
 _MAX_SLACK_IDENTIFIER_LENGTH = 255
+SLACK_AZENTS_COMMAND = "/azents"
+SLACK_INVOCATION_SHORTCUT_CALLBACK_ID = "azents_ask_agent"
+SLACK_SETTINGS_SHORTCUT_CALLBACK_ID = "azents_conversation_settings"
+SLACK_SETTINGS_OPEN_ACTION_ID = "azents_conversation_settings_open"
+SLACK_SETTINGS_VIEW_CALLBACK_ID = "azents_conversation_settings"
+SLACK_SETUP_VIEW_CALLBACK_ID = "azents_conversation_setup"
+SLACK_SELECTOR_VIEW_CALLBACK_ID = "azents_agent_selector"
 SLACK_REQUIRED_BOT_SCOPES = (
     "app_mentions:read",
     "channels:history",
@@ -49,6 +59,7 @@ SLACK_REQUIRED_BOT_SCOPES = (
     "groups:history",
     "groups:read",
     "chat:write",
+    "commands",
     "users:read",
 )
 SLACK_OPTIONAL_FILE_BOT_SCOPES = (
@@ -127,6 +138,14 @@ class SlackInteractionCallback:
     actor_user_id: str
     provider_interaction_key: str
     interaction_type: ExternalChannelInteractionType
+    handler: Literal[
+        "selector_open",
+        "selector_navigation",
+        "selector_submission",
+        "settings_open",
+        "settings_submission",
+        "unsupported",
+    ]
     callback_id: str | None
     action_id: str | None
     trigger_id: str | None = field(repr=False)
@@ -143,26 +162,42 @@ class SlackInteractionCallback:
     selector_search: str | None = field(default=None, repr=False)
     selector_view_id: str | None = field(default=None, repr=False)
     selector_view_hash: str | None = field(default=None, repr=False)
+    provider_parent_channel_id: str | None = field(default=None, repr=False)
+    provider_thread_key: str | None = field(default=None, repr=False)
+    settings_metadata: str | None = field(default=None, repr=False)
+    settings_location: ExternalChannelConversationLocation | None = field(
+        default=None,
+        repr=False,
+    )
+    settings_response_mode: ExternalChannelResponseMode | None = field(
+        default=None,
+        repr=False,
+    )
 
     def requires_selector_processing(self) -> bool:
         """Return whether this callback belongs to the supported selector flow."""
-        if self.interaction_type is ExternalChannelInteractionType.SHORTCUT:
-            return self.trigger_id is not None
-        if self.interaction_type is ExternalChannelInteractionType.BLOCK_ACTION:
-            return (
-                self.action_id == "azents_agent_selector_open"
-                and self.trigger_id is not None
-            ) or (
-                self.selector_navigation is not None
-                and self.selector_metadata is not None
-                and self.selector_view_id is not None
-            )
-        if self.interaction_type is ExternalChannelInteractionType.VIEW_SUBMISSION:
-            return (
-                self.selector_metadata is not None
-                and self.selected_route_id is not None
-            )
-        return False
+        return self.handler in {
+            "selector_open",
+            "selector_navigation",
+            "selector_submission",
+        }
+
+    def requires_settings_processing(self) -> bool:
+        """Return whether this callback belongs to Slack conversation settings."""
+        return self.handler in {"settings_open", "settings_submission"}
+
+    def requires_provider_processing(
+        self,
+        *,
+        app_mode: ExternalChannelAppMode,
+    ) -> bool:
+        """Return whether the authenticated callback has one supported processor."""
+        if self.requires_settings_processing():
+            return True
+        return (
+            app_mode is ExternalChannelAppMode.MULTI
+            and self.requires_selector_processing()
+        )
 
     def interaction_create(
         self,
@@ -264,11 +299,16 @@ class _SlackSignatureClock(Clock):
 
 def parse_slack_callback_route(raw_body: bytes) -> SlackCallbackRoute:
     """Parse only the bounded fields required before signature verification."""
-    payload, is_interaction = _parse_callback_payload(raw_body)
-    if is_interaction:
+    payload, payload_kind = _parse_callback_payload(raw_body)
+    if payload_kind == "interaction":
         return SlackInteractionRouteIdentity(
             app_id=_required_string(payload, "api_app_id"),
             tenant_id=_required_nested_string(payload, "team", "id"),
+        )
+    if payload_kind == "command":
+        return SlackInteractionRouteIdentity(
+            app_id=_required_string(payload, "api_app_id"),
+            tenant_id=_required_string(payload, "team_id"),
         )
     callback_type = _required_string(payload, "type")
     if callback_type == "url_verification":
@@ -293,8 +333,8 @@ def parse_slack_callback(
     received_at: datetime.datetime,
 ) -> SlackCallbackEnvelope:
     """Parse one verified Slack callback into a bounded event or interaction."""
-    payload, is_interaction = _parse_callback_payload(raw_body)
-    if is_interaction:
+    payload, payload_kind = _parse_callback_payload(raw_body)
+    if payload_kind in {"interaction", "command"}:
         return parse_slack_interaction_payload(
             payload=payload,
             provider_interaction_key=_http_interaction_key(raw_body),
@@ -347,16 +387,28 @@ def parse_slack_interaction_payload(
     received_at: datetime.datetime,
 ) -> SlackInteractionCallback:
     """Project one authenticated Socket or HTTP interaction into safe metadata."""
-    interaction_type = _interaction_type(_required_string(payload, "type"))
-    actor_user_id = _required_nested_string(payload, "user", "id")
+    command = _optional_string(payload, "command")
+    if command is None:
+        interaction_type = _interaction_type(_required_string(payload, "type"))
+        actor_user_id = _required_nested_string(payload, "user", "id")
+        tenant_id = _required_nested_string(payload, "team", "id")
+    else:
+        interaction_type = ExternalChannelInteractionType.MANAGEMENT_ACTION
+        actor_user_id = _required_string(payload, "user_id")
+        tenant_id = _required_string(payload, "team_id")
     app_id = _required_string(payload, "api_app_id")
-    tenant_id = _required_nested_string(payload, "team", "id")
     callback_id = _first_optional_string(
         payload,
         ("callback_id",),
         ("view", "callback_id"),
     )
     action_id = _interaction_action_id(payload)
+    handler = _interaction_handler(
+        payload,
+        interaction_type=interaction_type,
+        callback_id=callback_id,
+        action_id=action_id,
+    )
     selector_metadata = _interaction_selector_metadata(
         payload,
         interaction_type=interaction_type,
@@ -377,12 +429,28 @@ def parse_slack_interaction_payload(
         if isinstance(selector_view, dict) and selector_navigation is not None
         else None
     )
+    provider_parent_channel_id = _interaction_parent_channel_id(payload)
+    provider_thread_key = _interaction_thread_key(payload)
+    settings_metadata = _interaction_settings_metadata(
+        payload,
+        interaction_type=interaction_type,
+        handler=handler,
+    )
+    settings_location = _interaction_settings_location(
+        payload,
+        handler=handler,
+    )
+    settings_response_mode = _interaction_settings_response_mode(
+        payload,
+        handler=handler,
+    )
     return SlackInteractionCallback(
         app_id=app_id,
         tenant_id=tenant_id,
         actor_user_id=actor_user_id,
         provider_interaction_key=provider_interaction_key,
         interaction_type=interaction_type,
+        handler=handler,
         callback_id=callback_id,
         action_id=action_id,
         trigger_id=_optional_string(payload, "trigger_id"),
@@ -402,9 +470,15 @@ def parse_slack_interaction_payload(
         ),
         selector_view_id=selector_view_id,
         selector_view_hash=selector_view_hash,
+        provider_parent_channel_id=provider_parent_channel_id,
+        provider_thread_key=provider_thread_key,
+        settings_metadata=settings_metadata,
+        settings_location=settings_location,
+        settings_response_mode=settings_response_mode,
         resource_correlation_key=_interaction_resource_correlation_key(payload),
         projection={
             "interaction_type": interaction_type.value,
+            "handler": handler,
             "surface": _interaction_surface(payload),
         },
         expires_at=received_at + SLACK_INTERACTION_TTL,
@@ -421,6 +495,8 @@ def project_slack_shortcut_source_event(
     """Project a verified message shortcut source into the canonical event inbox."""
     if _interaction_type(_required_string(payload, "type")) is not (
         ExternalChannelInteractionType.SHORTCUT
+    ) or _optional_string(payload, "callback_id") != (
+        SLACK_INVOCATION_SHORTCUT_CALLBACK_ID
     ):
         raise SlackHTTPInvalidPayload("Slack interaction is not a message shortcut.")
     app_id = _required_string(payload, "api_app_id")
@@ -474,11 +550,13 @@ def project_slack_shortcut_source_event_from_callback_body(
     received_at: datetime.datetime,
 ) -> ExternalChannelTrigger | None:
     """Project a verified shortcut body, or return no source for other callbacks."""
-    payload, is_interaction = _parse_callback_payload(raw_body)
-    if not is_interaction:
+    payload, payload_kind = _parse_callback_payload(raw_body)
+    if payload_kind != "interaction":
         return None
     if _interaction_type(_required_string(payload, "type")) is not (
         ExternalChannelInteractionType.SHORTCUT
+    ) or _optional_string(payload, "callback_id") != (
+        SLACK_INVOCATION_SHORTCUT_CALLBACK_ID
     ):
         return None
     return project_slack_shortcut_source_event(
@@ -489,16 +567,20 @@ def project_slack_shortcut_source_event_from_callback_body(
     )
 
 
-def _parse_callback_payload(raw_body: bytes) -> tuple[dict[str, object], bool]:
+def _parse_callback_payload(
+    raw_body: bytes,
+) -> tuple[dict[str, object], Literal["event", "interaction", "command"]]:
     """Parse either an Events API JSON payload or an interaction form payload."""
     if len(raw_body) > MAX_SLACK_HTTP_BODY_BYTES:
         raise SlackHTTPPayloadTooLarge("Slack callback body exceeds the size limit.")
     if raw_body.lstrip().startswith(b"{"):
-        return _parse_payload(raw_body), False
-    return _parse_interaction_form_payload(raw_body), True
+        return _parse_payload(raw_body), "event"
+    return _parse_interaction_form_payload(raw_body)
 
 
-def _parse_interaction_form_payload(raw_body: bytes) -> dict[str, object]:
+def _parse_interaction_form_payload(
+    raw_body: bytes,
+) -> tuple[dict[str, object], Literal["interaction", "command"]]:
     """Read the single URL-encoded Slack interaction payload without retaining it."""
     try:
         fields = parse_qsl(
@@ -512,21 +594,34 @@ def _parse_interaction_form_payload(raw_body: bytes) -> dict[str, object]:
             "Slack interaction callback form is invalid."
         ) from error
     payload_values = [value for key, value in fields if key == "payload"]
-    if len(payload_values) != 1:
+    if payload_values:
+        if len(payload_values) != 1 or len(fields) != 1:
+            raise SlackHTTPInvalidPayload(
+                "Slack interaction callback form must contain one payload."
+            )
+        try:
+            payload: object = json.loads(payload_values[0])
+        except json.JSONDecodeError as error:
+            raise SlackHTTPInvalidPayload(
+                "Slack interaction callback payload is not valid JSON."
+            ) from error
+        if not isinstance(payload, dict):
+            raise SlackHTTPInvalidPayload(
+                "Slack interaction callback payload must be a JSON object."
+            )
+        return payload, "interaction"
+    form: dict[str, object] = {}
+    for key, value in fields:
+        if key in form:
+            raise SlackHTTPInvalidPayload(
+                "Slack command callback form contains duplicate fields."
+            )
+        form[key] = value
+    if _optional_string(form, "command") is None:
         raise SlackHTTPInvalidPayload(
-            "Slack interaction callback form must contain one payload."
+            "Slack callback form is not a supported interaction or command."
         )
-    try:
-        payload: object = json.loads(payload_values[0])
-    except json.JSONDecodeError as error:
-        raise SlackHTTPInvalidPayload(
-            "Slack interaction callback payload is not valid JSON."
-        ) from error
-    if not isinstance(payload, dict):
-        raise SlackHTTPInvalidPayload(
-            "Slack interaction callback payload must be a JSON object."
-        )
-    return payload
+    return form, "command"
 
 
 def _parse_payload(raw_body: bytes) -> dict[str, object]:
@@ -827,6 +922,63 @@ def _interaction_type(value: str) -> ExternalChannelInteractionType:
     return interaction_type
 
 
+def _interaction_handler(
+    payload: dict[str, object],
+    *,
+    interaction_type: ExternalChannelInteractionType,
+    callback_id: str | None,
+    action_id: str | None,
+) -> Literal[
+    "selector_open",
+    "selector_navigation",
+    "selector_submission",
+    "settings_open",
+    "settings_submission",
+    "unsupported",
+]:
+    """Select one explicit provider processor from fixed callback identifiers."""
+    match interaction_type:
+        case ExternalChannelInteractionType.MANAGEMENT_ACTION:
+            command_text = (_optional_string(payload, "text") or "").strip()
+            if (
+                _optional_string(payload, "command") == SLACK_AZENTS_COMMAND
+                and command_text == "settings"
+            ):
+                return "settings_open"
+            return "unsupported"
+        case ExternalChannelInteractionType.SHORTCUT:
+            if callback_id == SLACK_INVOCATION_SHORTCUT_CALLBACK_ID:
+                return "selector_open"
+            if callback_id == SLACK_SETTINGS_SHORTCUT_CALLBACK_ID:
+                return "settings_open"
+            return "unsupported"
+        case ExternalChannelInteractionType.BLOCK_ACTION:
+            if action_id == "azents_agent_selector_open":
+                return "selector_open"
+            if action_id in {
+                "azents_agent_selector_search",
+                "azents_agent_selector_previous",
+                "azents_agent_selector_next",
+            }:
+                return "selector_navigation"
+            if action_id == SLACK_SETTINGS_OPEN_ACTION_ID:
+                return "settings_open"
+            return "unsupported"
+        case ExternalChannelInteractionType.OPTIONS:
+            return "unsupported"
+        case ExternalChannelInteractionType.VIEW_SUBMISSION:
+            if callback_id == SLACK_SELECTOR_VIEW_CALLBACK_ID:
+                return "selector_submission"
+            if callback_id in {
+                SLACK_SETTINGS_VIEW_CALLBACK_ID,
+                SLACK_SETUP_VIEW_CALLBACK_ID,
+            }:
+                return "settings_submission"
+            return "unsupported"
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
 def _interaction_action_id(payload: dict[str, object]) -> str | None:
     """Return one action identifier without retaining arbitrary action values."""
     direct = _optional_string(payload, "action_id")
@@ -837,6 +989,22 @@ def _interaction_action_id(payload: dict[str, object]) -> str | None:
         return None
     action = actions[0]
     return _optional_string(action, "action_id") if isinstance(action, dict) else None
+
+
+def _interaction_action_value(payload: dict[str, object]) -> str | None:
+    """Return one bounded transient action value from an exact single action."""
+    actions = payload.get("actions")
+    if not isinstance(actions, list) or len(actions) != 1:
+        return None
+    action = actions[0]
+    if not isinstance(action, dict):
+        return None
+    value = _optional_string(action, "value")
+    if value is None:
+        return None
+    if len(value) > 3_000:
+        raise SlackHTTPInvalidPayload("Slack interaction action value is invalid.")
+    return value
 
 
 def _interaction_selector_interaction_id(
@@ -880,7 +1048,7 @@ def _interaction_selector_metadata(
     view = payload.get("view")
     if not isinstance(view, dict):
         raise SlackHTTPInvalidPayload("Slack selector submission view is missing.")
-    if _optional_string(view, "callback_id") != "azents_agent_selector":
+    if _optional_string(view, "callback_id") != SLACK_SELECTOR_VIEW_CALLBACK_ID:
         return None
     metadata = _optional_string(view, "private_metadata")
     if metadata is None or len(metadata) > 3_000:
@@ -941,7 +1109,7 @@ def _interaction_selected_route_id(
     view = payload.get("view")
     if not isinstance(view, dict):
         raise SlackHTTPInvalidPayload("Slack selector submission view is missing.")
-    if _optional_string(view, "callback_id") != "azents_agent_selector":
+    if _optional_string(view, "callback_id") != SLACK_SELECTOR_VIEW_CALLBACK_ID:
         return None
     state = view.get("state")
     values = state.get("values") if isinstance(state, dict) else None
@@ -958,22 +1126,131 @@ def _interaction_selected_route_id(
     return route_id
 
 
-def _interaction_resource_correlation_key(
-    payload: dict[str, object],
-) -> str | None:
-    """Project the interaction's visible source conversation without its content."""
-    channel_id = _first_optional_string(
+def _interaction_parent_channel_id(payload: dict[str, object]) -> str | None:
+    """Project the authenticated interaction's provider parent channel."""
+    value = _first_optional_string(
         payload,
+        ("channel_id",),
         ("channel", "id"),
         ("container", "channel_id"),
     )
-    message_ts = _first_optional_string(
+    if value is not None and len(value) > _MAX_SLACK_IDENTIFIER_LENGTH:
+        raise SlackHTTPInvalidPayload("Slack interaction channel is invalid.")
+    return value
+
+
+def _interaction_thread_key(payload: dict[str, object]) -> str | None:
+    """Project an exact message or thread key when the interaction proves one."""
+    value = _first_optional_string(
         payload,
         ("message", "thread_ts"),
         ("message", "ts"),
         ("container", "thread_ts"),
         ("container", "message_ts"),
     )
+    if value is not None and len(value) > _MAX_SLACK_IDENTIFIER_LENGTH:
+        raise SlackHTTPInvalidPayload("Slack interaction thread is invalid.")
+    return value
+
+
+def _interaction_settings_metadata(
+    payload: dict[str, object],
+    *,
+    interaction_type: ExternalChannelInteractionType,
+    handler: str,
+) -> str | None:
+    """Keep only signed settings scope needed by the immediate processor."""
+    if handler == "settings_open" and (
+        interaction_type is ExternalChannelInteractionType.BLOCK_ACTION
+    ):
+        value = _interaction_action_value(payload)
+        if value is None:
+            raise SlackHTTPInvalidPayload("Slack settings action scope is missing.")
+        return value
+    if handler != "settings_submission":
+        return None
+    view = payload.get("view")
+    if not isinstance(view, dict):
+        raise SlackHTTPInvalidPayload("Slack settings submission view is missing.")
+    value = _optional_string(view, "private_metadata")
+    if value is None or len(value) > 3_000:
+        raise SlackHTTPInvalidPayload("Slack settings metadata is invalid.")
+    return value
+
+
+def _interaction_settings_location(
+    payload: dict[str, object],
+    *,
+    handler: str,
+) -> ExternalChannelConversationLocation | None:
+    """Read one explicit conversation-location selection from a settings modal."""
+    if handler != "settings_submission":
+        return None
+    value = _interaction_modal_selected_value(
+        payload,
+        block_id="azents_conversation_location",
+        action_id="azents_conversation_location",
+    )
+    if value is None:
+        return None
+    try:
+        return ExternalChannelConversationLocation(value)
+    except ValueError as error:
+        raise SlackHTTPInvalidPayload(
+            "Slack conversation location is invalid."
+        ) from error
+
+
+def _interaction_settings_response_mode(
+    payload: dict[str, object],
+    *,
+    handler: str,
+) -> ExternalChannelResponseMode | None:
+    """Read one explicit response-mode selection from a settings modal."""
+    if handler != "settings_submission":
+        return None
+    value = _interaction_modal_selected_value(
+        payload,
+        block_id="azents_conversation_response_mode",
+        action_id="azents_conversation_response_mode",
+    )
+    if value is None:
+        return None
+    try:
+        return ExternalChannelResponseMode(value)
+    except ValueError as error:
+        raise SlackHTTPInvalidPayload(
+            "Slack conversation response mode is invalid."
+        ) from error
+
+
+def _interaction_modal_selected_value(
+    payload: dict[str, object],
+    *,
+    block_id: str,
+    action_id: str,
+) -> str | None:
+    """Read one bounded static-select value from a known modal field."""
+    view = payload.get("view")
+    state = view.get("state") if isinstance(view, dict) else None
+    values = state.get("values") if isinstance(state, dict) else None
+    block = values.get(block_id) if isinstance(values, dict) else None
+    action = block.get(action_id) if isinstance(block, dict) else None
+    selected = action.get("selected_option") if isinstance(action, dict) else None
+    value = selected.get("value") if isinstance(selected, dict) else None
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value or len(value) > 64:
+        raise SlackHTTPInvalidPayload("Slack modal selection is invalid.")
+    return value
+
+
+def _interaction_resource_correlation_key(
+    payload: dict[str, object],
+) -> str | None:
+    """Project the interaction's visible source conversation without its content."""
+    channel_id = _interaction_parent_channel_id(payload)
+    message_ts = _interaction_thread_key(payload)
     if channel_id is None or message_ts is None:
         return None
     return f"{channel_id}:{message_ts}"
@@ -981,6 +1258,8 @@ def _interaction_resource_correlation_key(
 
 def _interaction_surface(payload: dict[str, object]) -> str:
     """Return the categorical interaction surface without raw payload retention."""
+    if _optional_string(payload, "command") is not None:
+        return "command"
     container_type = _first_optional_string(payload, ("container", "type"))
     if container_type is not None:
         return container_type

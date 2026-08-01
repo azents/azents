@@ -51,7 +51,10 @@ from azents.repos.external_channel.data import (
     ExternalChannelResourceCreate,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.external_channel.work import (
+    ExternalChannelWorkRepository,
+    _provider_payload,  # pyright: ignore[reportPrivateUsage]
+)
 from azents.repos.external_channel.work_data import ChannelWorkTask
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
@@ -61,6 +64,44 @@ from azents.testing.model_selection import make_test_model_selection_dict
 
 def _at(second: int) -> datetime.datetime:
     return datetime.datetime(2026, 7, 22, 0, 0, second, tzinfo=datetime.UTC)
+
+
+def test_slack_parent_delivery_payload_omits_thread_target() -> None:
+    """Lower a parent conversation to a channel-level Slack post."""
+    payload = _provider_payload(
+        ExternalChannelProvider.SLACK,
+        {
+            "channel_id": "C-1",
+            "conversation_scope": "parent_channel",
+            "thread_ts": "must-not-be-used",
+        },
+        text="Reply",
+    )
+
+    assert payload == {
+        "channel_id": "C-1",
+        "conversation_scope": "parent_channel",
+        "text": "Reply",
+    }
+
+
+def test_slack_thread_delivery_payload_retains_root_target() -> None:
+    """Lower a thread conversation to its exact Slack root timestamp."""
+    payload = _provider_payload(
+        ExternalChannelProvider.SLACK,
+        {
+            "channel_id": "C-1",
+            "thread_ts": "1.000001",
+        },
+        text="Reply",
+    )
+
+    assert payload == {
+        "channel_id": "C-1",
+        "thread_ts": "1.000001",
+        "conversation_scope": "thread",
+        "text": "Reply",
+    }
 
 
 def _task(

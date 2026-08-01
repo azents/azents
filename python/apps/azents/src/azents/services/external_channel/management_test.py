@@ -646,9 +646,55 @@ def test_socket_manifest_keeps_required_bot_events_without_callback() -> None:
     assert "groups:read" in guidance.bot_scopes
     assert "files:read" in guidance.bot_scopes
     assert "files:write" in guidance.bot_scopes
+    assert "commands" in guidance.bot_scopes
     assert "request_url" not in subscriptions
+    assert settings["interactivity"] == {"is_enabled": True}
+    features = guidance.manifest["features"]
+    assert isinstance(features, dict)
+    assert features["slash_commands"] == [
+        {
+            "command": "/azents",
+            "description": "Open Azents conversation settings",
+            "usage_hint": "settings",
+            "should_escape": False,
+        }
+    ]
+    shortcuts = features["shortcuts"]
+    assert isinstance(shortcuts, list)
+    assert [
+        shortcut["callback_id"] for shortcut in shortcuts if isinstance(shortcut, dict)
+    ] == [
+        "azents_ask_agent",
+        "azents_conversation_settings",
+    ]
     assert guidance.callback_url is None
     assert "signing_secret" not in guidance.manifest_json
+
+
+def test_http_manifest_routes_commands_interactivity_and_events_to_callback() -> None:
+    """HTTP Apps use the fixed authenticated callback for every Slack surface."""
+    callback_url = "https://callbacks.example.test/external-channel/v1/slack/events"
+    guidance = slack_manifest_guidance(
+        ExternalChannelTransport.HTTP,
+        callback_url=callback_url,
+        app_name="Incident Agent",
+    )
+
+    features = guidance.manifest["features"]
+    settings = guidance.manifest["settings"]
+    assert isinstance(features, dict)
+    assert isinstance(settings, dict)
+    slash_commands = features["slash_commands"]
+    interactivity = settings["interactivity"]
+    subscriptions = settings["event_subscriptions"]
+    assert isinstance(slash_commands, list)
+    assert isinstance(slash_commands[0], dict)
+    assert isinstance(interactivity, dict)
+    assert isinstance(subscriptions, dict)
+    assert slash_commands[0]["url"] == callback_url
+    assert interactivity["request_url"] == callback_url
+    assert subscriptions["request_url"] == callback_url
+    assert guidance.callback_url == callback_url
 
 
 async def test_add_multi_route_returns_existing_available_association() -> None:

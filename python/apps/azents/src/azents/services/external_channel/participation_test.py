@@ -39,6 +39,7 @@ from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionReason,
 )
 from azents.services.external_channel.participation import (
+    ExternalChannelParticipationError,
     ExternalChannelParticipationService,
     _CommittedLocation,  # pyright: ignore[reportPrivateUsage]
 )
@@ -162,12 +163,47 @@ def _service(
     return ExternalChannelParticipationService(
         session_manager=cast(SessionManager[AsyncSession], _session_manager),
         repository=cast(Any, repository),
+        management_repository=cast(Any, MagicMock()),
         agent_repository=cast(Any, MagicMock()),
         ingestion_replay_service=cast(Any, replay or MagicMock()),
         conversation_lock=cast(Any, _Lock()),
         participation_lock=cast(Any, _Lock()),
         config=Config.model_construct(external_channel_participation_enabled=True),
     )
+
+
+@pytest.mark.asyncio
+async def test_parent_mutation_rejects_replacement_setting_before_any_write() -> None:
+    """Fence a stale modal by signed setting identity as well as generation."""
+    repository = MagicMock()
+    repository.lock_connection_for_routing = AsyncMock(
+        return_value=SimpleNamespace(id="connection-1")
+    )
+    repository.lock_active_participation_setting = AsyncMock(
+        return_value=_setting().model_copy(update={"id": "replacement-setting"})
+    )
+    repository.update_participation_setting = AsyncMock()
+    service = _service(repository=repository)
+
+    with pytest.raises(
+        ExternalChannelParticipationError,
+        match="settings changed before submission",
+    ):
+        await service.mutate_parent_settings(
+            connection_id="connection-1",
+            provider_parent_channel_id="channel-1",
+            principal_id="principal-1",
+            expected_setting_id="setting-1",
+            expected_settings_generation=1,
+            location=ExternalChannelConversationLocation.THREADS,
+            response_mode=ExternalChannelResponseMode.MENTION_ONLY,
+            now=_NOW,
+            deadline=ExternalChannelOperationDeadline(
+                _NOW + datetime.timedelta(seconds=30)
+            ),
+        )
+
+    repository.update_participation_setting.assert_not_awaited()
 
 
 @pytest.mark.asyncio

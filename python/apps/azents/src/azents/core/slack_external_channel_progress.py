@@ -96,6 +96,8 @@ def render_slack_session_presence(
     agent_name: str,
     session_url: str,
     state: ExternalChannelSessionPresenceState,
+    settings_action_id: str,
+    settings_action_value: str | None,
 ) -> SlackProgressPresentation:
     """Render one Session binding presence control with navigation."""
     text = session_presence_sentence(agent_name, state)
@@ -103,6 +105,29 @@ def render_slack_session_presence(
         agent_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     )
     verb = "joined" if state == "joined" else "left"
+    elements: list[dict[str, object]] = [
+        {
+            "type": "button",
+            "action_id": "view_azents_session",
+            "text": {
+                "type": "plain_text",
+                "text": "View session",
+            },
+            "url": session_url,
+        }
+    ]
+    if settings_action_value is not None:
+        elements.append(
+            {
+                "type": "button",
+                "action_id": settings_action_id,
+                "text": {
+                    "type": "plain_text",
+                    "text": "Conversation settings",
+                },
+                "value": settings_action_value,
+            }
+        )
     return SlackProgressPresentation(
         text=text,
         blocks=[
@@ -115,17 +140,7 @@ def render_slack_session_presence(
             },
             {
                 "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "action_id": "view_azents_session",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "View session",
-                        },
-                        "url": session_url,
-                    }
-                ],
+                "elements": elements,
             },
         ],
     )

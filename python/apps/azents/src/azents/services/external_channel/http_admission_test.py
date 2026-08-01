@@ -364,7 +364,7 @@ def _interaction_body(
         "api_app_id": app_id,
         "team": {"id": tenant_id},
         "user": {"id": "U-1"},
-        "callback_id": "ask-agent",
+        "callback_id": "azents_ask_agent",
         "trigger_id": "trigger-secret-must-not-persist",
         "response_url": "https://hooks.slack.com/actions/private",
         "channel": {"id": "C-1"},
@@ -694,6 +694,9 @@ async def test_matching_active_interaction_is_admitted_without_raw_payload(
     assert create.resource_correlation_key == "C-1:100.0001"
     assert create.projection == {
         "interaction_type": expected_type,
+        "handler": (
+            "selector_open" if interaction_type == "message_action" else "unsupported"
+        ),
         "surface": expected_surface,
     }
     assert principal.provider_user_id == "U-1"
