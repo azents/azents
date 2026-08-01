@@ -34,12 +34,13 @@ void test("preserves string continuation metadata", () => {
 
 void test("classifies external Channel Work continuation", () => {
   assert.deepEqual(
-    continuationPresentation(
-      continuationMessage({
+    continuationPresentation({
+      ...continuationMessage({
         source: "external_channel",
         active_bindings: "binding-1",
       }),
-    ),
+      role: "external_channel_continuation",
+    }),
     {
       source: "external_channel",
       icon: "channel",

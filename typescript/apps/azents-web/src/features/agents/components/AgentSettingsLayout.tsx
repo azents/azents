@@ -2,10 +2,9 @@
 
 /** Shared layout for Agent settings pages. */
 
-import { Box, Button, Group, rem } from "@mantine/core";
-import { IconArrowLeft } from "@tabler/icons-react";
+import { rem } from "@mantine/core";
 import { useTranslations } from "next-intl";
-import Link from "next/link";
+import { SettingsPageLayout } from "@/shared/components/SettingsPageLayout";
 import { AgentSettingsHeader } from "./AgentSettingsHeader";
 import type { AgentResponse } from "@azents/public-client";
 
@@ -32,26 +31,13 @@ export function AgentSettingsLayout({
     backTarget === "agent" ? t("backToAgent") : t("backToSettings");
 
   return (
-    <Box h="100%" mih={0} style={{ display: "flex", flexDirection: "column" }}>
-      <AgentSettingsHeader agent={agent} />
-      <Box
-        style={{
-          borderBottom: "0.0625rem solid var(--mantine-color-default-border)",
-          backgroundColor: "var(--mantine-color-body)",
-        }}
-      >
-        <Group px="md" py="xs" maw={backMaxWidth} mx="auto" w="100%">
-          <Button
-            component={Link}
-            href={backHref}
-            variant="subtle"
-            leftSection={<IconArrowLeft size={rem(16)} />}
-          >
-            {backLabel}
-          </Button>
-        </Group>
-      </Box>
+    <SettingsPageLayout
+      header={<AgentSettingsHeader agent={agent} />}
+      backHref={backHref}
+      backLabel={backLabel}
+      backMaxWidth={backMaxWidth}
+    >
       {children}
-    </Box>
+    </SettingsPageLayout>
   );
 }

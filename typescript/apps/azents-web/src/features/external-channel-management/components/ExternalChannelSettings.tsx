@@ -9,6 +9,7 @@ import {
   Code,
   CopyButton,
   Divider,
+  Flex,
   Group,
   List,
   Loader,
@@ -137,8 +138,13 @@ function ConnectionRow({
       data-testid={`external-connection-${connection.id}`}
     >
       <Stack gap="md">
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
-          <Box style={{ minWidth: 0 }}>
+        <Flex
+          direction={{ base: "column", sm: "row" }}
+          justify="space-between"
+          align="flex-start"
+          gap="xs"
+        >
+          <Box w={{ base: "100%", sm: "auto" }} style={{ minWidth: 0 }}>
             <Group gap="xs">
               <Text fw={700}>
                 {connection.provider === "discord" ? t("discord") : t("slack")}
@@ -165,7 +171,7 @@ function ConnectionRow({
               ? t("credentialsConfigured")
               : t("credentialsMissing")}
           </Badge>
-        </Group>
+        </Flex>
 
         <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
           <Box>

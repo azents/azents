@@ -1,19 +1,14 @@
 "use client";
 
-/**
- * LLM Settings UI component.
- *
- * Displays LLM Provider Integration list and provides create/update/delete UI plus workspace default model settings.
- * Only Owner can manage; Manager/Member are read-only.
- */
+/** Focused LLM provider integration settings UI. */
 
 import {
   ActionIcon,
   Alert,
   Badge,
+  Box,
   Button,
   Card,
-  Container,
   Group,
   Loader,
   rem,
@@ -25,11 +20,9 @@ import {
 } from "@mantine/core";
 import { IconEdit, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import Link from "next/link";
 import { IntegrationFormModal } from "./IntegrationFormModal";
 import { KimiConnectionStatusBadge } from "./KimiOAuthConnectionCard";
-import { WorkspaceModelSettingsCard } from "./WorkspaceModelSettingsCard";
-import type { LlmSettingsContainerOutput } from "../containers/useLlmSettingsContainer";
+import type { LlmIntegrationsContainerOutput } from "../containers/useLlmIntegrationsContainer";
 import type { KimiOAuthConnectionStatus } from "./KimiOAuthConnectionCard";
 import type { LlmProviderIntegrationResponse } from "@azents/public-client";
 import type { ReactNode } from "react";
@@ -65,7 +58,6 @@ function providerColor(provider: string): string {
     case "xai_oauth":
       return "dark";
     case "kimi_oauth":
-      return "violet";
     case "openrouter":
       return "violet";
     default:
@@ -112,23 +104,21 @@ function kimiConnectionStatusForIntegration(
   return integration.config.status;
 }
 
-export interface LlmSettingsProps extends LlmSettingsContainerOutput {
+export interface LlmIntegrationsProps extends LlmIntegrationsContainerOutput {
   renderSubscriptionUsage: (
     integration: LlmProviderIntegrationResponse,
   ) => ReactNode;
 }
 
-export function LlmSettings(props: LlmSettingsProps): React.ReactElement {
+export function LlmIntegrations(
+  props: LlmIntegrationsProps,
+): React.ReactElement {
   const {
     listState,
     formModal,
     mutationState,
     canManage,
-    providerOptions,
     availableProviderValues,
-    modelOptions,
-    catalogStates,
-    modelsLoading,
     renderSubscriptionUsage,
     onOpenCreate,
     onOpenEdit,
@@ -137,57 +127,29 @@ export function LlmSettings(props: LlmSettingsProps): React.ReactElement {
     onUpdate,
     onDelete,
     onToggleEnabled,
-    onSyncCatalog,
-    onUpdateWorkspaceModelSettings,
   } = props;
   const t = useTranslations("workspace.llmSettings");
 
   return (
-    <Container size="md" py="xl">
-      <Stack gap="lg">
+    <Box style={{ height: "100%", overflow: "auto", minHeight: 0 }}>
+      <Stack gap="lg" p="md" maw={rem(860)} mx="auto" w="100%">
         <Group justify="space-between">
           <Title order={3}>{t("headline")}</Title>
-          <Group gap="sm">
+          {canManage && (
             <Button
-              component={Link}
-              href={`/w/${props.handle}/settings/runtime-profiles`}
-              variant="default"
+              leftSection={<IconPlus size={rem(16)} />}
+              onClick={onOpenCreate}
             >
-              {t("runtimeProfiles")}
+              {t("addIntegration")}
             </Button>
-            {canManage && (
-              <Button
-                leftSection={<IconPlus size={rem(16)} />}
-                onClick={onOpenCreate}
-              >
-                {t("addIntegration")}
-              </Button>
-            )}
-          </Group>
+          )}
         </Group>
-
         <Text c="dimmed" size="sm">
           {t("description")}
         </Text>
-
         {listState.type === "LOADING" && <Loader />}
         {listState.type === "ERROR" && (
           <Alert color="red">{t("loadError")}</Alert>
-        )}
-        {listState.type === "READY" && (
-          <WorkspaceModelSettingsCard
-            settings={listState.workspaceModelSettings}
-            handle={props.handle}
-            providerOptions={providerOptions}
-            modelOptions={modelOptions}
-            catalogStates={catalogStates}
-            modelsLoading={modelsLoading}
-            canManage={canManage}
-            submitting={mutationState.type === "SUBMITTING"}
-            error={mutationState.type === "IDLE" ? mutationState.error : null}
-            onSyncCatalog={onSyncCatalog}
-            onSubmit={onUpdateWorkspaceModelSettings}
-          />
         )}
         {listState.type === "READY" && listState.integrations.length === 0 && (
           <Text c="dimmed">{t("empty")}</Text>
@@ -204,7 +166,6 @@ export function LlmSettings(props: LlmSettingsProps): React.ReactElement {
               usage={renderSubscriptionUsage(integration)}
             />
           ))}
-
         <IntegrationFormModal
           handle={props.handle}
           availableProviderValues={availableProviderValues}
@@ -215,11 +176,10 @@ export function LlmSettings(props: LlmSettingsProps): React.ReactElement {
           onUpdate={onUpdate}
         />
       </Stack>
-    </Container>
+    </Box>
   );
 }
 
-/** Integration card */
 function IntegrationCard({
   integration,
   canManage,
@@ -278,8 +238,8 @@ function IntegrationCard({
                   name: integration.name,
                 })}
                 checked={integration.enabled}
-                onChange={(e) =>
-                  onToggleEnabled(integration, e.currentTarget.checked)
+                onChange={(event) =>
+                  onToggleEnabled(integration, event.currentTarget.checked)
                 }
                 size="sm"
               />

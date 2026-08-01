@@ -24,11 +24,12 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/engine_adapter.py
   - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentFormContainer.ts
-  - typescript/apps/azents-web/src/features/llm-settings/containers/useLlmSettingsContainer.ts
+  - typescript/apps/azents-web/src/features/llm-settings/containers/useLlmIntegrationsContainer.ts
+  - typescript/apps/azents-web/src/features/llm-settings/containers/useWorkspaceModelSettingsContainer.ts
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
   - typescript/apps/azents-admin-web/src/features/model-catalog/containers/useModelCatalogPageContainer.ts
-last_verified_at: 2026-07-21
-spec_version: 17
+last_verified_at: 2026-08-01
+spec_version: 18
 ---
 
 # Model Catalog Domain Spec
@@ -154,6 +155,7 @@ For user-scoped integration catalogs, the picker can trigger integration sync. F
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-08-01 | 18 | Split Workspace model selection and LLM integration settings into focused routes and containers while preserving catalog query, sync, and submit authority |
 | 2026-07-21 | 17 | Clarified that provider-request declaration limits apply whenever the Agent has Tool Search enabled, which is the default for newly created Agents |
 | 2026-07-19 | 15 | Added the Agent-opt-in provider-request tool-limit registry as the narrow call-time exception to saved model-selection snapshot semantics |
 | 2026-07-19 | 14 | Added direct account-scoped OpenRouter model projection with unrestricted valid model visibility and conservative capability claims |

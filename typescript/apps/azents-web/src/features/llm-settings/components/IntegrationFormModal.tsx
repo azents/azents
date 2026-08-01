@@ -25,7 +25,12 @@ import { ChatGPTOAuthConnectionCard } from "./ChatGPTOAuthConnectionCard";
 import { GcpServiceAccountForm } from "./GcpServiceAccountForm";
 import { SetupGuide } from "./SetupGuide";
 import { XaiOAuthConnectionCard } from "./XaiOAuthConnectionCard";
-import type { LlmSettingsContainerOutput } from "../containers/useLlmSettingsContainer";
+import type {
+  CreateIntegrationInput,
+  FormModalState,
+  MutationState,
+  UpdateIntegrationInput,
+} from "../types";
 import type { CredentialType } from "./SetupGuide";
 import type { LlmProviderIntegrationResponse } from "@azents/public-client";
 
@@ -91,8 +96,8 @@ export interface ProviderFormProps {
   integration: LlmProviderIntegrationResponse | null;
   isCreate: boolean;
   isSubmitting: boolean;
-  onCreate: LlmSettingsContainerOutput["onCreate"];
-  onUpdate: LlmSettingsContainerOutput["onUpdate"];
+  onCreate: (data: CreateIntegrationInput) => void;
+  onUpdate: (data: UpdateIntegrationInput) => void;
   onClose: () => void;
 }
 
@@ -107,11 +112,11 @@ export function IntegrationFormModal({
 }: {
   handle: string;
   availableProviderValues: string[];
-  formModal: LlmSettingsContainerOutput["formModal"];
-  mutationState: LlmSettingsContainerOutput["mutationState"];
+  formModal: FormModalState;
+  mutationState: MutationState;
   onClose: () => void;
-  onCreate: LlmSettingsContainerOutput["onCreate"];
-  onUpdate: LlmSettingsContainerOutput["onUpdate"];
+  onCreate: (data: CreateIntegrationInput) => void;
+  onUpdate: (data: UpdateIntegrationInput) => void;
 }): React.ReactElement {
   const t = useTranslations("workspace.llmSettings");
   const isOpen = formModal.type !== "CLOSED";
@@ -153,11 +158,11 @@ function IntegrationFormContent({
 }: {
   handle: string;
   availableProviderValues: string[];
-  formModal: LlmSettingsContainerOutput["formModal"];
-  mutationState: LlmSettingsContainerOutput["mutationState"];
+  formModal: FormModalState;
+  mutationState: MutationState;
   onClose: () => void;
-  onCreate: LlmSettingsContainerOutput["onCreate"];
-  onUpdate: LlmSettingsContainerOutput["onUpdate"];
+  onCreate: (data: CreateIntegrationInput) => void;
+  onUpdate: (data: UpdateIntegrationInput) => void;
 }): React.ReactElement {
   const t = useTranslations("workspace.llmSettings");
   const providerLabels: ProviderLabels = {
@@ -298,7 +303,7 @@ function OAuthAliasForm({
 }: {
   name: string;
   isSubmitting: boolean;
-  onUpdate: LlmSettingsContainerOutput["onUpdate"];
+  onUpdate: (data: UpdateIntegrationInput) => void;
   onClose: () => void;
 }): React.ReactElement {
   const t = useTranslations("workspace.llmSettings");

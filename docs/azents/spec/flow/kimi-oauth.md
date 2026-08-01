@@ -22,7 +22,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
   - typescript/apps/azents-web/src/features/chat/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-07-19
+last_verified_at: 2026-08-01
 spec_version: 1
 ---
 

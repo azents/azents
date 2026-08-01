@@ -52,6 +52,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/automaticProjects.ts
   - typescript/apps/azents-web/src/features/agents/components/AgentAutomaticProjects.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
+  - typescript/apps/azents-web/src/features/workspace-settings/**
+  - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/features/runtime-profiles/**
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/**
   - typescript/apps/azents-web/src/app/(app)/join/[handle]/page.tsx
@@ -85,8 +87,9 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-07-31
-spec_version: 53
+  - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
+last_verified_at: 2026-08-01
+spec_version: 54
 ---
 
 # Workspace & Membership
@@ -324,6 +327,31 @@ Membership UI has these routes:
 - `/w/[handle]/members` — exposes workspace member list, invitation, and join request review.
 - `/join/[handle]` — entrypoint where external user requests to join by workspace handle or checks pending state.
 - invitation/join request tRPC router wraps backend REST API. UI exposes management actions to users with OWNER/MANAGER permission, and provides read/request-centered screen to MEMBER.
+
+### Workspace Settings UI
+
+azents-web `/w/[handle]/settings` is the Workspace settings overview inside
+`WorkspaceShell`. The overview identifies the current Workspace by name and handle and links to three
+focused settings areas:
+
+- `/w/[handle]/settings/models` — Workspace selectable model options and default main/lightweight
+  labels;
+- `/w/[handle]/settings/llm-integrations` — LLM provider credentials, connection state, enablement,
+  subscription usage, and integration lifecycle controls;
+- `/w/[handle]/settings/runtime-profiles` — exact Runtime Provider and infrastructure choices,
+  Workspace defaults for new Agents, lifecycle controls, and scoped Runtime recreation.
+
+All detail pages use the Workspace identity header and provide an explicit return to the settings
+overview. The dynamic settings route accepts only `models` and `llm-integrations`; unknown settings
+sections return 404, while Runtime Profiles retains its dedicated static route. Members, Toolkits,
+External channels, and My Profile remain independent Workspace sidebar destinations and are not
+duplicated in the settings overview.
+
+Every Workspace member may read all three settings areas. Existing Owner-only management behavior
+remains for model and LLM integration settings: only the Owner receives model save and integration
+create/edit/delete/enable controls. Runtime Profile management remains available to Owners and
+Managers. Backend authorization is final for every mutation. Each detail page owns independent query
+and mutation state, while tRPC cache remains the shared server-state authority across navigation.
 
 ### Membership Lifecycle
 
@@ -585,6 +613,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-01 (spec_version=54)** — Replaced the combined Workspace LLM settings page with a
+  Workspace-identified settings overview and focused model, LLM integration, and Runtime Profile
+  routes, preserving each area's existing read and management authorization.
 - **2026-07-31 (spec_version=53)** — Replaced global Profile allowance and Workspace restriction
   hierarchy with Workspace-owned exact Runtime Profiles, a creation-time default, restrictive-only
   network policy, authoritative reconciliation, and explicit scoped recreation.

@@ -293,10 +293,32 @@
       "slackApps": "External channels",
       "integrations": "External channels"
     },
+    "settings": {
+      "layout": {
+        "backToWorkspace": "Back to workspace",
+        "backToSettings": "Back to settings"
+      },
+      "hub": {
+        "title": "Workspace settings",
+        "description": "Choose a settings area to review or update this workspace.",
+        "configuration": "Configuration",
+        "models": {
+          "label": "Default models",
+          "description": "Selectable models and defaults copied to new agents"
+        },
+        "llmIntegrations": {
+          "label": "LLM integrations",
+          "description": "Provider credentials, connections, status, and usage"
+        },
+        "runtimeProfiles": {
+          "label": "Runtime profiles",
+          "description": "Runtime provider and infrastructure choices for workspace agents"
+        }
+      }
+    },
     "llmSettings": {
       "headline": "LLM Integrations",
       "description": "Manage API keys and credentials for LLM providers used in this workspace.",
-      "runtimeProfiles": "Runtime profiles",
       "addIntegration": "Add integration",
       "empty": "No integrations configured yet.",
       "loadError": "Failed to load integrations.",
@@ -443,6 +465,9 @@
         "statusError": "Device authorization {status}."
       },
       "modelSelection": {
+        "pageTitle": "Default models",
+        "pageDescription": "Choose the selectable models and defaults that new agents inherit.",
+        "loadError": "Failed to load workspace model settings.",
         "title": "Workspace default models",
         "description": "Configure the ordered model list that new agents copy by default.",
         "currentMain": "Current main:",
@@ -562,7 +587,6 @@
     "runtimeProfiles": {
       "headline": "Runtime profiles",
       "description": "Define complete runtime choices for agents in this workspace.",
-      "backToSettings": "LLM integrations",
       "addProfile": "Add profile",
       "noInfrastructureTitle": "No Provider profiles available",
       "noInfrastructureDescription": "A platform administrator must publish a compatible Pod Profile or Container Profile before this workspace can create a Runtime Profile.",

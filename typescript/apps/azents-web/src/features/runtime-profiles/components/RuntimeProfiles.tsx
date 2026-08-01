@@ -2,10 +2,9 @@
 
 import {
   Alert,
-  Anchor,
   Badge,
+  Box,
   Button,
-  Container,
   Group,
   Loader,
   Paper,
@@ -18,9 +17,8 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { IconArrowLeft, IconPlus, IconRefresh } from "@tabler/icons-react";
+import { IconPlus, IconRefresh } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import Link from "next/link";
 import { runtimeProfileAvailabilityReason } from "../runtimeProfilePresentation";
 import { RuntimeProfileFormModal } from "./RuntimeProfileFormModal";
 import type { RuntimeProfilesContainerOutput } from "../containers/useRuntimeProfilesContainer";
@@ -46,7 +44,6 @@ export function RuntimeProfiles(
   props: RuntimeProfilesContainerOutput,
 ): React.ReactElement {
   const {
-    handle,
     state,
     editorState,
     mutationState,
@@ -63,18 +60,18 @@ export function RuntimeProfiles(
 
   if (state.type === "LOADING") {
     return (
-      <Container size="lg" py="xl">
-        <Group justify="center" py="xl">
+      <Box style={{ height: "100%", overflow: "auto", minHeight: 0 }}>
+        <Group justify="center" p="xl">
           <Loader />
         </Group>
-      </Container>
+      </Box>
     );
   }
   if (state.type === "ERROR") {
     return (
-      <Container size="lg" py="xl">
+      <Box style={{ height: "100%", overflow: "auto", minHeight: 0 }} p="md">
         <Alert color="red">{state.message}</Alert>
-      </Container>
+      </Box>
     );
   }
 
@@ -88,15 +85,8 @@ export function RuntimeProfiles(
   }));
 
   return (
-    <Container size="lg" py="xl">
-      <Stack gap="lg">
-        <Anchor component={Link} href={`/w/${handle}/settings`} size="sm">
-          <Group gap="xs">
-            <IconArrowLeft size={rem(14)} />
-            <Text size="sm">{t("backToSettings")}</Text>
-          </Group>
-        </Anchor>
-
+    <Box style={{ height: "100%", overflow: "auto", minHeight: 0 }}>
+      <Stack gap="lg" p="md" maw={rem(1080)} mx="auto" w="100%">
         <Group justify="space-between" align="flex-start">
           <Stack gap="xs">
             <Title order={3}>{t("headline")}</Title>
@@ -357,6 +347,6 @@ export function RuntimeProfiles(
         onClose={onCloseEditor}
         onSubmit={onSubmit}
       />
-    </Container>
+    </Box>
   );
 }

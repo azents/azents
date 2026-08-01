@@ -9,8 +9,6 @@ import { useEffect, useState } from "react";
 import { SelectableModelOptionsEditor } from "@/features/agents/components/SelectableModelOptionsEditor";
 import { selectableModelOptionFormValuesFromStoredOptions } from "@/features/agents/model-selection";
 import type {
-  ModelCatalogState,
-  ModelSelectionOption,
   ProviderIntegrationOption,
   SelectableModelOptionFormValue,
 } from "@/features/agents/model-selection";
@@ -26,9 +24,6 @@ export interface WorkspaceModelSettingsCardProps {
   settings: WorkspaceModelSettingsResponse | null;
   handle: string;
   providerOptions: ProviderIntegrationOption[];
-  modelOptions: ModelSelectionOption[];
-  catalogStates: ReadonlyMap<string, ModelCatalogState>;
-  modelsLoading: boolean;
   canManage: boolean;
   submitting: boolean;
   error: string | null;

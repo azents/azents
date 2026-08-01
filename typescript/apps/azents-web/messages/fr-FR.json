@@ -293,10 +293,32 @@
       "slackApps": "Canaux externes",
       "integrations": "Canaux externes"
     },
+    "settings": {
+      "layout": {
+        "backToWorkspace": "Retour à l’espace de travail",
+        "backToSettings": "Retour aux paramètres"
+      },
+      "hub": {
+        "title": "Paramètres de l’espace de travail",
+        "description": "Choisissez la zone de paramètres à consulter ou à modifier.",
+        "configuration": "Configuration",
+        "models": {
+          "label": "Modèles par défaut",
+          "description": "Modèles sélectionnables et valeurs par défaut des nouveaux agents"
+        },
+        "llmIntegrations": {
+          "label": "Intégrations LLM",
+          "description": "Identifiants, connexions, état et utilisation des fournisseurs"
+        },
+        "runtimeProfiles": {
+          "label": "Profils d’exécution",
+          "description": "Choix du fournisseur et de l’infrastructure d’exécution des agents"
+        }
+      }
+    },
     "llmSettings": {
       "headline": "Intégrations LLM",
       "description": "Gérez les clés API et les identifiants des fournisseurs LLM utilisés dans cet espace de travail.",
-      "runtimeProfiles": "Profils d’exécution",
       "addIntegration": "Ajouter une intégration",
       "empty": "Aucune intégration configurée.",
       "loadError": "Impossible de charger les intégrations.",
@@ -443,6 +465,9 @@
         "statusError": "Autorisation de l'appareil : {status}."
       },
       "modelSelection": {
+        "pageTitle": "Modèles par défaut",
+        "pageDescription": "Choisissez les modèles sélectionnables et les valeurs par défaut hérités par les nouveaux agents.",
+        "loadError": "Impossible de charger les paramètres de modèle de l’espace de travail.",
         "title": "Modèles par défaut de l'espace de travail",
         "description": "Configure the ordered model list that new agents copy by default.",
         "currentMain": "Principal actuel :",
@@ -562,7 +587,6 @@
     "runtimeProfiles": {
       "headline": "Profils d’exécution",
       "description": "Gérez les configurations d’exécution complètes utilisées par les agents de cet espace de travail.",
-      "backToSettings": "Intégrations LLM",
       "addProfile": "Ajouter un profil",
       "noInfrastructureTitle": "Aucun profil fournisseur disponible",
       "noInfrastructureDescription": "Un administrateur de la plateforme doit publier un profil Pod ou un profil de conteneur compatible avant que cet espace de travail puisse créer un profil d’exécution.",
