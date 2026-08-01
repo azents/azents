@@ -23,6 +23,7 @@ from azents.core.enums import (
     ExternalChannelWorkStatus,
 )
 from azents.core.external_channel_progress import ExternalChannelWorkTask
+from azents.core.external_channel_session_presence import session_presence_payload
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
@@ -1491,12 +1492,42 @@ class ExternalChannelManagementRepository:
         reason: str,
     ) -> tuple[str, ...]:
         if binding.disconnected_at is not None:
-            return await self._pending_progress_delete_intent_ids(
+            return await self._pending_binding_disconnect_intent_ids(
                 session,
                 binding_id=binding.id,
             )
         binding.disconnected_at = now
         binding.disconnect_reason = reason
+        presence = await session.scalar(
+            sa.select(RDBExternalChannelDeliveryAttempt).where(
+                RDBExternalChannelDeliveryAttempt.origin_type
+                == ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
+                RDBExternalChannelDeliveryAttempt.origin_id == binding.id,
+                RDBExternalChannelDeliveryAttempt.binding_id == binding.id,
+                RDBExternalChannelDeliveryAttempt.operation
+                == ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            )
+        )
+        if presence is None:
+            presence = RDBExternalChannelDeliveryAttempt(
+                origin_type=ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
+                origin_id=binding.id,
+                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                request_payload=session_presence_payload(
+                    resource.labels,
+                    state="left",
+                ),
+                status=ExternalChannelDeliveryStatus.PENDING,
+                channel_action_id=None,
+                binding_id=binding.id,
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+                attempted_at=None,
+                completed_at=None,
+            )
+            session.add(presence)
+            await session.flush()
         works = list(
             (
                 await session.scalars(
@@ -1550,18 +1581,18 @@ class ExternalChannelManagementRepository:
             session.add(attempt)
             await session.flush()
         await session.flush()
-        return await self._pending_progress_delete_intent_ids(
+        return await self._pending_binding_disconnect_intent_ids(
             session,
             binding_id=binding.id,
         )
 
     @staticmethod
-    async def _pending_progress_delete_intent_ids(
+    async def _pending_binding_disconnect_intent_ids(
         session: AsyncSession,
         *,
         binding_id: str,
     ) -> tuple[str, ...]:
-        """Return retryable cleanup intents before connection credentials purge."""
+        """Return retryable disconnect intents before provider authority changes."""
         ids = await session.scalars(
             sa.select(RDBExternalChannelDeliveryAttempt.id)
             .where(
@@ -1569,8 +1600,6 @@ class ExternalChannelManagementRepository:
                 == ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
                 RDBExternalChannelDeliveryAttempt.origin_id == binding_id,
                 RDBExternalChannelDeliveryAttempt.binding_id == binding_id,
-                RDBExternalChannelDeliveryAttempt.operation
-                == ExternalChannelDeliveryOperation.PROGRESS_DELETE,
                 RDBExternalChannelDeliveryAttempt.status
                 == ExternalChannelDeliveryStatus.PENDING,
             )

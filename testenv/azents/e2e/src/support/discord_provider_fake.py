@@ -1210,6 +1210,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 outcome=nonce_outcome,
                 file_count=file_count,
                 file_bytes=file_bytes,
+                safe_category=_session_presence_category(body),
                 session_path=_session_path(body),
             )
             self.state.record_operation(
@@ -1826,6 +1827,24 @@ def _session_path(body: dict[str, object]) -> str | None:
             parsed = urlparse(url)
             if parsed.scheme in {"http", "https"} and parsed.netloc:
                 return parsed.path if parsed.path.startswith("/w/") else None
+    return None
+
+
+def _session_presence_category(body: dict[str, object]) -> str | None:
+    """Classify Session presence without retaining Agent-authored display text."""
+    if _session_path(body) is None:
+        return None
+    embeds = body.get("embeds")
+    if not isinstance(embeds, list):
+        return None
+    for raw_embed in cast(list[object], embeds):
+        if not isinstance(raw_embed, dict):
+            continue
+        title = cast(dict[str, object], raw_embed).get("title")
+        if title == "Session connected":
+            return "session_presence_joined"
+        if title == "Session disconnected":
+            return "session_presence_left"
     return None
 
 

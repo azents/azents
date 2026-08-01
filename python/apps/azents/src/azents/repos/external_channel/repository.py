@@ -35,6 +35,7 @@ from azents.core.enums import (
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
 )
+from azents.core.external_channel_session_presence import session_presence_payload
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.base import RDBModel
@@ -1270,7 +1271,36 @@ class ExternalChannelRepository:
         )
         resource_labels = {resource.id: resource.labels for resource in resources}
         binding_resource_ids = {binding.id: binding.resource_id for binding in bindings}
-        progress_delete_intent_ids: list[str] = []
+        cleanup_intent_ids: list[str] = []
+        for binding in bindings:
+            if binding.disconnected_at is not None:
+                continue
+            result = await session.execute(
+                pg_insert(RDBExternalChannelDeliveryAttempt)
+                .values(
+                    id=uuid7().hex,
+                    origin_type=ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
+                    origin_id=binding.id,
+                    channel_action_id=None,
+                    binding_id=binding.id,
+                    operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                    request_payload=session_presence_payload(
+                        resource_labels.get(binding.resource_id),
+                        state="left",
+                    ),
+                    status=ExternalChannelDeliveryStatus.PENDING,
+                    provider_message_key=None,
+                    error_kind=None,
+                    error_summary=None,
+                    attempted_at=None,
+                    completed_at=None,
+                )
+                .on_conflict_do_nothing()
+                .returning(RDBExternalChannelDeliveryAttempt.id)
+            )
+            created_id = result.scalar_one_or_none()
+            if created_id is not None:
+                cleanup_intent_ids.append(created_id)
         for work in works:
             if work.progress_provider_message_key is None:
                 continue
@@ -1299,7 +1329,7 @@ class ExternalChannelRepository:
             )
             created_id = result.scalar_one_or_none()
             if created_id is not None:
-                progress_delete_intent_ids.append(created_id)
+                cleanup_intent_ids.append(created_id)
         for work in works:
             work.status = ExternalChannelWorkStatus.FINISHED
             work.finished_at = now
@@ -1354,7 +1384,7 @@ class ExternalChannelRepository:
         if not defer_provider_state_purge:
             self._purge_connection_provider_state(connection)
         await session.flush()
-        return tuple(progress_delete_intent_ids)
+        return tuple(cleanup_intent_ids)
 
     async def purge_disconnected_connection_provider_state(
         self,

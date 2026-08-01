@@ -620,12 +620,14 @@ async def test_disconnect_prepares_cleanup_before_terminal_secret_purge() -> Non
         events.append("prepare")
         return prepared_target
 
-    async def attempt_prepared_delivery(target: object) -> None:
+    async def attempt_captured_terminal_delivery(target: object) -> None:
         assert target is prepared_target
         events.append("delivery")
 
     action_service.prepare_delivery.side_effect = prepare_delivery
-    action_service.attempt_prepared_delivery.side_effect = attempt_prepared_delivery
+    action_service.attempt_captured_terminal_delivery.side_effect = (
+        attempt_captured_terminal_delivery
+    )
     agent_repository = AsyncMock()
     agent_repository.get_by_id.return_value = SimpleNamespace(
         workspace_id="workspace-1"
@@ -689,7 +691,7 @@ async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -
         expired_access_request_count=0,
         unavailable_resource_count=0,
         disconnected_binding_count=1,
-        progress_delete_intent_ids=("cleanup-1",),
+        cleanup_intent_ids=("cleanup-1",),
     )
     repository = AsyncMock()
     repository.get_multi_connection.return_value = connection
@@ -720,7 +722,7 @@ async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -
         events.append("delivery")
 
     action_service.prepare_delivery_in_session.side_effect = prepare
-    action_service.attempt_prepared_delivery.side_effect = deliver
+    action_service.attempt_captured_terminal_delivery.side_effect = deliver
     service = ExternalChannelManagementService(
         session_manager=session_manager,
         repository=repository,

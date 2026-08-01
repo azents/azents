@@ -6,6 +6,7 @@ spec_type: flow
 owner: "@Hardtack"
 touches_domains: [external-channel, agent, conversation]
 code_paths:
+  - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/session_lifecycle.py
   - python/apps/azents/src/azents/repos/external_channel/lifecycle.py
   - python/apps/azents/src/azents/services/external_channel/lifecycle.py
@@ -30,7 +31,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-01
-spec_version: 25
+spec_version: 26
 ---
 
 # External Channel Lifecycle
@@ -38,17 +39,26 @@ spec_version: 25
 ## Direct Management Transitions
 
 Disconnecting a connected binding terminally sets `disconnected_at`, ends active
-Channel Work, and commits Activity Tracker cleanup delivery when needed. Provider
-conversation positions and already projected AgentSession history remain. The
-timestamp is the only binding connectedness authority; no lifecycle path clears it or
-reactivates history.
+Channel Work, commits one leave-presence control, and commits Activity Tracker cleanup
+delivery when needed. Slack renders the presence control with Block Kit and Discord
+uses an Embed; both include the current Agent name and one `View session` button.
+Provider conversation positions and already projected AgentSession history remain.
+The timestamp is the only binding connectedness authority; no lifecycle path clears
+it or reactivates history. Repeating a manual binding disconnect does not create a
+second leave-presence control.
 
 Disconnecting a connection accepts every lifecycle and credential state. It
-terminalizes the connection, terminates owned active resources/bindings/work, clears
-credentials, and commits terminal local state before provider cleanup runs. Repeating
-the command is safe. Disconnected connection rows remain durable history roots but
-are excluded from the active Single management list. Disconnected Multi Apps remain
-readable through Workspace history but reject mutation.
+terminalizes the connection, terminates owned active resources/bindings/work, commits
+one leave-presence control for each newly disconnected binding, clears credentials,
+and commits terminal local state before provider cleanup runs. Provider targets are
+captured in memory before route detachment or credential purge. Post-commit delivery
+revalidates the durable connection, route, resource, binding, Session, attempt
+identity, terminal binding state, and purged connection state before using that
+captured target. Credentials are not copied into delivery rows or another persistence
+surface. Repeating the command is safe.
+Disconnected connection rows remain durable history roots but are excluded from the
+active Single management list. Disconnected Multi Apps remain readable through
+Workspace history but reject mutation.
 
 Removing the sole Single App association disconnects the entire App. Removing one
 Multi App route generation-fences the connection, marks only that catalog route
@@ -124,9 +134,14 @@ file deletion is observed at download time. An in-progress outbound provider att
 retains its existing one-attempt outcome and is never replayed after a lifecycle change.
 
 Provider credential and permission failures move only connection health to
-`reconnect_required`; they preserve route relationships, bindings, and work. Slack
-App uninstall clears provider credentials and terminalizes provider resources while
-preserving the route relationship for later reconfiguration. In-flight validation
+`reconnect_required`; they preserve route relationships, bindings, and work.
+Authenticated Slack token revocation follows that recoverable health transition.
+Authenticated Slack App uninstall instead terminally disconnects the connection,
+creates leave-presence and Tracker cleanup only for bindings that were still
+connected, removes active route authority, marks resources unavailable, and clears
+provider identity and credentials. Cleanup targets are captured before the purge and
+attempted after the terminal commit. A repeated uninstall is idempotent and creates
+no duplicate presence control. In-flight validation
 results are generation-fenced so they cannot overwrite a newer edit or disconnect.
 Transient `degraded` or `reconnect_required` ingress health does not disconnect a
 binding or block an otherwise authorized outbound REST delivery. Terminal connection
@@ -166,9 +181,11 @@ Archive uses the explicit terminal transition policy inside the caller-owned arc
 2. set their terminal disconnect timestamps and preserve their history;
 3. end Channel Work;
 4. preserve already projected Session history and normal mailbox lifecycle state; and
-5. create one cleanup delivery intent for each retained Activity Tracker.
+5. create one leave-presence control per disconnected binding plus one cleanup
+   delivery intent for each retained Activity Tracker.
 
-Provider cleanup runs after commit. Failure or an unknown result does not roll back Session archive.
+Provider presence and cleanup delivery run after commit. Failure or an unknown result
+does not roll back Session archive.
 External Channel file transfer adds no stored byte object or file-specific cleanup
 participant; only existing metadata, action, and delivery rows follow lifecycle cleanup.
 
@@ -196,11 +213,11 @@ Agent-scoped grant, and block roots are not cascade-deleted through AgentSession
 
 Agent deletion is asynchronous and irreversible. Its lifecycle status fences new
 routing and invocation, then decommission archives/terminalizes owned Session state
-through the normal lifecycle participant and commits provider cleanup intents. A
-Single App route removal disconnects that App; a Multi App route removal preserves
-the Workspace-owned App and its other Agents. Historical routes retain the immutable
-Agent snapshot with no routable Agent ID. The finalizer never bypasses restrictive
-ownership boundaries.
+through the normal lifecycle participant and commits leave-presence and Tracker
+cleanup intents. A Single App route removal disconnects that App; a Multi App route
+removal preserves the Workspace-owned App and its other Agents. Historical routes
+retain the immutable Agent snapshot with no routable Agent ID. The finalizer never
+bypasses restrictive ownership boundaries.
 
 ## Operational Projection
 
@@ -219,6 +236,11 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-08-01** (spec_version 26) — Added one durable leave-presence control to every
+  binding termination path, including manual disconnect, route or connection removal,
+  Session archive, Agent decommission, and authenticated App uninstall. Terminal
+  connection paths capture delivery authority before credential purge and revalidate
+  durable terminal identity after commit without persisting another credential copy.
 - **2026-08-01** (spec_version 25) — Made the conversation position plus canonical
   mailbox own Allow replay acceptance and wake recovery while provider-control
   delivery remains independent.

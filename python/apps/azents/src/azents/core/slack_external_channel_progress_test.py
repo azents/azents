@@ -11,7 +11,7 @@ from azents.core.slack_external_channel_progress import (
     SLACK_FALLBACK_TEXT_MAX_LENGTH,
     render_slack_persisted_progress,
     render_slack_progress,
-    render_slack_session_link,
+    render_slack_session_presence,
 )
 
 _SESSION_URL = "https://azents.example/w/team/agents/agent-1/sessions/session-1"
@@ -192,23 +192,45 @@ def test_persisted_progress_uses_the_same_renderer() -> None:
     )
 
 
-def test_session_link_message_contains_only_button_block() -> None:
-    presentation = render_slack_session_link(_SESSION_URL)
+def test_session_presence_contains_copy_and_navigation() -> None:
+    presentation = render_slack_session_presence(
+        agent_name="Research Agent",
+        session_url=_SESSION_URL,
+        state="joined",
+    )
 
-    assert presentation.text == "Open Azents session"
+    assert presentation.text == "Research Agent joined this conversation."
     assert presentation.blocks == [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "*Research Agent* joined this conversation.",
+            },
+        },
         {
             "type": "actions",
             "elements": [
                 {
                     "type": "button",
-                    "action_id": "open_azents_session",
+                    "action_id": "view_azents_session",
                     "text": {
                         "type": "plain_text",
-                        "text": "Open Azents session",
+                        "text": "View session",
                     },
                     "url": _SESSION_URL,
                 }
             ],
-        }
+        },
     ]
+
+    left = render_slack_session_presence(
+        agent_name="Research Agent",
+        session_url=_SESSION_URL,
+        state="left",
+    )
+    assert left.text == "Research Agent left this conversation."
+    assert left.blocks[0]["text"] == {
+        "type": "mrkdwn",
+        "text": "*Research Agent* left this conversation.",
+    }
