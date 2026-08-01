@@ -1,7 +1,7 @@
 import { rem } from "@mantine/core";
 import { expect, within } from "storybook/test";
 import { StorybookCanvas } from "@/shared/storybook/StorybookCanvas";
-import { LlmSettings } from "./LlmSettings";
+import { LlmIntegrations } from "./LlmIntegrations";
 import type { LlmProviderIntegrationResponse } from "@azents/public-client";
 import type { Meta, StoryObj } from "@storybook/nextjs-vite";
 
@@ -53,7 +53,7 @@ const integrations: LlmProviderIntegrationResponse[] = [
 ];
 
 const meta = {
-  component: LlmSettings,
+  component: LlmIntegrations,
   decorators: [
     (Story) => (
       <StorybookCanvas maxWidth={rem(860)}>
@@ -66,16 +66,11 @@ const meta = {
     listState: {
       type: "READY",
       integrations,
-      workspaceModelSettings: null,
     },
     formModal: { type: "CLOSED" },
     mutationState: { type: "IDLE", error: null },
     canManage: true,
-    providerOptions: [],
     availableProviderValues: ["xai", "xai_oauth", "kimi_oauth", "openrouter"],
-    modelOptions: [],
-    catalogStates: new Map(),
-    modelsLoading: false,
     renderSubscriptionUsage: () => null,
     onOpenCreate: () => {},
     onOpenEdit: () => {},
@@ -84,26 +79,38 @@ const meta = {
     onUpdate: () => {},
     onDelete: () => {},
     onToggleEnabled: () => {},
-    onSyncCatalog: () => Promise.resolve(),
-    onUpdateWorkspaceModelSettings: () => {},
   },
-} satisfies Meta<typeof LlmSettings>;
+} satisfies Meta<typeof LlmIntegrations>;
 
 export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const SubscriptionCredentialModes = {
+export const LoadedOwner = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByText("xAI API key")).toBeVisible();
-    await expect(canvas.getByText("xAI Grok OAuth")).toBeVisible();
-    await expect(canvas.getByText("Kimi subscription")).toBeVisible();
     await expect(canvas.getByText("Production xAI API")).toBeVisible();
     await expect(canvas.getByText("Personal Grok account")).toBeVisible();
     await expect(canvas.getByText("Kimi Code subscription")).toBeVisible();
     await expect(canvas.getByText("Reconnect required")).toBeVisible();
-    await expect(canvas.getByText("OpenRouter")).toBeVisible();
     await expect(canvas.getByText("OpenRouter workspace")).toBeVisible();
   },
+} satisfies Story;
+
+export const LoadedReadOnly = {
+  args: { canManage: false },
+} satisfies Story;
+
+export const EmptyOwner = {
+  args: {
+    listState: { type: "READY", integrations: [] },
+  },
+} satisfies Story;
+
+export const Loading = {
+  args: { listState: { type: "LOADING" } },
+} satisfies Story;
+
+export const Error = {
+  args: { listState: { type: "ERROR" } },
 } satisfies Story;

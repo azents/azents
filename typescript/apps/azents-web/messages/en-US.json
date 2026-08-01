@@ -294,6 +294,25 @@
       "integrations": "External channels",
       "runtimeExecution": "Runtime execution"
     },
+    "settings": {
+      "layout": {
+        "backToWorkspace": "Back to workspace",
+        "backToSettings": "Back to settings"
+      },
+      "hub": {
+        "title": "Workspace settings",
+        "description": "Choose a settings area to review or update this workspace.",
+        "configuration": "Configuration",
+        "models": {
+          "label": "Default models",
+          "description": "Selectable models and defaults copied to new agents"
+        },
+        "llmIntegrations": {
+          "label": "LLM integrations",
+          "description": "Provider credentials, connections, status, and usage"
+        }
+      }
+    },
     "llmSettings": {
       "headline": "LLM Integrations",
       "description": "Manage API keys and credentials for LLM providers used in this workspace.",
@@ -443,6 +462,9 @@
         "statusError": "Device authorization {status}."
       },
       "modelSelection": {
+        "pageTitle": "Default models",
+        "pageDescription": "Choose the selectable models and defaults that new agents inherit.",
+        "loadError": "Failed to load workspace model settings.",
         "title": "Workspace default models",
         "description": "Configure the ordered model list that new agents copy by default.",
         "currentMain": "Current main:",

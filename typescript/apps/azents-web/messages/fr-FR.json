@@ -294,6 +294,25 @@
       "integrations": "Canaux externes",
       "runtimeExecution": "Exécution du runtime"
     },
+    "settings": {
+      "layout": {
+        "backToWorkspace": "Retour à l’espace de travail",
+        "backToSettings": "Retour aux paramètres"
+      },
+      "hub": {
+        "title": "Paramètres de l’espace de travail",
+        "description": "Choisissez la zone de paramètres à consulter ou à modifier.",
+        "configuration": "Configuration",
+        "models": {
+          "label": "Modèles par défaut",
+          "description": "Modèles sélectionnables et valeurs par défaut des nouveaux agents"
+        },
+        "llmIntegrations": {
+          "label": "Intégrations LLM",
+          "description": "Identifiants, connexions, état et utilisation des fournisseurs"
+        }
+      }
+    },
     "llmSettings": {
       "headline": "Intégrations LLM",
       "description": "Gérez les clés API et les identifiants des fournisseurs LLM utilisés dans cet espace de travail.",
@@ -443,6 +462,9 @@
         "statusError": "Autorisation de l'appareil : {status}."
       },
       "modelSelection": {
+        "pageTitle": "Modèles par défaut",
+        "pageDescription": "Choisissez les modèles sélectionnables et les valeurs par défaut hérités par les nouveaux agents.",
+        "loadError": "Impossible de charger les paramètres de modèle de l’espace de travail.",
         "title": "Modèles par défaut de l'espace de travail",
         "description": "Configure the ordered model list that new agents copy by default.",
         "currentMain": "Principal actuel :",

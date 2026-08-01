@@ -294,6 +294,25 @@
       "integrations": "外部チャンネル",
       "runtimeExecution": "ランタイム実行"
     },
+    "settings": {
+      "layout": {
+        "backToWorkspace": "ワークスペースに戻る",
+        "backToSettings": "設定に戻る"
+      },
+      "hub": {
+        "title": "ワークスペース設定",
+        "description": "確認または変更するワークスペース設定を選択してください。",
+        "configuration": "構成",
+        "models": {
+          "label": "デフォルトモデル",
+          "description": "新しいエージェントにコピーする選択可能モデルとデフォルト値"
+        },
+        "llmIntegrations": {
+          "label": "LLM 連携",
+          "description": "プロバイダーの認証情報、接続状態、使用量を管理"
+        }
+      }
+    },
     "llmSettings": {
       "headline": "LLM連携管理",
       "description": "このワークスペースで使用するLLMプロバイダーのAPIキーと認証情報を管理します。",
@@ -443,6 +462,9 @@
         "statusError": "デバイス認証ステータス: {status}。"
       },
       "modelSelection": {
+        "pageTitle": "デフォルトモデル",
+        "pageDescription": "新しいエージェントが継承する選択可能モデルとデフォルト値を設定します。",
+        "loadError": "ワークスペースのモデル設定を読み込めませんでした。",
         "title": "ワークスペースのデフォルトモデル",
         "description": "Configure the ordered model list that new agents copy by default.",
         "currentMain": "現在のメイン:",

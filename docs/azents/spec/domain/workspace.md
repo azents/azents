@@ -51,6 +51,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/automaticProjects.ts
   - typescript/apps/azents-web/src/features/agents/components/AgentAutomaticProjects.tsx
   - typescript/apps/azents-web/src/features/agents/containers/useAgentAutomaticProjectsContainer.ts
+  - typescript/apps/azents-web/src/features/workspace-settings/**
+  - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/app/(app)/w/[handle]/**
   - typescript/apps/azents-web/src/app/(app)/join/[handle]/page.tsx
   - python/apps/azents/src/azents/repos/agent_runtime/**
@@ -78,8 +80,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-07-30
-spec_version: 52
+last_verified_at: 2026-08-01
+spec_version: 53
 ---
 
 # Workspace & Membership
@@ -295,6 +297,26 @@ Membership UI has these routes:
 - `/w/[handle]/members` — exposes workspace member list, invitation, and join request review.
 - `/join/[handle]` — entrypoint where external user requests to join by workspace handle or checks pending state.
 - invitation/join request tRPC router wraps backend REST API. UI exposes management actions to users with OWNER/MANAGER permission, and provides read/request-centered screen to MEMBER.
+
+### Workspace Settings UI
+
+azents-web `/w/[handle]/settings` is the Workspace settings overview inside
+`WorkspaceShell`. The overview identifies the current Workspace by name and handle and links to two
+focused settings areas:
+
+- `/w/[handle]/settings/models` — Workspace selectable model options and default main/lightweight
+  labels;
+- `/w/[handle]/settings/llm-integrations` — LLM provider credentials, connection state, enablement,
+  subscription usage, and integration lifecycle controls.
+
+Both detail pages provide an explicit return to the settings overview. Unknown settings sections
+return 404. Members, Toolkits, External channels, Runtime execution, and My Profile remain
+independent Workspace sidebar destinations and are not duplicated in the settings overview.
+
+Every Workspace member may read both settings areas. Existing Owner-only management behavior remains:
+only the Owner receives model save and integration create/edit/delete/enable controls, and backend
+authorization is final. The two detail pages use independent query and mutation state, while tRPC
+cache remains the shared server-state authority across navigation.
 
 ### Membership Lifecycle
 
@@ -556,6 +578,9 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-01 (spec_version=53)** — Replaced the combined Workspace LLM settings page with a
+  Workspace-identified settings overview and focused model and LLM integration routes, preserving
+  member visibility, Owner-only management, and existing backend settings authority.
 - **2026-07-27 (spec_version=51)** — Made allowed Profiles the complete Runtime execution ceilings and removed the separate Platform envelope.
 - **2026-07-26 (spec_version=50)** — Added Workspace Profile allowance, restrictive Runtime execution policy, and reset-free automatic tightening convergence.
 - **2026-07-26 (spec_version=49)** — Added the manual orphan Git-worktree cleanup TurnAction,

@@ -22,7 +22,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/events/**
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-07-19
+last_verified_at: 2026-08-01
 spec_version: 6
 ---
 

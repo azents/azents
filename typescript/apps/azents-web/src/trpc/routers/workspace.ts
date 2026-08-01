@@ -7,6 +7,7 @@
  */
 import {
   workspaceV1CreateWorkspace,
+  workspaceV1GetWorkspaceByHandle,
   workspaceV1ListWorkspaces,
 } from "@azents/public-client";
 import { z } from "zod/v4";
@@ -14,6 +15,25 @@ import { mapExpectedError } from "../api-error";
 import { publicProcedure, router } from "../init";
 
 export const workspaceRouter = router({
+  get: publicProcedure
+    .input(z.object({ handle: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await workspaceV1GetWorkspaceByHandle({
+          client: ctx.apiClient,
+          path: { handle: input.handle },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+        });
+      }
+    }),
+
   /**
    * workspace list fetch
    * - Bearer token auth required (context.apiClient to included)

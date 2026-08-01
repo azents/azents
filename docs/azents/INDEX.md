@@ -20,12 +20,12 @@ Design documents are accumulated records and are not listed individually in this
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-07-31 | 29 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-28 | 13 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
-| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-07-21 | 17 |
+| [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-01 | 18 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-07-28 | 13 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-28 | 77 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-07-30 | 52 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-01 | 53 |
 
 ## Living Specs — Flow
 
@@ -35,22 +35,22 @@ Design documents are accumulated records and are not listed individually in this
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-07-30 | 43 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-28 | 12 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
-| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-07-21 | 18 |
+| [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-07-30 | 12 |
 | [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-07-30 | 23 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-07-31 | 20 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-07-31 | 19 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-30 | 36 |
-| [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-07-19 | 1 |
+| [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
-| [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-07-19 | 3 |
+| [OpenRouter API Key Provider Flow](spec/flow/openrouter-api-key.md) | @Hardtack | 2026-08-01 | 3 |
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-26 | 11 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-24 | 25 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
 | [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-07-31 | 14 |
-| [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-07-18 | 3 |
-| [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-07-19 | 6 |
+| [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-01 | 3 |
+| [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-08-01 | 6 |
 
 ## Requirements Snapshots
 
@@ -396,6 +396,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Fifteen-Minute Wait Timeout Requirements](requirements/wait-260726-fifteen-minute-timeout.md) | wait-260726 | 2026-07-26 | 2026-07-26 |
 | [Session Web Viewer Discussion — View Discord/Slack Sessions in Web UI Historical Requirements Reconstruction](requirements/web-260416-web-viewer.md) | web-260416 | 2026-04-16 | 2026-04-16 |
 | [Provider-Native Channel Work Progress Requirements](requirements/work-260723-provider-native-progress.md) | work-260723 | 2026-07-23 | - |
+| [Workspace Settings Hub Requirements](requirements/workspace-260801-settings-hub.md) | workspace-260801 | 2026-08-01 | 2026-08-01 |
 | [Session Worktree Archive and Purge Integrity Requirements](requirements/worktree-260722-archive-purge-integrity.md) | worktree-260722 | 2026-07-22 | 2026-07-22 |
 | [Archive-Owned Session Worktree Cleanup Requirements](requirements/worktree-260723-archive-owned-cleanup.md) | worktree-260723 | 2026-07-23 | 2026-07-23 |
 | [Manual Orphan Worktree Cleanup Requirements](requirements/worktree-260726-manual-orphan-cleanup.md) | worktree-260726 | 2026-07-26 | - |
@@ -744,6 +745,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Fifteen-Minute Wait Timeout](adr/wait-260726-fifteen-minute-timeout.md)
 - [Session Web Viewer Discussion — View Discord/Slack Sessions in Web UI](adr/web-260416-web-viewer.md)
 - [Provider-Native Channel Work Progress](adr/work-260723-provider-native-progress.md)
+- [Workspace Settings Hub](adr/workspace-260801-settings-hub.md)
 - [Session Worktree Archive and Purge Integrity](adr/worktree-260722-archive-purge-integrity.md)
 - [Archive-Owned Session Worktree Cleanup](adr/worktree-260723-archive-owned-cleanup.md)
 - [Manual Orphan Worktree Cleanup](adr/worktree-260726-manual-orphan-cleanup.md)

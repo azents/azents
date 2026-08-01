@@ -294,6 +294,25 @@
       "integrations": "외부 채널",
       "runtimeExecution": "런타임 실행"
     },
+    "settings": {
+      "layout": {
+        "backToWorkspace": "워크스페이스로 돌아가기",
+        "backToSettings": "설정으로 돌아가기"
+      },
+      "hub": {
+        "title": "워크스페이스 설정",
+        "description": "확인하거나 수정할 워크스페이스 설정 영역을 선택하세요.",
+        "configuration": "구성",
+        "models": {
+          "label": "기본 모델",
+          "description": "새 에이전트에 복사할 선택 모델과 기본값"
+        },
+        "llmIntegrations": {
+          "label": "LLM 연동",
+          "description": "프로바이더 인증 정보, 연결 상태, 사용량 관리"
+        }
+      }
+    },
     "llmSettings": {
       "headline": "LLM 연동 관리",
       "description": "이 워크스페이스에서 사용할 LLM 프로바이더의 API 키와 인증 정보를 관리합니다.",
@@ -443,6 +462,9 @@
         "statusError": "디바이스 인증 상태: {status}."
       },
       "modelSelection": {
+        "pageTitle": "기본 모델",
+        "pageDescription": "새 에이전트가 상속할 선택 모델과 기본값을 설정합니다.",
+        "loadError": "워크스페이스 모델 설정을 불러오지 못했습니다.",
         "title": "워크스페이스 기본 모델",
         "description": "새 에이전트가 기본으로 복사할 순서 있는 모델 목록을 설정합니다.",
         "currentMain": "현재 메인:",

@@ -24,7 +24,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/agents/components/ModelCatalogPicker.tsx
   - typescript/apps/azents-web/src/features/llm-settings/**
   - typescript/apps/azents-web/src/trpc/routers/llm-provider-integration.ts
-last_verified_at: 2026-07-21
+last_verified_at: 2026-08-01
 spec_version: 18
 ---
 
