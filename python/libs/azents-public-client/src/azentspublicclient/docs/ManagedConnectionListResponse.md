@@ -7,6 +7,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **items** | [**List[ManagedConnection]**](ManagedConnection.md) |  | 
 **associated_multi_apps** | [**List[ManagedMultiConnection]**](ManagedMultiConnection.md) |  | 
+**default_response_mode** | [**ExternalChannelResponseMode**](ExternalChannelResponseMode.md) |  | 
 
 ## Example
 

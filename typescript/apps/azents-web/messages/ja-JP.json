@@ -1027,6 +1027,20 @@
       "externalChannels": {
         "title": "外部チャンネル",
         "description": "専用 Slack・Discord 接続を運用し、このエージェントを呼び出せる参加者を管理します。",
+        "defaultResponseModeTitle": "既定の応答モード",
+        "defaultResponseModeDescription": "この値は新しく接続される会話にのみコピーされます。既存の会話のモードは変わりません。",
+        "defaultResponseModeSaved": "既定の応答モードを保存しました。",
+        "saveResponseMode": "保存",
+        "responseMode": {
+          "all_messages": {
+            "label": "対象となるすべてのメッセージ",
+            "description": "対象の参加者が通常のメッセージを送った場合も会話を継続します。"
+          },
+          "mention_only": {
+            "label": "メンションのみ",
+            "description": "通常のメッセージはコンテキストとして保持し、エージェントが明示的にメンションされたときに応答します。"
+          }
+        },
         "addConnection": "Slack を接続",
         "connectionsTitle": "接続",
         "emptyConnectionsTitle": "外部チャンネル接続がありません",
@@ -1190,6 +1204,15 @@
       "sessionChannels": {
         "title": "チャンネル",
         "description": "外部チャンネル binding、work projection、delivery 結果、保持されたアクセスを確認します。",
+        "responseModeTitle": "応答モード",
+        "responseModeLabel": "エージェントを起動するメッセージ",
+        "responseModeDescription": "接続中のこの会話で今後受信するメッセージに適用されます。",
+        "responseModeReadOnlyDescription": "切断またはアーカイブされた会話に保存されていたモードです。",
+        "saveResponseMode": "保存",
+        "responseMode": {
+          "all_messages": "対象となるすべてのメッセージ",
+          "mention_only": "メンションのみ"
+        },
         "archivedTitle": "アーカイブ済みセッション",
         "archivedDescription": "アーカイブ時に外部チャンネルは完全に切断されました。この画面は読み取り専用です。",
         "retentionUnlimited": "保持期間：無期限",

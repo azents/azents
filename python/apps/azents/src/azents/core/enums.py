@@ -786,6 +786,13 @@ class ExternalChannelRouteMode(enum.StrEnum):
     PLATFORM = "platform"
 
 
+class ExternalChannelResponseMode(enum.StrEnum):
+    """Message eligibility policy copied to one external conversation binding."""
+
+    MENTION_ONLY = "mention_only"
+    ALL_MESSAGES = "all_messages"
+
+
 class ExternalChannelRouteCatalogStatus(enum.StrEnum):
     """Catalog availability for one connection-to-Agent route."""
 

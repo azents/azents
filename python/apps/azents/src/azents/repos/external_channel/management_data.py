@@ -14,6 +14,7 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
+    ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelTransport,
     ExternalChannelWorkStatus,
@@ -172,6 +173,7 @@ class ManagedBinding(_Projection):
     id: str
     agent_session_id: str
     provider: ExternalChannelProvider
+    response_mode: ExternalChannelResponseMode
     resource_type: str
     resource_label: str
     connected_at: datetime.datetime

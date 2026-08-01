@@ -28,6 +28,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
+    ExternalChannelResponseMode,
     MailboxItemKind,
     MailboxSchedulingMode,
 )
@@ -188,12 +189,27 @@ class ExternalChannelMailboxIngestionStore:
                     ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
                     ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY,
                 )
+            binding = await self.repository.lock_connected_binding_by_resource(
+                session,
+                resource_id=resource.id,
+            )
+            ignored_reason = _response_mode_ignored_reason(
+                request=request,
+                binding=binding,
+            )
+            if ignored_reason is not None:
+                await session.commit()
+                return _immediate(
+                    ExternalChannelIngestionOutcomeKind.IGNORED,
+                    ignored_reason,
+                )
             conversation = await self._resolve_conversation(
                 session,
                 request=request,
                 connection=connection,
                 resource=resource,
                 position=position,
+                binding=binding,
                 now=now,
             )
             if (
@@ -312,12 +328,23 @@ class ExternalChannelMailboxIngestionStore:
                 return _rejected(
                     ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
                 )
+            binding = await self.repository.lock_connected_binding_by_resource(
+                session,
+                resource_id=resource.id,
+            )
+            ignored_reason = _response_mode_ignored_reason(
+                request=request,
+                binding=binding,
+            )
+            if ignored_reason is not None:
+                return await self._commit_ignored(session, ignored_reason)
             conversation = await self._resolve_conversation(
                 session,
                 request=request,
                 connection=connection,
                 resource=resource,
                 position=position,
+                binding=binding,
                 now=now,
             )
             if conversation.route is None:
@@ -553,15 +580,12 @@ class ExternalChannelMailboxIngestionStore:
         connection: ExternalChannelConnection,
         resource: ExternalChannelResource,
         position: ExternalChannelConversationPosition,
+        binding: ExternalChannelBinding | None,
         now: datetime.datetime,
     ) -> _Conversation:
         principal_id = await self._ensure_principal(
             session,
             request=request,
-        )
-        binding = await self.repository.lock_connected_binding_by_resource(
-            session,
-            resource_id=resource.id,
         )
         route = None
         selector = None
@@ -747,6 +771,7 @@ class ExternalChannelMailboxIngestionStore:
                 resource_id=resource.id,
                 route_id=route.id,
                 agent_session_id=root.agent_session.id,
+                response_mode=agent.external_channel_default_response_mode,
                 disconnected_at=None,
                 disconnect_reason=None,
             ),
@@ -1333,6 +1358,24 @@ def _rejected(
 
 def _route_has_automatic_access(route: ExternalChannelAgentRoute) -> bool:
     return route.open_access_enabled
+
+
+def _response_mode_ignored_reason(
+    *,
+    request: ExternalChannelIngestionRequest,
+    binding: ExternalChannelBinding | None,
+) -> ExternalChannelIngestionReason | None:
+    """Return why a current provider message cannot trigger shared ingestion."""
+    if (
+        request.operation is not ExternalChannelIngestionOperation.CURRENT_TRIGGER
+        or request.locator.invocation
+    ):
+        return None
+    if binding is None:
+        return ExternalChannelIngestionReason.NOT_AN_INVOCATION
+    if binding.response_mode is ExternalChannelResponseMode.MENTION_ONLY:
+        return ExternalChannelIngestionReason.RESPONSE_MODE_NOT_TRIGGERED
+    return None
 
 
 def _approval_url(web_url: str, access_request_id: str) -> str | None:

@@ -20,20 +20,16 @@ import json
 from pydantic import BaseModel, ConfigDict
 from typing import Any, ClassVar, Dict, List
 from azentspublicclient.models.external_channel_response_mode import ExternalChannelResponseMode
-from azentspublicclient.models.managed_connection import ManagedConnection
-from azentspublicclient.models.managed_multi_connection import ManagedMultiConnection
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ManagedConnectionListResponse(BaseModel):
+class ExternalChannelResponseModeSetting(BaseModel):
     """
-    ManagedConnectionListResponse
+    Canonical full-value External Channel response-mode setting.
     """ # noqa: E501
-    items: List[ManagedConnection]
-    associated_multi_apps: List[ManagedMultiConnection]
-    default_response_mode: ExternalChannelResponseMode
+    response_mode: ExternalChannelResponseMode
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["items", "associated_multi_apps", "default_response_mode"]
+    __properties: ClassVar[List[str]] = ["response_mode"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -53,7 +49,7 @@ class ManagedConnectionListResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ManagedConnectionListResponse from a JSON string"""
+        """Create an instance of ExternalChannelResponseModeSetting from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -76,20 +72,6 @@ class ManagedConnectionListResponse(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
-        # override the default output from pydantic by calling `to_dict()` of each item in items (list)
-        _items = []
-        if self.items:
-            for _item_items in self.items:
-                if _item_items:
-                    _items.append(_item_items.to_dict())
-            _dict['items'] = _items
-        # override the default output from pydantic by calling `to_dict()` of each item in associated_multi_apps (list)
-        _items = []
-        if self.associated_multi_apps:
-            for _item_associated_multi_apps in self.associated_multi_apps:
-                if _item_associated_multi_apps:
-                    _items.append(_item_associated_multi_apps.to_dict())
-            _dict['associated_multi_apps'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -99,7 +81,7 @@ class ManagedConnectionListResponse(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ManagedConnectionListResponse from a dict"""
+        """Create an instance of ExternalChannelResponseModeSetting from a dict"""
         if obj is None:
             return None
 
@@ -107,9 +89,7 @@ class ManagedConnectionListResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "items": [ManagedConnection.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None,
-            "associated_multi_apps": [ManagedMultiConnection.from_dict(_item) for _item in obj["associated_multi_apps"]] if obj.get("associated_multi_apps") is not None else None,
-            "default_response_mode": obj.get("default_response_mode")
+            "response_mode": obj.get("response_mode")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

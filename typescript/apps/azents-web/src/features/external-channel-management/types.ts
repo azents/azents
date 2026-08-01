@@ -1,4 +1,5 @@
 import type {
+  ExternalChannelResponseMode,
   ExternalChannelTransport,
   ManagedBlock,
   ManagedConnection,
@@ -50,6 +51,7 @@ export type ExternalChannelManagementState =
   | { type: "ERROR"; message: string }
   | {
       type: "LOADED";
+      defaultResponseMode: ExternalChannelResponseMode;
       connections: ManagedConnection[];
       associatedMultiApps: ManagedMultiConnection[];
       grants: ManagedGrant[];

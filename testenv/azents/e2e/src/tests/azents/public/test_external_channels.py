@@ -57,6 +57,9 @@ from azentspublicclient.models.external_channel_connection_status import (
 from azentspublicclient.models.external_channel_decision_input import (
     ExternalChannelDecisionInput,
 )
+from azentspublicclient.models.external_channel_response_mode import (
+    ExternalChannelResponseMode,
+)
 from azentspublicclient.models.external_channel_route_catalog_status import (
     ExternalChannelRouteCatalogStatus,
 )
@@ -75,6 +78,7 @@ from azentspublicclient.models.multi_channel_default_request import (
     MultiChannelDefaultRequest,
 )
 from azentspublicclient.models.multi_route_create_request import MultiRouteCreateRequest
+from azentspublicclient.models.response_mode_request import ResponseModeRequest
 from azentspublicclient.models.secrets import Secrets
 from azentspublicclient.models.slack_connection_credentials import (
     SlackConnectionCredentials,
@@ -1096,6 +1100,379 @@ def test_connection_update_and_repeated_disconnect(
     )
     assert repeated.status is ExternalChannelConnectionStatus.DISCONNECTED
     assert repeated.credentials_configured is False
+
+
+def test_slack_binding_response_modes_gate_and_preserve_context(
+    request: pytest.FixtureRequest,
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    slack_provider_fake_url: str,
+    azents_engine_worker_container: Container,
+) -> None:
+    """Exercise creation-time copy, mention gating, context, and mode updates."""
+    del azents_engine_worker_container
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    root_seconds = int(time.time()) - 60
+    root_timestamp = f"{root_seconds}.000210"
+    root_body = "Initial response-mode invocation"
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/configure",
+        json={
+            "history_pages": [
+                [
+                    {
+                        "user": "U-MODE",
+                        "ts": root_timestamp,
+                        "text": root_body,
+                    }
+                ]
+            ],
+        },
+        timeout=5,
+    ).raise_for_status()
+    token, _, handle, agent_id = _create_agent(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+        runtime_profile_provider_id=None,
+        shell_enabled=False,
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    external_api = ExternalChannelV1Api(public_api_client)
+    initial = external_api.external_channel_v1_list_connections(
+        agent_id=agent_id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert initial.default_response_mode is ExternalChannelResponseMode.ALL_MESSAGES
+    saved_default = external_api.external_channel_v1_update_default_response_mode(
+        agent_id=agent_id,
+        handle=handle,
+        response_mode_request=ResponseModeRequest(
+            response_mode=ExternalChannelResponseMode.MENTION_ONLY
+        ),
+        _headers=headers,
+    )
+    assert saved_default.response_mode is ExternalChannelResponseMode.MENTION_ONLY
+    setup = external_api.external_channel_v1_setup_slack_connection(
+        agent_id=agent_id,
+        handle=handle,
+        slack_connection_setup_request=SlackConnectionSetupRequest(
+            app_id=_APP_ID,
+            transport=ExternalChannelTransport.HTTP,
+            credentials=SlackConnectionCredentials(
+                bot_token=_BOT_TOKEN,
+                signing_secret=_SIGNING_SECRET,
+                app_token=None,
+            ),
+        ),
+        _headers=headers,
+    )
+
+    def disconnect_connection() -> None:
+        external_api.external_channel_v1_disconnect_connection(
+            agent_id=agent_id,
+            connection_id=setup.connection.id,
+            handle=handle,
+            _headers=headers,
+        )
+
+    request.addfinalizer(disconnect_connection)
+    external_api.external_channel_v1_validate_connection(
+        agent_id=agent_id,
+        connection_id=setup.connection.id,
+        handle=handle,
+        _headers=headers,
+    )
+    callback_url = f"{azents_public_server_url}/external-channel/v1/slack/events"
+
+    def send_event(event: dict[str, object]) -> None:
+        body = json.dumps(
+            {
+                "type": "event_callback",
+                "event_id": f"Ev-{unique()}",
+                "event_time": int(time.time()),
+                "api_app_id": _APP_ID,
+                "team_id": _TEAM_ID,
+                "event": event,
+            },
+            separators=(",", ":"),
+        ).encode()
+        response = requests.post(
+            callback_url,
+            data=body,
+            headers=_signed_headers(body),
+            timeout=5,
+        )
+        assert response.status_code == 200
+
+    send_event(
+        {
+            "type": "app_mention",
+            "channel": _CHANNEL_ID,
+            "channel_type": "channel",
+            "user": "U-MODE",
+            "text": "<@B-E2E> start",
+            "ts": root_timestamp,
+        }
+    )
+    chat_api = ChatV1Api(public_api_client)
+
+    def find_binding() -> tuple[Any, Any] | None:
+        sessions = chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        )
+        for session in sessions.items:
+            projection = external_api.external_channel_v1_list_session_channels(
+                agent_id=agent_id,
+                session_id=session.id,
+                handle=handle,
+                _headers=headers,
+            )
+            if len(projection.items) == 1:
+                return session, projection.items[0]
+        return None
+
+    session, binding = cast(
+        tuple[Any, Any],
+        wait_until(
+            find_binding,
+            timeout=15,
+            interval=0.2,
+            message="Slack response-mode invocation did not create one binding",
+        ),
+    )
+    assert binding.response_mode is ExternalChannelResponseMode.MENTION_ONLY
+    wait_until(
+        lambda: (
+            evidence
+            if len(
+                evidence := _external_channel_input_evidence(
+                    public_server_url=azents_public_server_url,
+                    token=token,
+                    session_id=session.id,
+                    include_pending=False,
+                )
+            )
+            == 1
+            else None
+        ),
+        timeout=30,
+        interval=0.2,
+        message="Initial Slack response-mode input was not promoted",
+    )
+
+    before_counts = cast(
+        dict[str, int],
+        _provider_state(slack_provider_fake_url)["request_counts"],
+    )
+    before_history_reads = before_counts.get(
+        "conversations.history", 0
+    ) + before_counts.get("conversations.replies", 0)
+    ordinary_timestamp = f"{root_seconds + 1}.000210"
+    ordinary_body = "Context retained without an invocation"
+    send_event(
+        {
+            "type": "message",
+            "channel": _CHANNEL_ID,
+            "channel_type": "channel",
+            "user": "U-MODE",
+            "text": ordinary_body,
+            "ts": ordinary_timestamp,
+            "thread_ts": root_timestamp,
+        }
+    )
+    after_ignored_counts = cast(
+        dict[str, int],
+        _provider_state(slack_provider_fake_url)["request_counts"],
+    )
+    assert (
+        after_ignored_counts.get("conversations.history", 0)
+        + after_ignored_counts.get("conversations.replies", 0)
+        == before_history_reads
+    )
+    assert (
+        len(
+            _external_channel_input_evidence(
+                public_server_url=azents_public_server_url,
+                token=token,
+                session_id=session.id,
+                include_pending=False,
+            )
+        )
+        == 1
+    )
+
+    mention_timestamp = f"{root_seconds + 2}.000210"
+    mention_body = "<@B-E2E> use the retained context"
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/configure",
+        json={
+            "history_pages": [
+                [
+                    {
+                        "user": "U-MODE",
+                        "ts": mention_timestamp,
+                        "thread_ts": root_timestamp,
+                        "text": mention_body,
+                    },
+                    {
+                        "user": "U-MODE",
+                        "ts": ordinary_timestamp,
+                        "thread_ts": root_timestamp,
+                        "text": ordinary_body,
+                    },
+                    {
+                        "user": "U-MODE",
+                        "ts": root_timestamp,
+                        "text": root_body,
+                    },
+                ]
+            ],
+        },
+        timeout=5,
+    ).raise_for_status()
+    send_event(
+        {
+            "type": "app_mention",
+            "channel": _CHANNEL_ID,
+            "channel_type": "channel",
+            "user": "U-MODE",
+            "text": mention_body,
+            "ts": mention_timestamp,
+            "thread_ts": root_timestamp,
+        }
+    )
+    mention_evidence = cast(
+        list[dict[str, object]],
+        wait_until(
+            lambda: (
+                evidence
+                if len(
+                    evidence := _external_channel_input_evidence(
+                        public_server_url=azents_public_server_url,
+                        token=token,
+                        session_id=session.id,
+                        include_pending=False,
+                    )
+                )
+                == 3
+                else None
+            ),
+            timeout=30,
+            interval=0.2,
+            message="Later Slack mention did not include retained context",
+        ),
+    )
+    assert ordinary_body in {item["body"] for item in mention_evidence}
+
+    updated = external_api.external_channel_v1_update_session_channel_response_mode(
+        agent_id=agent_id,
+        session_id=session.id,
+        binding_id=binding.id,
+        handle=handle,
+        response_mode_request=ResponseModeRequest(
+            response_mode=ExternalChannelResponseMode.ALL_MESSAGES
+        ),
+        _headers=headers,
+    )
+    assert updated.response_mode is ExternalChannelResponseMode.ALL_MESSAGES
+    continuation_timestamp = f"{root_seconds + 3}.000210"
+    continuation_body = "All-messages continuation"
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/configure",
+        json={
+            "history_pages": [
+                [
+                    {
+                        "user": "U-MODE",
+                        "ts": continuation_timestamp,
+                        "thread_ts": root_timestamp,
+                        "text": continuation_body,
+                    },
+                    {
+                        "user": "U-MODE",
+                        "ts": mention_timestamp,
+                        "thread_ts": root_timestamp,
+                        "text": mention_body,
+                    },
+                    {
+                        "user": "U-MODE",
+                        "ts": ordinary_timestamp,
+                        "thread_ts": root_timestamp,
+                        "text": ordinary_body,
+                    },
+                    {
+                        "user": "U-MODE",
+                        "ts": root_timestamp,
+                        "text": root_body,
+                    },
+                ]
+            ],
+        },
+        timeout=5,
+    ).raise_for_status()
+    send_event(
+        {
+            "type": "message",
+            "channel": _CHANNEL_ID,
+            "channel_type": "channel",
+            "user": "U-MODE",
+            "text": continuation_body,
+            "ts": continuation_timestamp,
+            "thread_ts": root_timestamp,
+        }
+    )
+    continuation_evidence = cast(
+        list[dict[str, object]],
+        wait_until(
+            lambda: (
+                evidence
+                if len(
+                    evidence := _external_channel_input_evidence(
+                        public_server_url=azents_public_server_url,
+                        token=token,
+                        session_id=session.id,
+                        include_pending=False,
+                    )
+                )
+                == 4
+                else None
+            ),
+            timeout=30,
+            interval=0.2,
+            message="All-messages Slack continuation was not admitted",
+        ),
+    )
+    assert continuation_body in {item["body"] for item in continuation_evidence}
+
+    disconnected = external_api.external_channel_v1_disconnect_session_channel(
+        agent_id=agent_id,
+        session_id=session.id,
+        binding_id=binding.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert (
+        disconnected.items[0].response_mode is ExternalChannelResponseMode.ALL_MESSAGES
+    )
+    with pytest.raises(ApiException) as disconnected_update:
+        external_api.external_channel_v1_update_session_channel_response_mode(
+            agent_id=agent_id,
+            session_id=session.id,
+            binding_id=binding.id,
+            handle=handle,
+            response_mode_request=ResponseModeRequest(
+                response_mode=ExternalChannelResponseMode.MENTION_ONLY
+            ),
+            _headers=headers,
+        )
+    assert cast(Any, disconnected_update.value).status == 404
 
 
 def test_multi_app_workspace_management_default_and_disconnect_journey(
@@ -2610,6 +2987,51 @@ def test_connection_management_web_surface_uses_redacted_operational_state(
     assert _BOT_TOKEN not in browser_driver.page_source
     assert _SIGNING_SECRET not in browser_driver.page_source
 
+    default_mode = wait.until(
+        ec.visibility_of_element_located(
+            (By.CSS_SELECTOR, '[data-testid="external-default-response-mode"]')
+        )
+    )
+    mention_only = default_mode.find_element(
+        By.CSS_SELECTOR,
+        'input[value="mention_only"]',
+    )
+    mention_only.click()
+    default_mode.find_element(
+        By.CSS_SELECTOR,
+        '[data-testid="save-external-default-response-mode"]',
+    ).click()
+
+    def default_mode_saved(_: WebDriver) -> bool:
+        settings = external_api.external_channel_v1_list_connections(
+            agent_id=agent_id,
+            handle=handle,
+            _headers=headers,
+        )
+        return (
+            settings.default_response_mode is ExternalChannelResponseMode.MENTION_ONLY
+        )
+
+    wait.until(default_mode_saved)
+    browser_driver.refresh()
+    reloaded_default_mode = wait.until(
+        ec.visibility_of_element_located(
+            (By.CSS_SELECTOR, '[data-testid="external-default-response-mode"]')
+        )
+    )
+    assert reloaded_default_mode.find_element(
+        By.CSS_SELECTOR,
+        'input[value="mention_only"]',
+    ).is_selected()
+    connection = wait.until(
+        ec.visibility_of_element_located(
+            (
+                By.CSS_SELECTOR,
+                f'[data-testid="external-connection-{setup.connection.id}"]',
+            )
+        )
+    )
+
     validate_button = connection.find_element(
         By.XPATH,
         ".//button[normalize-space()='Validate']",
@@ -2856,6 +3278,15 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)
+    saved_default = external_api.external_channel_v1_update_default_response_mode(
+        agent_id=agent_id,
+        handle=handle,
+        response_mode_request=ResponseModeRequest(
+            response_mode=ExternalChannelResponseMode.MENTION_ONLY
+        ),
+        _headers=headers,
+    )
+    assert saved_default.response_mode is ExternalChannelResponseMode.MENTION_ONLY
     setup = external_api.external_channel_v1_setup_discord_connection(
         agent_id=agent_id,
         handle=handle,
@@ -2938,6 +3369,7 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
 
     assert session.agent_id == agent_id
     assert binding.provider.value == "discord"
+    assert binding.response_mode is ExternalChannelResponseMode.MENTION_ONLY
     detail = chat_api.chat_v1_get_agent_session(
         agent_id=agent_id,
         session_id=session.id,

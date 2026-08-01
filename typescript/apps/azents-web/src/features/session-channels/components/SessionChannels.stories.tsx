@@ -64,6 +64,7 @@ const binding: ManagedBinding = {
   id: "binding_01",
   agent_session_id: session.id,
   provider: "slack",
+  response_mode: "all_messages",
   resource_type: "private_channel_thread",
   resource_label: "#incident-database · thread",
   connected_at: "2026-07-22T02:05:00Z",
@@ -162,7 +163,12 @@ const meta = {
     },
     actionError: null,
     disconnectingId: null,
+    responseModeDrafts: {},
+    updatingResponseModeId: null,
+    responseModeError: null,
     onDisconnect: noop,
+    onResponseModeChange: noop,
+    onSaveResponseMode: noop,
   },
 } satisfies Meta<typeof SessionChannels>;
 
@@ -223,6 +229,40 @@ export const Error = {
 export const Busy = {
   args: {
     disconnectingId: binding.id,
+  },
+} satisfies Story;
+
+export const MentionsOnly = {
+  args: {
+    state: {
+      type: "LOADED",
+      session,
+      bindings: [{ ...binding, response_mode: "mention_only" }],
+      grants: [grant],
+    },
+  },
+} satisfies Story;
+
+export const ModeDraftChanged = {
+  args: {
+    responseModeDrafts: { [binding.id]: "mention_only" },
+  },
+} satisfies Story;
+
+export const ModeSaving = {
+  args: {
+    responseModeDrafts: { [binding.id]: "mention_only" },
+    updatingResponseModeId: binding.id,
+  },
+} satisfies Story;
+
+export const ModeError = {
+  args: {
+    responseModeDrafts: { [binding.id]: "mention_only" },
+    responseModeError: {
+      bindingId: binding.id,
+      message: "The response mode could not be saved.",
+    },
   },
 } satisfies Story;
 

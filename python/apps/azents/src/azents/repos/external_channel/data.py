@@ -24,6 +24,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
+    ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
     ExternalChannelTransport,
@@ -357,6 +358,7 @@ class ExternalChannelBinding(_Record):
     resource_id: str
     route_id: str
     agent_session_id: str
+    response_mode: ExternalChannelResponseMode
     connected_at: datetime.datetime
     disconnected_at: datetime.datetime | None
     disconnect_reason: str | None
@@ -370,6 +372,7 @@ class ExternalChannelBindingCreate(_Record):
     resource_id: str
     route_id: str
     agent_session_id: str
+    response_mode: ExternalChannelResponseMode
     disconnected_at: datetime.datetime | None
     disconnect_reason: str | None
 

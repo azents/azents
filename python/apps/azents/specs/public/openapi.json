@@ -7095,6 +7095,73 @@
         }
       }
     },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode": {
+      "put": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Update Default Response Mode",
+        "description": "Replace the default copied to newly connected conversations.",
+        "operationId": "external_channel_v1_update_default_response_mode",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResponseModeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalChannelResponseModeSetting"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack": {
       "post": {
         "tags": [
@@ -7888,6 +7955,91 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ManagedBindingListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode": {
+      "put": {
+        "tags": [
+          "External Channel v1"
+        ],
+        "summary": "Update Session Channel Response Mode",
+        "description": "Replace one connected conversation binding's response mode.",
+        "operationId": "external_channel_v1_update_session_channel_response_mode",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "binding_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Binding Id"
+            }
+          },
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Handle"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResponseModeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedBinding"
                 }
               }
             }
@@ -17729,6 +17881,28 @@
         "title": "ExternalChannelProviderIdentity",
         "description": "Validated non-secret identity for one installed provider application."
       },
+      "ExternalChannelResponseMode": {
+        "type": "string",
+        "enum": [
+          "mention_only",
+          "all_messages"
+        ],
+        "title": "ExternalChannelResponseMode",
+        "description": "Message eligibility policy copied to one external conversation binding."
+      },
+      "ExternalChannelResponseModeSetting": {
+        "properties": {
+          "response_mode": {
+            "$ref": "#/components/schemas/ExternalChannelResponseMode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "response_mode"
+        ],
+        "title": "ExternalChannelResponseModeSetting",
+        "description": "Canonical full-value External Channel response-mode setting."
+      },
       "ExternalChannelRouteCatalogStatus": {
         "type": "string",
         "enum": [
@@ -19943,6 +20117,9 @@
           "provider": {
             "$ref": "#/components/schemas/ExternalChannelProvider"
           },
+          "response_mode": {
+            "$ref": "#/components/schemas/ExternalChannelResponseMode"
+          },
           "resource_type": {
             "type": "string",
             "title": "Resource Type"
@@ -20014,6 +20191,7 @@
           "id",
           "agent_session_id",
           "provider",
+          "response_mode",
           "resource_type",
           "resource_label",
           "connected_at",
@@ -20420,12 +20598,16 @@
             },
             "type": "array",
             "title": "Associated Multi Apps"
+          },
+          "default_response_mode": {
+            "$ref": "#/components/schemas/ExternalChannelResponseMode"
           }
         },
         "type": "object",
         "required": [
           "items",
-          "associated_multi_apps"
+          "associated_multi_apps",
+          "default_response_mode"
         ],
         "title": "ManagedConnectionListResponse"
       },
@@ -23444,6 +23626,19 @@
         ],
         "title": "ResetAgentRuntimeRequest",
         "description": "Agent Runtime reset request."
+      },
+      "ResponseModeRequest": {
+        "properties": {
+          "response_mode": {
+            "$ref": "#/components/schemas/ExternalChannelResponseMode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "response_mode"
+        ],
+        "title": "ResponseModeRequest",
+        "description": "Required full-value response-mode request."
       },
       "RuntimeConfigurationResolutionStatus": {
         "type": "string",

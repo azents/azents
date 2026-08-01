@@ -39,6 +39,7 @@ code_paths:
   - typescript/apps/azents-web/src/trpc/routers/externalChannel.ts
 api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels
+  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/manifest
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/slack
@@ -53,9 +54,10 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/management-handoffs/{handoff_id}
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
+  - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-08-01
-spec_version: 37
+spec_version: 38
 ---
 
 # External Channel
@@ -110,7 +112,7 @@ contain multiple independent bindings.
 | Resource | One provider conversation: a Slack thread or Discord root/thread, with provider labels, availability, latest activity, and any provisioned delivery-thread identity. Discord labels separately retain source channel, parent channel, root message, existing thread, and provisioned delivery thread identities. |
 | Conversation position | Durable read-through position for one connection-scoped parent channel or thread. PostgreSQL position compare-and-set is the ordering authority across retries and replicas. |
 | Principal | Provider tenant/user identity and author category. It is not an Azents User or WorkspaceUser. |
-| Binding | Persistent link from one route/resource to one AgentSession. `disconnected_at IS NULL` identifies the current connected relationship; a non-null timestamp is its terminal boundary. A new authorized conversation commits the binding and real Session with its first canonical mailbox input. |
+| Binding | Persistent link from one route/resource to one AgentSession with one required concrete `mention_only` or `all_messages` response mode. `disconnected_at IS NULL` identifies the current connected relationship; a non-null timestamp is its terminal boundary. A new authorized conversation copies the Agent default and commits the binding and real Session with its first canonical mailbox input. |
 | Mailbox item and Session events | One deterministic mailbox item contains the ordered immutable provider-history projection. The conversation position compare-and-set is the sole duplicate-prevention and ordering authority. Mailbox identity owns input idempotency and pending wake recovery. Promotion creates the canonical External Channel Session events; no parallel provider-message, revision, invocation-batch, activation, or wake-dispatch record exists. |
 | Access request/grant/block | Opaque approval request with a content-free provider locator and conversation-position replay boundary, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
 | Channel Work/action/delivery | Binding-scoped durable current-work title and ordered provider-neutral tasks with stable identities, status, optional details, optional output, and labeled URL sources; one work-cycle-owned desired progress state and provider identity; one atomic explicit action; and persisted provider intents/outcomes. File-bearing replies retain only bounded Runtime source manifests and delivery phase evidence. Management derives projection state from the latest progress operation belonging to the current work cycle. |
@@ -149,6 +151,10 @@ contain multiple independent bindings.
   connected, and explicit disconnect sets the terminal timestamp and reason. Gateway
   health, lease ownership, reconnect state, and provider-ingress availability never
   reactivate or disable that relationship.
+- A binding response mode is always concrete. `all_messages` admits eligible ordinary
+  human messages on a connected binding; `mention_only` requires an explicit provider
+  invocation. The Agent default is copied only when a binding is created and is never
+  dynamically inherited. Existing Agents and historical bindings use `all_messages`.
 - Connection capabilities expose `download_files` and `upload_files` independently.
   Missing legacy fields are unavailable. A model-visible file key directly contains
   its provider request coordinates. It is valid only for the current Agent, Session,
@@ -263,6 +269,11 @@ can invoke. This setting never overrides a block or admits the connected Azents 
 Removing the Single association disconnects the App. Secret fields remain blank and
 required when an existing connection is edited.
 
+The same Agent settings surface exposes the Agent's default External Channel response
+mode even when no App is connected. Agent administrators may replace the required
+`mention_only` or `all_messages` value. The mutation changes only the creation-time
+default and does not enumerate or rewrite existing bindings.
+
 Workspace Owners and Managers manage provider-scoped Multi Apps from Workspace
 integrations. Ordinary Members have neither Multi read nor write authority. Slack and
 Discord Multi creation start with zero Agents. Their provider-correct public API,
@@ -312,7 +323,11 @@ Agent connection list.
 
 Session Channels shows bindings, the current Channel Work title, typed ordered
 tasks, failed state, details, output, source links, Activity Tracker projection
-state, delivery outcomes, grants, and terminal disconnect state.
+state, delivery outcomes, grants, concrete response mode, and terminal disconnect
+state. Agent administrators may replace the mode only while the binding remains
+connected and owned by the requested Agent and Session. Disconnected historical
+bindings retain their final mode as read-only state; foreign, missing, unauthorized,
+and disconnected mutations use the not-found-shaped management boundary.
 Approval and management detail surfaces show complete provider user identities with
 copy controls, while regular timeline summaries remain name-first. Destructive
 connection, binding, grant, and block actions require in-product confirmation.
@@ -326,6 +341,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-01** (spec_version 38) — Added Agent defaults and concrete binding
+  response modes, creation-time copy semantics, connected-only management, and
+  `all_messages` compatibility for existing data.
 - **2026-08-01** (spec_version 37) — Replaced the initial button-only Session
   navigation control with joined-presence copy and added leave-presence delivery to
   binding termination while retaining the canonical Session link.

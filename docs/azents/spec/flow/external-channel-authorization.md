@@ -35,7 +35,7 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
 last_verified_at: 2026-08-01
-spec_version: 17
+spec_version: 18
 ---
 
 # External Channel Authorization
@@ -126,7 +126,9 @@ routed Agent's current automatic Project policy and creates the root
 Runtime validation or filesystem access in this transaction; policy save-time
 validation is authoritative. If the resource already has a connected binding, Allow
 reuses that binding's Session and context snapshot instead of rereading or merging
-the current policy.
+the current policy. A newly created binding also copies the routed Agent's current
+required External Channel response-mode default. Reusing a binding retains its
+existing concrete mode.
 
 When the original approval control message has a delivered provider identity, every
 compatible final decision also creates one idempotent access-request-origin delete
@@ -161,9 +163,22 @@ pending-context reference. At promotion, it becomes contiguous
 provider source attribution, trigger identity, authorization state, and one optional
 leading omission reminder.
 
-Later authorized original messages on a connected binding create another canonical
-mailbox item and wake the same Session. Edit and delete callbacks are excluded; they do not
-independently invoke the Agent or create a lifecycle/revision correction.
+Later authorized original messages on a connected `all_messages` binding create
+another canonical mailbox item and wake the same Session. A `mention_only` binding
+requires an explicit invocation; ordinary messages remain provider-history context
+without independent admission. Edit and delete callbacks are excluded in either mode;
+they do not independently invoke the Agent or create a lifecycle/revision correction.
+
+## Response-Mode Management Authorization
+
+The Agent default and each connected binding mode use the existing External Channel
+management authority. Reading the Agent-scoped default follows Agent visibility.
+Replacing the default or a binding mode requires an explicit AgentAdmin relationship.
+Binding mutation additionally scopes the row to the requested Workspace, Agent,
+AgentSession, binding ID, and `disconnected_at IS NULL`. Unauthorized, cross-scope,
+missing, and disconnected targets remain indistinguishable through the existing
+not-found response. Neither mutation changes grants, blocks, route access policy,
+principal identity, past messages, or already accepted work.
 
 ## Revocation
 
@@ -174,6 +189,9 @@ Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-08-01** (spec_version 18) — Added AgentAdmin-managed Agent and binding
+  response modes, creation-time default copy in Allow, connected ownership scoping,
+  and mention-only authorization-preserving admission.
 - **2026-08-01** (spec_version 17) — Replaced the initial button-only Session link
   with a joined-presence control that retains canonical Session navigation.
 - **2026-08-01** (spec_version 16) — Made Allow replay converge through the

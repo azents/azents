@@ -192,6 +192,8 @@ __all__ = [
     "ExternalChannelMultiRouteImpact",
     "ExternalChannelProvider",
     "ExternalChannelProviderIdentity",
+    "ExternalChannelResponseMode",
+    "ExternalChannelResponseModeSetting",
     "ExternalChannelRouteCatalogStatus",
     "ExternalChannelTransport",
     "ExternalChannelWorkStatus",
@@ -345,6 +347,7 @@ __all__ = [
     "ResetAgentRuntimeRequest",
     "ResponseChatV1ReadAgentWorkspacePath",
     "ResponseLlmProviderIntegrationV1GetSubscriptionUsage",
+    "ResponseModeRequest",
     "RuntimeConfigurationResolutionStatus",
     "RuntimeConfigurationRevisionResponse",
     "RuntimeDesiredState",
@@ -628,6 +631,8 @@ from azentspublicclient.models.external_channel_multi_impact_default import Exte
 from azentspublicclient.models.external_channel_multi_route_impact import ExternalChannelMultiRouteImpact as ExternalChannelMultiRouteImpact
 from azentspublicclient.models.external_channel_provider import ExternalChannelProvider as ExternalChannelProvider
 from azentspublicclient.models.external_channel_provider_identity import ExternalChannelProviderIdentity as ExternalChannelProviderIdentity
+from azentspublicclient.models.external_channel_response_mode import ExternalChannelResponseMode as ExternalChannelResponseMode
+from azentspublicclient.models.external_channel_response_mode_setting import ExternalChannelResponseModeSetting as ExternalChannelResponseModeSetting
 from azentspublicclient.models.external_channel_route_catalog_status import ExternalChannelRouteCatalogStatus as ExternalChannelRouteCatalogStatus
 from azentspublicclient.models.external_channel_transport import ExternalChannelTransport as ExternalChannelTransport
 from azentspublicclient.models.external_channel_work_status import ExternalChannelWorkStatus as ExternalChannelWorkStatus
@@ -781,6 +786,7 @@ from azentspublicclient.models.requested_inference_profile import RequestedInfer
 from azentspublicclient.models.reset_agent_runtime_request import ResetAgentRuntimeRequest as ResetAgentRuntimeRequest
 from azentspublicclient.models.response_chat_v1_read_agent_workspace_path import ResponseChatV1ReadAgentWorkspacePath as ResponseChatV1ReadAgentWorkspacePath
 from azentspublicclient.models.response_llm_provider_integration_v1_get_subscription_usage import ResponseLlmProviderIntegrationV1GetSubscriptionUsage as ResponseLlmProviderIntegrationV1GetSubscriptionUsage
+from azentspublicclient.models.response_mode_request import ResponseModeRequest as ResponseModeRequest
 from azentspublicclient.models.runtime_configuration_resolution_status import RuntimeConfigurationResolutionStatus as RuntimeConfigurationResolutionStatus
 from azentspublicclient.models.runtime_configuration_revision_response import RuntimeConfigurationRevisionResponse as RuntimeConfigurationRevisionResponse
 from azentspublicclient.models.runtime_desired_state import RuntimeDesiredState as RuntimeDesiredState

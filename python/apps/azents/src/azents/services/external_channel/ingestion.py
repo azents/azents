@@ -65,6 +65,7 @@ class ExternalChannelIngestionReason(enum.StrEnum):
     SELECTION_REQUIRED = "selection_required"
     ACCESS_REQUIRED = "access_required"
     NOT_AN_INVOCATION = "not_an_invocation"
+    RESPONSE_MODE_NOT_TRIGGERED = "response_mode_not_triggered"
     AUTHOR_NOT_ELIGIBLE = "author_not_eligible"
     CONNECTION_UNAVAILABLE = "connection_unavailable"
     INGRESS_AUTHORITY_STALE = "ingress_authority_stale"

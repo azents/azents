@@ -17,6 +17,7 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
+    ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelTransport,
 )
@@ -34,6 +35,7 @@ from azents.repos.external_channel.management import (
     progress_projection_state,
 )
 from azents.repos.external_channel.management_data import (
+    ManagedBinding,
     ManagedConnection,
     ManagedMultiRoute,
 )
@@ -45,7 +47,9 @@ from azents.services.external_channel.data import (
     DiscordConnectionCredentials,
 )
 from azents.services.external_channel.management import (
+    ExternalChannelManagementNotFound,
     ExternalChannelManagementService,
+    ExternalChannelResponseModeSetting,
     slack_manifest_guidance,
 )
 
@@ -71,6 +75,198 @@ def _connection() -> ManagedConnection:
         socket_gap_reason=None,
         disconnected_at=None,
     )
+
+
+def _binding(
+    response_mode: ExternalChannelResponseMode = (
+        ExternalChannelResponseMode.MENTION_ONLY
+    ),
+) -> ManagedBinding:
+    now = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
+    return ManagedBinding(
+        id="binding-1",
+        agent_session_id="session-1",
+        provider=ExternalChannelProvider.SLACK,
+        response_mode=response_mode,
+        resource_type="thread",
+        resource_label="Channel thread",
+        connected_at=now,
+        disconnected_at=None,
+        disconnect_reason=None,
+        latest_activity_at=now,
+        work=None,
+        deliveries=[],
+    )
+
+
+def _management_service(
+    *,
+    session: AsyncSession,
+    repository: AsyncMock,
+    agent_repository: AsyncMock,
+    agent_admin_repository: AsyncMock,
+) -> ExternalChannelManagementService:
+    @asynccontextmanager
+    async def session_manager() -> AsyncGenerator[AsyncSession, None]:
+        yield session
+
+    return ExternalChannelManagementService(
+        session_manager=session_manager,
+        repository=repository,
+        domain_repository=AsyncMock(),
+        lifecycle_repository=AsyncMock(),
+        agent_repository=agent_repository,
+        agent_admin_repository=agent_admin_repository,
+        workspace_user_repository=AsyncMock(),
+        connection_service=AsyncMock(),
+        discord_activation_service=AsyncMock(),
+        action_service=AsyncMock(),
+        access_service=AsyncMock(),
+    )
+
+
+async def test_default_response_mode_read_projects_agent_value() -> None:
+    """Visible Agent management state includes the concrete creation default."""
+    session = AsyncMock(spec=AsyncSession)
+    agent_repository = AsyncMock()
+    agent_repository.get_by_id.return_value = SimpleNamespace(
+        workspace_id="workspace-1",
+        external_channel_default_response_mode=(
+            ExternalChannelResponseMode.MENTION_ONLY
+        ),
+    )
+    agent_admin_repository = AsyncMock()
+    service = _management_service(
+        session=session,
+        repository=AsyncMock(),
+        agent_repository=agent_repository,
+        agent_admin_repository=agent_admin_repository,
+    )
+
+    result = await service.get_default_response_mode(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        workspace_user_id="workspace-user-1",
+    )
+
+    assert result.response_mode is ExternalChannelResponseMode.MENTION_ONLY
+    agent_admin_repository.is_admin.assert_not_awaited()
+
+
+async def test_default_response_mode_update_requires_agent_admin() -> None:
+    """A non-admin cannot mutate the Agent-scoped creation default."""
+    session = AsyncMock(spec=AsyncSession)
+    agent_repository = AsyncMock()
+    agent_repository.get_by_id.return_value = SimpleNamespace(
+        workspace_id="workspace-1"
+    )
+    agent_admin_repository = AsyncMock()
+    agent_admin_repository.is_admin.return_value = False
+    service = _management_service(
+        session=session,
+        repository=AsyncMock(),
+        agent_repository=agent_repository,
+        agent_admin_repository=agent_admin_repository,
+    )
+
+    with pytest.raises(ExternalChannelManagementNotFound):
+        await service.update_default_response_mode(
+            workspace_id="workspace-1",
+            agent_id="agent-1",
+            workspace_user_id="workspace-user-1",
+            setting=ExternalChannelResponseModeSetting(
+                response_mode=ExternalChannelResponseMode.MENTION_ONLY
+            ),
+        )
+
+    agent_repository.update_external_channel_default_response_mode.assert_not_awaited()
+    session.commit.assert_not_awaited()
+
+
+async def test_default_response_mode_update_does_not_rewrite_bindings() -> None:
+    """Replacing the Agent default calls only the Agent repository mutation."""
+    session = AsyncMock(spec=AsyncSession)
+    agent_repository = AsyncMock()
+    agent_repository.get_by_id.return_value = SimpleNamespace(
+        workspace_id="workspace-1"
+    )
+    agent_repository.update_external_channel_default_response_mode.return_value = (
+        SimpleNamespace(
+            workspace_id="workspace-1",
+            external_channel_default_response_mode=(
+                ExternalChannelResponseMode.MENTION_ONLY
+            ),
+        )
+    )
+    agent_admin_repository = AsyncMock()
+    agent_admin_repository.is_admin.return_value = True
+    repository = AsyncMock()
+    service = _management_service(
+        session=session,
+        repository=repository,
+        agent_repository=agent_repository,
+        agent_admin_repository=agent_admin_repository,
+    )
+
+    result = await service.update_default_response_mode(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        workspace_user_id="workspace-user-1",
+        setting=ExternalChannelResponseModeSetting(
+            response_mode=ExternalChannelResponseMode.MENTION_ONLY
+        ),
+    )
+
+    assert result.response_mode is ExternalChannelResponseMode.MENTION_ONLY
+    agent_repository.update_external_channel_default_response_mode.assert_awaited_once_with(
+        session,
+        agent_id="agent-1",
+        response_mode=ExternalChannelResponseMode.MENTION_ONLY,
+    )
+    repository.update_binding_response_mode.assert_not_awaited()
+    session.commit.assert_awaited_once()
+
+
+async def test_binding_response_mode_update_uses_full_ownership_scope() -> None:
+    """The service supplies Workspace, Agent, Session, and binding ownership."""
+    session = AsyncMock(spec=AsyncSession)
+    repository = AsyncMock()
+    repository.update_binding_response_mode.return_value = True
+    agent_repository = AsyncMock()
+    agent_repository.get_by_id.return_value = SimpleNamespace(
+        workspace_id="workspace-1"
+    )
+    agent_admin_repository = AsyncMock()
+    agent_admin_repository.is_admin.return_value = True
+    service = _management_service(
+        session=session,
+        repository=repository,
+        agent_repository=agent_repository,
+        agent_admin_repository=agent_admin_repository,
+    )
+    service.list_bindings = AsyncMock(return_value=[_binding()])
+
+    result = await service.update_binding_response_mode(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        workspace_user_id="workspace-user-1",
+        agent_session_id="session-1",
+        binding_id="binding-1",
+        setting=ExternalChannelResponseModeSetting(
+            response_mode=ExternalChannelResponseMode.MENTION_ONLY
+        ),
+    )
+
+    assert result.response_mode is ExternalChannelResponseMode.MENTION_ONLY
+    repository.update_binding_response_mode.assert_awaited_once_with(
+        session,
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        agent_session_id="session-1",
+        binding_id="binding-1",
+        response_mode=ExternalChannelResponseMode.MENTION_ONLY,
+    )
+    session.commit.assert_awaited_once()
 
 
 async def test_setup_discord_commits_route_before_callback_activation() -> None:

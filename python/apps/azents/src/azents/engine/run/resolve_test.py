@@ -20,6 +20,7 @@ from azents.core.enums import (
     ExchangeFileOrigin,
     ExchangeFileProvenanceKind,
     ExchangeFileStatus,
+    ExternalChannelResponseMode,
     LLMProvider,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
@@ -139,6 +140,7 @@ def _make_agent(
         model_parameters=None,
         system_prompt="You are helpful.",
         enabled=True,
+        external_channel_default_response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
         lifecycle_status=AgentLifecycleStatus.ACTIVE,
         type=AgentType.PUBLIC,
         runtime_profile_id=None,

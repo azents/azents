@@ -200,9 +200,11 @@ Class | Method | HTTP request | Description
 *ExternalChannelV1Api* | [**external_channel_v1_setup_multi_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_setup_multi_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi | Setup Multi Slack Connection
 *ExternalChannelV1Api* | [**external_channel_v1_setup_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_setup_slack_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack | Setup Slack Connection
 *ExternalChannelV1Api* | [**external_channel_v1_update_connection_access_policy**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_update_connection_access_policy) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/access-policy | Update Connection Access Policy
+*ExternalChannelV1Api* | [**external_channel_v1_update_default_response_mode**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_update_default_response_mode) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode | Update Default Response Mode
 *ExternalChannelV1Api* | [**external_channel_v1_update_discord_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_update_discord_connection) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/discord | Update Discord Connection
 *ExternalChannelV1Api* | [**external_channel_v1_update_multi_discord_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_update_multi_discord_connection) | **PUT** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id} | Update Multi Discord Connection
 *ExternalChannelV1Api* | [**external_channel_v1_update_multi_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_update_multi_slack_connection) | **PUT** /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id} | Update Multi Slack Connection
+*ExternalChannelV1Api* | [**external_channel_v1_update_session_channel_response_mode**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_update_session_channel_response_mode) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode | Update Session Channel Response Mode
 *ExternalChannelV1Api* | [**external_channel_v1_update_slack_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_update_slack_connection) | **PUT** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/slack | Update Slack Connection
 *ExternalChannelV1Api* | [**external_channel_v1_validate_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_validate_connection) | **POST** /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/{connection_id}/validate | Validate Connection
 *ExternalChannelV1Api* | [**external_channel_v1_validate_multi_discord_connection**](azentspublicclient/docs/ExternalChannelV1Api.md#external_channel_v1_validate_multi_discord_connection) | **POST** /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/validate | Validate Multi Discord Connection
@@ -438,6 +440,8 @@ Class | Method | HTTP request | Description
  - [ExternalChannelMultiRouteImpact](azentspublicclient/docs/ExternalChannelMultiRouteImpact.md)
  - [ExternalChannelProvider](azentspublicclient/docs/ExternalChannelProvider.md)
  - [ExternalChannelProviderIdentity](azentspublicclient/docs/ExternalChannelProviderIdentity.md)
+ - [ExternalChannelResponseMode](azentspublicclient/docs/ExternalChannelResponseMode.md)
+ - [ExternalChannelResponseModeSetting](azentspublicclient/docs/ExternalChannelResponseModeSetting.md)
  - [ExternalChannelRouteCatalogStatus](azentspublicclient/docs/ExternalChannelRouteCatalogStatus.md)
  - [ExternalChannelTransport](azentspublicclient/docs/ExternalChannelTransport.md)
  - [ExternalChannelWorkStatus](azentspublicclient/docs/ExternalChannelWorkStatus.md)
@@ -591,6 +595,7 @@ Class | Method | HTTP request | Description
  - [ResetAgentRuntimeRequest](azentspublicclient/docs/ResetAgentRuntimeRequest.md)
  - [ResponseChatV1ReadAgentWorkspacePath](azentspublicclient/docs/ResponseChatV1ReadAgentWorkspacePath.md)
  - [ResponseLlmProviderIntegrationV1GetSubscriptionUsage](azentspublicclient/docs/ResponseLlmProviderIntegrationV1GetSubscriptionUsage.md)
+ - [ResponseModeRequest](azentspublicclient/docs/ResponseModeRequest.md)
  - [RuntimeConfigurationResolutionStatus](azentspublicclient/docs/RuntimeConfigurationResolutionStatus.md)
  - [RuntimeConfigurationRevisionResponse](azentspublicclient/docs/RuntimeConfigurationRevisionResponse.md)
  - [RuntimeDesiredState](azentspublicclient/docs/RuntimeDesiredState.md)
