@@ -87,11 +87,22 @@ def render_slack_persisted_progress(
     )
 
 
-def render_slack_session_link(session_url: str) -> SlackProgressPresentation:
-    """Render the one-time Session link message for a new binding."""
+def render_slack_session_link(
+    session_url: str,
+    agent_name: str,
+) -> SlackProgressPresentation:
+    """Render the one-time Session presence message for a new binding."""
+    safe_name = _fallback_literal(agent_name)
     return SlackProgressPresentation(
-        text="Open Azents session",
+        text=f"{safe_name} joined this conversation.",
         blocks=[
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*{safe_name}* joined this conversation.",
+                },
+            },
             {
                 "type": "actions",
                 "elements": [
@@ -100,12 +111,12 @@ def render_slack_session_link(session_url: str) -> SlackProgressPresentation:
                         "action_id": "open_azents_session",
                         "text": {
                             "type": "plain_text",
-                            "text": "Open Azents session",
+                            "text": "View session",
                         },
                         "url": session_url,
                     }
                 ],
-            }
+            },
         ],
     )
 

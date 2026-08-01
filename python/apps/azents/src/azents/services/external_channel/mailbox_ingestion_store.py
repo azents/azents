@@ -1042,11 +1042,17 @@ class ExternalChannelMailboxIngestionStore:
         )
         if session_url is None:
             raise RuntimeError("External Channel Session URL is unavailable.")
+        agent = await self.agent_repository.get_by_id(
+            session,
+            route.require_active_agent_id(),
+        )
+        if agent is None:
+            raise RuntimeError("External Channel Agent disappeared.")
         thread_key = request.locator.delivery_thread_key
         if thread_key is None:
             raise RuntimeError("External Channel Session link target is unavailable.")
         if request.locator.provider is ExternalChannelProvider.SLACK:
-            presentation = render_slack_session_link(session_url)
+            presentation = render_slack_session_link(session_url, agent.name)
             payload: dict[str, object] = {
                 "control_kind": "session_link",
                 "tenant_id": request.locator.provider_tenant_id,
@@ -1059,8 +1065,18 @@ class ExternalChannelMailboxIngestionStore:
             payload = _discord_delivery_payload(resource.labels)
             payload["text"] = ""
             payload["control_kind"] = "session_link"
+            payload["embeds"] = [
+                {
+                    "title": "Session connected",
+                    "description": (
+                        f"**{_discord_markdown_literal(agent.name)}** "
+                        "joined this conversation."
+                    ),
+                    "color": 0x57F287,
+                }
+            ]
             payload["components"] = _discord_link_button(
-                label="Open Azents session", url=session_url
+                label="View session", url=session_url
             )
         attempt = await self.repository.create_delivery_attempt_idempotent(
             session,
@@ -1461,6 +1477,17 @@ def _discord_link_button(*, label: str, url: str) -> list[dict[str, object]]:
             "components": [{"type": 2, "style": 5, "label": label, "url": url}],
         }
     ]
+
+
+def _discord_markdown_literal(value: str) -> str:
+    """Escape one literal value embedded in Discord Markdown."""
+    return (
+        value.replace("\\", "\\\\")
+        .replace("*", "\\*")
+        .replace("_", "\\_")
+        .replace("~", "\\~")
+        .replace("`", "\\`")
+    )
 
 
 def _utc_now() -> datetime.datetime:

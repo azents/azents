@@ -752,7 +752,7 @@ class ExternalChannelActionService:
                 if (
                     target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
                     and payload.get("control_kind") == "session_link"
-                    and (files or components is None or embeds is not None)
+                    and (files or components is None)
                 ):
                     return _discord_invalid_payload()
                 if files:

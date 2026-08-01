@@ -192,11 +192,18 @@ def test_persisted_progress_uses_the_same_renderer() -> None:
     )
 
 
-def test_session_link_message_contains_only_button_block() -> None:
-    presentation = render_slack_session_link(_SESSION_URL)
+def test_session_link_message_announces_agent_presence() -> None:
+    presentation = render_slack_session_link(_SESSION_URL, "Research Agent")
 
-    assert presentation.text == "Open Azents session"
+    assert presentation.text == "Research Agent joined this conversation."
     assert presentation.blocks == [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "*Research Agent* joined this conversation.",
+            },
+        },
         {
             "type": "actions",
             "elements": [
@@ -205,10 +212,10 @@ def test_session_link_message_contains_only_button_block() -> None:
                     "action_id": "open_azents_session",
                     "text": {
                         "type": "plain_text",
-                        "text": "Open Azents session",
+                        "text": "View session",
                     },
                     "url": _SESSION_URL,
                 }
             ],
-        }
+        },
     ]

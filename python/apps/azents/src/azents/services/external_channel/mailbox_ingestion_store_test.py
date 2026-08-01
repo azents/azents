@@ -161,6 +161,11 @@ async def test_session_link_intent_contains_the_retained_session_route() -> None
     )
     store = _store(
         repository=repository,
+        agent_repository=SimpleNamespace(
+            get_by_id=AsyncMock(
+                return_value=Agent.model_construct(name="Research Agent")
+            )
+        ),
         workspace_repository=workspace_repository,
     )
     connection = ExternalChannelConnection.model_construct(
@@ -212,6 +217,8 @@ async def test_session_link_intent_contains_the_retained_session_route() -> None
         "https://azents.example/w/workspace%20name/agents/agent%2Fid/"
         "sessions/session%20id"
     ) in rendered_payload
+    assert "Research Agent joined this conversation." in rendered_payload
+    assert "View session" in rendered_payload
 
 
 async def test_conversation_resolution_does_not_create_session_before_acceptance() -> (

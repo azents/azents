@@ -1144,7 +1144,7 @@ async def test_slack_selector_control_uses_interaction_identity() -> None:
 
 @pytest.mark.asyncio
 async def test_slack_session_link_control_reaches_provider() -> None:
-    """A committed Slack Session link is delivered as validated blocks."""
+    """A committed Slack Session presence message reaches the provider."""
     events: list[str] = []
     repository = _RepositoryDouble(events)
     repository.target = repository.target.model_copy(
@@ -1155,8 +1155,15 @@ async def test_slack_session_link_control_reaches_provider() -> None:
                 "tenant_id": "T1",
                 "channel_id": "C1",
                 "thread_ts": "1.000001",
-                "text": "Open this Session in Azents.",
+                "text": "Research Agent joined this conversation.",
                 "blocks": [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "*Research Agent* joined this conversation.",
+                        },
+                    },
                     {
                         "type": "actions",
                         "elements": [
@@ -1164,12 +1171,12 @@ async def test_slack_session_link_control_reaches_provider() -> None:
                                 "type": "button",
                                 "text": {
                                     "type": "plain_text",
-                                    "text": "Open Session",
+                                    "text": "View session",
                                 },
                                 "url": "https://azents.example/session-1",
                             }
                         ],
-                    }
+                    },
                 ],
             },
         }
@@ -1181,7 +1188,7 @@ async def test_slack_session_link_control_reaches_provider() -> None:
             self.bot_tokens.append(cast(str, kwargs["bot_token"]))
             assert kwargs["channel_id"] == "C1"
             assert kwargs["thread_ts"] == "1.000001"
-            assert kwargs["text"] == "Open this Session in Azents."
+            assert kwargs["text"] == "Research Agent joined this conversation."
             assert kwargs["blocks"] == repository.target.request_payload["blocks"]
             assert kwargs["icon_url"] is None
             return self._result()
@@ -1208,7 +1215,7 @@ async def test_slack_session_link_control_reaches_provider() -> None:
 
 @pytest.mark.asyncio
 async def test_discord_session_link_control_reaches_provider() -> None:
-    """A committed Discord Session link is delivered with its link component."""
+    """A committed Discord Session presence Embed reaches the provider."""
     events: list[str] = []
     repository = _RepositoryDouble(events)
     components = [
@@ -1218,7 +1225,7 @@ async def test_discord_session_link_control_reaches_provider() -> None:
                 {
                     "type": 2,
                     "style": 5,
-                    "label": "Open Azents session",
+                    "label": "View session",
                     "url": "https://azents.example/session-1",
                 }
             ],
@@ -1235,6 +1242,13 @@ async def test_discord_session_link_control_reaches_provider() -> None:
                 "channel_id": "333",
                 "text": "",
                 "components": components,
+                "embeds": [
+                    {
+                        "title": "Session connected",
+                        "description": "**Research Agent** joined this conversation.",
+                        "color": 0x57F287,
+                    }
+                ],
             },
         }
     )
@@ -1267,7 +1281,7 @@ async def test_discord_session_link_control_reaches_provider() -> None:
                 "content": "",
                 "delivery_attempt_id": "delivery-1",
                 "components": components,
-                "embeds": None,
+                "embeds": repository.target.request_payload["embeds"],
             },
         )
     ]

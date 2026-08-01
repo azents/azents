@@ -31,7 +31,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-01
-spec_version: 27
+spec_version: 28
 ---
 
 # External Channel Delivery and Channel Work
@@ -222,10 +222,11 @@ delivery outcome and never causes an unsafe replay.
 
 - Conversational replies use `chat.postMessage` with Slack `markdown_text` in the bound thread. The Tool schema and the provider delivery boundary enforce Slack's current 12,000-character Markdown limit before a mutation request.
 - Releasing the first eligible invocation while a binding has no unanswered work creates Channel Work and one Block Kit Activity Tracker intent before Session wake-up. Creation does not depend on Todo state or a `channel_action` call.
-- Initial binding acceptance separately creates one button-only `Open Azents session`
-  control message and the initial Activity Tracker in the same durable transaction as
-  the triggering mailbox input. The Worker attempts those controls independently after
-  commit. Retries reuse the same mailbox and delivery attempts.
+- Initial binding acceptance separately creates one joined-presence control with a
+  `View session` button and the initial Activity Tracker in the same durable transaction
+  as the triggering mailbox input. Slack uses Block Kit and Discord uses an Embed.
+  The Worker attempts those controls independently after commit. Retries reuse the same
+  mailbox and delivery attempts.
   Later invocations on the binding do not repeat the provider mutation, and Activity
   Tracker desired state never contains the Session URL.
 - The initial Tracker states that the Agent is checking the message with one
@@ -322,6 +323,8 @@ Binding disconnect, connection disconnect, Session archive, and decommission may
 
 ## Changelog
 
+- **2026-08-01** (spec_version 28) — Replaced the initial button-only Session link
+  with a joined-presence message and `View session` action.
 - **2026-08-01** (spec_version 27) — Decoupled initial Session-link and progress
   provider-control outcomes from canonical mailbox promotion, Session wake, and
   AgentRun creation.
