@@ -2493,9 +2493,27 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
         )
         assert len(input_evidence) == 1
         assert input_evidence[0]["provider"] == "slack"
-        assert _successful_session_paths(_provider_state(slack_provider_fake_url)) == [
+        expected_session_path = (
             f"/w/{handle}/agents/{agent_id}/sessions/{socket_session.id}"
-        ]
+        )
+        presence_state = cast(
+            dict[str, object],
+            wait_until(
+                lambda: (
+                    state
+                    if _successful_session_paths(
+                        state := _provider_state(slack_provider_fake_url)
+                    )
+                    == [expected_session_path]
+                    and _successful_session_presence_states(state) == ["joined"]
+                    else None
+                ),
+                timeout=10,
+                interval=0.2,
+                message="Socket Mode joined presence was not delivered",
+            ),
+        )
+        assert _successful_session_paths(presence_state) == [expected_session_path]
 
         def reconnect_required_connection() -> object | None:
             connections = external_api.external_channel_v1_list_connections(
