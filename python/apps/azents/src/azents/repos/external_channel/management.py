@@ -39,7 +39,6 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelInteraction,
     RDBExternalChannelPrincipal,
     RDBExternalChannelResource,
-    RDBExternalChannelSessionActivation,
     RDBExternalChannelWork,
 )
 from azents.repos.external_channel.management_data import (
@@ -56,9 +55,6 @@ from azents.repos.external_channel.management_data import (
     ManagedWork,
     ManagedWorkSource,
     ManagedWorkTask,
-)
-from azents.repos.external_channel.repository import (
-    block_initializing_session_activations,
 )
 
 
@@ -1501,13 +1497,6 @@ class ExternalChannelManagementRepository:
             )
         binding.disconnected_at = now
         binding.disconnect_reason = reason
-        await block_initializing_session_activations(
-            session,
-            binding_condition=(
-                RDBExternalChannelSessionActivation.binding_id == binding.id
-            ),
-            now=now,
-        )
         works = list(
             (
                 await session.scalars(

@@ -29,7 +29,6 @@ from azents.core.enums import (
     ExternalChannelResourceType,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
-    ExternalChannelSessionActivationState,
     ExternalChannelTransport,
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
@@ -166,12 +165,6 @@ external_channel_delivery_operation_enum = ENUM(
 external_channel_delivery_status_enum = ENUM(
     ExternalChannelDeliveryStatus,
     name="external_channel_delivery_status",
-    create_type=False,
-    values_callable=_enum_values,
-)
-external_channel_session_activation_state_enum = ENUM(
-    ExternalChannelSessionActivationState,
-    name="external_channel_session_activation_state",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -1066,11 +1059,6 @@ class RDBExternalChannelBinding(RDBModel):
         unique=True,
         postgresql_where=sa.text("disconnected_at IS NULL"),
     )
-    UQ_ID_AGENT_SESSION = sa.UniqueConstraint(
-        "id",
-        "agent_session_id",
-        name="uq_external_channel_bindings_id_agent_session",
-    )
 
     id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -1127,206 +1115,6 @@ class RDBExternalChannelBinding(RDBModel):
         IX_AGENT_SESSION_ID,
         IX_ROUTE_ID,
         UQ_CONNECTED_RESOURCE,
-        UQ_ID_AGENT_SESSION,
-    )
-
-
-class RDBExternalChannelSessionActivation(RDBModel):
-    """Durable ordered admission of one External Channel Session invocation."""
-
-    __tablename__ = "external_channel_session_activations"
-
-    IX_BINDING_ID = sa.Index(
-        "ix_external_channel_session_activations_binding_id",
-        "binding_id",
-    )
-    IX_AGENT_SESSION_ID = sa.Index(
-        "ix_external_channel_session_activations_agent_session_id",
-        "agent_session_id",
-    )
-    UQ_POSITION_TRIGGER = sa.UniqueConstraint(
-        "conversation_position_id",
-        "trigger_provider_message_key",
-        "trigger_position",
-        name="uq_external_channel_session_activations_position_trigger",
-    )
-    UQ_MAILBOX_ITEM = sa.UniqueConstraint(
-        "mailbox_item_id",
-        name="uq_external_channel_session_activations_mailbox_item",
-    )
-    UQ_POSITION_BARRIER = sa.Index(
-        "uq_external_channel_session_activations_position_barrier",
-        "conversation_position_id",
-        unique=True,
-        postgresql_where=sa.text("state IN ('initializing', 'blocked')"),
-    )
-    FK_CONNECTION_POSITION = sa.ForeignKeyConstraint(
-        ["connection_id", "conversation_position_id"],
-        [
-            "external_channel_conversation_positions.connection_id",
-            "external_channel_conversation_positions.id",
-        ],
-        name="fk_external_channel_session_activations_connection_position",
-        ondelete="RESTRICT",
-    )
-    FK_BINDING_SESSION = sa.ForeignKeyConstraint(
-        ["binding_id", "agent_session_id"],
-        [
-            "external_channel_bindings.id",
-            "external_channel_bindings.agent_session_id",
-        ],
-        name="fk_external_channel_session_activations_binding_session",
-        ondelete="RESTRICT",
-    )
-    CK_STATE_FIELDS = sa.CheckConstraint(
-        "mailbox_item_id IS NOT NULL AND "
-        "((state = 'initializing' "
-        "AND failure_kind IS NULL AND failure_summary IS NULL "
-        "AND activated_at IS NULL AND blocked_at IS NULL) "
-        "OR (state = 'activated' "
-        "AND failure_kind IS NULL AND failure_summary IS NULL "
-        "AND activated_at IS NOT NULL AND blocked_at IS NULL) "
-        "OR (state = 'blocked' "
-        "AND failure_kind IS NOT NULL AND failure_summary IS NOT NULL "
-        "AND activated_at IS NULL AND blocked_at IS NOT NULL))",
-        name="ck_external_channel_session_activations_state_fields",
-    )
-
-    id: Mapped[str] = mapped_column(
-        sa.String(32),
-        primary_key=True,
-        init=False,
-        default_factory=lambda: uuid7().hex,
-    )
-    connection_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
-    conversation_position_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        nullable=False,
-    )
-    binding_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("external_channel_bindings.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    agent_session_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("agent_sessions.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    trigger_provider_message_key: Mapped[str] = mapped_column(
-        sa.Text,
-        nullable=False,
-    )
-    trigger_position: Mapped[str] = mapped_column(sa.Text, nullable=False)
-    state: Mapped[ExternalChannelSessionActivationState] = mapped_column(
-        external_channel_session_activation_state_enum,
-        nullable=False,
-        server_default=ExternalChannelSessionActivationState.INITIALIZING.value,
-    )
-    mailbox_item_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        nullable=False,
-    )
-    range_start_position: Mapped[str | None] = mapped_column(
-        sa.Text,
-        nullable=True,
-        default=None,
-    )
-    failure_kind: Mapped[str | None] = mapped_column(
-        sa.String(120),
-        nullable=True,
-        default=None,
-    )
-    failure_summary: Mapped[str | None] = mapped_column(
-        sa.String(255),
-        nullable=True,
-        default=None,
-    )
-    activated_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        nullable=True,
-        default=None,
-    )
-    blocked_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        nullable=True,
-        default=None,
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=False,
-        server_default=sa.func.now(),
-    )
-    updated_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=False,
-        server_default=sa.func.now(),
-        onupdate=sa.func.now(),
-    )
-
-    __table_args__ = (
-        IX_BINDING_ID,
-        IX_AGENT_SESSION_ID,
-        UQ_POSITION_TRIGGER,
-        UQ_MAILBOX_ITEM,
-        UQ_POSITION_BARRIER,
-        FK_CONNECTION_POSITION,
-        FK_BINDING_SESSION,
-        CK_STATE_FIELDS,
-    )
-
-
-class RDBExternalChannelSessionActivationDelivery(RDBModel):
-    """Ordered required provider delivery for one Session activation."""
-
-    __tablename__ = "external_channel_session_activation_deliveries"
-
-    UQ_ACTIVATION_ORDINAL = sa.UniqueConstraint(
-        "activation_id",
-        "ordinal",
-        name="uq_external_channel_session_activation_deliveries_ordinal",
-    )
-    UQ_ACTIVATION_ATTEMPT = sa.UniqueConstraint(
-        "activation_id",
-        "delivery_attempt_id",
-        name="uq_external_channel_session_activation_deliveries_attempt",
-    )
-
-    id: Mapped[str] = mapped_column(
-        sa.String(32),
-        primary_key=True,
-        init=False,
-        default_factory=lambda: uuid7().hex,
-    )
-    activation_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey(
-            "external_channel_session_activations.id",
-            ondelete="CASCADE",
-        ),
-        nullable=False,
-    )
-    ordinal: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    delivery_attempt_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey(
-            "external_channel_delivery_attempts.id",
-            ondelete="RESTRICT",
-        ),
-        nullable=False,
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=False,
-        server_default=sa.func.now(),
-    )
-
-    __table_args__ = (
-        UQ_ACTIVATION_ORDINAL,
-        UQ_ACTIVATION_ATTEMPT,
     )
 
 

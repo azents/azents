@@ -1,6 +1,7 @@
-"""External Channel access decisions and binding activation setup."""
+"""External Channel access decisions and binding setup."""
 
 import datetime
+import logging
 from dataclasses import dataclass
 from typing import Annotated, Literal, assert_never
 
@@ -12,6 +13,7 @@ from azents.core.enums import (
     AgentSessionStartReason,
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
+    ExternalChannelProvider,
     ExternalChannelResourceStatus,
 )
 from azents.rdb.deps import get_session_manager
@@ -41,6 +43,8 @@ from azents.services.root_agent_session_creation import (
 from azents.services.root_agent_session_creation.data import (
     AgentDefaultRootWorkspaceIntent,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ExternalChannelAccessDecisionError(ValueError):
@@ -119,6 +123,7 @@ class ExternalChannelAccessService:
     ) -> ExternalChannelAllowedAccess:
         """Allow one participant and create its Session binding atomically."""
         async with self.session_manager() as session:
+            created_provider_event_type: str | None = None
             request_snapshot = await self.repository.get_access_request(
                 session,
                 access_request_id=access_request_id,
@@ -242,6 +247,11 @@ class ExternalChannelAccessService:
                     )
                 )
                 agent_session_id = root_session.agent_session.id
+                if root_session.created:
+                    created_provider_event_type = _provider_event_type(
+                        provider=connection.provider,
+                        labels=resource.labels,
+                    )
             binding = await self.repository.create_binding_idempotent(
                 session,
                 ExternalChannelBindingCreate(
@@ -288,6 +298,14 @@ class ExternalChannelAccessService:
                 )
             )
             await session.commit()
+            if created_provider_event_type is not None:
+                logger.info(
+                    "Created External Channel AgentSession",
+                    extra={
+                        "external_channel_provider": connection.provider.value,
+                        "provider_event_type": created_provider_event_type,
+                    },
+                )
             await self._replay_allowed_request(
                 access_request_id=decided.id,
                 now=now,
@@ -571,3 +589,19 @@ class ExternalChannelAccessService:
             )
         if request.expires_at <= now:
             raise ExternalChannelAccessDecisionError("The access request has expired.")
+
+
+def _provider_event_type(
+    *,
+    provider: ExternalChannelProvider,
+    labels: dict[str, object] | None,
+) -> str:
+    """Return the sanitized provider event kind retained with the resource."""
+    value = None if labels is None else labels.get("provider_event_type")
+    expected = {
+        ExternalChannelProvider.SLACK: {"app_mention", "message"},
+        ExternalChannelProvider.DISCORD: {"discord_message_create"},
+    }
+    return (
+        value if isinstance(value, str) and value in expected[provider] else "unknown"
+    )

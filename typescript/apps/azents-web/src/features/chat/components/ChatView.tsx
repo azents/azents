@@ -1575,17 +1575,23 @@ export function ChatView({
                     <PendingMailboxBubble
                       key={`${entry.item.mailbox_item_id}:${entry.item.item_key}`}
                       entry={entry}
+                      currentWorkspaceProfile={currentWorkspaceProfile}
                       onDelete={onDeletePendingInputBuffer}
                     />
                   ))}
                 {chatTimelineState.type === "LATEST_FOLLOWING" &&
                   pendingInputBuffers.map((buffer) =>
                     buffer.id.startsWith("optimistic:") ? (
-                      <OptimisticInputBubble key={buffer.id} buffer={buffer} />
+                      <OptimisticInputBubble
+                        key={buffer.id}
+                        buffer={buffer}
+                        currentWorkspaceProfile={currentWorkspaceProfile}
+                      />
                     ) : (
                       <PendingInputBufferBubble
                         key={buffer.id}
                         buffer={buffer}
+                        currentWorkspaceProfile={currentWorkspaceProfile}
                         onDelete={onDeletePendingInputBuffer}
                       />
                     ),

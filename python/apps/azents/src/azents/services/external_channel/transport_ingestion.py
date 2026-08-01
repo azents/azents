@@ -105,6 +105,7 @@ class ExternalChannelTransportIngestionService:
             locator=ExternalChannelTriggerLocator(
                 connection_id=event.connection_id,
                 provider=ExternalChannelProvider.SLACK,
+                provider_event_type=normalized.source_event_type,
                 provider_tenant_id=normalized.tenant_id,
                 provider_channel_id=normalized.channel_id,
                 provider_parent_channel_id=None,
@@ -227,6 +228,7 @@ class ExternalChannelTransportIngestionService:
             locator=ExternalChannelTriggerLocator(
                 connection_id=event.connection_id,
                 provider=ExternalChannelProvider.DISCORD,
+                provider_event_type=event.event_type,
                 provider_tenant_id=normalized.tenant_id,
                 provider_channel_id=provider_channel_id,
                 provider_parent_channel_id=(

@@ -7,7 +7,6 @@ from typing import assert_never
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 
 from azents.core.enums import (
     AgentLifecycleStatus,
@@ -20,7 +19,6 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelRouteCatalogStatus,
-    ExternalChannelSessionActivationState,
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
@@ -53,8 +51,6 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelInteraction,
     RDBExternalChannelResource,
-    RDBExternalChannelSessionActivation,
-    RDBExternalChannelSessionActivationDelivery,
     RDBExternalChannelWork,
     RDBExternalChannelWorkProjectionPart,
 )
@@ -1238,33 +1234,6 @@ class ExternalChannelWorkRepository:
                 error_kind="delivery_authority_revoked",
                 error_summary=(
                     "The current External Channel authority is no longer active."
-                ),
-                now=now,
-            )
-        linked_activations = list(
-            await session.scalars(
-                sa.select(RDBExternalChannelSessionActivation)
-                .join(
-                    RDBExternalChannelSessionActivationDelivery,
-                    RDBExternalChannelSessionActivationDelivery.activation_id
-                    == RDBExternalChannelSessionActivation.id,
-                )
-                .where(
-                    RDBExternalChannelSessionActivationDelivery.delivery_attempt_id
-                    == attempt.id
-                )
-                .with_for_update(of=RDBExternalChannelSessionActivation)
-            )
-        )
-        if any(
-            activation.state is ExternalChannelSessionActivationState.BLOCKED
-            for activation in linked_activations
-        ):
-            return await self._reject_delivery_start(
-                attempt,
-                error_kind="session_activation_blocked",
-                error_summary=(
-                    "The External Channel Session activation is no longer eligible."
                 ),
                 now=now,
             )
@@ -3026,44 +2995,12 @@ class ExternalChannelWorkRepository:
         """List bounded durable controls eligible for one provider attempt."""
         if limit <= 0:
             raise ValueError("Provider control delivery limit must be positive.")
-        activation_delivery = aliased(RDBExternalChannelSessionActivationDelivery)
-        activation = aliased(RDBExternalChannelSessionActivation)
-        prior_delivery = aliased(RDBExternalChannelSessionActivationDelivery)
-        prior_attempt = aliased(RDBExternalChannelDeliveryAttempt)
-        incomplete_prior_delivery = (
-            sa.select(prior_delivery.id)
-            .join(
-                prior_attempt,
-                prior_attempt.id == prior_delivery.delivery_attempt_id,
-            )
-            .where(
-                prior_delivery.activation_id == activation_delivery.activation_id,
-                prior_delivery.ordinal < activation_delivery.ordinal,
-                prior_attempt.status != ExternalChannelDeliveryStatus.DELIVERED,
-            )
-        )
-        ineligible_activation_delivery = (
-            sa.select(activation_delivery.id)
-            .join(
-                activation,
-                activation.id == activation_delivery.activation_id,
-            )
-            .where(
-                activation_delivery.delivery_attempt_id
-                == RDBExternalChannelDeliveryAttempt.id,
-                sa.or_(
-                    activation.state == ExternalChannelSessionActivationState.BLOCKED,
-                    sa.exists(incomplete_prior_delivery),
-                ),
-            )
-        )
         result = await session.scalars(
             sa.select(RDBExternalChannelDeliveryAttempt.id)
             .where(
                 _provider_control_predicate(),
                 RDBExternalChannelDeliveryAttempt.status
                 == ExternalChannelDeliveryStatus.PENDING,
-                ~sa.exists(ineligible_activation_delivery),
             )
             .order_by(
                 RDBExternalChannelDeliveryAttempt.created_at,

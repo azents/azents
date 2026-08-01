@@ -50,8 +50,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-07-31
-spec_version: 24
+last_verified_at: 2026-08-01
+spec_version: 25
 ---
 
 # External Channel Provider Ingress
@@ -87,11 +87,10 @@ Slack sends HTTP callbacks to the single fixed endpoint
 5. The fully parsed event identity must match the selected connection before the
    authenticated request is projected into a typed, content-free trigger locator.
 6. Original message triggers enter synchronous conversation ingestion. Provider
-   history is read; a real idle Session, binding, canonical non-promotable mailbox
-   input, durable activation, and required provider-control intents are committed; the
-   Session link and Tracker are delivered in order; and only then are activation,
-   running state, and position advancement committed. The mailbox item is also pending
-   wake-recovery identity.
+   history is read; then one transaction commits the real Session, binding, canonical
+   mailbox input, conversation-position advance, running transition, and independent
+   provider-control intents. The mailbox item is also the pending wake-recovery
+   identity. Session-link or Tracker delivery never gates Agent execution.
 7. Success is acknowledged only for a completed non-retryable outcome. A retryable
    coordination, history, position, or wake failure remains unacknowledged so the
    provider may retry.
@@ -234,33 +233,23 @@ the canonical message source nor a durable queue item.
    was omitted. The connected Azents App/Bot is excluded; raw REST pages, callbacks,
    tokens, private URLs, and attachment bodies are not retained.
    Slack display-name and permalink enrichment is optional and starts only while a
-   fixed reserve remains for required admission.
+   fixed reserve remains for durable acceptance and wake dispatch.
 4. A short admission transaction locks and revalidates the same authority,
    conversation position, active resource, route/binding/selector, and access
-   boundary. It creates or reuses the connected binding, real idle root Session,
-   initial Channel Work, deterministic canonical mailbox input, durable Session
-   activation, and deterministic Session-link and progress delivery intents. The
-   activation binds the inert mailbox item and ordered delivery attempts to the exact
-   trigger. PostgreSQL compare-and-set restarts the read when another replica advanced
-   the position, and an incomplete activation is the durable barrier against a later
-   trigger and mailbox promotion.
-5. Outside a database transaction, the service settles the activation's one-time
-   Session-link delivery followed by every initial progress part in stable order
-   through the shared one-attempt delivery fence. Only durable `delivered` results
-   continue. A failed, unknown, missing, or not-attempted result retains the mailbox
-   item but blocks the activation without promotion or execution; deadline expiry
-   leaves initialization retryable.
-6. After required delivery and lock-ownership validation, the service rechecks the same
-   absolute transport deadline. Expiration fails retryably before activation. A
-   short activation transaction then revalidates authority and the exact durable
-   activation identities, verifies every linked delivery is still `delivered` and the
-   retained mailbox item still belongs to the bound Session, transitions the
-   activation, marks the Session running, initializes thread position, and advances the
-   conversation position atomically.
-7. After commit, the service claims the pending mailbox item and sends routing-only
+   boundary. It creates or reuses the connected binding, real root Session, initial
+   Channel Work, deterministic canonical mailbox input, and deterministic Session-link
+   and progress delivery intents. The same transaction marks the Session running,
+   initializes thread position, and compare-and-set advances the conversation position.
+   PostgreSQL conversation position is the sole duplicate-prevention and ordering
+   authority; a mismatch restarts provider-history preparation.
+5. After commit, the service claims the pending mailbox item and sends routing-only
    `SessionWakeUp(session_id)`. A crash or broker failure leaves that item recoverable,
    so duplicate transport delivery can complete the same logical wake without creating
    another Session input.
+6. The Agent Worker attempts committed Session-link and progress controls through the
+   shared one-attempt delivery fence. Delivered, failed, unknown, not-attempted, and
+   cancelled outcomes remain provider-delivery evidence only; none gates mailbox
+   promotion, Session wake, or AgentRun creation.
 
 An existing connected binding wins route resolution. Otherwise Single uses its sole
 route, Multi uses one valid channel default, and unresolved Multi traffic creates an
@@ -288,10 +277,10 @@ Authenticated Slack App uninstall and token revocation bypass normal message
 ingestion and directly apply fenced connection lifecycle handling. Provider-history,
 coordination, position, or wake failures return a retryable transport outcome. Invalid
 or stale authority and malformed replay boundaries fail closed. Committed selector,
-and approval controls may be attempted after their commit. Session-link and initial
-progress controls are required synchronous gates before mailbox promotion. Provider
-Session links use only `/w/{workspace}/agents/{agent}/sessions/{session}` and target
-the same durable Session exposed by existing Agent Session list and detail APIs.
+approval, Session-link, and initial-progress controls are attempted after their commit
+without gating accepted input. Provider Session links use only
+`/w/{workspace}/agents/{agent}/sessions/{session}` and target the same durable Session
+exposed by existing Agent Session list and detail APIs.
 
 ## File Metadata Projection
 
@@ -326,6 +315,11 @@ Slack SDK clients use dedicated non-propagating loggers so SDK diagnostics canno
 serialize provider request parameters, response bodies, or Socket endpoint details
 into application logs.
 
+The first successful creation of a real External Channel root AgentSession emits one
+structured information log with only the provider and canonical provider event type.
+Session reuse and idempotent retries emit no creation log. Provider tenant, channel,
+participant, message, payload, and Session identifiers are excluded.
+
 The External Channel Gateway supervises Slack Socket and Discord Gateway manager loops
 as required process dependencies. Unexpected top-level return, cancellation, or failure
 terminates the gateway instead of leaving readiness alive without one transport class.
@@ -335,17 +329,16 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-01** (spec_version 25) — Made PostgreSQL conversation position the sole
+  duplicate-prevention authority and decoupled provider-control outcomes from
+  canonical mailbox acceptance, Session wake, and AgentRun creation.
 - **2026-07-31** (spec_version 24) — Recognized authenticated same-Team Slack Bot
   User mentions delivered as subtype-free human `message` callbacks while preserving
   fail-closed context handling for unrelated or App-authored messages.
-- **2026-07-31** (spec_version 23) — Added durable ordered Session activation as
-  the shared binding-to-wake authority, blocked execution after terminal provider
-  initialization failure, and corrected Session navigation to the canonical `/w`
-  route.
-- **2026-07-31** (spec_version 22) — Split synchronous admission into staging,
-  ordered required provider delivery, and mailbox finalization; reserved Slack
-  optional-enrichment time for required work; and made `disconnected_at` the binding
-  relationship authority.
+- **2026-07-31** (spec_version 23) — Corrected Session navigation to the canonical
+  `/w` route.
+- **2026-07-31** (spec_version 22) — Reserved Slack optional-enrichment time for
+  durable admission and made `disconnected_at` the binding relationship authority.
 - **2026-07-31** (spec_version 21) — Moved Slack Socket Mode and Discord Gateway
   managers into one provider-neutral External Channel Gateway runtime, removed Socket
   supervision from Agent Workers, and preserved direct shared-ingestion calls.

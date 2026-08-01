@@ -18,7 +18,6 @@ from azents.core.enums import (
     AgentRunStatus,
     AgentSessionStatus,
     EventKind,
-    ExternalChannelSessionActivationState,
     MailboxItemKind,
     MailboxSchedulingMode,
 )
@@ -454,8 +453,6 @@ class MailboxService:
                 session_id,
             )
             for buffer in pending:
-                if not await self._mailbox_item_is_promotable(session, buffer):
-                    return False
                 if buffer.scheduling_mode is MailboxSchedulingMode.WAKE_SESSION:
                     return True
             return False
@@ -511,11 +508,6 @@ class MailboxService:
                 session,
                 session_id,
             )
-            if oldest is not None and not await self._mailbox_item_is_promotable(
-                session,
-                oldest,
-            ):
-                oldest = None
             actual_buffer_id = oldest.id if oldest is not None else None
             if actual_buffer_id != expected_buffer_id:
                 raise MailboxPreparationStaleError(
@@ -841,33 +833,13 @@ class MailboxService:
         session: AsyncSession,
         session_id: str,
     ) -> MailboxItem | None:
-        """Return the FIFO head only when its durable admission gate is open."""
+        """Return the current FIFO head without consuming it."""
         pending = await self.mailbox_item_repository.list_for_flush(
             session,
             session_id,
             limit=1,
         )
-        if not pending:
-            return None
-        buffer = pending[0]
-        if not await self._mailbox_item_is_promotable(session, buffer):
-            return None
-        return buffer
-
-    async def _mailbox_item_is_promotable(
-        self,
-        session: AsyncSession,
-        buffer: MailboxItem,
-    ) -> bool:
-        """Keep retained External Channel input inert until activation commits."""
-        if buffer.kind is not MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION:
-            return True
-        repository = self.external_channel_repository
-        state = await repository.get_session_activation_state_by_mailbox_item_id(
-            session,
-            mailbox_item_id=buffer.id,
-        )
-        return state is None or state is ExternalChannelSessionActivationState.ACTIVATED
+        return pending[0] if pending else None
 
     @asynccontextmanager
     async def _discard_prepared_model_files_on_failure(

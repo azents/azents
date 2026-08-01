@@ -161,6 +161,7 @@ async def test_slack_history_uses_native_trigger_and_returns_canonical_messages(
     locator = ExternalChannelTriggerLocator(
         connection_id="connection-1",
         provider=ExternalChannelProvider.SLACK,
+        provider_event_type="app_mention",
         provider_tenant_id="tenant-1",
         provider_channel_id="channel-1",
         provider_parent_channel_id=None,
@@ -282,6 +283,7 @@ async def test_slack_history_resolves_visible_bot_author_display_name() -> None:
     locator = ExternalChannelTriggerLocator(
         connection_id="connection-1",
         provider=ExternalChannelProvider.SLACK,
+        provider_event_type="app_mention",
         provider_tenant_id="tenant-1",
         provider_channel_id="channel-1",
         provider_parent_channel_id=None,
@@ -365,6 +367,7 @@ async def test_slack_history_skips_optional_enrichment_inside_required_reserve()
     locator = ExternalChannelTriggerLocator(
         connection_id="connection-1",
         provider=ExternalChannelProvider.SLACK,
+        provider_event_type="app_mention",
         provider_tenant_id="tenant-1",
         provider_channel_id="channel-1",
         provider_parent_channel_id=None,
@@ -435,6 +438,7 @@ async def test_discord_history_preserves_reference_mappings() -> None:
     locator = ExternalChannelTriggerLocator(
         connection_id="connection-1",
         provider=ExternalChannelProvider.DISCORD,
+        provider_event_type="discord_message_create",
         provider_tenant_id="100",
         provider_channel_id="200",
         provider_parent_channel_id="200",

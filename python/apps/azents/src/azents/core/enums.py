@@ -931,14 +931,6 @@ class ExternalChannelDeliveryStatus(enum.StrEnum):
     NOT_ATTEMPTED = "not_attempted"
 
 
-class ExternalChannelSessionActivationState(enum.StrEnum):
-    """Durable admission state for one External Channel Session invocation."""
-
-    INITIALIZING = "initializing"
-    ACTIVATED = "activated"
-    BLOCKED = "blocked"
-
-
 class ExternalChannelWorkProjectionStatus(enum.StrEnum):
     """Current provider projection state for one Channel Work part."""
 
