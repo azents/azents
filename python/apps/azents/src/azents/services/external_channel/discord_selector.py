@@ -195,6 +195,12 @@ class DiscordSelectorResponseService:
             color = 0xFEE75C
             control_delivery_attempt_id = None
             connection_id = None
+        elif selection.status == "setup_pending_location":
+            content = "Agent selected for this channel."
+            title = "Agent selected"
+            color = 0x57F287
+            control_delivery_attempt_id = None
+            connection_id = None
         else:
             outcome = await self.ingestion_replay_service.replay_selected_interaction(
                 selector_interaction_id=selection.selector_interaction.id,

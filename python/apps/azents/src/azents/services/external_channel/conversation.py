@@ -120,6 +120,40 @@ class ExternalChannelConversationLock(Protocol):
         ...
 
 
+@dataclass(frozen=True, repr=False)
+class ExternalChannelParticipationScope:
+    """One provider parent-channel participation coordination identity."""
+
+    connection_id: str
+    provider_parent_channel_id: str
+
+    def __post_init__(self) -> None:
+        """Reject incomplete participation identities."""
+        if not self.connection_id or not self.provider_parent_channel_id:
+            raise ValueError("External Channel participation scope must be complete.")
+
+    def __repr__(self) -> str:
+        """Return only a bounded coordination digest."""
+        encoded = "\0".join(
+            (self.connection_id, self.provider_parent_channel_id)
+        ).encode()
+        digest = hashlib.sha256(encoded).hexdigest()
+        return f"ExternalChannelParticipationScope(lock_digest={digest!r})"
+
+
+class ExternalChannelParticipationLock(Protocol):
+    """Ephemeral lock for one selected-Agent parent-channel configuration."""
+
+    def acquire(
+        self,
+        *,
+        scope: ExternalChannelParticipationScope,
+        deadline: ExternalChannelOperationDeadline,
+    ) -> AbstractAsyncContextManager[ExternalChannelConversationLockLease]:
+        """Acquire an owned participation lease within the operation deadline."""
+        ...
+
+
 @dataclass(frozen=True)
 class ExternalChannelHistoryRange[MessageT]:
     """One complete bounded provider-history range."""

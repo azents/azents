@@ -11,10 +11,14 @@ from azents.core.enums import ExternalChannelConversationLockBackend
 from azents.core.redis import create_redis_client
 from azents.services.external_channel.conversation import (
     ExternalChannelConversationLock,
+    ExternalChannelParticipationLock,
 )
 from azents.services.external_channel.conversation_lock import (
     InMemoryExternalChannelConversationLock,
     RedisExternalChannelConversationLock,
+)
+from azents.services.external_channel.participation_lock import (
+    NamespacedExternalChannelParticipationLock,
 )
 from azents.utils.appctx import AppContext
 
@@ -47,3 +51,13 @@ async def get_external_channel_conversation_lock(
         f"{__name__}.get_external_channel_conversation_lock",
         create,
     )
+
+
+async def get_external_channel_participation_lock(
+    conversation_lock: Annotated[
+        ExternalChannelConversationLock,
+        Depends(get_external_channel_conversation_lock),
+    ],
+) -> ExternalChannelParticipationLock:
+    """Return a namespaced lock backed by the configured conversation backend."""
+    return NamespacedExternalChannelParticipationLock(conversation_lock)

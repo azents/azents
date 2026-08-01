@@ -3,11 +3,12 @@
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import pytest
 
 from azents.core.enums import (
+    ExternalChannelConversationLocation,
     ExternalChannelConversationScopeKind,
     ExternalChannelIngressProfile,
     ExternalChannelMessageLifecycle,
@@ -21,6 +22,7 @@ from azents.services.external_channel.conversation import (
     ExternalChannelHistoryRange,
     ExternalChannelHistoryTemporaryFailure,
     ExternalChannelOperationDeadline,
+    ExternalChannelParticipationScope,
 )
 from azents.services.external_channel.ingestion import (
     ExternalChannelCanonicalHistoryMessage,
@@ -35,6 +37,7 @@ from azents.services.external_channel.ingestion import (
     ExternalChannelIngressAuthority,
     ExternalChannelIngressAuthorityKind,
     ExternalChannelReplayBoundary,
+    ExternalChannelSetupReplayBoundary,
     ExternalChannelTriggerLocator,
     ExternalChannelWakeDispatchResult,
 )
@@ -55,7 +58,7 @@ class _Lock:
     def acquire(
         self,
         *,
-        scope: ExternalChannelConversationScope,
+        scope: ExternalChannelConversationScope | ExternalChannelParticipationScope,
         deadline: ExternalChannelOperationDeadline,
     ) -> AbstractAsyncContextManager[ExternalChannelConversationLockLease]:
         del scope, deadline
@@ -63,6 +66,39 @@ class _Lock:
         @asynccontextmanager
         async def owned() -> AsyncIterator[ExternalChannelConversationLockLease]:
             yield self.lease
+
+        return owned()
+
+
+@dataclass
+class _EventLease:
+    name: str
+    events: list[str]
+
+    async def assert_owned(self) -> None:
+        self.events.append(f"{self.name}:assert")
+
+
+@dataclass
+class _EventLock:
+    name: str
+    events: list[str]
+
+    def acquire(
+        self,
+        *,
+        scope: ExternalChannelConversationScope | ExternalChannelParticipationScope,
+        deadline: ExternalChannelOperationDeadline,
+    ) -> AbstractAsyncContextManager[ExternalChannelConversationLockLease]:
+        del scope, deadline
+
+        @asynccontextmanager
+        async def owned() -> AsyncIterator[ExternalChannelConversationLockLease]:
+            self.events.append(f"{self.name}:enter")
+            try:
+                yield _EventLease(self.name, self.events)
+            finally:
+                self.events.append(f"{self.name}:exit")
 
         return owned()
 
@@ -147,6 +183,88 @@ class _WakeDispatcher:
         return self.results.pop(0)
 
 
+@dataclass
+class _EventHistory:
+    events: list[str]
+
+    async def read_range(
+        self,
+        *,
+        locator: ExternalChannelTriggerLocator,
+        exclusive_start_position: str | None,
+        deadline: ExternalChannelOperationDeadline,
+    ) -> ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage]:
+        del exclusive_start_position, deadline
+        self.events.append(f"history:{locator.trigger_provider_message_key}")
+        message = _message(
+            provider_message_key=locator.trigger_provider_message_key,
+            provider_position=locator.trigger_position,
+        )
+        return ExternalChannelHistoryRange(
+            messages=(message,),
+            trigger=message,
+            context_omitted=False,
+            range_start_position=None,
+            trigger_position=locator.trigger_position,
+            provider_request_count=1,
+            scanned_message_count=1,
+            elapsed_seconds=0,
+        )
+
+
+@dataclass
+class _EventStore:
+    events: list[str]
+    priority_request: ExternalChannelIngestionRequest | None = None
+
+    async def prepare(
+        self,
+        *,
+        request: ExternalChannelIngestionRequest,
+    ) -> ExternalChannelIngestionPreparation:
+        self.events.append(f"prepare:{request.operation.value}")
+        if (
+            request.operation is ExternalChannelIngestionOperation.CURRENT_TRIGGER
+            and self.priority_request is not None
+        ):
+            priority = self.priority_request
+            self.priority_request = None
+            return ExternalChannelIngestionPreparation(
+                position_id=None,
+                exclusive_start_position=None,
+                immediate_outcome=None,
+                wake_mailbox_item_id=None,
+                wake_session_id=None,
+                priority_request=priority,
+            )
+        return ExternalChannelIngestionPreparation(
+            position_id=f"position:{request.operation.value}",
+            exclusive_start_position=None,
+            immediate_outcome=None,
+            wake_mailbox_item_id=None,
+            wake_session_id=None,
+            priority_request=None,
+        )
+
+    async def accept(
+        self,
+        *,
+        request: ExternalChannelIngestionRequest,
+        preparation: ExternalChannelIngestionPreparation,
+        history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
+    ) -> ExternalChannelIngestionAcceptance:
+        del preparation, history
+        self.events.append(f"accept:{request.operation.value}")
+        return ExternalChannelIngestionAcceptance(
+            status="accepted",
+            reason=ExternalChannelIngestionReason.ACCEPTED,
+            mailbox_item_id=f"mailbox:{request.operation.value}",
+            session_id=f"session:{request.operation.value}",
+            control_delivery_attempt_id=None,
+            connection_id=None,
+        )
+
+
 def _message(
     *,
     provider_message_key: str,
@@ -229,6 +347,63 @@ def _request(
     )
 
 
+def _parent_request() -> ExternalChannelIngestionRequest:
+    request = _request()
+    return replace(
+        request,
+        locator=replace(
+            request.locator,
+            provider_parent_channel_id="channel-1",
+            provider_thread_key=None,
+            delivery_thread_key="00000000000000000002",
+        ),
+        scope=ExternalChannelConversationScope(
+            connection_id=request.locator.connection_id,
+            kind=ExternalChannelConversationScopeKind.PARENT_CHANNEL,
+            provider_channel_id=request.locator.provider_channel_id,
+            provider_thread_key=None,
+        ),
+    )
+
+
+def _setup_request() -> ExternalChannelIngestionRequest:
+    request = _parent_request()
+    locator = replace(
+        request.locator,
+        trigger_provider_message_key="message-key-1",
+        trigger_provider_message_id="1.000000",
+        trigger_position="00000000000000000001",
+        delivery_thread_key="00000000000000000001",
+    )
+    return ExternalChannelIngestionRequest(
+        locator=locator,
+        scope=request.scope,
+        authority=replace(
+            request.authority,
+            kind=ExternalChannelIngressAuthorityKind.DURABLE_REPLAY,
+        ),
+        deadline=request.deadline,
+        operation=ExternalChannelIngestionOperation.SETUP_CONTINUATION,
+        selected_route_id="route-1",
+        replay_boundary=ExternalChannelSetupReplayBoundary(
+            connection_id=locator.connection_id,
+            claim_id="claim-1",
+            expected_claim_generation=1,
+            selected_source_revision=2,
+            setting_id="setting-1",
+            settings_generation=1,
+            location=ExternalChannelConversationLocation.CHANNEL,
+            source_resource_id="source-resource-1",
+            target_resource_id="parent-resource-1",
+            principal_id="principal-1",
+            trigger_provider_message_key=locator.trigger_provider_message_key,
+            conversation_position_id="position-1",
+            range_start_position=None,
+            trigger_position=locator.trigger_position,
+        ),
+    )
+
+
 @pytest.mark.parametrize(
     ("kind", "profile"),
     [
@@ -279,6 +454,7 @@ async def test_ingestion_restarts_history_after_position_mismatch() -> None:
                 immediate_outcome=None,
                 wake_mailbox_item_id=None,
                 wake_session_id=None,
+                priority_request=None,
             ),
             ExternalChannelIngestionPreparation(
                 position_id="position-1",
@@ -286,6 +462,7 @@ async def test_ingestion_restarts_history_after_position_mismatch() -> None:
                 immediate_outcome=None,
                 wake_mailbox_item_id=None,
                 wake_session_id=None,
+                priority_request=None,
             ),
         ],
         acceptances=[
@@ -310,6 +487,7 @@ async def test_ingestion_restarts_history_after_position_mismatch() -> None:
     wake = _WakeDispatcher()
     service = ExternalChannelConversationIngestionService(
         conversation_lock=lock,
+        participation_lock=lock,
         history_reader=history,
         store=store,
         wake_dispatcher=wake,
@@ -338,6 +516,7 @@ async def test_duplicate_recovers_pending_wake_without_history_read() -> None:
     wake = _WakeDispatcher(results=["already_dispatched"])
     service = ExternalChannelConversationIngestionService(
         conversation_lock=_Lock(),
+        participation_lock=_Lock(),
         history_reader=history,
         store=_Store(
             preparations=[
@@ -353,6 +532,7 @@ async def test_duplicate_recovers_pending_wake_without_history_read() -> None:
                     ),
                     wake_mailbox_item_id="batch-1",
                     wake_session_id="session-1",
+                    priority_request=None,
                 )
             ],
             acceptances=[],
@@ -372,6 +552,7 @@ async def test_provider_control_delivery_does_not_gate_accepted_wake() -> None:
     wake = _WakeDispatcher()
     service = ExternalChannelConversationIngestionService(
         conversation_lock=_Lock(),
+        participation_lock=_Lock(),
         history_reader=_History(),
         store=_Store(
             preparations=[
@@ -381,6 +562,7 @@ async def test_provider_control_delivery_does_not_gate_accepted_wake() -> None:
                     immediate_outcome=None,
                     wake_mailbox_item_id=None,
                     wake_session_id=None,
+                    priority_request=None,
                 )
             ],
             acceptances=[
@@ -405,10 +587,76 @@ async def test_provider_control_delivery_does_not_gate_accepted_wake() -> None:
     assert wake.calls == [("batch-1", "session-1")]
 
 
+async def test_parent_history_io_runs_outside_locks() -> None:
+    """Provider history is fetched only after both coordination locks are released."""
+    events: list[str] = []
+    service = ExternalChannelConversationIngestionService(
+        conversation_lock=_EventLock("conversation", events),
+        participation_lock=_EventLock("participation", events),
+        history_reader=_EventHistory(events),
+        store=_EventStore(events),
+        wake_dispatcher=_WakeDispatcher(),
+    )
+
+    outcome = await service.ingest(_parent_request())
+
+    assert outcome.kind is ExternalChannelIngestionOutcomeKind.ACCEPTED
+    history_index = events.index("history:message-key-2")
+    assert events[:history_index] == [
+        "conversation:enter",
+        "conversation:assert",
+        "participation:enter",
+        "participation:assert",
+        "conversation:assert",
+        "prepare:current_trigger",
+        "participation:exit",
+        "conversation:exit",
+    ]
+    assert events[history_index + 1 :] == [
+        "conversation:enter",
+        "conversation:assert",
+        "participation:enter",
+        "participation:assert",
+        "conversation:assert",
+        "accept:current_trigger",
+        "participation:exit",
+        "conversation:exit",
+    ]
+
+
+async def test_selected_setup_continuation_precedes_newer_parent_ingress() -> None:
+    """A selected setup source is accepted before the newer top-level trigger."""
+    events: list[str] = []
+    store = _EventStore(events, priority_request=_setup_request())
+    wake = _WakeDispatcher(results=["dispatched", "dispatched"])
+    service = ExternalChannelConversationIngestionService(
+        conversation_lock=_EventLock("conversation", events),
+        participation_lock=_EventLock("participation", events),
+        history_reader=_EventHistory(events),
+        store=store,
+        wake_dispatcher=wake,
+    )
+
+    outcome = await service.ingest(_parent_request())
+
+    assert outcome.kind is ExternalChannelIngestionOutcomeKind.ACCEPTED
+    assert [event for event in events if event.startswith(("history:", "accept:"))] == [
+        "history:message-key-1",
+        "accept:setup_continuation",
+        "history:message-key-2",
+        "accept:current_trigger",
+    ]
+    assert wake.calls == [
+        ("mailbox:setup_continuation", "session:setup_continuation"),
+        ("mailbox:current_trigger", "session:current_trigger"),
+    ]
+
+
 async def test_concurrent_wake_claim_is_retryable() -> None:
     wake = _WakeDispatcher(results=["claimed_elsewhere"])
     service = ExternalChannelConversationIngestionService(
         conversation_lock=_Lock(),
+        participation_lock=_Lock(),
         history_reader=_History(),
         store=_Store(
             preparations=[
@@ -424,6 +672,7 @@ async def test_concurrent_wake_claim_is_retryable() -> None:
                     ),
                     wake_mailbox_item_id="batch-1",
                     wake_session_id="session-1",
+                    priority_request=None,
                 )
             ],
             acceptances=[],
@@ -440,6 +689,7 @@ async def test_concurrent_wake_claim_is_retryable() -> None:
 async def test_history_failure_returns_retryable_outcome() -> None:
     service = ExternalChannelConversationIngestionService(
         conversation_lock=_Lock(),
+        participation_lock=_Lock(),
         history_reader=_History(failure=True),
         store=_Store(
             preparations=[
@@ -449,6 +699,7 @@ async def test_history_failure_returns_retryable_outcome() -> None:
                     immediate_outcome=None,
                     wake_mailbox_item_id=None,
                     wake_session_id=None,
+                    priority_request=None,
                 )
             ],
             acceptances=[],

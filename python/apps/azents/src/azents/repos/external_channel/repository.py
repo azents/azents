@@ -2480,6 +2480,55 @@ class ExternalChannelRepository:
         )
         return self._as(ExternalChannelSetupClaim, rdb)
 
+    async def get_setup_claim(
+        self,
+        session: AsyncSession,
+        *,
+        claim_id: str,
+    ) -> ExternalChannelSetupClaim | None:
+        """Fetch one setup claim by stable identity."""
+        return self._as(
+            ExternalChannelSetupClaim,
+            await session.get(RDBExternalChannelSetupClaim, claim_id),
+        )
+
+    async def lock_setup_claim(
+        self,
+        session: AsyncSession,
+        *,
+        claim_id: str,
+    ) -> ExternalChannelSetupClaim | None:
+        """Lock one setup claim by stable identity."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelSetupClaim)
+            .where(RDBExternalChannelSetupClaim.id == claim_id)
+            .with_for_update()
+        )
+        return self._as(ExternalChannelSetupClaim, rdb)
+
+    async def list_selected_setup_claims(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int,
+    ) -> list[ExternalChannelSetupClaim]:
+        """List bounded selected claims in oldest-selection recovery order."""
+        if limit <= 0 or limit > 100:
+            raise ValueError("Setup claim recovery limit is invalid.")
+        rows = await session.scalars(
+            sa.select(RDBExternalChannelSetupClaim)
+            .where(
+                RDBExternalChannelSetupClaim.status
+                == ExternalChannelSetupClaimStatus.SELECTED
+            )
+            .order_by(
+                RDBExternalChannelSetupClaim.selected_at,
+                RDBExternalChannelSetupClaim.id,
+            )
+            .limit(limit)
+        )
+        return [ExternalChannelSetupClaim.model_validate(row) for row in rows]
+
     async def lock_nonterminal_setup_claim(
         self,
         session: AsyncSession,

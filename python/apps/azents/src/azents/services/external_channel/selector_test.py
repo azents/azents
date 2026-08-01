@@ -10,19 +10,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAppMode,
+    ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
     ExternalChannelPrincipalAuthorType,
+    ExternalChannelSetupClaimStatus,
 )
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
     ExternalChannelBinding,
     ExternalChannelCatalogRoute,
+    ExternalChannelChannelDefaultCreate,
     ExternalChannelConnection,
     ExternalChannelInteraction,
     ExternalChannelPrincipal,
+    ExternalChannelSetupClaim,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.selector import (
@@ -59,6 +63,7 @@ def _selector(
     *,
     selected_route_id: str | None = None,
     expires_at: datetime.datetime | None = None,
+    setup_claim_id: str | None = None,
 ) -> ExternalChannelInteraction:
     state = ExternalChannelSelectorState(
         connection_id="connection-1",
@@ -75,6 +80,7 @@ def _selector(
         connection_id="connection-1",
         interaction_type=ExternalChannelInteractionType.MANAGEMENT_ACTION,
         principal_id="principal-1",
+        setup_claim_id=setup_claim_id,
         projection=projection_with_selector_state({}, state),
         status=ExternalChannelInteractionStatus.ACCEPTED,
         expires_at=expires_at or _NOW + datetime.timedelta(minutes=10),
@@ -100,6 +106,9 @@ class _Repository:
         self.blocked_agents: set[str] = set()
         self.author_type = ExternalChannelPrincipalAuthorType.HUMAN
         self.connection_status = connection_status
+        self.setup_claim: ExternalChannelSetupClaim | None = None
+        self.current_default: ExternalChannelAgentRoute | None = None
+        self.created_default: ExternalChannelChannelDefaultCreate | None = None
 
     async def lock_interaction(
         self,
@@ -224,6 +233,66 @@ class _Repository:
         self.calls.append("binding_lock")
         assert resource_id == "resource-1"
         return self.binding
+
+    async def lock_setup_claim(
+        self,
+        session: AsyncSession,
+        *,
+        claim_id: str,
+    ) -> ExternalChannelSetupClaim | None:
+        del session
+        self.calls.append("setup_claim_lock")
+        if self.setup_claim is None or self.setup_claim.id != claim_id:
+            return None
+        return self.setup_claim
+
+    async def lock_routable_channel_default(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        provider_channel_id: str,
+    ) -> ExternalChannelAgentRoute | None:
+        del session
+        self.calls.append("channel_default_lock")
+        assert connection_id == "connection-1"
+        assert provider_channel_id == "parent-channel-1"
+        return self.current_default
+
+    async def create_channel_default(
+        self,
+        session: AsyncSession,
+        create: ExternalChannelChannelDefaultCreate,
+    ) -> object:
+        del session
+        self.calls.append("channel_default_create")
+        self.created_default = create
+        return object()
+
+    async def assign_setup_claim_route(
+        self,
+        session: AsyncSession,
+        *,
+        claim_id: str,
+        expected_claim_generation: int,
+        route_id: str,
+    ) -> ExternalChannelSetupClaim | None:
+        del session
+        self.calls.append("setup_route_assign")
+        claim = self.setup_claim
+        if (
+            claim is None
+            or claim.id != claim_id
+            or claim.claim_generation != expected_claim_generation
+        ):
+            return None
+        self.setup_claim = claim.model_copy(
+            update={
+                "route_id": route_id,
+                "status": ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+            }
+        )
+        return self.setup_claim
 
     async def get_active_block(
         self,
@@ -389,6 +458,51 @@ async def test_existing_binding_wins_without_selector_mutation() -> None:
     assert selection.status == "already_bound"
     assert selection.binding is binding
     assert "projection_replace" not in repository.calls
+
+
+@pytest.mark.asyncio
+async def test_setup_selector_assigns_parent_route_without_binding() -> None:
+    """Setup Agent selection creates only the channel default and claim route."""
+    session = _Session()
+    route = _route("route-1", "agent-1").model_copy(
+        update={"open_access_enabled": True}
+    )
+    repository = _Repository(
+        rows=[ExternalChannelCatalogRoute(route=route, agent_name="Alpha")]
+    )
+    repository.selector = _selector(setup_claim_id="claim-1")
+    repository.setup_claim = ExternalChannelSetupClaim.model_construct(
+        id="claim-1",
+        connection_id="connection-1",
+        provider_parent_channel_id="parent-channel-1",
+        route_id=None,
+        source_resource_id="resource-1",
+        claim_generation=1,
+        status=ExternalChannelSetupClaimStatus.PENDING_AGENT,
+    )
+
+    selection = await _service(session, repository).select_route(
+        selector_interaction_id="selector-1",
+        principal_id="principal-1",
+        route_id="route-1",
+        now=_NOW,
+    )
+
+    assert selection.status == "setup_pending_location"
+    assert selection.binding is None
+    assert repository.setup_claim is not None
+    assert repository.setup_claim.route_id == "route-1"
+    assert (
+        repository.setup_claim.status
+        is ExternalChannelSetupClaimStatus.PENDING_LOCATION
+    )
+    assert repository.created_default is not None
+    assert (
+        repository.created_default.status is ExternalChannelChannelDefaultStatus.ACTIVE
+    )
+    assert repository.created_default.configured_by_principal_id == "principal-1"
+    assert "binding_lock" not in repository.calls
+    assert session.committed
 
 
 @pytest.mark.asyncio

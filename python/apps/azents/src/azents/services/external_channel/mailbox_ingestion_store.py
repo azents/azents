@@ -17,6 +17,7 @@ from azents.core.enums import (
     AgentSessionStartReason,
     ExternalChannelAccessRequestStatus,
     ExternalChannelAppMode,
+    ExternalChannelConversationLocation,
     ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
@@ -29,6 +30,7 @@ from azents.core.enums import (
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
     ExternalChannelResponseMode,
+    ExternalChannelSetupClaimStatus,
     MailboxItemKind,
     MailboxSchedulingMode,
 )
@@ -54,9 +56,12 @@ from azents.repos.external_channel.data import (
     ExternalChannelInteraction,
     ExternalChannelInteractionCreate,
     ExternalChannelMailboxProjectionItem,
+    ExternalChannelParticipationSetting,
     ExternalChannelPrincipalCreate,
     ExternalChannelResource,
     ExternalChannelResourceCreate,
+    ExternalChannelSetupClaim,
+    ExternalChannelSetupClaimCreate,
     ExternalChannelWork,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
@@ -75,6 +80,13 @@ from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionReason,
     ExternalChannelIngestionRequest,
     ExternalChannelIngressAuthorityKind,
+    ExternalChannelSetupReplayBoundary,
+)
+from azents.services.external_channel.participation_state import (
+    ExternalChannelSetupSourceProjection,
+    build_setup_continuation_request,
+    projection_with_setup_source,
+    setup_source_from_projection,
 )
 from azents.services.external_channel.selector_state import (
     ExternalChannelSelectorState,
@@ -100,11 +112,15 @@ logger = logging.getLogger(__name__)
 class _Conversation:
     """Current durable conversation routing state."""
 
+    source_resource: ExternalChannelResource
     resource: ExternalChannelResource
     route: ExternalChannelAgentRoute | None
+    setting: ExternalChannelParticipationSetting | None
     binding: ExternalChannelBinding | None
     principal_id: str
     selector: ExternalChannelInteraction | None
+    setup_claim: ExternalChannelSetupClaim | None
+    setup_required: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -148,7 +164,7 @@ class ExternalChannelMailboxIngestionStore:
         *,
         request: ExternalChannelIngestionRequest,
     ) -> ExternalChannelIngestionPreparation:
-        """Resolve the conversation and Session before provider-history retrieval."""
+        """Prepare one content-free routing snapshot before provider history."""
         now = _utc_now()
         async with self.session_manager() as session:
             connection = await self._lock_authority(session, request=request, now=now)
@@ -157,41 +173,53 @@ class ExternalChannelMailboxIngestionStore:
                     ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
                     ExternalChannelIngestionReason.INGRESS_AUTHORITY_STALE,
                 )
+            priority_request = await self._selected_setup_priority_request(
+                session,
+                request=request,
+            )
+            if priority_request is not None:
+                await session.commit()
+                return ExternalChannelIngestionPreparation(
+                    position_id=None,
+                    exclusive_start_position=None,
+                    immediate_outcome=None,
+                    wake_mailbox_item_id=None,
+                    wake_session_id=None,
+                    priority_request=priority_request,
+                )
             position = await self._prepare_position(session, request=request)
             if position is None:
                 return _immediate(
                     ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
                     ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY,
                 )
-            resource = await self._resolve_resource(
+            source_resource = await self._get_source_resource(
                 session,
                 request=request,
-                now=now,
             )
-            if resource is None:
-                await session.commit()
-                return _immediate(
-                    ExternalChannelIngestionOutcomeKind.IGNORED,
-                    ExternalChannelIngestionReason.NOT_AN_INVOCATION,
-                )
-            if resource.status is not ExternalChannelResourceStatus.ACTIVE:
+            if (
+                source_resource is not None
+                and source_resource.status is not ExternalChannelResourceStatus.ACTIVE
+            ):
                 await session.commit()
                 return _immediate(
                     ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
                     ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE,
                 )
-            if not self._replay_source_matches(
+            if source_resource is not None and not self._replay_source_matches(
                 request=request,
-                resource=resource,
+                resource=source_resource,
             ):
                 await session.commit()
                 return _immediate(
                     ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
                     ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY,
                 )
-            binding = await self.repository.lock_connected_binding_by_resource(
+            binding = await self._prepare_effective_binding(
                 session,
-                resource_id=resource.id,
+                request=request,
+                connection=connection,
+                source_resource=source_resource,
             )
             ignored_reason = _response_mode_ignored_reason(
                 request=request,
@@ -203,15 +231,27 @@ class ExternalChannelMailboxIngestionStore:
                     ExternalChannelIngestionOutcomeKind.IGNORED,
                     ignored_reason,
                 )
-            conversation = await self._resolve_conversation(
-                session,
+            if source_resource is None:
+                if request.replay_boundary is not None:
+                    await session.commit()
+                    return _immediate(
+                        ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
+                        ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY,
+                    )
+                source_resource = await self._create_source_resource(
+                    session,
+                    request=request,
+                    now=now,
+                )
+            if not self._replay_source_matches(
                 request=request,
-                connection=connection,
-                resource=resource,
-                position=position,
-                binding=binding,
-                now=now,
-            )
+                resource=source_resource,
+            ):
+                await session.commit()
+                return _immediate(
+                    ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
+                    ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY,
+                )
             if (
                 request.operation is ExternalChannelIngestionOperation.CURRENT_TRIGGER
                 and position.read_through_position is not None
@@ -219,10 +259,10 @@ class ExternalChannelMailboxIngestionStore:
             ):
                 wake_item_id = None
                 wake_session_id = None
-                if conversation.binding is not None:
+                if binding is not None:
                     existing = await self.mailbox_service.get_by_idempotency_key(
                         session,
-                        session_id=conversation.binding.agent_session_id,
+                        session_id=binding.agent_session_id,
                         kind=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION,
                         idempotency_key=_mailbox_idempotency_key(
                             request=request,
@@ -231,7 +271,7 @@ class ExternalChannelMailboxIngestionStore:
                     )
                     if existing is not None:
                         wake_item_id = existing.id
-                        wake_session_id = conversation.binding.agent_session_id
+                        wake_session_id = binding.agent_session_id
                 await session.commit()
                 return ExternalChannelIngestionPreparation(
                     position_id=None,
@@ -245,6 +285,7 @@ class ExternalChannelMailboxIngestionStore:
                     ),
                     wake_mailbox_item_id=wake_item_id,
                     wake_session_id=wake_session_id,
+                    priority_request=None,
                 )
             start = position.read_through_position
             boundary = request.replay_boundary
@@ -261,6 +302,7 @@ class ExternalChannelMailboxIngestionStore:
                 immediate_outcome=None,
                 wake_mailbox_item_id=None,
                 wake_session_id=None,
+                priority_request=None,
             )
 
     async def accept(
@@ -312,50 +354,56 @@ class ExternalChannelMailboxIngestionStore:
                 )
             ):
                 return _rejected(ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY)
-            resource = await self.repository.get_resource_by_provider_key(
+            source_resource = await self.repository.get_resource_by_provider_key(
                 session,
                 connection_id=connection.id,
                 resource_type=ExternalChannelResourceType.THREAD,
                 provider_resource_key=request.locator.provider_resource_key,
             )
             if (
-                resource is None
-                or resource.status is not ExternalChannelResourceStatus.ACTIVE
+                source_resource is None
+                or source_resource.status is not ExternalChannelResourceStatus.ACTIVE
                 or not self._replay_source_matches(
                     request=request,
-                    resource=resource,
+                    resource=source_resource,
                 )
             ):
                 return _rejected(
                     ExternalChannelIngestionReason.CONVERSATION_UNAVAILABLE
                 )
-            binding = await self.repository.lock_connected_binding_by_resource(
-                session,
-                resource_id=resource.id,
-            )
-            ignored_reason = _response_mode_ignored_reason(
-                request=request,
-                binding=binding,
-            )
-            if ignored_reason is not None:
-                return await self._commit_ignored(session, ignored_reason)
             conversation = await self._resolve_conversation(
                 session,
                 request=request,
                 connection=connection,
-                resource=resource,
+                source_resource=source_resource,
                 position=position,
-                binding=binding,
                 now=now,
             )
+            ignored_reason = _response_mode_ignored_reason(
+                request=request,
+                binding=conversation.binding,
+            )
+            if ignored_reason is not None:
+                return await self._commit_ignored(session, ignored_reason)
+            if conversation.setup_required:
+                return await self._accept_setup_required(
+                    session,
+                    request=request,
+                    connection=connection,
+                    position=position,
+                    history=history,
+                    conversation=conversation,
+                    now=now,
+                )
             if conversation.route is None:
                 selector = conversation.selector or await self._ensure_selector(
                     session,
                     request=request,
                     connection=connection,
-                    resource=resource,
+                    resource=conversation.resource,
                     position=position,
                     principal_id=conversation.principal_id,
+                    setup_claim_id=None,
                     now=now,
                 )
                 delivery_id = await self._create_selector_control_intent(
@@ -400,7 +448,7 @@ class ExternalChannelMailboxIngestionStore:
                     session,
                     ExternalChannelAccessRequestCreate(
                         route_id=conversation.route.id,
-                        resource_id=resource.id,
+                        resource_id=conversation.resource.id,
                         trigger_provider_message_key=(
                             request.locator.trigger_provider_message_key
                         ),
@@ -448,7 +496,12 @@ class ExternalChannelMailboxIngestionStore:
                 creation = await self._create_binding(
                     session,
                     route=conversation.route,
-                    resource=resource,
+                    resource=conversation.resource,
+                    response_mode=(
+                        None
+                        if conversation.setting is None
+                        else conversation.setting.response_mode
+                    ),
                 )
                 binding = creation.binding
                 session_created = creation.session_created
@@ -459,13 +512,13 @@ class ExternalChannelMailboxIngestionStore:
             )
             session_presence_id = await self._create_session_presence_intent(
                 session,
-                resource=resource,
+                resource=conversation.resource,
                 binding=binding,
             )
             progress_id = await self._create_initial_progress_intent(
                 session,
                 request=request,
-                resource=resource,
+                resource=conversation.resource,
                 binding=binding,
                 work=work,
             )
@@ -476,7 +529,7 @@ class ExternalChannelMailboxIngestionStore:
             projection = _invocation_projection(
                 request=request,
                 history=history,
-                resource=resource,
+                resource=conversation.resource,
                 binding=binding,
                 trigger_principal_id=conversation.principal_id,
                 invocation_id=idempotency_key,
@@ -514,12 +567,22 @@ class ExternalChannelMailboxIngestionStore:
                 if not advanced:
                     await session.rollback()
                     return _position_mismatch()
-            await self._initialize_thread_position(
+            if (
+                conversation.resource.resource_type
+                is ExternalChannelResourceType.THREAD
+            ):
+                await self._initialize_thread_position(
+                    session,
+                    request=request,
+                    resource=conversation.resource,
+                    parent_position=position,
+                    trigger_position=history.trigger_position,
+                )
+            await self._complete_setup_replay(
                 session,
                 request=request,
-                resource=resource,
-                parent_position=position,
-                trigger_position=history.trigger_position,
+                conversation=conversation,
+                now=now,
             )
             await session.commit()
             if session_created:
@@ -544,23 +607,28 @@ class ExternalChannelMailboxIngestionStore:
                 connection_id=connection.id if control_id is not None else None,
             )
 
-    async def _resolve_resource(
+    async def _get_source_resource(
         self,
         session: AsyncSession,
         *,
         request: ExternalChannelIngestionRequest,
-        now: datetime.datetime,
     ) -> ExternalChannelResource | None:
-        resource = await self.repository.get_resource_by_provider_key(
+        """Fetch the route-neutral provider-history source Resource."""
+        return await self.repository.get_resource_by_provider_key(
             session,
             connection_id=request.locator.connection_id,
             resource_type=ExternalChannelResourceType.THREAD,
             provider_resource_key=request.locator.provider_resource_key,
         )
-        if resource is not None:
-            return resource
-        if request.replay_boundary is not None or not request.locator.invocation:
-            return None
+
+    async def _create_source_resource(
+        self,
+        session: AsyncSession,
+        *,
+        request: ExternalChannelIngestionRequest,
+        now: datetime.datetime,
+    ) -> ExternalChannelResource:
+        """Create the route-neutral provider-history source Resource."""
         return await self.repository.create_resource_idempotent(
             session,
             ExternalChannelResourceCreate(
@@ -575,51 +643,580 @@ class ExternalChannelMailboxIngestionStore:
             ),
         )
 
+    async def _prepare_effective_binding(
+        self,
+        session: AsyncSession,
+        *,
+        request: ExternalChannelIngestionRequest,
+        connection: ExternalChannelConnection,
+        source_resource: ExternalChannelResource | None,
+    ) -> ExternalChannelBinding | None:
+        """Resolve only the concrete Binding needed by the response predicate."""
+        if source_resource is not None:
+            source_binding = await self.repository.lock_connected_binding_by_resource(
+                session,
+                resource_id=source_resource.id,
+            )
+            if source_binding is not None:
+                return source_binding
+        boundary = request.replay_boundary
+        if isinstance(boundary, ExternalChannelSetupReplayBoundary):
+            target = await self.repository.lock_resource(
+                session,
+                resource_id=boundary.target_resource_id,
+            )
+            if (
+                target is None
+                or target.connection_id != connection.id
+                or target.status is not ExternalChannelResourceStatus.ACTIVE
+            ):
+                return None
+            return await self.repository.lock_connected_binding_by_resource(
+                session,
+                resource_id=target.id,
+            )
+        if (
+            request.scope.kind
+            is not ExternalChannelConversationScopeKind.PARENT_CHANNEL
+        ):
+            return None
+        route = await self._resolve_route(
+            session,
+            request=request,
+            connection=connection,
+        )
+        if route is None:
+            return None
+        setting = await self.repository.lock_active_participation_setting(
+            session,
+            connection_id=connection.id,
+            provider_parent_channel_id=_provider_parent_channel_id(request),
+        )
+        if (
+            setting is None
+            or setting.route_id != route.id
+            or setting.location is not ExternalChannelConversationLocation.CHANNEL
+        ):
+            return None
+        parent_resource = await self.repository.get_resource_by_provider_key(
+            session,
+            connection_id=connection.id,
+            resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+            provider_resource_key=setting.provider_parent_channel_id,
+        )
+        if (
+            parent_resource is None
+            or parent_resource.status is not ExternalChannelResourceStatus.ACTIVE
+        ):
+            return None
+        return await self.repository.lock_connected_binding_by_resource(
+            session,
+            resource_id=parent_resource.id,
+        )
+
+    async def _selected_setup_priority_request(
+        self,
+        session: AsyncSession,
+        *,
+        request: ExternalChannelIngestionRequest,
+    ) -> ExternalChannelIngestionRequest | None:
+        """Return the selected continuation that must precede newer parent traffic."""
+        if (
+            request.operation is not ExternalChannelIngestionOperation.CURRENT_TRIGGER
+            or request.scope.kind
+            is not ExternalChannelConversationScopeKind.PARENT_CHANNEL
+        ):
+            return None
+        claim = await self.repository.lock_nonterminal_setup_claim(
+            session,
+            connection_id=request.locator.connection_id,
+            provider_parent_channel_id=_provider_parent_channel_id(request),
+        )
+        if (
+            claim is None
+            or claim.status is not ExternalChannelSetupClaimStatus.SELECTED
+        ):
+            return None
+        if (
+            claim.selected_setting_id is None
+            or claim.selected_resource_id is None
+            or claim.selected_source_revision is None
+        ):
+            raise ValueError("Selected External Channel setup claim is incomplete.")
+        configuration = await self.repository.get_connection_configuration(
+            session,
+            connection_id=claim.connection_id,
+        )
+        setting = await self.repository.get_active_participation_setting(
+            session,
+            connection_id=claim.connection_id,
+            provider_parent_channel_id=claim.provider_parent_channel_id,
+        )
+        source_resource = await self.repository.get_resource(
+            session,
+            resource_id=claim.source_resource_id,
+        )
+        target_resource = await self.repository.get_resource(
+            session,
+            resource_id=claim.selected_resource_id,
+        )
+        principal = await self.repository.get_principal(
+            session,
+            principal_id=claim.principal_id,
+        )
+        if (
+            configuration is None
+            or setting is None
+            or setting.id != claim.selected_setting_id
+            or source_resource is None
+            or source_resource.status is not ExternalChannelResourceStatus.ACTIVE
+            or target_resource is None
+            or target_resource.status is not ExternalChannelResourceStatus.ACTIVE
+            or principal is None
+        ):
+            raise ValueError("Selected External Channel setup owners are unavailable.")
+        return build_setup_continuation_request(
+            configuration=configuration,
+            claim=claim,
+            setting=setting,
+            source_resource=source_resource,
+            principal=principal,
+            source=setup_source_from_projection(claim.source_projection),
+            deadline=request.deadline,
+        )
+
     async def _resolve_conversation(
         self,
         session: AsyncSession,
         *,
         request: ExternalChannelIngestionRequest,
         connection: ExternalChannelConnection,
-        resource: ExternalChannelResource,
+        source_resource: ExternalChannelResource,
         position: ExternalChannelConversationPosition,
-        binding: ExternalChannelBinding | None,
         now: datetime.datetime,
     ) -> _Conversation:
         principal_id = await self._ensure_principal(
             session,
             request=request,
         )
-        route = None
-        selector = None
-        if binding is not None:
-            route = await self.repository.get_routable_route_by_id(
-                session,
-                route_id=binding.route_id,
-            )
-        else:
+        boundary = request.replay_boundary
+        if isinstance(boundary, ExternalChannelSetupReplayBoundary):
             route = await self._resolve_route(
                 session,
                 request=request,
                 connection=connection,
             )
-            if route is None:
-                selector = await self._ensure_selector(
-                    session,
-                    request=request,
-                    connection=connection,
-                    resource=resource,
-                    position=position,
-                    principal_id=principal_id,
-                    now=now,
+            setting = await self.repository.lock_active_participation_setting(
+                session,
+                connection_id=connection.id,
+                provider_parent_channel_id=_provider_parent_channel_id(request),
+            )
+            claim = await self.repository.lock_setup_claim(
+                session,
+                claim_id=boundary.claim_id,
+            )
+            target_resource = await self.repository.lock_resource(
+                session,
+                resource_id=boundary.target_resource_id,
+            )
+            if (
+                route is None
+                or setting is None
+                or setting.id != boundary.setting_id
+                or setting.route_id != route.id
+                or setting.settings_generation != boundary.settings_generation
+                or setting.location is not boundary.location
+                or claim is None
+                or claim.status is not ExternalChannelSetupClaimStatus.SELECTED
+                or claim.claim_generation != boundary.expected_claim_generation
+                or claim.selected_source_revision != boundary.selected_source_revision
+                or claim.selected_resource_id != boundary.target_resource_id
+                or claim.source_resource_id != source_resource.id
+                or target_resource is None
+                or target_resource.connection_id != connection.id
+                or target_resource.status is not ExternalChannelResourceStatus.ACTIVE
+            ):
+                raise ValueError(
+                    "External Channel selected setup replay is no longer current."
                 )
+            binding = await self.repository.lock_connected_binding_by_resource(
+                session,
+                resource_id=target_resource.id,
+            )
+            return _Conversation(
+                source_resource=source_resource,
+                resource=target_resource,
+                route=route,
+                setting=setting,
+                binding=binding,
+                principal_id=principal_id,
+                selector=None,
+                setup_claim=claim,
+                setup_required=False,
+            )
+        source_binding = await self.repository.lock_connected_binding_by_resource(
+            session,
+            resource_id=source_resource.id,
+        )
+        if source_binding is not None:
+            route = await self.repository.get_routable_route_by_id(
+                session,
+                route_id=source_binding.route_id,
+            )
+            return _Conversation(
+                source_resource=source_resource,
+                resource=source_resource,
+                route=route,
+                setting=None,
+                binding=source_binding,
+                principal_id=principal_id,
+                selector=None,
+                setup_claim=None,
+                setup_required=False,
+            )
+        route = await self._resolve_route(
+            session,
+            request=request,
+            connection=connection,
+        )
+        setting = await self.repository.lock_active_participation_setting(
+            session,
+            connection_id=connection.id,
+            provider_parent_channel_id=_provider_parent_channel_id(request),
+        )
+        if setting is not None:
+            if route is None or setting.route_id != route.id:
+                raise ValueError(
+                    "External Channel participation route is no longer current."
+                )
+            target_resource = source_resource
+            if (
+                request.scope.kind
+                is ExternalChannelConversationScopeKind.PARENT_CHANNEL
+                and setting.location is ExternalChannelConversationLocation.CHANNEL
+            ):
+                target_resource = await self.repository.get_resource_by_provider_key(
+                    session,
+                    connection_id=connection.id,
+                    resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+                    provider_resource_key=setting.provider_parent_channel_id,
+                ) or await self.repository.create_resource_idempotent(
+                    session,
+                    ExternalChannelResourceCreate(
+                        connection_id=connection.id,
+                        resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+                        provider_resource_key=setting.provider_parent_channel_id,
+                        labels=_parent_resource_labels(request),
+                        status=ExternalChannelResourceStatus.ACTIVE,
+                        latest_activity_at=now,
+                        unavailable_at=None,
+                        deleted_at=None,
+                    ),
+                )
+            binding = await self.repository.lock_connected_binding_by_resource(
+                session,
+                resource_id=target_resource.id,
+            )
+            return _Conversation(
+                source_resource=source_resource,
+                resource=target_resource,
+                route=route,
+                setting=setting,
+                binding=binding,
+                principal_id=principal_id,
+                selector=None,
+                setup_claim=None,
+                setup_required=False,
+            )
+        setup_required = (
+            self.config.external_channel_participation_enabled
+            and request.operation is ExternalChannelIngestionOperation.CURRENT_TRIGGER
+            and request.scope.kind
+            is ExternalChannelConversationScopeKind.PARENT_CHANNEL
+            and request.locator.invocation
+        )
+        selector = None
+        if route is None and not setup_required:
+            selector = await self._ensure_selector(
+                session,
+                request=request,
+                connection=connection,
+                resource=source_resource,
+                position=position,
+                principal_id=principal_id,
+                setup_claim_id=None,
+                now=now,
+            )
         return _Conversation(
-            resource=resource,
+            source_resource=source_resource,
+            resource=source_resource,
             route=route,
-            binding=binding,
+            setting=None,
+            binding=None,
             principal_id=principal_id,
             selector=selector,
+            setup_claim=None,
+            setup_required=setup_required,
         )
+
+    async def _accept_setup_required(
+        self,
+        session: AsyncSession,
+        *,
+        request: ExternalChannelIngestionRequest,
+        connection: ExternalChannelConnection,
+        position: ExternalChannelConversationPosition,
+        history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
+        conversation: _Conversation,
+        now: datetime.datetime,
+    ) -> ExternalChannelIngestionAcceptance:
+        """Commit only setup state for one eligible unconfigured invocation."""
+        route = conversation.route
+        if route is not None:
+            agent_id = route.require_active_agent_id()
+            if (
+                await self.repository.get_active_block(
+                    session,
+                    agent_id=agent_id,
+                    principal_id=conversation.principal_id,
+                )
+                is not None
+            ):
+                return await self._commit_ignored(
+                    session,
+                    ExternalChannelIngestionReason.AUTHOR_NOT_ELIGIBLE,
+                )
+        claim = await self._ensure_setup_claim(
+            session,
+            request=request,
+            position=position,
+            source_resource=conversation.source_resource,
+            principal_id=conversation.principal_id,
+            route=route,
+            history=history,
+            now=now,
+        )
+        if claim is None:
+            await session.rollback()
+            return _position_mismatch()
+        if route is None:
+            selector = await self._ensure_selector(
+                session,
+                request=request,
+                connection=connection,
+                resource=conversation.source_resource,
+                position=position,
+                principal_id=conversation.principal_id,
+                setup_claim_id=claim.id,
+                now=now,
+            )
+            delivery_id = await self._create_selector_control_intent(
+                session,
+                request=request,
+                selector_id=selector.id,
+            )
+            await session.commit()
+            return ExternalChannelIngestionAcceptance(
+                status="awaiting_selection",
+                reason=ExternalChannelIngestionReason.SELECTION_REQUIRED,
+                mailbox_item_id=None,
+                session_id=None,
+                control_delivery_attempt_id=delivery_id,
+                connection_id=connection.id if delivery_id is not None else None,
+            )
+        grant = await self.repository.get_active_access_grant(
+            session,
+            agent_id=route.require_active_agent_id(),
+            principal_id=conversation.principal_id,
+            agent_session_id=None,
+        )
+        if grant is None and not _route_has_automatic_access(route):
+            access_request = await self.repository.create_access_request_idempotent(
+                session,
+                ExternalChannelAccessRequestCreate(
+                    route_id=route.id,
+                    resource_id=conversation.source_resource.id,
+                    trigger_provider_message_key=(
+                        request.locator.trigger_provider_message_key
+                    ),
+                    principal_id=conversation.principal_id,
+                    agent_session_id=None,
+                    setup_claim_id=claim.id,
+                    status=ExternalChannelAccessRequestStatus.PENDING,
+                    decision_policy_snapshot={"policy_version": 2},
+                    decided_by_user_id=None,
+                    decision_summary=None,
+                    expires_at=now + _ACCESS_REQUEST_AGE,
+                    decided_at=None,
+                    connection_id=connection.id,
+                    conversation_position_id=position.id,
+                    range_start_position=history.range_start_position,
+                    trigger_position=history.trigger_position,
+                ),
+            )
+            trigger = history.trigger
+            assert trigger.provider_user_id is not None
+            delivery_id = await self._create_access_control_intent(
+                session,
+                request_id=access_request.id,
+                request=request,
+                binding=None,
+                principal_provider_user_id=trigger.provider_user_id,
+                participant_label=(
+                    trigger.sender_display_name or trigger.provider_user_id
+                ),
+                now=now,
+            )
+            await session.commit()
+            return ExternalChannelIngestionAcceptance(
+                status="awaiting_access",
+                reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
+                mailbox_item_id=None,
+                session_id=None,
+                control_delivery_attempt_id=delivery_id,
+                connection_id=connection.id if delivery_id is not None else None,
+            )
+        await session.commit()
+        return ExternalChannelIngestionAcceptance(
+            status="awaiting_selection",
+            reason=ExternalChannelIngestionReason.SETUP_REQUIRED,
+            mailbox_item_id=None,
+            session_id=None,
+            control_delivery_attempt_id=None,
+            connection_id=None,
+        )
+
+    async def _ensure_setup_claim(
+        self,
+        session: AsyncSession,
+        *,
+        request: ExternalChannelIngestionRequest,
+        position: ExternalChannelConversationPosition,
+        source_resource: ExternalChannelResource,
+        principal_id: str,
+        route: ExternalChannelAgentRoute | None,
+        history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
+        now: datetime.datetime,
+    ) -> ExternalChannelSetupClaim | None:
+        """Create or replace the one latest eligible pending setup source."""
+        provider_parent_channel_id = _provider_parent_channel_id(request)
+        source_projection = projection_with_setup_source(
+            ExternalChannelSetupSourceProjection(
+                schema_version=1,
+                provider=request.locator.provider,
+                provider_event_type=request.locator.provider_event_type,
+                provider_tenant_id=request.locator.provider_tenant_id,
+                provider_channel_id=request.locator.provider_channel_id,
+                provider_parent_channel_id=provider_parent_channel_id,
+                scope_kind=request.scope.kind,
+                provider_thread_key=request.locator.provider_thread_key,
+                delivery_thread_key=request.locator.delivery_thread_key,
+                provider_resource_key=request.locator.provider_resource_key,
+                trigger_provider_message_key=(
+                    request.locator.trigger_provider_message_key
+                ),
+                trigger_provider_message_id=(
+                    request.locator.trigger_provider_message_id
+                ),
+                trigger_position=history.trigger_position,
+                range_start_position=history.range_start_position,
+            )
+        )
+        claim = await self.repository.lock_nonterminal_setup_claim(
+            session,
+            connection_id=request.locator.connection_id,
+            provider_parent_channel_id=provider_parent_channel_id,
+        )
+        if (
+            claim is not None
+            and claim.status is ExternalChannelSetupClaimStatus.SELECTED
+        ):
+            return None
+        if claim is None:
+            return await self.repository.create_setup_claim(
+                session,
+                ExternalChannelSetupClaimCreate(
+                    connection_id=request.locator.connection_id,
+                    provider_parent_channel_id=provider_parent_channel_id,
+                    route_id=None if route is None else route.id,
+                    conversation_position_id=position.id,
+                    source_resource_id=source_resource.id,
+                    principal_id=principal_id,
+                    source_projection=source_projection,
+                    source_revision=1,
+                    claim_generation=1,
+                    status=(
+                        ExternalChannelSetupClaimStatus.PENDING_AGENT
+                        if route is None
+                        else ExternalChannelSetupClaimStatus.PENDING_LOCATION
+                    ),
+                    selected_setting_id=None,
+                    selected_resource_id=None,
+                    selected_source_revision=None,
+                    expires_at=now + _ACCESS_REQUEST_AGE,
+                    selected_at=None,
+                    completed_at=None,
+                ),
+            )
+        if (
+            claim.status is ExternalChannelSetupClaimStatus.PENDING_AGENT
+            and route is not None
+        ):
+            claim = await self.repository.assign_setup_claim_route(
+                session,
+                claim_id=claim.id,
+                expected_claim_generation=claim.claim_generation,
+                route_id=route.id,
+            )
+            if claim is None:
+                return None
+        if (route is None) != (claim.route_id is None) or (
+            route is not None and claim.route_id != route.id
+        ):
+            raise ValueError("External Channel setup route changed during admission.")
+        if (
+            claim.conversation_position_id == position.id
+            and claim.source_resource_id == source_resource.id
+            and claim.principal_id == principal_id
+            and claim.source_projection == source_projection
+        ):
+            return claim
+        return await self.repository.replace_setup_claim_source(
+            session,
+            claim_id=claim.id,
+            expected_claim_generation=claim.claim_generation,
+            expected_source_revision=claim.source_revision,
+            conversation_position_id=position.id,
+            source_resource_id=source_resource.id,
+            principal_id=principal_id,
+            source_projection=source_projection,
+            expires_at=now + _ACCESS_REQUEST_AGE,
+        )
+
+    async def _complete_setup_replay(
+        self,
+        session: AsyncSession,
+        *,
+        request: ExternalChannelIngestionRequest,
+        conversation: _Conversation,
+        now: datetime.datetime,
+    ) -> None:
+        """Complete one selected claim in the canonical acceptance transaction."""
+        boundary = request.replay_boundary
+        if not isinstance(boundary, ExternalChannelSetupReplayBoundary):
+            return
+        claim = conversation.setup_claim
+        if claim is None:
+            raise ValueError("External Channel setup replay claim is unavailable.")
+        completed = await self.repository.complete_setup_claim(
+            session,
+            claim_id=claim.id,
+            expected_claim_generation=boundary.expected_claim_generation,
+            expected_selected_source_revision=boundary.selected_source_revision,
+            completed_at=now,
+        )
+        if completed is None:
+            raise ValueError("External Channel setup replay completion was fenced.")
 
     async def _resolve_route(
         self,
@@ -644,7 +1241,7 @@ class ExternalChannelMailboxIngestionStore:
         return await self.repository.lock_routable_channel_default(
             session,
             connection_id=connection.id,
-            provider_channel_id=request.locator.provider_channel_id,
+            provider_channel_id=_provider_parent_channel_id(request),
         )
 
     async def _ensure_principal(
@@ -701,6 +1298,7 @@ class ExternalChannelMailboxIngestionStore:
         resource: ExternalChannelResource,
         position: ExternalChannelConversationPosition,
         principal_id: str,
+        setup_claim_id: str | None,
         now: datetime.datetime,
     ) -> ExternalChannelInteraction:
         provider_key = selector_provider_interaction_key(
@@ -724,7 +1322,10 @@ class ExternalChannelMailboxIngestionStore:
         )
         if existing is not None:
             state = selector_state_from_interaction(existing)
-            if state.model_copy(update={"selected_route_id": None}) != expected:
+            if (
+                state.model_copy(update={"selected_route_id": None}) != expected
+                or existing.setup_claim_id != setup_claim_id
+            ):
                 raise ValueError("External Channel selector retry is incompatible.")
             return existing
         admitted = await self.repository.admit_interaction(
@@ -737,7 +1338,7 @@ class ExternalChannelMailboxIngestionStore:
                 callback_id=None,
                 action_id="agent_selector",
                 principal_id=principal_id,
-                setup_claim_id=None,
+                setup_claim_id=setup_claim_id,
                 resource_correlation_key=None,
                 projection=projection_with_selector_state({}, expected),
                 status=ExternalChannelInteractionStatus.ACCEPTED,
@@ -754,6 +1355,7 @@ class ExternalChannelMailboxIngestionStore:
         *,
         route: ExternalChannelAgentRoute,
         resource: ExternalChannelResource,
+        response_mode: ExternalChannelResponseMode | None,
     ) -> _BindingCreation:
         agent_id = route.require_active_agent_id()
         agent = await self.agent_repository.get_by_id(session, agent_id)
@@ -775,7 +1377,11 @@ class ExternalChannelMailboxIngestionStore:
                 resource_id=resource.id,
                 route_id=route.id,
                 agent_session_id=root.agent_session.id,
-                response_mode=agent.external_channel_default_response_mode,
+                response_mode=(
+                    agent.external_channel_default_response_mode
+                    if response_mode is None
+                    else response_mode
+                ),
                 disconnected_at=None,
                 disconnect_reason=None,
             ),
@@ -1299,6 +1905,43 @@ def _resource_labels(request: ExternalChannelIngestionRequest) -> dict[str, obje
     }
 
 
+def _provider_parent_channel_id(
+    request: ExternalChannelIngestionRequest,
+) -> str:
+    """Return the stable provider parent-channel identity."""
+    value = request.locator.provider_parent_channel_id
+    if value:
+        return value
+    if request.locator.provider is ExternalChannelProvider.SLACK:
+        return request.locator.provider_channel_id
+    if request.scope.kind is ExternalChannelConversationScopeKind.PARENT_CHANNEL:
+        return request.scope.provider_channel_id
+    raise ValueError("External Channel parent-channel identity is unavailable.")
+
+
+def _parent_resource_labels(
+    request: ExternalChannelIngestionRequest,
+) -> dict[str, object]:
+    """Build explicit labels for one first-class parent-channel Resource."""
+    parent_channel_id = _provider_parent_channel_id(request)
+    if request.locator.provider is ExternalChannelProvider.SLACK:
+        return {
+            "provider": "slack",
+            "provider_event_type": request.locator.provider_event_type,
+            "tenant_id": request.locator.provider_tenant_id,
+            "channel_id": parent_channel_id,
+            "conversation_scope": ExternalChannelResourceType.PARENT_CHANNEL.value,
+        }
+    return {
+        "provider": "discord",
+        "provider_event_type": request.locator.provider_event_type,
+        "guild_id": request.locator.provider_tenant_id,
+        "parent_channel_id": parent_channel_id,
+        "source_channel_id": parent_channel_id,
+        "conversation_scope": ExternalChannelResourceType.PARENT_CHANNEL.value,
+    }
+
+
 def _add_discord_thread_provisioning(
     payload: dict[str, object],
     *,
@@ -1335,6 +1978,7 @@ def _immediate(
         ),
         wake_mailbox_item_id=None,
         wake_session_id=None,
+        priority_request=None,
     )
 
 

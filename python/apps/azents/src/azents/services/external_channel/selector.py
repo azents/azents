@@ -9,16 +9,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     ExternalChannelAppMode,
+    ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelInteractionStatus,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
+    ExternalChannelSetupClaimStatus,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
+    ExternalChannelAgentRoute,
     ExternalChannelBinding,
     ExternalChannelCatalogRoute,
+    ExternalChannelChannelDefaultCreate,
     ExternalChannelInteraction,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
@@ -56,7 +60,13 @@ class ExternalChannelSelectorCatalog:
 class ExternalChannelSelectorSelection:
     """One immutable selection result or its existing binding winner."""
 
-    status: Literal["selected", "already_selected", "already_bound", "expired"]
+    status: Literal[
+        "selected",
+        "already_selected",
+        "already_bound",
+        "setup_pending_location",
+        "expired",
+    ]
     selector_interaction: ExternalChannelInteraction
     binding: ExternalChannelBinding | None
 
@@ -94,6 +104,7 @@ class ExternalChannelSelectorService:
                 principal_id=principal_id,
                 now=now,
             )
+            assert interaction is not None
             connection = await self.repository.get_connection(
                 session,
                 connection_id=state.connection_id,
@@ -132,6 +143,7 @@ class ExternalChannelSelectorService:
                 session,
                 rows=rows[:_SELECTOR_PAGE_SIZE],
                 principal_id=principal_id,
+                setup_claim_id=interaction.setup_claim_id,
             )
             return ExternalChannelSelectorCatalog(
                 candidates=tuple(candidates),
@@ -196,6 +208,15 @@ class ExternalChannelSelectorService:
                 or route.connection_id != connection.id
             ):
                 raise ExternalChannelSelectorError("Selected Agent is unavailable.")
+            if interaction.setup_claim_id is not None:
+                return await self._select_setup_route(
+                    session,
+                    interaction=interaction,
+                    state=state,
+                    connection_id=connection.id,
+                    requested_route=route,
+                    principal_id=principal_id,
+                )
             resource = await self.repository.lock_resource(
                 session,
                 resource_id=state.resource_id,
@@ -248,6 +269,110 @@ class ExternalChannelSelectorService:
                 binding=None,
             )
 
+    async def _select_setup_route(
+        self,
+        session: AsyncSession,
+        *,
+        interaction: ExternalChannelInteraction,
+        state: ExternalChannelSelectorState,
+        connection_id: str,
+        requested_route: ExternalChannelAgentRoute,
+        principal_id: str,
+    ) -> ExternalChannelSelectorSelection:
+        """Select only the parent-channel Agent without creating a Binding."""
+        claim_id = interaction.setup_claim_id
+        assert claim_id is not None
+        claim = await self.repository.lock_setup_claim(
+            session,
+            claim_id=claim_id,
+        )
+        if (
+            claim is None
+            or claim.connection_id != connection_id
+            or claim.status
+            not in {
+                ExternalChannelSetupClaimStatus.PENDING_AGENT,
+                ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+                ExternalChannelSetupClaimStatus.SELECTED,
+                ExternalChannelSetupClaimStatus.COMPLETED,
+            }
+        ):
+            raise ExternalChannelSelectorError("Setup interaction is unavailable.")
+        source = await self.repository.lock_resource(
+            session,
+            resource_id=claim.source_resource_id,
+        )
+        if source is None or source.connection_id != connection_id:
+            raise ExternalChannelSelectorError("Setup source is unavailable.")
+        current_default = await self.repository.lock_routable_channel_default(
+            session,
+            connection_id=connection_id,
+            provider_channel_id=claim.provider_parent_channel_id,
+        )
+        selected_route = current_default or requested_route
+        if (
+            await self.repository.get_active_block(
+                session,
+                agent_id=selected_route.require_active_agent_id(),
+                principal_id=principal_id,
+            )
+            is not None
+        ):
+            raise ExternalChannelSelectorError("Selected Agent is unavailable.")
+        grant = await self.repository.get_active_access_grant(
+            session,
+            agent_id=selected_route.require_active_agent_id(),
+            principal_id=principal_id,
+            agent_session_id=None,
+        )
+        if grant is None and not selected_route.open_access_enabled:
+            raise ExternalChannelSelectorError("Selected Agent is unavailable.")
+        if claim.status is ExternalChannelSetupClaimStatus.PENDING_AGENT:
+            if current_default is None:
+                await self.repository.create_channel_default(
+                    session,
+                    ExternalChannelChannelDefaultCreate(
+                        connection_id=connection_id,
+                        provider_channel_id=claim.provider_parent_channel_id,
+                        route_id=selected_route.id,
+                        status=ExternalChannelChannelDefaultStatus.ACTIVE,
+                        configured_by_user_id=None,
+                        configured_by_principal_id=principal_id,
+                        invalidated_at=None,
+                        invalidation_reason=None,
+                    ),
+                )
+            assigned = await self.repository.assign_setup_claim_route(
+                session,
+                claim_id=claim.id,
+                expected_claim_generation=claim.claim_generation,
+                route_id=selected_route.id,
+            )
+            if assigned is None:
+                raise ExternalChannelSelectorError(
+                    "Setup Agent selection lost its current generation."
+                )
+        elif claim.route_id != selected_route.id:
+            raise ExternalChannelSelectorError(
+                "Setup Agent selection is no longer current."
+            )
+        updated = await self.repository.replace_interaction_projection(
+            session,
+            interaction_id=interaction.id,
+            projection=projection_with_selector_state(
+                interaction.projection,
+                state.model_copy(update={"selected_route_id": selected_route.id}),
+            ),
+        )
+        if updated is None:
+            raise RuntimeError("Selector interaction disappeared during selection.")
+        await session.commit()
+        return ExternalChannelSelectorSelection(
+            status="setup_pending_location",
+            selector_interaction=updated,
+            binding=None,
+        )
+
     async def validate_discord_component_scope(
         self,
         *,
@@ -268,6 +393,7 @@ class ExternalChannelSelectorService:
                 principal_id=principal_id,
                 now=now,
             )
+            assert interaction is not None
             connection = await self.repository.get_connection(
                 session,
                 connection_id=state.connection_id,
@@ -318,6 +444,7 @@ class ExternalChannelSelectorService:
         *,
         rows: list[ExternalChannelCatalogRoute],
         principal_id: str,
+        setup_claim_id: str | None,
     ) -> list[ExternalChannelSelectorCandidate]:
         candidates: list[ExternalChannelSelectorCandidate] = []
         for row in rows:
@@ -327,11 +454,24 @@ class ExternalChannelSelectorService:
                 principal_id=principal_id,
                 agent_session_id=None,
             )
+            if (
+                setup_claim_id is not None
+                and grant is None
+                and not row.route.open_access_enabled
+            ):
+                continue
             candidates.append(
                 ExternalChannelSelectorCandidate(
                     route_id=row.route.id,
                     agent_name=row.agent_name,
-                    access=("available" if grant is not None else "access_required"),
+                    access=(
+                        "available"
+                        if grant is not None
+                        or (
+                            setup_claim_id is not None and row.route.open_access_enabled
+                        )
+                        else "access_required"
+                    ),
                 )
             )
         return candidates

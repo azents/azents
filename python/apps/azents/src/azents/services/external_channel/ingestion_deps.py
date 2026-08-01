@@ -6,9 +6,11 @@ from fastapi import Depends
 
 from azents.services.external_channel.conversation import (
     ExternalChannelConversationLock,
+    ExternalChannelParticipationLock,
 )
 from azents.services.external_channel.deps import (
     get_external_channel_conversation_lock,
+    get_external_channel_participation_lock,
 )
 from azents.services.external_channel.ingestion import (
     ExternalChannelConversationIngestionService,
@@ -29,6 +31,10 @@ def get_external_channel_conversation_ingestion_service(
         ExternalChannelConversationLock,
         Depends(get_external_channel_conversation_lock),
     ],
+    participation_lock: Annotated[
+        ExternalChannelParticipationLock,
+        Depends(get_external_channel_participation_lock),
+    ],
     history_reader: Annotated[
         ExternalChannelProviderHistoryReader,
         Depends(ExternalChannelProviderHistoryReader),
@@ -45,6 +51,7 @@ def get_external_channel_conversation_ingestion_service(
     """Compose the shared ingestion service for transport and replay callers."""
     return ExternalChannelConversationIngestionService(
         conversation_lock=conversation_lock,
+        participation_lock=participation_lock,
         history_reader=history_reader,
         store=store,
         wake_dispatcher=wake_dispatcher,

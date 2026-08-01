@@ -17,6 +17,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResponseMode,
+    ExternalChannelSetupClaimStatus,
 )
 from azents.services.external_channel.access import ExternalChannelAccessService
 from azents.services.external_channel.ingestion import (
@@ -66,6 +67,7 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
         resource_id="resource-secret",
         principal_id="principal-secret",
         agent_session_id=None,
+        setup_claim_id=None,
         status=ExternalChannelAccessRequestStatus.PENDING,
         expires_at=now + datetime.timedelta(minutes=5),
     )
@@ -178,3 +180,87 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
     assert "session-secret" not in caplog.text
     created_binding = repository.create_binding_idempotent.await_args.args[1]
     assert created_binding.response_mode is ExternalChannelResponseMode.MENTION_ONLY
+
+
+async def test_setup_allow_grants_access_without_binding_session_or_replay() -> None:
+    """Restricted setup Allow resumes location choice without execution state."""
+    now = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
+    request = SimpleNamespace(
+        id="access-1",
+        route_id="route-1",
+        resource_id="source-resource-1",
+        principal_id="principal-1",
+        agent_session_id=None,
+        setup_claim_id="claim-1",
+        status=ExternalChannelAccessRequestStatus.PENDING,
+        expires_at=now + datetime.timedelta(minutes=5),
+    )
+    route = SimpleNamespace(
+        id="route-1",
+        connection_id="connection-1",
+        require_active_agent_id=lambda: "agent-1",
+    )
+    connection = SimpleNamespace(id="connection-1")
+    resource = SimpleNamespace(
+        id="source-resource-1",
+        connection_id="connection-1",
+        status=ExternalChannelResourceStatus.ACTIVE,
+    )
+    claim = SimpleNamespace(
+        id="claim-1",
+        connection_id="connection-1",
+        route_id="route-1",
+        source_resource_id="source-resource-1",
+        principal_id="principal-1",
+        claim_generation=1,
+        source_revision=1,
+        status=ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+    )
+    grant = SimpleNamespace(scope=ExternalChannelAccessGrantScope.AGENT)
+    decided = SimpleNamespace(**vars(request))
+    decided.status = ExternalChannelAccessRequestStatus.ALLOWED
+    repository = MagicMock()
+    repository.get_access_request = AsyncMock(return_value=request)
+    repository.get_agent_route = AsyncMock(return_value=route)
+    repository.lock_connection_for_routing = AsyncMock(return_value=connection)
+    repository.get_routable_route_by_id = AsyncMock(return_value=route)
+    repository.lock_resource = AsyncMock(return_value=resource)
+    repository.lock_setup_claim = AsyncMock(return_value=claim)
+    repository.lock_access_request = AsyncMock(return_value=request)
+    repository.get_active_block = AsyncMock(return_value=None)
+    repository.ensure_access_grant = AsyncMock(return_value=grant)
+    repository.decide_access_request = AsyncMock(return_value=decided)
+    repository.create_access_request_control_delete_intent = AsyncMock(
+        return_value=None
+    )
+    repository.create_binding_idempotent = AsyncMock()
+    root_creation = MagicMock()
+    root_creation.create_root_session = AsyncMock()
+    replay = MagicMock()
+    replay.replay_access_allow = AsyncMock()
+    service = ExternalChannelAccessService(
+        session_manager=cast(Any, _SessionManager()),
+        repository=cast(Any, repository),
+        agent_repository=cast(Any, MagicMock()),
+        root_agent_session_creation_service=cast(Any, root_creation),
+        ingestion_replay_service=cast(Any, replay),
+    )
+
+    result = await service.allow(
+        access_request_id=request.id,
+        scope=ExternalChannelAccessGrantScope.AGENT,
+        decided_by_user_id="approver-1",
+        decision_summary=None,
+        now=now,
+    )
+
+    assert result.binding is None
+    assert result.grant is grant
+    assert result.setup_continuation is not None
+    assert result.setup_continuation.setup_claim_id == "claim-1"
+    assert result.setup_continuation.claim_generation == 1
+    assert result.setup_continuation.source_revision == 1
+    assert result.setup_continuation.route_id == "route-1"
+    repository.create_binding_idempotent.assert_not_awaited()
+    root_creation.create_root_session.assert_not_awaited()
+    replay.replay_access_allow.assert_not_awaited()
