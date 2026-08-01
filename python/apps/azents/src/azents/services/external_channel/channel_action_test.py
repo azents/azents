@@ -1350,7 +1350,6 @@ async def test_discord_session_presence_control_uses_embed_and_link() -> None:
                 ],
                 "embeds": [
                     {
-                        "title": "Session disconnected",
                         "description": "**Research Agent** left this conversation.",
                         "color": 0x99AAB5,
                     }
