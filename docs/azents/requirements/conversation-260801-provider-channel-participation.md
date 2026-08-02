@@ -2,6 +2,7 @@
 title: "Provider Channel Participation Settings Requirements"
 created: 2026-08-01
 updated: 2026-08-01
+implemented: 2026-08-02
 tags: [external-channel, slack, discord, conversation]
 document_role: primary
 document_type: requirements

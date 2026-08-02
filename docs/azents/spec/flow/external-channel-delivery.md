@@ -31,8 +31,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_data.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-01
-spec_version: 28
+last_verified_at: 2026-08-02
+spec_version: 29
 ---
 
 # External Channel Delivery and Channel Work
@@ -207,17 +207,19 @@ the same durable-attempt nonce, validates each emitted byte count against prefli
 size, and is bounded by the provider request limit. The durable records retain source
 manifests and delivery evidence, never file bytes.
 
-For a Discord root-message resource, the first route-resolved outbound intent ensures
+For a Discord root-message thread Resource, the first route-resolved outbound intent ensures
 one provider thread and records its returned channel ID on the resource under a lock.
 New thread creation uses the current routed Agent name after trimming and provider
 length bounding, with the safe product fallback only for a blank name. Existing
 threads are reused without rename, and later Agent renames do not rename them.
-New provider threads explicitly use Discord's minimum supported 60-minute automatic
-archive duration instead of inheriting the parent channel default.
-All later newly planned approval, Session navigation, reply, file, progress, recovery,
-and cleanup intents use that retained delivery channel. Existing threads already use
-their retained delivery channel. A failed or ambiguous thread creation is a terminal
-delivery outcome and never causes an unsafe replay.
+Parent-channel Resources deliver directly to the provider parent channel. Slack omits
+`thread_ts`; Discord never provisions a thread. Thread Resources retain the existing
+target behavior: Slack uses the bound root and Discord reuses an existing thread or
+provisions one delivery thread. New Discord provider threads explicitly use the
+minimum supported 60-minute automatic archive duration instead of inheriting the
+parent channel default. All later approval, Session navigation, reply, file, progress,
+recovery, and cleanup intents use the Resource's explicit target. A failed or ambiguous
+thread creation is a terminal delivery outcome and never causes an unsafe replay.
 
 ## Activity Tracker Lifecycle
 
@@ -225,12 +227,14 @@ delivery outcome and never causes an unsafe replay.
 - Releasing the first eligible invocation while a binding has no unanswered work creates Channel Work and one Block Kit Activity Tracker intent before Session wake-up. Creation does not depend on Todo state or a `channel_action` call.
 - Initial binding acceptance separately creates one Session presence control and the
   initial Activity Tracker in the same durable transaction as the triggering mailbox
-  input. The presence control replaces the former button-only Session link. Slack uses
-  Block Kit and Discord uses an Embed; both state that the current Agent joined the
-  conversation and place one `View session` URL button below the message. The Worker
-  attempts those controls independently after commit. Retries reuse the same mailbox
-  and delivery attempts. Later invocations on the binding do not repeat the provider
-  mutation, and Activity Tracker desired state never contains the Session URL.
+  input. The versioned presence control replaces the former button-only Session link.
+  Slack uses Block Kit and Discord uses an Embed; both state that the current Agent
+  joined the conversation and place `View session` and provider-native
+  `Conversation settings` actions below the message while the Binding remains
+  connected. The Worker attempts those controls independently after commit. Retries
+  reuse the same mailbox and delivery attempts. Later invocations on the binding do
+  not repeat the provider mutation, and Activity Tracker desired state never contains
+  the Session URL.
 - The initial Tracker states that the Agent is checking the message with one
   `task_card` carrying the `in_progress` state. Once Channel Work exists, one
   `plan` block carries the Agent-authored title and complete ordered task list.
@@ -253,6 +257,11 @@ delivery outcome and never causes an unsafe replay.
   empty string and its Embed with the current bounded title, status summary, ordered
   checklist, prioritized context, and labeled sources. Update, delete, replacement,
   recovery, and final-reply cleanup use the same durable Tracker identity and gating.
+- Existing connected Bindings without the versioned settings action are reconciled
+  through one distinct idempotent `binding_settings_available` control. It contains
+  both `View session` and `Conversation settings`, never rewrites historical provider
+  messages, excludes disconnected Bindings, and treats delivered, failed, and unknown
+  outcomes as final one-attempt evidence rather than blindly retrying them.
 
 The work cycle stores its title, complete provider-neutral version-2 desired
 snapshot, desired revision, and retained provider identity. A matching Slack
@@ -338,6 +347,9 @@ back the terminal lifecycle transition.
 
 ## Changelog
 
+- **2026-08-02** (spec_version 29) — Added direct parent-channel targeting, versioned
+  conversation-settings presence actions, and bounded existing-Binding control
+  reconciliation without history rewrite.
 - **2026-08-01** (spec_version 28) — Replaced the button-only Session link with
   joined-presence controls and added one leave-presence control to every binding
   termination path, including post-purge delivery through an in-memory captured

@@ -88,8 +88,12 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-08-01
-spec_version: 54
+  - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi
+  - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
+  - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
+  - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
+last_verified_at: 2026-08-02
+spec_version: 55
 ---
 
 # Workspace & Membership
@@ -424,9 +428,9 @@ A non-primary session can own a Git worktree allocation created by a `create_git
 
 Each created worktree is prompt-eligible only through its context-owned `SessionWorkspaceProject` projection, just like manually selected Projects. The `SessionGitWorktree` row is retained for lifecycle and cleanup, and links to the registered Project row after registration succeeds. Explicit user-requested cleanup remains session-scoped. After a Session archive transaction commits, archive makes one forced best-effort pass over every non-cleaned root-tree allocation. Successful cleanup removes the owned worktree and Azents-created branch, removes the session-scoped reserved worktree parent directory when it becomes empty, deletes catalog and linked Project rows, and marks the allocation cleaned. Failure is recorded and logged but does not fail archive or schedule retry. Durable purge does not inspect or remove physical worktrees and deletes allocation rows through database finalization regardless of cleanup status.
 
-### Workspace Slack Multi Apps
+### Workspace External Channel Multi Apps
 
-Workspace is the management authority for Slack Multi Apps. Owners and Managers can
+Workspace is the Web management authority for Slack and Discord Multi Apps. Owners and Managers can
 list, create, inspect, validate, edit, and disconnect Multi Apps; manage their
 available/removed Agent catalog; preview destructive impact; and replace or clear
 channel defaults. Members cannot read or mutate this surface. These permissions are
@@ -437,6 +441,14 @@ one Multi App may expose several Workspace Agents and one Agent may appear in se
 Apps. App mode is immutable, route addition/re-enable remains rollout-gated, and
 destructive route/default/App mutations use the current connection generation.
 Disconnected Multi Apps remain readable history but are not mutable.
+
+A provider participant may establish the first channel default only through the
+provider-native selector and only from routes that principal may currently invoke.
+That default stores provider-principal provenance; Web mutations store the authenticated
+Workspace User provenance. Replacing or clearing a default atomically invalidates the
+old participation setting and pending setup claim, disconnects only the old parent
+Binding, and preserves every established thread Binding and Session. Impact previews
+and mutation responses expose the participation-setting and parent-Binding counts.
 
 Azents Web exposes Multi management under Workspace integrations. Agent settings
 show Multi associations only as read-only context. An opaque Slack management
@@ -525,8 +537,8 @@ stateDiagram-v2
 | List invitations I received | ✅ | ✅ | ✅ | ❌ |
 | Join request | — | — | — | authenticated user |
 | Approve/reject/mute join request | ✅ | ✅ | ❌ | ❌ |
-| Read Slack Multi Apps/routes/defaults | ✅ | ✅ | ❌ | ❌ |
-| Create/edit/disconnect Slack Multi Apps | ✅ | ✅ | ❌ | ❌ |
+| Read External Channel Multi Apps/routes/defaults | ✅ | ✅ | ❌ | ❌ |
+| Create/edit/disconnect External Channel Multi Apps | ✅ | ✅ | ❌ | ❌ |
 | Add/remove/re-enable Multi App Agents | ✅ | ✅ | ❌ | ❌ |
 | Replace/clear Multi App channel defaults | ✅ | ✅ | ❌ | ❌ |
 
@@ -578,6 +590,10 @@ stateDiagram-v2
 | `external_channel_v1_remove_multi_slack_route` | DELETE `/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/agents/{route_id}` | generation fence and impact scope |
 | `external_channel_v1_replace_multi_slack_channel_default` | PUT `/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}/channel-defaults/{provider_channel_id}` | generation fence and available route |
 | `external_channel_v1_disconnect_multi_slack_connection` | DELETE `/external-channel/v1/workspaces/{handle}/external-channels/slack/multi/{connection_id}` | generation fence; terminal mutation |
+| `external_channel_v1_list_multi_discord_connections` | GET `/external-channel/v1/workspaces/{handle}/external-channels/discord/multi` | Workspace External Channel read permission |
+| `external_channel_v1_setup_multi_discord_connection` | POST `/external-channel/v1/workspaces/{handle}/external-channels/discord/multi` | Workspace External Channel write permission; rollout gate |
+| `external_channel_v1_replace_multi_discord_channel_default` | PUT `/external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults/{provider_channel_id}` | generation fence, available route, and old participation transition |
+| `external_channel_v1_clear_multi_discord_channel_default` | DELETE `/external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults/{provider_channel_id}` | generation fence and old participation transition |
 
 ### Admin API
 
@@ -613,6 +629,10 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-02 (spec_version=55)** — Generalized Workspace Multi App authority to
+  Slack and Discord, added provider-principal initial channel-default provenance, and
+  coupled default replacement/clear to setup invalidation and parent-Binding
+  terminalization while preserving thread conversations.
 - **2026-08-01 (spec_version=54)** — Replaced the combined Workspace LLM settings page with a
   Workspace-identified settings overview and focused model, LLM integration, and Runtime Profile
   routes, preserving each area's existing read and management authorization.

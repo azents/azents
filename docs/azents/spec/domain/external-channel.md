@@ -56,15 +56,15 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-08-01
-spec_version: 38
+last_verified_at: 2026-08-02
+spec_version: 39
 ---
 
 # External Channel
 
 ## Overview
 
-External Channels connect provider conversations to Azents Agents without treating provider credentials, conversations, participants, or delivery state as AgentSession-owned chat data. Workspace owns connection credentials and provider identity. An Agent route selects the Agent for a connection. A resource represents one provider conversation, and a connected binding links that resource to one AgentSession until explicit disconnect.
+External Channels connect provider conversations to Azents Agents without treating provider credentials, conversations, participants, or delivery state as AgentSession-owned chat data. Workspace owns connection credentials and provider identity. An Agent route selects the Agent for a connection. A channel participation setting selects whether top-level traffic shares one parent-channel conversation or creates isolated thread conversations. A resource represents one provider conversation, and a connected binding links that resource to one AgentSession until explicit disconnect.
 
 Slack and Discord are supported providers. A Slack connection uses a manually
 configured Slack App and selects either signed HTTP callbacks or Socket Mode. A Discord
@@ -107,12 +107,14 @@ contain multiple independent bindings.
 | --- | --- |
 | Connection | Workspace-owned provider App identity, immutable `single` or `multi` mode, encrypted credentials, capability/health snapshot, configuration and App-claim generations, terminal disconnect state, and provider ingress lease/gap state. Slack has one selected HTTP or Socket transport; Discord concurrently uses signed HTTP interactions and a Gateway session. |
 | Agent route | Persistent connection-to-Agent relationship. Single Apps require exactly one current route. Multi Apps retain zero or more available or removed catalog routes; immutable Agent identity snapshots preserve history after Agent deletion. Each active dedicated route defaults to open human access and separately defaults to rejecting external bot messages. |
-| Channel default | Multi App channel-to-route preference. At most one active default exists per connection and provider channel. Removing its route invalidates rather than silently retargets it. |
-| Interaction | Idempotent signed Slack or Discord shortcut, component/action, navigation, or submission claim. An unresolved selector interaction retains a content-free provider locator, conversation position boundary, initiating principal, and selected route. Provider triggers and Discord interaction tokens stay transient and are never persisted or replayed. |
-| Resource | One provider conversation: a Slack thread or Discord root/thread, with provider labels, availability, latest activity, and any provisioned delivery-thread identity. Discord labels separately retain source channel, parent channel, root message, existing thread, and provisioned delivery thread identities. |
+| Channel default | Multi App channel-to-route preference with exactly one Azents User or provider-principal configuration actor. At most one active default exists per connection and provider parent channel. Replacement or clear terminalizes the old route's parent binding and invalidates its participation setting and pending setup claim rather than silently retargeting them. |
+| Participation setting | One active `channel` or `threads` location and concrete response-mode default for the connection and provider parent channel's selected route. The setting has a generation, exactly one User-or-principal latest actor, and terminal invalidation evidence. It is never inferred from an existing binding. |
+| Setup claim | One bounded nonterminal channel-setup authority retaining the latest eligible explicit mention's content-free source Resource, principal, position/replay boundary, source revision, selected route/location state, and expiry. It creates no Binding, Session, mailbox input, or AgentRun before location selection. |
+| Interaction | Idempotent signed Slack or Discord shortcut, command, component/action, navigation, or submission claim. An interaction may bind to a setup claim, setting generation, or connected Binding while provider trigger IDs, Discord interaction tokens, callback URLs, signatures, and raw bodies remain transient. |
+| Resource | One provider conversation. `parent_channel` uses the stable provider parent-channel identity and delivers directly there. Thread Resources use a Slack root message or Discord root/existing thread and may retain a provisioned Discord delivery-thread identity. Scope is explicit in type and labels and is never inferred from a missing thread field. |
 | Conversation position | Durable read-through position for one connection-scoped parent channel or thread. PostgreSQL position compare-and-set is the ordering authority across retries and replicas. |
 | Principal | Provider tenant/user identity and author category. It is not an Azents User or WorkspaceUser. |
-| Binding | Persistent link from one route/resource to one AgentSession with one required concrete `mention_only` or `all_messages` response mode. `disconnected_at IS NULL` identifies the current connected relationship; a non-null timestamp is its terminal boundary. A new authorized conversation copies the Agent default and commits the binding and real Session with its first canonical mailbox input. |
+| Binding | Persistent link from one route/resource to one AgentSession with one required concrete `mention_only` or `all_messages` response mode. `disconnected_at IS NULL` identifies the current connected relationship; a non-null timestamp is its terminal boundary. Configured parent/thread creation copies the active participation setting; legacy isolated-thread access replay without a setup claim copies the Agent default. Binding, real Session, and first canonical mailbox input commit together only after setup selection or for an already configured conversation. |
 | Mailbox item and Session events | One deterministic mailbox item contains the ordered immutable provider-history projection. The conversation position compare-and-set is the sole duplicate-prevention and ordering authority. Mailbox identity owns input idempotency and pending wake recovery. Promotion creates the canonical External Channel Session events; no parallel provider-message, revision, invocation-batch, activation, or wake-dispatch record exists. |
 | Access request/grant/block | Opaque approval request with a content-free provider locator and conversation-position replay boundary, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
 | Channel Work/action/delivery | Binding-scoped durable current-work title and ordered provider-neutral tasks with stable identities, status, optional details, optional output, and labeled URL sources; one work-cycle-owned desired progress state and provider identity; one atomic explicit action; and persisted provider intents/outcomes. File-bearing replies retain only bounded Runtime source manifests and delivery phase evidence. Management derives projection state from the latest progress operation belonging to the current work cycle. |
@@ -139,10 +141,21 @@ contain multiple independent bindings.
   admission, acknowledgement ordering, typed lifecycle projection, and bounded
   terminal health classification. Public SDK Socket Mode request and response types
   validate envelopes and construct acknowledgements.
-- An unbound resource resolves only through an existing binding, the Single App's
-  sole route, a valid Multi App channel default, or explicit selector completion, in
-  that order. It never chooses an arbitrary candidate. A resource has at most one
-  connected binding, so a later Agent choice cannot replace an established thread.
+- An exact connected thread binding resolves before parent-channel participation.
+  Otherwise the Single App route or valid Multi App channel default selects one Agent,
+  and the active participation setting selects `channel` or `threads`. An explicit
+  eligible top-level invocation with no setting creates or replaces one setup claim;
+  ordinary messages create no setup state. No path chooses an arbitrary route or fans
+  out to several Agents.
+- One active participation setting and one nonterminal setup claim may exist per
+  connection and provider parent channel. A later eligible explicit mention replaces
+  the pending claim's source and increments its revision. The first valid location
+  selection freezes the latest revision and releases exactly one canonical continuation.
+- The deployment participation gate defaults to disabled in backend and Helm
+  configuration. While disabled, the system remains read-compatible with the additive
+  schema but does not create setup claims, participation settings, parent-channel
+  Resources, or provider settings controls. The deterministic E2E fixture explicitly
+  enables the gate.
 - Durable execution mutations are fenced by the current Session owner generation.
   Provider principals, Slack callback actors, Workspace requesters, and approvers
   remain provenance or authorization identities and never become the execution User.
@@ -153,8 +166,9 @@ contain multiple independent bindings.
   reactivate or disable that relationship.
 - A binding response mode is always concrete. `all_messages` admits eligible ordinary
   human messages on a connected binding; `mention_only` requires an explicit provider
-  invocation. The Agent default is copied only when a binding is created and is never
-  dynamically inherited. Existing Agents and historical bindings use `all_messages`.
+  invocation. Location selection snapshots the Agent default into the participation
+  setting. Later configured Bindings copy that setting, while existing Bindings retain
+  their own mode. Existing Agents and historical bindings use `all_messages`.
 - Connection capabilities expose `download_files` and `upload_files` independently.
   Missing legacy fields are unavailable. A model-visible file key directly contains
   its provider request coordinates. It is valid only for the current Agent, Session,
@@ -200,9 +214,10 @@ contain multiple independent bindings.
   verified object before Runtime delivery. Any metadata, response-header, or body-size
   mismatch fails closed without a Runtime destination commit; provider URLs and bytes
   remain outside durable External Channel state.
-- Initial synchronous binding acceptance atomically commits the binding, real Session,
+- Selected setup replay or configured synchronous binding acceptance atomically commits the binding, real Session,
   canonical mailbox input, conversation-position advance, running transition, one
-  joined-presence intent with Session navigation, and one checking work projection.
+  versioned joined-presence intent with Session navigation and conversation settings,
+  and one checking work projection.
   Broker wake follows that commit using the mailbox item as its recovery identity.
   Provider-control delivery is independent background work: failed, unknown, or
   cancelled presence or progress delivery never blocks mailbox promotion, Session
@@ -212,10 +227,10 @@ contain multiple independent bindings.
   description carries the status summary, every ordered task title and status marker,
   then prioritized details, output, and labeled sources. The functional Tracker body is
   not duplicated as ordinary message content; Multi App Agent attribution remains
-  separate readable content. A
-  Discord root source provisions or reuses one delivery thread after route resolution,
-  persists that target, and sends approval controls, Session navigation, replies,
-  files, progress, recovery, and cleanup to that thread. A delivered final answer
+  separate readable content. A parent-channel Resource posts directly to the Slack or
+  Discord parent channel. A Discord thread Resource provisions or reuses one delivery
+  thread, persists that target, and sends approval controls, Session navigation,
+  replies, files, progress, recovery, and cleanup to that thread. A delivered final answer
   deletes active progress, and separate work cycles never share provider identities.
 - The Tracker uses one native read-only Slack task card before Channel Work is
   declared. Once tasks exist, one native Slack plan carries the Agent-authored
@@ -251,9 +266,10 @@ contain multiple independent bindings.
 - A Session- or Agent-scoped grant authorizes invocation only for the same Agent, principal, route relationship, and active resource. Blocks take precedence.
 - Creating a new binding Session snapshots the routed Agent's current automatic
   Project policy into the root `SessionAgentContext` in the same transaction as
-  Session and binding creation. This applies both to an administrator Allow
-  decision and to initial binding creation for an already Agent-authorized
-  principal. Reusing an existing binding keeps its existing Session/context
+  Session and binding creation. This applies to selected setup replay, configured
+  ingestion, and legacy isolated-thread Allow replay. A setup-linked Allow commits
+  authorization and resumes location setup without creating a Binding or Session.
+  Reusing an existing binding keeps its existing Session/context
   Project snapshot; later policy changes are not retroactive.
 - Restore never reactivates a disconnected binding, ended work item, or connection.
 
@@ -271,8 +287,9 @@ required when an existing connection is edited.
 
 The same Agent settings surface exposes the Agent's default External Channel response
 mode even when no App is connected. Agent administrators may replace the required
-`mention_only` or `all_messages` value. The mutation changes only the creation-time
-default and does not enumerate or rewrite existing bindings.
+`mention_only` or `all_messages` value. The mutation changes only the value copied
+into a later participation setting or legacy isolated-thread Binding; it does not
+enumerate or rewrite active settings or existing bindings.
 
 Workspace Owners and Managers manage provider-scoped Multi Apps from Workspace
 integrations. Ordinary Members have neither Multi read nor write authority. Slack and
@@ -282,6 +299,12 @@ idempotent Agent association, removed-route re-enable, channel defaults, validat
 and complete credential replacement, impact previews, and generation-fenced route
 removal/default mutation/App disconnect. Disconnected Multi Apps remain readable
 historical records but accept no further mutation.
+
+Provider-native Multi setup may create the first channel default with provider-principal
+provenance after showing only routes that principal may invoke. Web replacement or
+clear remains a Workspace Owner/Manager action. Both use the same old-route transition:
+invalidate the participation setting and setup claim, disconnect only the connected
+parent binding, preserve every thread binding and Session, and report those impacts.
 
 Agent settings show associated Multi Apps as Workspace-managed read-only context.
 Slack can open an opaque, expiring management handoff for the current Multi App
@@ -293,7 +316,10 @@ validates that its Bot Token belongs to the submitted Discord Application, retai
 target Guild identity, durably prepares the opaque callback selector hash and
 Application public key behind the current credential and configuration-generation
 fences, then configures the signed-interaction callback and reconciles the required
-Guild-scoped `Ask an Azents Agent` Message Command. This preparation accepts only
+Guild-scoped invocation and conversation-settings command set. Reconciliation creates
+or updates required Azents-owned commands, removes only recognized obsolete Azents
+variants, preserves unrelated customer commands, and stores the validated role-to-ID
+map. This preparation accepts only
 Discord PING verification; ordinary interactions remain unauthorized until the
 activation commit. A failed provider registration clears the provisional callback
 authority behind the same fences and requires reconnection. Replacing Discord
@@ -302,6 +328,21 @@ activation repeats. Dedicated Discord setup is available without a deployment-sc
 provider rollout flag; Discord Multi App creation is subject to the shared Multi rollout
 gate. Every enabled Server deployment includes the provider-neutral External Channel
 Gateway.
+
+Provider-native settings resolve either the parent channel's selected Agent, location,
+and response-mode default or one exact connected thread Binding. Slack exposes signed
+`/azents settings`, a `Conversation settings` message shortcut, and versioned presence
+actions; Discord exposes signed application/message commands and presence actions.
+Channel-to-Threads disconnects only the parent Binding. Threads-to-Channel creates no
+empty Session; a later explicit eligible mention creates the new parent Binding.
+Changing a Channel response mode updates the setting and connected parent Binding
+atomically, while a Threads default change affects only future thread Bindings.
+
+The Slack installation contract includes the `commands` scope, `/azents`, invocation
+and conversation-settings message shortcuts, and enabled interactivity. HTTP manifests
+use the fixed signed callback for Slash and interactivity Request URLs; Socket Mode
+manifests omit those URLs. Existing customer-owned Apps receive a bounded configuration
+update notice because Azents cannot change their manifest remotely.
 
 Slack validation first uses `auth.test` to resolve the Team, Bot User ID, and Bot ID.
 It retains `auth.test.user_id` as `provider_bot_user_id` and uses the separate Bot ID
@@ -323,9 +364,11 @@ Agent connection list.
 
 Session Channels shows bindings, the current Channel Work title, typed ordered
 tasks, failed state, details, output, source links, Activity Tracker projection
-state, delivery outcomes, grants, concrete response mode, and terminal disconnect
-state. Agent administrators may replace the mode only while the binding remains
-connected and owned by the requested Agent and Session. Disconnected historical
+state, delivery outcomes, grants, parent-channel versus thread location, concrete
+response mode, and terminal disconnect state. Agent administrators may replace the
+mode only while the binding remains connected and owned by the requested Agent and
+Session. A parent Binding mutation updates its active participation setting in the
+same transaction; a thread Binding mutation updates only itself. Disconnected historical
 bindings retain their final mode as read-only state; foreign, missing, unauthorized,
 and disconnected mutations use the not-found-shaped management boundary.
 Approval and management detail surfaces show complete provider user identities with
@@ -341,6 +384,10 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-02** (spec_version 39) — Added provider-channel participation settings,
+  latest-source setup claims, explicit parent-channel Resources, setup continuation,
+  provider-native settings controls, selected-Agent lifecycle coupling, and direct
+  parent delivery without eager Binding or Session creation.
 - **2026-08-01** (spec_version 38) — Added Agent defaults and concrete binding
   response modes, creation-time copy semantics, connected-only management, and
   `all_messages` compatibility for existing data.
