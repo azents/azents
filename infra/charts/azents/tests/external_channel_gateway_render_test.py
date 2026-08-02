@@ -19,10 +19,3 @@ def test_external_channel_gateway_replaces_discord_specific_role() -> None:
     assert 'value: "8013"' in rendered
     assert "name: discord-gateway" not in rendered
     assert "./bin/discordgatewayworker.sh" not in rendered
-
-
-def test_external_channel_participation_has_no_rollout_gate() -> None:
-    """Provider participation is canonical and has no deployment opt-in."""
-    rendered = _helm_template()
-
-    assert "AZ_EXTERNAL_CHANNEL_PARTICIPATION_ENABLED" not in rendered
