@@ -1,6 +1,6 @@
 ---
 name: feature-design
-description: "Requirements-first workflow for new feature design, design documents, and architecture changes. Use for collaborative or autonomous design: research current Living Specs and code before interviewing the user, confirm high-level requirements, preserve an immutable requirements snapshot, use reusable research subagents without blocking the conversation, record design decisions in an ADR, validate repository feasibility, and produce an implementable final design."
+description: "Requirements-first workflow for new feature design, design documents, and architecture changes. Use for collaborative or autonomous design: research current behavior, confirm Requirements, resolve material decisions in an ADR, validate Design authority and feasibility, and obtain complete Design approval."
 ---
 
 # Feature Design Workflow
@@ -8,394 +8,333 @@ description: "Requirements-first workflow for new feature design, design documen
 Use this sequence:
 
 ```text
-pre-interview current-system research
+current-system research
 → requirement interview
-→ confirmed Requirements snapshot
-→ system-grounded problem framing
-→ complete ADR decision-backlog briefing
+→ confirmed Requirements
+→ system framing
+→ material-decision briefing
 → ADR decisions
-→ complete design draft
-→ feasibility validation
-→ final design
+→ complete Design
+→ authority and feasibility validation
+→ Design approval
+→ final Design
 ```
 
-Keep each artifact's responsibility distinct:
+Artifact responsibilities:
 
 - **Requirements**: what users need and how success is observed.
-- **ADR**: why hard-to-reverse design decisions were chosen.
-- **Design**: how the system will satisfy the requirements and ADR decisions.
+- **ADR**: why material architecture or product-contract decisions were chosen.
+- **Design**: how approved intent and decisions will be implemented.
 - **Spec**: how the implemented system currently behaves.
 
-## Modes
+## Modes and decision ownership
 
-| User request | Mode |
-| --- | --- |
-| "Design this", "write a design doc" | **Collaborative**: discuss design decisions with the user |
-| "Proceed autonomously", "handle it yourself", "decide and continue" | **Autonomous**: discuss design decisions with a dedicated interviewee subagent |
+Default to **Collaborative** mode: the requester owns unresolved material decisions.
+Enter **Autonomous** mode only when the requester explicitly delegates all remaining
+material design decisions; use one dedicated interviewee subagent as the decision
+owner.
 
-Default to collaborative mode. Both modes require the user to confirm the high-level Requirements before design decisions begin. Autonomous mode delegates design choices, not product intent.
+A request to decide one current topic, handle implementation details, or stop asking
+low-level questions is scoped delegation. It does not switch the whole workflow or
+authorize later undisclosed decisions.
 
-## Phase 0: Pre-interview current-system research
+Material-decision visibility never changes with ownership. Both modes keep the
+complete material-decision map and accepted choices visible and recorded. Both
+modes require requester confirmation of high-level Requirements; autonomy never
+extends to product intent. The same read-only interviewee owns Autonomous decisions
+through later discoveries, blockers, and final approval. The root agent retains
+user communication and artifact editing.
 
-After restating the request and before asking the first requirement or design question,
-research the current product behavior:
+An early request for Autonomous mode records the delegation, but do not launch the
+interviewee or begin autonomous decisions until the requester confirms Requirements.
 
-1. read the applicable Living Specs first;
-2. inspect the relevant code paths, contracts, tests, fixtures, and configuration;
-3. identify the current terminology, ownership, lifecycle, and user-visible behavior;
-4. distinguish behavior that already exists from the requested gap; and
-5. record evidence-backed unknowns that genuinely require requester intent.
+## Phase 0: Research current behavior
 
-This phase is mandatory for changes to an existing product area. For a genuinely
-greenfield area, search for related specs and code, then state that no current
-implementation was found.
+Before the first requirement or design question for an existing product area:
 
-Use the findings to avoid presenting existing behavior as a new option or asking the
-requester to supply facts available from the repository. Before the first interview
-question, give a concise briefing of the confirmed current behavior, the requested
-gap, and any material uncertainty. Ask only a question that remains after this
-research and could change the user-visible contract or scope.
+1. read applicable Living Specs;
+2. inspect relevant code, contracts, tests, fixtures, and configuration;
+3. identify current behavior, terminology, ownership, lifecycle, and boundaries;
+4. distinguish current behavior from the requested gap; and
+5. brief the requester on confirmed facts and material unknowns.
 
-Read historical Requirements, ADRs, and Designs only when current specs or code leave
-product intent or rationale unclear. This preliminary research grounds the interview;
-Phase 3 remains the complete requirement-by-requirement system analysis.
+For a greenfield area, search for related behavior and state when none exists. Do
+not ask the requester for repository facts or present existing behavior as a new
+choice. Read historical Requirements, ADRs, and Designs only when current sources
+leave intent or rationale unclear. Phase 3 still performs complete
+requirement-by-requirement analysis.
 
-## Phase 1: Requirement discovery
+### Research support
 
-Keep the main agent as the interview owner. Use the Phase 0 evidence to distinguish
-known facts from assumptions, and ask one high-value question at a time.
+Use reusable research subagents when separate evidence lanes help. Give them the
+request, current Requirements draft, confirmed facts, unresolved assumptions,
+accepted or rejected directions, and a strict evidence-only role. Start bounded
+scouting proactively when useful, but do not delay acknowledgement or interrupt the
+current interview. Research agents do not edit artifacts or decide product intent.
+Send context deltas as the interview evolves, and redirect or discard results made
+stale by a changed primary scenario or accepted direction.
 
-### Interview priorities
+When the requester cannot judge a product convention, offer a scoped benchmark
+study before researching. Agree on the question, targets, and comparison dimensions.
+Return patterns, implications, and a recommendation, then resume the interview.
+Benchmark evidence becomes intent only after requester acceptance.
+Do not use benchmarking to determine the requester's actual problem, organization
+policy, fixed constraints, or desired outcome.
 
-Establish, in dependency order:
+## Phase 1: Discover Requirements
 
-1. the primary actor;
-2. one primary end-to-end user scenario;
-3. the expected outcome;
-4. must-have behavior;
-5. scope boundaries and non-goals;
-6. fixed product, compatibility, security, or operational constraints; and
-7. an observable success signal.
+Keep the main agent as interview owner. Ask one high-value question at a time and
+only when its answer could change:
 
-Do not use this list as a fixed questionnaire. Skip information already established by the request or prior answers. Ask a question only when its answer could change the primary scenario, user-visible contract, required scope, fixed constraints, success criteria, or later design-decision backlog.
+- the primary actor or one primary end-to-end scenario;
+- the expected outcome or observable success signal;
+- must-have behavior or required scope;
+- product, compatibility, security, or operational constraints; or
+- non-goals and later material decisions.
 
-Explain briefly why a question matters. Offer realistic examples or options when they help, but always allow a different answer. Recommend a direction only when evidence is sufficient.
+Require exactly one primary scenario. Classify other scenarios as supporting,
+secondary, or future scope. Skip facts already established by the request or Phase
+0. Explain why a question matters and recommend a direction only when evidence is
+sufficient.
 
-Require exactly one primary scenario before completing discovery. Record additional scenarios as supporting, secondary, or future scope.
+Periodically summarize confirmed intent and remaining questions. When a later
+answer conflicts with an earlier one, state the conflict and confirm the change.
 
-After several questions or a topic transition, summarize what is known and what remains. If a later answer contradicts an earlier one, state the conflict and confirm the change instead of silently overwriting it.
+## Phase 2: Confirm the Requirements snapshot
 
-### Benchmark Assist
+For Azents, read
+[references/requirements-template.md](references/requirements-template.md) and
+`docs/azents/AGENTS.md`, then create the Requirements snapshot using the required
+shared basename and KST creation date.
 
-When the user lacks domain background, says they are unsure, asks how comparable products behave, or cannot judge a product convention, offer a quick benchmark study scoped to the current interview question.
-
-Before researching:
-
-1. state the research question;
-2. propose two to four behaviorally relevant targets or target categories;
-3. state the user-flow dimensions to compare; and
-4. let the user accept or adjust the scope.
-
-Return a compact pattern comparison, implications for this feature, and a recommendation. Then resume the interrupted interview question. Benchmark evidence informs the user's choice; it never becomes a requirement until the user accepts it.
-
-Do not use benchmark research to answer questions only the requester can answer, such as their actual problem, organization policy, fixed constraints, or desired outcome.
-
-### Reusable research subagents
-
-Prefer long-lived research subagents so the main agent retains the interview context. Reuse one subagent per research lane instead of spawning a new one for each question. Typical lanes include:
-
-- product and benchmark patterns;
-- current repository and product behavior; and
-- external platform or technical capabilities.
-
-Give each research subagent:
-
-- the original request;
-- the current Requirements draft;
-- confirmed facts and unresolved assumptions;
-- the current interview or design question;
-- accepted and rejected directions; and
-- a strict evidence-only role that does not edit artifacts or decide product intent.
-
-Send context deltas to the same subagent as the interview evolves. Redirect or discard stale research when the primary scenario changes.
-
-Start limited, reversible scouting proactively when it will prepare better questions,
-but never wait for it before acknowledging the request and briefing the user. This
-does not relax Phase 0: do not ask the first interview question until the required
-current-system research is complete. Do not interrupt the current topic merely
-because later background research completed. Keep results in the main agent's
-research context until they naturally support the current or next question.
-
-The main agent always owns user communication, Requirements confirmation, ADR updates, and final synthesis.
-
-## Phase 2: Requirements snapshot
-
-Once the primary scenario is stable, create the Requirements document before creating an ADR. For Azents, use:
-
-```text
-docs/azents/requirements/{word}-{YYMMDD}-{slug}.md
-```
-
-Use the KST Requirements creation date. Treat `{word}-{YYMMDD}` as the canonical snapshot ID and reference individual requirements as `{word}-{YYMMDD}/REQ-N`. Reserve the exact Requirements basename for the snapshot's later ADR and Design, even when those documents are created on a later date:
-
-```text
-docs/azents/adr/{same-basename}.md
-docs/azents/design/{same-basename}.md
-```
-
-- Choose a short lowercase feature word such as `slack`, `memory`, or `billing`.
-- Use a slug that names the specific user-visible capability, not an implementation method or broad topic.
-- Avoid numeric allocation, `v2`, `final`, and similar mutable-version naming.
-- If the same word and date collide, combine the same requirement effort or choose a more precise feature word. Do not append an arbitrary ordinal.
-
-For Azents, follow [references/requirements-template.md](references/requirements-template.md) and `docs/azents/AGENTS.md`.
-
-Include:
+Requirements contain product intent only:
 
 - problem and user-visible goal;
-- primary actor and primary scenario;
+- primary actor and scenario;
 - supporting scenarios;
 - goals and non-goals;
 - numbered requirements with observable acceptance criteria;
-- fixed constraints;
-- open assumptions; and
-- explicit requester confirmation.
+- fixed constraints and open assumptions; and
+- requester confirmation.
 
-Do not include APIs, data models, libraries, class structure, architecture choices, implementation phases, or ADR decisions.
+Keep APIs, data models, libraries, class structure, architecture, implementation
+phases, and ADR decisions out of Requirements. Present the complete document and
+obtain explicit requester confirmation before creating the ADR or accepting design
+decisions.
 
-Present the complete Requirements document to the user and obtain explicit confirmation. If the initial request already establishes every required field, this may be one confirmation turn. Do not create the ADR or accept design decisions before confirmation.
-
-### Requirements change and immutability
-
-Before implementation, apply product-scope changes in this order:
+Before implementation, apply scope changes in this order:
 
 ```text
 Requirements → ADR → Design
 ```
 
-Return to the user whenever a discovery would add a user type, user-visible behavior, required scope, or contract; relax a confirmed constraint; or change the success signal. Do this in autonomous mode as well.
+Return to the requester for any new actor, user-visible behavior, required scope,
+contract, relaxed constraint, or changed success signal, including in Autonomous
+mode.
 
-When implementation is complete and verified, set the Requirements and Design documents' `implemented` date. From that point, treat the Requirements, accepted ADR, and Design as one immutable historical snapshot. Never rewrite them to match later behavior. Create a new snapshot for later work on the same topic. Keep current behavior only in the living specs.
+After verified implementation, set the matching Requirements and Design
+`implemented` date and treat the Requirements, accepted ADR, and Design as one
+immutable historical snapshot. Later changes require a new snapshot; current
+behavior belongs in Living Specs.
 
-## Phase 3: System-grounded problem framing
+## Phase 3: Frame the system problem
 
-After Requirements confirmation, inspect the current code and living specs. Limited background scouting may already exist, but now perform the complete repository analysis.
-
-Capture:
+After Requirements confirmation, inspect the complete affected system. Capture:
 
 - current behavior and the gap from each requirement;
-- relevant ownership and lifecycle boundaries;
+- ownership, source-of-truth, lifecycle, and interface boundaries;
 - reusable components and integrations;
-- existing implementation, contracts, state, tests, fixtures, configuration, and
-  documentation that the change supersedes or makes obsolete;
-- likely API, event, persistence, security, and migration impact;
-- constraints that affect feasibility; and
-- the initial design-decision backlog.
+- implementation, contracts, state, tests, fixtures, configuration, documentation,
+  and generated surfaces that become obsolete;
+- API, event, persistence, security, migration, and operational impact;
+- feasibility constraints;
+- fixed or derived outcomes;
+- candidate material decisions; and
+- agent-owned local implementation categories.
 
-Do not treat assumptions as current behavior. Do not let existing code structure silently redefine the confirmed Requirements.
+Do not treat assumptions as current behavior or let existing code silently redefine
+confirmed Requirements.
 
-## Phase 4: ADR decision backlog, baseline, and discussion
+## Phase 4: Resolve material decisions
 
-Before discussing any individual ADR decision, present the complete current
-design-decision backlog to the user. This briefing is mandatory in collaborative
-mode and must:
+Before discussing an individual decision, brief the complete current decision map:
 
-- list every currently known hard-to-reverse architecture or product-contract
-  decision that requires requester judgment;
-- show the intended discussion order and important dependencies;
-- keep trivial, reversible engineering choices out of the requester decision list;
-- identify decisions already fixed by confirmed Requirements rather than reopening
-  them; and
-- remain visible as an explicit checklist with pending, current, and accepted items.
+- **Fixed or derived outcomes**: important consequences already determined by
+  Requirements, accepted ADRs, current Specs, or project constraints. Disclose but
+  do not reopen them.
+- **Material decisions**: unresolved choices with materially different product,
+  architecture, security, persistence, source-of-truth, ownership, lifecycle,
+  interface, configuration, operational, failure, recovery, migration, rollout,
+  compatibility, fallback, or authoritative-removal outcomes.
+- **Agent-owned details**: identifiers, file layout, helper boundaries, equivalent
+  local structures, fixture composition, and other local reversible choices that
+  create no new behavior, state, configuration, contract, authority, or mode.
+  State these categories once and do not ask about individual choices.
 
-If later research, an accepted decision, or a blocker adds, removes, splits, or
-reorders a decision, update and re-brief the complete backlog before discussing the
-next decision. Do not silently append a new decision during one-at-a-time
-discussion.
+Track material decisions as an explicit checklist with pending, current, delegated,
+and accepted states.
 
-After the backlog briefing, create the ADR before accepting the first design
-decision. The initial ADR may contain the unresolved backlog while discussion is
-active.
+### Decision admission
 
-For Azents, create the ADR at `docs/azents/adr/{requirements-basename}.md`. Use `<snapshot>/ADR` for the document and `<snapshot>/ADR-DN` for accepted decisions. Keep all hard-to-reverse decisions for the snapshot in this one ADR. Do not allocate a global ADR number. Legacy numbered ADRs are historical inputs only and are not valid current ADR files after migration.
+Create a decision point only when:
 
-For every decision that determines architecture or product contract:
+1. approved authority does not already determine the outcome;
+2. at least two viable options remain;
+3. those options produce materially different outcomes; and
+4. the choice is required for a coherent Design.
 
-1. state the question;
-2. provide realistic options and trade-offs;
-3. recommend one option when evidence is sufficient;
-4. obtain the decision from the user in collaborative mode or the interviewee subagent in autonomous mode; and
-5. update the ADR immediately before continuing.
+A consequential but fixed outcome is briefing, not a question. A choice that fails
+the materiality test belongs to the agent. Frame decisions at the consequence
+level and bundle dependent parameters; do not split code-shape details into
+requester questions.
 
-Use this format:
+### Visibility, delegation, and ADR recording
 
-```markdown
-### Decision Point: <name>
+Keep material decisions visible regardless of owner:
 
-**Question**: <specific question>
+- the requester owns them in Collaborative mode;
+- delegating one topic applies only to that topic;
+- delegating local details applies only to the stated agent-owned categories; and
+- the interviewee owns them in Autonomous mode.
 
-**Options**
-- A. <option> — pros/cons
-- B. <option> — pros/cons
+When research or an accepted choice changes the material-decision map, re-brief the
+complete map before continuing. Earlier scoped delegation does not cover a new
+topic. Never silently append or adopt a material decision.
 
-**Recommendation**: <recommended option and why>
+After the initial briefing, create the same-basename snapshot ADR before accepting
+the first decision. For every material decision:
 
-Please choose A/B or adjust the direction.
-```
+1. state one consequence-level question;
+2. present realistic options and trade-offs;
+3. recommend when evidence supports a direction;
+4. obtain the choice from the current decision owner; and
+5. record it immediately as the next `<snapshot>/ADR-DN` before continuing.
 
-Discuss one decision at a time. In collaborative mode, wait for the user. In autonomous mode, send each decision separately to the dedicated interviewee subagent. After acceptance, record the decision as the next `<snapshot>/ADR-DN`. Reference the affected `<snapshot>/REQ-N` items from the ADR; do not duplicate requirement text.
+Discuss one decision at a time. In Collaborative mode, wait unless that exact topic
+was delegated. In Autonomous mode, send each decision separately to the dedicated
+interviewee. Reference affected Requirements instead of duplicating them in the
+ADR. Proceed only when the material-decision map has no unresolved item.
 
-Once the ADR defines a coherent direction, proceed to the complete design draft.
+## Phase 5: Write the complete Design
 
-## Phase 5: Complete design draft
+Before writing, read
+[references/design-template.md](references/design-template.md) and
+`docs/azents/AGENTS.md`. Use the exact Requirements/ADR basename for the primary
+Design.
 
-Write the complete draft under the project-approved design location. For Azents, use `docs/azents/design/{requirements-basename}.md` for the primary snapshot Design. Supporting plans, audits, and validation reports keep their separate descriptive naming rules.
+The Design must:
 
-Reference the Requirements document rather than copying its requirements. Include a traceability matrix from `<snapshot>/REQ-N` through `<snapshot>/ADR-DN` to the proposed design mechanisms.
+- trace every Requirement through accepted ADR decisions to implementation
+  mechanisms;
+- define architecture, ownership, interfaces, data, lifecycle, failures,
+  migration, operations, observability, and verification as applicable;
+- include only material mechanisms authorized by Requirements, accepted ADRs,
+  unchanged current Specs, or project constraints;
+- assign stable IDs and a Design revision to material mechanisms;
+- identify removal authority, replacement boundaries, and absence evidence;
+- define an E2E-first Test Strategy; and
+- state assumptions and non-blocking risks without using them to create behavior or
+  authority.
 
-Include, as applicable:
+Local implementation details do not belong in the authority table. When a
+mechanism combines approved sources, cite them all; synthesis and Design approval
+do not create authority. A new material mechanism returns to Phase 4 before it
+enters Design.
 
-- current behavior and requirement gaps;
-- proposed architecture and ownership boundaries;
-- API and data-model changes;
-- runtime and lifecycle behavior;
-- state transitions and failure handling;
-- security and permissions;
-- migration, rollout, and rollback;
-- observability and operational risks;
-- test strategy and fixture requirements;
-- alternatives considered; and
-- assumptions and unresolved risks.
+Finish the full draft before reopening discussion. Continue through non-material
+unknowns with explicit assumptions; return any new product scope to Requirements
+and any new material choice to the ADR flow.
 
-Every primary Design must include this section:
+## Phase 6: Validate and approve the Design
 
-```markdown
-## Removal and Replacement
+### Authority audit
 
-| Existing unit or behavior | Why it becomes obsolete | Replacement or remaining authority | Removal boundary | Absence verification |
-| --- | --- | --- | --- | --- |
-| ... | ... | ... | ... | ... |
-```
+Audit in both directions:
 
-Cover obsolete code, contracts, state, tests, fixtures, configuration,
-documentation, and generated surfaces as applicable. A replacement may be
-`None` when the behavior disappears entirely. Use an explicit `None` finding
-only after system-grounded analysis finds no removal obligations. Treat every
-identified removal as part of the design deliverable rather than optional later
-cleanup.
+- every Requirement has a credible Design mechanism;
+- every material mechanism has allowed authority;
+- derived mechanisms cite all approved sources and introduce no remaining choice;
+- local details create no material behavior, state, contract, authority, or mode;
+- every removal has authority and a replacement or terminal boundary; and
+- no unapproved second authority or optional behavior remains.
 
-Finish the full draft before reopening discussion. Record contradictions or unknowns as candidate blockers and continue using explicit assumptions. After the draft is complete, reopen only points that meet the blocker criteria.
+Authorization and feasibility are independent. A mechanism being common,
+implementable, reversible, low-risk, or non-blocking does not authorize it.
+Resolve authority failures through Requirements, ADR, or removal from Design.
 
-For a design blocker, update the ADR before revising the design. For a requirement blocker, return to the user and update Requirements before the ADR or design.
+### Feasibility check
 
-## Phase 6: Feasibility check
+Validate each requirement and material mechanism against the real repository:
 
-Validate the complete draft against the real repository and product constraints. Check:
-
-- whether every requirement has a credible implementation and verification path;
-- canonical source data and projection identity;
-- current code paths, ownership, and lifecycle state;
-- current specs and relevant historical ADRs/designs;
-- API, event, persistence, migration, and compatibility impact;
-- whether every removal has a credible call-site, dependency, data, migration,
-  test, fixture, generated-artifact, and spec cleanup path as applicable;
-- whether absence verification proves that no superseded path remains as an
-  unapproved second authority or compatibility fallback;
-- retries, pagination, concurrency, and failure modes;
+- canonical data, identity, ownership, lifecycle, and current code paths;
+- API, event, persistence, migration, compatibility, concurrency, retry, and
+  failure impact;
 - security, permissions, and operational risks;
-- existing component and integration reuse; and
+- reusable components and integrations;
+- removal and absence-verification paths; and
 - deterministic fixtures, E2E prerequisites, and evidence requirements.
 
-Produce a compact matrix with `feasible`, `conditional`, or `blocked` results and concrete evidence for each requirement and major decision.
+Report `feasible`, `conditional`, or `blocked` with concrete evidence. A blocker
+must contradict confirmed Requirements or an accepted ADR, prevent an approved
+outcome, require an unapproved material change, force mutually exclusive paths,
+prevent a credible implementation or verification plan, or make feasibility
+impossible to conclude. Local naming, refactoring, polish, and bounded risk are not
+feasibility blockers and do not create authority.
 
-A point is a blocker only when leaving it unresolved would:
+Resolve requirement blockers through `Requirements → ADR → Design` and design
+blockers through `ADR → Design`, then repeat affected authority and feasibility
+checks.
 
-- contradict confirmed Requirements or an accepted ADR decision;
-- make required user-visible behavior infeasible;
-- require an unapproved contract, security, persistence, or ownership change;
-- force mutually exclusive architecture paths;
-- prevent a credible implementation or verification plan; or
-- make feasibility impossible to conclude.
+### Design approval
 
-Local refactoring, naming, reversible polish, conventional implementation details, and bounded risks are not blockers by themselves.
+After both checks pass, present a compact approval brief covering:
 
-Resolve requirement blockers through `Requirements → ADR → Design`. Resolve design-only blockers through `ADR → Design`. Repeat the affected feasibility checks and do not finalize while a blocker remains.
+- the material-decision map and owners;
+- architecture, ownership, source-of-truth, and interface boundaries;
+- state, configuration, runtime modes, and operational controls;
+- migration, rollout, rollback, failure, retry, recovery, compatibility, and
+  fallback behavior;
+- removal and replacement obligations;
+- derived material mechanisms; and
+- categories of agent-owned local details.
 
-## Phase 7: Final design
+In Collaborative mode, obtain explicit requester approval. Scoped delegation does
+not replace complete Design approval. In Autonomous mode, the dedicated interviewee
+approves the Design and the root agent reports the full brief to the requester;
+product-scope changes still return to the requester.
 
-Finalize only after Requirements, ADR, design, and feasibility evidence agree.
+Record approval using the reference template. Approval is valid only while its
+Design revision and exact authority ID set match the current authority section. A
+later material change invalidates approval and repeats the affected authority,
+feasibility, and approval steps.
 
-Summarize:
+## Phase 7: Finalize
 
-- the Requirements document and short ID;
-- accepted ADR decisions and rejected alternatives;
-- validated system and data boundaries;
-- planned removals, replacement authorities, and absence evidence;
+Finalize only when Requirements, ADR, Design authority, feasibility evidence, and
+Design approval agree. Report:
+
+- Requirements, ADR, Design, mode, and decision owner;
+- accepted material decisions and authorities;
+- removal and replacement scope;
 - requirement-level feasibility evidence;
-- remaining non-blocking risks and assumptions;
-- implementation phases or why one focused PR is sufficient;
-- required living-spec updates; and
-- the verification plan.
+- remaining non-blocking risks;
+- implementation phases or one focused PR; and
+- living-spec and verification work.
 
-Do not start implementation unless the user asks to proceed.
-
-## Autonomous mode
-
-Require the user to confirm the high-level Requirements before autonomy begins. The user must at least confirm the problem, primary actor, one primary scenario, expected outcome, must-have boundary, fixed constraints or non-goals, and success signal.
-
-After confirmation:
-
-1. launch one dedicated interviewee subagent for design decisions;
-2. give it the Requirements, system framing, evidence, and current ADR state;
-3. keep the same interviewee through initial decisions and later blockers; and
-4. keep research subagents separate from the interviewee role.
-
-The interviewee may critique and choose design options, but it may not add user-visible scope, alter confirmed Requirements, or edit artifacts. Return to the user for any such change.
-
-The root agent remains responsible for research coordination, recommendations, Requirements and ADR updates, design writing, feasibility validation, and final synthesis.
-
-## Output expectations
-
-For interactive progress, report the current phase, what was learned, and the next action concisely.
-
-For final output, use:
-
-```markdown
-## Design Result
-
-- Requirements: `<path>` (`<short-id>`)
-- ADR: `<path>`
-- Design doc: `<path>`
-- Mode: Collaborative | Autonomous
-- Primary scenario: <scenario>
-- Key decisions:
-  - <decision and rationale>
-- Removal and replacement:
-  - <obsolete unit, replacement authority, removal boundary, and absence evidence>
-- Feasibility:
-  - <requirement-level evidence>
-- Remaining non-blockers:
-  - <risk or assumption>
-- Next steps:
-  - <implementation or review step>
-```
+Do not start implementation until the requester asks. Then switch to the appropriate
+shipping workflow.
 
 ## Guardrails
 
-- Do not ask the first requirement or design question before researching applicable
-  Living Specs and relevant code.
-- Do not ask the requester to resolve current-system facts that repository evidence
-  can answer.
-- Do not skip explicit user confirmation of high-level Requirements, even in autonomous mode.
-- Do not let research subagents own or interrupt the interview.
-- Do not turn benchmark patterns into requirements without user acceptance.
-- Do not create an ADR before the Requirements document is confirmed.
-- Do not begin individual ADR decision discussion before briefing the complete
-  current decision backlog.
-- Do not duplicate the Requirements source of truth in the ADR or design.
-- Do not create or retain a numbered ADR file, or use a different primary Design basename, for an Azents development snapshot. Legacy numbered ADRs may appear only in explicit historical provenance or ambiguity records.
-- Do not silently weaken a requirement to avoid a feasibility problem.
-- Do not modify implemented Requirements, adopted ADRs, or implemented designs.
-- Keep current behavior in `docs/azents/spec/`.
+- Research current behavior before the first requirement or design question.
+- Do not ask requesters for repository facts or non-material code-shape choices.
+- Confirm Requirements before ADR decisions in every mode.
+- Keep research evidence separate from product intent and decision ownership.
+- Brief the complete material-decision map before individual decisions and after
+  any material change.
+- Scoped delegation never hides or authorizes later material topics.
+- Do not finalize unauthorized mechanisms or treat feasibility as authority.
+- Do not proceed without revision-bound complete Design approval.
+- Keep implemented Requirements, ADRs, and Designs immutable and current behavior
+  in Living Specs.
 - Keep git-tracked artifacts in English.
-- If the user asks to implement after final design approval, switch to the appropriate shipping workflow.
