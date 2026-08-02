@@ -12,17 +12,19 @@ pre-interview current-system research
 → requirement interview
 → confirmed Requirements snapshot
 → system-grounded problem framing
-→ complete ADR decision-backlog briefing
+→ complete material-decision briefing
 → ADR decisions
 → complete design draft
+→ design authority audit
 → feasibility validation
+→ design approval
 → final design
 ```
 
 Keep each artifact's responsibility distinct:
 
 - **Requirements**: what users need and how success is observed.
-- **ADR**: why hard-to-reverse design decisions were chosen.
+- **ADR**: why material architecture or product-contract decisions were chosen.
 - **Design**: how the system will satisfy the requirements and ADR decisions.
 - **Spec**: how the implemented system currently behaves.
 
@@ -31,9 +33,16 @@ Keep each artifact's responsibility distinct:
 | User request | Mode |
 | --- | --- |
 | "Design this", "write a design doc" | **Collaborative**: discuss design decisions with the user |
-| "Proceed autonomously", "handle it yourself", "decide and continue" | **Autonomous**: discuss design decisions with a dedicated interviewee subagent |
+| Explicitly delegate all remaining material design decisions | **Autonomous**: discuss design decisions with a dedicated interviewee subagent |
 
-Default to collaborative mode. Both modes require the user to confirm the high-level Requirements before design decisions begin. Autonomous mode delegates design choices, not product intent.
+Default to collaborative mode. A request to decide one current point, choose local
+implementation details, or stop asking low-level questions does not switch the
+whole workflow to autonomous mode. Only explicit delegation of all remaining
+material design decisions does.
+
+Both modes require the user to confirm the high-level Requirements before design
+decisions begin. Autonomous mode delegates decision ownership, not material
+decision visibility or product intent.
 
 ## Phase 0: Pre-interview current-system research
 
@@ -190,41 +199,84 @@ Capture:
   documentation that the change supersedes or makes obsolete;
 - likely API, event, persistence, security, and migration impact;
 - constraints that affect feasibility; and
-- the initial design-decision backlog.
+- fixed or derived design outcomes;
+- candidate material decisions; and
+- categories of local implementation detail the agent will own.
 
 Do not treat assumptions as current behavior. Do not let existing code structure silently redefine the confirmed Requirements.
 
-## Phase 4: ADR decision backlog, baseline, and discussion
+## Phase 4: Material decision backlog, authority baseline, and ADR discussion
 
-Before discussing any individual ADR decision, present the complete current
-design-decision backlog to the user. This briefing is mandatory in collaborative
-mode and must:
+Before discussing any individual decision, present the complete current material
+decision map. Separate it into:
 
-- list every currently known hard-to-reverse architecture or product-contract
-  decision that requires requester judgment;
-- show the intended discussion order and important dependencies;
-- keep trivial, reversible engineering choices out of the requester decision list;
-- identify decisions already fixed by confirmed Requirements rather than reopening
-  them; and
-- remain visible as an explicit checklist with pending, current, and accepted items.
+- **Fixed or derived outcomes**: important consequences already determined by
+  confirmed Requirements, accepted ADR decisions, current Specs, or project
+  constraints. Brief them without reopening them.
+- **Material decisions**: unresolved choices whose viable options produce
+  materially different product, architecture, security, persistence, source of
+  truth, ownership, lifecycle, API or event boundary, configuration, operational
+  mode, failure or recovery, migration, rollout, compatibility, fallback, or
+  removal of an authoritative behavior, contract, persisted state,
+  source-of-truth path, or operational mode. Keep these visible as an explicit
+  checklist with pending, current, delegated, and accepted items.
+- **Agent-owned implementation categories**: identifiers, file layout, helper
+  boundaries, equivalent local data structures, fixture composition, and other
+  local reversible choices that create no new behavior, state, configuration,
+  contract, authority, or operational mode. State these categories once; do not
+  enumerate or ask about individual choices.
+
+Admit a requester decision point only when all of these are true:
+
+1. confirmed authority does not already determine the outcome;
+2. at least two viable options remain;
+3. the options create materially different outcomes on one of the boundaries
+   above; and
+4. the choice must be resolved to produce a coherent Design.
+
+An important consequence with only one authorized outcome belongs in the fixed or
+derived briefing, not the decision backlog. A local choice that fails the
+materiality test belongs to the agent and must not become a requester question.
+
+Frame each decision as one consequence-level topic. Bundle dependent parameters
+that determine the same outcome. Do not split identifiers, filenames, class or
+function boundaries, library mechanics, or equivalent code-shape choices into
+separate questions unless the requester explicitly made them part of the product
+contract.
+
+Material decision visibility and decision ownership are separate:
+
+- In collaborative mode, the requester owns unresolved material decisions.
+- Delegating the current decision applies only to that named topic.
+- Delegating local details applies only to the agent-owned categories.
+- Neither scoped delegation changes the workflow mode or authorizes undisclosed
+  later material decisions.
+- In autonomous mode, the dedicated interviewee owns unresolved material
+  decisions, but the complete material decision map and every accepted choice
+  remain visible and recorded.
 
 If later research, an accepted decision, or a blocker adds, removes, splits, or
-reorders a decision, update and re-brief the complete backlog before discussing the
-next decision. Do not silently append a new decision during one-at-a-time
-discussion.
+reorders a material decision, update and re-brief the complete map before
+continuing. Previous delegation does not cover a newly discovered topic unless
+the user explicitly delegated all remaining material decisions. Do not silently
+append or adopt a material decision.
 
 After the backlog briefing, create the ADR before accepting the first design
 decision. The initial ADR may contain the unresolved backlog while discussion is
 active.
 
-For Azents, create the ADR at `docs/azents/adr/{requirements-basename}.md`. Use `<snapshot>/ADR` for the document and `<snapshot>/ADR-DN` for accepted decisions. Keep all hard-to-reverse decisions for the snapshot in this one ADR. Do not allocate a global ADR number. Legacy numbered ADRs are historical inputs only and are not valid current ADR files after migration.
+For Azents, create the ADR at `docs/azents/adr/{requirements-basename}.md`.
+Use `<snapshot>/ADR` for the document and `<snapshot>/ADR-DN` for accepted
+decisions. Keep all material decisions for the snapshot in this one ADR. Do not
+allocate a global ADR number. Legacy numbered ADRs are historical inputs only and
+are not valid current ADR files after migration.
 
-For every decision that determines architecture or product contract:
+For every material decision:
 
 1. state the question;
 2. provide realistic options and trade-offs;
 3. recommend one option when evidence is sufficient;
-4. obtain the decision from the user in collaborative mode or the interviewee subagent in autonomous mode; and
+4. obtain the decision from its current owner; and
 5. update the ADR immediately before continuing.
 
 Use this format:
@@ -243,15 +295,22 @@ Use this format:
 Please choose A/B or adjust the direction.
 ```
 
-Discuss one decision at a time. In collaborative mode, wait for the user. In autonomous mode, send each decision separately to the dedicated interviewee subagent. After acceptance, record the decision as the next `<snapshot>/ADR-DN`. Reference the affected `<snapshot>/REQ-N` items from the ADR; do not duplicate requirement text.
+Discuss one material decision at a time. In collaborative mode, wait for the user
+unless that exact topic was delegated. In autonomous mode, send each decision
+separately to the dedicated interviewee subagent. After acceptance, record the
+decision as the next `<snapshot>/ADR-DN`. Reference the affected
+`<snapshot>/REQ-N` items from the ADR; do not duplicate requirement text.
 
-Once the ADR defines a coherent direction, proceed to the complete design draft.
+Proceed to the complete design draft only when the material decision map has no
+unresolved item.
 
 ## Phase 5: Complete design draft
 
 Write the complete draft under the project-approved design location. For Azents, use `docs/azents/design/{requirements-basename}.md` for the primary snapshot Design. Supporting plans, audits, and validation reports keep their separate descriptive naming rules.
 
-Reference the Requirements document rather than copying its requirements. Include a traceability matrix from `<snapshot>/REQ-N` through `<snapshot>/ADR-DN` to the proposed design mechanisms.
+Reference the Requirements document rather than copying its requirements. Include
+forward traceability from `<snapshot>/REQ-N` through `<snapshot>/ADR-DN` to the
+proposed design mechanisms.
 
 Include, as applicable:
 
@@ -267,12 +326,47 @@ Include, as applicable:
 - alternatives considered; and
 - assumptions and unresolved risks.
 
+Every primary Design must also include reverse authority traceability:
+
+```markdown
+## Design Authority
+
+- Design revision: `1`
+
+| ID | Material design mechanism | Authority | Classification |
+| --- | --- | --- | --- |
+| M1 | ... | ... | `required | decided | existing | derived` |
+```
+
+Include only material mechanisms, not every local implementation choice. Each row
+must trace to confirmed Requirements, an accepted ADR decision, an unchanged
+current Spec, or a project constraint. When a mechanism is derived from multiple
+sources, cite each source and include the resulting synthesis in final approval.
+Design synthesis and approval do not create authority or replace a Requirement or
+ADR decision.
+
+Use stable document-local IDs. Keep an unchanged mechanism's ID across revisions,
+allocate a new ID for a new mechanism, and do not reuse a removed ID. Increment
+the Design revision whenever a material mechanism or its authority changes.
+
+Classify each mechanism as:
+
+- `required`: directly required by confirmed Requirements;
+- `decided`: selected by an accepted ADR decision;
+- `existing`: retained from an unchanged current Spec or project constraint; or
+- `derived`: necessary synthesis of multiple approved sources with no remaining
+  material choice.
+
+Do not introduce a material mechanism as an assumption, conventional detail,
+rollout precaution, risk mitigation, fallback, or feasibility fix. If it lacks
+authority, return it to the material decision map before treating it as Design.
+
 Every primary Design must include this section:
 
 ```markdown
 ## Removal and Replacement
 
-| Existing unit or behavior | Why it becomes obsolete | Replacement or remaining authority | Removal boundary | Absence verification |
+| Existing unit or behavior | Removal authority | Replacement or remaining authority | Removal boundary | Absence verification |
 | --- | --- | --- | --- | --- |
 | ... | ... | ... | ... | ... |
 ```
@@ -284,11 +378,38 @@ only after system-grounded analysis finds no removal obligations. Treat every
 identified removal as part of the design deliverable rather than optional later
 cleanup.
 
-Finish the full draft before reopening discussion. Record contradictions or unknowns as candidate blockers and continue using explicit assumptions. After the draft is complete, reopen only points that meet the blocker criteria.
+Finish the complete draft before reopening discussion. Record contradictions or
+unknowns as candidate blockers and continue using explicit assumptions that do
+not create behavior or authority. If the draft reveals a new material decision,
+update and resolve the material decision map before continuing.
 
-For a design blocker, update the ADR before revising the design. For a requirement blocker, return to the user and update Requirements before the ADR or design.
+## Phase 6: Design authority audit
 
-## Phase 6: Feasibility check
+Audit the complete draft in both directions:
+
+- every confirmed Requirement has a Design mechanism;
+- every material Design mechanism has an allowed authority;
+- every material synthesis derived from approved sources is explicit;
+- agent-owned local details do not create a new runtime branch, state,
+  configuration, contract, fallback, compatibility path, failure behavior,
+  operational responsibility, or source of truth;
+- every removal has authority and a replacement or terminal boundary; and
+- no unapproved second authority or optional behavior remains.
+
+Authorization and feasibility are separate. A mechanism being implementable,
+reversible, common, low-risk, or non-blocking does not authorize it.
+
+Resolve an authority failure through:
+
+```text
+product scope change → Requirements
+material design decision → ADR
+unsupported mechanism → remove from Design
+```
+
+Do not continue while the authority audit has an unresolved or pending item.
+
+## Phase 7: Feasibility check
 
 Validate the complete draft against the real repository and product constraints. Check:
 
@@ -308,7 +429,7 @@ Validate the complete draft against the real repository and product constraints.
 
 Produce a compact matrix with `feasible`, `conditional`, or `blocked` results and concrete evidence for each requirement and major decision.
 
-A point is a blocker only when leaving it unresolved would:
+A point is a feasibility blocker only when leaving it unresolved would:
 
 - contradict confirmed Requirements or an accepted ADR decision;
 - make required user-visible behavior infeasible;
@@ -317,18 +438,61 @@ A point is a blocker only when leaving it unresolved would:
 - prevent a credible implementation or verification plan; or
 - make feasibility impossible to conclude.
 
-Local refactoring, naming, reversible polish, conventional implementation details, and bounded risks are not blockers by themselves.
+Local refactoring, naming, reversible polish, conventional implementation
+details, and bounded risks are not feasibility blockers by themselves. This
+classification does not grant Design authority.
 
 Resolve requirement blockers through `Requirements → ADR → Design`. Resolve design-only blockers through `ADR → Design`. Repeat the affected feasibility checks and do not finalize while a blocker remains.
 
-## Phase 7: Final design
+## Phase 8: Design approval
 
-Finalize only after Requirements, ADR, design, and feasibility evidence agree.
+After the authority audit and feasibility check pass, present a compact approval
+brief covering:
+
+- the complete material decision map and decision owners;
+- architecture, ownership, source-of-truth, and interface boundaries;
+- new state, configuration, runtime modes, and operational controls;
+- migration, rollout, rollback, failure, retry, and recovery behavior;
+- compatibility and fallback behavior;
+- removal and replacement obligations;
+- material Design syntheses derived from multiple approved sources; and
+- categories of local implementation detail the agent will own.
+
+In collaborative mode, obtain explicit requester approval of the complete Design.
+Scoped delegation of individual decisions or local details does not replace this
+approval. In autonomous mode, have the dedicated interviewee approve the complete
+Design and report the full approval brief to the user. Product-scope changes still
+return to the requester.
+
+Record the approval in the Design:
+
+```markdown
+## Design Approval
+
+- Mode: `Collaborative | Autonomous`
+- Decision owner: `<requester or interviewee>`
+- Approved on: `YYYY-MM-DD`
+- Approved Design revision: `<revision>`
+- Approved authority IDs: `<exact ID set>`
+- Approved scope: `<material Design summary>`
+```
+
+Any material change after approval reopens the affected
+`Requirements → ADR → Design` path and requires a new authority audit,
+feasibility check, and Design approval. The approval is valid only when its
+revision and exact authority ID set match the current `Design Authority` section.
+
+## Phase 9: Final design
+
+Finalize only after Requirements, ADR, Design authority, feasibility evidence, and
+Design approval agree.
 
 Summarize:
 
 - the Requirements document and short ID;
 - accepted ADR decisions and rejected alternatives;
+- Design approval mode and decision owner;
+- material Design mechanisms and their authorities;
 - validated system and data boundaries;
 - planned removals, replacement authorities, and absence evidence;
 - requirement-level feasibility evidence;
@@ -341,16 +505,27 @@ Do not start implementation unless the user asks to proceed.
 
 ## Autonomous mode
 
-Require the user to confirm the high-level Requirements before autonomy begins. The user must at least confirm the problem, primary actor, one primary scenario, expected outcome, must-have boundary, fixed constraints or non-goals, and success signal.
+Enter autonomous mode only when the user explicitly delegates all remaining
+material design decisions. A local request such as "choose this", "handle the
+details", or "stop asking low-level questions" remains scoped and does not change
+the mode.
+
+Require the user to confirm the high-level Requirements before autonomy begins.
+The user must at least confirm the problem, primary actor, one primary scenario,
+expected outcome, must-have boundary, fixed constraints or non-goals, and success
+signal.
 
 After confirmation:
 
 1. launch one dedicated interviewee subagent for design decisions;
 2. give it the Requirements, system framing, evidence, and current ADR state;
-3. keep the same interviewee through initial decisions and later blockers; and
+3. keep the same interviewee through initial decisions, later material decisions,
+   blockers, and final Design approval; and
 4. keep research subagents separate from the interviewee role.
 
-The interviewee may critique and choose design options, but it may not add user-visible scope, alter confirmed Requirements, or edit artifacts. Return to the user for any such change.
+The interviewee may critique and choose visible material design options, but it
+may not add user-visible scope, alter confirmed Requirements, hide material
+decisions, or edit artifacts. Return to the user for any product-scope change.
 
 The root agent remains responsible for research coordination, recommendations, Requirements and ADR updates, design writing, feasibility validation, and final synthesis.
 
@@ -368,8 +543,11 @@ For final output, use:
 - Design doc: `<path>`
 - Mode: Collaborative | Autonomous
 - Primary scenario: <scenario>
+- Design approval: `<mode, decision owner, date>`
 - Key decisions:
   - <decision and rationale>
+- Design authority:
+  - <material mechanism and authority>
 - Removal and replacement:
   - <obsolete unit, replacement authority, removal boundary, and absence evidence>
 - Feasibility:
@@ -391,7 +569,16 @@ For final output, use:
 - Do not turn benchmark patterns into requirements without user acceptance.
 - Do not create an ADR before the Requirements document is confirmed.
 - Do not begin individual ADR decision discussion before briefing the complete
-  current decision backlog.
+  current material decision map.
+- Do not ask the requester to choose identifiers, file layout, helper boundaries,
+  equivalent local data structures, fixture names, or other non-material code
+  shape.
+- Do not treat scoped delegation as permission to hide or decide later material
+  topics.
+- Do not finalize a Design with an unauthorized material mechanism.
+- Do not treat feasibility, reversibility, convention, or low risk as Design
+  authority.
+- Do not proceed without complete Design approval.
 - Do not duplicate the Requirements source of truth in the ADR or design.
 - Do not create or retain a numbered ADR file, or use a different primary Design basename, for an Azents development snapshot. Legacy numbered ADRs may appear only in explicit historical provenance or ambiguity records.
 - Do not silently weaken a requirement to avoid a feasibility problem.

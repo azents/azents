@@ -128,7 +128,8 @@ When modifying azents-scoped areas:
 - Update related spec files directly in the same PR when needed.
 - For new feature design, confirm a Requirements document before creating its same-basename ADR or Design.
 - When a large feature is split into stacked phases, run spec review once in a separate phase right before QA.
-- For hard-to-reverse design decisions, record the accepted decision, rejected options, and risks in an ADR or appropriate design/spec document.
+- For material architecture or product-contract decisions, record the accepted
+  decision, rejected options, and risks in the development snapshot ADR.
 
 Detailed documentation rules: `docs/azents/AGENTS.md`.
 
