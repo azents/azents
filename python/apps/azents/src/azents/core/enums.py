@@ -793,6 +793,13 @@ class ExternalChannelResponseMode(enum.StrEnum):
     ALL_MESSAGES = "all_messages"
 
 
+class ExternalChannelConversationLocation(enum.StrEnum):
+    """Selected provider conversation location for one parent channel."""
+
+    CHANNEL = "channel"
+    THREADS = "threads"
+
+
 class ExternalChannelRouteCatalogStatus(enum.StrEnum):
     """Catalog availability for one connection-to-Agent route."""
 
@@ -828,9 +835,28 @@ class ExternalChannelChannelDefaultStatus(enum.StrEnum):
     INVALIDATED = "invalidated"
 
 
+class ExternalChannelParticipationSettingStatus(enum.StrEnum):
+    """Lifecycle state of one provider parent-channel participation setting."""
+
+    ACTIVE = "active"
+    INVALIDATED = "invalidated"
+
+
+class ExternalChannelSetupClaimStatus(enum.StrEnum):
+    """Lifecycle state of one provider parent-channel setup claim."""
+
+    PENDING_AGENT = "pending_agent"
+    PENDING_LOCATION = "pending_location"
+    SELECTED = "selected"
+    COMPLETED = "completed"
+    EXPIRED = "expired"
+    INVALIDATED = "invalidated"
+
+
 class ExternalChannelResourceType(enum.StrEnum):
     """Provider resource type represented by an external conversation."""
 
+    PARENT_CHANNEL = "parent_channel"
     THREAD = "thread"
 
 
@@ -912,8 +938,10 @@ class ExternalChannelDeliveryOriginType(enum.StrEnum):
 
     CHANNEL_ACTION = "channel_action"
     ACCESS_REQUEST = "access_request"
+    SETUP_CLAIM = "setup_claim"
     BINDING_DISCONNECT = "binding_disconnect"
     CONNECTION_DISCONNECT = "connection_disconnect"
+    BINDING_SETTINGS_AVAILABLE = "binding_settings_available"
     MANAGER_OPERATION = "manager_operation"
 
 

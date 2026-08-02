@@ -179,6 +179,7 @@ class SlackInteractionCallback:
             callback_id=self.callback_id,
             action_id=self.action_id,
             principal_id=None,
+            setup_claim_id=None,
             resource_correlation_key=self.resource_correlation_key,
             projection=self.projection,
             status=ExternalChannelInteractionStatus.ACCEPTED,

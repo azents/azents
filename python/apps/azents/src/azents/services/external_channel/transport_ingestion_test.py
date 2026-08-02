@@ -13,6 +13,7 @@ from azents.core.enums import (
     ExternalChannelConversationScopeKind,
     ExternalChannelIngressProfile,
     ExternalChannelProvider,
+    ExternalChannelResourceType,
 )
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
@@ -77,9 +78,11 @@ class _Repository:
         _session: AsyncSession,
         *,
         connection_id: str,
+        resource_type: ExternalChannelResourceType,
         provider_resource_key: str,
     ) -> ExternalChannelResource | None:
         assert connection_id == "connection-1"
+        assert resource_type is ExternalChannelResourceType.THREAD
         del provider_resource_key
         return self.provider_resource
 

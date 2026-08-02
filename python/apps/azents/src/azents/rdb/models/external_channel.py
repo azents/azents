@@ -16,6 +16,7 @@ from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
+    ExternalChannelConversationLocation,
     ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
@@ -23,6 +24,7 @@ from azents.core.enums import (
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
+    ExternalChannelParticipationSettingStatus,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
@@ -30,6 +32,7 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
+    ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
@@ -91,6 +94,12 @@ external_channel_response_mode_enum = ENUM(
     create_type=False,
     values_callable=_enum_values,
 )
+external_channel_conversation_location_enum = ENUM(
+    ExternalChannelConversationLocation,
+    name="external_channel_conversation_location",
+    create_type=False,
+    values_callable=_enum_values,
+)
 external_channel_route_catalog_status_enum = ENUM(
     ExternalChannelRouteCatalogStatus,
     name="external_channel_route_catalog_status",
@@ -112,6 +121,18 @@ external_channel_interaction_status_enum = ENUM(
 external_channel_channel_default_status_enum = ENUM(
     ExternalChannelChannelDefaultStatus,
     name="external_channel_channel_default_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_participation_setting_status_enum = ENUM(
+    ExternalChannelParticipationSettingStatus,
+    name="external_channel_participation_setting_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_setup_claim_status_enum = ENUM(
+    ExternalChannelSetupClaimStatus,
+    name="external_channel_setup_claim_status",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -719,6 +740,10 @@ class RDBExternalChannelInteraction(RDBModel):
         "ix_external_channel_interactions_expires_at",
         "expires_at",
     )
+    IX_SETUP_CLAIM_ID = sa.Index(
+        "ix_external_channel_interactions_setup_claim_id",
+        "setup_claim_id",
+    )
 
     id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -767,6 +792,12 @@ class RDBExternalChannelInteraction(RDBModel):
         nullable=True,
         default=None,
     )
+    setup_claim_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_setup_claims.id", ondelete="RESTRICT"),
+        nullable=True,
+        default=None,
+    )
     resource_correlation_key: Mapped[str | None] = mapped_column(
         sa.String(512),
         nullable=True,
@@ -800,6 +831,7 @@ class RDBExternalChannelInteraction(RDBModel):
         UQ_CONNECTION_PROVIDER_INTERACTION_KEY,
         UQ_CONNECTION_ID_ID,
         IX_EXPIRES_AT,
+        IX_SETUP_CLAIM_ID,
     )
 
 
@@ -829,6 +861,10 @@ class RDBExternalChannelChannelDefault(RDBModel):
         name="fk_external_channel_channel_defaults_connection_route",
         ondelete="RESTRICT",
     )
+    CK_CONFIGURED_ACTOR = sa.CheckConstraint(
+        "num_nonnulls(configured_by_user_id, configured_by_principal_id) = 1",
+        name="ck_external_channel_channel_defaults_configured_actor",
+    )
 
     id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -844,10 +880,17 @@ class RDBExternalChannelChannelDefault(RDBModel):
         nullable=False,
         server_default=ExternalChannelChannelDefaultStatus.ACTIVE.value,
     )
-    configured_by_user_id: Mapped[str] = mapped_column(
+    configured_by_user_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         sa.ForeignKey("users.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
+        default=None,
+    )
+    configured_by_principal_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_principals.id", ondelete="RESTRICT"),
+        nullable=True,
+        default=None,
     )
     invalidated_at: Mapped[datetime.datetime | None] = mapped_column(
         TimeZoneDateTime,
@@ -877,6 +920,126 @@ class RDBExternalChannelChannelDefault(RDBModel):
         UQ_ACTIVE_CONNECTION_CHANNEL,
         IX_ROUTE_ID_STATUS,
         FK_CONNECTION_ROUTE,
+        CK_CONFIGURED_ACTOR,
+    )
+
+
+class RDBExternalChannelParticipationSetting(RDBModel):
+    """Selected parent-channel conversation behavior for one connection."""
+
+    __tablename__ = "external_channel_participation_settings"
+
+    UQ_CONNECTION_ID_ID = sa.UniqueConstraint(
+        "connection_id",
+        "id",
+        name="uq_external_channel_participation_settings_connection_id_id",
+    )
+    UQ_ACTIVE_CONNECTION_CHANNEL = sa.Index(
+        "uq_external_channel_participation_active_channel",
+        "connection_id",
+        "provider_parent_channel_id",
+        unique=True,
+        postgresql_where=sa.text("status = 'active'"),
+    )
+    IX_ROUTE_ID_STATUS = sa.Index(
+        "ix_external_channel_participation_settings_route_id_status",
+        "route_id",
+        "status",
+    )
+    FK_CONNECTION_ROUTE = sa.ForeignKeyConstraint(
+        ["connection_id", "route_id"],
+        [
+            "external_channel_agent_routes.connection_id",
+            "external_channel_agent_routes.id",
+        ],
+        name="fk_external_channel_participation_settings_connection_route",
+        ondelete="RESTRICT",
+    )
+    CK_CONFIGURED_ACTOR = sa.CheckConstraint(
+        "num_nonnulls(configured_by_user_id, configured_by_principal_id) = 1",
+        name="ck_external_channel_participation_settings_configured_actor",
+    )
+    CK_POSITIVE_GENERATION = sa.CheckConstraint(
+        "settings_generation > 0",
+        name="ck_external_channel_participation_settings_positive_generation",
+    )
+    CK_INVALIDATION_METADATA = sa.CheckConstraint(
+        "(status = 'active' AND invalidated_at IS NULL "
+        "AND invalidation_reason IS NULL) OR "
+        "(status = 'invalidated' AND invalidated_at IS NOT NULL "
+        "AND invalidation_reason IS NOT NULL)",
+        name="ck_external_channel_participation_invalidation_metadata",
+    )
+
+    id: Mapped[str] = mapped_column(
+        sa.String(32),
+        primary_key=True,
+        init=False,
+        default_factory=lambda: uuid7().hex,
+    )
+    connection_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    provider_parent_channel_id: Mapped[str] = mapped_column(
+        sa.String(255),
+        nullable=False,
+    )
+    route_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    location: Mapped[ExternalChannelConversationLocation] = mapped_column(
+        external_channel_conversation_location_enum,
+        nullable=False,
+    )
+    response_mode: Mapped[ExternalChannelResponseMode] = mapped_column(
+        external_channel_response_mode_enum,
+        nullable=False,
+    )
+    settings_generation: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    status: Mapped[ExternalChannelParticipationSettingStatus] = mapped_column(
+        external_channel_participation_setting_status_enum,
+        nullable=False,
+    )
+    configured_by_user_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=True,
+        default=None,
+    )
+    configured_by_principal_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_principals.id", ondelete="RESTRICT"),
+        nullable=True,
+        default=None,
+    )
+    invalidated_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    invalidation_reason: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        nullable=True,
+        default=None,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+    )
+
+    __table_args__ = (
+        UQ_CONNECTION_ID_ID,
+        UQ_ACTIVE_CONNECTION_CHANNEL,
+        IX_ROUTE_ID_STATUS,
+        FK_CONNECTION_ROUTE,
+        CK_CONFIGURED_ACTOR,
+        CK_POSITIVE_GENERATION,
+        CK_INVALIDATION_METADATA,
     )
 
 
@@ -1047,6 +1210,193 @@ class RDBExternalChannelPrincipal(RDBModel):
     __table_args__ = (UQ_PROVIDER_TENANT_USER,)
 
 
+class RDBExternalChannelSetupClaim(RDBModel):
+    """Latest eligible setup continuation before canonical Session admission."""
+
+    __tablename__ = "external_channel_setup_claims"
+
+    UQ_CONNECTION_ID_ID = sa.UniqueConstraint(
+        "connection_id",
+        "id",
+        name="uq_external_channel_setup_claims_connection_id_id",
+    )
+    UQ_NONTERMINAL_CONNECTION_CHANNEL = sa.Index(
+        "uq_external_channel_setup_claims_nonterminal_connection_channel",
+        "connection_id",
+        "provider_parent_channel_id",
+        unique=True,
+        postgresql_where=sa.text(
+            "status IN ('pending_agent', 'pending_location', 'selected')"
+        ),
+    )
+    IX_ROUTE_ID_STATUS = sa.Index(
+        "ix_external_channel_setup_claims_route_id_status",
+        "route_id",
+        "status",
+    )
+    IX_STATUS_EXPIRES_AT = sa.Index(
+        "ix_external_channel_setup_claims_status_expires_at",
+        "status",
+        "expires_at",
+    )
+    FK_CONNECTION_ROUTE = sa.ForeignKeyConstraint(
+        ["connection_id", "route_id"],
+        [
+            "external_channel_agent_routes.connection_id",
+            "external_channel_agent_routes.id",
+        ],
+        name="fk_external_channel_setup_claims_connection_route",
+        ondelete="RESTRICT",
+    )
+    FK_CONNECTION_POSITION = sa.ForeignKeyConstraint(
+        ["connection_id", "conversation_position_id"],
+        [
+            "external_channel_conversation_positions.connection_id",
+            "external_channel_conversation_positions.id",
+        ],
+        name="fk_external_channel_setup_claims_connection_position",
+        ondelete="RESTRICT",
+    )
+    FK_CONNECTION_SOURCE_RESOURCE = sa.ForeignKeyConstraint(
+        ["connection_id", "source_resource_id"],
+        [
+            "external_channel_resources.connection_id",
+            "external_channel_resources.id",
+        ],
+        name="fk_external_channel_setup_claims_connection_source_resource",
+        ondelete="RESTRICT",
+    )
+    FK_CONNECTION_SELECTED_SETTING = sa.ForeignKeyConstraint(
+        ["connection_id", "selected_setting_id"],
+        [
+            "external_channel_participation_settings.connection_id",
+            "external_channel_participation_settings.id",
+        ],
+        name="fk_external_channel_setup_claims_connection_selected_setting",
+        ondelete="RESTRICT",
+    )
+    FK_CONNECTION_SELECTED_RESOURCE = sa.ForeignKeyConstraint(
+        ["connection_id", "selected_resource_id"],
+        [
+            "external_channel_resources.connection_id",
+            "external_channel_resources.id",
+        ],
+        name="fk_external_channel_setup_claims_connection_selected_resource",
+        ondelete="RESTRICT",
+    )
+    CK_POSITIVE_REVISIONS = sa.CheckConstraint(
+        "source_revision > 0 AND claim_generation > 0",
+        name="ck_external_channel_setup_claims_positive_revisions",
+    )
+    CK_SELECTED_SOURCE_REVISION = sa.CheckConstraint(
+        "selected_source_revision IS NULL "
+        "OR (selected_source_revision > 0 "
+        "AND selected_source_revision <= source_revision)",
+        name="ck_external_channel_setup_claims_selected_source_revision",
+    )
+    CK_SELECTION_METADATA = sa.CheckConstraint(
+        "(status IN ('pending_agent', 'pending_location') "
+        "AND selected_setting_id IS NULL "
+        "AND selected_resource_id IS NULL "
+        "AND selected_source_revision IS NULL "
+        "AND selected_at IS NULL) OR "
+        "(status IN ('selected', 'completed') "
+        "AND selected_setting_id IS NOT NULL "
+        "AND selected_resource_id IS NOT NULL "
+        "AND selected_source_revision IS NOT NULL "
+        "AND selected_at IS NOT NULL) OR "
+        "status IN ('expired', 'invalidated')",
+        name="ck_external_channel_setup_claims_selection_metadata",
+    )
+    CK_COMPLETED_AT = sa.CheckConstraint(
+        "(status = 'completed' AND completed_at IS NOT NULL) OR status <> 'completed'",
+        name="ck_external_channel_setup_claims_completed_at",
+    )
+
+    id: Mapped[str] = mapped_column(
+        sa.String(32),
+        primary_key=True,
+        init=False,
+        default_factory=lambda: uuid7().hex,
+    )
+    connection_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    provider_parent_channel_id: Mapped[str] = mapped_column(
+        sa.String(255),
+        nullable=False,
+    )
+    route_id: Mapped[str | None] = mapped_column(sa.String(32), nullable=True)
+    conversation_position_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+    )
+    source_resource_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    principal_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_principals.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    source_projection: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    source_revision: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    claim_generation: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    status: Mapped[ExternalChannelSetupClaimStatus] = mapped_column(
+        external_channel_setup_claim_status_enum,
+        nullable=False,
+    )
+    selected_setting_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        nullable=True,
+    )
+    selected_resource_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        nullable=True,
+    )
+    selected_source_revision: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        nullable=True,
+    )
+    expires_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        nullable=False,
+    )
+    selected_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+    )
+    completed_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+    )
+
+    __table_args__ = (
+        UQ_CONNECTION_ID_ID,
+        UQ_NONTERMINAL_CONNECTION_CHANNEL,
+        IX_ROUTE_ID_STATUS,
+        IX_STATUS_EXPIRES_AT,
+        FK_CONNECTION_ROUTE,
+        FK_CONNECTION_POSITION,
+        FK_CONNECTION_SOURCE_RESOURCE,
+        FK_CONNECTION_SELECTED_SETTING,
+        FK_CONNECTION_SELECTED_RESOURCE,
+        CK_POSITIVE_REVISIONS,
+        CK_SELECTED_SOURCE_REVISION,
+        CK_SELECTION_METADATA,
+        CK_COMPLETED_AT,
+    )
+
+
 class RDBExternalChannelBinding(RDBModel):
     """Lifecycle-owned link between one external resource and AgentSession."""
 
@@ -1150,6 +1500,10 @@ class RDBExternalChannelAccessRequest(RDBModel):
         "ix_external_channel_access_requests_agent_session_id",
         "agent_session_id",
     )
+    IX_SETUP_CLAIM_ID = sa.Index(
+        "ix_external_channel_access_requests_setup_claim_id",
+        "setup_claim_id",
+    )
     UQ_ROUTE_TRIGGER_MESSAGE = sa.UniqueConstraint(
         "route_id",
         "trigger_provider_message_key",
@@ -1238,6 +1592,12 @@ class RDBExternalChannelAccessRequest(RDBModel):
         nullable=True,
         default=None,
     )
+    setup_claim_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_setup_claims.id", ondelete="RESTRICT"),
+        nullable=True,
+        default=None,
+    )
     decided_by_user_id: Mapped[str | None] = mapped_column(
         sa.String(32),
         sa.ForeignKey("users.id", ondelete="RESTRICT"),
@@ -1272,6 +1632,7 @@ class RDBExternalChannelAccessRequest(RDBModel):
         CK_PENDING_BOUNDARY,
         IX_STATUS_CREATED_AT,
         IX_AGENT_SESSION_ID,
+        IX_SETUP_CLAIM_ID,
         UQ_ROUTE_TRIGGER_MESSAGE,
         FK_CONNECTION_RESOURCE,
         FK_CONNECTION_POSITION,
