@@ -41,6 +41,16 @@ class DiscordThreadProvisioningResult:
     error_summary: str | None
 
 
+@dataclass(frozen=True)
+class DiscordThreadTitleResult:
+    """Sanitized exact Discord thread-channel read or title update result."""
+
+    status: Literal["present", "failed", "unknown"]
+    observed_thread: DiscordObservedThread | None
+    error_kind: str | None
+    error_summary: str | None
+
+
 class DiscordOutboundFileContentError(Exception):
     """One Runtime or Exchange source became unavailable during upload."""
 
@@ -199,6 +209,67 @@ class DiscordDeliveryClient:
             guild_id=guild_id,
             parent_channel_id=parent_channel_id,
             root_message_id=root_message_id,
+        )
+
+    async def read_thread_channel(
+        self,
+        *,
+        bot_token: str,
+        guild_id: str,
+        parent_channel_id: str,
+        root_message_id: str,
+        thread_channel_id: str,
+    ) -> DiscordThreadTitleResult:
+        """Read one exact current thread channel for one fenced title operation."""
+        response = await self._request(
+            "GET",
+            f"/channels/{thread_channel_id}",
+            bot_token=bot_token,
+            json_body=None,
+        )
+        if isinstance(response, DiscordDeliveryResult):
+            return _thread_title_from_delivery_result(response)
+        return _thread_title_result(
+            raw_thread=_json_object(response),
+            guild_id=guild_id,
+            parent_channel_id=parent_channel_id,
+            root_message_id=root_message_id,
+            thread_channel_id=thread_channel_id,
+        )
+
+    async def patch_thread_name(
+        self,
+        *,
+        bot_token: str,
+        guild_id: str,
+        parent_channel_id: str,
+        root_message_id: str,
+        thread_channel_id: str,
+        name: str,
+    ) -> DiscordThreadTitleResult:
+        """Change only one exact current thread's name."""
+        normalized_name = normalize_discord_projected_title(name)
+        if normalized_name is None:
+            return DiscordThreadTitleResult(
+                status="failed",
+                observed_thread=None,
+                error_kind="title_invalid",
+                error_summary="Discord thread title was empty after normalization.",
+            )
+        response = await self._request(
+            "PATCH",
+            f"/channels/{thread_channel_id}",
+            bot_token=bot_token,
+            json_body={"name": normalized_name},
+        )
+        if isinstance(response, DiscordDeliveryResult):
+            return _thread_title_from_delivery_result(response)
+        return _thread_title_result(
+            raw_thread=_json_object(response),
+            guild_id=guild_id,
+            parent_channel_id=parent_channel_id,
+            root_message_id=root_message_id,
+            thread_channel_id=thread_channel_id,
         )
 
     async def _read_root_thread(
@@ -417,8 +488,13 @@ class DiscordDeliveryClient:
 
 def normalize_discord_thread_name(name: str | None) -> str:
     """Return one bounded valid Discord thread name."""
-    normalized = "" if name is None else " ".join(name.split())
-    return (normalized or "Azents")[:100]
+    return normalize_discord_projected_title(name or "") or "Azents"
+
+
+def normalize_discord_projected_title(name: str) -> str | None:
+    """Return one bounded title or None when content is blank after normalization."""
+    normalized = " ".join(name.split())
+    return normalized[:100] or None
 
 
 def _response_failure(response: httpx.Response) -> DiscordDeliveryResult | None:
@@ -559,6 +635,76 @@ def _thread_provisioning_from_delivery_result(
             error_summary=result.error_summary,
         )
     return _unknown_thread_provisioning_result(
+        error_kind=result.error_kind or "provider_ambiguous",
+        error_summary=result.error_summary or "Discord provider outcome is unknown.",
+    )
+
+
+def _thread_title_result(
+    *,
+    raw_thread: object,
+    guild_id: str,
+    parent_channel_id: str,
+    root_message_id: str,
+    thread_channel_id: str,
+) -> DiscordThreadTitleResult:
+    """Validate one exact complete thread response for a title operation."""
+    result = _thread_provisioning_result(
+        raw_thread=raw_thread,
+        guild_id=guild_id,
+        parent_channel_id=parent_channel_id,
+        root_message_id=root_message_id,
+    )
+    if result.status == "absent":
+        return DiscordThreadTitleResult(
+            status="unknown",
+            observed_thread=None,
+            error_kind="thread_response_invalid",
+            error_summary="Discord thread response omitted the target channel.",
+        )
+    if result.status != "present":
+        return DiscordThreadTitleResult(
+            status=result.status,
+            observed_thread=None,
+            error_kind=result.error_kind,
+            error_summary=result.error_summary,
+        )
+    if result.thread_channel_id != thread_channel_id:
+        return DiscordThreadTitleResult(
+            status="unknown",
+            observed_thread=None,
+            error_kind="thread_identity_mismatch",
+            error_summary="Discord thread response did not match the target channel.",
+        )
+    if result.observed_thread is None:
+        return DiscordThreadTitleResult(
+            status="unknown",
+            observed_thread=None,
+            error_kind="thread_proof_incomplete",
+            error_summary="Discord thread response omitted required title evidence.",
+        )
+    return DiscordThreadTitleResult(
+        status="present",
+        observed_thread=result.observed_thread,
+        error_kind=None,
+        error_summary=None,
+    )
+
+
+def _thread_title_from_delivery_result(
+    result: DiscordDeliveryResult,
+) -> DiscordThreadTitleResult:
+    """Map common Discord provider outcomes for one title operation."""
+    if result.status == "failed" and result.error_kind != "rate_limited":
+        return DiscordThreadTitleResult(
+            status="failed",
+            observed_thread=None,
+            error_kind=result.error_kind,
+            error_summary=result.error_summary,
+        )
+    return DiscordThreadTitleResult(
+        status="unknown",
+        observed_thread=None,
         error_kind=result.error_kind or "provider_ambiguous",
         error_summary=result.error_summary or "Discord provider outcome is unknown.",
     )

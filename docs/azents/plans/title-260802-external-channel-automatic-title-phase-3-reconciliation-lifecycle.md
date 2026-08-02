@@ -167,6 +167,28 @@ tags: [external-channel, discord, title, backend, worker, lifecycle]
   - `python -m pytest scripts/tests/test_gen_docs_index.py`
   - pre-commit snapshot/frontmatter/index validation during commit
   - `git diff --check`
+- Validation evidence:
+  - Ruff format and check passed for all 20 changed Python files.
+  - Full backend Pyright passed with `0 errors, 0 warnings`.
+  - Primary integrated title, Discord, lifecycle, management, migration, archive,
+    decommission, and purge matrix passed: `218 passed`; the only warnings were
+    three existing testcontainers deprecation warnings.
+  - Full backend Pytest passed: `3925 passed`, with six existing non-blocking
+    dependency or SQLAlchemy warnings.
+  - Documentation index tests passed: `14 passed`.
+  - Alembic reports one head, `b00cf0366fa3`. The focused migration regression
+    proves incomplete version-1 External Channel participant executions reset to
+    version 2, completed and cancelled tombstones remain unchanged, and unsafe
+    downgrade is refused.
+  - Real two-session PostgreSQL regressions execute the actual archive and
+    connection-disconnect lifecycle transactions. Title settlement yields
+    immediately with `NOWAIT`, lifecycle commits, no false settlement is recorded,
+    and stale `attempting` work remains recoverable.
+  - Independent review found and verified corrections for canonical target races,
+    exact consumed-Event authority, same-Resource multi-Binding isolation,
+    lifecycle lock contention, and all audited Discord connection or credential
+    revocation paths. Final complete-diff review reported PASS with no remaining
+    Critical or Warning finding.
 - Scope-drift check:
   - verify every Phase 3 outcome and removal obligation is implemented;
   - verify Session execution and ordinary at-most-once delivery remain independent
@@ -187,6 +209,14 @@ tags: [external-channel, discord, title, backend, worker, lifecycle]
   - No schema shape change is required. Existing immutable participant snapshots
     require policy version `2` and a generated forward-progress data migration that
     safely replays incomplete version-1 External Channel cleanup.
+  - Final-title reconciliation now verifies canonical Resource/thread equality and
+    exact consumed-Event authority before every provider operation and settlement.
+    Discord authority revocation terminalizes both phases transactionally, including
+    callback reset, activation failure, reconnect-required transitions, and single
+    or Multi configuration replacement.
+  - Lifecycle settlement uses fail-fast `NOWAIT` owner locking. Contention rolls
+    back without inventing authority loss and leaves durable stale work for
+    GET-first recovery.
   - Phase 4 still owns deterministic fake/E2E and integrated product validation.
     Phase 5 still owns Living Spec promotion, implementation marking, and plan
     cleanup. Design delta: `None`.

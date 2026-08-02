@@ -65,6 +65,7 @@ from azents.repos.external_channel.management_data import (
     ManagedWorkSource,
     ManagedWorkTask,
 )
+from azents.repos.external_channel.title import ExternalChannelTitleRepository
 
 
 @dataclass(frozen=True)
@@ -499,6 +500,12 @@ class ExternalChannelManagementRepository:
             provider_app_id=provider_app_id,
             encrypted_credentials=encrypted_credentials,
             provider_config=provider_config,
+        )
+        await ExternalChannelTitleRepository().terminalize_connection_projections(
+            session,
+            connection_id=connection.id,
+            reason="discord_configuration_replaced",
+            now=datetime.datetime.now(datetime.UTC),
         )
         await session.flush()
         await session.refresh(connection, attribute_names=["updated_at"])
@@ -1174,6 +1181,12 @@ class ExternalChannelManagementRepository:
             provider_app_id=provider_app_id,
             encrypted_credentials=encrypted_credentials,
             provider_config=provider_config,
+        )
+        await ExternalChannelTitleRepository().terminalize_connection_projections(
+            session,
+            connection_id=connection.id,
+            reason="discord_configuration_replaced",
+            now=datetime.datetime.now(datetime.UTC),
         )
         await session.flush()
         await session.refresh(connection, attribute_names=["updated_at"])
@@ -1899,6 +1912,14 @@ class ExternalChannelManagementRepository:
         now: datetime.datetime,
         reason: str,
     ) -> tuple[str, ...]:
+        await ExternalChannelTitleRepository().terminalize_lifecycle_projections(
+            session,
+            session_ids=(),
+            binding_ids=(binding.id,),
+            resource_ids=(),
+            reason=reason,
+            now=now,
+        )
         if binding.disconnected_at is not None:
             return await self._pending_binding_disconnect_intent_ids(
                 session,

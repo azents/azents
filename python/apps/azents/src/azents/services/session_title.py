@@ -64,6 +64,9 @@ from azents.repos.llm_provider_integration.deps import (
     get_llm_provider_integration_repository,
 )
 from azents.services.chatgpt_oauth.runtime import ensure_runtime_tokens
+from azents.services.external_channel.discord_delivery import (
+    normalize_discord_projected_title,
+)
 
 logger = logging.getLogger(__name__)
 _TITLE_MAX_CHARS = 50
@@ -242,11 +245,14 @@ class SessionTitleService:
         )
         if generated is None:
             return None
+        normalized_title = normalize_discord_projected_title(generated)
+        if normalized_title is None:
+            return None
         async with self.session_manager() as session:
             updated = await self.agent_session_repository.replace_initial_auto_title(
                 session,
                 session_id=session_id,
-                title=generated,
+                title=normalized_title,
                 event_id=event.id,
             )
             if updated is not None:
@@ -255,7 +261,7 @@ class SessionTitleService:
                     session,
                     agent_session_id=session_id,
                     generation_event_id=event.id,
-                    desired_title=generated,
+                    desired_title=normalized_title,
                     now=datetime.datetime.now(datetime.UTC),
                 )
             await session.commit()

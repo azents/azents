@@ -44,9 +44,11 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelChannelDefault,
     RDBExternalChannelConnection,
     RDBExternalChannelDeliveryAttempt,
+    RDBExternalChannelDiscordThreadTitleProjection,
     RDBExternalChannelInteraction,
     RDBExternalChannelParticipationSetting,
     RDBExternalChannelResource,
+    RDBExternalChannelSessionTitleCandidate,
     RDBExternalChannelSetupClaim,
     RDBExternalChannelWork,
     RDBExternalChannelWorkProjectionPart,
@@ -65,6 +67,7 @@ from azents.repos.external_channel.data import (
     ExternalChannelPurgeVerification,
     ExternalChannelRestoreValidation,
 )
+from azents.repos.external_channel.title import ExternalChannelTitleRepository
 
 _NONTERMINAL_SETUP_CLAIM_STATUSES = (
     ExternalChannelSetupClaimStatus.PENDING_AGENT,
@@ -89,6 +92,11 @@ class _LockedParticipationState:
 class ExternalChannelLifecycleRepository:
     """Own restrictive External Channel lifecycle mutations and verification."""
 
+    @staticmethod
+    def _title_repository() -> ExternalChannelTitleRepository:
+        """Build the shared title persistence owner for lifecycle fences."""
+        return ExternalChannelTitleRepository()
+
     async def terminate_session_tree(
         self,
         session: AsyncSession,
@@ -105,6 +113,14 @@ class ExternalChannelLifecycleRepository:
             session,
             session_ids=session_ids,
             connected_only=True,
+        )
+        await self._title_repository().terminalize_lifecycle_projections(
+            session,
+            session_ids=session_ids,
+            binding_ids=tuple(binding.id for binding in bindings),
+            resource_ids=(),
+            reason="session_archived",
+            now=now,
         )
         if not bindings:
             return ExternalChannelArchiveTermination(
@@ -246,6 +262,10 @@ class ExternalChannelLifecycleRepository:
         )
         if any(work.status is ExternalChannelWorkStatus.ACTIVE for work in works):
             raise RuntimeError("Restored External Channel work was reactivated")
+        await self._title_repository().validate_lifecycle_projections_terminal(
+            session,
+            session_ids=session_ids,
+        )
         return ExternalChannelRestoreValidation(
             disconnected_binding_count=len(bindings),
             finished_work_count=len(works),
@@ -386,6 +406,23 @@ class ExternalChannelLifecycleRepository:
             RDBExternalChannelWork,
             RDBExternalChannelWork.binding_id.in_(binding_ids),
         )
+        await self._delete(
+            session,
+            RDBExternalChannelDiscordThreadTitleProjection,
+            sa.or_(
+                RDBExternalChannelDiscordThreadTitleProjection.binding_id.in_(
+                    binding_ids
+                ),
+                RDBExternalChannelDiscordThreadTitleProjection.agent_session_id.in_(
+                    session_ids
+                ),
+            ),
+        )
+        await self._delete(
+            session,
+            RDBExternalChannelSessionTitleCandidate,
+            RDBExternalChannelSessionTitleCandidate.agent_session_id.in_(session_ids),
+        )
         deleted_binding_count = await self._delete(
             session,
             RDBExternalChannelBinding,
@@ -461,6 +498,20 @@ class ExternalChannelLifecycleRepository:
             raise RuntimeError(
                 "Session-owned External Channel state remains after purge"
             )
+        remaining_title_projection_count = await self._count(
+            session,
+            RDBExternalChannelDiscordThreadTitleProjection,
+            RDBExternalChannelDiscordThreadTitleProjection.agent_session_id.in_(
+                session_ids
+            ),
+        )
+        remaining_title_candidate_count = await self._count(
+            session,
+            RDBExternalChannelSessionTitleCandidate,
+            RDBExternalChannelSessionTitleCandidate.agent_session_id.in_(session_ids),
+        )
+        if remaining_title_projection_count or remaining_title_candidate_count:
+            raise RuntimeError("Session-owned External Channel title state remains")
         return verification
 
     async def project_multi_route_impact(
@@ -725,6 +776,14 @@ class ExternalChannelLifecycleRepository:
             now=now,
             reason="relationship_removed",
         )
+        await self._title_repository().terminalize_lifecycle_projections(
+            session,
+            session_ids=(),
+            binding_ids=tuple(binding.id for binding in bindings),
+            resource_ids=tuple(resource.id for resource in resources),
+            reason="relationship_removed",
+            now=now,
+        )
         for resource in resources:
             if resource.status is ExternalChannelResourceStatus.ACTIVE:
                 resource.status = ExternalChannelResourceStatus.UNAVAILABLE
@@ -946,6 +1005,14 @@ class ExternalChannelLifecycleRepository:
             resources=resources,
             now=now,
             reason=reason,
+        )
+        await self._title_repository().terminalize_lifecycle_projections(
+            session,
+            session_ids=(),
+            binding_ids=tuple(binding.id for binding in bindings),
+            resource_ids=tuple(resource.id for resource in resources),
+            reason=reason,
+            now=now,
         )
         unavailable_resource_count = 0
         for resource in resources:

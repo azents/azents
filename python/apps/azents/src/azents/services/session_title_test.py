@@ -572,7 +572,7 @@ class TestSessionTitleHelpers:
 
         async def generate_title(**kwargs: object) -> str:
             del kwargs
-            return "Generated external title"
+            return "  Generated   external\n title  "
 
         monkeypatch.setattr(service, "_generate_title", generate_title)
         event = Event(
@@ -604,6 +604,51 @@ class TestSessionTitleHelpers:
             }
         ]
         assert calls == ["replace", "arm", "commit"]
+
+    async def test_blank_generated_title_does_not_mutate_session_or_projection(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Blank projected titles leave Session and External Channel state unchanged."""
+        repository = _AgentSessionRepository()
+
+        service = SessionTitleService(
+            agent_repository=cast(AgentRepository, object()),
+            agent_session_repository=cast(AgentSessionRepository, repository),
+            external_channel_title_repository=cast(
+                ExternalChannelTitleRepository,
+                _ExternalChannelTitleRepository(),
+            ),
+            integration_repository=cast(LLMProviderIntegrationRepository, object()),
+            session_manager=cast(Any, _session_manager),
+            model_stream_watchdog=cast(ModelStreamWatchdog, object()),
+            retry_policy=cast(FailedRunRetryPolicy, object()),
+        )
+
+        async def generate_title(**kwargs: object) -> str:
+            del kwargs
+            return " \n\t "
+
+        monkeypatch.setattr(service, "_generate_title", generate_title)
+        event = Event(
+            id="0" * 32,
+            session_id="session-001",
+            kind=EventKind.USER_MESSAGE,
+            payload=UserMessagePayload(
+                sender_user_id=None,
+                content="Do not create a blank title",
+                attachments=[],
+                metadata={},
+            ),
+            created_at=datetime.datetime.now(datetime.UTC),
+        )
+
+        result = await service.generate_from_initial_prompt(
+            session_id="session-001",
+            event=event,
+        )
+
+        assert result is None
 
 
 def _model_selection() -> AgentModelSelection:

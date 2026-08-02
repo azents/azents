@@ -104,6 +104,7 @@ from .data import (
     ExternalChannelWork,
     ExternalChannelWorkCreate,
 )
+from .title import ExternalChannelTitleRepository
 
 _RecordT = TypeVar("_RecordT", bound=BaseModel)
 
@@ -569,6 +570,12 @@ class ExternalChannelRepository:
         connection.configuration_generation += 1
         connection.status = ExternalChannelConnectionStatus.RECONNECT_REQUIRED
         connection.last_health_at = checked_at
+        await ExternalChannelTitleRepository().terminalize_connection_projections(
+            session,
+            connection_id=connection.id,
+            reason="discord_callback_registration_failed",
+            now=checked_at,
+        )
         await session.flush()
         return True
 
@@ -612,6 +619,12 @@ class ExternalChannelRepository:
         connection.socket_heartbeat_at = None
         connection.socket_gap_detected_at = None
         connection.socket_gap_reason = None
+        await ExternalChannelTitleRepository().terminalize_connection_projections(
+            session,
+            connection_id=connection.id,
+            reason="discord_activation_failed",
+            now=checked_at,
+        )
         await session.flush()
         await session.refresh(connection, attribute_names=["updated_at"])
         return ExternalChannelConnection.model_validate(connection)
@@ -925,6 +938,12 @@ class ExternalChannelRepository:
         lease.heartbeat_at = now
         lease.gap_detected_at = now
         lease.gap_reason = reason
+        await ExternalChannelTitleRepository().terminalize_connection_projections(
+            session,
+            connection_id=connection.id,
+            reason=reason,
+            now=now,
+        )
         await session.flush()
         return True
 
@@ -1266,6 +1285,14 @@ class ExternalChannelRepository:
             ).all()
         )
         binding_ids = [binding.id for binding in bindings]
+        await ExternalChannelTitleRepository().terminalize_lifecycle_projections(
+            session,
+            session_ids=(),
+            binding_ids=binding_ids,
+            resource_ids=tuple(resource.id for resource in resources),
+            reason=reason,
+            now=now,
+        )
         works = list(
             (
                 await session.scalars(
@@ -1483,6 +1510,13 @@ class ExternalChannelRepository:
             connection.socket_heartbeat_at = None
             connection.socket_gap_detected_at = None
             connection.socket_gap_reason = None
+        if connection.provider is ExternalChannelProvider.DISCORD:
+            await ExternalChannelTitleRepository().terminalize_connection_projections(
+                session,
+                connection_id=connection.id,
+                reason=reason,
+                now=now,
+            )
         await session.flush()
         return True
 
@@ -2397,7 +2431,17 @@ class ExternalChannelRepository:
             )
             .returning(RDBExternalChannelResource.id)
         )
-        return result.scalar_one_or_none() is not None
+        marked = result.scalar_one_or_none() is not None
+        if marked:
+            await ExternalChannelTitleRepository().terminalize_lifecycle_projections(
+                session,
+                session_ids=(),
+                binding_ids=(),
+                resource_ids=(resource_id,),
+                reason="resource_unavailable",
+                now=now,
+            )
+        return marked
 
     async def terminate_resource_for_provider_loss(
         self,
@@ -2455,6 +2499,14 @@ class ExternalChannelRepository:
         )
         resource.status = ExternalChannelResourceStatus.UNAVAILABLE
         resource.unavailable_at = now
+        await ExternalChannelTitleRepository().terminalize_lifecycle_projections(
+            session,
+            session_ids=(),
+            binding_ids=(),
+            resource_ids=(resource_id,),
+            reason=reason,
+            now=now,
+        )
         await session.flush()
         return True
 

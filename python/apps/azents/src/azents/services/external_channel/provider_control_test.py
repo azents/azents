@@ -16,6 +16,7 @@ from azents.services.external_channel.channel_action import (
 from azents.services.external_channel.discord_projection import (
     DiscordProjectionProvisioningDrain,
     DiscordProjectionReconciliationService,
+    DiscordProjectionTitleDrain,
 )
 from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
@@ -119,16 +120,35 @@ class _ActionService:
 
 
 class _ProjectionReconciliationService:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+
     async def drain_once(
         self,
         *,
         now: datetime.datetime,
     ) -> DiscordProjectionProvisioningDrain:
         assert now == _at(120)
+        self.events.append("provisioning")
         return DiscordProjectionProvisioningDrain(
             claimed=0,
             ready=0,
             unmanaged=0,
+            retried=0,
+            failed=0,
+        )
+
+    async def drain_titles_once(
+        self,
+        *,
+        now: datetime.datetime,
+    ) -> DiscordProjectionTitleDrain:
+        assert now == _at(120)
+        self.events.append("title")
+        return DiscordProjectionTitleDrain(
+            claimed=0,
+            applied=0,
+            relinquished=0,
             retried=0,
             failed=0,
         )
@@ -153,7 +173,7 @@ async def test_drain_commits_recovery_before_provider_attempts() -> None:
         ),
         projection_reconciliation=cast(
             DiscordProjectionReconciliationService,
-            _ProjectionReconciliationService(),
+            _ProjectionReconciliationService(events),
         ),
         stale_threshold=datetime.timedelta(minutes=2),
         interval=datetime.timedelta(seconds=1),
@@ -165,10 +185,13 @@ async def test_drain_commits_recovery_before_provider_attempts() -> None:
     assert result.stale_unknown == 1
     assert result.attempted == 2
     assert result.provisioning.claimed == 0
+    assert result.title.claimed == 0
     assert events == [
         "recover",
         "list",
         "commit",
         "delivery-1",
         "delivery-2",
+        "provisioning",
+        "title",
     ]

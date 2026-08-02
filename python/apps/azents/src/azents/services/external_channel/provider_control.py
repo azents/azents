@@ -18,6 +18,7 @@ from azents.services.external_channel.channel_action import (
 from azents.services.external_channel.discord_projection import (
     DiscordProjectionProvisioningDrain,
     DiscordProjectionReconciliationService,
+    DiscordProjectionTitleDrain,
     get_discord_projection_reconciliation_service,
 )
 
@@ -35,6 +36,7 @@ class ExternalChannelProviderControlDrain:
     stale_unknown: int
     attempted: int
     provisioning: DiscordProjectionProvisioningDrain
+    title: DiscordProjectionTitleDrain
 
 
 @dataclasses.dataclass(frozen=True)
@@ -67,12 +69,19 @@ class ExternalChannelProviderControlService:
         while not shutdown_event.is_set():
             try:
                 result = await self.drain_once()
-                if result.stale_unknown or result.attempted:
+                if (
+                    result.stale_unknown
+                    or result.attempted
+                    or result.provisioning.claimed
+                    or result.title.claimed
+                ):
                     logger.info(
                         "Drained External Channel provider controls",
                         extra={
                             "stale_unknown": result.stale_unknown,
                             "attempted": result.attempted,
+                            "provisioning_claimed": result.provisioning.claimed,
+                            "title_claimed": result.title.claimed,
                         },
                     )
             except asyncio.CancelledError:
@@ -117,10 +126,12 @@ class ExternalChannelProviderControlService:
             if outcome is not None:
                 attempted += 1
         provisioning = await self.projection_reconciliation.drain_once(now=current)
+        title = await self.projection_reconciliation.drain_titles_once(now=current)
         return ExternalChannelProviderControlDrain(
             stale_unknown=stale_unknown,
             attempted=attempted,
             provisioning=provisioning,
+            title=title,
         )
 
     async def attempt_delivery(self, delivery_attempt_id: str) -> None:

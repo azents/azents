@@ -14,6 +14,7 @@ from azents.core.enums import (
     ExternalChannelDiscordThreadObservationStatus,
     ExternalChannelDiscordThreadTitleProofKind,
     ExternalChannelDiscordThreadTitleProvisioningStatus,
+    ExternalChannelDiscordThreadTitleStatus,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelRouteCatalogStatus,
@@ -44,6 +45,8 @@ from azents.services.external_channel.data import DiscordConnectionCredentials
 from azents.services.external_channel.discord_delivery import (
     DiscordDeliveryClient,
     DiscordThreadProvisioningResult,
+    DiscordThreadTitleResult,
+    normalize_discord_projected_title,
 )
 
 _DEFAULT_LIMIT = 20
@@ -71,6 +74,17 @@ class DiscordProjectionProvisioningDrain:
     failed: int
 
 
+@dataclass(frozen=True)
+class DiscordProjectionTitleDrain:
+    """Content-free bounded final-title reconciliation outcome counts."""
+
+    claimed: int
+    applied: int
+    relinquished: int
+    retried: int
+    failed: int
+
+
 @dataclass
 class DiscordProjectionAuthorityLoader:
     """Revalidate projection ownership without using mutable delivery inference."""
@@ -87,7 +101,34 @@ class DiscordProjectionAuthorityLoader:
         *,
         projection: ExternalChannelDiscordThreadTitleProjection,
     ) -> DiscordProjectionProvisioningAuthority | None:
-        """Return current complete provider authority or fail closed."""
+        """Return current provisioning authority or fail closed."""
+        return await self._load(
+            session,
+            projection=projection,
+            require_consumed_title_event=False,
+        )
+
+    async def load_title(
+        self,
+        session: AsyncSession,
+        *,
+        projection: ExternalChannelDiscordThreadTitleProjection,
+    ) -> DiscordProjectionProvisioningAuthority | None:
+        """Return authority for one exact consumed generated-title projection."""
+        return await self._load(
+            session,
+            projection=projection,
+            require_consumed_title_event=True,
+        )
+
+    async def _load(
+        self,
+        session: AsyncSession,
+        *,
+        projection: ExternalChannelDiscordThreadTitleProjection,
+        require_consumed_title_event: bool,
+    ) -> DiscordProjectionProvisioningAuthority | None:
+        """Return phase-specific current complete provider authority or fail closed."""
         if (
             projection.provisioning_protocol_version
             != SUPPORTED_DISCORD_THREAD_TITLE_PROVISIONING_PROTOCOL_VERSION
@@ -131,6 +172,15 @@ class DiscordProjectionAuthorityLoader:
                 ExternalChannelSessionTitleCandidateStatus.PENDING,
                 ExternalChannelSessionTitleCandidateStatus.CONSUMED,
             }
+            or (
+                require_consumed_title_event
+                and (
+                    candidate.status
+                    is not ExternalChannelSessionTitleCandidateStatus.CONSUMED
+                    or candidate.consumed_event_id
+                    != projection.title_generation_event_id
+                )
+            )
         ):
             return None
         route = await self.external_channel_repository.get_agent_route(
@@ -218,6 +268,33 @@ class DiscordProjectionReconciliationService:
             claimed=len(claimed),
             ready=sum(outcome == "ready" for outcome in outcomes),
             unmanaged=sum(outcome == "unmanaged" for outcome in outcomes),
+            retried=sum(outcome == "retry" for outcome in outcomes),
+            failed=sum(outcome == "failed" for outcome in outcomes),
+        )
+
+    async def drain_titles_once(
+        self,
+        *,
+        now: datetime.datetime | None = None,
+    ) -> DiscordProjectionTitleDrain:
+        """Claim and reconcile one bounded batch of due final-title controls."""
+        current = now or datetime.datetime.now(datetime.UTC)
+        async with self.session_manager() as session:
+            claimed = await self.title_repository.claim_due_titles(
+                session,
+                now=current,
+                stale_before=current - self.stale_threshold,
+                limit=self.limit,
+            )
+            await session.commit()
+        outcomes = [
+            await self._reconcile_title(projection, now=current)
+            for projection in claimed
+        ]
+        return DiscordProjectionTitleDrain(
+            claimed=len(claimed),
+            applied=sum(outcome == "applied" for outcome in outcomes),
+            relinquished=sum(outcome == "relinquished" for outcome in outcomes),
             retried=sum(outcome == "retry" for outcome in outcomes),
             failed=sum(outcome == "failed" for outcome in outcomes),
         )
@@ -313,6 +390,304 @@ class DiscordProjectionReconciliationService:
         if reconciled.status == "failed":
             return await self._fail_result(projection, result=reconciled, now=now)
         return await self._retry_result(projection, result=reconciled, now=now)
+
+    async def _reconcile_title(
+        self,
+        projection: ExternalChannelDiscordThreadTitleProjection,
+        *,
+        now: datetime.datetime,
+    ) -> str:
+        """Perform one GET-before-PATCH title settlement for one exact claim."""
+        if (
+            projection.provisioning_protocol_version
+            != SUPPORTED_DISCORD_THREAD_TITLE_PROVISIONING_PROTOCOL_VERSION
+        ):
+            return "skipped"
+        desired_title = normalize_discord_projected_title(
+            projection.desired_title or ""
+        )
+        if desired_title is None:
+            return await self._fail_title(
+                projection,
+                now=now,
+                failure_kind="title_invalid",
+                failure_summary=(
+                    "Discord projected title was empty after normalization."
+                ),
+            )
+        if (
+            projection.thread_channel_id is None
+            or projection.expected_provisional_title is None
+        ):
+            return await self._settle_title_relinquished(
+                projection,
+                now=now,
+                reason="thread_identity_missing",
+            )
+        authority = await self._load_title_authority(projection)
+        if authority is None:
+            return await self._fail_title(
+                projection,
+                now=now,
+                failure_kind="authority_revoked",
+                failure_summary="Discord projection authority is no longer current.",
+            )
+        if not _title_delivery_target_matches(
+            projection,
+            authority=authority,
+        ):
+            return await self._settle_title_relinquished(
+                projection,
+                now=now,
+                reason="delivery_channel_conflict",
+            )
+        read = await self.discord_client.read_thread_channel(
+            bot_token=authority.bot_token,
+            guild_id=projection.admission_guild_id,
+            parent_channel_id=projection.admission_parent_channel_id,
+            root_message_id=projection.admission_root_message_id,
+            thread_channel_id=projection.thread_channel_id,
+        )
+        return await self._reconcile_title_read(
+            projection,
+            authority=authority,
+            desired_title=desired_title,
+            result=read,
+            now=now,
+            patch_allowed=True,
+        )
+
+    async def _reconcile_title_read(
+        self,
+        projection: ExternalChannelDiscordThreadTitleProjection,
+        *,
+        authority: DiscordProjectionProvisioningAuthority,
+        desired_title: str,
+        result: DiscordThreadTitleResult,
+        now: datetime.datetime,
+        patch_allowed: bool,
+    ) -> str:
+        """Settle one title GET result or issue its one adjacent name-only PATCH."""
+        if result.status == "failed":
+            return await self._fail_title(
+                projection,
+                now=now,
+                failure_kind=result.error_kind or "provider_rejected",
+                failure_summary=result.error_summary
+                or "Discord rejected the thread title operation.",
+            )
+        if result.status == "unknown" or result.observed_thread is None:
+            return await self._retry_title(
+                projection,
+                now=now,
+                failure_kind=result.error_kind or "provider_ambiguous",
+                failure_summary=result.error_summary
+                or "Discord thread title state was not provable.",
+            )
+        thread = result.observed_thread
+        if thread.owner_id != authority.bot_user_id:
+            return await self._settle_title_relinquished(
+                projection,
+                now=now,
+                reason="provider_thread_owner_changed",
+            )
+        if thread.name == desired_title:
+            return await self._settle_title_applied(
+                projection,
+                expected_bot_user_id=authority.bot_user_id,
+                now=now,
+            )
+        if thread.name != projection.expected_provisional_title:
+            return await self._settle_title_relinquished(
+                projection,
+                now=now,
+                reason="provider_thread_name_taken_over",
+            )
+        if not patch_allowed:
+            return await self._retry_title(
+                projection,
+                now=now,
+                failure_kind="title_patch_unconfirmed",
+                failure_summary="Discord did not confirm the thread title update.",
+            )
+        current_authority = await self._load_title_authority(projection)
+        if current_authority is None:
+            return await self._fail_title(
+                projection,
+                now=now,
+                failure_kind="authority_revoked",
+                failure_summary="Discord projection authority is no longer current.",
+            )
+        if not _title_delivery_target_matches(
+            projection,
+            authority=current_authority,
+        ):
+            return await self._settle_title_relinquished(
+                projection,
+                now=now,
+                reason="delivery_channel_conflict",
+            )
+        if thread.owner_id != current_authority.bot_user_id:
+            return await self._settle_title_relinquished(
+                projection,
+                now=now,
+                reason="provider_thread_owner_changed",
+            )
+        patched = await self.discord_client.patch_thread_name(
+            bot_token=current_authority.bot_token,
+            guild_id=projection.admission_guild_id,
+            parent_channel_id=projection.admission_parent_channel_id,
+            root_message_id=projection.admission_root_message_id,
+            thread_channel_id=thread.channel_id,
+            name=desired_title,
+        )
+        if patched.status != "unknown":
+            return await self._reconcile_title_read(
+                projection,
+                authority=current_authority,
+                desired_title=desired_title,
+                result=patched,
+                now=now,
+                patch_allowed=False,
+            )
+        recovery_authority = await self._load_title_authority(projection)
+        if recovery_authority is None:
+            return await self._fail_title(
+                projection,
+                now=now,
+                failure_kind="authority_revoked",
+                failure_summary="Discord projection authority is no longer current.",
+            )
+        if not _title_delivery_target_matches(
+            projection,
+            authority=recovery_authority,
+        ):
+            return await self._settle_title_relinquished(
+                projection,
+                now=now,
+                reason="delivery_channel_conflict",
+            )
+        reconciled = await self.discord_client.read_thread_channel(
+            bot_token=recovery_authority.bot_token,
+            guild_id=projection.admission_guild_id,
+            parent_channel_id=projection.admission_parent_channel_id,
+            root_message_id=projection.admission_root_message_id,
+            thread_channel_id=thread.channel_id,
+        )
+        return await self._reconcile_title_read(
+            projection,
+            authority=recovery_authority,
+            desired_title=desired_title,
+            result=reconciled,
+            now=now,
+            patch_allowed=False,
+        )
+
+    async def _settle_title_applied(
+        self,
+        projection: ExternalChannelDiscordThreadTitleProjection,
+        *,
+        expected_bot_user_id: str,
+        now: datetime.datetime,
+    ) -> str:
+        """Settle only a currently authoritative exact final-title claim."""
+        async with self.session_manager() as session:
+            authority = await self.authority_loader.load_title(
+                session,
+                projection=projection,
+            )
+            if authority is None or authority.bot_user_id != expected_bot_user_id:
+                settled = await self.title_repository.fail_title(
+                    session,
+                    projection_id=projection.id,
+                    expected_title_attempt_count=projection.title_attempt_count,
+                    expected_title_claimed_at=_title_claimed_at(projection),
+                    failure_kind="authority_revoked",
+                    failure_summary=(
+                        "Discord projection authority is no longer current."
+                    ),
+                    now=now,
+                )
+            else:
+                settled = await self.title_repository.settle_title_applied(
+                    session,
+                    projection_id=projection.id,
+                    expected_title_attempt_count=projection.title_attempt_count,
+                    expected_title_claimed_at=_title_claimed_at(projection),
+                    now=now,
+                )
+            await session.commit()
+        return _title_settlement_outcome(settled)
+
+    async def _settle_title_relinquished(
+        self,
+        projection: ExternalChannelDiscordThreadTitleProjection,
+        *,
+        now: datetime.datetime,
+        reason: str,
+    ) -> str:
+        """Preserve the provider name while terminally releasing title authority."""
+        async with self.session_manager() as session:
+            settled = await self.title_repository.settle_title_relinquished(
+                session,
+                projection_id=projection.id,
+                expected_title_attempt_count=projection.title_attempt_count,
+                expected_title_claimed_at=_title_claimed_at(projection),
+                reason=reason,
+                now=now,
+            )
+            await session.commit()
+        return _title_settlement_outcome(settled)
+
+    async def _retry_title(
+        self,
+        projection: ExternalChannelDiscordThreadTitleProjection,
+        *,
+        now: datetime.datetime,
+        failure_kind: str,
+        failure_summary: str,
+    ) -> str:
+        """Release the exact title claim with bounded exponential retry delay."""
+        async with self.session_manager() as session:
+            retried = await self.title_repository.retry_title(
+                session,
+                projection_id=projection.id,
+                expected_title_attempt_count=projection.title_attempt_count,
+                expected_title_claimed_at=_title_claimed_at(projection),
+                next_attempt_at=now
+                + datetime.timedelta(
+                    seconds=min(
+                        _MAX_RETRY_SECONDS,
+                        2 ** min(projection.title_attempt_count, 8),
+                    )
+                ),
+                failure_kind=failure_kind,
+                failure_summary=failure_summary,
+            )
+            await session.commit()
+        return "retry" if retried is not None else "lost"
+
+    async def _fail_title(
+        self,
+        projection: ExternalChannelDiscordThreadTitleProjection,
+        *,
+        now: datetime.datetime,
+        failure_kind: str,
+        failure_summary: str,
+    ) -> str:
+        """Terminalize one exact title claim without another provider mutation."""
+        async with self.session_manager() as session:
+            failed = await self.title_repository.fail_title(
+                session,
+                projection_id=projection.id,
+                expected_title_attempt_count=projection.title_attempt_count,
+                expected_title_claimed_at=_title_claimed_at(projection),
+                failure_kind=failure_kind,
+                failure_summary=failure_summary,
+                now=now,
+            )
+            await session.commit()
+        return _title_settlement_outcome(failed)
 
     async def _settle_existing(
         self,
@@ -542,6 +917,17 @@ class DiscordProjectionReconciliationService:
         async with self.session_manager() as session:
             return await self.authority_loader.load(session, projection=projection)
 
+    async def _load_title_authority(
+        self,
+        projection: ExternalChannelDiscordThreadTitleProjection,
+    ) -> DiscordProjectionProvisioningAuthority | None:
+        """Load final-title authority before every title provider operation."""
+        async with self.session_manager() as session:
+            return await self.authority_loader.load_title(
+                session,
+                projection=projection,
+            )
+
 
 def _connection_matches_projection(
     connection: ExternalChannelConnectionConfiguration | None,
@@ -581,6 +967,18 @@ def _delivery_channel_id(resource: ExternalChannelResource) -> str | None:
     """Read only the canonical target for adoption consistency, never ownership."""
     value = (resource.labels or {}).get("delivery_channel_id")
     return value if isinstance(value, str) and value else None
+
+
+def _title_delivery_target_matches(
+    projection: ExternalChannelDiscordThreadTitleProjection,
+    *,
+    authority: DiscordProjectionProvisioningAuthority,
+) -> bool:
+    """Require one nonempty canonical target equal to the immutable title thread."""
+    return bool(
+        projection.thread_channel_id
+        and authority.delivery_channel_id == projection.thread_channel_id
+    )
 
 
 def _thread_proof_matches(
@@ -623,6 +1021,15 @@ def _claimed_at(
     return projection.provision_claimed_at
 
 
+def _title_claimed_at(
+    projection: ExternalChannelDiscordThreadTitleProjection,
+) -> datetime.datetime:
+    """Return the required repository final-title claim fence timestamp."""
+    if projection.title_claimed_at is None:
+        raise RuntimeError("Claimed projection is missing its title timestamp.")
+    return projection.title_claimed_at
+
+
 def _durable_settlement_outcome(
     projection: ExternalChannelDiscordThreadTitleProjection | None,
 ) -> str:
@@ -635,6 +1042,23 @@ def _durable_settlement_outcome(
         case ExternalChannelDiscordThreadTitleProvisioningStatus.UNMANAGED:
             return "unmanaged"
         case ExternalChannelDiscordThreadTitleProvisioningStatus.FAILED:
+            return "failed"
+        case _:
+            return "lost"
+
+
+def _title_settlement_outcome(
+    projection: ExternalChannelDiscordThreadTitleProjection | None,
+) -> str:
+    """Report only one durable final-title settlement outcome."""
+    if projection is None:
+        return "lost"
+    match projection.title_status:
+        case ExternalChannelDiscordThreadTitleStatus.APPLIED:
+            return "applied"
+        case ExternalChannelDiscordThreadTitleStatus.RELINQUISHED:
+            return "relinquished"
+        case ExternalChannelDiscordThreadTitleStatus.FAILED:
             return "failed"
         case _:
             return "lost"

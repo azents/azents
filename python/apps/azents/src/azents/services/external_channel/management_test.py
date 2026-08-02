@@ -43,6 +43,7 @@ from azents.repos.external_channel.management_data import (
     ManagedConnection,
     ManagedMultiRoute,
 )
+from azents.repos.external_channel.title import ExternalChannelTitleRepository
 from azents.services.external_channel.connection import (
     ExternalChannelConnectionService,
 )
@@ -820,7 +821,9 @@ async def test_discord_replacement_failure_leaves_durable_fence_committed() -> N
     activation_service.activate.assert_awaited_once_with(connection_id="connection-1")
 
 
-async def test_replace_discord_configuration_invalidates_prior_authority() -> None:
+async def test_replace_discord_configuration_invalidates_prior_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Credential replacement clears callback, identity, health, and lease state."""
     connection = cast(
         RDBExternalChannelConnection,
@@ -858,6 +861,12 @@ async def test_replace_discord_configuration_invalidates_prior_authority() -> No
     session = AsyncMock(spec=AsyncSession)
     repository = ExternalChannelManagementRepository()
     repository.get_connection = AsyncMock(return_value=(connection, route))
+    terminalize = AsyncMock()
+    monkeypatch.setattr(
+        ExternalChannelTitleRepository,
+        "terminalize_connection_projections",
+        terminalize,
+    )
 
     result = await repository.replace_discord_configuration(
         session,
@@ -892,6 +901,11 @@ async def test_replace_discord_configuration_invalidates_prior_authority() -> No
     assert connection.socket_heartbeat_at is None
     assert connection.socket_gap_detected_at is None
     assert connection.socket_gap_reason is None
+    terminalize.assert_awaited_once()
+    terminalize_args = terminalize.await_args
+    assert terminalize_args is not None
+    assert terminalize_args.kwargs["connection_id"] == connection.id
+    assert terminalize_args.kwargs["reason"] == "discord_configuration_replaced"
 
 
 def _multi_route(

@@ -120,6 +120,12 @@ def test_external_channel_manifest_excludes_canonical_provider_state() -> None:
         "external_channel_delivery_attempts": (
             SessionLifecycleResourceClassification.LIFECYCLE_ROOT
         ),
+        "external_channel_session_title_candidates": (
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT
+        ),
+        "external_channel_discord_thread_title_projections": (
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT
+        ),
     }
 
 

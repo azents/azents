@@ -1,6 +1,7 @@
 """External Channel automatic Session-title persistence."""
 
 import datetime
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -111,6 +112,29 @@ class ExternalChannelTitleRepository:
         )
 
     @staticmethod
+    async def _lock_attempting_title(
+        session: AsyncSession,
+        *,
+        projection_id: str,
+        expected_title_attempt_count: int,
+        expected_title_claimed_at: datetime.datetime,
+    ) -> RDBExternalChannelDiscordThreadTitleProjection | None:
+        """Lock only the exact current generated-title claim fence."""
+        return await session.scalar(
+            sa.select(RDBExternalChannelDiscordThreadTitleProjection)
+            .where(
+                RDBExternalChannelDiscordThreadTitleProjection.id == projection_id,
+                RDBExternalChannelDiscordThreadTitleProjection.title_status
+                == ExternalChannelDiscordThreadTitleStatus.ATTEMPTING,
+                RDBExternalChannelDiscordThreadTitleProjection.title_attempt_count
+                == expected_title_attempt_count,
+                RDBExternalChannelDiscordThreadTitleProjection.title_claimed_at
+                == expected_title_claimed_at,
+            )
+            .with_for_update(nowait=True)
+        )
+
+    @staticmethod
     async def _lock_projection_resource(
         session: AsyncSession,
         *,
@@ -120,7 +144,7 @@ class ExternalChannelTitleRepository:
         return await session.scalar(
             sa.select(RDBExternalChannelResource)
             .where(RDBExternalChannelResource.id == projection.resource_id)
-            .with_for_update()
+            .with_for_update(nowait=True)
         )
 
     @staticmethod
@@ -128,6 +152,7 @@ class ExternalChannelTitleRepository:
         session: AsyncSession,
         *,
         projection: RDBExternalChannelDiscordThreadTitleProjection,
+        title_generation_event_id: str | None,
     ) -> RDBExternalChannelResource | None:
         """Lock and revalidate every durable owner before provider settlement."""
         resource = await ExternalChannelTitleRepository._lock_projection_resource(
@@ -149,29 +174,41 @@ class ExternalChannelTitleRepository:
                 == projection.agent_session_id,
                 RDBExternalChannelBinding.disconnected_at.is_(None),
             )
-            .with_for_update()
+            .with_for_update(nowait=True)
         )
-        candidate = await session.scalar(
-            sa.select(RDBExternalChannelSessionTitleCandidate)
-            .where(
-                RDBExternalChannelSessionTitleCandidate.id
-                == projection.session_title_candidate_id,
-                RDBExternalChannelSessionTitleCandidate.agent_session_id
-                == projection.agent_session_id,
-                RDBExternalChannelSessionTitleCandidate.binding_id
-                == projection.binding_id,
-                RDBExternalChannelSessionTitleCandidate.trigger_provider_message_key
-                == projection.admission_trigger_provider_message_key,
-                RDBExternalChannelSessionTitleCandidate.admission_provisional_title
-                == projection.requested_provisional_title,
+        candidate_conditions: list[sa.ColumnElement[bool]] = [
+            RDBExternalChannelSessionTitleCandidate.id
+            == projection.session_title_candidate_id,
+            RDBExternalChannelSessionTitleCandidate.agent_session_id
+            == projection.agent_session_id,
+            RDBExternalChannelSessionTitleCandidate.binding_id == projection.binding_id,
+            RDBExternalChannelSessionTitleCandidate.trigger_provider_message_key
+            == projection.admission_trigger_provider_message_key,
+            RDBExternalChannelSessionTitleCandidate.admission_provisional_title
+            == projection.requested_provisional_title,
+        ]
+        if title_generation_event_id is None:
+            candidate_conditions.append(
                 RDBExternalChannelSessionTitleCandidate.status.in_(
                     (
                         ExternalChannelSessionTitleCandidateStatus.PENDING,
                         ExternalChannelSessionTitleCandidateStatus.CONSUMED,
                     )
-                ),
+                )
             )
-            .with_for_update()
+        else:
+            candidate_conditions.extend(
+                (
+                    RDBExternalChannelSessionTitleCandidate.status
+                    == ExternalChannelSessionTitleCandidateStatus.CONSUMED,
+                    RDBExternalChannelSessionTitleCandidate.consumed_event_id
+                    == title_generation_event_id,
+                )
+            )
+        candidate = await session.scalar(
+            sa.select(RDBExternalChannelSessionTitleCandidate)
+            .where(*candidate_conditions)
+            .with_for_update(nowait=True)
         )
         agent_session = await session.scalar(
             sa.select(RDBAgentSession)
@@ -181,7 +218,7 @@ class ExternalChannelTitleRepository:
                 RDBAgentSession.stop_requested_at.is_(None),
                 RDBAgentSession.ended_at.is_(None),
             )
-            .with_for_update()
+            .with_for_update(nowait=True)
         )
         if binding is None or candidate is None or agent_session is None:
             return None
@@ -195,7 +232,7 @@ class ExternalChannelTitleRepository:
                 RDBExternalChannelAgentRoute.catalog_status
                 == ExternalChannelRouteCatalogStatus.AVAILABLE,
             )
-            .with_for_update()
+            .with_for_update(nowait=True)
         )
         if route is None:
             return None
@@ -205,7 +242,7 @@ class ExternalChannelTitleRepository:
                 RDBAgent.id == agent_session.agent_id,
                 RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
             )
-            .with_for_update()
+            .with_for_update(nowait=True)
         )
         connection = await session.scalar(
             sa.select(RDBExternalChannelConnection)
@@ -226,9 +263,58 @@ class ExternalChannelTitleRepository:
                 RDBExternalChannelConnection.encrypted_credentials.is_not(None),
                 RDBExternalChannelConnection.app_mode == route.connection_app_mode,
             )
-            .with_for_update()
+            .with_for_update(nowait=True)
         )
         return resource if agent is not None and connection is not None else None
+
+    @staticmethod
+    async def _lock_current_title_settlement(
+        session: AsyncSession,
+        *,
+        projection_id: str,
+        expected_title_attempt_count: int,
+        expected_title_claimed_at: datetime.datetime,
+    ) -> (
+        tuple[
+            RDBExternalChannelDiscordThreadTitleProjection,
+            RDBExternalChannelResource,
+        ]
+        | None
+    ):
+        """Lock title owners before its projection claim to match lifecycle order."""
+        observed = await session.get(
+            RDBExternalChannelDiscordThreadTitleProjection,
+            projection_id,
+        )
+        if observed is None:
+            return None
+        resource = (
+            await ExternalChannelTitleRepository._lock_current_settlement_resource(
+                session,
+                projection=observed,
+                title_generation_event_id=observed.title_generation_event_id,
+            )
+        )
+        if resource is None:
+            return None
+        projection = await ExternalChannelTitleRepository._lock_attempting_title(
+            session,
+            projection_id=projection_id,
+            expected_title_attempt_count=expected_title_attempt_count,
+            expected_title_claimed_at=expected_title_claimed_at,
+        )
+        if projection is None:
+            return None
+        resource = (
+            await ExternalChannelTitleRepository._lock_current_settlement_resource(
+                session,
+                projection=projection,
+                title_generation_event_id=projection.title_generation_event_id,
+            )
+        )
+        if resource is None:
+            return None
+        return projection, resource
 
     @staticmethod
     def _terminalize_provisioning(
@@ -251,6 +337,36 @@ class ExternalChannelTitleRepository:
         projection.title_failure_kind = reason
         projection.title_failure_summary = reason
         projection.title_completed_at = now
+
+    @staticmethod
+    def _terminalize_title(
+        projection: RDBExternalChannelDiscordThreadTitleProjection,
+        *,
+        title_status: ExternalChannelDiscordThreadTitleStatus,
+        failure_kind: str | None,
+        failure_summary: str | None,
+        now: datetime.datetime,
+    ) -> None:
+        """Terminalize the exact final-title claim without reopening it."""
+        projection.title_status = title_status
+        projection.title_next_attempt_at = None
+        projection.title_claimed_at = None
+        projection.title_failure_kind = failure_kind
+        projection.title_failure_summary = failure_summary
+        projection.title_completed_at = now
+
+    @staticmethod
+    def _title_delivery_target_matches(
+        resource: RDBExternalChannelResource,
+        *,
+        projection: RDBExternalChannelDiscordThreadTitleProjection,
+    ) -> bool:
+        """Require the final rename target to equal the canonical Resource target."""
+        thread_channel_id = projection.thread_channel_id
+        if thread_channel_id is None:
+            return False
+        labels = resource.labels or {}
+        return labels.get("delivery_channel_id") == thread_channel_id
 
     @staticmethod
     def _set_delivery_channel_if_compatible(
@@ -652,11 +768,52 @@ class ExternalChannelTitleRepository:
         limit: int,
     ) -> tuple[ExternalChannelDiscordThreadTitleProjection, ...]:
         """Claim bounded due or stale final-title projections for current Workers."""
+        candidate_status = RDBExternalChannelSessionTitleCandidate.status
+        candidate_provisional_title = (
+            RDBExternalChannelSessionTitleCandidate.admission_provisional_title
+        )
+        projection_provisional_title = (
+            RDBExternalChannelDiscordThreadTitleProjection.requested_provisional_title
+        )
+        projection_thread_channel_id = (
+            RDBExternalChannelDiscordThreadTitleProjection.thread_channel_id
+        )
         rows = list(
             (
                 await session.scalars(
                     sa.select(RDBExternalChannelDiscordThreadTitleProjection)
+                    .join(
+                        RDBExternalChannelSessionTitleCandidate,
+                        RDBExternalChannelSessionTitleCandidate.id
+                        == (
+                            RDBExternalChannelDiscordThreadTitleProjection.session_title_candidate_id
+                        ),
+                    )
+                    .join(
+                        RDBExternalChannelResource,
+                        RDBExternalChannelResource.id
+                        == RDBExternalChannelDiscordThreadTitleProjection.resource_id,
+                    )
                     .where(
+                        RDBExternalChannelDiscordThreadTitleProjection.provisioning_protocol_version
+                        == SUPPORTED_DISCORD_THREAD_TITLE_PROVISIONING_PROTOCOL_VERSION,
+                        candidate_provisional_title == projection_provisional_title,
+                        RDBExternalChannelResource.connection_id
+                        == (
+                            RDBExternalChannelDiscordThreadTitleProjection.admission_connection_id
+                        ),
+                        RDBExternalChannelResource.status
+                        == ExternalChannelResourceStatus.ACTIVE,
+                        RDBExternalChannelResource.labels[
+                            "delivery_channel_id"
+                        ].as_string()
+                        == projection_thread_channel_id,
+                        candidate_status
+                        == ExternalChannelSessionTitleCandidateStatus.CONSUMED,
+                        RDBExternalChannelSessionTitleCandidate.consumed_event_id
+                        == (
+                            RDBExternalChannelDiscordThreadTitleProjection.title_generation_event_id
+                        ),
                         RDBExternalChannelDiscordThreadTitleProjection.provisioning_status
                         == ExternalChannelDiscordThreadTitleProvisioningStatus.READY,
                         sa.or_(
@@ -695,6 +852,305 @@ class ExternalChannelTitleRepository:
         for row in rows:
             await session.refresh(row)
         return tuple(self._projection(row) for row in rows)
+
+    async def settle_title_applied(
+        self,
+        session: AsyncSession,
+        *,
+        projection_id: str,
+        expected_title_attempt_count: int,
+        expected_title_claimed_at: datetime.datetime,
+        now: datetime.datetime,
+    ) -> ExternalChannelDiscordThreadTitleProjection | None:
+        """Persist one owned successful final title rename behind its exact fence."""
+        locked = await self._lock_current_title_settlement(
+            session,
+            projection_id=projection_id,
+            expected_title_attempt_count=expected_title_attempt_count,
+            expected_title_claimed_at=expected_title_claimed_at,
+        )
+        if locked is None:
+            return None
+        projection, resource = locked
+        if not self._title_delivery_target_matches(
+            resource,
+            projection=projection,
+        ):
+            self._terminalize_title(
+                projection,
+                title_status=ExternalChannelDiscordThreadTitleStatus.RELINQUISHED,
+                failure_kind="delivery_channel_conflict",
+                failure_summary="delivery_channel_conflict",
+                now=now,
+            )
+        else:
+            self._terminalize_title(
+                projection,
+                title_status=ExternalChannelDiscordThreadTitleStatus.APPLIED,
+                failure_kind=None,
+                failure_summary=None,
+                now=now,
+            )
+        await session.flush()
+        await self._refresh_projections(session, [projection])
+        return self._projection(projection)
+
+    async def settle_title_relinquished(
+        self,
+        session: AsyncSession,
+        *,
+        projection_id: str,
+        expected_title_attempt_count: int,
+        expected_title_claimed_at: datetime.datetime,
+        reason: str,
+        now: datetime.datetime,
+    ) -> ExternalChannelDiscordThreadTitleProjection | None:
+        """Persist an owned terminal decision to leave the final title unchanged."""
+        self._validate_relinquished_reason(reason)
+        locked = await self._lock_current_title_settlement(
+            session,
+            projection_id=projection_id,
+            expected_title_attempt_count=expected_title_attempt_count,
+            expected_title_claimed_at=expected_title_claimed_at,
+        )
+        if locked is None:
+            return None
+        projection, resource = locked
+        if not self._title_delivery_target_matches(
+            resource,
+            projection=projection,
+        ):
+            self._terminalize_title(
+                projection,
+                title_status=ExternalChannelDiscordThreadTitleStatus.RELINQUISHED,
+                failure_kind="delivery_channel_conflict",
+                failure_summary="delivery_channel_conflict",
+                now=now,
+            )
+        else:
+            self._terminalize_title(
+                projection,
+                title_status=ExternalChannelDiscordThreadTitleStatus.RELINQUISHED,
+                failure_kind=reason,
+                failure_summary=reason,
+                now=now,
+            )
+        await session.flush()
+        await self._refresh_projections(session, [projection])
+        return self._projection(projection)
+
+    async def retry_title(
+        self,
+        session: AsyncSession,
+        *,
+        projection_id: str,
+        expected_title_attempt_count: int,
+        expected_title_claimed_at: datetime.datetime,
+        next_attempt_at: datetime.datetime,
+        failure_kind: str,
+        failure_summary: str,
+    ) -> ExternalChannelDiscordThreadTitleProjection | None:
+        """Release one exact transient final-title claim for a later retry."""
+        self._validate_failure(
+            failure_kind=failure_kind,
+            failure_summary=failure_summary,
+        )
+        projection = await self._lock_attempting_title(
+            session,
+            projection_id=projection_id,
+            expected_title_attempt_count=expected_title_attempt_count,
+            expected_title_claimed_at=expected_title_claimed_at,
+        )
+        if projection is None:
+            return None
+        projection.title_status = ExternalChannelDiscordThreadTitleStatus.RETRY_WAIT
+        projection.title_next_attempt_at = next_attempt_at
+        projection.title_claimed_at = None
+        projection.title_failure_kind = failure_kind
+        projection.title_failure_summary = failure_summary
+        await session.flush()
+        await self._refresh_projections(session, [projection])
+        return self._projection(projection)
+
+    async def fail_title(
+        self,
+        session: AsyncSession,
+        *,
+        projection_id: str,
+        expected_title_attempt_count: int,
+        expected_title_claimed_at: datetime.datetime,
+        failure_kind: str,
+        failure_summary: str,
+        now: datetime.datetime,
+    ) -> ExternalChannelDiscordThreadTitleProjection | None:
+        """Terminalize one exact final-title claim after a permanent failure."""
+        self._validate_failure(
+            failure_kind=failure_kind,
+            failure_summary=failure_summary,
+        )
+        projection = await self._lock_attempting_title(
+            session,
+            projection_id=projection_id,
+            expected_title_attempt_count=expected_title_attempt_count,
+            expected_title_claimed_at=expected_title_claimed_at,
+        )
+        if projection is None:
+            return None
+        self._terminalize_title(
+            projection,
+            title_status=ExternalChannelDiscordThreadTitleStatus.FAILED,
+            failure_kind=failure_kind,
+            failure_summary=failure_summary,
+            now=now,
+        )
+        await session.flush()
+        await self._refresh_projections(session, [projection])
+        return self._projection(projection)
+
+    async def terminalize_lifecycle_projections(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: Sequence[str],
+        binding_ids: Sequence[str],
+        resource_ids: Sequence[str],
+        reason: str,
+        now: datetime.datetime,
+    ) -> None:
+        """Terminalize nonfinal title work without performing provider I/O."""
+        self._validate_relinquished_reason(reason)
+        conditions: list[sa.ColumnElement[bool]] = []
+        if session_ids:
+            conditions.append(
+                RDBExternalChannelDiscordThreadTitleProjection.agent_session_id.in_(
+                    tuple(session_ids)
+                )
+            )
+        if binding_ids:
+            conditions.append(
+                RDBExternalChannelDiscordThreadTitleProjection.binding_id.in_(
+                    tuple(binding_ids)
+                )
+            )
+        if resource_ids:
+            conditions.append(
+                RDBExternalChannelDiscordThreadTitleProjection.resource_id.in_(
+                    tuple(resource_ids)
+                )
+            )
+        if not conditions:
+            return
+        scope = sa.or_(*conditions)
+        await session.execute(
+            sa.update(RDBExternalChannelDiscordThreadTitleProjection)
+            .where(
+                scope,
+                RDBExternalChannelDiscordThreadTitleProjection.provisioning_status.in_(
+                    (
+                        ExternalChannelDiscordThreadTitleProvisioningStatus.PENDING,
+                        ExternalChannelDiscordThreadTitleProvisioningStatus.ATTEMPTING,
+                        ExternalChannelDiscordThreadTitleProvisioningStatus.RETRY_WAIT,
+                    )
+                ),
+            )
+            .values(
+                provisioning_status=(
+                    ExternalChannelDiscordThreadTitleProvisioningStatus.FAILED
+                ),
+                provision_next_attempt_at=None,
+                provision_claimed_at=None,
+                provision_failure_kind=reason,
+                provision_failure_summary=reason,
+                provision_completed_at=now,
+            )
+        )
+        await session.execute(
+            sa.update(RDBExternalChannelDiscordThreadTitleProjection)
+            .where(
+                scope,
+                RDBExternalChannelDiscordThreadTitleProjection.title_status.in_(
+                    (
+                        ExternalChannelDiscordThreadTitleStatus.WAITING,
+                        ExternalChannelDiscordThreadTitleStatus.PENDING,
+                        ExternalChannelDiscordThreadTitleStatus.ATTEMPTING,
+                        ExternalChannelDiscordThreadTitleStatus.RETRY_WAIT,
+                    )
+                ),
+            )
+            .values(
+                title_status=ExternalChannelDiscordThreadTitleStatus.RELINQUISHED,
+                title_next_attempt_at=None,
+                title_claimed_at=None,
+                title_failure_kind=reason,
+                title_failure_summary=reason,
+                title_completed_at=now,
+            )
+        )
+
+    async def terminalize_connection_projections(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        reason: str,
+        now: datetime.datetime,
+    ) -> None:
+        """Terminalize all nonfinal Discord title work owned by one connection."""
+        resource_ids = tuple(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelResource.id).where(
+                        RDBExternalChannelResource.connection_id == connection_id
+                    )
+                )
+            ).all()
+        )
+        await self.terminalize_lifecycle_projections(
+            session,
+            session_ids=(),
+            binding_ids=(),
+            resource_ids=resource_ids,
+            reason=reason,
+            now=now,
+        )
+
+    async def validate_lifecycle_projections_terminal(
+        self,
+        session: AsyncSession,
+        *,
+        session_ids: Sequence[str],
+    ) -> None:
+        """Reject restore when prior title work would become active again."""
+        if not session_ids:
+            return
+        remaining = await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(RDBExternalChannelDiscordThreadTitleProjection)
+            .where(
+                RDBExternalChannelDiscordThreadTitleProjection.agent_session_id.in_(
+                    tuple(session_ids)
+                ),
+                sa.or_(
+                    RDBExternalChannelDiscordThreadTitleProjection.provisioning_status.in_(
+                        (
+                            ExternalChannelDiscordThreadTitleProvisioningStatus.PENDING,
+                            ExternalChannelDiscordThreadTitleProvisioningStatus.ATTEMPTING,
+                            ExternalChannelDiscordThreadTitleProvisioningStatus.RETRY_WAIT,
+                        )
+                    ),
+                    RDBExternalChannelDiscordThreadTitleProjection.title_status.in_(
+                        (
+                            ExternalChannelDiscordThreadTitleStatus.WAITING,
+                            ExternalChannelDiscordThreadTitleStatus.PENDING,
+                            ExternalChannelDiscordThreadTitleStatus.ATTEMPTING,
+                            ExternalChannelDiscordThreadTitleStatus.RETRY_WAIT,
+                        )
+                    ),
+                ),
+            )
+        )
+        if remaining:
+            raise RuntimeError("Restored External Channel title work was reactivated")
 
     async def persist_provisioning_preflight(
         self,
@@ -752,6 +1208,7 @@ class ExternalChannelTitleRepository:
         resource = await self._lock_current_settlement_resource(
             session,
             projection=projection,
+            title_generation_event_id=None,
         )
         if resource is None:
             self._terminalize_provisioning(
@@ -826,6 +1283,7 @@ class ExternalChannelTitleRepository:
         resource = await self._lock_current_settlement_resource(
             session,
             projection=projection,
+            title_generation_event_id=None,
         )
         if resource is None:
             self._terminalize_provisioning(

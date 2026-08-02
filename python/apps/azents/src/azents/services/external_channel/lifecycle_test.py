@@ -265,7 +265,12 @@ async def test_archive_selects_only_active_work_for_progress_cleanup() -> None:
     )
 
     work_select = str(session.scalar_statements[2])
-    progress_insert = session.execute_statements[0].compile().params
+    progress_insert = next(
+        statement.compile().params
+        for statement in session.execute_statements
+        if "external_channel_delivery_attempts" in str(statement)
+        and "progress-message-1" in str(statement.compile().params)
+    )
     assert progress_insert is not None
     assert "external_channel_works.status =" in work_select
     assert active_work.state_revision == 8

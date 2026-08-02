@@ -10,6 +10,7 @@ from azents.services.external_channel.discord_delivery import (
     DiscordDeliveryClient,
     DiscordOutboundFile,
     discord_delivery_nonce,
+    normalize_discord_projected_title,
     normalize_discord_thread_name,
 )
 
@@ -325,6 +326,145 @@ def test_normalize_discord_thread_name_is_deterministic_and_bounded() -> None:
     )
     assert normalize_discord_thread_name(None) == "Azents"
     assert len(normalize_discord_thread_name("x" * 101)) == 100
+
+
+def test_normalize_discord_projected_title_rejects_blank_content_without_fallback() -> (
+    None
+):
+    """Final generated titles do not gain a provisional-name fallback."""
+    assert normalize_discord_projected_title("  Incident   response ") == (
+        "Incident response"
+    )
+    assert normalize_discord_projected_title(" \t\n ") is None
+    assert len(normalize_discord_projected_title("x" * 101) or "") == 100
+
+
+@pytest.mark.asyncio
+async def test_read_thread_channel_requires_exact_complete_identity() -> None:
+    """A final title GET accepts only the immutable thread's complete identity."""
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "id": "444",
+                "guild_id": "111",
+                "parent_id": "222",
+                "owner_id": "bot-001",
+                "name": "Stored provisional title",
+                "thread_metadata": {"create_timestamp": "2026-08-02T00:00:00+00:00"},
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await DiscordDeliveryClient(client).read_thread_channel(
+            bot_token="discord-secret",
+            guild_id="111",
+            parent_channel_id="222",
+            root_message_id="333",
+            thread_channel_id="444",
+        )
+
+    assert result.status == "present"
+    assert result.observed_thread is not None
+    assert result.observed_thread.name == "Stored provisional title"
+    assert calls[0].url.path == "/api/v10/channels/444"
+    assert calls[0].headers["Authorization"] == "Bot discord-secret"
+
+
+@pytest.mark.asyncio
+async def test_read_thread_channel_rejects_mismatched_or_incomplete_identity() -> None:
+    """A direct GET never treats a different or incomplete thread as current."""
+    responses = [
+        {
+            "id": "other",
+            "guild_id": "111",
+            "parent_id": "222",
+            "owner_id": "bot-001",
+            "name": "Stored provisional title",
+            "thread_metadata": {"create_timestamp": "2026-08-02T00:00:00+00:00"},
+        },
+        {
+            "id": "444",
+            "guild_id": "111",
+            "parent_id": "222",
+            "name": "Stored provisional title",
+        },
+    ]
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(200, json=responses.pop(0))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        discord = DiscordDeliveryClient(client)
+        mismatched = await discord.read_thread_channel(
+            bot_token="discord-secret",
+            guild_id="111",
+            parent_channel_id="222",
+            root_message_id="333",
+            thread_channel_id="444",
+        )
+        incomplete = await discord.read_thread_channel(
+            bot_token="discord-secret",
+            guild_id="111",
+            parent_channel_id="222",
+            root_message_id="333",
+            thread_channel_id="444",
+        )
+
+    assert mismatched.status == "unknown"
+    assert mismatched.error_kind == "thread_identity_invalid"
+    assert incomplete.status == "unknown"
+    assert incomplete.error_kind == "thread_proof_incomplete"
+
+
+@pytest.mark.asyncio
+async def test_patch_thread_name_is_name_only_and_rejects_empty_title() -> None:
+    """The final-title adapter changes only a normalized nonempty thread name."""
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "id": "444",
+                "guild_id": "111",
+                "parent_id": "222",
+                "owner_id": "bot-001",
+                "name": "Generated final title",
+                "thread_metadata": {"create_timestamp": "2026-08-02T00:00:00+00:00"},
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        discord = DiscordDeliveryClient(client)
+        rejected = await discord.patch_thread_name(
+            bot_token="discord-secret",
+            guild_id="111",
+            parent_channel_id="222",
+            root_message_id="333",
+            thread_channel_id="444",
+            name=" \t",
+        )
+        result = await discord.patch_thread_name(
+            bot_token="discord-secret",
+            guild_id="111",
+            parent_channel_id="222",
+            root_message_id="333",
+            thread_channel_id="444",
+            name=" Generated   final title ",
+        )
+
+    assert rejected.status == "failed"
+    assert rejected.error_kind == "title_invalid"
+    assert result.status == "present"
+    assert json.loads(calls[0].content) == {"name": "Generated final title"}
+    assert calls[0].method == "PATCH"
+    assert calls[0].url.path == "/api/v10/channels/444"
 
 
 @pytest.mark.asyncio

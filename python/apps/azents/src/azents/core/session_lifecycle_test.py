@@ -197,7 +197,7 @@ def test_external_channel_participant_declares_session_owned_foundation_state() 
     """External Channel foundation state is lifecycle-classified before activation."""
     participant = get_session_lifecycle_registry().get("session.external-channel")
 
-    assert participant.policy_version == 1
+    assert participant.policy_version == 2
     assert participant.dependencies == ("session.execution",)
     assert participant.archive_policy is SessionLifecycleTransitionPolicy.TERMINATE
     assert participant.restore_policy is SessionLifecycleTransitionPolicy.PRESERVE
@@ -228,6 +228,14 @@ def test_external_channel_participant_declares_session_owned_foundation_state() 
         ),
         (
             "external_channel_delivery_attempts",
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+        ),
+        (
+            "external_channel_session_title_candidates",
+            SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+        ),
+        (
+            "external_channel_discord_thread_title_projections",
             SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
         ),
     }

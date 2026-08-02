@@ -59,7 +59,7 @@ def get_session_lifecycle_registry() -> SessionLifecycleRegistry:
             ),
             SessionLifecycleParticipantDefinition(
                 key="session.external-channel",
-                policy_version=1,
+                policy_version=2,
                 dependencies=("session.execution",),
                 owned_resources=(
                     _database_resource(
@@ -89,6 +89,16 @@ def get_session_lifecycle_registry() -> SessionLifecycleRegistry:
                     ),
                     _database_resource(
                         "external_channel_delivery_attempts",
+                        SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+                        "test_session_lifecycle_external_channel",
+                    ),
+                    _database_resource(
+                        "external_channel_session_title_candidates",
+                        SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
+                        "test_session_lifecycle_external_channel",
+                    ),
+                    _database_resource(
+                        "external_channel_discord_thread_title_projections",
                         SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
                         "test_session_lifecycle_external_channel",
                     ),
