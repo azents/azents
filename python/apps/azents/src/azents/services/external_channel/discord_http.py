@@ -245,6 +245,7 @@ class DiscordHTTPAdmissionService:
             return DiscordHTTPAdmissionResult(envelope=envelope, admission=admission)
         try:
             response = await self.settings_response_service.component_response(
+                interaction_id=admission.interaction.id,
                 scope=parse_discord_settings_custom_id(
                     custom_id=custom_id,
                     secret=self.settings_response_service.config.auth.jwt.secret_key,

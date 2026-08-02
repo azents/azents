@@ -98,6 +98,7 @@ class DiscordSettingsResponseService:
     async def component_response(
         self,
         *,
+        interaction_id: str,
         scope: DiscordSettingsScope,
         context: DiscordSettingsContext,
         now: datetime.datetime,
@@ -105,7 +106,11 @@ class DiscordSettingsResponseService:
         """Revalidate one signed component and commit its canonical mutation."""
         try:
             if scope.action == "open_binding":
-                return await self._binding_open_response(scope=scope, context=context)
+                return await self._binding_open_response(
+                    scope=scope,
+                    context=context,
+                    interaction_id=interaction_id,
+                )
             effective_context = (
                 DiscordSettingsContext(
                     connection_id=context.connection_id,
@@ -166,6 +171,7 @@ class DiscordSettingsResponseService:
         *,
         scope: DiscordSettingsScope,
         context: DiscordSettingsContext,
+        interaction_id: str,
     ) -> DiscordSettingsResponse:
         """Open settings from a shared joined-presence Binding control."""
         settings = await self._resolve(context)
@@ -179,7 +185,7 @@ class DiscordSettingsResponseService:
         return DiscordSettingsResponse(
             response=_settings_response(
                 settings=settings,
-                origin_interaction_id=scope.origin_interaction_id,
+                origin_interaction_id=interaction_id,
                 secret=self.config.auth.jwt.secret_key,
             ),
             cleanup_delivery_ids=(),

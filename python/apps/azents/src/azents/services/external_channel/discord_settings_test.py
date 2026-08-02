@@ -38,6 +38,7 @@ from azents.services.external_channel.discord_settings import (
 from azents.services.external_channel.discord_settings_scope import (
     DiscordSettingsScope,
     discord_binding_version,
+    parse_discord_settings_custom_id,
 )
 from azents.services.external_channel.participation import (
     ExternalChannelParticipationService,
@@ -230,6 +231,7 @@ async def test_setup_control_passes_exact_claim_fences_to_canonical_selection() 
     service, _ = _service(origin=_origin(), participation=participation)
 
     response = await service.component_response(
+        interaction_id="component-interaction-1",
         scope=DiscordSettingsScope(
             action="setup_channel",
             origin_interaction_id="interaction-1",
@@ -285,6 +287,7 @@ async def test_parent_control_preserves_every_cleanup_delivery() -> None:
     service, _ = _service(origin=_origin(), participation=participation)
 
     response = await service.component_response(
+        interaction_id="component-interaction-1",
         scope=DiscordSettingsScope(
             action="parent_threads",
             origin_interaction_id="interaction-1",
@@ -351,6 +354,7 @@ async def test_thread_control_mutates_only_the_exact_connected_binding() -> None
     )
 
     response = await service.component_response(
+        interaction_id="component-interaction-1",
         scope=DiscordSettingsScope(
             action="thread_all_messages",
             origin_interaction_id="interaction-1",
@@ -392,6 +396,7 @@ async def test_stale_parent_generation_returns_notice_without_mutation() -> None
     service, _ = _service(origin=_origin(), participation=participation)
 
     response = await service.component_response(
+        interaction_id="component-interaction-1",
         scope=DiscordSettingsScope(
             action="parent_all_messages",
             origin_interaction_id="interaction-1",
@@ -410,3 +415,76 @@ async def test_stale_parent_generation_returns_notice_without_mutation() -> None
     assert response.response["type"] == 4
     assert "changed before submission" in str(response.response)
     participation.mutate_parent_settings.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_binding_open_rebinds_follow_up_controls_to_component_interaction() -> (
+    None
+):
+    """A joined-presence control signs mutations with its admitted component."""
+    current = ExternalChannelParticipationSettings(
+        target="parent",
+        agent_name="Agent One",
+        setting=_setting(),
+        claim=None,
+        resource=None,
+        binding=_binding(),
+    )
+    updated = ExternalChannelParticipationSettings(
+        target="parent",
+        agent_name="Agent One",
+        setting=_setting(response_mode=ExternalChannelResponseMode.ALL_MESSAGES),
+        claim=None,
+        resource=None,
+        binding=_binding(response_mode=ExternalChannelResponseMode.ALL_MESSAGES),
+    )
+    participation = SimpleNamespace(
+        resolve_settings=AsyncMock(return_value=current),
+        mutate_parent_settings=AsyncMock(
+            return_value=ExternalChannelParticipationSettingsMutation(
+                settings=updated,
+                cleanup_delivery_ids=(),
+            )
+        ),
+    )
+    service, repository = _service(origin=_origin(), participation=participation)
+
+    opened = await service.component_response(
+        interaction_id="component-interaction-1",
+        scope=DiscordSettingsScope(
+            action="open_binding",
+            origin_interaction_id="binding-1",
+            setup_claim_id=None,
+            claim_generation=None,
+            source_revision=None,
+            setting_id=None,
+            settings_generation=None,
+            binding_id=None,
+            binding_version=None,
+        ),
+        context=_CONTEXT,
+        now=_NOW,
+    )
+
+    data = cast(dict[str, object], opened.response["data"])
+    rows = cast(list[dict[str, object]], data["components"])
+    response_buttons = cast(list[dict[str, object]], rows[1]["components"])
+    all_messages_custom_id = cast(str, response_buttons[1]["custom_id"])
+    mutation_scope = parse_discord_settings_custom_id(
+        custom_id=all_messages_custom_id,
+        secret="settings-secret",
+    )
+    assert mutation_scope.origin_interaction_id == "component-interaction-1"
+
+    saved = await service.component_response(
+        interaction_id="mutation-interaction-1",
+        scope=mutation_scope,
+        context=_CONTEXT,
+        now=_NOW,
+    )
+
+    assert saved.response["type"] == 7
+    assert repository.lock_interaction.await_args.kwargs["interaction_id"] == (
+        "component-interaction-1"
+    )
+    participation.mutate_parent_settings.assert_awaited_once()
