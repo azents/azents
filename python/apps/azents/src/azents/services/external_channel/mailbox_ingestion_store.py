@@ -1192,6 +1192,12 @@ class ExternalChannelMailboxIngestionStore:
             route is not None and claim.route_id != route.id
         ):
             raise ValueError("External Channel setup route changed during admission.")
+        existing_source = setup_source_from_projection(claim.source_projection)
+        if (
+            existing_source.trigger_provider_message_key
+            == request.locator.trigger_provider_message_key
+        ):
+            return claim
         if (
             claim.conversation_position_id == position.id
             and claim.source_resource_id == source_resource.id

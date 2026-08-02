@@ -481,6 +481,20 @@ function SlackAppGuide({
             {t("guideDescription")}
           </Text>
         </Box>
+        {manifest.transport === "http" && manifest.callback_url && (
+          <Alert color="yellow" title={t("existingAppInteractivityTitle")}>
+            <Stack gap="xs">
+              <Text size="sm">{t("existingAppInteractivityDescription")}</Text>
+              <GuideCodeBlock>{manifest.callback_url}</GuideCodeBlock>
+              <Group justify="flex-end">
+                <CopyValueButton
+                  value={manifest.callback_url}
+                  label={t("copyCallback")}
+                />
+              </Group>
+            </Stack>
+          </Alert>
+        )}
         <Tabs defaultValue="manifest" style={{ minWidth: 0 }}>
           <Tabs.List grow style={{ minWidth: 0 }}>
             <Tabs.Tab
@@ -551,6 +565,9 @@ function SlackAppGuide({
                 </List.Item>
                 {manifest.transport === "socket" && (
                   <List.Item>{t("manualSocketStep")}</List.Item>
+                )}
+                {manifest.transport === "http" && (
+                  <List.Item>{t("manualInteractivityStep")}</List.Item>
                 )}
                 <List.Item>{t("manualInstallStep")}</List.Item>
                 <List.Item>{t("manualInviteStep")}</List.Item>

@@ -380,6 +380,35 @@ def test_settings_modal_projects_only_typed_signed_scope_and_selections() -> Non
     assert "signed-settings-scope" not in repr(callback)
 
 
+def test_settings_button_projects_modal_open_callback() -> None:
+    """Route one setup control button through the settings modal processor."""
+    callback = parse_slack_interaction_payload(
+        payload={
+            "type": "block_actions",
+            "api_app_id": "A-1",
+            "team": {"id": "T-1"},
+            "user": {"id": "U-1"},
+            "trigger_id": "trigger-secret",
+            "channel": {"id": "C-1"},
+            "message": {"ts": "100.0001", "thread_ts": "100.0001"},
+            "actions": [
+                {
+                    "action_id": "azents_conversation_settings_open",
+                    "value": "signed-settings-locator",
+                }
+            ],
+        },
+        provider_interaction_key="http-settings-open",
+        received_at=_NOW,
+    )
+
+    assert callback.handler == "settings_open"
+    assert callback.settings_metadata == "signed-settings-locator"
+    assert callback.trigger_id == "trigger-secret"
+    assert "signed-settings-locator" not in repr(callback)
+    assert "trigger-secret" not in repr(callback)
+
+
 @pytest.mark.parametrize(
     ("interaction_type", "expected_type", "expected_handler", "expected_surface"),
     [
