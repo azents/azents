@@ -74,6 +74,11 @@ _MAX_HISTORY_PAGES = 32
 _MAX_HISTORY_MESSAGES_PER_PAGE = 100
 _MAX_CONFIGURED_OBJECT_BYTES = 16 * 1024
 _MAX_CONFIGURED_ROOT_MESSAGES = 100
+_MAX_CONFIGURED_GUILD_COMMANDS = 100
+_MAX_GUILD_COMMAND_ID_CHARACTERS = 32
+_MAX_GUILD_COMMAND_NAME_CHARACTERS = 100
+_MAX_GUILD_COMMAND_DESCRIPTION_CHARACTERS = 100
+_GUILD_COMMAND_TYPES = {1, 2, 3}
 _COMMAND_ROLE_CONTRACTS = {
     "message_action": ("Ask an Azents Agent", 3),
     "azents_settings": ("Azents settings", 1),
@@ -309,24 +314,14 @@ class FakeState:
 
     def create_guild_command(self, body: Mapping[str, object]) -> dict[str, object]:
         """Create one bounded Discord command with a deterministic ID."""
-        name = body.get("name")
-        command_type = body.get("type")
-        description = body.get("description")
-        if (
-            not isinstance(name, str)
-            or not name
-            or not isinstance(command_type, int)
-            or isinstance(command_type, bool)
-            or (description is not None and not isinstance(description, str))
-        ):
-            raise ValueError("Invalid Discord command payload.")
+        command_fields = _guild_command_fields(body)
         with self.lock:
+            if len(self.guild_commands) >= _MAX_CONFIGURED_GUILD_COMMANDS:
+                raise ValueError("Discord command state exceeds its bounded size.")
             self._command_sequence += 1
             command: dict[str, object] = {
                 "id": str(self._command_sequence),
-                "name": name,
-                "type": command_type,
-                **({} if description is None else {"description": description}),
+                **command_fields,
             }
             self.guild_commands[cast(str, command["id"])] = command
             return dict(command)
@@ -337,13 +332,14 @@ class FakeState:
         body: Mapping[str, object],
     ) -> dict[str, object] | None:
         """Update one known command without retaining the request body in evidence."""
+        command_fields = _guild_command_fields(body)
         with self.lock:
             if command_id not in self.guild_commands:
                 return None
-        updated = self.create_guild_command({**body, "id": command_id})
-        with self.lock:
-            self.guild_commands.pop(cast(str, updated["id"]), None)
-            updated["id"] = command_id
+            updated: dict[str, object] = {
+                "id": command_id,
+                **command_fields,
+            }
             self.guild_commands[command_id] = updated
             return dict(updated)
 
@@ -2019,34 +2015,54 @@ def _configured_guild_commands(value: object) -> dict[str, dict[str, object]]:
         return {}
     if not isinstance(value, list):
         raise ValueError("guild_commands must be a list.")
+    raw_commands = cast(list[object], value)
+    if len(raw_commands) > _MAX_CONFIGURED_GUILD_COMMANDS:
+        raise ValueError("guild_commands exceeds its bounded size.")
     commands: dict[str, dict[str, object]] = {}
-    for raw_command in cast(list[object], value):
+    for raw_command in raw_commands:
         if not isinstance(raw_command, dict):
             raise ValueError("guild_commands entries must be objects.")
         command = cast(dict[str, object], raw_command)
         command_id = command.get("id")
-        name = command.get("name")
-        command_type = command.get("type")
-        description = command.get("description")
         if (
             not isinstance(command_id, str)
             or not command_id.isdigit()
+            or len(command_id) > _MAX_GUILD_COMMAND_ID_CHARACTERS
             or command_id in commands
-            or not isinstance(name, str)
-            or not name
-            or not isinstance(command_type, int)
-            or isinstance(command_type, bool)
-            or description is not None
-            and not isinstance(description, str)
         ):
             raise ValueError("guild_commands entry is invalid.")
+        command_fields = _guild_command_fields(command)
         commands[command_id] = {
             "id": command_id,
-            "name": name,
-            "type": command_type,
-            **({} if description is None else {"description": description}),
+            **command_fields,
         }
     return commands
+
+
+def _guild_command_fields(body: Mapping[str, object]) -> dict[str, object]:
+    """Validate one bounded Discord command body without retaining extra fields."""
+    name = body.get("name")
+    command_type = body.get("type")
+    description = body.get("description")
+    if (
+        not isinstance(name, str)
+        or not name
+        or len(name) > _MAX_GUILD_COMMAND_NAME_CHARACTERS
+        or not isinstance(command_type, int)
+        or isinstance(command_type, bool)
+        or command_type not in _GUILD_COMMAND_TYPES
+        or description is not None
+        and (
+            not isinstance(description, str)
+            or len(description) > _MAX_GUILD_COMMAND_DESCRIPTION_CHARACTERS
+        )
+    ):
+        raise ValueError("Invalid Discord command payload.")
+    return {
+        "name": name,
+        "type": command_type,
+        **({} if description is None else {"description": description}),
+    }
 
 
 def _guild_command_evidence(

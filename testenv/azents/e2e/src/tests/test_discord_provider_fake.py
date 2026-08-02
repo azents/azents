@@ -927,10 +927,10 @@ def test_discord_fake_root_reads_require_configured_or_explicit_synthetic_mode(
     assert synthetic.json()["id"] == "root-a"
 
 
-def test_discord_fake_rejects_unbounded_history_and_root_fixtures(
+def test_discord_fake_rejects_unbounded_history_root_and_command_fixtures(
     discord_fake_urls: tuple[str, str],
 ) -> None:
-    """History/root fixture page, count, and serialized-size bounds are enforced."""
+    """History, root, and command fixture state remains explicitly bounded."""
     discord_fake_url, _ = discord_fake_urls
     oversized = requests.post(
         f"{discord_fake_url}/__testenv/configure",
@@ -972,6 +972,59 @@ def test_discord_fake_rejects_unbounded_history_and_root_fixtures(
         timeout=5,
     )
     assert oversized_root.status_code == 400
+    too_many_commands = requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={
+            "guild_commands": [
+                {
+                    "id": str(500000000000001000 + index),
+                    "name": f"command-{index}",
+                    "type": 1,
+                }
+                for index in range(101)
+            ]
+        },
+        timeout=5,
+    )
+    assert too_many_commands.status_code == 400
+    oversized_command = requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={
+            "guild_commands": [
+                {
+                    "id": "500000000000002000",
+                    "name": "x" * 101,
+                    "type": 1,
+                }
+            ]
+        },
+        timeout=5,
+    )
+    assert oversized_command.status_code == 400
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={
+            "guild_commands": [
+                {
+                    "id": str(500000000000003000 + index),
+                    "name": f"command-{index}",
+                    "type": 1,
+                }
+                for index in range(100)
+            ]
+        },
+        timeout=5,
+    ).raise_for_status()
+    command_collection_url = (
+        f"{discord_fake_url}/api/v10/applications/100000000000000001/"
+        "guilds/200000000000000001/commands"
+    )
+    overflow_create = requests.post(
+        command_collection_url,
+        json={"name": "overflow", "type": 1},
+        timeout=5,
+    )
+    assert overflow_create.status_code == 400
 
 
 def test_discord_fake_update_delete_track_missing_and_deleted_messages(
