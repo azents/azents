@@ -222,14 +222,6 @@ def test_external_channel_participant_declares_session_owned_foundation_state() 
             "external_channel_works",
             SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
         ),
-        (
-            "external_channel_actions",
-            SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
-        ),
-        (
-            "external_channel_delivery_attempts",
-            SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
-        ),
     }
 
 

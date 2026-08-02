@@ -30,9 +30,7 @@ import {
 import { useTranslations } from "next-intl";
 import type { SessionChannelsContainerOutput } from "../containers/useSessionChannelsContainer";
 import type {
-  ExternalChannelDeliveryStatus,
   ManagedBinding,
-  ManagedDelivery,
   ManagedGrant,
   ManagedWork,
   ManagedWorkTask,
@@ -40,22 +38,6 @@ import type {
 
 function formatDate(value: string | null): string {
   return value === null ? "—" : new Date(value).toLocaleString();
-}
-
-function deliveryColor(status: ExternalChannelDeliveryStatus): string {
-  switch (status) {
-    case "delivered":
-      return "green";
-    case "failed":
-      return "red";
-    case "unknown":
-      return "yellow";
-    case "attempting":
-      return "blue";
-    case "pending":
-    case "not_attempted":
-      return "gray";
-  }
 }
 
 function projectionColor(state: ManagedWork["projection_state"]): string {
@@ -104,36 +86,6 @@ function TaskIcon({
     case "pending":
       return <IconClock size={rem(14)} color="var(--mantine-color-gray-6)" />;
   }
-}
-
-function DeliveryRow({
-  delivery,
-}: {
-  delivery: ManagedDelivery;
-}): React.ReactElement {
-  const t = useTranslations("workspace.agents.sessionChannels");
-  return (
-    <Group
-      justify="space-between"
-      align="flex-start"
-      wrap="nowrap"
-      py="xs"
-      data-testid={`external-delivery-${delivery.id}`}
-    >
-      <Box style={{ minWidth: 0 }}>
-        <Text size="sm" fw={600}>
-          {t(`operation.${delivery.operation}`)}
-        </Text>
-        <Text size="xs" c="dimmed">
-          {delivery.error_summary ??
-            formatDate(delivery.completed_at ?? delivery.created_at)}
-        </Text>
-      </Box>
-      <Badge color={deliveryColor(delivery.status)} variant="light">
-        {t(`deliveryStatus.${delivery.status}`)}
-      </Badge>
-    </Group>
-  );
 }
 
 function WorkSection({
@@ -409,22 +361,6 @@ function BindingPanel({
 
         <Divider label={t("channelWork")} labelPosition="left" />
         <WorkSection binding={binding} />
-
-        <Divider label={t("deliveries")} labelPosition="left" />
-        {binding.deliveries.length === 0 ? (
-          <Text size="sm" c="dimmed">
-            {t("noDeliveries")}
-          </Text>
-        ) : (
-          <Stack gap={0}>
-            {binding.deliveries.map((delivery, index) => (
-              <Box key={delivery.id}>
-                {index > 0 && <Divider />}
-                <DeliveryRow delivery={delivery} />
-              </Box>
-            ))}
-          </Stack>
-        )}
       </Stack>
     </Paper>
   );

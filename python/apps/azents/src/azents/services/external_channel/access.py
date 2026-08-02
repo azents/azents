@@ -32,6 +32,7 @@ from azents.repos.external_channel.data import (
     ExternalChannelSetupClaim,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionOutcomeKind,
 )
@@ -39,6 +40,7 @@ from azents.services.external_channel.ingestion_replay import (
     ExternalChannelIngestionReplayService,
     external_channel_replay_deadline,
 )
+from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
 )
@@ -74,7 +76,7 @@ class ExternalChannelAllowedAccess:
     request: ExternalChannelAccessRequest
     binding: ExternalChannelBinding | None
     grant: ExternalChannelAccessGrant
-    control_delete_delivery_id: str | None
+    control_delete_plan: ProviderEffectPlan | None
     setup_continuation: ExternalChannelSetupContinuation | None
 
 
@@ -83,7 +85,7 @@ class ExternalChannelResolvedAccess:
     """Durable result of an idempotent Deny or Block decision."""
 
     request: ExternalChannelAccessRequest
-    control_delete_delivery_id: str | None
+    control_delete_plan: ProviderEffectPlan | None
 
 
 @dataclass(frozen=True)
@@ -111,6 +113,10 @@ class ExternalChannelAccessService:
     repository: Annotated[
         ExternalChannelRepository,
         Depends(ExternalChannelRepository),
+    ]
+    work_repository: Annotated[
+        ExternalChannelWorkRepository,
+        Depends(ExternalChannelWorkRepository),
     ]
     agent_repository: Annotated[
         AgentRepository,
@@ -204,11 +210,9 @@ class ExternalChannelAccessService:
                     raise ExternalChannelAccessDecisionError(
                         "The prior Allow decision no longer has its active state."
                     )
-                delete_intent = (
-                    await self.repository.create_access_request_control_delete_intent(
-                        session,
-                        access_request_id=request.id,
-                    )
+                delete_plan = await self.work_repository.prepare_access_control_delete(
+                    session,
+                    access_request_id=request.id,
                 )
                 await session.commit()
                 await self._replay_allowed_request(
@@ -219,9 +223,7 @@ class ExternalChannelAccessService:
                     request=request,
                     binding=binding,
                     grant=grant,
-                    control_delete_delivery_id=(
-                        None if delete_intent is None else delete_intent.id
-                    ),
+                    control_delete_plan=delete_plan,
                     setup_continuation=None,
                 )
             self._require_pending(request, now=now)
@@ -315,11 +317,9 @@ class ExternalChannelAccessService:
             )
             if decided is None:
                 raise ExternalChannelAccessRequestNotFound(access_request_id)
-            delete_intent = (
-                await self.repository.create_access_request_control_delete_intent(
-                    session,
-                    access_request_id=request.id,
-                )
+            delete_plan = await self.work_repository.prepare_access_control_delete(
+                session,
+                access_request_id=request.id,
             )
             await session.commit()
             if created_provider_event_type is not None:
@@ -338,9 +338,7 @@ class ExternalChannelAccessService:
                 request=decided,
                 binding=binding,
                 grant=grant,
-                control_delete_delivery_id=(
-                    None if delete_intent is None else delete_intent.id
-                ),
+                control_delete_plan=delete_plan,
                 setup_continuation=None,
             )
 
@@ -438,20 +436,16 @@ class ExternalChannelAccessService:
                 raise ExternalChannelAccessDecisionError(
                     "The prior setup Allow decision no longer has its active grant."
                 )
-            delete_intent = (
-                await self.repository.create_access_request_control_delete_intent(
-                    session,
-                    access_request_id=request.id,
-                )
+            delete_plan = await self.work_repository.prepare_access_control_delete(
+                session,
+                access_request_id=request.id,
             )
             await session.commit()
             return ExternalChannelAllowedAccess(
                 request=request,
                 binding=None,
                 grant=grant,
-                control_delete_delivery_id=(
-                    None if delete_intent is None else delete_intent.id
-                ),
+                control_delete_plan=delete_plan,
                 setup_continuation=_setup_continuation(claim),
             )
         self._require_pending(request, now=now)
@@ -479,20 +473,16 @@ class ExternalChannelAccessService:
         )
         if decided is None:
             raise ExternalChannelAccessRequestNotFound(request.id)
-        delete_intent = (
-            await self.repository.create_access_request_control_delete_intent(
-                session,
-                access_request_id=request.id,
-            )
+        delete_plan = await self.work_repository.prepare_access_control_delete(
+            session,
+            access_request_id=request.id,
         )
         await session.commit()
         return ExternalChannelAllowedAccess(
             request=decided,
             binding=None,
             grant=grant,
-            control_delete_delivery_id=(
-                None if delete_intent is None else delete_intent.id
-            ),
+            control_delete_plan=delete_plan,
             setup_continuation=_setup_continuation(claim),
         )
 
@@ -640,18 +630,14 @@ class ExternalChannelAccessService:
                     raise ExternalChannelAccessDecisionError(
                         "The access request changed during decision retry."
                     )
-                delete_intent = (
-                    await self.repository.create_access_request_control_delete_intent(
-                        session,
-                        access_request_id=request.id,
-                    )
+                delete_plan = await self.work_repository.prepare_access_control_delete(
+                    session,
+                    access_request_id=request.id,
                 )
                 await session.commit()
                 return ExternalChannelResolvedAccess(
                     request=request,
-                    control_delete_delivery_id=(
-                        None if delete_intent is None else delete_intent.id
-                    ),
+                    control_delete_plan=delete_plan,
                 )
             route_snapshot = await self.repository.get_agent_route(
                 session,
@@ -698,18 +684,14 @@ class ExternalChannelAccessService:
                 access_request_id=access_request_id,
             )
             if request.status is expected_status:
-                delete_intent = (
-                    await self.repository.create_access_request_control_delete_intent(
-                        session,
-                        access_request_id=request.id,
-                    )
+                delete_plan = await self.work_repository.prepare_access_control_delete(
+                    session,
+                    access_request_id=request.id,
                 )
                 await session.commit()
                 return ExternalChannelResolvedAccess(
                     request=request,
-                    control_delete_delivery_id=(
-                        None if delete_intent is None else delete_intent.id
-                    ),
+                    control_delete_plan=delete_plan,
                 )
             self._require_pending(request, now=now)
             if action == "block":
@@ -736,18 +718,14 @@ class ExternalChannelAccessService:
             )
             if decided is None:
                 raise ExternalChannelAccessRequestNotFound(access_request_id)
-            delete_intent = (
-                await self.repository.create_access_request_control_delete_intent(
-                    session,
-                    access_request_id=request.id,
-                )
+            delete_plan = await self.work_repository.prepare_access_control_delete(
+                session,
+                access_request_id=request.id,
             )
             await session.commit()
             return ExternalChannelResolvedAccess(
                 request=decided,
-                control_delete_delivery_id=(
-                    None if delete_intent is None else delete_intent.id
-                ),
+                control_delete_plan=delete_plan,
             )
 
     async def _resolve_setup_request(
@@ -809,18 +787,14 @@ class ExternalChannelAccessService:
                 "The External Channel setup request is unavailable."
             )
         if request.status is expected_status:
-            delete_intent = (
-                await self.repository.create_access_request_control_delete_intent(
-                    session,
-                    access_request_id=request.id,
-                )
+            delete_plan = await self.work_repository.prepare_access_control_delete(
+                session,
+                access_request_id=request.id,
             )
             await session.commit()
             return ExternalChannelResolvedAccess(
                 request=request,
-                control_delete_delivery_id=(
-                    None if delete_intent is None else delete_intent.id
-                ),
+                control_delete_plan=delete_plan,
             )
         self._require_pending(request, now=now)
         if action == "block":
@@ -865,18 +839,14 @@ class ExternalChannelAccessService:
                 raise ExternalChannelAccessDecisionError(
                     "The External Channel setup changed during access resolution."
                 )
-        delete_intent = (
-            await self.repository.create_access_request_control_delete_intent(
-                session,
-                access_request_id=request.id,
-            )
+        delete_plan = await self.work_repository.prepare_access_control_delete(
+            session,
+            access_request_id=request.id,
         )
         await session.commit()
         return ExternalChannelResolvedAccess(
             request=decided,
-            control_delete_delivery_id=(
-                None if delete_intent is None else delete_intent.id
-            ),
+            control_delete_plan=delete_plan,
         )
 
     async def _locked_request(

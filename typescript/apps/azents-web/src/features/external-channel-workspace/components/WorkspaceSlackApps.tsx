@@ -314,7 +314,7 @@ function DefaultMutationAlert({
         claims: mutation.terminated_setup_claim_count,
         interactions: mutation.expired_interaction_count,
         bindings: mutation.disconnected_parent_binding_count,
-        deliveries: mutation.cleanup_delivery_count,
+        cleanups: mutation.direct_cleanup_count,
       })}
     </Alert>
   );

@@ -32,6 +32,7 @@ from azents.services.external_channel.deps import (
     get_external_channel_conversation_lock,
     get_external_channel_participation_lock,
 )
+from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
 
 class ExternalChannelIngestionOperation(enum.StrEnum):
@@ -419,12 +420,12 @@ class ExternalChannelIngestionOutcome:
     kind: ExternalChannelIngestionOutcomeKind
     reason: ExternalChannelIngestionReason
     mailbox_item_id: str | None = dataclasses.field(repr=False)
-    control_delivery_attempt_id: str | None = dataclasses.field(repr=False)
+    control_plans: tuple[ProviderEffectPlan, ...] = dataclasses.field(repr=False)
     connection_id: str | None = dataclasses.field(repr=False)
 
     def __post_init__(self) -> None:
         """Require complete provider-control delivery identity."""
-        if (self.control_delivery_attempt_id is None) != (self.connection_id is None):
+        if bool(self.control_plans) != (self.connection_id is not None):
             raise ValueError(
                 "External Channel control delivery identity is incomplete."
             )
@@ -478,14 +479,14 @@ class ExternalChannelIngestionAcceptance:
     reason: ExternalChannelIngestionReason
     mailbox_item_id: str | None
     session_id: str | None
-    control_delivery_attempt_id: str | None
+    control_plans: tuple[ProviderEffectPlan, ...]
     connection_id: str | None
 
     def __post_init__(self) -> None:
         """Require complete wake and provider-control identities."""
         if (self.mailbox_item_id is None) != (self.session_id is None):
             raise ValueError("External Channel accepted wake identity is incomplete.")
-        if (self.control_delivery_attempt_id is None) != (self.connection_id is None):
+        if bool(self.control_plans) != (self.connection_id is not None):
             raise ValueError(
                 "External Channel control delivery identity is incomplete."
             )
@@ -601,7 +602,7 @@ class ExternalChannelConversationIngestionService:
                         kind=ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
                         reason=ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY,
                         mailbox_item_id=None,
-                        control_delivery_attempt_id=None,
+                        control_plans=(),
                         connection_id=None,
                     )
                 acceptance = await self._accept_locked(
@@ -620,7 +621,7 @@ class ExternalChannelConversationIngestionService:
                 kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                 reason=ExternalChannelIngestionReason.POSITION_CHANGED,
                 mailbox_item_id=None,
-                control_delivery_attempt_id=None,
+                control_plans=(),
                 connection_id=None,
             )
         except asyncio.CancelledError:
@@ -630,7 +631,7 @@ class ExternalChannelConversationIngestionService:
                 kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                 reason=ExternalChannelIngestionReason.COORDINATION_UNAVAILABLE,
                 mailbox_item_id=None,
-                control_delivery_attempt_id=None,
+                control_plans=(),
                 connection_id=None,
             )
         except ExternalChannelHistoryError:
@@ -638,7 +639,7 @@ class ExternalChannelConversationIngestionService:
                 kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                 reason=ExternalChannelIngestionReason.HISTORY_UNAVAILABLE,
                 mailbox_item_id=None,
-                control_delivery_attempt_id=None,
+                control_plans=(),
                 connection_id=None,
             )
         except ExternalChannelWakeDispatchUnavailable:
@@ -646,7 +647,7 @@ class ExternalChannelConversationIngestionService:
                 kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                 reason=ExternalChannelIngestionReason.WAKE_DISPATCH_PENDING,
                 mailbox_item_id=None,
-                control_delivery_attempt_id=None,
+                control_plans=(),
                 connection_id=None,
             )
 
@@ -728,7 +729,7 @@ class ExternalChannelConversationIngestionService:
                     kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                     reason=ExternalChannelIngestionReason.WAKE_DISPATCH_PENDING,
                     mailbox_item_id=preparation.wake_mailbox_item_id,
-                    control_delivery_attempt_id=None,
+                    control_plans=(),
                     connection_id=None,
                 )
         return outcome
@@ -753,7 +754,7 @@ class ExternalChannelConversationIngestionService:
                     kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                     reason=ExternalChannelIngestionReason.WAKE_DISPATCH_PENDING,
                     mailbox_item_id=acceptance.mailbox_item_id,
-                    control_delivery_attempt_id=None,
+                    control_plans=(),
                     connection_id=None,
                 )
         match acceptance.status:
@@ -779,7 +780,7 @@ class ExternalChannelConversationIngestionService:
             kind=kind,
             reason=acceptance.reason,
             mailbox_item_id=acceptance.mailbox_item_id,
-            control_delivery_attempt_id=acceptance.control_delivery_attempt_id,
+            control_plans=acceptance.control_plans,
             connection_id=acceptance.connection_id,
         )
 

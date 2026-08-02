@@ -1282,8 +1282,6 @@
           "unknown": "Provider outcome unknown",
           "none": "No active projection"
         },
-        "deliveries": "Delivery outcomes",
-        "noDeliveries": "No provider delivery has been attempted.",
         "grantsTitle": "Session access",
         "grantsDescription": "Participants authorized specifically for this session.",
         "noGrants": "No active session-scoped grants.",
@@ -1292,21 +1290,6 @@
         "workStatus": {
           "active": "Work active",
           "finished": "Work finished"
-        },
-        "deliveryStatus": {
-          "pending": "Pending",
-          "attempting": "Attempting",
-          "delivered": "Delivered",
-          "failed": "Failed",
-          "unknown": "Unknown outcome",
-          "not_attempted": "Not attempted"
-        },
-        "operation": {
-          "reply": "Reply",
-          "progress_create": "Create progress",
-          "progress_update": "Update progress",
-          "progress_delete": "Delete progress",
-          "control_message": "Control message"
         },
         "grantScope": {
           "session": "Session access",
@@ -1789,7 +1772,7 @@
       "setDefault": "Set default",
       "defaultMutationChangedTitle": "Channel selection updated",
       "defaultMutationUnchangedTitle": "Channel selection already current",
-      "defaultMutationImpact": "Participation cleanup: {settings} setting(s) invalidated, {claims} setup request(s) ended, {interactions} pending control(s) expired, {bindings} parent conversation(s) disconnected, and {deliveries} cleanup message(s) queued.",
+      "defaultMutationImpact": "Participation cleanup: {settings} setting(s) invalidated, {claims} setup request(s) ended, {interactions} pending control(s) expired, {bindings} parent conversation(s) disconnected, and {cleanups} immediate cleanup message(s) attempted.",
       "channel": "Channel",
       "defaultAgent": "Default Agent",
       "defaultStatus": "Default status",

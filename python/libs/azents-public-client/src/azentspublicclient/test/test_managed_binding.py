@@ -67,18 +67,7 @@ class TestManagedBinding(unittest.TestCase):
                     desired_progress_revision = 56, 
                     progress_projected = True, 
                     projection_state = 'synchronized', 
-                    finished_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ),
-                deliveries = [
-                    azentspublicclient.models.managed_delivery.ManagedDelivery(
-                        id = '', 
-                        operation = 'reply', 
-                        status = 'pending', 
-                        error_kind = '', 
-                        error_summary = '', 
-                        attempted_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        completed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
-                    ]
+                    finished_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
             )
         else:
             return ManagedBinding(
@@ -115,17 +104,6 @@ class TestManagedBinding(unittest.TestCase):
                     progress_projected = True, 
                     projection_state = 'synchronized', 
                     finished_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), ),
-                deliveries = [
-                    azentspublicclient.models.managed_delivery.ManagedDelivery(
-                        id = '', 
-                        operation = 'reply', 
-                        status = 'pending', 
-                        error_kind = '', 
-                        error_summary = '', 
-                        attempted_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        completed_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
-                    ],
         )
         """
 

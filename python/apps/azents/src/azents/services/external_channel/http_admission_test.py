@@ -63,6 +63,7 @@ from azents.services.external_channel.slack_http import (
 from azents.services.external_channel.transport_ingestion import (
     ExternalChannelTransportIngestionService,
 )
+from azents.testing.external_channel import make_provider_effect_plan
 
 _NOW = datetime.datetime(2026, 7, 22, 1, 0, tzinfo=datetime.UTC)
 _SECRET = "signing-secret"
@@ -110,6 +111,7 @@ class _AdmissionDouble:
         self.fail = fail
         self.retryable = retryable
         self.awaiting_access = awaiting_access
+        self.control_plan = make_provider_effect_plan("http-awaiting-access")
         self.revocation_changed = True
         self.events: list[ExternalChannelTrigger] = []
         self.connected_bot_user_ids: list[str | None] = []
@@ -142,7 +144,7 @@ class _AdmissionDouble:
                 kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                 reason=ExternalChannelIngestionReason.HISTORY_UNAVAILABLE,
                 mailbox_item_id=None,
-                control_delivery_attempt_id=None,
+                control_plans=(),
                 connection_id=None,
             )
         if self.awaiting_access:
@@ -150,7 +152,7 @@ class _AdmissionDouble:
                 kind=ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS,
                 reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
                 mailbox_item_id=None,
-                control_delivery_attempt_id="delivery-1",
+                control_plans=(self.control_plan,),
                 connection_id=event.connection_id,
             )
         if event.event_type == "app_uninstalled":
@@ -168,7 +170,7 @@ class _AdmissionDouble:
             kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
             reason=ExternalChannelIngestionReason.ACCEPTED,
             mailbox_item_id="batch-1",
-            control_delivery_attempt_id=None,
+            control_plans=(),
             connection_id=None,
         )
 
@@ -473,7 +475,7 @@ async def test_awaiting_access_exposes_only_committed_control_delivery_identity(
 
     assert result.event_id == "Ev-1"
     assert result.created is False
-    assert result.control_delivery_attempt_id == "delivery-1"
+    assert result.control_plans == (admission.control_plan,)
     assert result.control_delivery_connection_id == "connection-1"
 
 

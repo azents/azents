@@ -141,13 +141,19 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
             kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
             reason=ExternalChannelIngestionReason.ACCEPTED,
             mailbox_item_id="mailbox-secret",
-            control_delivery_attempt_id=None,
+            control_plans=(),
             connection_id=None,
         )
     )
     service = ExternalChannelAccessService(
         session_manager=cast(Any, _SessionManager()),
         repository=cast(Any, repository),
+        work_repository=cast(
+            Any,
+            SimpleNamespace(
+                prepare_access_control_delete=AsyncMock(return_value=None),
+            ),
+        ),
         agent_repository=cast(Any, agent_repository),
         root_agent_session_creation_service=cast(Any, root_creation),
         ingestion_replay_service=cast(Any, replay),
@@ -241,6 +247,12 @@ async def test_setup_allow_grants_access_without_binding_session_or_replay() -> 
     service = ExternalChannelAccessService(
         session_manager=cast(Any, _SessionManager()),
         repository=cast(Any, repository),
+        work_repository=cast(
+            Any,
+            SimpleNamespace(
+                prepare_access_control_delete=AsyncMock(return_value=None),
+            ),
+        ),
         agent_repository=cast(Any, MagicMock()),
         root_agent_session_creation_service=cast(Any, root_creation),
         ingestion_replay_service=cast(Any, replay),

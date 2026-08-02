@@ -23,6 +23,7 @@ from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
     get_external_channel_provider_control_service,
 )
+from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.external_channel.selector import (
     ExternalChannelSelectorCatalog,
     ExternalChannelSelectorService,
@@ -50,7 +51,7 @@ class DiscordSelectorComponentResponse:
     """One transient component response plus an optional durable control delivery."""
 
     response: dict[str, object]
-    control_delivery_attempt_id: str | None
+    control_plan: ProviderEffectPlan | None
     connection_id: str | None
 
 
@@ -137,7 +138,7 @@ class DiscordSelectorResponseService:
                     principal_id=principal_id,
                     now=now,
                 ),
-                control_delivery_attempt_id=None,
+                control_plan=None,
                 connection_id=None,
             )
         if scope.action in {
@@ -172,7 +173,7 @@ class DiscordSelectorResponseService:
                         ),
                     },
                 },
-                control_delivery_attempt_id=None,
+                control_plan=None,
                 connection_id=None,
             )
         if scope.action != _DISCORD_SELECTOR_ACTION_SELECT or selected_route_id is None:
@@ -187,19 +188,19 @@ class DiscordSelectorResponseService:
             content = "This Agent selection has expired. Start a new conversation."
             title = "Agent selection expired"
             color = 0x99AAB5
-            control_delivery_attempt_id = None
+            control_plan = None
             connection_id = None
         elif selection.status == "already_bound":
             content = "This conversation is already linked to an Agent."
             title = "Conversation already linked"
             color = 0xFEE75C
-            control_delivery_attempt_id = None
+            control_plan = None
             connection_id = None
         elif selection.status == "setup_pending_location":
             content = "Agent selected for this channel."
             title = "Agent selected"
             color = 0x57F287
-            control_delivery_attempt_id = None
+            control_plan = None
             connection_id = None
         else:
             outcome = await self.ingestion_replay_service.replay_selected_interaction(
@@ -213,11 +214,17 @@ class DiscordSelectorResponseService:
                     | ExternalChannelIngestionOutcomeKind.DUPLICATE
                 ):
                     awaiting_access = False
-                    control_delivery_attempt_id = None
+                    control_plan = None
                     connection_id = None
                 case ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS:
                     awaiting_access = True
-                    control_delivery_attempt_id = outcome.control_delivery_attempt_id
+                    if len(outcome.control_plans) > 1:
+                        raise RuntimeError(
+                            "Discord selector access produced multiple controls."
+                        )
+                    control_plan = (
+                        None if not outcome.control_plans else outcome.control_plans[0]
+                    )
                     connection_id = outcome.connection_id
                 case (
                     ExternalChannelIngestionOutcomeKind.AWAITING_SELECTION
@@ -250,7 +257,7 @@ class DiscordSelectorResponseService:
                     "components": [],
                 },
             },
-            control_delivery_attempt_id=control_delivery_attempt_id,
+            control_plan=control_plan,
             connection_id=connection_id,
         )
 
@@ -258,11 +265,11 @@ class DiscordSelectorResponseService:
         self,
         *,
         connection_id: str,
-        delivery_attempt_id: str,
+        plan: ProviderEffectPlan,
     ) -> None:
-        """Attempt one committed access control only after the interaction response."""
+        """Attempt one access control only after the interaction response."""
         del connection_id
-        await self.provider_control.attempt_delivery(delivery_attempt_id)
+        await self.provider_control.attempt(plan)
 
 
 def parse_discord_selector_custom_id(

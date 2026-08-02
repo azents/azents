@@ -12,15 +12,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 from azents.core.enums import (
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
-    ExternalChannelActionMode,
     ExternalChannelAppMode,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelConversationLocation,
     ExternalChannelConversationScopeKind,
-    ExternalChannelDeliveryOperation,
-    ExternalChannelDeliveryOriginType,
-    ExternalChannelDeliveryStatus,
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
@@ -169,30 +165,6 @@ external_channel_access_grant_scope_enum = ENUM(
 external_channel_work_status_enum = ENUM(
     ExternalChannelWorkStatus,
     name="external_channel_work_status",
-    create_type=False,
-    values_callable=_enum_values,
-)
-external_channel_action_mode_enum = ENUM(
-    ExternalChannelActionMode,
-    name="external_channel_action_mode",
-    create_type=False,
-    values_callable=_enum_values,
-)
-external_channel_delivery_origin_type_enum = ENUM(
-    ExternalChannelDeliveryOriginType,
-    name="external_channel_delivery_origin_type",
-    create_type=False,
-    values_callable=_enum_values,
-)
-external_channel_delivery_operation_enum = ENUM(
-    ExternalChannelDeliveryOperation,
-    name="external_channel_delivery_operation",
-    create_type=False,
-    values_callable=_enum_values,
-)
-external_channel_delivery_status_enum = ENUM(
-    ExternalChannelDeliveryStatus,
-    name="external_channel_delivery_status",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -1614,6 +1586,18 @@ class RDBExternalChannelAccessRequest(RDBModel):
         nullable=True,
         default=None,
     )
+    control_provider_message_key: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        nullable=True,
+        default=None,
+    )
+    control_projection_status: Mapped[ExternalChannelWorkProjectionStatus | None] = (
+        mapped_column(
+            external_channel_work_projection_status_enum,
+            nullable=True,
+            default=None,
+        )
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,
         init=False,
@@ -1866,11 +1850,6 @@ class RDBExternalChannelWork(RDBModel):
         nullable=True,
         default=None,
     )
-    progress_provider_message_key: Mapped[str | None] = mapped_column(
-        sa.String(255),
-        nullable=True,
-        default=None,
-    )
     finished_at: Mapped[datetime.datetime | None] = mapped_column(
         TimeZoneDateTime,
         nullable=True,
@@ -1891,206 +1870,6 @@ class RDBExternalChannelWork(RDBModel):
     )
 
     __table_args__ = (IX_BINDING_ID_STATUS, UQ_ACTIVE_BINDING)
-
-
-class RDBExternalChannelAction(RDBModel):
-    """One idempotent atomic Channel Action accepted from an Agent run."""
-
-    __tablename__ = "external_channel_actions"
-
-    IX_BINDING_ID_CREATED_AT = sa.Index(
-        "ix_external_channel_actions_binding_id_created_at",
-        "binding_id",
-        "created_at",
-    )
-    UQ_SESSION_CLIENT_TOOL_CALL = sa.UniqueConstraint(
-        "agent_session_id",
-        "client_tool_call_id",
-        name="uq_external_channel_actions_session_client_tool_call",
-    )
-
-    id: Mapped[str] = mapped_column(
-        sa.String(32),
-        primary_key=True,
-        init=False,
-        default_factory=lambda: uuid7().hex,
-    )
-    agent_session_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("agent_sessions.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    client_tool_call_id: Mapped[str] = mapped_column(sa.Text, nullable=False)
-    binding_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("external_channel_bindings.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    mode: Mapped[ExternalChannelActionMode] = mapped_column(
-        external_channel_action_mode_enum,
-        nullable=False,
-    )
-    state_revision: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    request_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    agent_run_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("agent_runs.id", ondelete="SET NULL"),
-        nullable=True,
-        default=None,
-    )
-    work_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("external_channel_works.id", ondelete="RESTRICT"),
-        nullable=True,
-        default=None,
-    )
-    accepted_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=False,
-        server_default=sa.func.now(),
-    )
-    completed_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        nullable=True,
-        default=None,
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=False,
-        server_default=sa.func.now(),
-    )
-    updated_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=False,
-        server_default=sa.func.now(),
-        onupdate=sa.func.now(),
-    )
-
-    __table_args__ = (IX_BINDING_ID_CREATED_AT, UQ_SESSION_CLIENT_TOOL_CALL)
-
-
-class RDBExternalChannelDeliveryAttempt(RDBModel):
-    """One durable, at-most-once provider operation intent and outcome."""
-
-    __tablename__ = "external_channel_delivery_attempts"
-
-    IX_BINDING_ID_STATUS = sa.Index(
-        "ix_external_channel_delivery_attempts_binding_id_status",
-        "binding_id",
-        "status",
-    )
-    IX_STATUS_CREATED_AT = sa.Index(
-        "ix_external_channel_delivery_attempts_status_created_at",
-        "status",
-        "created_at",
-    )
-    UQ_OPERATION_WITH_BINDING = sa.Index(
-        "uq_external_channel_delivery_attempts_operation_with_binding",
-        "origin_type",
-        "origin_id",
-        "binding_id",
-        "operation",
-        "part_ordinal",
-        unique=True,
-        postgresql_where=sa.text("binding_id IS NOT NULL"),
-    )
-    UQ_OPERATION_WITHOUT_BINDING = sa.Index(
-        "uq_external_channel_delivery_attempts_operation_without_binding",
-        "origin_type",
-        "origin_id",
-        "operation",
-        "part_ordinal",
-        unique=True,
-        postgresql_where=sa.text("binding_id IS NULL"),
-    )
-
-    id: Mapped[str] = mapped_column(
-        sa.String(32),
-        primary_key=True,
-        init=False,
-        default_factory=lambda: uuid7().hex,
-    )
-    origin_type: Mapped[ExternalChannelDeliveryOriginType] = mapped_column(
-        external_channel_delivery_origin_type_enum,
-        nullable=False,
-    )
-    origin_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
-    operation: Mapped[ExternalChannelDeliveryOperation] = mapped_column(
-        external_channel_delivery_operation_enum,
-        nullable=False,
-    )
-    request_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    status: Mapped[ExternalChannelDeliveryStatus] = mapped_column(
-        external_channel_delivery_status_enum,
-        nullable=False,
-        server_default=ExternalChannelDeliveryStatus.PENDING.value,
-    )
-    part_ordinal: Mapped[int] = mapped_column(
-        sa.Integer,
-        nullable=False,
-        default=0,
-        server_default="0",
-    )
-    channel_action_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("external_channel_actions.id", ondelete="RESTRICT"),
-        nullable=True,
-        default=None,
-    )
-    binding_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("external_channel_bindings.id", ondelete="RESTRICT"),
-        nullable=True,
-        default=None,
-    )
-    provider_message_key: Mapped[str | None] = mapped_column(
-        sa.String(255),
-        nullable=True,
-        default=None,
-    )
-    error_kind: Mapped[str | None] = mapped_column(
-        sa.String(120),
-        nullable=True,
-        default=None,
-    )
-    error_summary: Mapped[str | None] = mapped_column(
-        sa.Text,
-        nullable=True,
-        default=None,
-    )
-    attempted_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        nullable=True,
-        default=None,
-    )
-    completed_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        nullable=True,
-        default=None,
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=False,
-        server_default=sa.func.now(),
-    )
-    updated_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=False,
-        server_default=sa.func.now(),
-        onupdate=sa.func.now(),
-    )
-
-    __table_args__ = (
-        IX_BINDING_ID_STATUS,
-        IX_STATUS_CREATED_AT,
-        UQ_OPERATION_WITH_BINDING,
-        UQ_OPERATION_WITHOUT_BINDING,
-    )
 
 
 class RDBExternalChannelWorkProjectionPart(RDBModel):
@@ -2125,22 +1904,9 @@ class RDBExternalChannelWorkProjectionPart(RDBModel):
     status: Mapped[ExternalChannelWorkProjectionStatus] = mapped_column(
         external_channel_work_projection_status_enum,
         nullable=False,
-        default=ExternalChannelWorkProjectionStatus.PENDING,
-        server_default=ExternalChannelWorkProjectionStatus.PENDING.value,
     )
     provider_message_key: Mapped[str | None] = mapped_column(
         sa.String(255),
-        nullable=True,
-        default=None,
-    )
-    latest_delivery_attempt_id: Mapped[str | None] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("external_channel_delivery_attempts.id", ondelete="RESTRICT"),
-        nullable=True,
-        default=None,
-    )
-    deleted_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
         nullable=True,
         default=None,
     )

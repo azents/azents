@@ -2,17 +2,15 @@
 
 import datetime
 from collections.abc import Sequence
-from types import SimpleNamespace
 from typing import cast
 
 import pytest
-import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
-    ExternalChannelDeliveryOriginType,
-    ExternalChannelWorkProjectionStatus,
-    ExternalChannelWorkStatus,
+    ExternalChannelAppMode,
+    ExternalChannelDeliveryOperation,
+    ExternalChannelProvider,
 )
 from azents.core.session_lifecycle import (
     SessionLifecycleParticipantDefinition,
@@ -21,11 +19,9 @@ from azents.core.session_lifecycle import (
     SessionLifecycleTransitionContext,
     SessionLifecycleTransitionPolicy,
 )
-from azents.rdb.models.external_channel import RDBExternalChannelDeliveryAttempt
 from azents.repos.external_channel.data import (
     ExternalChannelArchiveTermination,
     ExternalChannelPurgeCleanup,
-    ExternalChannelPurgePreparation,
     ExternalChannelPurgeVerification,
     ExternalChannelRestoreValidation,
 )
@@ -36,6 +32,11 @@ from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
 )
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
+from azents.services.external_channel.provider_effect import (
+    ProviderEffectPlan,
+    ProviderOperationKey,
+    ProviderTarget,
+)
 
 
 def _definition(key: str) -> SessionLifecycleParticipantDefinition:
@@ -70,6 +71,29 @@ def _purge_context() -> SessionLifecyclePurgeContext:
     )
 
 
+def _plan() -> ProviderEffectPlan:
+    return ProviderEffectPlan(
+        target=ProviderTarget(
+            operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            binding_id="binding-1",
+            resource_id="resource-1",
+            connection_id="connection-1",
+            provider=ExternalChannelProvider.SLACK,
+            app_mode=ExternalChannelAppMode.SINGLE,
+            encrypted_credentials="encrypted",
+            provider_tenant_id="tenant-1",
+            capabilities=None,
+            workspace_handle="workspace",
+            agent_id="agent-1",
+            agent_session_id="session-1",
+            agent_name="Agent",
+            agent_avatar=None,
+            request_payload={"control_kind": "session_presence"},
+        ),
+        operation_key=ProviderOperationKey.from_seed("archive-cleanup"),
+    )
+
+
 class _RepositoryDouble(ExternalChannelLifecycleRepository):
     """Repository double recording transaction-bound lifecycle calls."""
 
@@ -83,14 +107,13 @@ class _RepositoryDouble(ExternalChannelLifecycleRepository):
         session_ids: Sequence[str],
         now: datetime.datetime,
     ) -> ExternalChannelArchiveTermination:
-        """Record archive termination without a provider operation."""
         del session, now
         self.calls.append(("archive", tuple(session_ids)))
         return ExternalChannelArchiveTermination(
             disconnected_binding_count=1,
             finished_work_count=1,
-            created_cleanup_intent_count=1,
-            cleanup_intent_ids=("delivery-1",),
+            direct_cleanup_count=1,
+            cleanup_plans=(_plan(),),
         )
 
     async def validate_restore_session_tree(
@@ -99,27 +122,11 @@ class _RepositoryDouble(ExternalChannelLifecycleRepository):
         *,
         session_ids: Sequence[str],
     ) -> ExternalChannelRestoreValidation:
-        """Record restore validation."""
         del session
         self.calls.append(("restore", tuple(session_ids)))
         return ExternalChannelRestoreValidation(
             disconnected_binding_count=1,
             finished_work_count=1,
-        )
-
-    async def prepare_session_tree_purge(
-        self,
-        session: AsyncSession,
-        *,
-        session_ids: Sequence[str],
-        now: datetime.datetime,
-    ) -> ExternalChannelPurgePreparation:
-        """Record provider-free purge preparation."""
-        del session, now
-        self.calls.append(("prepare", tuple(session_ids)))
-        return ExternalChannelPurgePreparation(
-            not_attempted_delivery_count=1,
-            unknown_delivery_count=1,
         )
 
     async def purge_session_tree(
@@ -128,12 +135,9 @@ class _RepositoryDouble(ExternalChannelLifecycleRepository):
         *,
         session_ids: Sequence[str],
     ) -> ExternalChannelPurgeCleanup:
-        """Record restrictive Session-owned cleanup."""
         del session
         self.calls.append(("cleanup", tuple(session_ids)))
         return ExternalChannelPurgeCleanup(
-            deleted_delivery_attempt_count=1,
-            deleted_action_count=1,
             deleted_session_grant_count=1,
             preserved_agent_grant_reference_count=1,
             deleted_access_request_count=1,
@@ -147,235 +151,43 @@ class _RepositoryDouble(ExternalChannelLifecycleRepository):
         *,
         session_ids: Sequence[str],
     ) -> ExternalChannelPurgeVerification:
-        """Record final absence verification."""
         del session
         self.calls.append(("verify", tuple(session_ids)))
         return ExternalChannelPurgeVerification(
             remaining_binding_count=0,
             remaining_work_count=0,
-            remaining_action_count=0,
-            remaining_delivery_attempt_count=0,
             remaining_access_request_count=0,
             remaining_session_grant_count=0,
         )
 
 
-class _RowsDouble:
-    """Minimal SQLAlchemy scalar result used by lifecycle repository unit tests."""
+class _ActionServiceDouble:
+    def __init__(self) -> None:
+        self.plans: list[ProviderEffectPlan] = []
 
-    def __init__(self, rows: list[object]) -> None:
-        self.rows = rows
-
-    def all(self) -> list[object]:
-        """Return preselected rows."""
-        return self.rows
+    async def execute_terminal_control(self, plan: ProviderEffectPlan) -> None:
+        self.plans.append(plan)
 
 
-class _ExecutionDouble:
-    """Minimal execute result supporting lifecycle row counts and inserts."""
-
-    def __init__(self, rows: list[object] | None = None) -> None:
-        self.rows = rows or []
-
-    def scalar_one_or_none(self) -> None:
-        """Model an idempotent insert that already has its delivery identity."""
-        return None
-
-    def scalars(self) -> _RowsDouble:
-        """Model a mutation that affected no rows."""
-        return _RowsDouble([])
-
-    def all(self) -> list[object]:
-        """Return one deterministic row sequence for execute-based selects."""
-        return self.rows
-
-
-class _LifecycleSessionDouble:
-    """Record lifecycle SQL while supplying deterministic scalar query results."""
-
-    def __init__(
-        self,
-        scalar_rows: list[list[object]],
-        *,
-        execute_rows: list[list[object]] | None = None,
-    ) -> None:
-        self.scalar_rows = scalar_rows
-        self.execute_rows = execute_rows or []
-        self.scalar_statements: list[sa.ClauseElement] = []
-        self.execute_statements: list[sa.ClauseElement] = []
-        self.added: list[object] = []
-
-    async def scalars(self, statement: sa.ClauseElement) -> _RowsDouble:
-        """Return rows for one lifecycle select in call order."""
-        self.scalar_statements.append(statement)
-        return _RowsDouble(self.scalar_rows.pop(0))
-
-    async def execute(self, statement: sa.ClauseElement) -> _ExecutionDouble:
-        """Record a lifecycle insert, update, or delete."""
-        self.execute_statements.append(statement)
-        return _ExecutionDouble(
-            self.execute_rows.pop(0)
-            if isinstance(statement, sa.Select) and self.execute_rows
-            else None
-        )
-
-    def add(self, value: object) -> None:
-        """Record one ORM-owned delivery intent."""
-        self.added.append(value)
-
-    async def flush(self) -> None:
-        """Model caller-owned transaction flushing."""
-
-
-@pytest.mark.asyncio
-async def test_archive_selects_only_active_work_for_progress_cleanup() -> None:
-    """A historical finished work cannot produce a new progress-delete intent."""
-    binding = SimpleNamespace(
-        id="binding-1",
-        route_id="route-1",
-        resource_id="resource-1",
-        disconnected_at=None,
-        disconnect_reason=None,
+def _service(
+    repository: _RepositoryDouble,
+    action_service: _ActionServiceDouble | None = None,
+) -> ExternalChannelLifecycleService:
+    return ExternalChannelLifecycleService(
+        repository=repository,
+        action_service=cast(
+            ExternalChannelActionService,
+            action_service or _ActionServiceDouble(),
+        ),
     )
-    active_work = SimpleNamespace(
-        id="work-active",
-        binding_id="binding-1",
-        status=ExternalChannelWorkStatus.ACTIVE,
-        finished_at=None,
-        state_revision=7,
-        desired_progress_payload={"status": "working"},
-        desired_progress_revision=3,
-        progress_provider_message_key="progress-message-1",
-    )
-    resource = SimpleNamespace(
-        id="resource-1",
-        labels={
-            "provider": "slack",
-            "tenant_id": "tenant-1",
-            "channel_id": "channel-1",
-            "thread_ts": "thread-1",
-        },
-    )
-    session = _LifecycleSessionDouble([[binding], [resource], [active_work]])
-
-    await ExternalChannelLifecycleRepository().terminate_session_tree(
-        cast(AsyncSession, session),
-        session_ids=("session-1",),
-        now=datetime.datetime(2026, 7, 21, tzinfo=datetime.UTC),
-    )
-
-    work_select = str(session.scalar_statements[2])
-    progress_insert = session.execute_statements[0].compile().params
-    assert progress_insert is not None
-    assert "external_channel_works.status =" in work_select
-    assert active_work.state_revision == 8
-    assert active_work.desired_progress_payload is None
-    assert active_work.desired_progress_revision == 4
-    assert progress_insert["id"]
-    assert progress_insert["origin_id"] == "binding-1"
-    presence = cast(RDBExternalChannelDeliveryAttempt, session.added[0])
-    assert presence.request_payload == {
-        "control_kind": "session_presence",
-        "control_version": 2,
-        "presence_state": "left",
-        "tenant_id": "tenant-1",
-        "channel_id": "channel-1",
-        "thread_ts": "thread-1",
-    }
-    assert all(
-        "external_channel_pending_contexts" not in str(statement)
-        for statement in session.execute_statements
-    )
-
-
-@pytest.mark.asyncio
-async def test_discord_projection_cleanup_creates_one_delete_per_present_page() -> None:
-    """Discord cleanup owns each present projection part in stable page order."""
-    part = SimpleNamespace(
-        work_id="work-1",
-        part_ordinal=2,
-        status=ExternalChannelWorkProjectionStatus.PRESENT,
-        provider_message_key="discord:guild-1:555",
-        latest_delivery_attempt_id=None,
-    )
-    work = SimpleNamespace(id="work-1", binding_id="binding-1")
-    resource = SimpleNamespace(
-        labels={
-            "provider": "discord",
-            "guild_id": "guild-1",
-            "delivery_channel_id": "444",
-        }
-    )
-    session = _LifecycleSessionDouble(
-        [],
-        execute_rows=[[(part, work, resource)]],
-    )
-
-    repository = ExternalChannelLifecycleRepository()
-    cleanup = repository._create_discord_projection_delete_intents  # pyright: ignore[reportPrivateUsage]
-    delivery_ids = await cleanup(
-        cast(AsyncSession, session),
-        binding_ids=("binding-1",),
-        origin_type=ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
-        now=datetime.datetime(2026, 7, 21, tzinfo=datetime.UTC),
-    )
-
-    assert len(delivery_ids) == 1
-    assert part.status is ExternalChannelWorkProjectionStatus.PENDING
-    assert part.latest_delivery_attempt_id == delivery_ids[0]
-    attempt = cast(RDBExternalChannelDeliveryAttempt, session.added[0])
-    assert attempt.part_ordinal == 2
-    assert attempt.request_payload == {
-        "provider": "discord",
-        "guild_id": "guild-1",
-        "channel_id": "444",
-        "provider_message_key": "discord:guild-1:555",
-        "work_id": "work-1",
-    }
-
-
-@pytest.mark.asyncio
-async def test_purge_access_requests_require_direct_session_ownership() -> None:
-    """A pre-Session approval request is not inferred from a binding pair."""
-    session = _LifecycleSessionDouble([[], [], [], []])
-
-    await ExternalChannelLifecycleRepository().prepare_session_tree_purge(
-        cast(AsyncSession, session),
-        session_ids=("session-1",),
-        now=datetime.datetime(2026, 7, 21, tzinfo=datetime.UTC),
-    )
-
-    access_request_select = str(session.scalar_statements[1])
-    assert "external_channel_access_requests.agent_session_id IN" in (
-        access_request_select
-    )
-    assert "external_channel_bindings" not in access_request_select
-
-
-@pytest.mark.asyncio
-async def test_purge_delivery_cleanup_includes_binding_null_action_attempts() -> None:
-    """An action-linked delivery is removed before its owning action is deleted."""
-    session = _LifecycleSessionDouble([[], [], ["action-1"], []])
-
-    await ExternalChannelLifecycleRepository().purge_session_tree(
-        cast(AsyncSession, session),
-        session_ids=("session-1",),
-    )
-
-    delivery_delete = str(session.execute_statements[0])
-    assert "external_channel_delivery_attempts.channel_action_id IN" in delivery_delete
 
 
 @pytest.mark.asyncio
 async def test_external_channel_dispatches_only_its_participant(
     rdb_session: AsyncSession,
 ) -> None:
-    """Archive and restore invoke only the External Channel participant."""
     repository = _RepositoryDouble()
-    service = ExternalChannelLifecycleService(
-        repository=repository,
-        action_service=cast(ExternalChannelActionService, object()),
-    )
+    service = _service(repository)
 
     assert (
         await service.archive_participant(
@@ -397,6 +209,7 @@ async def test_external_channel_dispatches_only_its_participant(
     )
 
     assert archive is not None
+    assert archive.direct_cleanup_count == 1
     assert restore is not None
     assert repository.calls == [
         ("archive", ("session-1", "session-2")),
@@ -405,26 +218,41 @@ async def test_external_channel_dispatches_only_its_participant(
 
 
 @pytest.mark.asyncio
-async def test_external_channel_purge_phases_are_transaction_bound(
+async def test_purge_has_no_provider_delivery_preparation(
     rdb_session: AsyncSession,
 ) -> None:
-    """Purge phase calls remain inside the caller-owned DB transaction."""
     repository = _RepositoryDouble()
-    service = ExternalChannelLifecycleService(
-        repository=repository,
-        action_service=cast(ExternalChannelActionService, object()),
-    )
+    service = _service(repository)
     definition = _definition("session.external-channel")
     context = _purge_context()
 
-    await service.prepare_purge_participant(rdb_session, definition, context)
+    assert (
+        await service.prepare_purge_participant(
+            rdb_session,
+            definition,
+            context,
+        )
+        is None
+    )
     await service.cleanup_purge_participant(rdb_session, definition, context)
     await service.verify_purge_participant(rdb_session, definition, context)
     await service.finalize_purge_participant(rdb_session, definition, context)
 
     assert repository.calls == [
-        ("prepare", ("session-1", "session-2")),
         ("cleanup", ("session-1", "session-2")),
         ("verify", ("session-1", "session-2")),
         ("verify", ("session-1", "session-2")),
     ]
+
+
+@pytest.mark.asyncio
+async def test_archive_cleanup_executes_each_captured_plan_once() -> None:
+    repository = _RepositoryDouble()
+    action_service = _ActionServiceDouble()
+    service = _service(repository, action_service)
+    plans = (_plan(), _plan())
+
+    consumed = await service.consume_archive_cleanup(plans)
+
+    assert consumed == 2
+    assert action_service.plans == list(plans)

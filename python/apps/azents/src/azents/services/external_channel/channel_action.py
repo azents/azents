@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+import logging
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -19,7 +20,6 @@ from azents.core.enums import (
     ExternalChannelActionMode,
     ExternalChannelAppMode,
     ExternalChannelDeliveryOperation,
-    ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
     ExternalChannelWorkStatus,
 )
@@ -41,8 +41,8 @@ from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_data import (
-    ChannelActionCommit,
-    ChannelDeliveryTarget,
+    ChannelActionEffectPlan,
+    ChannelActionResult,
     ChannelWorkSnapshot,
     ChannelWorkTask,
 )
@@ -50,8 +50,6 @@ from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderBatch,
     RuntimeToProviderCleanupError,
     RuntimeToProviderDeliveryCapability,
-    RuntimeToProviderRecovery,
-    RuntimeToProviderRecoveryError,
     RuntimeToProviderSource,
     RuntimeToProviderTransferError,
 )
@@ -90,6 +88,7 @@ from azents.services.external_channel.presentation import (
     resolve_slack_agent_presentation,
 )
 from azents.services.external_channel.provider_effect import (
+    ProviderEffectOutcome,
     ProviderEffectPlan,
     ProviderMutationOutcome,
     ProviderOperationKey,
@@ -109,6 +108,8 @@ from azents.services.external_channel.slack_settings import (
 )
 from azents.services.file_storage import FileStorage, RangedFileStorage
 from azents.services.session_resource_authority import SessionResourceAuthority
+
+logger = logging.getLogger(__name__)
 
 
 async def get_slack_delivery_http_client() -> AsyncIterator[httpx.AsyncClient]:
@@ -224,20 +225,6 @@ class ExternalChannelActionService:
                 agent_id=agent_id,
             )
 
-    async def find_existing_action(
-        self,
-        *,
-        session_id: str,
-        client_tool_call_id: str,
-    ) -> tuple[ChannelActionCommit, dict[str, object]] | None:
-        """Resolve a duplicate Tool call before touching its Runtime sources."""
-        async with self.session_manager() as session:
-            return await self.repository.find_action_by_client_tool_call(
-                session,
-                session_id=session_id,
-                client_tool_call_id=client_tool_call_id,
-            )
-
     async def execute(
         self,
         *,
@@ -254,10 +241,10 @@ class ExternalChannelActionService:
         file_storage: FileStorage | None,
         authority: SessionResourceAuthority | None = None,
         provider_delivery_capability: RuntimeToProviderDeliveryCapability | None = None,
-    ) -> ChannelActionCommit:
-        """Commit canonical state, then attempt every provider intent once."""
+    ) -> ChannelActionResult:
+        """Commit canonical state, then execute ordered provider effects once."""
         async with self.session_manager() as session:
-            committed = await self.repository.commit_action(
+            transition = await self.repository.commit_direct_action(
                 session,
                 session_id=session_id,
                 agent_id=agent_id,
@@ -273,470 +260,196 @@ class ExternalChannelActionService:
             )
             await session.commit()
         reply_delivered = (
-            committed.work_status is not ExternalChannelWorkStatus.FINISHED
+            transition.work_status is not ExternalChannelWorkStatus.FINISHED
             or any(
-                delivery.operation is ExternalChannelDeliveryOperation.REPLY
-                for delivery in committed.deliveries
+                effect.provider.target.operation
+                is ExternalChannelDeliveryOperation.REPLY
+                for effect in transition.effects
             )
         )
-        for delivery in committed.deliveries:
+        outcomes: list[ProviderEffectOutcome] = []
+        for effect in transition.effects:
+            operation = effect.provider.target.operation
             if (
-                delivery.operation is ExternalChannelDeliveryOperation.REPLY
-                and delivery.status is not ExternalChannelDeliveryStatus.PENDING
+                operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE
+                and transition.work_status is ExternalChannelWorkStatus.FINISHED
+                and not reply_delivered
             ):
-                reply_delivered = (
-                    reply_delivered
-                    and delivery.status is ExternalChannelDeliveryStatus.DELIVERED
-                )
-            if delivery.status is ExternalChannelDeliveryStatus.PENDING:
-                if (
-                    delivery.operation
-                    is ExternalChannelDeliveryOperation.PROGRESS_DELETE
-                    and committed.work_status is ExternalChannelWorkStatus.FINISHED
-                    and not reply_delivered
-                ):
-                    async with self.session_manager() as session:
-                        await self.repository.skip_delivery(
-                            session,
-                            delivery_attempt_id=delivery.id,
-                            error_kind="final_reply_not_delivered",
-                            error_summary=(
-                                "Activity Tracker cleanup requires a delivered "
-                                "final reply."
-                            ),
-                            now=datetime.datetime.now(datetime.UTC),
-                        )
-                        await session.commit()
-                    continue
-                outcome = await self.attempt_delivery(
-                    delivery.id,
-                    file_storage=file_storage,
-                    agent_id=agent_id,
-                    authority=authority,
-                    provider_delivery_capability=provider_delivery_capability,
-                )
-                if delivery.operation is ExternalChannelDeliveryOperation.REPLY:
-                    reply_delivered = (
-                        reply_delivered
-                        and outcome is ExternalChannelDeliveryStatus.DELIVERED
-                    )
-        async with self.session_manager() as session:
-            result = await self.repository.complete_action(
-                session,
-                action_id=committed.action_id,
-                now=datetime.datetime.now(datetime.UTC),
-            )
-            await session.commit()
-            return result
-
-    async def prepare_delivery(
-        self,
-        delivery_attempt_id: str,
-    ) -> ChannelDeliveryTarget | None:
-        """Load one pending provider target before its connection is terminalized."""
-        async with self.session_manager() as session:
-            target = await self.repository.get_delivery_target(
-                session,
-                delivery_attempt_id=delivery_attempt_id,
-            )
-            if target is None or target.status not in {
-                ExternalChannelDeliveryStatus.PENDING,
-                ExternalChannelDeliveryStatus.ATTEMPTING,
-                ExternalChannelDeliveryStatus.UNKNOWN,
-                ExternalChannelDeliveryStatus.DELIVERED,
-            }:
-                return None
-            if (
-                target.status is ExternalChannelDeliveryStatus.DELIVERED
-                and _completed_runtime_recoveries(target.request_payload) is None
-            ):
-                return None
-            return target
-
-    async def prepare_delivery_in_session(
-        self,
-        session: AsyncSession,
-        delivery_attempt_id: str,
-    ) -> ChannelDeliveryTarget | None:
-        """Capture a pending target before the caller purges connection secrets."""
-        target = await self.repository.get_delivery_target(
-            session,
-            delivery_attempt_id=delivery_attempt_id,
-        )
-        if target is None or target.status is not ExternalChannelDeliveryStatus.PENDING:
-            return None
-        return target
-
-    async def attempt_delivery(
-        self,
-        delivery_attempt_id: str,
-        *,
-        file_storage: FileStorage | None = None,
-        agent_id: str | None = None,
-        authority: SessionResourceAuthority | None = None,
-        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None = None,
-    ) -> ExternalChannelDeliveryStatus | None:
-        """Attempt one pending provider operation without automatic retry."""
-        target = await self.prepare_delivery(delivery_attempt_id)
-        if target is None:
-            return None
-        return await self.attempt_prepared_delivery(
-            target,
-            file_storage=file_storage,
-            agent_id=agent_id,
-            authority=authority,
-            provider_delivery_capability=provider_delivery_capability,
-        )
-
-    async def attempt_prepared_delivery(
-        self,
-        target: ChannelDeliveryTarget,
-        *,
-        file_storage: FileStorage | None = None,
-        agent_id: str | None = None,
-        authority: SessionResourceAuthority | None = None,
-        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None = None,
-    ) -> ExternalChannelDeliveryStatus | None:
-        """Attempt one prepared target after revalidating current provider authority."""
-        return await self._attempt_prepared_delivery(
-            target,
-            captured_terminal=False,
-            file_storage=file_storage,
-            agent_id=agent_id,
-            authority=authority,
-            provider_delivery_capability=provider_delivery_capability,
-        )
-
-    async def attempt_captured_terminal_delivery(
-        self,
-        target: ChannelDeliveryTarget,
-    ) -> ExternalChannelDeliveryStatus | None:
-        """Attempt terminal cleanup using provider authority captured before purge."""
-        return await self._attempt_prepared_delivery(
-            target,
-            captured_terminal=True,
-            file_storage=None,
-            agent_id=None,
-            authority=None,
-            provider_delivery_capability=None,
-        )
-
-    async def _attempt_prepared_delivery(
-        self,
-        target: ChannelDeliveryTarget,
-        *,
-        captured_terminal: bool,
-        file_storage: FileStorage | None,
-        agent_id: str | None,
-        authority: SessionResourceAuthority | None,
-        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None,
-    ) -> ExternalChannelDeliveryStatus | None:
-        """Attempt one current target or settle its prior provider completion."""
-        runtime_provider_transfer = _uses_runtime_provider_transfer(target)
-        completed_recoveries = (
-            _completed_runtime_recoveries(target.request_payload)
-            if target.provider is ExternalChannelProvider.SLACK
-            else None
-        )
-        if completed_recoveries is not None:
-            return await self._recover_completed_runtime_delivery(
-                target,
-                recoveries=completed_recoveries,
-                provider_delivery_capability=provider_delivery_capability,
-            )
-        if target.status is not ExternalChannelDeliveryStatus.PENDING:
-            return None
-        if runtime_provider_transfer:
-            if provider_delivery_capability is None:
-                async with self.session_manager() as session:
-                    await self.repository.skip_delivery(
-                        session,
-                        delivery_attempt_id=target.delivery_attempt_id,
-                        error_kind="runtime_file_source_unavailable",
-                        error_summary=(
-                            "The original Runtime file source is unavailable."
+                outcomes.append(
+                    ProviderEffectOutcome(
+                        operation=operation,
+                        part=effect.part,
+                        status="not_attempted",
+                        reason="final_reply_not_delivered",
+                        detail=(
+                            "Activity Tracker cleanup requires a delivered final reply."
                         ),
-                        now=datetime.datetime.now(datetime.UTC),
                     )
-                    await session.commit()
-                return ExternalChannelDeliveryStatus.FAILED
-        async with self.session_manager() as session:
-            if captured_terminal:
-                started = await self.repository.start_captured_terminal_delivery(
-                    session,
-                    target=target,
-                    now=datetime.datetime.now(datetime.UTC),
                 )
-            else:
-                started = await self.repository.start_delivery(
-                    session,
-                    delivery_attempt_id=target.delivery_attempt_id,
-                    now=datetime.datetime.now(datetime.UTC),
-                    runtime_target=(
-                        provider_delivery_capability.target
-                        if _has_runtime_outbound_source(target.request_payload)
-                        and provider_delivery_capability is not None
-                        else None
-                    ),
-                )
-            await session.commit()
-        if started is None:
-            return None
-        try:
-            result = await self._deliver(
-                _provider_effect_plan(started),
-                delivery_attempt_id=started.delivery_attempt_id,
+                continue
+            outcome = await self.execute_direct_effect(
+                effect,
                 file_storage=file_storage,
                 agent_id=agent_id,
                 authority=authority,
                 provider_delivery_capability=provider_delivery_capability,
             )
-        except asyncio.CancelledError:
-            await asyncio.shield(
-                self._record_unknown_after_cancellation(target.delivery_attempt_id)
-            )
-            raise
-        recovery_delivery_id = None
-        settled_status: ExternalChannelDeliveryStatus | None = None
-        started_runtime_provider_transfer = _uses_runtime_provider_transfer(started)
-        if not (result.status == "delivered" and started_runtime_provider_transfer):
-            async with self.session_manager() as session:
-                settlement = await self.repository.settle_delivery(
-                    session,
-                    delivery_attempt_id=target.delivery_attempt_id,
-                    status=ExternalChannelDeliveryStatus(result.status),
-                    provider_message_key=result.provider_message_key,
-                    error_kind=result.error_kind,
-                    error_summary=result.error_summary,
-                    now=datetime.datetime.now(datetime.UTC),
-                )
-                await session.commit()
-            recovery_delivery_id = settlement.recovery_delivery_id
-            settled_status = settlement.status
-        if recovery_delivery_id is not None:
-            await self.attempt_delivery(recovery_delivery_id)
-        if started_runtime_provider_transfer:
-            await self.recover_runtime_provider_settlement(
-                target.delivery_attempt_id,
-                provider_delivery_capability=provider_delivery_capability,
-            )
-            return ExternalChannelDeliveryStatus(result.status)
-        return settled_status
-
-    async def drain_runtime_provider_settlements(
-        self,
-        *,
-        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None,
-        limit: int = 20,
-    ) -> int:
-        """Recover bounded provider-completed claims without provider mutation."""
-        if provider_delivery_capability is None:
-            return 0
-        async with self.session_manager() as session:
-            delivery_attempt_ids = (
-                await self.repository.list_runtime_provider_settlement_delivery_ids(
-                    session,
-                    limit=limit,
-                )
-            )
-        recovered = 0
-        for delivery_attempt_id in delivery_attempt_ids:
-            status = await self.recover_runtime_provider_settlement(
-                delivery_attempt_id,
-                provider_delivery_capability=provider_delivery_capability,
-            )
-            if status is ExternalChannelDeliveryStatus.DELIVERED:
-                recovered += 1
-        return recovered
-
-    async def recover_runtime_provider_settlement(
-        self,
-        delivery_attempt_id: str,
-        *,
-        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None,
-    ) -> ExternalChannelDeliveryStatus | None:
-        """Recover exact Runtime settlement without replaying a provider request."""
-        target = await self.prepare_delivery(delivery_attempt_id)
-        if target is None or target.provider is not ExternalChannelProvider.SLACK:
-            return None
-        recoveries = _completed_runtime_recoveries(target.request_payload)
-        if recoveries is None or provider_delivery_capability is None:
-            return None
-        return await self._recover_completed_runtime_delivery(
-            target,
-            recoveries=recoveries,
-            provider_delivery_capability=provider_delivery_capability,
+            outcomes.append(outcome)
+            if operation is ExternalChannelDeliveryOperation.REPLY:
+                reply_delivered = reply_delivered and outcome.status == "delivered"
+        return ChannelActionResult(
+            binding_id=transition.binding_id,
+            work_status=transition.work_status,
+            state_revision=transition.state_revision,
+            outcomes=tuple(outcomes),
         )
 
-    async def _recover_completed_runtime_delivery(
+    async def execute_direct_effect(
         self,
-        target: ChannelDeliveryTarget,
+        effect: ChannelActionEffectPlan,
         *,
-        recoveries: tuple[RuntimeToProviderRecovery, ...],
-        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None,
-    ) -> ExternalChannelDeliveryStatus | None:
-        """Settle a persisted Slack completion without another provider request."""
-        if provider_delivery_capability is None:
+        file_storage: FileStorage | None = None,
+        agent_id: str | None = None,
+        authority: SessionResourceAuthority | None = None,
+        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None = None,
+    ) -> ProviderEffectOutcome:
+        """Revalidate, execute, and apply one process-local provider effect."""
+        async with self.session_manager() as session:
+            current = await self.repository.revalidate_direct_effect(
+                session,
+                effect=effect,
+            )
+        if current is None:
+            return ProviderEffectOutcome(
+                operation=effect.provider.target.operation,
+                part=effect.part,
+                status="not_attempted",
+                reason="provider_authority_unavailable",
+                detail="Current External Channel provider authority is unavailable.",
+            )
+        result = await self._deliver(
+            current,
+            file_storage=file_storage,
+            agent_id=agent_id,
+            authority=authority,
+            provider_delivery_capability=provider_delivery_capability,
+        )
+        async with self.session_manager() as session:
+            await self.repository.apply_direct_effect_outcome(
+                session,
+                effect=effect,
+                outcome=result,
+            )
+            await session.commit()
+        return ProviderEffectOutcome(
+            operation=current.target.operation,
+            part=effect.part,
+            status=result.status,
+            reason=result.error_kind,
+            detail=result.error_summary,
+        )
+
+    async def execute_direct_control(
+        self,
+        plan: ProviderEffectPlan,
+    ) -> ProviderMutationOutcome | None:
+        """Execute one post-commit provider control without durable work state."""
+        async with self.session_manager() as session:
+            current = await self.repository.revalidate_direct_control(
+                session,
+                plan=plan,
+            )
+        if current is None:
             return None
-        try:
-            await provider_delivery_capability.recover(recoveries=recoveries)
-        except asyncio.CancelledError:
-            raise
-        except RuntimeToProviderRecoveryError as error:
-            await self._record_runtime_provider_state(
-                delivery_attempt_id=target.delivery_attempt_id,
-                state="provider_completed",
-                recoveries=error.recoveries,
-                provider_message_key=_runtime_provider_message_key(
-                    target.request_payload
-                ),
-            )
-            return target.status
-        except RuntimeToProviderTransferError:
-            return target.status
-        if target.status is ExternalChannelDeliveryStatus.DELIVERED:
-            await self._record_runtime_provider_state(
-                delivery_attempt_id=target.delivery_attempt_id,
-                state="settled",
-                recoveries=recoveries,
-                provider_message_key=_runtime_provider_message_key(
-                    target.request_payload
-                ),
-            )
-            return ExternalChannelDeliveryStatus.DELIVERED
-        provider_message_key = _runtime_provider_message_key(target.request_payload)
-        async with self.session_manager() as session:
-            recovery_delivery_id = (
-                await self.repository.complete_runtime_provider_recovery(
+        outcome = await self._deliver(
+            current,
+            file_storage=None,
+            agent_id=current.target.agent_id,
+            authority=None,
+            provider_delivery_capability=None,
+        )
+        work_id = current.target.request_payload.get("work_id")
+        desired_revision = current.target.request_payload.get(
+            "desired_progress_revision"
+        )
+        part = current.target.request_payload.get("part_ordinal", 0)
+        if (
+            isinstance(work_id, str)
+            and isinstance(desired_revision, int)
+            and isinstance(part, int)
+        ):
+            async with self.session_manager() as session:
+                await self.repository.apply_direct_effect_outcome(
                     session,
-                    delivery_attempt_id=target.delivery_attempt_id,
-                    provider_message_key=provider_message_key,
-                    now=datetime.datetime.now(datetime.UTC),
+                    effect=ChannelActionEffectPlan(
+                        provider=current,
+                        part=part,
+                        work_id=work_id,
+                        expected_desired_progress_revision=desired_revision,
+                    ),
+                    outcome=outcome,
                 )
-            )
-            await session.commit()
-        if recovery_delivery_id is not None:
-            await self.attempt_delivery(recovery_delivery_id)
-        return ExternalChannelDeliveryStatus.DELIVERED
+                await session.commit()
+        elif isinstance(
+            current.target.request_payload.get("access_request_id"),
+            str,
+        ):
+            async with self.session_manager() as session:
+                await self.repository.apply_access_control_outcome(
+                    session,
+                    plan=current,
+                    outcome=outcome,
+                )
+                await session.commit()
+        return outcome
 
-    async def drain_archive_cleanup(
+    async def execute_terminal_control(
         self,
-        delivery_ids: Sequence[str],
-    ) -> int:
-        """Attempt current archive intents and recover older rows conservatively."""
+        plan: ProviderEffectPlan,
+    ) -> ProviderMutationOutcome | None:
+        """Execute one captured cleanup after canonical terminal commit."""
         async with self.session_manager() as session:
-            await self.repository.recover_archive_cleanup(
+            current = await self.repository.revalidate_terminal_control(
                 session,
-                current_delivery_ids=delivery_ids,
-                now=datetime.datetime.now(datetime.UTC),
+                plan=plan,
             )
-            pending_ids = await self.repository.list_archive_cleanup_ids(
-                session,
-                delivery_ids=delivery_ids,
-            )
-            await session.commit()
-        for delivery_id in pending_ids:
-            await self.attempt_delivery(delivery_id)
-        return len(pending_ids)
-
-    async def _record_unknown_after_cancellation(
-        self,
-        delivery_attempt_id: str,
-    ) -> None:
-        async with self.session_manager() as session:
-            await self.repository.finish_delivery(
-                session,
-                delivery_attempt_id=delivery_attempt_id,
-                status=ExternalChannelDeliveryStatus.UNKNOWN,
-                provider_message_key=None,
-                error_kind="execution_cancelled",
-                error_summary=(
-                    "Provider delivery outcome is unknown after cancellation."
-                ),
-                now=datetime.datetime.now(datetime.UTC),
-            )
-            await session.commit()
-
-    async def _record_runtime_provider_state(
-        self,
-        *,
-        delivery_attempt_id: str,
-        state: str,
-        recoveries: tuple[RuntimeToProviderRecovery, ...],
-        provider_message_key: str | None,
-    ) -> bool:
-        """Persist exact Runtime claim ownership before another state boundary."""
-        async with self.session_manager() as session:
-            recorded = await self.repository.record_runtime_provider_state(
-                session,
-                delivery_attempt_id=delivery_attempt_id,
-                state=state,
-                recovery_payload={
-                    "claims": [
-                        _runtime_provider_recovery_payload(recovery)
-                        for recovery in recoveries
-                    ],
-                    "provider_message_key": provider_message_key,
-                },
-                provider_message_key=provider_message_key,
-            )
-            await session.commit()
-            return recorded
-
-    async def _complete_runtime_provider_delivery(
-        self,
-        *,
-        delivery_attempt_id: str,
-        recoveries: tuple[RuntimeToProviderRecovery, ...],
-        provider_message_key: str | None,
-    ) -> bool:
-        """Atomically publish confirmed provider success before Runtime cleanup."""
-        async with self.session_manager() as session:
-            completion = await self.repository.complete_runtime_provider_delivery(
-                session,
-                delivery_attempt_id=delivery_attempt_id,
-                recovery_payload={
-                    "claims": [
-                        _runtime_provider_recovery_payload(recovery)
-                        for recovery in recoveries
-                    ],
-                    "provider_message_key": provider_message_key,
-                },
-                provider_message_key=provider_message_key,
-                now=datetime.datetime.now(datetime.UTC),
-            )
-            await session.commit()
-        if completion.recovery_delivery_id is not None:
-            await self.attempt_delivery(completion.recovery_delivery_id)
-        return completion.accepted
-
-    async def _revalidate_runtime_delivery_authority(
-        self,
-        *,
-        delivery_attempt_id: str,
-        provider_delivery_capability: RuntimeToProviderDeliveryCapability,
-        provider_started: bool,
-    ) -> None:
-        """Fence Runtime admission and provider mutation against current authority."""
-        async with self.session_manager() as session:
-            current = await self.repository.revalidate_runtime_delivery_authority(
-                session,
-                delivery_attempt_id=delivery_attempt_id,
-                runtime_target=provider_delivery_capability.target,
-                provider_started=provider_started,
-                now=datetime.datetime.now(datetime.UTC),
-            )
-            await session.commit()
-        if not current:
-            raise RuntimeToProviderTransferError(
-                "Runtime provider delivery authority is no longer current"
-            )
+        if current is None:
+            return None
+        outcome = await self._deliver(
+            current,
+            file_storage=None,
+            agent_id=current.target.agent_id,
+            authority=None,
+            provider_delivery_capability=None,
+        )
+        work_id = current.target.request_payload.get("work_id")
+        desired_revision = current.target.request_payload.get(
+            "desired_progress_revision"
+        )
+        part = current.target.request_payload.get("part_ordinal", 0)
+        if (
+            isinstance(work_id, str)
+            and isinstance(desired_revision, int)
+            and isinstance(part, int)
+        ):
+            async with self.session_manager() as session:
+                await self.repository.apply_direct_effect_outcome(
+                    session,
+                    effect=ChannelActionEffectPlan(
+                        provider=current,
+                        part=part,
+                        work_id=work_id,
+                        expected_desired_progress_revision=desired_revision,
+                    ),
+                    outcome=outcome,
+                )
+                await session.commit()
+        return outcome
 
     async def _deliver(
         self,
         plan: ProviderEffectPlan,
         *,
-        delivery_attempt_id: str,
         file_storage: FileStorage | None,
         agent_id: str | None,
         authority: SessionResourceAuthority | None,
@@ -756,7 +469,7 @@ class ExternalChannelActionService:
                 return _provider_mutation_outcome(
                     await self._deliver_slack(
                         target,
-                        delivery_attempt_id=delivery_attempt_id,
+                        operation_key=plan.operation_key,
                         bot_token=credentials.bot_token,
                         file_storage=file_storage,
                         agent_id=agent_id,
@@ -1100,7 +813,7 @@ class ExternalChannelActionService:
         self,
         target: ProviderTarget,
         *,
-        delivery_attempt_id: str,
+        operation_key: ProviderOperationKey,
         bot_token: str,
         file_storage: FileStorage | None,
         agent_id: str | None,
@@ -1149,7 +862,7 @@ class ExternalChannelActionService:
                         thread_ts=thread_ts,
                         markdown_text=prepend_agent_markdown(presentation, text),
                         files=files,
-                        delivery_attempt_id=delivery_attempt_id,
+                        operation_key=operation_key,
                         authority=authority,
                         provider_delivery_capability=provider_delivery_capability,
                     )
@@ -1406,14 +1119,11 @@ class ExternalChannelActionService:
         thread_ts: str | None,
         markdown_text: str,
         files: tuple[ExternalChannelOutboundFileManifest, ...],
-        delivery_attempt_id: str,
+        operation_key: ProviderOperationKey,
         authority: SessionResourceAuthority | None,
         provider_delivery_capability: RuntimeToProviderDeliveryCapability | None,
     ) -> SlackControlMessageResult:
-        """Stream one Runtime batch and Exchange sources through one Slack completion.
-
-        The Runtime claims remain held until Slack's one completion result.
-        """
+        """Stream Runtime and Exchange files inside one direct provider call."""
         runtime_sources = tuple(
             RuntimeToProviderSource(
                 runtime_path=file.path,
@@ -1425,7 +1135,6 @@ class ExternalChannelActionService:
             if file.source is ExternalChannelOutboundFileSource.RUNTIME
         )
         batch: RuntimeToProviderBatch | None = None
-        claim_recoveries: tuple[RuntimeToProviderRecovery, ...] = ()
         if runtime_sources:
             if provider_delivery_capability is None:
                 return SlackControlMessageResult(
@@ -1437,36 +1146,16 @@ class ExternalChannelActionService:
             try:
 
                 async def before_source_admission() -> None:
-                    await self._revalidate_runtime_delivery_authority(
-                        delivery_attempt_id=delivery_attempt_id,
-                        provider_delivery_capability=provider_delivery_capability,
-                        provider_started=False,
-                    )
+                    return None
 
-                batch = await provider_delivery_capability.prepare(
-                    operation_id=f"external-channel-delivery:{delivery_attempt_id}",
-                    batch_id=delivery_attempt_id,
+                prepared_batch = await provider_delivery_capability.prepare(
+                    operation_id=f"external-channel:{operation_key.value}",
+                    batch_id=operation_key.value,
                     sources=runtime_sources,
                     before_source_admission=before_source_admission,
                 )
-                await batch.ensure_active()
-                claim_recoveries = batch.recovery_evidence()
-                recorded = await self._record_runtime_provider_state(
-                    delivery_attempt_id=delivery_attempt_id,
-                    state="prepared",
-                    recoveries=claim_recoveries,
-                    provider_message_key=None,
-                )
-                if not recorded:
-                    await batch.abandon_or_cancel()
-                    return SlackControlMessageResult(
-                        status="failed",
-                        provider_message_key=None,
-                        error_kind="runtime_file_source_unavailable",
-                        error_summary=(
-                            "The Runtime file delivery is no longer eligible."
-                        ),
-                    )
+                await prepared_batch.ensure_active()
+                batch = prepared_batch
             except asyncio.CancelledError:
                 if batch is not None:
                     await asyncio.shield(batch.close())
@@ -1524,30 +1213,9 @@ class ExternalChannelActionService:
                 error_summary="The original Exchange file source is unavailable.",
             )
 
-        provider_started = False
-
         async def before_provider_request() -> None:
-            nonlocal provider_started
             if batch is not None:
-                assert provider_delivery_capability is not None
-                await self._revalidate_runtime_delivery_authority(
-                    delivery_attempt_id=delivery_attempt_id,
-                    provider_delivery_capability=provider_delivery_capability,
-                    provider_started=provider_started,
-                )
                 await batch.ensure_active()
-                if not provider_started:
-                    recorded = await self._record_runtime_provider_state(
-                        delivery_attempt_id=delivery_attempt_id,
-                        state="provider_started",
-                        recoveries=claim_recoveries,
-                        provider_message_key=None,
-                    )
-                    if not recorded:
-                        raise RuntimeToProviderTransferError(
-                            "Runtime provider claim ownership was not persisted"
-                        )
-            provider_started = True
 
         runtime_index = 0
         outbound_files: list[SlackOutboundFile] = []
@@ -1594,29 +1262,8 @@ class ExternalChannelActionService:
         except asyncio.CancelledError:
             if batch is not None:
                 await asyncio.shield(batch.close())
-                if not provider_started:
-                    await asyncio.shield(batch.abandon_or_cancel())
             raise
         except RuntimeToProviderTransferError:
-            if batch is not None and not provider_started:
-                try:
-                    await batch.close()
-                    await batch.abandon_or_cancel()
-                except RuntimeToProviderCleanupError:
-                    return SlackControlMessageResult(
-                        status="unknown",
-                        provider_message_key=None,
-                        error_kind="runtime_transfer_cleanup_unknown",
-                        error_summary=(
-                            "Runtime file delivery cleanup is not confirmed."
-                        ),
-                    )
-                return SlackControlMessageResult(
-                    status="failed",
-                    provider_message_key=None,
-                    error_kind="runtime_file_source_unavailable",
-                    error_summary="The original Runtime file source is unavailable.",
-                )
             if batch is not None:
                 await batch.close()
             return SlackControlMessageResult(
@@ -1629,36 +1276,17 @@ class ExternalChannelActionService:
             return result
         if result.status == "delivered":
             try:
-                recoveries = await batch.provider_completed()
-                completed = await self._complete_runtime_provider_delivery(
-                    delivery_attempt_id=delivery_attempt_id,
-                    recoveries=recoveries,
-                    provider_message_key=result.provider_message_key,
-                )
-                if not completed:
-                    await batch.close()
-                    return SlackControlMessageResult(
-                        status="unknown",
-                        provider_message_key=None,
-                        error_kind="runtime_provider_completion_unrecorded",
-                        error_summary=(
-                            "Slack accepted the file reply, but the provider "
-                            "completion could not be recorded."
-                        ),
-                    )
+                await batch.provider_completed()
                 await batch.acknowledge_and_settle()
-                await self._record_runtime_provider_state(
-                    delivery_attempt_id=delivery_attempt_id,
-                    state="settled",
-                    recoveries=recoveries,
-                    provider_message_key=result.provider_message_key,
-                )
             except asyncio.CancelledError:
                 await asyncio.shield(batch.close())
                 raise
             except RuntimeToProviderTransferError:
+                logger.exception(
+                    "Runtime claim cleanup failed after provider delivery",
+                    extra={"provider": "slack", "operation": "reply"},
+                )
                 await batch.close()
-                return result
             return result
         if result.status == "failed":
             try:
@@ -1673,36 +1301,9 @@ class ExternalChannelActionService:
                     error_kind="runtime_transfer_cleanup_unknown",
                     error_summary="Runtime file delivery cleanup is not confirmed.",
                 )
+            return result
         await batch.close()
         return result
-
-
-def _provider_effect_plan(target: ChannelDeliveryTarget) -> ProviderEffectPlan:
-    """Adapt one durable target into the process-local provider boundary."""
-    return ProviderEffectPlan(
-        target=ProviderTarget(
-            operation=target.operation,
-            binding_id=target.binding_id,
-            resource_id=target.resource_id,
-            connection_id=target.connection_id,
-            provider=target.provider,
-            app_mode=target.app_mode,
-            encrypted_credentials=target.encrypted_credentials,
-            provider_tenant_id=target.provider_tenant_id,
-            capabilities=(
-                None if target.capabilities is None else dict(target.capabilities)
-            ),
-            workspace_handle=target.workspace_handle,
-            agent_id=target.agent_id,
-            agent_session_id=target.agent_session_id,
-            agent_name=target.agent_name,
-            agent_avatar=(
-                None if target.agent_avatar is None else dict(target.agent_avatar)
-            ),
-            request_payload=dict(target.request_payload),
-        ),
-        operation_key=ProviderOperationKey.from_seed(target.delivery_attempt_id),
-    )
 
 
 def _provider_mutation_outcome(
@@ -1715,115 +1316,6 @@ def _provider_mutation_outcome(
         error_kind=result.error_kind,
         error_summary=result.error_summary,
     )
-
-
-def _has_runtime_outbound_source(payload: dict[str, object]) -> bool:
-    """Return whether one persisted delivery requires a Runtime upload."""
-    files = payload.get("files")
-    return isinstance(files, list) and any(
-        isinstance(file, dict) and file.get("source", "runtime") == "runtime"
-        for file in files
-    )
-
-
-def _uses_runtime_provider_transfer(target: ChannelDeliveryTarget) -> bool:
-    """Return whether Slack delivery requires the trusted Runtime transfer path."""
-    return (
-        target.provider is ExternalChannelProvider.SLACK
-        and _has_runtime_outbound_source(target.request_payload)
-    )
-
-
-def _runtime_provider_recovery_payload(
-    recovery: RuntimeToProviderRecovery,
-) -> dict[str, object]:
-    """Serialize exact internal claim correlation for durable recovery."""
-    return {
-        "transfer_id": recovery.transfer_id,
-        "attempt_id": recovery.attempt_id,
-        "consumer_claim_id": recovery.consumer_claim_id,
-        "revision": recovery.revision,
-        "runtime_id": recovery.runtime_id,
-        "desired_generation": recovery.desired_generation,
-        "operation_id": recovery.operation_id,
-        "session_id": recovery.session_id,
-        "agent_id": recovery.agent_id,
-        "deadline_at": recovery.deadline_at.isoformat(),
-    }
-
-
-def _completed_runtime_recoveries(
-    payload: dict[str, object],
-) -> tuple[RuntimeToProviderRecovery, ...] | None:
-    """Parse only the durable completion state that permits no provider replay."""
-    recovery = payload.get("runtime_provider_recovery")
-    if not isinstance(recovery, dict) or recovery.get("state") != "provider_completed":
-        return None
-    claims = recovery.get("claims")
-    if not isinstance(claims, list) or not claims:
-        return None
-    parsed: list[RuntimeToProviderRecovery] = []
-    for claim in claims:
-        if not isinstance(claim, dict):
-            return None
-        try:
-            transfer_id = _required_recovery_string(claim, "transfer_id")
-            attempt_id = _required_recovery_string(claim, "attempt_id")
-            consumer_claim_id = _required_recovery_string(claim, "consumer_claim_id")
-            runtime_id = _required_recovery_string(claim, "runtime_id")
-            operation_id = _required_recovery_string(claim, "operation_id")
-            session_id = _required_recovery_string(claim, "session_id")
-            agent_id = _required_recovery_string(claim, "agent_id")
-            revision = claim["revision"]
-            desired_generation = claim["desired_generation"]
-            deadline_value = _required_recovery_string(claim, "deadline_at")
-        except KeyError, ValueError:
-            return None
-        if (
-            not isinstance(revision, int)
-            or not isinstance(desired_generation, int)
-            or revision < 0
-            or desired_generation < 0
-        ):
-            return None
-        try:
-            deadline_at = datetime.datetime.fromisoformat(deadline_value)
-        except ValueError:
-            return None
-        if deadline_at.tzinfo is None:
-            return None
-        parsed.append(
-            RuntimeToProviderRecovery(
-                transfer_id=transfer_id,
-                attempt_id=attempt_id,
-                consumer_claim_id=consumer_claim_id,
-                revision=revision,
-                runtime_id=runtime_id,
-                desired_generation=desired_generation,
-                operation_id=operation_id,
-                session_id=session_id,
-                agent_id=agent_id,
-                deadline_at=deadline_at,
-            )
-        )
-    return tuple(parsed)
-
-
-def _runtime_provider_message_key(payload: dict[str, object]) -> str | None:
-    """Return the provider key retained with a durable Runtime completion."""
-    recovery = payload.get("runtime_provider_recovery")
-    if not isinstance(recovery, dict):
-        return None
-    value = recovery.get("provider_message_key")
-    return value if isinstance(value, str) and value else None
-
-
-def _required_recovery_string(value: dict[str, object], key: str) -> str:
-    """Read one non-empty durable recovery identifier."""
-    result = value[key]
-    if not isinstance(result, str) or not result:
-        raise ValueError("Runtime provider recovery identifier is invalid")
-    return result
 
 
 def _provider_message_ts(value: object) -> str | None:

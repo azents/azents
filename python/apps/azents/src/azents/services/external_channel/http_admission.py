@@ -38,6 +38,7 @@ from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
     ExternalChannelInteractionProcessor,
 )
+from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
 )
@@ -74,7 +75,7 @@ class SlackHTTPAdmissionResult:
         default=None,
         repr=False,
     )
-    control_delivery_attempt_id: str | None = field(default=None, repr=False)
+    control_plans: tuple[ProviderEffectPlan, ...] = field(default=(), repr=False)
     control_delivery_connection_id: str | None = field(default=None, repr=False)
 
 
@@ -258,7 +259,7 @@ class SlackHTTPAdmissionService:
                     created=(
                         result.kind is ExternalChannelIngestionOutcomeKind.ACCEPTED
                     ),
-                    control_delivery_attempt_id=result.control_delivery_attempt_id,
+                    control_plans=result.control_plans,
                     control_delivery_connection_id=result.connection_id,
                 )
             case (
@@ -370,10 +371,10 @@ class SlackHTTPAdmissionService:
         self,
         *,
         connection_id: str,
-        delivery_attempt_id: str,
+        plan: ProviderEffectPlan,
     ) -> None:
-        """Attempt one committed approval control after provider acknowledgement."""
+        """Attempt one approval control after provider acknowledgement."""
         await self.interaction_processor.attempt_control_delivery(
             connection_id=connection_id,
-            delivery_attempt_id=delivery_attempt_id,
+            plan=plan,
         )

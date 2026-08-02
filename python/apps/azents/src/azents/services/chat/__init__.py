@@ -986,7 +986,7 @@ class ChatSessionService:
         user_id: str | None,
     ) -> Result[ArchiveSessionResult, ArchiveSessionError]:
         """Archive an active non-primary AgentSession after access validation."""
-        archive_cleanup_ids: tuple[str, ...] = ()
+        archive_cleanup_plans = ()
         async with self.session_manager() as session:
             agent_session = await self.agent_session_repository.get_by_id(
                 session,
@@ -1072,7 +1072,7 @@ class ChatSessionService:
                 context: SessionLifecycleTransitionContext,
             ) -> None:
                 """Run a participant inside this Session tree lock transaction."""
-                nonlocal archive_cleanup_ids
+                nonlocal archive_cleanup_plans
                 result = (
                     await self.external_channel_lifecycle_service.archive_participant(
                         session,
@@ -1081,7 +1081,7 @@ class ChatSessionService:
                     )
                 )
                 if result is not None:
-                    archive_cleanup_ids = result.cleanup_intent_ids
+                    archive_cleanup_plans = result.cleanup_plans
 
             await self.lifecycle_orchestrator.archive(
                 context=SessionLifecycleTransitionContext(
@@ -1120,7 +1120,7 @@ class ChatSessionService:
                 )
             cleanup_requested = (
                 await self.external_channel_lifecycle_service.consume_archive_cleanup(
-                    archive_cleanup_ids
+                    archive_cleanup_plans
                 )
                 > 0
             )

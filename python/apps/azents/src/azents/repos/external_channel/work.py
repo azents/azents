@@ -1,57 +1,39 @@
-"""Persistence boundary for Channel Work and at-most-once delivery."""
+"""External Channel Work persistence and direct provider-effect planning."""
 
 import datetime
 from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import assert_never
+from typing import Literal, assert_never
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
-    AgentRunStatus,
     AgentSessionStatus,
+    ExternalChannelAccessRequestStatus,
     ExternalChannelActionMode,
     ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
-    ExternalChannelDeliveryOriginType,
-    ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
-    ExternalChannelRouteCatalogStatus,
-    ExternalChannelSetupClaimStatus,
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
-    RuntimeDesiredState,
-    RuntimeProviderConnectionState,
-    RuntimeProviderObservedState,
-    RuntimeRunnerState,
 )
-from azents.core.external_channel_file import (
-    ExternalChannelOutboundFileManifest,
-)
-from azents.core.external_channel_progress import (
-    ExternalChannelDesiredProgress,
-)
+from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
+from azents.core.external_channel_progress import ExternalChannelDesiredProgress
+from azents.core.external_channel_session_presence import session_presence_payload
 from azents.core.slack_external_channel_progress import (
-    SlackProgressPresentation,
     render_slack_persisted_progress,
     render_slack_progress,
 )
 from azents.rdb.models.agent import RDBAgent
-from azents.rdb.models.agent_run import RDBAgentRun
-from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessRequest,
-    RDBExternalChannelAction,
     RDBExternalChannelAgentRoute,
     RDBExternalChannelBinding,
     RDBExternalChannelConnection,
-    RDBExternalChannelDeliveryAttempt,
-    RDBExternalChannelInteraction,
     RDBExternalChannelResource,
     RDBExternalChannelSetupClaim,
     RDBExternalChannelWork,
@@ -59,240 +41,499 @@ from azents.rdb.models.external_channel import (
 )
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.repos.external_channel.work_data import (
-    ChannelActionCommit,
-    ChannelDeliveryTarget,
-    ChannelWorkDelivery,
+    ChannelActionEffectPlan,
+    ChannelActionTransition,
     ChannelWorkSnapshot,
     ChannelWorkTask,
     ExternalChannelFileAccessTarget,
 )
-from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.external_channel.discord_delivery import (
     DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES,
     DISCORD_DEFAULT_MAX_FILE_BYTES,
 )
 from azents.services.external_channel.discord_presentation import (
-    DiscordProgressPage,
-    DiscordProgressPresentation,
     render_discord_persisted_progress,
     split_discord_markdown,
+)
+from azents.services.external_channel.provider_effect import (
+    ProviderEffectPlan,
+    ProviderMutationOutcome,
+    ProviderOperationKey,
+    ProviderTarget,
 )
 from azents.services.external_channel.slack_events import (
     SLACK_MARKDOWN_TEXT_MAX_LENGTH,
 )
 
 
-@dataclass(frozen=True)
-class RuntimeProviderDeliveryCompletion:
-    """One atomic provider-success ledger completion result."""
-
-    accepted: bool
-    recovery_delivery_id: str | None
-
-
-@dataclass(frozen=True)
-class DeliverySettlement:
-    """One fenced provider-result settlement."""
-
-    accepted: bool
-    status: ExternalChannelDeliveryStatus | None
-    recovery_delivery_id: str | None
-
-
-@dataclass(frozen=True)
-class ProviderControlAttemptIdentity:
-    """Immutable authority identity captured before final locking."""
-
-    delivery_attempt_id: str
-    origin_type: ExternalChannelDeliveryOriginType
-    origin_id: str
-    operation: ExternalChannelDeliveryOperation
-    binding_id: str | None
-    channel_action_id: str | None
-
-
-@dataclass(frozen=True)
-class SelectorControlTarget:
-    """Interaction-owned selector delivery authority."""
-
-    connection_id: str
-    resource_id: str
-    route_id: str | None
-
-
-def _selector_control_target(
-    interaction: RDBExternalChannelInteraction | None,
-) -> SelectorControlTarget | None:
-    """Read the bounded selector authority retained by one interaction."""
-    if interaction is None:
-        return None
-    state = interaction.projection.get("agent_selector")
-    if not isinstance(state, dict):
-        return None
-    connection_id = state.get("connection_id")
-    resource_id = state.get("resource_id")
-    route_id = state.get("selected_route_id")
-    if (
-        not isinstance(connection_id, str)
-        or not connection_id
-        or not isinstance(resource_id, str)
-        or not resource_id
-        or (route_id is not None and not isinstance(route_id, str))
-    ):
-        return None
-    return SelectorControlTarget(
-        connection_id=connection_id,
-        resource_id=resource_id,
-        route_id=route_id,
-    )
-
-
 class ExternalChannelWorkRepository:
-    """Own Channel Work transitions and delivery ledger state."""
+    """Own canonical Channel Work and current provider projection state."""
 
-    async def recover_deleted_discord_progress(
+    async def prepare_access_control_create(
         self,
         session: AsyncSession,
         *,
-        binding_id: str,
-        resource_labels: dict[str, object] | None,
-        deleted_provider_message_key: str,
-        origin_id: str,
-        now: datetime.datetime,
-    ) -> str | None:
-        """Recreate one confirmed-missing active Discord progress page."""
-        work = await session.scalar(
-            sa.select(RDBExternalChannelWork)
-            .join(
-                RDBExternalChannelBinding,
-                RDBExternalChannelBinding.id == RDBExternalChannelWork.binding_id,
-            )
-            .join(
-                RDBExternalChannelAgentRoute,
-                RDBExternalChannelAgentRoute.id == RDBExternalChannelBinding.route_id,
-            )
-            .join(
-                RDBExternalChannelConnection,
-                RDBExternalChannelConnection.id
-                == RDBExternalChannelAgentRoute.connection_id,
-            )
+        access_request_id: str,
+        connection_id: str,
+        resource_id: str | None,
+        route_id: str | None,
+        binding_id: str | None,
+        request_payload: dict[str, object],
+        operation_seed: str,
+    ) -> ProviderEffectPlan | None:
+        """Claim one access-control create as conservatively unknown before I/O."""
+        request = await session.scalar(
+            sa.select(RDBExternalChannelAccessRequest)
             .where(
-                RDBExternalChannelWork.binding_id == binding_id,
-                RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
-                RDBExternalChannelConnection.provider
-                == ExternalChannelProvider.DISCORD,
+                RDBExternalChannelAccessRequest.id == access_request_id,
+                RDBExternalChannelAccessRequest.status
+                == ExternalChannelAccessRequestStatus.PENDING,
             )
             .with_for_update()
         )
-        if work is None:
+        if (
+            request is None
+            or request.control_provider_message_key is not None
+            or request.control_projection_status is not None
+        ):
             return None
-        part = await session.scalar(
-            sa.select(RDBExternalChannelWorkProjectionPart)
-            .where(
-                RDBExternalChannelWorkProjectionPart.work_id == work.id,
-                RDBExternalChannelWorkProjectionPart.provider_message_key
-                == deleted_provider_message_key,
-                RDBExternalChannelWorkProjectionPart.status
-                == ExternalChannelWorkProjectionStatus.PRESENT,
-            )
-            .with_for_update()
-        )
-        if part is None or work.desired_progress_payload is None:
-            return None
-        part.provider_message_key = None
-        part.status = ExternalChannelWorkProjectionStatus.DELETED
-        part.deleted_at = now
-        presentation = render_discord_persisted_progress(
-            work.desired_progress_payload,
-            work_id=work.id,
-            desired_progress_revision=work.desired_progress_revision,
-        )
-        if part.part_ordinal >= len(presentation.pages):
-            return None
-        return await self._create_discord_progress_attempt(
+        request.control_projection_status = ExternalChannelWorkProjectionStatus.UNKNOWN
+        await session.flush()
+        return await self.prepare_direct_control(
             session,
-            work=work,
-            origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-            origin_id=origin_id,
-            channel_action_id=None,
+            connection_id=connection_id,
+            resource_id=resource_id,
+            route_id=route_id,
             binding_id=binding_id,
-            part=part,
-            operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-            labels=resource_labels,
-            page=presentation.pages[part.part_ordinal],
+            operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            request_payload=request_payload,
+            operation_seed=operation_seed,
         )
 
-    async def ensure_initial_discord_progress(
+    async def prepare_direct_control(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        resource_id: str | None,
+        route_id: str | None,
+        binding_id: str | None,
+        operation: ExternalChannelDeliveryOperation,
+        request_payload: dict[str, object],
+        operation_seed: str,
+    ) -> ProviderEffectPlan | None:
+        """Capture one process-local provider control from current domain state."""
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection).where(
+                RDBExternalChannelConnection.id == connection_id,
+                RDBExternalChannelConnection.status
+                == ExternalChannelConnectionStatus.ACTIVE,
+            )
+        )
+        if connection is None:
+            return None
+        resource = (
+            None
+            if resource_id is None
+            else await session.scalar(
+                sa.select(RDBExternalChannelResource).where(
+                    RDBExternalChannelResource.id == resource_id,
+                    RDBExternalChannelResource.connection_id == connection.id,
+                    RDBExternalChannelResource.status
+                    == ExternalChannelResourceStatus.ACTIVE,
+                )
+            )
+        )
+        if resource_id is not None and resource is None:
+            return None
+        route = (
+            None
+            if route_id is None
+            else await session.scalar(
+                sa.select(RDBExternalChannelAgentRoute).where(
+                    RDBExternalChannelAgentRoute.id == route_id,
+                    RDBExternalChannelAgentRoute.connection_id == connection.id,
+                )
+            )
+        )
+        if route_id is not None and route is None:
+            return None
+        binding = (
+            None
+            if binding_id is None
+            else await session.scalar(
+                sa.select(RDBExternalChannelBinding).where(
+                    RDBExternalChannelBinding.id == binding_id,
+                    RDBExternalChannelBinding.resource_id == resource_id,
+                    RDBExternalChannelBinding.disconnected_at.is_(None),
+                )
+            )
+        )
+        if binding_id is not None and binding is None:
+            return None
+        if binding is not None:
+            if route is None:
+                route = await session.get(
+                    RDBExternalChannelAgentRoute,
+                    binding.route_id,
+                )
+            if route is None or route.connection_id != connection.id:
+                return None
+        agent = (
+            None
+            if route is None or route.agent_id is None
+            else await session.scalar(
+                sa.select(RDBAgent).where(
+                    RDBAgent.id == route.agent_id,
+                    RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+                )
+            )
+        )
+        workspace = (
+            None
+            if agent is None
+            else await session.get(RDBWorkspace, agent.workspace_id)
+        )
+        agent_session = (
+            None
+            if binding is None
+            else await session.get(RDBAgentSession, binding.agent_session_id)
+        )
+        return ProviderEffectPlan(
+            target=ProviderTarget(
+                operation=operation,
+                binding_id=None if binding is None else binding.id,
+                resource_id=None if resource is None else resource.id,
+                connection_id=connection.id,
+                provider=connection.provider,
+                app_mode=connection.app_mode,
+                encrypted_credentials=connection.encrypted_credentials,
+                provider_tenant_id=connection.provider_tenant_id,
+                capabilities=connection.capabilities,
+                workspace_handle=None if workspace is None else workspace.handle,
+                agent_id=None if agent is None else agent.id,
+                agent_session_id=(None if agent_session is None else agent_session.id),
+                agent_name=None if agent is None else agent.name,
+                agent_avatar=None if agent is None else agent.avatar,
+                request_payload=request_payload,
+            ),
+            operation_key=ProviderOperationKey.from_seed(operation_seed),
+        )
+
+    async def revalidate_direct_control(
+        self,
+        session: AsyncSession,
+        *,
+        plan: ProviderEffectPlan,
+    ) -> ProviderEffectPlan | None:
+        """Refresh one process-local control against current provider authority."""
+        target = plan.target
+        route_id: str | None = None
+        if (
+            target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+            and target.request_payload.get("control_kind") == "setup_required"
+        ):
+            setup_claim_id = target.request_payload.get("setup_claim_id")
+            if not isinstance(setup_claim_id, str):
+                return None
+            claim = await session.get(
+                RDBExternalChannelSetupClaim,
+                setup_claim_id,
+            )
+            if claim is None or claim.route_id is None:
+                return None
+            route_id = claim.route_id
+        access_request_id = target.request_payload.get("access_request_id")
+        if (
+            target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+            and isinstance(access_request_id, str)
+        ):
+            request = await session.scalar(
+                sa.select(RDBExternalChannelAccessRequest).where(
+                    RDBExternalChannelAccessRequest.id == access_request_id,
+                    RDBExternalChannelAccessRequest.status
+                    == ExternalChannelAccessRequestStatus.PENDING,
+                    RDBExternalChannelAccessRequest.control_provider_message_key.is_(
+                        None
+                    ),
+                    RDBExternalChannelAccessRequest.control_projection_status
+                    == ExternalChannelWorkProjectionStatus.UNKNOWN,
+                )
+            )
+            if request is None:
+                return None
+        return await self.prepare_direct_control(
+            session,
+            connection_id=target.connection_id,
+            resource_id=target.resource_id,
+            route_id=route_id,
+            binding_id=target.binding_id,
+            operation=target.operation,
+            request_payload=target.request_payload,
+            operation_seed=plan.operation_key.value,
+        )
+
+    async def revalidate_terminal_control(
+        self,
+        session: AsyncSession,
+        *,
+        plan: ProviderEffectPlan,
+    ) -> ProviderEffectPlan | None:
+        """Verify a captured cleanup plan against committed terminal state."""
+        target = plan.target
+        if target.binding_id is None or target.resource_id is None:
+            return None
+        row = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelBinding,
+                    RDBExternalChannelResource,
+                    RDBExternalChannelAgentRoute,
+                    RDBExternalChannelConnection,
+                )
+                .join(
+                    RDBExternalChannelResource,
+                    RDBExternalChannelResource.id
+                    == RDBExternalChannelBinding.resource_id,
+                )
+                .join(
+                    RDBExternalChannelAgentRoute,
+                    RDBExternalChannelAgentRoute.id
+                    == RDBExternalChannelBinding.route_id,
+                )
+                .join(
+                    RDBExternalChannelConnection,
+                    RDBExternalChannelConnection.id
+                    == RDBExternalChannelAgentRoute.connection_id,
+                )
+                .where(
+                    RDBExternalChannelBinding.id == target.binding_id,
+                    RDBExternalChannelBinding.resource_id == target.resource_id,
+                    RDBExternalChannelBinding.disconnected_at.is_not(None),
+                    RDBExternalChannelResource.connection_id
+                    == RDBExternalChannelConnection.id,
+                    RDBExternalChannelConnection.id == target.connection_id,
+                    RDBExternalChannelConnection.provider == target.provider,
+                    RDBExternalChannelConnection.app_mode == target.app_mode,
+                )
+            )
+        ).one_or_none()
+        if row is None or target.encrypted_credentials is None:
+            return None
+        return plan
+
+    async def prepare_initial_progress(
         self,
         session: AsyncSession,
         *,
         work_id: str,
-        binding_id: str,
-        labels: dict[str, object] | None,
-    ) -> tuple[str, ...]:
-        """Plan initial Discord Tracker pages through the durable page ledger."""
-        work = await session.scalar(
-            sa.select(RDBExternalChannelWork)
-            .where(RDBExternalChannelWork.id == work_id)
+    ) -> ProviderEffectPlan | None:
+        """Plan the first current progress projection after canonical admission."""
+        row = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelWork,
+                    RDBExternalChannelBinding,
+                    RDBExternalChannelResource,
+                    RDBExternalChannelAgentRoute,
+                    RDBExternalChannelConnection,
+                )
+                .join(
+                    RDBExternalChannelBinding,
+                    RDBExternalChannelBinding.id == RDBExternalChannelWork.binding_id,
+                )
+                .join(
+                    RDBExternalChannelResource,
+                    RDBExternalChannelResource.id
+                    == RDBExternalChannelBinding.resource_id,
+                )
+                .join(
+                    RDBExternalChannelAgentRoute,
+                    RDBExternalChannelAgentRoute.id
+                    == RDBExternalChannelBinding.route_id,
+                )
+                .join(
+                    RDBExternalChannelConnection,
+                    RDBExternalChannelConnection.id
+                    == RDBExternalChannelAgentRoute.connection_id,
+                )
+                .where(
+                    RDBExternalChannelWork.id == work_id,
+                    RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
+                    RDBExternalChannelBinding.disconnected_at.is_(None),
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        work, binding, resource, route, connection = row
+        if work.desired_progress_payload is None:
+            return None
+        if connection.provider is ExternalChannelProvider.SLACK:
+            rendered = render_slack_persisted_progress(
+                work.desired_progress_payload,
+                work_id=work.id,
+                desired_progress_revision=work.desired_progress_revision,
+            )
+            payload = _provider_payload(
+                connection.provider,
+                resource.labels,
+                text=rendered.text,
+                blocks=rendered.blocks,
+                desired_progress_revision=work.desired_progress_revision,
+            )
+        else:
+            rendered_discord = render_discord_persisted_progress(
+                work.desired_progress_payload,
+                work_id=work.id,
+                desired_progress_revision=work.desired_progress_revision,
+            )
+            if not rendered_discord.pages:
+                return None
+            page = rendered_discord.pages[0]
+            payload = _provider_payload(
+                connection.provider,
+                resource.labels,
+                text=page.text,
+                desired_progress_revision=work.desired_progress_revision,
+            )
+            payload["embeds"] = page.embeds
+        payload["work_id"] = work.id
+        payload["part_ordinal"] = 0
+        return await self.prepare_direct_control(
+            session,
+            connection_id=connection.id,
+            resource_id=resource.id,
+            route_id=route.id,
+            binding_id=binding.id,
+            operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
+            request_payload=payload,
+            operation_seed=(
+                f"initial-progress:{work.id}:{work.desired_progress_revision}"
+            ),
+        )
+
+    async def prepare_access_control_delete(
+        self,
+        session: AsyncSession,
+        *,
+        access_request_id: str,
+    ) -> ProviderEffectPlan | None:
+        """Capture the current access-control message for one direct delete."""
+        request = await session.scalar(
+            sa.select(RDBExternalChannelAccessRequest)
+            .where(
+                RDBExternalChannelAccessRequest.id == access_request_id,
+                RDBExternalChannelAccessRequest.status
+                != ExternalChannelAccessRequestStatus.PENDING,
+            )
             .with_for_update()
         )
-        if work is None:
-            raise RuntimeError("External Channel work disappeared.")
-        if work.desired_progress_payload is None:
-            return ()
-        presentation = render_discord_persisted_progress(
-            work.desired_progress_payload,
-            work_id=work.id,
-            desired_progress_revision=work.desired_progress_revision,
+        if (
+            request is None
+            or request.control_provider_message_key is None
+            or request.control_projection_status
+            is not ExternalChannelWorkProjectionStatus.PRESENT
+        ):
+            return None
+        route = await session.get(RDBExternalChannelAgentRoute, request.route_id)
+        resource = await session.get(RDBExternalChannelResource, request.resource_id)
+        if (
+            route is None
+            or resource is None
+            or resource.connection_id != route.connection_id
+        ):
+            return None
+        connection = await session.get(
+            RDBExternalChannelConnection, route.connection_id
         )
-        parts = list(
-            await session.scalars(
-                sa.select(RDBExternalChannelWorkProjectionPart)
-                .where(RDBExternalChannelWorkProjectionPart.work_id == work.id)
-                .order_by(RDBExternalChannelWorkProjectionPart.part_ordinal)
-                .with_for_update()
+        if connection is None:
+            return None
+        binding = await session.scalar(
+            sa.select(RDBExternalChannelBinding).where(
+                RDBExternalChannelBinding.resource_id == resource.id,
+                RDBExternalChannelBinding.route_id == route.id,
+                RDBExternalChannelBinding.disconnected_at.is_(None),
             )
         )
-        if not parts:
-            for ordinal, page in enumerate(presentation.pages):
-                part = RDBExternalChannelWorkProjectionPart(
-                    work_id=work.id,
-                    part_ordinal=ordinal,
-                    desired_progress_revision=work.desired_progress_revision,
-                    status=ExternalChannelWorkProjectionStatus.PENDING,
-                    provider_message_key=None,
-                    latest_delivery_attempt_id=None,
-                    deleted_at=None,
-                )
-                session.add(part)
-                await session.flush()
-                await self._create_discord_progress_attempt(
-                    session,
-                    work=work,
-                    origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-                    origin_id=work.id,
-                    channel_action_id=None,
-                    binding_id=binding_id,
-                    part=part,
-                    operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                    labels=labels,
-                    page=page,
-                )
-        delivery_attempt_ids = await session.scalars(
-            sa.select(RDBExternalChannelWorkProjectionPart.latest_delivery_attempt_id)
-            .where(
-                RDBExternalChannelWorkProjectionPart.work_id == work.id,
-                RDBExternalChannelWorkProjectionPart.latest_delivery_attempt_id.is_not(
-                    None
-                ),
-            )
-            .order_by(RDBExternalChannelWorkProjectionPart.part_ordinal)
+        payload = _provider_payload(
+            connection.provider,
+            resource.labels,
+            provider_message_key=request.control_provider_message_key,
         )
-        return tuple(
-            delivery_attempt_id
-            for delivery_attempt_id in delivery_attempt_ids
-            if delivery_attempt_id is not None
+        payload["access_request_id"] = request.id
+        return await self.prepare_direct_control(
+            session,
+            connection_id=connection.id,
+            resource_id=resource.id,
+            route_id=route.id,
+            binding_id=None if binding is None else binding.id,
+            operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+            request_payload=payload,
+            operation_seed=f"access-delete:{request.id}:{request.updated_at.isoformat()}",
         )
+
+    async def apply_access_control_outcome(
+        self,
+        session: AsyncSession,
+        *,
+        plan: ProviderEffectPlan,
+        outcome: ProviderMutationOutcome,
+    ) -> bool:
+        """Compare-and-set current access-control provider projection state."""
+        access_request_id = plan.target.request_payload.get("access_request_id")
+        if not isinstance(access_request_id, str):
+            return False
+        request = await session.scalar(
+            sa.select(RDBExternalChannelAccessRequest)
+            .where(RDBExternalChannelAccessRequest.id == access_request_id)
+            .with_for_update()
+        )
+        if request is None:
+            return False
+        if plan.target.operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE:
+            expected_key = plan.target.request_payload.get("provider_message_key")
+            if (
+                not isinstance(expected_key, str)
+                or request.control_provider_message_key != expected_key
+            ):
+                return False
+            if outcome.status == "delivered":
+                request.control_provider_message_key = None
+                request.control_projection_status = (
+                    ExternalChannelWorkProjectionStatus.DELETED
+                )
+            elif outcome.status == "failed":
+                request.control_projection_status = (
+                    ExternalChannelWorkProjectionStatus.FAILED
+                )
+            else:
+                request.control_projection_status = (
+                    ExternalChannelWorkProjectionStatus.UNKNOWN
+                )
+        elif plan.target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE:
+            if outcome.status == "delivered":
+                if outcome.provider_message_key is None:
+                    request.control_projection_status = (
+                        ExternalChannelWorkProjectionStatus.UNKNOWN
+                    )
+                else:
+                    request.control_provider_message_key = outcome.provider_message_key
+                    request.control_projection_status = (
+                        ExternalChannelWorkProjectionStatus.PRESENT
+                    )
+            elif outcome.status == "failed":
+                request.control_projection_status = (
+                    ExternalChannelWorkProjectionStatus.FAILED
+                )
+            else:
+                request.control_projection_status = (
+                    ExternalChannelWorkProjectionStatus.UNKNOWN
+                )
+        else:
+            return False
+        await session.flush()
+        return True
 
     async def ensure_active_work(
         self,
@@ -319,7 +560,6 @@ class ExternalChannelWorkRepository:
                 state_revision=1,
                 desired_progress_revision=0,
                 desired_progress_payload=None,
-                progress_provider_message_key=None,
                 finished_at=None,
             )
         )
@@ -428,7 +668,7 @@ class ExternalChannelWorkRepository:
         session_id: str,
         agent_id: str,
     ) -> list[ChannelWorkSnapshot]:
-        """List all active binding work in stable binding order."""
+        """List active binding work in stable binding order."""
         rows = (
             await session.execute(
                 sa.select(
@@ -441,10 +681,7 @@ class ExternalChannelWorkRepository:
                     RDBAgentSession,
                     RDBAgentSession.id == RDBExternalChannelBinding.agent_session_id,
                 )
-                .join(
-                    RDBAgent,
-                    RDBAgent.id == RDBAgentSession.agent_id,
-                )
+                .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
                 .join(
                     RDBExternalChannelAgentRoute,
                     RDBExternalChannelAgentRoute.id
@@ -480,63 +717,18 @@ class ExternalChannelWorkRepository:
                 .order_by(RDBExternalChannelBinding.id)
             )
         ).all()
-        snapshots: list[ChannelWorkSnapshot] = []
-        for binding, resource, connection, work in rows:
-            action = await session.scalar(
-                sa.select(RDBExternalChannelAction)
-                .where(RDBExternalChannelAction.work_id == work.id)
-                .order_by(
-                    RDBExternalChannelAction.created_at.desc(),
-                    RDBExternalChannelAction.id.desc(),
-                )
-                .limit(1)
+        return [
+            ChannelWorkSnapshot(
+                binding_id=binding.id,
+                provider=connection.provider,
+                resource_label=_resource_label(resource.labels, binding.id),
+                title=work.title,
+                tasks=[ChannelWorkTask.model_validate(task) for task in work.tasks],
             )
-            deliveries = await self._list_deliveries(
-                session,
-                channel_action_id=None if action is None else action.id,
-            )
-            latest_progress_delivery = await self._latest_progress_delivery(
-                session,
-                work_id=work.id,
-            )
-            projection_parts = list(
-                await session.scalars(
-                    sa.select(RDBExternalChannelWorkProjectionPart)
-                    .where(RDBExternalChannelWorkProjectionPart.work_id == work.id)
-                    .order_by(RDBExternalChannelWorkProjectionPart.part_ordinal)
-                )
-            )
-            snapshots.append(
-                ChannelWorkSnapshot(
-                    binding_id=binding.id,
-                    provider=connection.provider,
-                    resource_label=_resource_label(resource.labels, binding.id),
-                    title=work.title,
-                    tasks=[ChannelWorkTask.model_validate(task) for task in work.tasks],
-                    state_revision=work.state_revision,
-                    desired_progress_revision=work.desired_progress_revision,
-                    progress_provider_message_key=(
-                        None
-                        if connection.provider is ExternalChannelProvider.DISCORD
-                        else work.progress_provider_message_key
-                    ),
-                    projection_drift=_projection_drift(
-                        work,
-                        (
-                            []
-                            if latest_progress_delivery is None
-                            else [latest_progress_delivery]
-                        ),
-                        provider=connection.provider,
-                        projection_parts=projection_parts,
-                    ),
-                    latest_action_mode=None if action is None else action.mode,
-                    latest_deliveries=deliveries,
-                )
-            )
-        return snapshots
+            for binding, resource, connection, work in rows
+        ]
 
-    async def commit_action(
+    async def commit_direct_action(
         self,
         session: AsyncSession,
         *,
@@ -551,38 +743,18 @@ class ExternalChannelWorkRepository:
         tasks: Sequence[ChannelWorkTask] | None,
         files: Sequence[ExternalChannelOutboundFileManifest],
         now: datetime.datetime,
-    ) -> ChannelActionCommit:
-        """Commit work transition, action identity, and provider intents atomically."""
+    ) -> ChannelActionTransition:
+        """Commit canonical Work and return process-local provider effects."""
+        del run_id
         requested_tasks = (
             [task.model_dump(mode="json") for task in tasks]
             if tasks is not None
             else None
         )
-        request_payload: dict[str, object] = {
-            "binding": binding_id,
-            "mode": mode.value,
-            **({"message": message} if message is not None else {}),
-            **({"title": title} if title is not None else {}),
-            **({"todo_update": requested_tasks} if requested_tasks is not None else {}),
-            **(
-                {"files": [item.model_dump(mode="json") for item in files]}
-                if files
-                else {}
-            ),
-        }
         if mode is ExternalChannelActionMode.FINISH and message is None:
             raise ValueError("Finish requires a final External Channel reply.")
         if files and message is None:
             raise ValueError("Channel file publication requires a message.")
-        existing = await session.scalar(
-            sa.select(RDBExternalChannelAction).where(
-                RDBExternalChannelAction.agent_session_id == session_id,
-                RDBExternalChannelAction.client_tool_call_id == client_tool_call_id,
-            )
-        )
-        if existing is not None:
-            _validate_existing_action(existing, request_payload)
-            return await self._build_commit(session, existing)
 
         session_row = await session.scalar(
             sa.select(RDBAgentSession)
@@ -595,15 +767,6 @@ class ExternalChannelWorkRepository:
         )
         if session_row is None:
             raise ValueError("AgentSession is not active.")
-        existing = await session.scalar(
-            sa.select(RDBExternalChannelAction).where(
-                RDBExternalChannelAction.agent_session_id == session_id,
-                RDBExternalChannelAction.client_tool_call_id == client_tool_call_id,
-            )
-        )
-        if existing is not None:
-            _validate_existing_action(existing, request_payload)
-            return await self._build_commit(session, existing)
         agent = await session.scalar(
             sa.select(RDBAgent).where(
                 RDBAgent.id == agent_id,
@@ -634,14 +797,24 @@ class ExternalChannelWorkRepository:
         connection = await session.scalar(
             sa.select(RDBExternalChannelConnection).where(
                 RDBExternalChannelConnection.id == route.connection_id,
+                RDBExternalChannelConnection.status
+                == ExternalChannelConnectionStatus.ACTIVE,
             )
         )
         if connection is None:
             raise ValueError("External Channel connection is not active.")
         _validate_message_length(connection.provider, message)
-        resource = await session.get(RDBExternalChannelResource, binding.resource_id)
+        resource = await session.scalar(
+            sa.select(RDBExternalChannelResource).where(
+                RDBExternalChannelResource.id == binding.resource_id,
+                RDBExternalChannelResource.connection_id == connection.id,
+                RDBExternalChannelResource.status
+                == ExternalChannelResourceStatus.ACTIVE,
+            )
+        )
         if resource is None:
             raise ValueError("External Channel resource is unavailable.")
+        workspace = await session.get(RDBWorkspace, agent.workspace_id)
 
         work = await session.scalar(
             sa.select(RDBExternalChannelWork)
@@ -651,8 +824,7 @@ class ExternalChannelWorkRepository:
             )
             .with_for_update()
         )
-        created_work = work is None
-        if created_work:
+        if work is None:
             work = RDBExternalChannelWork(
                 binding_id=binding.id,
                 status=ExternalChannelWorkStatus.ACTIVE,
@@ -662,17 +834,56 @@ class ExternalChannelWorkRepository:
                 state_revision=1,
                 desired_progress_revision=0,
                 desired_progress_payload=None,
-                progress_provider_message_key=None,
                 finished_at=None,
             )
             session.add(work)
             await session.flush()
 
-        operations: list[
-            tuple[ExternalChannelDeliveryOperation, dict[str, object], int]
-        ] = []
+        effects: list[ChannelActionEffectPlan] = []
+
+        def append_effect(
+            operation: ExternalChannelDeliveryOperation,
+            payload: dict[str, object],
+            *,
+            part: int,
+            expected_desired_progress_revision: int | None,
+        ) -> None:
+            target = ProviderTarget(
+                operation=operation,
+                binding_id=binding.id,
+                resource_id=resource.id,
+                connection_id=connection.id,
+                provider=connection.provider,
+                app_mode=connection.app_mode,
+                encrypted_credentials=connection.encrypted_credentials,
+                provider_tenant_id=connection.provider_tenant_id,
+                capabilities=connection.capabilities,
+                workspace_handle=None if workspace is None else workspace.handle,
+                agent_id=agent.id,
+                agent_session_id=session_id,
+                agent_name=agent.name,
+                agent_avatar=agent.avatar,
+                request_payload=payload,
+            )
+            effects.append(
+                ChannelActionEffectPlan(
+                    provider=ProviderEffectPlan(
+                        target=target,
+                        operation_key=ProviderOperationKey.from_seed(
+                            f"{client_tool_call_id}:{len(effects)}:"
+                            f"{operation.value}:{part}"
+                        ),
+                    ),
+                    part=part,
+                    work_id=work.id,
+                    expected_desired_progress_revision=(
+                        expected_desired_progress_revision
+                    ),
+                )
+            )
+
         if message is not None:
-            for part_ordinal, part in enumerate(
+            for part, payload in enumerate(
                 _reply_parts(
                     provider=connection.provider,
                     labels=resource.labels,
@@ -680,13 +891,21 @@ class ExternalChannelWorkRepository:
                     files=files,
                 )
             ):
-                operations.append(
-                    (
-                        ExternalChannelDeliveryOperation.REPLY,
-                        part,
-                        part_ordinal,
-                    )
+                append_effect(
+                    ExternalChannelDeliveryOperation.REPLY,
+                    payload,
+                    part=part,
+                    expected_desired_progress_revision=None,
                 )
+
+        projection_parts = {
+            part.part_ordinal: part
+            for part in await session.scalars(
+                sa.select(RDBExternalChannelWorkProjectionPart)
+                .where(RDBExternalChannelWorkProjectionPart.work_id == work.id)
+                .with_for_update()
+            )
+        }
         if mode is ExternalChannelActionMode.CONTINUE:
             progress_changed = title is not None or requested_tasks is not None
             if requested_tasks is not None and title is None:
@@ -730,46 +949,97 @@ class ExternalChannelWorkRepository:
                 work.desired_progress_revision += 1
                 work.desired_progress_payload = progress.model_dump(mode="json")
                 if connection.provider is ExternalChannelProvider.SLACK:
-                    presentation = _render_progress(
-                        connection.provider,
+                    rendered = render_slack_progress(
                         progress,
                         work_id=work.id,
                         desired_progress_revision=work.desired_progress_revision,
                     )
-                    if created_work:
-                        operations.append(
-                            (
-                                ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                                _provider_payload(
-                                    connection.provider,
-                                    resource.labels,
-                                    text=presentation.text,
-                                    blocks=presentation.blocks,
-                                    desired_progress_revision=(
-                                        work.desired_progress_revision
-                                    ),
-                                ),
-                                0,
-                            )
+                    desired_pages = ((rendered.text, rendered.blocks),)
+                else:
+                    rendered_discord = render_discord_persisted_progress(
+                        work.desired_progress_payload,
+                        work_id=work.id,
+                        desired_progress_revision=work.desired_progress_revision,
+                    )
+                    desired_pages = tuple(
+                        (page.text, page.embeds) for page in rendered_discord.pages
+                    )
+                for part_ordinal, (text, presentation) in enumerate(desired_pages):
+                    part = projection_parts.pop(part_ordinal, None)
+                    operation: ExternalChannelDeliveryOperation | None = None
+                    if (
+                        part is None
+                        or part.status is ExternalChannelWorkProjectionStatus.DELETED
+                    ):
+                        operation = ExternalChannelDeliveryOperation.PROGRESS_CREATE
+                    elif part.status is ExternalChannelWorkProjectionStatus.FAILED:
+                        operation = (
+                            ExternalChannelDeliveryOperation.PROGRESS_UPDATE
+                            if part.provider_message_key is not None
+                            else ExternalChannelDeliveryOperation.PROGRESS_CREATE
                         )
-                    elif work.progress_provider_message_key is not None:
-                        operations.append(
-                            (
-                                ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-                                _provider_payload(
-                                    connection.provider,
-                                    resource.labels,
-                                    text=presentation.text,
-                                    blocks=presentation.blocks,
-                                    provider_message_key=(
-                                        work.progress_provider_message_key
-                                    ),
-                                    desired_progress_revision=(
-                                        work.desired_progress_revision
-                                    ),
+                    elif (
+                        part.status is ExternalChannelWorkProjectionStatus.PRESENT
+                        and part.provider_message_key is not None
+                        and part.desired_progress_revision
+                        < work.desired_progress_revision
+                    ):
+                        operation = ExternalChannelDeliveryOperation.PROGRESS_UPDATE
+                    elif (
+                        part.status is ExternalChannelWorkProjectionStatus.UNKNOWN
+                        and part.desired_progress_revision
+                        < work.desired_progress_revision
+                    ):
+                        operation = (
+                            ExternalChannelDeliveryOperation.PROGRESS_UPDATE
+                            if part.provider_message_key is not None
+                            else ExternalChannelDeliveryOperation.PROGRESS_CREATE
+                        )
+                    if operation is None:
+                        continue
+                    payload = _provider_payload(
+                        connection.provider,
+                        resource.labels,
+                        text=text,
+                        blocks=(
+                            presentation
+                            if connection.provider is ExternalChannelProvider.SLACK
+                            else None
+                        ),
+                        provider_message_key=(
+                            None if part is None else part.provider_message_key
+                        ),
+                        desired_progress_revision=work.desired_progress_revision,
+                    )
+                    if connection.provider is ExternalChannelProvider.DISCORD:
+                        payload["embeds"] = presentation
+                    append_effect(
+                        operation,
+                        payload,
+                        part=part_ordinal,
+                        expected_desired_progress_revision=(
+                            work.desired_progress_revision
+                        ),
+                    )
+                for part_ordinal, part in sorted(projection_parts.items()):
+                    if (
+                        part.status is ExternalChannelWorkProjectionStatus.PRESENT
+                        and part.provider_message_key is not None
+                    ):
+                        append_effect(
+                            ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+                            _provider_payload(
+                                connection.provider,
+                                resource.labels,
+                                provider_message_key=part.provider_message_key,
+                                desired_progress_revision=(
+                                    work.desired_progress_revision
                                 ),
-                                0,
-                            )
+                            ),
+                            part=part_ordinal,
+                            expected_desired_progress_revision=(
+                                work.desired_progress_revision
+                            ),
                         )
         else:
             work.status = ExternalChannelWorkStatus.FINISHED
@@ -777,252 +1047,59 @@ class ExternalChannelWorkRepository:
             work.finished_at = now
             work.desired_progress_revision += 1
             work.desired_progress_payload = None
-            if (
-                connection.provider is ExternalChannelProvider.SLACK
-                and work.progress_provider_message_key is not None
-            ):
-                operations.append(
-                    (
+            for part_ordinal, part in sorted(projection_parts.items()):
+                if (
+                    part.status is ExternalChannelWorkProjectionStatus.PRESENT
+                    and part.provider_message_key is not None
+                ):
+                    append_effect(
                         ExternalChannelDeliveryOperation.PROGRESS_DELETE,
                         _provider_payload(
                             connection.provider,
                             resource.labels,
-                            provider_message_key=work.progress_provider_message_key,
-                            desired_progress_revision=(work.desired_progress_revision),
+                            provider_message_key=part.provider_message_key,
+                            desired_progress_revision=work.desired_progress_revision,
                         ),
-                        0,
+                        part=part_ordinal,
+                        expected_desired_progress_revision=(
+                            work.desired_progress_revision
+                        ),
                     )
-                )
-
-        action = RDBExternalChannelAction(
-            agent_session_id=session_id,
-            agent_run_id=run_id,
-            client_tool_call_id=client_tool_call_id,
+        await session.flush()
+        return ChannelActionTransition(
             binding_id=binding.id,
-            mode=mode,
-            state_revision=work.state_revision,
-            request_payload=request_payload,
             work_id=work.id,
-            completed_at=None,
+            work_status=work.status,
+            state_revision=work.state_revision,
+            effects=tuple(effects),
         )
-        session.add(action)
-        await session.flush()
-        for operation, payload, part_ordinal in operations:
-            session.add(
-                RDBExternalChannelDeliveryAttempt(
-                    origin_type=ExternalChannelDeliveryOriginType.CHANNEL_ACTION,
-                    origin_id=action.id,
-                    operation=operation,
-                    request_payload=payload,
-                    status=ExternalChannelDeliveryStatus.PENDING,
-                    part_ordinal=part_ordinal,
-                    channel_action_id=action.id,
-                    binding_id=binding.id,
-                    provider_message_key=(
-                        work.progress_provider_message_key
-                        if operation
-                        in {
-                            ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-                            ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-                        }
-                        else None
-                    ),
-                    error_kind=None,
-                    error_summary=None,
-                    attempted_at=None,
-                    completed_at=None,
-                )
-            )
-        await session.flush()
-        if (
-            mode is ExternalChannelActionMode.CONTINUE
-            and work.desired_progress_payload is not None
-            and connection.provider is ExternalChannelProvider.DISCORD
-        ):
-            presentation = render_discord_persisted_progress(
-                work.desired_progress_payload,
-                work_id=work.id,
-                desired_progress_revision=work.desired_progress_revision,
-            )
-            await self._plan_discord_progress(
-                session,
-                work=work,
-                action=action,
-                labels=resource.labels,
-                presentation=presentation,
-            )
-        await session.flush()
-        return await self._build_commit(session, action)
 
-    async def find_action_by_client_tool_call(
+    async def revalidate_direct_effect(
         self,
         session: AsyncSession,
         *,
-        session_id: str,
-        client_tool_call_id: str,
-    ) -> tuple[ChannelActionCommit, dict[str, object]] | None:
-        """Return one already committed action before any Runtime preflight."""
-        action = await session.scalar(
-            sa.select(RDBExternalChannelAction).where(
-                RDBExternalChannelAction.agent_session_id == session_id,
-                RDBExternalChannelAction.client_tool_call_id == client_tool_call_id,
-            )
-        )
-        if action is None:
+        effect: ChannelActionEffectPlan,
+    ) -> ProviderEffectPlan | None:
+        """Resolve current provider authority for one process-local effect."""
+        target = effect.provider.target
+        if target.binding_id is None or target.resource_id is None:
             return None
-        return (
-            await self._build_commit(session, action),
-            dict(action.request_payload),
-        )
-
-    async def get_delivery_target(
-        self,
-        session: AsyncSession,
-        *,
-        delivery_attempt_id: str,
-    ) -> ChannelDeliveryTarget | None:
-        """Load provider target and encrypted credentials for one intent."""
-        attempt = await session.get(
-            RDBExternalChannelDeliveryAttempt,
-            delivery_attempt_id,
-        )
-        if attempt is None:
-            return None
-        if attempt.binding_id is None:
-            if attempt.origin_type is ExternalChannelDeliveryOriginType.SETUP_CLAIM:
-                setup_target = (
-                    await session.execute(
-                        sa.select(
-                            RDBExternalChannelAgentRoute,
-                            RDBExternalChannelConnection,
-                            RDBAgent,
-                            RDBExternalChannelSetupClaim.source_resource_id,
-                        )
-                        .join(
-                            RDBExternalChannelSetupClaim,
-                            RDBExternalChannelSetupClaim.route_id
-                            == RDBExternalChannelAgentRoute.id,
-                        )
-                        .join(
-                            RDBExternalChannelConnection,
-                            RDBExternalChannelConnection.id
-                            == RDBExternalChannelAgentRoute.connection_id,
-                        )
-                        .join(
-                            RDBAgent,
-                            RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
-                        )
-                        .where(RDBExternalChannelSetupClaim.id == attempt.origin_id)
-                    )
-                ).one_or_none()
-                if setup_target is None:
-                    return None
-                route, connection, agent, resource_id = setup_target
-                connection_id = route.connection_id
-            elif (
-                attempt.origin_type is ExternalChannelDeliveryOriginType.ACCESS_REQUEST
-            ):
-                request_route = (
-                    await session.execute(
-                        sa.select(
-                            RDBExternalChannelAgentRoute,
-                            RDBExternalChannelConnection,
-                            RDBAgent,
-                            RDBExternalChannelAccessRequest.resource_id,
-                        )
-                        .join(
-                            RDBExternalChannelAccessRequest,
-                            RDBExternalChannelAccessRequest.route_id
-                            == RDBExternalChannelAgentRoute.id,
-                        )
-                        .join(
-                            RDBExternalChannelConnection,
-                            RDBExternalChannelConnection.id
-                            == RDBExternalChannelAgentRoute.connection_id,
-                        )
-                        .outerjoin(
-                            RDBAgent,
-                            RDBAgent.id == RDBExternalChannelAgentRoute.agent_id,
-                        )
-                        .where(RDBExternalChannelAccessRequest.id == attempt.origin_id)
-                    )
-                ).one_or_none()
-                if request_route is None:
-                    return None
-                route, connection, agent, resource_id = request_route
-                connection_id = route.connection_id
-            elif (
-                attempt.origin_type
-                is ExternalChannelDeliveryOriginType.MANAGER_OPERATION
-            ):
-                interaction = await session.get(
-                    RDBExternalChannelInteraction,
-                    attempt.origin_id,
-                )
-                target = _selector_control_target(interaction)
-                if target is None:
-                    return None
-                connection = await session.get(
-                    RDBExternalChannelConnection,
-                    target.connection_id,
-                )
-                if connection is None:
-                    return None
-                route = (
-                    None
-                    if target.route_id is None
-                    else await session.get(
-                        RDBExternalChannelAgentRoute,
-                        target.route_id,
-                    )
-                )
-                agent = (
-                    None
-                    if route is None or route.agent_id is None
-                    else await session.get(RDBAgent, route.agent_id)
-                )
-                resource_id = target.resource_id
-                connection_id = target.connection_id
-            else:
-                return None
-            workspace = (
-                None
-                if agent is None
-                else await session.get(RDBWorkspace, agent.workspace_id)
-            )
-            return ChannelDeliveryTarget(
-                delivery_attempt_id=attempt.id,
-                operation=attempt.operation,
-                status=attempt.status,
-                binding_id=None,
-                resource_id=resource_id,
-                connection_id=connection_id,
-                provider=connection.provider,
-                app_mode=connection.app_mode,
-                encrypted_credentials=connection.encrypted_credentials,
-                provider_tenant_id=connection.provider_tenant_id,
-                capabilities=connection.capabilities,
-                workspace_handle=None if workspace is None else workspace.handle,
-                agent_id=None if agent is None else agent.id,
-                agent_session_id=None,
-                agent_name=None if agent is None else agent.name,
-                agent_avatar=None if agent is None else agent.avatar,
-                request_payload=dict(attempt.request_payload),
-            )
         row = (
             await session.execute(
                 sa.select(
-                    RDBExternalChannelDeliveryAttempt,
+                    RDBExternalChannelBinding,
+                    RDBExternalChannelResource,
                     RDBExternalChannelAgentRoute,
                     RDBExternalChannelConnection,
+                    RDBAgentSession,
                     RDBAgent,
-                    RDBExternalChannelBinding.resource_id,
-                    RDBExternalChannelBinding.agent_session_id,
+                    RDBWorkspace,
+                    RDBExternalChannelWork,
                 )
                 .join(
-                    RDBExternalChannelBinding,
-                    RDBExternalChannelBinding.id
-                    == RDBExternalChannelDeliveryAttempt.binding_id,
+                    RDBExternalChannelResource,
+                    RDBExternalChannelResource.id
+                    == RDBExternalChannelBinding.resource_id,
                 )
                 .join(
                     RDBExternalChannelAgentRoute,
@@ -1038,40 +1115,115 @@ class ExternalChannelWorkRepository:
                     RDBAgentSession,
                     RDBAgentSession.id == RDBExternalChannelBinding.agent_session_id,
                 )
+                .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
+                .join(RDBWorkspace, RDBWorkspace.id == RDBAgent.workspace_id)
                 .join(
-                    RDBAgent,
-                    RDBAgent.id == RDBAgentSession.agent_id,
+                    RDBExternalChannelWork,
+                    RDBExternalChannelWork.id == effect.work_id,
                 )
-                .where(RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id)
+                .where(
+                    RDBExternalChannelBinding.id == target.binding_id,
+                    RDBExternalChannelBinding.resource_id == target.resource_id,
+                    RDBExternalChannelBinding.disconnected_at.is_(None),
+                    RDBExternalChannelResource.status
+                    == ExternalChannelResourceStatus.ACTIVE,
+                    RDBExternalChannelResource.connection_id
+                    == RDBExternalChannelConnection.id,
+                    RDBExternalChannelConnection.id == target.connection_id,
+                    RDBExternalChannelConnection.status
+                    == ExternalChannelConnectionStatus.ACTIVE,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+                    RDBExternalChannelWork.binding_id == RDBExternalChannelBinding.id,
+                )
             )
         ).one_or_none()
         if row is None:
             return None
-        attempt, route, connection, agent, resource_id, agent_session_id = row
-        workspace = (
-            None
-            if agent is None
-            else await session.get(RDBWorkspace, agent.workspace_id)
+        binding, resource, _route, connection, agent_session, agent, workspace, _ = row
+        return ProviderEffectPlan(
+            target=ProviderTarget(
+                operation=target.operation,
+                binding_id=binding.id,
+                resource_id=resource.id,
+                connection_id=connection.id,
+                provider=connection.provider,
+                app_mode=connection.app_mode,
+                encrypted_credentials=connection.encrypted_credentials,
+                provider_tenant_id=connection.provider_tenant_id,
+                capabilities=connection.capabilities,
+                workspace_handle=workspace.handle,
+                agent_id=agent.id,
+                agent_session_id=agent_session.id,
+                agent_name=agent.name,
+                agent_avatar=agent.avatar,
+                request_payload=target.request_payload,
+            ),
+            operation_key=effect.provider.operation_key,
         )
-        return ChannelDeliveryTarget(
-            delivery_attempt_id=attempt.id,
-            operation=attempt.operation,
-            status=attempt.status,
-            binding_id=attempt.binding_id,
-            resource_id=resource_id,
-            connection_id=route.connection_id,
-            provider=connection.provider,
-            app_mode=connection.app_mode,
-            encrypted_credentials=connection.encrypted_credentials,
-            provider_tenant_id=connection.provider_tenant_id,
-            capabilities=connection.capabilities,
-            workspace_handle=None if workspace is None else workspace.handle,
-            agent_id=None if agent is None else agent.id,
-            agent_session_id=agent_session_id,
-            agent_name=None if agent is None else agent.name,
-            agent_avatar=None if agent is None else agent.avatar,
-            request_payload=dict(attempt.request_payload),
+
+    async def apply_direct_effect_outcome(
+        self,
+        session: AsyncSession,
+        *,
+        effect: ChannelActionEffectPlan,
+        outcome: ProviderMutationOutcome,
+    ) -> bool:
+        """Compare-and-set one current Work projection outcome."""
+        expected_revision = effect.expected_desired_progress_revision
+        if expected_revision is None:
+            return True
+        work = await session.scalar(
+            sa.select(RDBExternalChannelWork)
+            .where(
+                RDBExternalChannelWork.id == effect.work_id,
+                RDBExternalChannelWork.desired_progress_revision == expected_revision,
+            )
+            .with_for_update()
         )
+        if work is None:
+            return False
+        part = await session.scalar(
+            sa.select(RDBExternalChannelWorkProjectionPart)
+            .where(
+                RDBExternalChannelWorkProjectionPart.work_id == effect.work_id,
+                RDBExternalChannelWorkProjectionPart.part_ordinal == effect.part,
+            )
+            .with_for_update()
+        )
+        if part is None:
+            part = RDBExternalChannelWorkProjectionPart(
+                work_id=effect.work_id,
+                part_ordinal=effect.part,
+                desired_progress_revision=expected_revision,
+                status=ExternalChannelWorkProjectionStatus.UNKNOWN,
+                provider_message_key=None,
+            )
+            session.add(part)
+        elif part.desired_progress_revision > expected_revision:
+            return False
+        part.desired_progress_revision = expected_revision
+        match outcome.status:
+            case "delivered":
+                if (
+                    effect.provider.target.operation
+                    is ExternalChannelDeliveryOperation.PROGRESS_DELETE
+                ):
+                    part.status = ExternalChannelWorkProjectionStatus.DELETED
+                    part.provider_message_key = None
+                elif outcome.provider_message_key is None:
+                    part.status = ExternalChannelWorkProjectionStatus.UNKNOWN
+                else:
+                    part.status = ExternalChannelWorkProjectionStatus.PRESENT
+                    part.provider_message_key = outcome.provider_message_key
+            case "failed":
+                part.status = ExternalChannelWorkProjectionStatus.FAILED
+            case "unknown":
+                part.status = ExternalChannelWorkProjectionStatus.UNKNOWN
+            case _ as unreachable:
+                assert_never(unreachable)
+        await session.flush()
+        return True
 
     async def record_discord_delivery_channel(
         self,
@@ -1100,2458 +1252,6 @@ class ExternalChannelWorkRepository:
         resource.labels = labels
         await session.flush()
         return delivery_channel_id
-
-    async def start_captured_terminal_delivery(
-        self,
-        session: AsyncSession,
-        *,
-        target: ChannelDeliveryTarget,
-        now: datetime.datetime,
-    ) -> ChannelDeliveryTarget | None:
-        """Claim terminal cleanup using provider authority captured before purge."""
-        if (
-            target.status is not ExternalChannelDeliveryStatus.PENDING
-            or target.binding_id is None
-            or target.resource_id is None
-            or target.agent_session_id is None
-            or target.encrypted_credentials is None
-        ):
-            return None
-        attempt_snapshot = await session.get(
-            RDBExternalChannelDeliveryAttempt,
-            target.delivery_attempt_id,
-        )
-        binding_snapshot = await session.get(
-            RDBExternalChannelBinding,
-            target.binding_id,
-        )
-        if attempt_snapshot is None or binding_snapshot is None:
-            return None
-        route_snapshot = await session.get(
-            RDBExternalChannelAgentRoute,
-            binding_snapshot.route_id,
-        )
-        if route_snapshot is None:
-            return None
-        connection = await session.scalar(
-            sa.select(RDBExternalChannelConnection)
-            .where(RDBExternalChannelConnection.id == route_snapshot.connection_id)
-            .with_for_update()
-        )
-        route = await session.scalar(
-            sa.select(RDBExternalChannelAgentRoute)
-            .where(
-                RDBExternalChannelAgentRoute.id == route_snapshot.id,
-                RDBExternalChannelAgentRoute.connection_id
-                == route_snapshot.connection_id,
-            )
-            .with_for_update()
-        )
-        resource = await session.scalar(
-            sa.select(RDBExternalChannelResource)
-            .where(
-                RDBExternalChannelResource.id == binding_snapshot.resource_id,
-                RDBExternalChannelResource.connection_id
-                == route_snapshot.connection_id,
-            )
-            .with_for_update()
-        )
-        binding = await session.scalar(
-            sa.select(RDBExternalChannelBinding)
-            .where(
-                RDBExternalChannelBinding.id == binding_snapshot.id,
-                RDBExternalChannelBinding.route_id == route_snapshot.id,
-                RDBExternalChannelBinding.resource_id == binding_snapshot.resource_id,
-                RDBExternalChannelBinding.agent_session_id
-                == binding_snapshot.agent_session_id,
-            )
-            .with_for_update()
-        )
-        attempt = await session.scalar(
-            sa.select(RDBExternalChannelDeliveryAttempt)
-            .where(
-                RDBExternalChannelDeliveryAttempt.id == target.delivery_attempt_id,
-                RDBExternalChannelDeliveryAttempt.status
-                == ExternalChannelDeliveryStatus.PENDING,
-            )
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
-        if attempt is None:
-            return None
-        valid = (
-            connection is not None
-            and route is not None
-            and resource is not None
-            and binding is not None
-            and connection.status is ExternalChannelConnectionStatus.DISCONNECTED
-            and connection.encrypted_credentials is None
-            and binding.disconnected_at is not None
-            and attempt.origin_type
-            is ExternalChannelDeliveryOriginType.BINDING_DISCONNECT
-            and attempt.origin_id == binding.id
-            and attempt.binding_id == binding.id
-            and attempt.channel_action_id is None
-            and attempt.operation
-            in {
-                ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-                ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-            }
-            and attempt.operation is target.operation
-            and dict(attempt.request_payload) == target.request_payload
-            and target.binding_id == binding.id
-            and target.resource_id == resource.id
-            and target.connection_id == connection.id
-            and target.agent_session_id == binding.agent_session_id
-            and target.provider is connection.provider
-            and target.app_mode is connection.app_mode
-        )
-        if not valid:
-            return await self._reject_delivery_start(
-                attempt,
-                error_kind="captured_delivery_authority_revoked",
-                error_summary=(
-                    "The captured terminal provider delivery authority is unavailable."
-                ),
-                now=now,
-            )
-        attempt.status = ExternalChannelDeliveryStatus.ATTEMPTING
-        attempt.attempted_at = now
-        await session.flush()
-        return target.model_copy(
-            update={"status": ExternalChannelDeliveryStatus.ATTEMPTING}
-        )
-
-    async def start_delivery(
-        self,
-        session: AsyncSession,
-        *,
-        delivery_attempt_id: str,
-        now: datetime.datetime,
-        runtime_target: ServerToRuntimeTarget | None = None,
-    ) -> ChannelDeliveryTarget | None:
-        """Lock current authority and cross the sole provider-attempt boundary."""
-        attempt_snapshot = await session.scalar(
-            sa.select(RDBExternalChannelDeliveryAttempt).where(
-                RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id,
-                RDBExternalChannelDeliveryAttempt.status
-                == ExternalChannelDeliveryStatus.PENDING,
-            )
-        )
-        if attempt_snapshot is None:
-            return None
-        if attempt_snapshot.binding_id is None:
-            provider_control_identity = (
-                _provider_control_attempt_identity(attempt_snapshot)
-                if _is_provider_control_attempt(attempt_snapshot)
-                else None
-            )
-            authority_current = (
-                await self._provider_control_authority_current(
-                    session,
-                    identity=provider_control_identity,
-                )
-                if provider_control_identity is not None
-                else True
-            )
-            attempt = await session.scalar(
-                sa.select(RDBExternalChannelDeliveryAttempt)
-                .where(
-                    RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id,
-                    RDBExternalChannelDeliveryAttempt.status
-                    == ExternalChannelDeliveryStatus.PENDING,
-                )
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-            if attempt is None or (
-                provider_control_identity is not None
-                and _provider_control_attempt_identity(attempt)
-                != provider_control_identity
-            ):
-                return None
-            if not authority_current:
-                return await self._reject_delivery_start(
-                    attempt,
-                    error_kind="provider_control_authority_revoked",
-                    error_summary=(
-                        "The current provider control authority is unavailable."
-                    ),
-                    now=now,
-                )
-            target = await self.get_delivery_target(
-                session,
-                delivery_attempt_id=delivery_attempt_id,
-            )
-            if target is None or target.encrypted_credentials is None:
-                return await self._reject_delivery_start(
-                    attempt,
-                    error_kind="delivery_target_unavailable",
-                    error_summary=(
-                        "The current provider delivery target is unavailable."
-                    ),
-                    now=now,
-                )
-            attempt.status = ExternalChannelDeliveryStatus.ATTEMPTING
-            attempt.attempted_at = now
-            await session.flush()
-            return target.model_copy(
-                update={"status": ExternalChannelDeliveryStatus.ATTEMPTING}
-            )
-
-        binding_snapshot = await session.scalar(
-            sa.select(RDBExternalChannelBinding).where(
-                RDBExternalChannelBinding.id == attempt_snapshot.binding_id
-            )
-        )
-        if binding_snapshot is None:
-            attempt = await session.scalar(
-                sa.select(RDBExternalChannelDeliveryAttempt)
-                .where(
-                    RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id,
-                    RDBExternalChannelDeliveryAttempt.status
-                    == ExternalChannelDeliveryStatus.PENDING,
-                )
-                .with_for_update()
-            )
-            if attempt is None:
-                return None
-            return await self._reject_delivery_start(
-                attempt,
-                error_kind="binding_unavailable",
-                error_summary="The current External Channel binding is unavailable.",
-                now=now,
-            )
-        route_snapshot = await session.scalar(
-            sa.select(RDBExternalChannelAgentRoute).where(
-                RDBExternalChannelAgentRoute.id == binding_snapshot.route_id
-            )
-        )
-        resource_snapshot = await session.scalar(
-            sa.select(RDBExternalChannelResource).where(
-                RDBExternalChannelResource.id == binding_snapshot.resource_id
-            )
-        )
-        if route_snapshot is None or resource_snapshot is None:
-            attempt = await session.scalar(
-                sa.select(RDBExternalChannelDeliveryAttempt)
-                .where(
-                    RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id,
-                    RDBExternalChannelDeliveryAttempt.status
-                    == ExternalChannelDeliveryStatus.PENDING,
-                )
-                .with_for_update()
-            )
-            if attempt is None:
-                return None
-            return await self._reject_delivery_start(
-                attempt,
-                error_kind="delivery_authority_unavailable",
-                error_summary="The current External Channel authority is unavailable.",
-                now=now,
-            )
-        connection = await session.scalar(
-            sa.select(RDBExternalChannelConnection)
-            .where(RDBExternalChannelConnection.id == route_snapshot.connection_id)
-            .with_for_update()
-        )
-        route = await session.scalar(
-            sa.select(RDBExternalChannelAgentRoute)
-            .where(
-                RDBExternalChannelAgentRoute.id == route_snapshot.id,
-                RDBExternalChannelAgentRoute.connection_id
-                == route_snapshot.connection_id,
-            )
-            .with_for_update()
-        )
-        resource = await session.scalar(
-            sa.select(RDBExternalChannelResource)
-            .where(
-                RDBExternalChannelResource.id == resource_snapshot.id,
-                RDBExternalChannelResource.connection_id
-                == route_snapshot.connection_id,
-            )
-            .with_for_update()
-        )
-        agent_session = await session.scalar(
-            sa.select(RDBAgentSession)
-            .where(RDBAgentSession.id == binding_snapshot.agent_session_id)
-            .with_for_update()
-        )
-        agent = (
-            None
-            if agent_session is None
-            else await session.scalar(
-                sa.select(RDBAgent)
-                .where(RDBAgent.id == agent_session.agent_id)
-                .with_for_update()
-            )
-        )
-        binding = await session.scalar(
-            sa.select(RDBExternalChannelBinding)
-            .where(
-                RDBExternalChannelBinding.id == binding_snapshot.id,
-                RDBExternalChannelBinding.route_id == route_snapshot.id,
-                RDBExternalChannelBinding.resource_id == resource_snapshot.id,
-                RDBExternalChannelBinding.agent_session_id
-                == binding_snapshot.agent_session_id,
-            )
-            .with_for_update()
-        )
-        attempt = await session.scalar(
-            sa.select(RDBExternalChannelDeliveryAttempt)
-            .where(
-                RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id,
-                RDBExternalChannelDeliveryAttempt.status
-                == ExternalChannelDeliveryStatus.PENDING,
-            )
-            .with_for_update()
-        )
-        if attempt is None:
-            return None
-        if (
-            connection is None
-            or route is None
-            or resource is None
-            or agent_session is None
-            or agent is None
-            or binding is None
-            or attempt.binding_id != binding.id
-        ):
-            return await self._reject_delivery_start(
-                attempt,
-                error_kind="delivery_authority_unavailable",
-                error_summary="The current External Channel authority is unavailable.",
-                now=now,
-            )
-        binding_disconnect_delivery = (
-            attempt.origin_type is ExternalChannelDeliveryOriginType.BINDING_DISCONNECT
-            and attempt.operation
-            in {
-                ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-                ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-            }
-        )
-        authority_revoked = (
-            binding.disconnected_at is None
-            if binding_disconnect_delivery
-            else (
-                binding.disconnected_at is not None
-                or agent_session.status is not AgentSessionStatus.ACTIVE
-                or agent_session.stop_requested_at is not None
-                or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-                or route.agent_id != agent.id
-                or resource.status is not ExternalChannelResourceStatus.ACTIVE
-            )
-        )
-        if (
-            authority_revoked
-            or resource.connection_id != connection.id
-            or connection.encrypted_credentials is None
-        ):
-            return await self._reject_delivery_start(
-                attempt,
-                error_kind="delivery_authority_revoked",
-                error_summary=(
-                    "The current External Channel authority is no longer active."
-                ),
-                now=now,
-            )
-        if attempt.channel_action_id is not None:
-            action = await session.scalar(
-                sa.select(RDBExternalChannelAction)
-                .where(RDBExternalChannelAction.id == attempt.channel_action_id)
-                .with_for_update()
-            )
-            if (
-                action is None
-                or action.completed_at is not None
-                or action.agent_session_id != agent_session.id
-                or action.binding_id != binding.id
-            ):
-                return await self._reject_delivery_start(
-                    attempt,
-                    error_kind="delivery_action_unavailable",
-                    error_summary="The original Channel Action is unavailable.",
-                    now=now,
-                )
-            if action.agent_run_id is not None:
-                agent_run = await session.scalar(
-                    sa.select(RDBAgentRun)
-                    .where(RDBAgentRun.id == action.agent_run_id)
-                    .with_for_update()
-                )
-                if (
-                    agent_run is None
-                    or agent_run.session_id != agent_session.id
-                    or agent_run.status is not AgentRunStatus.RUNNING
-                    or agent_run.stop_requested_at is not None
-                ):
-                    return await self._reject_delivery_start(
-                        attempt,
-                        error_kind="delivery_action_cancelled",
-                        error_summary=(
-                            "The original Channel Action is no longer active."
-                        ),
-                        now=now,
-                    )
-        files = attempt.request_payload.get("files")
-        file_list = files if isinstance(files, list) else []
-        has_files = bool(file_list)
-        has_runtime_files = any(
-            isinstance(file, dict) and file.get("source", "runtime") == "runtime"
-            for file in file_list
-        )
-        if has_files and (
-            connection.capabilities is None
-            or connection.capabilities.get("upload_files") is not True
-        ):
-            return await self._reject_delivery_start(
-                attempt,
-                error_kind="provider_upload_unavailable",
-                error_summary=(
-                    "The current provider file-upload capability is unavailable."
-                ),
-                now=now,
-            )
-        if has_runtime_files:
-            if runtime_target is None:
-                return await self._reject_delivery_start(
-                    attempt,
-                    error_kind="runtime_file_source_unavailable",
-                    error_summary=(
-                        "The current Runtime delivery capability is unavailable."
-                    ),
-                    now=now,
-                )
-            runtime = await session.scalar(
-                sa.select(RDBAgentRuntime)
-                .where(
-                    RDBAgentRuntime.id == runtime_target.runtime_id,
-                    RDBAgentRuntime.agent_id == agent.id,
-                    RDBAgentRuntime.desired_generation
-                    == runtime_target.desired_generation,
-                    RDBAgentRuntime.provider_observed_generation
-                    == runtime_target.desired_generation,
-                    RDBAgentRuntime.desired_state == RuntimeDesiredState.RUNNING,
-                    RDBAgentRuntime.provider_observed_state
-                    == RuntimeProviderObservedState.RUNNING,
-                    RDBAgentRuntime.provider_connection_state
-                    == RuntimeProviderConnectionState.CONNECTED,
-                    RDBAgentRuntime.runner_state == RuntimeRunnerState.READY,
-                )
-                .with_for_update()
-            )
-            if runtime is None:
-                return await self._reject_delivery_start(
-                    attempt,
-                    error_kind="runtime_delivery_authority_revoked",
-                    error_summary=(
-                        "The current Runtime delivery authority is unavailable."
-                    ),
-                    now=now,
-                )
-        attempt.status = ExternalChannelDeliveryStatus.ATTEMPTING
-        attempt.attempted_at = now
-        workspace = await session.get(RDBWorkspace, agent.workspace_id)
-        await session.flush()
-        return ChannelDeliveryTarget(
-            delivery_attempt_id=attempt.id,
-            operation=attempt.operation,
-            status=ExternalChannelDeliveryStatus.ATTEMPTING,
-            binding_id=attempt.binding_id,
-            resource_id=resource.id,
-            connection_id=connection.id,
-            provider=connection.provider,
-            app_mode=connection.app_mode,
-            encrypted_credentials=connection.encrypted_credentials,
-            provider_tenant_id=connection.provider_tenant_id,
-            capabilities=connection.capabilities,
-            workspace_handle=None if workspace is None else workspace.handle,
-            agent_id=agent.id,
-            agent_session_id=agent_session.id,
-            agent_name=agent.name,
-            agent_avatar=agent.avatar,
-            request_payload=dict(attempt.request_payload),
-        )
-
-    async def _reject_delivery_start(
-        self,
-        attempt: RDBExternalChannelDeliveryAttempt,
-        *,
-        error_kind: str,
-        error_summary: str,
-        now: datetime.datetime,
-        provider_started: bool = False,
-    ) -> None:
-        """Terminalize one rejected delivery with its known provider-work boundary."""
-        attempt.status = (
-            ExternalChannelDeliveryStatus.UNKNOWN
-            if provider_started
-            else ExternalChannelDeliveryStatus.NOT_ATTEMPTED
-        )
-        attempt.error_kind = error_kind
-        attempt.error_summary = error_summary
-        attempt.completed_at = now
-        return None
-
-    async def revalidate_runtime_delivery_authority(
-        self,
-        session: AsyncSession,
-        *,
-        delivery_attempt_id: str,
-        runtime_target: ServerToRuntimeTarget,
-        provider_started: bool,
-        now: datetime.datetime,
-    ) -> bool:
-        """Fence one pre-provider Runtime operation against current authority."""
-        attempt = await session.scalar(
-            sa.select(RDBExternalChannelDeliveryAttempt)
-            .where(
-                RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id,
-                RDBExternalChannelDeliveryAttempt.status
-                == ExternalChannelDeliveryStatus.ATTEMPTING,
-            )
-            .with_for_update()
-        )
-        if attempt is None or attempt.binding_id is None:
-            return False
-        recovery = attempt.request_payload.get("runtime_provider_recovery")
-        provider_started = provider_started or (
-            isinstance(recovery, dict) and recovery.get("state") == "provider_started"
-        )
-        binding = await session.scalar(
-            sa.select(RDBExternalChannelBinding)
-            .where(RDBExternalChannelBinding.id == attempt.binding_id)
-            .with_for_update()
-        )
-        if binding is None:
-            await self._reject_delivery_start(
-                attempt,
-                error_kind="binding_unavailable",
-                error_summary="The current External Channel binding is unavailable.",
-                now=now,
-                provider_started=provider_started,
-            )
-            return False
-        agent_session = await session.scalar(
-            sa.select(RDBAgentSession)
-            .where(RDBAgentSession.id == binding.agent_session_id)
-            .with_for_update()
-        )
-        route = await session.scalar(
-            sa.select(RDBExternalChannelAgentRoute)
-            .where(RDBExternalChannelAgentRoute.id == binding.route_id)
-            .with_for_update()
-        )
-        resource = await session.scalar(
-            sa.select(RDBExternalChannelResource)
-            .where(RDBExternalChannelResource.id == binding.resource_id)
-            .with_for_update()
-        )
-        if agent_session is None or route is None or resource is None:
-            await self._reject_delivery_start(
-                attempt,
-                error_kind="delivery_authority_unavailable",
-                error_summary="The current External Channel authority is unavailable.",
-                now=now,
-                provider_started=provider_started,
-            )
-            return False
-        agent = await session.scalar(
-            sa.select(RDBAgent)
-            .where(RDBAgent.id == agent_session.agent_id)
-            .with_for_update()
-        )
-        connection = await session.scalar(
-            sa.select(RDBExternalChannelConnection)
-            .where(RDBExternalChannelConnection.id == route.connection_id)
-            .with_for_update()
-        )
-        if (
-            agent is None
-            or connection is None
-            or binding.disconnected_at is not None
-            or agent_session.status is not AgentSessionStatus.ACTIVE
-            or agent_session.stop_requested_at is not None
-            or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
-            or route.agent_id != agent.id
-            or resource.status is not ExternalChannelResourceStatus.ACTIVE
-            or resource.connection_id != connection.id
-            or connection.encrypted_credentials is None
-        ):
-            await self._reject_delivery_start(
-                attempt,
-                error_kind="delivery_authority_revoked",
-                error_summary=(
-                    "The current External Channel authority is no longer active."
-                ),
-                now=now,
-                provider_started=provider_started,
-            )
-            return False
-        if attempt.channel_action_id is not None:
-            action = await session.scalar(
-                sa.select(RDBExternalChannelAction)
-                .where(RDBExternalChannelAction.id == attempt.channel_action_id)
-                .with_for_update()
-            )
-            if (
-                action is None
-                or action.completed_at is not None
-                or action.agent_session_id != agent_session.id
-                or action.binding_id != binding.id
-            ):
-                await self._reject_delivery_start(
-                    attempt,
-                    error_kind="delivery_action_unavailable",
-                    error_summary="The original Channel Action is unavailable.",
-                    now=now,
-                    provider_started=provider_started,
-                )
-                return False
-            if action.agent_run_id is not None:
-                agent_run = await session.scalar(
-                    sa.select(RDBAgentRun)
-                    .where(RDBAgentRun.id == action.agent_run_id)
-                    .with_for_update()
-                )
-                if (
-                    agent_run is None
-                    or agent_run.session_id != agent_session.id
-                    or agent_run.status is not AgentRunStatus.RUNNING
-                    or agent_run.stop_requested_at is not None
-                ):
-                    await self._reject_delivery_start(
-                        attempt,
-                        error_kind="delivery_action_cancelled",
-                        error_summary=(
-                            "The original Channel Action is no longer active."
-                        ),
-                        now=now,
-                        provider_started=provider_started,
-                    )
-                    return False
-        files = attempt.request_payload.get("files")
-        file_list = files if isinstance(files, list) else []
-        if file_list and (
-            connection.capabilities is None
-            or connection.capabilities.get("upload_files") is not True
-        ):
-            await self._reject_delivery_start(
-                attempt,
-                error_kind="provider_upload_unavailable",
-                error_summary=(
-                    "The current provider file-upload capability is unavailable."
-                ),
-                now=now,
-                provider_started=provider_started,
-            )
-            return False
-        runtime = await session.scalar(
-            sa.select(RDBAgentRuntime)
-            .where(
-                RDBAgentRuntime.id == runtime_target.runtime_id,
-                RDBAgentRuntime.agent_id == agent.id,
-                RDBAgentRuntime.desired_generation == runtime_target.desired_generation,
-                RDBAgentRuntime.provider_observed_generation
-                == runtime_target.desired_generation,
-                RDBAgentRuntime.desired_state == RuntimeDesiredState.RUNNING,
-                RDBAgentRuntime.provider_observed_state
-                == RuntimeProviderObservedState.RUNNING,
-                RDBAgentRuntime.provider_connection_state
-                == RuntimeProviderConnectionState.CONNECTED,
-                RDBAgentRuntime.runner_state == RuntimeRunnerState.READY,
-            )
-            .with_for_update()
-        )
-        if runtime is None:
-            await self._reject_delivery_start(
-                attempt,
-                error_kind="runtime_delivery_authority_revoked",
-                error_summary="The current Runtime delivery authority is unavailable.",
-                now=now,
-                provider_started=provider_started,
-            )
-            return False
-        await session.flush()
-        return True
-
-    async def record_runtime_provider_state(
-        self,
-        session: AsyncSession,
-        *,
-        delivery_attempt_id: str,
-        state: str,
-        recovery_payload: dict[str, object],
-        provider_message_key: str | None,
-    ) -> bool:
-        """Durably retain exact Runtime claim ownership without provider replay."""
-        attempt = await session.scalar(
-            sa.select(RDBExternalChannelDeliveryAttempt)
-            .where(
-                RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id,
-                RDBExternalChannelDeliveryAttempt.status.in_(
-                    (
-                        ExternalChannelDeliveryStatus.ATTEMPTING,
-                        ExternalChannelDeliveryStatus.UNKNOWN,
-                        ExternalChannelDeliveryStatus.DELIVERED,
-                    )
-                ),
-            )
-            .with_for_update()
-        )
-        if attempt is None:
-            return False
-        payload = dict(attempt.request_payload)
-        payload["runtime_provider_recovery"] = {
-            "state": state,
-            **recovery_payload,
-        }
-        attempt.request_payload = payload
-        if provider_message_key is not None:
-            attempt.provider_message_key = provider_message_key
-        await session.flush()
-        return True
-
-    async def complete_runtime_provider_delivery(
-        self,
-        session: AsyncSession,
-        *,
-        delivery_attempt_id: str,
-        recovery_payload: dict[str, object],
-        provider_message_key: str | None,
-        now: datetime.datetime,
-    ) -> RuntimeProviderDeliveryCompletion:
-        """Atomically retain provider success and its exact settlement correlation."""
-        attempt = await session.scalar(
-            sa.select(RDBExternalChannelDeliveryAttempt)
-            .where(
-                RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id,
-                RDBExternalChannelDeliveryAttempt.status
-                == ExternalChannelDeliveryStatus.ATTEMPTING,
-            )
-            .with_for_update()
-        )
-        if attempt is None:
-            return RuntimeProviderDeliveryCompletion(
-                accepted=False,
-                recovery_delivery_id=None,
-            )
-        payload = dict(attempt.request_payload)
-        payload["runtime_provider_recovery"] = {
-            "state": "provider_completed",
-            **recovery_payload,
-        }
-        attempt.request_payload = payload
-        if provider_message_key is not None:
-            attempt.provider_message_key = provider_message_key
-        await session.flush()
-        recovery_delivery_id = await self.finish_delivery(
-            session,
-            delivery_attempt_id=delivery_attempt_id,
-            status=ExternalChannelDeliveryStatus.DELIVERED,
-            provider_message_key=provider_message_key,
-            error_kind=None,
-            error_summary=None,
-            now=now,
-        )
-        return RuntimeProviderDeliveryCompletion(
-            accepted=True,
-            recovery_delivery_id=recovery_delivery_id,
-        )
-
-    async def complete_runtime_provider_recovery(
-        self,
-        session: AsyncSession,
-        *,
-        delivery_attempt_id: str,
-        provider_message_key: str | None,
-        now: datetime.datetime,
-    ) -> str | None:
-        """Complete only a durably recorded provider success after settlement."""
-        attempt = await session.scalar(
-            sa.select(RDBExternalChannelDeliveryAttempt)
-            .where(
-                RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id,
-                RDBExternalChannelDeliveryAttempt.status.in_(
-                    (
-                        ExternalChannelDeliveryStatus.ATTEMPTING,
-                        ExternalChannelDeliveryStatus.UNKNOWN,
-                    )
-                ),
-            )
-            .with_for_update()
-        )
-        if attempt is None:
-            return None
-        recovery = attempt.request_payload.get("runtime_provider_recovery")
-        if (
-            not isinstance(recovery, dict)
-            or recovery.get("state") != "provider_completed"
-        ):
-            return None
-        if attempt.status is ExternalChannelDeliveryStatus.UNKNOWN:
-            attempt.status = ExternalChannelDeliveryStatus.ATTEMPTING
-            await session.flush()
-        return await self.finish_delivery(
-            session,
-            delivery_attempt_id=delivery_attempt_id,
-            status=ExternalChannelDeliveryStatus.DELIVERED,
-            provider_message_key=provider_message_key,
-            error_kind=None,
-            error_summary=None,
-            now=now,
-        )
-
-    async def skip_delivery(
-        self,
-        session: AsyncSession,
-        *,
-        delivery_attempt_id: str,
-        error_kind: str,
-        error_summary: str,
-        now: datetime.datetime,
-    ) -> bool:
-        """Terminalize one provider intent whose prerequisite did not complete."""
-        result = await session.execute(
-            sa.update(RDBExternalChannelDeliveryAttempt)
-            .where(
-                RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id,
-                RDBExternalChannelDeliveryAttempt.status
-                == ExternalChannelDeliveryStatus.PENDING,
-            )
-            .values(
-                status=ExternalChannelDeliveryStatus.NOT_ATTEMPTED,
-                error_kind=error_kind,
-                error_summary=error_summary,
-                completed_at=now,
-            )
-            .returning(RDBExternalChannelDeliveryAttempt.id)
-        )
-        return result.scalar_one_or_none() is not None
-
-    async def finish_delivery(
-        self,
-        session: AsyncSession,
-        *,
-        delivery_attempt_id: str,
-        status: ExternalChannelDeliveryStatus,
-        provider_message_key: str | None,
-        error_kind: str | None,
-        error_summary: str | None,
-        now: datetime.datetime,
-    ) -> str | None:
-        """Persist an outcome and return a missing-Tracker recovery intent."""
-        settlement = await self.settle_delivery(
-            session,
-            delivery_attempt_id=delivery_attempt_id,
-            status=status,
-            provider_message_key=provider_message_key,
-            error_kind=error_kind,
-            error_summary=error_summary,
-            now=now,
-        )
-        return settlement.recovery_delivery_id
-
-    async def settle_delivery(
-        self,
-        session: AsyncSession,
-        *,
-        delivery_attempt_id: str,
-        status: ExternalChannelDeliveryStatus,
-        provider_message_key: str | None,
-        error_kind: str | None,
-        error_summary: str | None,
-        now: datetime.datetime,
-    ) -> DeliverySettlement:
-        """Fence final authority and persist one provider outcome."""
-        snapshot = await session.get(
-            RDBExternalChannelDeliveryAttempt,
-            delivery_attempt_id,
-        )
-        if snapshot is None:
-            return DeliverySettlement(
-                accepted=False,
-                status=None,
-                recovery_delivery_id=None,
-            )
-        provider_control_identity = (
-            _provider_control_attempt_identity(snapshot)
-            if _is_provider_control_attempt(snapshot)
-            else None
-        )
-        authority_current = (
-            await self._provider_control_authority_current(
-                session,
-                identity=provider_control_identity,
-            )
-            if provider_control_identity is not None
-            else True
-        )
-        attempt = await session.scalar(
-            sa.select(RDBExternalChannelDeliveryAttempt)
-            .where(
-                RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id,
-                RDBExternalChannelDeliveryAttempt.status
-                == ExternalChannelDeliveryStatus.ATTEMPTING,
-            )
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
-        if attempt is None or (
-            provider_control_identity is not None
-            and _provider_control_attempt_identity(attempt) != provider_control_identity
-        ):
-            return DeliverySettlement(
-                accepted=False,
-                status=None,
-                recovery_delivery_id=None,
-            )
-        if provider_control_identity is not None and not authority_current:
-            attempt.status = ExternalChannelDeliveryStatus.UNKNOWN
-            if provider_message_key is not None:
-                attempt.provider_message_key = provider_message_key
-            attempt.error_kind = "delivery_authority_revoked_after_provider"
-            attempt.error_summary = (
-                "The provider operation completed after External Channel authority "
-                "was revoked."
-            )
-            attempt.completed_at = now
-            await session.flush()
-            return DeliverySettlement(
-                accepted=True,
-                status=ExternalChannelDeliveryStatus.UNKNOWN,
-                recovery_delivery_id=None,
-            )
-        attempt.status = status
-        if provider_message_key is not None:
-            attempt.provider_message_key = provider_message_key
-        attempt.error_kind = error_kind
-        attempt.error_summary = error_summary
-        attempt.completed_at = now
-        work = await self._work_for_delivery_attempt(session, attempt=attempt)
-        provider = (
-            None if work is None else await self._provider_for_work(session, work=work)
-        )
-        effective_status = status
-        if (
-            work is not None
-            and provider is ExternalChannelProvider.SLACK
-            and attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE
-            and status is ExternalChannelDeliveryStatus.FAILED
-            and error_kind == "message_not_found"
-        ):
-            effective_status = ExternalChannelDeliveryStatus.DELIVERED
-            attempt.status = effective_status
-            attempt.error_kind = "message_already_absent"
-            attempt.error_summary = (
-                "Slack already removed the Activity Tracker message."
-            )
-        if (
-            work is not None
-            and provider is ExternalChannelProvider.SLACK
-            and effective_status is ExternalChannelDeliveryStatus.DELIVERED
-        ):
-            if attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE:
-                work.progress_provider_message_key = provider_message_key
-            elif attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE:
-                work.progress_provider_message_key = None
-        recovery_id = None
-        if (
-            work is not None
-            and provider is ExternalChannelProvider.SLACK
-            and attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE
-            and effective_status is ExternalChannelDeliveryStatus.DELIVERED
-            and provider_message_key is not None
-        ):
-            attempted_revision = attempt.request_payload.get(
-                "desired_progress_revision"
-            )
-            if (
-                work.status is ExternalChannelWorkStatus.ACTIVE
-                and work.desired_progress_payload is not None
-                and isinstance(attempted_revision, int)
-                and work.desired_progress_revision > attempted_revision
-            ):
-                presentation = _render_persisted_progress(
-                    ExternalChannelProvider.SLACK,
-                    work.desired_progress_payload,
-                    work_id=work.id,
-                    desired_progress_revision=work.desired_progress_revision,
-                )
-                existing_catchup = await session.scalar(
-                    sa.select(RDBExternalChannelDeliveryAttempt).where(
-                        RDBExternalChannelDeliveryAttempt.origin_type
-                        == ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-                        RDBExternalChannelDeliveryAttempt.origin_id == attempt.id,
-                        RDBExternalChannelDeliveryAttempt.binding_id
-                        == attempt.binding_id,
-                        RDBExternalChannelDeliveryAttempt.operation
-                        == ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-                    )
-                )
-                if existing_catchup is None:
-                    catchup_payload = dict(attempt.request_payload)
-                    catchup_payload.update(
-                        {
-                            "work_id": work.id,
-                            "text": presentation.text,
-                            "blocks": presentation.blocks,
-                            "provider_message_key": provider_message_key,
-                            "desired_progress_revision": (
-                                work.desired_progress_revision
-                            ),
-                        }
-                    )
-                    existing_catchup = RDBExternalChannelDeliveryAttempt(
-                        origin_type=(
-                            ExternalChannelDeliveryOriginType.MANAGER_OPERATION
-                        ),
-                        origin_id=attempt.id,
-                        operation=ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-                        request_payload=catchup_payload,
-                        status=ExternalChannelDeliveryStatus.PENDING,
-                        channel_action_id=attempt.channel_action_id,
-                        binding_id=attempt.binding_id,
-                        provider_message_key=provider_message_key,
-                        error_kind=None,
-                        error_summary=None,
-                        attempted_at=None,
-                        completed_at=None,
-                    )
-                    session.add(existing_catchup)
-                await session.flush()
-                if existing_catchup.status is ExternalChannelDeliveryStatus.PENDING:
-                    recovery_id = existing_catchup.id
-            elif work.status is ExternalChannelWorkStatus.FINISHED:
-                recovery_id = await self._ensure_finished_tracker_delete(
-                    session,
-                    work=work,
-                )
-        if (
-            work is not None
-            and provider is ExternalChannelProvider.SLACK
-            and work.status is ExternalChannelWorkStatus.ACTIVE
-            and work.desired_progress_payload is not None
-            and attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_UPDATE
-            and effective_status is ExternalChannelDeliveryStatus.FAILED
-            and error_kind == "message_not_found"
-        ):
-            target_key = attempt.request_payload.get("provider_message_key")
-            if (
-                isinstance(target_key, str)
-                and work.progress_provider_message_key == target_key
-            ):
-                work.progress_provider_message_key = None
-                existing_recovery = await session.scalar(
-                    sa.select(RDBExternalChannelDeliveryAttempt).where(
-                        RDBExternalChannelDeliveryAttempt.origin_type
-                        == attempt.origin_type,
-                        RDBExternalChannelDeliveryAttempt.origin_id
-                        == attempt.origin_id,
-                        RDBExternalChannelDeliveryAttempt.binding_id
-                        == attempt.binding_id,
-                        RDBExternalChannelDeliveryAttempt.operation
-                        == ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                    )
-                )
-                if existing_recovery is None:
-                    recovery_payload = dict(attempt.request_payload)
-                    recovery_payload.pop("provider_message_key", None)
-                    recovery_payload["work_id"] = work.id
-                    recovery_payload["replaces_provider_message_key"] = target_key
-                    existing_recovery = RDBExternalChannelDeliveryAttempt(
-                        origin_type=attempt.origin_type,
-                        origin_id=attempt.origin_id,
-                        operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                        request_payload=recovery_payload,
-                        status=ExternalChannelDeliveryStatus.PENDING,
-                        channel_action_id=attempt.channel_action_id,
-                        binding_id=attempt.binding_id,
-                        provider_message_key=None,
-                        error_kind=None,
-                        error_summary=None,
-                        attempted_at=None,
-                        completed_at=None,
-                    )
-                    session.add(existing_recovery)
-                await session.flush()
-                if existing_recovery.status is ExternalChannelDeliveryStatus.PENDING:
-                    recovery_id = existing_recovery.id
-        if work is not None and provider is ExternalChannelProvider.DISCORD:
-            discord_recovery_id = await self._finish_discord_progress_part(
-                session,
-                work=work,
-                attempt=attempt,
-                effective_status=effective_status,
-                provider_message_key=provider_message_key,
-                now=now,
-            )
-            if discord_recovery_id is not None:
-                recovery_id = discord_recovery_id
-        if (
-            work is not None
-            and work.status is ExternalChannelWorkStatus.FINISHED
-            and attempt.operation is ExternalChannelDeliveryOperation.REPLY
-            and effective_status is ExternalChannelDeliveryStatus.DELIVERED
-        ):
-            cleanup_id = await self._ensure_finished_tracker_delete(
-                session,
-                work=work,
-            )
-            if cleanup_id is not None:
-                recovery_id = cleanup_id
-        if (
-            work is not None
-            and provider is ExternalChannelProvider.DISCORD
-            and work.status is ExternalChannelWorkStatus.FINISHED
-            and attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE
-        ):
-            next_cleanup_id = await self._next_pending_finished_discord_tracker_delete(
-                session,
-                work_id=work.id,
-            )
-            if next_cleanup_id is not None:
-                recovery_id = next_cleanup_id
-        await session.flush()
-        return DeliverySettlement(
-            accepted=True,
-            status=effective_status,
-            recovery_delivery_id=recovery_id,
-        )
-
-    async def _provider_control_authority_current(
-        self,
-        session: AsyncSession,
-        *,
-        identity: ProviderControlAttemptIdentity,
-    ) -> bool:
-        """Lock authority before the attempt using lifecycle-compatible order."""
-        if identity.binding_id is not None:
-            binding_snapshot = await session.get(
-                RDBExternalChannelBinding,
-                identity.binding_id,
-            )
-            if binding_snapshot is None:
-                return False
-            route_snapshot = await session.get(
-                RDBExternalChannelAgentRoute,
-                binding_snapshot.route_id,
-            )
-            if route_snapshot is None:
-                return False
-            agent_session = await session.get(
-                RDBAgentSession,
-                binding_snapshot.agent_session_id,
-                populate_existing=True,
-                with_for_update=True,
-            )
-            connection = await session.get(
-                RDBExternalChannelConnection,
-                route_snapshot.connection_id,
-                populate_existing=True,
-                with_for_update=True,
-            )
-            route = await session.get(
-                RDBExternalChannelAgentRoute,
-                route_snapshot.id,
-                populate_existing=True,
-                with_for_update=True,
-            )
-            if agent_session is None or connection is None or route is None:
-                return False
-            agent = await session.get(
-                RDBAgent,
-                agent_session.agent_id,
-                populate_existing=True,
-                with_for_update=True,
-            )
-            resource = await session.get(
-                RDBExternalChannelResource,
-                binding_snapshot.resource_id,
-                populate_existing=True,
-                with_for_update=True,
-            )
-            binding = await session.get(
-                RDBExternalChannelBinding,
-                identity.binding_id,
-                populate_existing=True,
-                with_for_update=True,
-            )
-            return (
-                binding is not None
-                and agent is not None
-                and resource is not None
-                and binding.agent_session_id == agent_session.id
-                and binding.route_id == route.id
-                and binding.resource_id == resource.id
-                and binding.disconnected_at is None
-                and agent_session.status is AgentSessionStatus.ACTIVE
-                and agent_session.stop_requested_at is None
-                and agent.lifecycle_status is AgentLifecycleStatus.ACTIVE
-                and route.agent_id == agent.id
-                and route.catalog_status is ExternalChannelRouteCatalogStatus.AVAILABLE
-                and route.connection_id == connection.id
-                and resource.status is ExternalChannelResourceStatus.ACTIVE
-                and resource.connection_id == connection.id
-                and connection.encrypted_credentials is not None
-            )
-        if identity.origin_type is ExternalChannelDeliveryOriginType.ACCESS_REQUEST:
-            access_request_snapshot = await session.get(
-                RDBExternalChannelAccessRequest,
-                identity.origin_id,
-            )
-            if (
-                access_request_snapshot is None
-                or access_request_snapshot.connection_id is None
-            ):
-                return False
-            return await self._unbound_provider_control_authority_current(
-                session,
-                identity=identity,
-                resource_id=access_request_snapshot.resource_id,
-                connection_id=access_request_snapshot.connection_id,
-                route_id=access_request_snapshot.route_id,
-            )
-        if identity.origin_type is ExternalChannelDeliveryOriginType.SETUP_CLAIM:
-            claim_snapshot = await session.get(
-                RDBExternalChannelSetupClaim,
-                identity.origin_id,
-            )
-            if (
-                claim_snapshot is None
-                or claim_snapshot.route_id is None
-                or claim_snapshot.status
-                is not ExternalChannelSetupClaimStatus.PENDING_LOCATION
-            ):
-                return False
-            return await self._unbound_provider_control_authority_current(
-                session,
-                identity=identity,
-                resource_id=claim_snapshot.source_resource_id,
-                connection_id=claim_snapshot.connection_id,
-                route_id=claim_snapshot.route_id,
-            )
-        if identity.origin_type is ExternalChannelDeliveryOriginType.MANAGER_OPERATION:
-            interaction = await session.get(
-                RDBExternalChannelInteraction,
-                identity.origin_id,
-                populate_existing=True,
-                with_for_update=True,
-            )
-            target = _selector_control_target(interaction)
-            if target is None:
-                return False
-            return await self._unbound_provider_control_authority_current(
-                session,
-                identity=identity,
-                resource_id=target.resource_id,
-                connection_id=target.connection_id,
-                route_id=target.route_id,
-            )
-        return False
-
-    async def _unbound_provider_control_authority_current(
-        self,
-        session: AsyncSession,
-        *,
-        identity: ProviderControlAttemptIdentity,
-        resource_id: str,
-        connection_id: str,
-        route_id: str | None,
-    ) -> bool:
-        """Lock and validate an access or selector provider-control target."""
-        connection = await session.get(
-            RDBExternalChannelConnection,
-            connection_id,
-            populate_existing=True,
-            with_for_update=True,
-        )
-        if connection is None:
-            return False
-        route = (
-            None
-            if route_id is None
-            else await session.get(
-                RDBExternalChannelAgentRoute,
-                route_id,
-                populate_existing=True,
-                with_for_update=True,
-            )
-        )
-        if route_id is not None and (
-            route is None
-            or route.connection_id != connection.id
-            or route.catalog_status is not ExternalChannelRouteCatalogStatus.AVAILABLE
-        ):
-            return False
-        agent = (
-            None
-            if route is None or route.agent_id is None
-            else await session.get(
-                RDBAgent,
-                route.agent_id,
-                populate_existing=True,
-                with_for_update=True,
-            )
-        )
-        resource = await session.get(
-            RDBExternalChannelResource,
-            resource_id,
-            populate_existing=True,
-            with_for_update=True,
-        )
-        if identity.origin_type is ExternalChannelDeliveryOriginType.ACCESS_REQUEST:
-            origin = await session.get(
-                RDBExternalChannelAccessRequest,
-                identity.origin_id,
-                populate_existing=True,
-                with_for_update=True,
-            )
-            origin_current = (
-                origin is not None
-                and origin.connection_id == connection.id
-                and origin.resource_id == resource_id
-                and origin.route_id == route_id
-            )
-        elif identity.origin_type is ExternalChannelDeliveryOriginType.SETUP_CLAIM:
-            origin = await session.get(
-                RDBExternalChannelSetupClaim,
-                identity.origin_id,
-                populate_existing=True,
-                with_for_update=True,
-            )
-            attempt = await session.get(
-                RDBExternalChannelDeliveryAttempt,
-                identity.delivery_attempt_id,
-                populate_existing=True,
-                with_for_update=True,
-            )
-            source_revision = (
-                None
-                if attempt is None
-                else attempt.request_payload.get("source_revision")
-            )
-            claim_generation = (
-                None
-                if attempt is None
-                else attempt.request_payload.get("claim_generation")
-            )
-            origin_current = (
-                origin is not None
-                and origin.connection_id == connection.id
-                and origin.source_resource_id == resource_id
-                and origin.route_id == route_id
-                and origin.status is ExternalChannelSetupClaimStatus.PENDING_LOCATION
-                and source_revision == origin.source_revision
-                and claim_generation == origin.claim_generation
-            )
-        elif (
-            identity.origin_type is ExternalChannelDeliveryOriginType.MANAGER_OPERATION
-        ):
-            origin = await session.get(
-                RDBExternalChannelInteraction,
-                identity.origin_id,
-                populate_existing=True,
-                with_for_update=True,
-            )
-            selector_target = _selector_control_target(origin)
-            origin_current = (
-                selector_target is not None
-                and selector_target.connection_id == connection.id
-                and selector_target.resource_id == resource_id
-                and selector_target.route_id == route_id
-            )
-        else:
-            return False
-        return (
-            resource is not None
-            and origin_current
-            and resource.status is ExternalChannelResourceStatus.ACTIVE
-            and resource.connection_id == connection.id
-            and connection.encrypted_credentials is not None
-            and (
-                route is None
-                or route.agent_id is None
-                or (
-                    agent is not None
-                    and agent.lifecycle_status is AgentLifecycleStatus.ACTIVE
-                )
-            )
-        )
-
-    async def _ensure_finished_tracker_delete(
-        self,
-        session: AsyncSession,
-        *,
-        work: RDBExternalChannelWork,
-    ) -> str | None:
-        """Create one cleanup intent after both Tracker creation and reply delivery."""
-        provider = await self._provider_for_work(session, work=work)
-        if provider is ExternalChannelProvider.DISCORD:
-            return await self._ensure_finished_discord_tracker_delete(
-                session,
-                work=work,
-            )
-        if provider is not ExternalChannelProvider.SLACK:
-            return None
-        provider_message_key = work.progress_provider_message_key
-        if (
-            work.status is not ExternalChannelWorkStatus.FINISHED
-            or provider_message_key is None
-        ):
-            return None
-        finish_action = await session.scalar(
-            sa.select(RDBExternalChannelAction)
-            .where(
-                RDBExternalChannelAction.work_id == work.id,
-                RDBExternalChannelAction.mode == ExternalChannelActionMode.FINISH,
-            )
-            .order_by(
-                RDBExternalChannelAction.created_at.desc(),
-                RDBExternalChannelAction.id.desc(),
-            )
-        )
-        if finish_action is None:
-            return None
-        replies = list(
-            await session.scalars(
-                sa.select(RDBExternalChannelDeliveryAttempt)
-                .where(
-                    RDBExternalChannelDeliveryAttempt.channel_action_id
-                    == finish_action.id,
-                    RDBExternalChannelDeliveryAttempt.operation
-                    == ExternalChannelDeliveryOperation.REPLY,
-                )
-                .order_by(RDBExternalChannelDeliveryAttempt.part_ordinal)
-            )
-        )
-        if not replies or any(
-            reply.status is not ExternalChannelDeliveryStatus.DELIVERED
-            for reply in replies
-        ):
-            return None
-        cleanup = await session.scalar(
-            sa.select(RDBExternalChannelDeliveryAttempt).where(
-                RDBExternalChannelDeliveryAttempt.channel_action_id == finish_action.id,
-                RDBExternalChannelDeliveryAttempt.operation
-                == ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-            )
-        )
-        if cleanup is None:
-            cleanup_payload = dict(replies[0].request_payload)
-            cleanup_payload.pop("text", None)
-            cleanup_payload.update(
-                {
-                    "provider_message_key": provider_message_key,
-                    "desired_progress_revision": work.desired_progress_revision,
-                }
-            )
-            cleanup = RDBExternalChannelDeliveryAttempt(
-                origin_type=ExternalChannelDeliveryOriginType.CHANNEL_ACTION,
-                origin_id=finish_action.id,
-                operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-                request_payload=cleanup_payload,
-                status=ExternalChannelDeliveryStatus.PENDING,
-                channel_action_id=finish_action.id,
-                binding_id=finish_action.binding_id,
-                provider_message_key=provider_message_key,
-                error_kind=None,
-                error_summary=None,
-                attempted_at=None,
-                completed_at=None,
-            )
-            session.add(cleanup)
-            await session.flush()
-        if cleanup.status is ExternalChannelDeliveryStatus.PENDING:
-            return cleanup.id
-        return None
-
-    async def _plan_discord_progress(
-        self,
-        session: AsyncSession,
-        *,
-        work: RDBExternalChannelWork,
-        action: RDBExternalChannelAction,
-        labels: dict[str, object] | None,
-        presentation: DiscordProgressPresentation,
-    ) -> None:
-        """Commit changed Discord Tracker page intents without reopening old calls."""
-        existing = {
-            part.part_ordinal: part
-            for part in await session.scalars(
-                sa.select(RDBExternalChannelWorkProjectionPart)
-                .where(RDBExternalChannelWorkProjectionPart.work_id == work.id)
-                .with_for_update()
-            )
-        }
-        planned: list[
-            tuple[
-                RDBExternalChannelWorkProjectionPart,
-                ExternalChannelDeliveryOperation,
-                DiscordProgressPage | None,
-            ]
-        ] = []
-        for ordinal, page in enumerate(presentation.pages):
-            part = existing.pop(ordinal, None)
-            if part is None:
-                part = RDBExternalChannelWorkProjectionPart(
-                    work_id=work.id,
-                    part_ordinal=ordinal,
-                    desired_progress_revision=work.desired_progress_revision,
-                    status=ExternalChannelWorkProjectionStatus.PENDING,
-                    provider_message_key=None,
-                    latest_delivery_attempt_id=None,
-                    deleted_at=None,
-                )
-                session.add(part)
-                planned.append(
-                    (
-                        part,
-                        ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                        page,
-                    )
-                )
-                continue
-            part.desired_progress_revision = work.desired_progress_revision
-            part.deleted_at = None
-            if part.status is ExternalChannelWorkProjectionStatus.DELETED:
-                part.provider_message_key = None
-                planned.append(
-                    (
-                        part,
-                        ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                        page,
-                    )
-                )
-                continue
-            if part.status is ExternalChannelWorkProjectionStatus.FAILED:
-                planned.append(
-                    (
-                        part,
-                        (
-                            ExternalChannelDeliveryOperation.PROGRESS_UPDATE
-                            if part.provider_message_key is not None
-                            else ExternalChannelDeliveryOperation.PROGRESS_CREATE
-                        ),
-                        page,
-                    )
-                )
-                continue
-            if (
-                part.status is ExternalChannelWorkProjectionStatus.PRESENT
-                and part.provider_message_key is not None
-                and not await self._discord_progress_page_matches(
-                    session,
-                    part=part,
-                    page=page,
-                )
-            ):
-                planned.append(
-                    (
-                        part,
-                        ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-                        page,
-                    )
-                )
-        for part in existing.values():
-            part.desired_progress_revision = work.desired_progress_revision
-            if (
-                part.status is ExternalChannelWorkProjectionStatus.PRESENT
-                and part.provider_message_key is not None
-            ):
-                planned.append(
-                    (
-                        part,
-                        ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-                        None,
-                    )
-                )
-        await session.flush()
-        for part, operation, page in planned:
-            await self._create_discord_progress_attempt(
-                session,
-                work=work,
-                origin_type=ExternalChannelDeliveryOriginType.CHANNEL_ACTION,
-                origin_id=action.id,
-                channel_action_id=action.id,
-                binding_id=action.binding_id,
-                part=part,
-                operation=operation,
-                labels=labels,
-                page=page,
-            )
-
-    async def _finish_discord_progress_part(
-        self,
-        session: AsyncSession,
-        *,
-        work: RDBExternalChannelWork,
-        attempt: RDBExternalChannelDeliveryAttempt,
-        effective_status: ExternalChannelDeliveryStatus,
-        provider_message_key: str | None,
-        now: datetime.datetime,
-    ) -> str | None:
-        """Advance one Discord page projection and catch it up only when safe."""
-        if attempt.operation not in {
-            ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-            ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-            ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-        }:
-            return None
-        part = await session.scalar(
-            sa.select(RDBExternalChannelWorkProjectionPart)
-            .where(
-                RDBExternalChannelWorkProjectionPart.work_id == work.id,
-                RDBExternalChannelWorkProjectionPart.latest_delivery_attempt_id
-                == attempt.id,
-            )
-            .with_for_update()
-        )
-        if part is None:
-            return None
-        if effective_status is ExternalChannelDeliveryStatus.DELIVERED:
-            if attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE:
-                part.status = ExternalChannelWorkProjectionStatus.DELETED
-                part.deleted_at = now
-            else:
-                resolved_key = provider_message_key or part.provider_message_key
-                if resolved_key is None:
-                    part.status = ExternalChannelWorkProjectionStatus.UNKNOWN
-                    return None
-                part.provider_message_key = resolved_key
-                part.status = ExternalChannelWorkProjectionStatus.PRESENT
-        elif effective_status is ExternalChannelDeliveryStatus.UNKNOWN:
-            part.status = ExternalChannelWorkProjectionStatus.UNKNOWN
-            return None
-        else:
-            part.status = ExternalChannelWorkProjectionStatus.FAILED
-            return None
-        if work.status is ExternalChannelWorkStatus.FINISHED:
-            return await self._ensure_finished_discord_tracker_delete(
-                session,
-                work=work,
-            )
-        if work.desired_progress_payload is None:
-            return None
-        presentation = render_discord_persisted_progress(
-            work.desired_progress_payload,
-            work_id=work.id,
-            desired_progress_revision=work.desired_progress_revision,
-        )
-        if (
-            attempt.operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE
-            and part.part_ordinal < len(presentation.pages)
-        ):
-            part.provider_message_key = None
-            return await self._create_discord_progress_attempt(
-                session,
-                work=work,
-                origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-                origin_id=attempt.id,
-                channel_action_id=attempt.channel_action_id,
-                binding_id=attempt.binding_id,
-                part=part,
-                operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                labels=None,
-                page=presentation.pages[part.part_ordinal],
-                request_payload=dict(attempt.request_payload),
-            )
-        if part.part_ordinal >= len(presentation.pages):
-            if part.provider_message_key is None:
-                return None
-            return await self._create_discord_progress_attempt(
-                session,
-                work=work,
-                origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-                origin_id=attempt.id,
-                channel_action_id=attempt.channel_action_id,
-                binding_id=attempt.binding_id,
-                part=part,
-                operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-                labels=None,
-                page=None,
-                request_payload=dict(attempt.request_payload),
-            )
-        page = presentation.pages[part.part_ordinal]
-        if (
-            attempt.request_payload.get("text") == page.text
-            and attempt.request_payload.get("embeds") == page.embeds
-        ) or part.provider_message_key is None:
-            return None
-        return await self._create_discord_progress_attempt(
-            session,
-            work=work,
-            origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-            origin_id=attempt.id,
-            channel_action_id=attempt.channel_action_id,
-            binding_id=attempt.binding_id,
-            part=part,
-            operation=ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-            labels=None,
-            page=page,
-            request_payload=dict(attempt.request_payload),
-        )
-
-    async def _ensure_finished_discord_tracker_delete(
-        self,
-        session: AsyncSession,
-        *,
-        work: RDBExternalChannelWork,
-    ) -> str | None:
-        """Create each known Discord Tracker page delete after all reply parts land."""
-        if work.status is not ExternalChannelWorkStatus.FINISHED:
-            return None
-        finish_action = await session.scalar(
-            sa.select(RDBExternalChannelAction)
-            .where(
-                RDBExternalChannelAction.work_id == work.id,
-                RDBExternalChannelAction.mode == ExternalChannelActionMode.FINISH,
-            )
-            .order_by(
-                RDBExternalChannelAction.created_at.desc(),
-                RDBExternalChannelAction.id.desc(),
-            )
-        )
-        if finish_action is None:
-            return None
-        replies = list(
-            await session.scalars(
-                sa.select(RDBExternalChannelDeliveryAttempt)
-                .where(
-                    RDBExternalChannelDeliveryAttempt.channel_action_id
-                    == finish_action.id,
-                    RDBExternalChannelDeliveryAttempt.operation
-                    == ExternalChannelDeliveryOperation.REPLY,
-                )
-                .order_by(RDBExternalChannelDeliveryAttempt.part_ordinal)
-            )
-        )
-        if not replies or any(
-            reply.status is not ExternalChannelDeliveryStatus.DELIVERED
-            for reply in replies
-        ):
-            return None
-        parts = list(
-            await session.scalars(
-                sa.select(RDBExternalChannelWorkProjectionPart)
-                .where(
-                    RDBExternalChannelWorkProjectionPart.work_id == work.id,
-                    RDBExternalChannelWorkProjectionPart.provider_message_key.is_not(
-                        None
-                    ),
-                    RDBExternalChannelWorkProjectionPart.status
-                    == ExternalChannelWorkProjectionStatus.PRESENT,
-                )
-                .order_by(RDBExternalChannelWorkProjectionPart.part_ordinal)
-                .with_for_update()
-            )
-        )
-        for part in parts:
-            existing = await session.scalar(
-                sa.select(RDBExternalChannelDeliveryAttempt).where(
-                    RDBExternalChannelDeliveryAttempt.channel_action_id
-                    == finish_action.id,
-                    RDBExternalChannelDeliveryAttempt.operation
-                    == ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-                    RDBExternalChannelDeliveryAttempt.part_ordinal == part.part_ordinal,
-                )
-            )
-            if existing is not None:
-                continue
-            await self._create_discord_progress_attempt(
-                session,
-                work=work,
-                origin_type=ExternalChannelDeliveryOriginType.CHANNEL_ACTION,
-                origin_id=finish_action.id,
-                channel_action_id=finish_action.id,
-                binding_id=finish_action.binding_id,
-                part=part,
-                operation=ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-                labels=None,
-                page=None,
-                request_payload=dict(replies[0].request_payload),
-            )
-        return await self._next_pending_finished_discord_tracker_delete(
-            session,
-            work_id=work.id,
-        )
-
-    async def _next_pending_finished_discord_tracker_delete(
-        self,
-        session: AsyncSession,
-        *,
-        work_id: str,
-    ) -> str | None:
-        """Return the next ordered delete after the prior page has terminalized."""
-        return await session.scalar(
-            sa.select(RDBExternalChannelDeliveryAttempt.id)
-            .join(
-                RDBExternalChannelAction,
-                RDBExternalChannelAction.id
-                == RDBExternalChannelDeliveryAttempt.channel_action_id,
-            )
-            .where(
-                RDBExternalChannelAction.work_id == work_id,
-                RDBExternalChannelAction.mode == ExternalChannelActionMode.FINISH,
-                RDBExternalChannelDeliveryAttempt.operation
-                == ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-                RDBExternalChannelDeliveryAttempt.status
-                == ExternalChannelDeliveryStatus.PENDING,
-            )
-            .order_by(RDBExternalChannelDeliveryAttempt.part_ordinal)
-            .limit(1)
-        )
-
-    async def _create_discord_progress_attempt(
-        self,
-        session: AsyncSession,
-        *,
-        work: RDBExternalChannelWork,
-        origin_type: ExternalChannelDeliveryOriginType,
-        origin_id: str,
-        channel_action_id: str | None,
-        binding_id: str | None,
-        part: RDBExternalChannelWorkProjectionPart,
-        operation: ExternalChannelDeliveryOperation,
-        labels: dict[str, object] | None,
-        page: DiscordProgressPage | None,
-        request_payload: dict[str, object] | None = None,
-    ) -> str:
-        """Create one page intent and make it the sole current page mutation."""
-        payload = (
-            _provider_payload(
-                ExternalChannelProvider.DISCORD,
-                labels,
-                text=None if page is None else page.text,
-                provider_message_key=part.provider_message_key,
-                desired_progress_revision=work.desired_progress_revision,
-            )
-            if request_payload is None
-            else dict(request_payload)
-        )
-        payload["work_id"] = work.id
-        payload["desired_progress_revision"] = work.desired_progress_revision
-        if page is None:
-            payload.pop("text", None)
-            payload.pop("embeds", None)
-        else:
-            payload["text"] = page.text
-            payload["embeds"] = page.embeds
-        if operation is ExternalChannelDeliveryOperation.PROGRESS_DELETE:
-            if part.provider_message_key is None:
-                raise RuntimeError("Discord Tracker page delete has no message key.")
-            payload["provider_message_key"] = part.provider_message_key
-        elif operation is ExternalChannelDeliveryOperation.PROGRESS_UPDATE:
-            if part.provider_message_key is None:
-                raise RuntimeError("Discord Tracker page update has no message key.")
-            payload["provider_message_key"] = part.provider_message_key
-        else:
-            payload.pop("provider_message_key", None)
-        attempt = RDBExternalChannelDeliveryAttempt(
-            origin_type=origin_type,
-            origin_id=origin_id,
-            operation=operation,
-            part_ordinal=part.part_ordinal,
-            request_payload=payload,
-            status=ExternalChannelDeliveryStatus.PENDING,
-            channel_action_id=channel_action_id,
-            binding_id=binding_id,
-            provider_message_key=(
-                part.provider_message_key
-                if operation is not ExternalChannelDeliveryOperation.PROGRESS_CREATE
-                else None
-            ),
-            error_kind=None,
-            error_summary=None,
-            attempted_at=None,
-            completed_at=None,
-        )
-        session.add(attempt)
-        await session.flush()
-        part.latest_delivery_attempt_id = attempt.id
-        part.status = ExternalChannelWorkProjectionStatus.PENDING
-        return attempt.id
-
-    async def _discord_progress_page_matches(
-        self,
-        session: AsyncSession,
-        *,
-        part: RDBExternalChannelWorkProjectionPart,
-        page: DiscordProgressPage,
-    ) -> bool:
-        """Compare a page with its last committed provider-bound presentation."""
-        if part.latest_delivery_attempt_id is None:
-            return False
-        attempt = await session.get(
-            RDBExternalChannelDeliveryAttempt,
-            part.latest_delivery_attempt_id,
-        )
-        return (
-            attempt is not None
-            and attempt.request_payload.get("text") == page.text
-            and attempt.request_payload.get("embeds") == page.embeds
-        )
-
-    async def _provider_for_work(
-        self,
-        session: AsyncSession,
-        *,
-        work: RDBExternalChannelWork,
-    ) -> ExternalChannelProvider | None:
-        """Resolve the current provider for one locked canonical Work row."""
-        return await session.scalar(
-            sa.select(RDBExternalChannelConnection.provider)
-            .join(
-                RDBExternalChannelAgentRoute,
-                RDBExternalChannelAgentRoute.connection_id
-                == RDBExternalChannelConnection.id,
-            )
-            .join(
-                RDBExternalChannelBinding,
-                RDBExternalChannelBinding.route_id == RDBExternalChannelAgentRoute.id,
-            )
-            .where(RDBExternalChannelBinding.id == work.binding_id)
-        )
-
-    async def _work_for_delivery_attempt(
-        self,
-        session: AsyncSession,
-        *,
-        attempt: RDBExternalChannelDeliveryAttempt,
-    ) -> RDBExternalChannelWork | None:
-        """Lock the work cycle explicitly owned by one delivery attempt."""
-        if attempt.channel_action_id is not None:
-            work_id = await session.scalar(
-                sa.select(RDBExternalChannelAction.work_id).where(
-                    RDBExternalChannelAction.id == attempt.channel_action_id
-                )
-            )
-        else:
-            raw_work_id = attempt.request_payload.get("work_id")
-            work_id = raw_work_id if isinstance(raw_work_id, str) else None
-        if work_id is None:
-            return None
-        return await session.scalar(
-            sa.select(RDBExternalChannelWork)
-            .where(RDBExternalChannelWork.id == work_id)
-            .with_for_update()
-        )
-
-    async def complete_action(
-        self,
-        session: AsyncSession,
-        *,
-        action_id: str,
-        now: datetime.datetime,
-    ) -> ChannelActionCommit:
-        """Mark an action complete after all its intents become terminal."""
-        action = await session.scalar(
-            sa.select(RDBExternalChannelAction)
-            .where(RDBExternalChannelAction.id == action_id)
-            .with_for_update()
-        )
-        if action is None:
-            raise RuntimeError("External Channel action disappeared.")
-        action.completed_at = now
-        await session.flush()
-        return await self._build_commit(session, action)
-
-    async def recover_action_by_client_tool_call(
-        self,
-        session: AsyncSession,
-        *,
-        session_id: str,
-        client_tool_call_id: str,
-        now: datetime.datetime,
-    ) -> ChannelActionCommit | None:
-        """Recover committed action outcomes without provider re-execution."""
-        action = await session.scalar(
-            sa.select(RDBExternalChannelAction)
-            .where(
-                RDBExternalChannelAction.agent_session_id == session_id,
-                RDBExternalChannelAction.client_tool_call_id == client_tool_call_id,
-            )
-            .with_for_update()
-        )
-        if action is None:
-            return None
-        attempts = list(
-            (
-                await session.scalars(
-                    sa.select(RDBExternalChannelDeliveryAttempt)
-                    .where(
-                        RDBExternalChannelDeliveryAttempt.channel_action_id
-                        == action.id,
-                        RDBExternalChannelDeliveryAttempt.status.in_(
-                            (
-                                ExternalChannelDeliveryStatus.PENDING,
-                                ExternalChannelDeliveryStatus.ATTEMPTING,
-                            )
-                        ),
-                    )
-                    .order_by(RDBExternalChannelDeliveryAttempt.id)
-                    .with_for_update()
-                )
-            ).all()
-        )
-        for attempt in attempts:
-            if _has_provider_completed_runtime_recovery(attempt):
-                await self.complete_runtime_provider_recovery(
-                    session,
-                    delivery_attempt_id=attempt.id,
-                    provider_message_key=_runtime_provider_message_key(attempt),
-                    now=now,
-                )
-                continue
-            if attempt.status is ExternalChannelDeliveryStatus.PENDING:
-                attempt.status = ExternalChannelDeliveryStatus.NOT_ATTEMPTED
-                attempt.error_kind = "recovered_not_attempted"
-                attempt.error_summary = (
-                    "The provider operation did not begin before recovery."
-                )
-            else:
-                attempt.status = ExternalChannelDeliveryStatus.UNKNOWN
-                attempt.error_kind = "recovered_outcome_unknown"
-                attempt.error_summary = (
-                    "The provider operation began but its outcome is unknown."
-                )
-            attempt.completed_at = now
-        action.completed_at = now
-        await session.flush()
-        return await self._build_commit(session, action)
-
-    async def list_recoverable_deliveries(
-        self,
-        session: AsyncSession,
-        *,
-        channel_action_id: str | None,
-    ) -> list[ChannelWorkDelivery]:
-        """Terminalize pending and attempting rows without provider execution."""
-        predicate = (
-            RDBExternalChannelDeliveryAttempt.channel_action_id == channel_action_id
-            if channel_action_id is not None
-            else RDBExternalChannelDeliveryAttempt.origin_type
-            == ExternalChannelDeliveryOriginType.BINDING_DISCONNECT
-        )
-        rows = list(
-            (
-                await session.scalars(
-                    sa.select(RDBExternalChannelDeliveryAttempt)
-                    .where(
-                        predicate,
-                        RDBExternalChannelDeliveryAttempt.status.in_(
-                            (
-                                ExternalChannelDeliveryStatus.PENDING,
-                                ExternalChannelDeliveryStatus.ATTEMPTING,
-                            )
-                        ),
-                    )
-                    .order_by(RDBExternalChannelDeliveryAttempt.id)
-                    .with_for_update()
-                )
-            ).all()
-        )
-        now = datetime.datetime.now(datetime.UTC)
-        for row in rows:
-            if _has_provider_completed_runtime_recovery(row):
-                await self.complete_runtime_provider_recovery(
-                    session,
-                    delivery_attempt_id=row.id,
-                    provider_message_key=_runtime_provider_message_key(row),
-                    now=now,
-                )
-                continue
-            if row.status is ExternalChannelDeliveryStatus.PENDING:
-                row.status = ExternalChannelDeliveryStatus.NOT_ATTEMPTED
-                row.error_kind = "recovered_not_attempted"
-                row.error_summary = (
-                    "The provider operation did not begin before recovery."
-                )
-            else:
-                row.status = ExternalChannelDeliveryStatus.UNKNOWN
-                row.error_kind = "recovered_outcome_unknown"
-                row.error_summary = (
-                    "The provider operation began but its outcome is unknown."
-                )
-            row.completed_at = now
-        await session.flush()
-        if channel_action_id is None:
-            return [_delivery(row) for row in rows]
-        action = await session.get(RDBExternalChannelAction, channel_action_id)
-        if action is not None:
-            action.completed_at = now
-        return await self._list_deliveries(
-            session,
-            channel_action_id=channel_action_id,
-        )
-
-    async def list_runtime_provider_settlement_delivery_ids(
-        self,
-        session: AsyncSession,
-        *,
-        limit: int,
-    ) -> list[str]:
-        """List bounded delivered provider results awaiting Runtime settlement only."""
-        if limit <= 0:
-            raise ValueError("Runtime provider settlement limit must be positive.")
-        result = await session.scalars(
-            sa.select(RDBExternalChannelDeliveryAttempt.id)
-            .where(
-                RDBExternalChannelDeliveryAttempt.status
-                == ExternalChannelDeliveryStatus.DELIVERED,
-                RDBExternalChannelDeliveryAttempt.request_payload[
-                    "runtime_provider_recovery"
-                ]["state"].as_string()
-                == "provider_completed",
-            )
-            .order_by(RDBExternalChannelDeliveryAttempt.completed_at)
-            .limit(limit)
-        )
-        return list(result)
-
-    async def recover_stale_provider_control_deliveries(
-        self,
-        session: AsyncSession,
-        *,
-        stale_before: datetime.datetime,
-        completed_at: datetime.datetime,
-        limit: int,
-    ) -> int:
-        """Terminalize bounded interrupted controls without provider replay."""
-        if limit <= 0:
-            raise ValueError("Provider control recovery limit must be positive.")
-        attempt_ids = list(
-            await session.scalars(
-                sa.select(RDBExternalChannelDeliveryAttempt.id)
-                .where(
-                    _provider_control_predicate(),
-                    RDBExternalChannelDeliveryAttempt.status
-                    == ExternalChannelDeliveryStatus.ATTEMPTING,
-                    RDBExternalChannelDeliveryAttempt.attempted_at <= stale_before,
-                )
-                .order_by(
-                    RDBExternalChannelDeliveryAttempt.attempted_at,
-                    RDBExternalChannelDeliveryAttempt.id,
-                )
-                .limit(limit)
-                .with_for_update(skip_locked=True)
-            )
-        )
-        if not attempt_ids:
-            return 0
-        recovered_ids = list(
-            await session.scalars(
-                sa.update(RDBExternalChannelDeliveryAttempt)
-                .where(
-                    RDBExternalChannelDeliveryAttempt.id.in_(attempt_ids),
-                    RDBExternalChannelDeliveryAttempt.status
-                    == ExternalChannelDeliveryStatus.ATTEMPTING,
-                )
-                .values(
-                    status=ExternalChannelDeliveryStatus.UNKNOWN,
-                    error_kind="provider_outcome_unknown",
-                    error_summary=(
-                        "The provider operation began but its outcome is unknown."
-                    ),
-                    completed_at=completed_at,
-                )
-                .returning(RDBExternalChannelDeliveryAttempt.id)
-            )
-        )
-        return len(recovered_ids)
-
-    async def list_pending_provider_control_delivery_ids(
-        self,
-        session: AsyncSession,
-        *,
-        limit: int,
-    ) -> list[str]:
-        """List bounded durable controls eligible for one provider attempt."""
-        if limit <= 0:
-            raise ValueError("Provider control delivery limit must be positive.")
-        result = await session.scalars(
-            sa.select(RDBExternalChannelDeliveryAttempt.id)
-            .where(
-                _provider_control_predicate(),
-                RDBExternalChannelDeliveryAttempt.status
-                == ExternalChannelDeliveryStatus.PENDING,
-            )
-            .order_by(
-                RDBExternalChannelDeliveryAttempt.created_at,
-                RDBExternalChannelDeliveryAttempt.id,
-            )
-            .limit(limit)
-        )
-        return list(result)
-
-    async def get_delivery_status(
-        self,
-        session: AsyncSession,
-        *,
-        delivery_attempt_id: str,
-    ) -> ExternalChannelDeliveryStatus | None:
-        """Read one delivery status without retaining its provider payload."""
-        return await session.scalar(
-            sa.select(RDBExternalChannelDeliveryAttempt.status).where(
-                RDBExternalChannelDeliveryAttempt.id == delivery_attempt_id
-            )
-        )
-
-    async def recover_archive_cleanup(
-        self,
-        session: AsyncSession,
-        *,
-        current_delivery_ids: Sequence[str],
-        now: datetime.datetime,
-    ) -> None:
-        """Terminalize prior archive cleanup without provider re-execution."""
-        predicate = [
-            RDBExternalChannelDeliveryAttempt.origin_type
-            == ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
-            RDBExternalChannelDeliveryAttempt.status.in_(
-                (
-                    ExternalChannelDeliveryStatus.PENDING,
-                    ExternalChannelDeliveryStatus.ATTEMPTING,
-                )
-            ),
-        ]
-        if current_delivery_ids:
-            predicate.append(
-                RDBExternalChannelDeliveryAttempt.id.not_in(current_delivery_ids)
-            )
-        rows = list(
-            (
-                await session.scalars(
-                    sa.select(RDBExternalChannelDeliveryAttempt)
-                    .where(*predicate)
-                    .order_by(RDBExternalChannelDeliveryAttempt.id)
-                    .with_for_update()
-                )
-            ).all()
-        )
-        for row in rows:
-            if row.status is ExternalChannelDeliveryStatus.PENDING:
-                row.status = ExternalChannelDeliveryStatus.NOT_ATTEMPTED
-                row.error_kind = "recovered_not_attempted"
-                row.error_summary = "Archive cleanup did not begin before recovery."
-            else:
-                row.status = ExternalChannelDeliveryStatus.UNKNOWN
-                row.error_kind = "recovered_outcome_unknown"
-                row.error_summary = "Archive cleanup began but its outcome is unknown."
-            row.completed_at = now
-        await session.flush()
-
-    async def list_archive_cleanup_ids(
-        self,
-        session: AsyncSession,
-        *,
-        delivery_ids: Sequence[str],
-    ) -> list[str]:
-        """Return only current archive intents that remain pending."""
-        if not delivery_ids:
-            return []
-        result = await session.scalars(
-            sa.select(RDBExternalChannelDeliveryAttempt.id)
-            .where(
-                RDBExternalChannelDeliveryAttempt.id.in_(delivery_ids),
-                RDBExternalChannelDeliveryAttempt.status
-                == ExternalChannelDeliveryStatus.PENDING,
-            )
-            .order_by(RDBExternalChannelDeliveryAttempt.created_at)
-        )
-        return list(result)
-
-    async def _build_commit(
-        self,
-        session: AsyncSession,
-        action: RDBExternalChannelAction,
-    ) -> ChannelActionCommit:
-        work = await session.get(RDBExternalChannelWork, action.work_id)
-        if work is None:
-            raise RuntimeError("External Channel work disappeared.")
-        return ChannelActionCommit(
-            action_id=action.id,
-            binding_id=action.binding_id,
-            work_id=work.id,
-            work_status=work.status,
-            state_revision=work.state_revision,
-            deliveries=await self._list_deliveries(
-                session,
-                channel_action_id=action.id,
-            ),
-        )
-
-    async def _list_deliveries(
-        self,
-        session: AsyncSession,
-        *,
-        channel_action_id: str | None,
-    ) -> list[ChannelWorkDelivery]:
-        if channel_action_id is None:
-            return []
-        rows = await session.scalars(
-            sa.select(RDBExternalChannelDeliveryAttempt)
-            .where(
-                RDBExternalChannelDeliveryAttempt.channel_action_id == channel_action_id
-            )
-            .order_by(
-                sa.case(
-                    (
-                        RDBExternalChannelDeliveryAttempt.operation
-                        == ExternalChannelDeliveryOperation.REPLY,
-                        0,
-                    ),
-                    else_=1,
-                ),
-                RDBExternalChannelDeliveryAttempt.part_ordinal,
-                RDBExternalChannelDeliveryAttempt.created_at,
-                RDBExternalChannelDeliveryAttempt.id,
-            )
-        )
-        return [_delivery(row) for row in rows]
-
-    async def _latest_progress_delivery(
-        self,
-        session: AsyncSession,
-        *,
-        work_id: str,
-    ) -> ChannelWorkDelivery | None:
-        row = await session.scalar(
-            sa.select(RDBExternalChannelDeliveryAttempt)
-            .outerjoin(
-                RDBExternalChannelAction,
-                RDBExternalChannelAction.id
-                == RDBExternalChannelDeliveryAttempt.channel_action_id,
-            )
-            .where(
-                sa.or_(
-                    RDBExternalChannelAction.work_id == work_id,
-                    sa.and_(
-                        RDBExternalChannelDeliveryAttempt.channel_action_id.is_(None),
-                        RDBExternalChannelDeliveryAttempt.origin_id == work_id,
-                    ),
-                ),
-                RDBExternalChannelDeliveryAttempt.operation.in_(
-                    (
-                        ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                        ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-                        ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-                    )
-                ),
-            )
-            .order_by(
-                RDBExternalChannelDeliveryAttempt.created_at.desc(),
-                RDBExternalChannelDeliveryAttempt.id.desc(),
-            )
-            .limit(1)
-        )
-        return None if row is None else _delivery(row)
-
-
-def _delivery(row: RDBExternalChannelDeliveryAttempt) -> ChannelWorkDelivery:
-    """Project one safe delivery result."""
-    return ChannelWorkDelivery(
-        id=row.id,
-        operation=row.operation,
-        status=row.status,
-        provider_message_key=row.provider_message_key,
-        error_kind=row.error_kind,
-        error_summary=row.error_summary,
-        created_at=row.created_at,
-        completed_at=row.completed_at,
-    )
-
-
-def _provider_control_predicate() -> sa.ColumnElement[bool]:
-    """Select non-Action durable controls owned by the background drain."""
-    return sa.and_(
-        RDBExternalChannelDeliveryAttempt.channel_action_id.is_(None),
-        RDBExternalChannelDeliveryAttempt.origin_type.in_(
-            (
-                ExternalChannelDeliveryOriginType.ACCESS_REQUEST,
-                ExternalChannelDeliveryOriginType.BINDING_SETTINGS_AVAILABLE,
-                ExternalChannelDeliveryOriginType.SETUP_CLAIM,
-                ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-            )
-        ),
-        RDBExternalChannelDeliveryAttempt.operation.in_(
-            (
-                ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-                ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-                ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-            )
-        ),
-    )
-
-
-def _is_provider_control_attempt(
-    attempt: RDBExternalChannelDeliveryAttempt,
-) -> bool:
-    """Return whether the Worker provider-control drain owns one attempt."""
-    return (
-        attempt.channel_action_id is None
-        and attempt.origin_type
-        in {
-            ExternalChannelDeliveryOriginType.ACCESS_REQUEST,
-            ExternalChannelDeliveryOriginType.BINDING_SETTINGS_AVAILABLE,
-            ExternalChannelDeliveryOriginType.SETUP_CLAIM,
-            ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-        }
-        and attempt.operation
-        in {
-            ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-            ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-            ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-            ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-        }
-    )
-
-
-def _provider_control_attempt_identity(
-    attempt: RDBExternalChannelDeliveryAttempt,
-) -> ProviderControlAttemptIdentity:
-    """Capture immutable identity used across authority-first final locking."""
-    return ProviderControlAttemptIdentity(
-        delivery_attempt_id=attempt.id,
-        origin_type=attempt.origin_type,
-        origin_id=attempt.origin_id,
-        operation=attempt.operation,
-        binding_id=attempt.binding_id,
-        channel_action_id=attempt.channel_action_id,
-    )
-
-
-def _has_provider_completed_runtime_recovery(
-    attempt: RDBExternalChannelDeliveryAttempt,
-) -> bool:
-    """Return whether a provider completion awaits Runtime-only settlement."""
-    recovery = attempt.request_payload.get("runtime_provider_recovery")
-    return isinstance(recovery, dict) and recovery.get("state") == "provider_completed"
-
-
-def _runtime_provider_message_key(
-    attempt: RDBExternalChannelDeliveryAttempt,
-) -> str | None:
-    """Read the provider message key retained with a confirmed completion."""
-    recovery = attempt.request_payload.get("runtime_provider_recovery")
-    if not isinstance(recovery, dict):
-        return attempt.provider_message_key
-    provider_message_key = recovery.get("provider_message_key")
-    if isinstance(provider_message_key, str) and provider_message_key:
-        return provider_message_key
-    return attempt.provider_message_key
-
-
-def _validate_existing_action(
-    action: RDBExternalChannelAction,
-    request_payload: dict[str, object],
-) -> None:
-    """Reject reuse of one durable tool-call identity with different input."""
-    if action.request_payload != request_payload:
-        raise ValueError("Client tool call identity conflicts with an action.")
 
 
 def _provider_payload(
@@ -3724,48 +1424,6 @@ def _discord_file_batches(
     return tuple(batches)
 
 
-def _render_progress(
-    provider: ExternalChannelProvider,
-    progress: ExternalChannelDesiredProgress,
-    *,
-    work_id: str,
-    desired_progress_revision: int,
-) -> SlackProgressPresentation:
-    """Lower canonical progress through the active provider adapter."""
-    match provider:
-        case ExternalChannelProvider.SLACK:
-            return render_slack_progress(
-                progress,
-                work_id=work_id,
-                desired_progress_revision=desired_progress_revision,
-            )
-        case ExternalChannelProvider.DISCORD:
-            raise RuntimeError("Discord Channel Work projection is not enabled.")
-        case _ as unreachable:
-            assert_never(unreachable)
-
-
-def _render_persisted_progress(
-    provider: ExternalChannelProvider,
-    payload: object,
-    *,
-    work_id: str,
-    desired_progress_revision: int,
-) -> SlackProgressPresentation:
-    """Validate and lower one durable canonical progress snapshot."""
-    match provider:
-        case ExternalChannelProvider.SLACK:
-            return render_slack_persisted_progress(
-                payload,
-                work_id=work_id,
-                desired_progress_revision=desired_progress_revision,
-            )
-        case ExternalChannelProvider.DISCORD:
-            raise RuntimeError("Discord Channel Work projection is not enabled.")
-        case _ as unreachable:
-            assert_never(unreachable)
-
-
 def _validate_message_length(
     provider: ExternalChannelProvider,
     message: str | None,
@@ -3796,63 +1454,155 @@ def _resource_label(labels: dict[str, object] | None, fallback: str) -> str:
     return fallback
 
 
-def _projection_drift(
+def projection_state(
     work: RDBExternalChannelWork,
-    deliveries: Sequence[ChannelWorkDelivery],
-    *,
-    provider: ExternalChannelProvider,
     projection_parts: Sequence[RDBExternalChannelWorkProjectionPart],
-) -> str:
-    """Derive a bounded progress projection drift label."""
-    if provider is ExternalChannelProvider.DISCORD:
+) -> Literal[
+    "synchronized",
+    "missing",
+    "stale",
+    "delete_failed",
+    "unknown",
+    "none",
+]:
+    """Derive current Work projection state only from owner-local parts."""
+    if any(
+        part.status is ExternalChannelWorkProjectionStatus.UNKNOWN
+        for part in projection_parts
+    ):
+        return "unknown"
+    if work.desired_progress_payload is None:
         if any(
-            part.status is ExternalChannelWorkProjectionStatus.UNKNOWN
+            part.status is ExternalChannelWorkProjectionStatus.FAILED
+            and part.provider_message_key is not None
             for part in projection_parts
         ):
-            return "unknown"
+            return "delete_failed"
         if any(
-            part.status
-            in {
-                ExternalChannelWorkProjectionStatus.FAILED,
-                ExternalChannelWorkProjectionStatus.PENDING,
-            }
+            part.status is ExternalChannelWorkProjectionStatus.PRESENT
+            and part.provider_message_key is not None
             for part in projection_parts
         ):
             return "stale"
-        if work.desired_progress_payload is None:
-            return "none" if not projection_parts else "stale"
-        if not projection_parts or any(
-            part.provider_message_key is None
-            or part.status is not ExternalChannelWorkProjectionStatus.PRESENT
-            or part.desired_progress_revision != work.desired_progress_revision
-            for part in projection_parts
-        ):
-            return "missing"
-        return "synchronized"
-    progress = [
-        item
-        for item in deliveries
-        if item.operation
-        in {
-            ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-            ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-            ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-        }
-    ]
-    if progress and progress[-1].status is ExternalChannelDeliveryStatus.UNKNOWN:
-        return "unknown"
-    if progress and progress[-1].status in {
-        ExternalChannelDeliveryStatus.FAILED,
-        ExternalChannelDeliveryStatus.NOT_ATTEMPTED,
-    }:
-        return (
-            "delete_failed"
-            if progress[-1].operation
-            is ExternalChannelDeliveryOperation.PROGRESS_DELETE
-            else "stale"
+        return "none"
+    if not projection_parts:
+        return "missing"
+    if any(
+        part.status is not ExternalChannelWorkProjectionStatus.PRESENT
+        or part.provider_message_key is None
+        or part.desired_progress_revision != work.desired_progress_revision
+        for part in projection_parts
+    ):
+        return "stale"
+    return "synchronized"
+
+
+async def terminate_binding_with_plans(
+    session: AsyncSession,
+    *,
+    binding: RDBExternalChannelBinding,
+    resource: RDBExternalChannelResource,
+    now: datetime.datetime,
+    reason: str,
+) -> tuple[ProviderEffectPlan, ...]:
+    """Commit one binding termination and capture bounded cleanup plans."""
+    if binding.disconnected_at is not None:
+        return ()
+    route = await session.get(RDBExternalChannelAgentRoute, binding.route_id)
+    if route is None:
+        raise RuntimeError("External Channel binding route disappeared.")
+    connection = await session.get(RDBExternalChannelConnection, route.connection_id)
+    agent_session = await session.get(RDBAgentSession, binding.agent_session_id)
+    agent = (
+        None
+        if agent_session is None
+        else await session.get(RDBAgent, agent_session.agent_id)
+    )
+    workspace = (
+        None if agent is None else await session.get(RDBWorkspace, agent.workspace_id)
+    )
+    if connection is None or agent_session is None or agent is None:
+        raise RuntimeError("External Channel binding authority disappeared.")
+
+    plans: list[ProviderEffectPlan] = []
+
+    def append_plan(
+        operation: ExternalChannelDeliveryOperation,
+        payload: dict[str, object],
+    ) -> None:
+        plans.append(
+            ProviderEffectPlan(
+                target=ProviderTarget(
+                    operation=operation,
+                    binding_id=binding.id,
+                    resource_id=resource.id,
+                    connection_id=connection.id,
+                    provider=connection.provider,
+                    app_mode=connection.app_mode,
+                    encrypted_credentials=connection.encrypted_credentials,
+                    provider_tenant_id=connection.provider_tenant_id,
+                    capabilities=connection.capabilities,
+                    workspace_handle=None if workspace is None else workspace.handle,
+                    agent_id=agent.id,
+                    agent_session_id=agent_session.id,
+                    agent_name=agent.name,
+                    agent_avatar=agent.avatar,
+                    request_payload=payload,
+                ),
+                operation_key=ProviderOperationKey.from_seed(
+                    f"binding-terminal:{binding.id}:{len(plans)}:{operation.value}"
+                ),
+            )
         )
-    if work.desired_progress_payload is not None:
-        return (
-            "missing" if work.progress_provider_message_key is None else "synchronized"
+
+    append_plan(
+        ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+        session_presence_payload(resource.labels, state="left"),
+    )
+    works = list(
+        await session.scalars(
+            sa.select(RDBExternalChannelWork)
+            .where(
+                RDBExternalChannelWork.binding_id == binding.id,
+                RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
+            )
+            .order_by(RDBExternalChannelWork.id)
+            .with_for_update()
         )
-    return "none" if work.progress_provider_message_key is None else "stale"
+    )
+    for work in works:
+        work.status = ExternalChannelWorkStatus.FINISHED
+        work.finished_at = now
+        work.state_revision += 1
+        work.desired_progress_revision += 1
+        work.desired_progress_payload = None
+        parts = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelWorkProjectionPart)
+                .where(
+                    RDBExternalChannelWorkProjectionPart.work_id == work.id,
+                    RDBExternalChannelWorkProjectionPart.status
+                    == ExternalChannelWorkProjectionStatus.PRESENT,
+                    RDBExternalChannelWorkProjectionPart.provider_message_key.is_not(
+                        None
+                    ),
+                )
+                .order_by(RDBExternalChannelWorkProjectionPart.part_ordinal)
+                .with_for_update()
+            )
+        )
+        for part in parts:
+            assert part.provider_message_key is not None
+            payload = _provider_payload(
+                connection.provider,
+                resource.labels,
+                provider_message_key=part.provider_message_key,
+                desired_progress_revision=work.desired_progress_revision,
+            )
+            payload["work_id"] = work.id
+            payload["part_ordinal"] = part.part_ordinal
+            append_plan(ExternalChannelDeliveryOperation.PROGRESS_DELETE, payload)
+    binding.disconnected_at = now
+    binding.disconnect_reason = reason
+    await session.flush()
+    return tuple(plans)

@@ -11,10 +11,10 @@ from azents.core.enums import ExternalChannelConnectionStatus
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.repos.external_channel.work_data import ChannelDeliveryTarget
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
 )
+from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.external_channel.slack_events import SlackConnectionRevocation
 
 
@@ -45,10 +45,10 @@ class ExternalChannelConnectionRevocationService:
         now: datetime.datetime,
     ) -> bool:
         """Apply one idempotent lifecycle transition under optional lease fencing."""
-        cleanup_targets: list[ChannelDeliveryTarget] = []
+        cleanup_plans: tuple[ProviderEffectPlan, ...] = ()
         async with self.session_manager() as session:
             if revocation.kind == "app_uninstalled":
-                cleanup_ids = (
+                captured_plans = (
                     await self.repository.terminate_connection_for_provider_event(
                         session,
                         connection_id=connection_id,
@@ -62,16 +62,10 @@ class ExternalChannelConnectionRevocationService:
                         defer_provider_state_purge=True,
                     )
                 )
-                if cleanup_ids is None:
+                if captured_plans is None:
                     await session.commit()
                     return False
-                for delivery_id in cleanup_ids:
-                    target = await self.action_service.prepare_delivery_in_session(
-                        session,
-                        delivery_id,
-                    )
-                    if target is not None:
-                        cleanup_targets.append(target)
+                cleanup_plans = captured_plans
                 purged = (
                     await self.repository.purge_disconnected_connection_provider_state(
                         session,
@@ -97,6 +91,6 @@ class ExternalChannelConnectionRevocationService:
                     await session.commit()
                     return False
             await session.commit()
-        for target in cleanup_targets:
-            await self.action_service.attempt_captured_terminal_delivery(target)
+        for plan in cleanup_plans:
+            await self.action_service.execute_terminal_control(plan)
         return True

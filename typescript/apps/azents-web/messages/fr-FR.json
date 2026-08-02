@@ -1282,8 +1282,6 @@
           "unknown": "Résultat du fournisseur inconnu",
           "none": "Aucune projection active"
         },
-        "deliveries": "Résultats de livraison",
-        "noDeliveries": "Aucune livraison au fournisseur n’a été tentée.",
         "grantsTitle": "Accès à la session",
         "grantsDescription": "Participants autorisés uniquement pour cette session.",
         "noGrants": "Aucune autorisation active limitée à la session.",
@@ -1292,21 +1290,6 @@
         "workStatus": {
           "active": "Travail actif",
           "finished": "Travail terminé"
-        },
-        "deliveryStatus": {
-          "pending": "En attente",
-          "attempting": "Tentative",
-          "delivered": "Livrée",
-          "failed": "Échec",
-          "unknown": "Résultat inconnu",
-          "not_attempted": "Non tentée"
-        },
-        "operation": {
-          "reply": "Réponse",
-          "progress_create": "Créer la progression",
-          "progress_update": "Mettre à jour la progression",
-          "progress_delete": "Supprimer la progression",
-          "control_message": "Message de contrôle"
         },
         "grantScope": {
           "session": "Accès à la session",
@@ -1789,7 +1772,7 @@
       "setDefault": "Définir par défaut",
       "defaultMutationChangedTitle": "Sélection du canal mise à jour",
       "defaultMutationUnchangedTitle": "La sélection du canal est déjà à jour",
-      "defaultMutationImpact": "Nettoyage de la participation : {settings} paramètre(s) invalidé(s), {claims} demande(s) de configuration terminée(s), {interactions} contrôle(s) en attente expiré(s), {bindings} conversation(s) parent déconnectée(s) et {deliveries} message(s) de nettoyage mis en file d’attente.",
+      "defaultMutationImpact": "Nettoyage de la participation : {settings} paramètre(s) invalidé(s), {claims} demande(s) de configuration terminée(s), {interactions} contrôle(s) en attente expiré(s), {bindings} conversation(s) parent déconnectée(s) et {cleanups} message(s) de nettoyage immédiat tenté(s).",
       "channel": "Canal",
       "defaultAgent": "Agent par défaut",
       "defaultStatus": "État de la valeur par défaut",

@@ -12,8 +12,6 @@ from azents.core.enums import (
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelConversationLocation,
-    ExternalChannelDeliveryOperation,
-    ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
     ExternalChannelResourceType,
     ExternalChannelResponseMode,
@@ -114,7 +112,7 @@ class ManagedChannelDefaultMutation(_Projection):
     terminated_setup_claim_count: int
     expired_interaction_count: int
     disconnected_parent_binding_count: int
-    cleanup_delivery_count: int
+    direct_cleanup_count: int
 
 
 class ManagedSlackManagementHandoff(_Projection):
@@ -140,17 +138,6 @@ class ManagedMultiConnectionDisconnect(_Projection):
     expired_access_request_count: int
     unavailable_resource_count: int
     disconnected_binding_count: int
-
-
-class ManagedDelivery(_Projection):
-    id: str
-    operation: ExternalChannelDeliveryOperation
-    status: ExternalChannelDeliveryStatus
-    error_kind: str | None
-    error_summary: str | None
-    attempted_at: datetime.datetime | None
-    completed_at: datetime.datetime | None
-    created_at: datetime.datetime
 
 
 class ManagedWorkSource(_Projection):
@@ -199,7 +186,6 @@ class ManagedBinding(_Projection):
     disconnect_reason: str | None
     latest_activity_at: datetime.datetime | None
     work: ManagedWork | None
-    deliveries: list[ManagedDelivery]
 
 
 class ManagedGrant(_Projection):

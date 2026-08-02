@@ -41,6 +41,7 @@ from azents.services.external_channel.ingestion import (
     ExternalChannelTriggerLocator,
     ExternalChannelWakeDispatchResult,
 )
+from azents.testing.external_channel import make_provider_effect_plan
 
 
 @dataclass
@@ -260,7 +261,7 @@ class _EventStore:
             reason=ExternalChannelIngestionReason.ACCEPTED,
             mailbox_item_id=f"mailbox:{request.operation.value}",
             session_id=f"session:{request.operation.value}",
-            control_delivery_attempt_id=None,
+            control_plans=(),
             connection_id=None,
         )
 
@@ -471,7 +472,7 @@ async def test_ingestion_restarts_history_after_position_mismatch() -> None:
                 reason=ExternalChannelIngestionReason.POSITION_CHANGED,
                 mailbox_item_id=None,
                 session_id=None,
-                control_delivery_attempt_id=None,
+                control_plans=(),
                 connection_id=None,
             ),
             ExternalChannelIngestionAcceptance(
@@ -479,7 +480,7 @@ async def test_ingestion_restarts_history_after_position_mismatch() -> None:
                 reason=ExternalChannelIngestionReason.ACCEPTED,
                 mailbox_item_id="batch-1",
                 session_id="session-1",
-                control_delivery_attempt_id=None,
+                control_plans=(),
                 connection_id=None,
             ),
         ],
@@ -499,7 +500,7 @@ async def test_ingestion_restarts_history_after_position_mismatch() -> None:
         kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
         reason=ExternalChannelIngestionReason.ACCEPTED,
         mailbox_item_id="batch-1",
-        control_delivery_attempt_id=None,
+        control_plans=(),
         connection_id=None,
     )
     assert history.calls == [
@@ -527,7 +528,7 @@ async def test_duplicate_recovers_pending_wake_without_history_read() -> None:
                         kind=ExternalChannelIngestionOutcomeKind.DUPLICATE,
                         reason=ExternalChannelIngestionReason.DUPLICATE,
                         mailbox_item_id="batch-1",
-                        control_delivery_attempt_id=None,
+                        control_plans=(),
                         connection_id=None,
                     ),
                     wake_mailbox_item_id="batch-1",
@@ -549,6 +550,7 @@ async def test_duplicate_recovers_pending_wake_without_history_read() -> None:
 
 async def test_provider_control_delivery_does_not_gate_accepted_wake() -> None:
     """Committed provider controls remain independent from accepted input wake."""
+    plan = make_provider_effect_plan("initial-progress")
     wake = _WakeDispatcher()
     service = ExternalChannelConversationIngestionService(
         conversation_lock=_Lock(),
@@ -571,7 +573,7 @@ async def test_provider_control_delivery_does_not_gate_accepted_wake() -> None:
                     reason=ExternalChannelIngestionReason.ACCEPTED,
                     mailbox_item_id="batch-1",
                     session_id="session-1",
-                    control_delivery_attempt_id="progress-1",
+                    control_plans=(plan,),
                     connection_id="connection-1",
                 )
             ],
@@ -582,7 +584,7 @@ async def test_provider_control_delivery_does_not_gate_accepted_wake() -> None:
     outcome = await service.ingest(_request())
 
     assert outcome.kind is ExternalChannelIngestionOutcomeKind.ACCEPTED
-    assert outcome.control_delivery_attempt_id == "progress-1"
+    assert outcome.control_plans == (plan,)
     assert outcome.connection_id == "connection-1"
     assert wake.calls == [("batch-1", "session-1")]
 
@@ -667,7 +669,7 @@ async def test_concurrent_wake_claim_is_retryable() -> None:
                         kind=ExternalChannelIngestionOutcomeKind.DUPLICATE,
                         reason=ExternalChannelIngestionReason.DUPLICATE,
                         mailbox_item_id="batch-1",
-                        control_delivery_attempt_id=None,
+                        control_plans=(),
                         connection_id=None,
                     ),
                     wake_mailbox_item_id="batch-1",

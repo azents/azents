@@ -8,16 +8,12 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.elements import ClauseElement
 
 from azents.core.enums import (
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelConversationLocation,
-    ExternalChannelDeliveryOperation,
-    ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
     ExternalChannelResourceType,
     ExternalChannelResponseMode,
@@ -27,16 +23,11 @@ from azents.core.enums import (
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAgentRoute,
     RDBExternalChannelConnection,
-    RDBExternalChannelDeliveryAttempt,
-    RDBExternalChannelWork,
 )
 from azents.repos.external_channel.data import (
     ExternalChannelMultiConnectionDisconnect,
 )
-from azents.repos.external_channel.management import (
-    ExternalChannelManagementRepository,
-    progress_projection_state,
-)
+from azents.repos.external_channel.management import ExternalChannelManagementRepository
 from azents.repos.external_channel.management_data import (
     ManagedBinding,
     ManagedChannelDefault,
@@ -56,6 +47,8 @@ from azents.services.external_channel.management import (
     ExternalChannelResponseModeSetting,
     slack_manifest_guidance,
 )
+from azents.services.external_channel.provider_effect import ProviderEffectPlan
+from azents.testing.external_channel import make_provider_effect_plan
 
 
 class _Lock:
@@ -136,7 +129,6 @@ def _binding(
         disconnect_reason=None,
         latest_activity_at=now,
         work=None,
-        deliveries=[],
     )
 
 
@@ -213,6 +205,8 @@ async def test_replace_multi_default_commits_before_cleanup_outside_locks() -> N
     session.commit.side_effect = commit
     repository = AsyncMock()
     repository.get_multi_connection.return_value = connection
+    first_plan = make_provider_effect_plan("default-cleanup-1")
+    second_plan = make_provider_effect_plan("default-cleanup-2")
 
     async def replace(*_: object, **__: object) -> object:
         events.append("repository")
@@ -223,16 +217,16 @@ async def test_replace_multi_default_commits_before_cleanup_outside_locks() -> N
             terminated_setup_claim_count=1,
             expired_interaction_count=2,
             disconnected_parent_binding_count=1,
-            cleanup_intent_ids=("cleanup-1", "cleanup-2"),
+            cleanup_plans=(first_plan, second_plan),
         )
 
     repository.replace_multi_channel_default.side_effect = replace
     action_service = AsyncMock()
 
-    async def deliver(delivery_id: str) -> None:
-        events.append(f"delivery:{delivery_id}")
+    async def deliver(plan: ProviderEffectPlan) -> None:
+        events.append("delivery:first" if plan is first_plan else "delivery:second")
 
-    action_service.attempt_delivery.side_effect = deliver
+    action_service.execute_terminal_control.side_effect = deliver
     service = _management_service(
         session=session,
         repository=repository,
@@ -259,7 +253,7 @@ async def test_replace_multi_default_commits_before_cleanup_outside_locks() -> N
     assert result.terminated_setup_claim_count == 1
     assert result.expired_interaction_count == 2
     assert result.disconnected_parent_binding_count == 1
-    assert result.cleanup_delivery_count == 2
+    assert result.direct_cleanup_count == 2
     assert events == [
         "conversation:acquire",
         "conversation:enter",
@@ -271,8 +265,8 @@ async def test_replace_multi_default_commits_before_cleanup_outside_locks() -> N
         "commit",
         "participation:exit",
         "conversation:exit",
-        "delivery:cleanup-1",
-        "delivery:cleanup-2",
+        "delivery:first",
+        "delivery:second",
     ]
 
 
@@ -293,7 +287,7 @@ async def test_replace_same_multi_default_preserves_connection_generation() -> N
         terminated_setup_claim_count=0,
         expired_interaction_count=0,
         disconnected_parent_binding_count=0,
-        cleanup_intent_ids=(),
+        cleanup_plans=(),
     )
     action_service = AsyncMock()
     service = _management_service(
@@ -316,7 +310,7 @@ async def test_replace_same_multi_default_preserves_connection_generation() -> N
 
     assert connection.updated_at == expected_generation
     session.commit.assert_awaited_once_with()
-    action_service.attempt_delivery.assert_not_awaited()
+    action_service.execute_terminal_control.assert_not_awaited()
 
 
 async def test_default_response_mode_read_projects_agent_value() -> None:
@@ -1068,43 +1062,6 @@ async def test_repeated_disconnect_reterminalizes_connection() -> None:
     session.flush.assert_awaited_once()
 
 
-async def test_disconnect_retry_recovers_pending_progress_cleanup_ids() -> None:
-    """A crash retry can prepare cleanup created by the prior transaction."""
-    connection = SimpleNamespace(
-        status=ExternalChannelConnectionStatus.DISCONNECTING,
-    )
-    route = SimpleNamespace(id="route-1")
-    resource = SimpleNamespace(id="resource-1")
-    binding = SimpleNamespace(
-        id="binding-1",
-        resource_id=resource.id,
-        disconnected_at=datetime.datetime(2026, 7, 31, tzinfo=datetime.UTC),
-    )
-    resource_rows = Mock()
-    resource_rows.all.return_value = [resource]
-    binding_rows = Mock()
-    binding_rows.all.return_value = [binding]
-    session = AsyncMock(spec=AsyncSession)
-    session.scalars.side_effect = [
-        resource_rows,
-        binding_rows,
-        ("cleanup-1",),
-    ]
-    repository = ExternalChannelManagementRepository()
-    repository.get_connection = AsyncMock(return_value=(connection, route))
-
-    cleanup_ids = await repository.begin_connection_disconnect(
-        session,
-        workspace_id="workspace-1",
-        agent_id="agent-1",
-        connection_id="connection-1",
-        now=datetime.datetime.now(datetime.UTC),
-    )
-
-    assert cleanup_ids == ("cleanup-1",)
-    session.flush.assert_awaited_once()
-
-
 async def test_disconnect_prepares_cleanup_before_terminal_secret_purge() -> None:
     """Provider cleanup retains its target while terminal state commits first."""
     events: list[str] = []
@@ -1121,10 +1078,14 @@ async def test_disconnect_prepares_cleanup_before_terminal_secret_purge() -> Non
 
     repository = AsyncMock()
     repository.get_connection.return_value = object()
+    plan = make_provider_effect_plan("single-disconnect")
 
-    async def begin_disconnect(*args: object, **kwargs: object) -> tuple[str, ...]:
+    async def begin_disconnect(
+        *args: object,
+        **kwargs: object,
+    ) -> tuple[ProviderEffectPlan, ...]:
         events.append("begin")
-        return ("cleanup-1",)
+        return (plan,)
 
     async def complete_disconnect(*args: object, **kwargs: object) -> ManagedConnection:
         events.append("complete")
@@ -1141,21 +1102,12 @@ async def test_disconnect_prepares_cleanup_before_terminal_secret_purge() -> Non
     lifecycle_repository.disconnect_single_connection.side_effect = disconnect_single
 
     action_service = AsyncMock()
-    prepared_target = object()
 
-    async def prepare_delivery(delivery_id: str) -> object:
-        assert delivery_id == "cleanup-1"
-        events.append("prepare")
-        return prepared_target
-
-    async def attempt_captured_terminal_delivery(target: object) -> None:
-        assert target is prepared_target
+    async def execute_terminal_control(effect: ProviderEffectPlan) -> None:
+        assert effect is plan
         events.append("delivery")
 
-    action_service.prepare_delivery.side_effect = prepare_delivery
-    action_service.attempt_captured_terminal_delivery.side_effect = (
-        attempt_captured_terminal_delivery
-    )
+    action_service.execute_terminal_control.side_effect = execute_terminal_control
     agent_repository = AsyncMock()
     agent_repository.get_by_id.return_value = SimpleNamespace(
         workspace_id="workspace-1"
@@ -1190,7 +1142,6 @@ async def test_disconnect_prepares_cleanup_before_terminal_secret_purge() -> Non
     assert events == [
         "begin",
         "commit",
-        "prepare",
         "lifecycle",
         "complete",
         "commit",
@@ -1214,6 +1165,7 @@ async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -
 
     now = datetime.datetime(2026, 7, 25, tzinfo=datetime.UTC)
     connection = SimpleNamespace(id="connection-1", updated_at=now)
+    plan = make_provider_effect_plan("multi-disconnect")
     disconnected = ExternalChannelMultiConnectionDisconnect(
         disconnected_route_count=1,
         invalidated_default_count=0,
@@ -1223,7 +1175,7 @@ async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -
         expired_access_request_count=0,
         unavailable_resource_count=0,
         disconnected_binding_count=1,
-        cleanup_intent_ids=("cleanup-1",),
+        cleanup_plans=(plan,),
     )
     repository = AsyncMock()
     repository.get_multi_connection.return_value = connection
@@ -1243,18 +1195,12 @@ async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -
         purge
     )
     action_service = AsyncMock()
-    target = object()
 
-    async def prepare(*args: object, **kwargs: object) -> object:
-        events.append("prepare")
-        return target
-
-    async def deliver(value: object) -> None:
-        assert value is target
+    async def deliver(value: ProviderEffectPlan) -> None:
+        assert value is plan
         events.append("delivery")
 
-    action_service.prepare_delivery_in_session.side_effect = prepare
-    action_service.attempt_captured_terminal_delivery.side_effect = deliver
+    action_service.execute_terminal_control.side_effect = deliver
     service = ExternalChannelManagementService(
         session_manager=session_manager,
         repository=repository,
@@ -1279,101 +1225,4 @@ async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -
     )
 
     assert result.disconnected_binding_count == 1
-    assert events == ["disconnect", "prepare", "purge", "commit", "delivery"]
-
-
-@pytest.mark.parametrize(
-    ("desired_payload", "provider_key", "operation", "status", "expected"),
-    [
-        ({}, "slack:T1:C1:1.1", None, None, "synchronized"),
-        ({}, None, None, None, "missing"),
-        (
-            {},
-            "slack:T1:C1:1.1",
-            ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-            ExternalChannelDeliveryStatus.FAILED,
-            "stale",
-        ),
-        (
-            None,
-            "slack:T1:C1:1.1",
-            ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-            ExternalChannelDeliveryStatus.FAILED,
-            "delete_failed",
-        ),
-        (
-            {},
-            "slack:T1:C1:1.1",
-            ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-            ExternalChannelDeliveryStatus.UNKNOWN,
-            "unknown",
-        ),
-        (None, None, None, None, "none"),
-    ],
-)
-def test_progress_projection_state_uses_delivery_lifecycle(
-    desired_payload: dict[str, object] | None,
-    provider_key: str | None,
-    operation: ExternalChannelDeliveryOperation | None,
-    status: ExternalChannelDeliveryStatus | None,
-    expected: str,
-) -> None:
-    """Projection state follows durable provider outcomes, not revision counters."""
-    work = cast(
-        RDBExternalChannelWork,
-        SimpleNamespace(
-            desired_progress_payload=desired_payload,
-            progress_provider_message_key=provider_key,
-            state_revision=100,
-            desired_progress_revision=1,
-        ),
-    )
-    progress = (
-        None
-        if operation is None or status is None
-        else cast(
-            RDBExternalChannelDeliveryAttempt,
-            SimpleNamespace(operation=operation, status=status),
-        )
-    )
-
-    assert progress_projection_state(work, progress) == expected
-
-
-async def test_latest_progress_query_is_scoped_to_current_work_cycle() -> None:
-    """Ignore prior work deliveries while retaining lifecycle cleanup."""
-    work = cast(
-        RDBExternalChannelWork,
-        SimpleNamespace(
-            id="work-current",
-            created_at=datetime.datetime(2026, 7, 23, tzinfo=datetime.UTC),
-        ),
-    )
-    session = AsyncMock(spec=AsyncSession)
-    captured_sql: list[str] = []
-
-    async def compile_statement(statement: ClauseElement) -> None:
-        sql = str(
-            statement.compile(
-                dialect=postgresql.dialect(),
-                compile_kwargs={"literal_binds": True},
-            )
-        )
-        captured_sql.append(sql)
-        return None
-
-    session.scalar.side_effect = compile_statement
-    result = (
-        await ExternalChannelManagementRepository().get_latest_work_progress_delivery(
-            session,
-            binding_id="binding-1",
-            work=work,
-        )
-    )
-    sql = captured_sql[0]
-
-    assert result is None
-    assert "external_channel_delivery_attempts.binding_id = 'binding-1'" in sql
-    assert "external_channel_actions.work_id = 'work-current'" in sql
-    assert "external_channel_delivery_attempts.channel_action_id IS NULL" in sql
-    assert "external_channel_delivery_attempts.created_at >= " in sql
+    assert events == ["disconnect", "purge", "commit", "delivery"]

@@ -33,9 +33,9 @@ class ManagedChannelDefaultMutation(BaseModel):
     terminated_setup_claim_count: StrictInt
     expired_interaction_count: StrictInt
     disconnected_parent_binding_count: StrictInt
-    cleanup_delivery_count: StrictInt
+    direct_cleanup_count: StrictInt
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["channel_default", "changed", "invalidated_participation_setting_count", "terminated_setup_claim_count", "expired_interaction_count", "disconnected_parent_binding_count", "cleanup_delivery_count"]
+    __properties: ClassVar[List[str]] = ["channel_default", "changed", "invalidated_participation_setting_count", "terminated_setup_claim_count", "expired_interaction_count", "disconnected_parent_binding_count", "direct_cleanup_count"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -109,7 +109,7 @@ class ManagedChannelDefaultMutation(BaseModel):
             "terminated_setup_claim_count": obj.get("terminated_setup_claim_count"),
             "expired_interaction_count": obj.get("expired_interaction_count"),
             "disconnected_parent_binding_count": obj.get("disconnected_parent_binding_count"),
-            "cleanup_delivery_count": obj.get("cleanup_delivery_count")
+            "direct_cleanup_count": obj.get("direct_cleanup_count")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

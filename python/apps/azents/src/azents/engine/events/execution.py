@@ -3,7 +3,6 @@
 import asyncio
 import datetime
 import itertools
-import json
 import logging
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -58,8 +57,6 @@ from azents.repos.agent_execution import (
     EventTranscriptRepository,
 )
 from azents.repos.agent_execution.data import EventCreate
-from azents.repos.external_channel.work import ExternalChannelWorkRepository
-from azents.repos.external_channel.work_data import ChannelActionCommit
 from azents.services.terminal_finalization import TerminalRunFinalizationCoordinator
 
 logger = logging.getLogger(__name__)
@@ -84,36 +81,6 @@ class TerminalResult:
 
     event_id: str | None
     message: str | None
-
-
-def _recovered_channel_action_output(
-    result: ChannelActionCommit,
-) -> dict[str, object]:
-    """Build a model-visible conservative recovery result."""
-    return {
-        "action_id": result.action_id,
-        "binding": result.binding_id,
-        "state": result.work_status.value,
-        "state_revision": result.state_revision,
-        "recovered": True,
-        "deliveries": [
-            {
-                "operation": delivery.operation.value,
-                "status": delivery.status.value,
-                **(
-                    {"reason": delivery.error_kind}
-                    if delivery.error_kind is not None
-                    else {}
-                ),
-                **(
-                    {"detail": delivery.error_summary}
-                    if delivery.error_summary is not None
-                    else {}
-                ),
-            }
-            for delivery in result.deliveries
-        ],
-    }
 
 
 InputPoller = Callable[[str], Awaitable[InputPollResult]]
@@ -1231,35 +1198,8 @@ class AgentRunExecution[
         session_id: str,
         call: ClientToolCallPayload,
     ) -> ClientToolResultPayload:
-        """Recover durable Channel Action state before generic cancellation."""
-        if call.name == "channel_action":
-            repository = ExternalChannelWorkRepository()
-            recovered = await repository.recover_action_by_client_tool_call(
-                session,
-                session_id=session_id,
-                client_tool_call_id=call.call_id,
-                now=datetime.datetime.now(datetime.UTC),
-            )
-            if recovered is not None:
-                return ClientToolResultPayload(
-                    call_id=call.call_id,
-                    name=call.name,
-                    wire_dialect=call.wire_dialect,
-                    status="cancelled",
-                    output=[
-                        OutputTextPart(
-                            text=json.dumps(
-                                _recovered_channel_action_output(recovered),
-                                ensure_ascii=False,
-                                sort_keys=True,
-                            )
-                        )
-                    ],
-                    metadata={
-                        "kind": "external_channel_action_recovered",
-                        "action_id": recovered.action_id,
-                    },
-                )
+        """Build the generic cancelled Tool result."""
+        del session, session_id
         return ClientToolResultPayload(
             call_id=call.call_id,
             name=call.name,

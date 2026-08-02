@@ -250,7 +250,7 @@ async def test_replay_failure_preserves_committed_location_for_recovery() -> Non
             kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
             reason=ExternalChannelIngestionReason.HISTORY_UNAVAILABLE,
             mailbox_item_id=None,
-            control_delivery_attempt_id=None,
+            control_plans=(),
             connection_id=None,
         )
 

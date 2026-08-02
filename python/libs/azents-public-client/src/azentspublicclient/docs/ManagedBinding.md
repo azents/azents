@@ -17,7 +17,6 @@ Name | Type | Description | Notes
 **disconnect_reason** | **str** |  | 
 **latest_activity_at** | **datetime** |  | 
 **work** | [**ManagedWork**](ManagedWork.md) |  | 
-**deliveries** | [**List[ManagedDelivery]**](ManagedDelivery.md) |  | 
 
 ## Example
 

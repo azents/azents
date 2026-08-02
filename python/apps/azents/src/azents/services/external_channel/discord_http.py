@@ -39,6 +39,7 @@ from azents.services.external_channel.discord_settings import (
 from azents.services.external_channel.discord_settings_scope import (
     parse_discord_settings_custom_id,
 )
+from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
 )
@@ -51,7 +52,7 @@ class DiscordHTTPAdmissionResult:
     envelope: DiscordInteractionEnvelope
     admission: ExternalChannelInteractionAdmission | None
     response: dict[str, object] | None = None
-    control_delivery_attempt_ids: tuple[str, ...] = ()
+    control_plans: tuple[ProviderEffectPlan, ...] = ()
     control_delivery_connection_id: str | None = None
 
     @property
@@ -289,9 +290,9 @@ class DiscordHTTPAdmissionService:
             envelope=envelope,
             admission=admission,
             response=response.response,
-            control_delivery_attempt_ids=response.cleanup_delivery_ids,
+            control_plans=response.cleanup_plans,
             control_delivery_connection_id=(
-                context.connection_id if response.cleanup_delivery_ids else None
+                context.connection_id if response.cleanup_plans else None
             ),
         )
 
@@ -343,10 +344,10 @@ class DiscordHTTPAdmissionService:
             envelope=envelope,
             admission=admission,
             response=component_response.response,
-            control_delivery_attempt_ids=(
+            control_plans=(
                 ()
-                if component_response.control_delivery_attempt_id is None
-                else (component_response.control_delivery_attempt_id,)
+                if component_response.control_plan is None
+                else (component_response.control_plan,)
             ),
             control_delivery_connection_id=component_response.connection_id,
         )
@@ -548,12 +549,12 @@ class DiscordHTTPAdmissionService:
         self,
         *,
         connection_id: str,
-        delivery_attempt_id: str,
+        plan: ProviderEffectPlan,
     ) -> None:
-        """Attempt one committed control only after the provider acknowledgement."""
+        """Attempt one control only after the provider acknowledgement."""
         await self.selector_response_service.attempt_control_delivery(
             connection_id=connection_id,
-            delivery_attempt_id=delivery_attempt_id,
+            plan=plan,
         )
 
 

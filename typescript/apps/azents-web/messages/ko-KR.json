@@ -1282,8 +1282,6 @@
           "unknown": "Provider 결과 알 수 없음",
           "none": "활성 projection 없음"
         },
-        "deliveries": "Delivery 결과",
-        "noDeliveries": "Provider delivery를 시도한 적이 없습니다.",
         "grantsTitle": "세션 접근 권한",
         "grantsDescription": "이 세션에 한해 허용된 참여자입니다.",
         "noGrants": "활성 session-scoped grant가 없습니다.",
@@ -1292,21 +1290,6 @@
         "workStatus": {
           "active": "Work 활성",
           "finished": "Work 완료"
-        },
-        "deliveryStatus": {
-          "pending": "대기",
-          "attempting": "시도 중",
-          "delivered": "전달됨",
-          "failed": "실패",
-          "unknown": "결과 불명",
-          "not_attempted": "시도하지 않음"
-        },
-        "operation": {
-          "reply": "답글",
-          "progress_create": "Progress 생성",
-          "progress_update": "Progress 수정",
-          "progress_delete": "Progress 삭제",
-          "control_message": "Control message"
         },
         "grantScope": {
           "session": "세션 접근",
@@ -1789,7 +1772,7 @@
       "setDefault": "기본값 설정",
       "defaultMutationChangedTitle": "채널 선택을 업데이트했습니다",
       "defaultMutationUnchangedTitle": "채널 선택이 이미 최신 상태입니다",
-      "defaultMutationImpact": "참여 상태 정리 결과: 설정 {settings}개 무효화, 설정 요청 {claims}개 종료, 대기 중인 제어 {interactions}개 만료, 상위 대화 {bindings}개 연결 해제, 정리 메시지 {deliveries}개 대기열 추가.",
+      "defaultMutationImpact": "참여 상태 정리 결과: 설정 {settings}개 무효화, 설정 요청 {claims}개 종료, 대기 중인 제어 {interactions}개 만료, 상위 대화 {bindings}개 연결 해제, 정리 메시지 {cleanups}개 즉시 시도.",
       "channel": "채널",
       "defaultAgent": "기본 에이전트",
       "defaultStatus": "기본값 상태",

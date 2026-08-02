@@ -1,15 +1,12 @@
 """External Channel root Toolkit tests."""
 
-import datetime
 import json
 from typing import cast
 
 import pytest
 
 from azents.core.enums import (
-    ExternalChannelActionMode,
     ExternalChannelDeliveryOperation,
-    ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
@@ -32,8 +29,7 @@ from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContextStore,
 )
 from azents.repos.external_channel.work_data import (
-    ChannelActionCommit,
-    ChannelWorkDelivery,
+    ChannelActionResult,
     ChannelWorkSnapshot,
     ChannelWorkTask,
 )
@@ -44,11 +40,8 @@ from azents.services.external_channel.file_transfer import (
     ExternalChannelFileDownloadResult,
     ExternalChannelFileTransferService,
 )
+from azents.services.external_channel.provider_effect import ProviderEffectOutcome
 from azents.services.file_storage import FileStorage
-
-
-def _at(second: int) -> datetime.datetime:
-    return datetime.datetime(2026, 7, 22, 0, 0, second, tzinfo=datetime.UTC)
 
 
 def _snapshot(binding_id: str = "binding-1") -> ChannelWorkSnapshot:
@@ -67,23 +60,6 @@ def _snapshot(binding_id: str = "binding-1") -> ChannelWorkSnapshot:
                 sources=[],
             )
         ],
-        state_revision=3,
-        desired_progress_revision=2,
-        progress_provider_message_key="slack:T1:C1:2.000001",
-        projection_drift="synchronized",
-        latest_action_mode=ExternalChannelActionMode.CONTINUE,
-        latest_deliveries=[
-            ChannelWorkDelivery(
-                id="delivery-1",
-                operation=ExternalChannelDeliveryOperation.PROGRESS_UPDATE,
-                status=ExternalChannelDeliveryStatus.DELIVERED,
-                provider_message_key="slack:T1:C1:2.000001",
-                error_kind=None,
-                error_summary=None,
-                created_at=_at(1),
-                completed_at=_at(2),
-            )
-        ],
     )
 
 
@@ -91,8 +67,6 @@ class _ActionService:
     def __init__(self, snapshots: list[ChannelWorkSnapshot]) -> None:
         self.snapshots = snapshots
         self.calls: list[dict[str, object]] = []
-        self.existing: tuple[ChannelActionCommit, dict[str, object]] | None = None
-        self.find_calls: list[tuple[str, str]] = []
 
     async def has_active_binding(self, *, session_id: str, agent_id: str) -> bool:
         del session_id, agent_id
@@ -107,44 +81,21 @@ class _ActionService:
         del session_id, agent_id
         return self.snapshots
 
-    async def find_existing_action(
-        self,
-        *,
-        session_id: str,
-        client_tool_call_id: str,
-    ) -> tuple[ChannelActionCommit, dict[str, object]] | None:
-        self.find_calls.append((session_id, client_tool_call_id))
-        return self.existing
-
-    async def drain_runtime_provider_settlements(
-        self,
-        *,
-        provider_delivery_capability: object | None,
-        limit: int = 20,
-    ) -> int:
-        del provider_delivery_capability, limit
-        return 0
-
-    async def execute(self, **kwargs: object) -> ChannelActionCommit:
+    async def execute(self, **kwargs: object) -> ChannelActionResult:
         self.calls.append(kwargs)
-        return ChannelActionCommit(
-            action_id="action-1",
+        return ChannelActionResult(
             binding_id=str(kwargs["binding_id"]),
-            work_id="work-1",
             work_status=ExternalChannelWorkStatus.ACTIVE,
             state_revision=4,
-            deliveries=[
-                ChannelWorkDelivery(
-                    id="delivery-2",
+            outcomes=(
+                ProviderEffectOutcome(
                     operation=ExternalChannelDeliveryOperation.REPLY,
-                    status=ExternalChannelDeliveryStatus.FAILED,
-                    provider_message_key=None,
-                    error_kind="resource_unavailable",
-                    error_summary="Slack cannot post to the linked conversation.",
-                    created_at=_at(3),
-                    completed_at=_at(4),
-                )
-            ],
+                    part=0,
+                    status="failed",
+                    reason="resource_unavailable",
+                    detail="Slack cannot post to the linked conversation.",
+                ),
+            ),
         )
 
 
@@ -255,10 +206,11 @@ async def test_channel_action_uses_durable_client_call_identity() -> None:
     assert isinstance(output, str)
     payload = json.loads(output)
     assert payload["state"] == "active"
-    assert payload["deliveries"] == [
+    assert payload["outcomes"] == [
         {
             "detail": "Slack cannot post to the linked conversation.",
             "operation": "reply",
+            "part": 0,
             "reason": "resource_unavailable",
             "status": "failed",
         }
@@ -360,72 +312,6 @@ async def test_channel_action_preflights_files_with_current_runtime_storage() ->
     assert manifests[0].path == "/workspace/agent/report.csv"
     assert service.calls[0]["file_storage"] is file_storage
     assert service.calls[0]["authority"] is None
-
-
-@pytest.mark.asyncio
-async def test_duplicate_file_action_returns_persisted_outcome_without_preflight() -> (
-    None
-):
-    """A retry does not depend on the original Runtime source remaining available."""
-    service = _ActionService([_snapshot()])
-    service.existing = (
-        ChannelActionCommit(
-            action_id="action-existing",
-            binding_id="binding-1",
-            work_id="work-1",
-            work_status=ExternalChannelWorkStatus.ACTIVE,
-            state_revision=4,
-            deliveries=[
-                ChannelWorkDelivery(
-                    id="delivery-existing",
-                    operation=ExternalChannelDeliveryOperation.REPLY,
-                    status=ExternalChannelDeliveryStatus.DELIVERED,
-                    provider_message_key=None,
-                    error_kind=None,
-                    error_summary=None,
-                    created_at=_at(3),
-                    completed_at=_at(4),
-                )
-            ],
-        ),
-        {
-            "binding": "binding-1",
-            "mode": "continue",
-            "message": "Attached report.",
-            "files": [
-                {
-                    "path": "/workspace/agent/report.csv",
-                    "filename": "report.csv",
-                    "media_type": "text/csv",
-                    "expected_size": 42,
-                }
-            ],
-        },
-    )
-    file_transfer_service = _FileTransferService()
-    toolkit = _toolkit(
-        service,
-        file_transfer_service=file_transfer_service,
-        file_storage=cast(FileStorage, object()),
-    )
-    state = await toolkit.update_context(_turn_context())
-
-    with client_tool_execution_context(call_id="call-files", name="channel_action"):
-        output = await state.tools[0].handler(
-            json.dumps(
-                {
-                    "mode": "continue",
-                    "binding": "binding-1",
-                    "message": "Attached report.",
-                    "files": ["/workspace/agent/report.csv"],
-                }
-            )
-        )
-
-    assert json.loads(cast(str, output))["action_id"] == "action-existing"
-    assert service.find_calls == [("session-1", "call-files")]
-    assert file_transfer_service.prepare_calls == []
-    assert service.calls == []
 
 
 @pytest.mark.asyncio
