@@ -118,6 +118,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Session Context Inspector Historical Requirements Reconstruction](requirements/context-260530-context-inspector.md) | context-260530 | 2026-05-30 | 2026-05-30 |
 | [Display Context Usage from the Resolved Run Profile Historical Requirements Reconstruction](requirements/context-260710-context-usage-display.md) | context-260710 | 2026-07-10 | - |
 | [Sandbox Provider Control Distributed Recovery Historical Requirements Reconstruction](requirements/control-260524-sandbox-control-distributed-recovery.md) | control-260524 | 2026-05-24 | 2026-05-24 |
+| [Provider Channel Participation Settings Requirements](requirements/conversation-260801-provider-channel-participation.md) | conversation-260801 | 2026-08-01 | - |
 | [nointern Core Concepts Historical Requirements Reconstruction](requirements/core-260207-core-concepts.md) | core-260207 | 2026-02-07 | 2026-03-06 |
 | [Calculate OpenAI-Compatible Costs from SDK Usage Historical Requirements Reconstruction](requirements/costs-260716-openai-costs-from-sdk-usage.md) | costs-260716 | 2026-07-16 | - |
 | [Introduce credential provider model and admin password reset token Historical Requirements Reconstruction](requirements/credential-260618-credential-and-admin-password.md) | credential-260618 | 2026-06-18 | - |
@@ -474,6 +475,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Session Context Inspector](adr/context-260530-context-inspector.md)
 - [Display Context Usage from the Resolved Run Profile](adr/context-260710-context-usage-display.md)
 - [Sandbox Provider Control Distributed Recovery Historical Decision Reconstruction](adr/control-260524-sandbox-control-distributed-recovery.md)
+- [Provider Channel Participation Settings](adr/conversation-260801-provider-channel-participation.md)
 - [nointern Core Concepts Historical Decision Reconstruction](adr/core-260207-core-concepts.md)
 - [Calculate OpenAI-Compatible Costs from SDK Usage](adr/costs-260716-openai-costs-from-sdk-usage.md)
 - [Introduce credential provider model and admin password reset token](adr/credential-260618-credential-and-admin-password.md)
