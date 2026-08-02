@@ -9,8 +9,6 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.config import Config
-from azents.core.deps import get_config
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
@@ -50,7 +48,6 @@ class ExternalChannelProviderControlService:
         ExternalChannelActionService,
         Depends(ExternalChannelActionService),
     ]
-    config: Annotated[Config, Depends(get_config)]
     stale_threshold: datetime.timedelta = _DEFAULT_STALE_THRESHOLD
     interval: datetime.timedelta = _DEFAULT_INTERVAL
     limit: int = _DEFAULT_LIMIT
@@ -113,8 +110,6 @@ class ExternalChannelProviderControlService:
                     session,
                     limit=self.limit,
                 )
-                if self.config.external_channel_participation_enabled
-                else []
             )
             delivery_attempt_ids = (
                 await self.repository.list_pending_provider_control_delivery_ids(
@@ -152,12 +147,10 @@ def get_external_channel_provider_control_service(
         ExternalChannelActionService,
         Depends(ExternalChannelActionService),
     ],
-    config: Annotated[Config, Depends(get_config)],
 ) -> ExternalChannelProviderControlService:
     """Compose provider-control delivery without exposing worker tuning as API input."""
     return ExternalChannelProviderControlService(
         session_manager=session_manager,
         repository=repository,
         action_service=action_service,
-        config=config,
     )

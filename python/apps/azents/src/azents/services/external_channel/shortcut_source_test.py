@@ -55,6 +55,7 @@ class _Repository:
         self.position_creates: list[object] = []
         self.resource_status = ExternalChannelResourceStatus.ACTIVE
         self.setup_claim: ExternalChannelSetupClaim | None = None
+        self.selector_interaction: ExternalChannelInteraction | None = None
         self.admitted_interactions: list[object] = []
         self.interaction = ExternalChannelInteraction.model_construct(
             id="interaction-1",
@@ -207,10 +208,10 @@ class _Repository:
         *,
         connection_id: str,
         provider_interaction_key: str,
-    ) -> None:
+    ) -> ExternalChannelInteraction | None:
         del session, connection_id, provider_interaction_key
         self.calls.append("selector_lookup")
-        return None
+        return self.selector_interaction
 
     async def admit_interaction(
         self,
@@ -226,6 +227,7 @@ class _Repository:
             created_at=_NOW,
             updated_at=_NOW,
         )
+        self.selector_interaction = selector
         return SimpleNamespace(interaction=selector, created=True)
 
 
@@ -281,8 +283,6 @@ def _discord_source_event() -> ExternalChannelTrigger:
 def _service(
     session: _Session,
     repository: _Repository,
-    *,
-    participation_enabled: bool = False,
 ) -> ExternalChannelShortcutSourceService:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
@@ -291,12 +291,6 @@ def _service(
     return ExternalChannelShortcutSourceService(
         session_manager=cast(SessionManager[AsyncSession], session_manager),
         repository=cast(ExternalChannelRepository, repository),
-        config=cast(
-            Any,
-            SimpleNamespace(
-                external_channel_participation_enabled=participation_enabled
-            ),
-        ),
     )
 
 
@@ -320,6 +314,11 @@ async def test_shortcut_source_commits_content_free_selector_state() -> None:
     assert state.trigger_provider_message_key == "slack:T-1:C-1:100.0001"
     assert state.trigger_position == "00000000000000000100.000100"
     assert state.selected_route_id is None
+    assert result.selector_interaction.setup_claim_id == "claim-1"
+    assert repository.setup_claim is not None
+    assert (
+        repository.setup_claim.status is ExternalChannelSetupClaimStatus.PENDING_AGENT
+    )
     create = cast(Any, repository.resource_creates[0])
     assert create.labels["provider_event_type"] == "app_mention"
     assert session.commit_count == 1
@@ -330,7 +329,12 @@ async def test_shortcut_source_commits_content_free_selector_state() -> None:
         "resource_create",
         "resource_lock",
         "binding",
-        "projection_replace",
+        "participation_setting",
+        "channel_default",
+        "setup_claim_lock",
+        "setup_claim_create",
+        "selector_lookup",
+        "selector_create",
     ]
 
 
@@ -354,7 +358,7 @@ async def test_shortcut_source_retry_reuses_the_same_interaction() -> None:
     assert first.selector_interaction is not None
     assert second.selector_interaction is not None
     assert first.selector_interaction.id == second.selector_interaction.id
-    assert repository.calls.count("projection_replace") == 1
+    assert repository.calls.count("selector_create") == 1
     assert session.commit_count == 2
     assert not any(
         forbidden in " ".join(repository.calls)
@@ -386,10 +390,10 @@ async def test_shortcut_source_retry_preserves_selected_route() -> None:
     selected_state = selector_state_from_interaction(
         first.selector_interaction
     ).model_copy(update={"selected_route_id": "route-1"})
-    repository.interaction = repository.interaction.model_copy(
+    repository.selector_interaction = first.selector_interaction.model_copy(
         update={
             "projection": projection_with_selector_state(
-                repository.interaction.projection,
+                first.selector_interaction.projection,
                 selected_state,
             )
         }
@@ -406,7 +410,7 @@ async def test_shortcut_source_retry_preserves_selected_route() -> None:
         selector_state_from_interaction(repeated.selector_interaction).selected_route_id
         == "route-1"
     )
-    assert repository.calls.count("projection_replace") == 1
+    assert repository.calls.count("selector_create") == 1
 
 
 @pytest.mark.asyncio
@@ -465,11 +469,7 @@ async def test_discord_parent_message_command_creates_setup_linked_selector() ->
     repository = _Repository()
     repository.provider = ExternalChannelProvider.DISCORD
 
-    result = await _service(
-        session,
-        repository,
-        participation_enabled=True,
-    ).ensure(
+    result = await _service(session, repository).ensure(
         shortcut_source_event=_discord_source_event(),
         interaction_id="interaction-1",
         now=_NOW,

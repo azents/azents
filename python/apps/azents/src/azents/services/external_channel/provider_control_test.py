@@ -7,7 +7,6 @@ from typing import cast
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.config import Config
 from azents.core.enums import ExternalChannelDeliveryStatus
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
@@ -143,9 +142,6 @@ async def test_drain_commits_recovery_before_provider_attempts() -> None:
             ExternalChannelActionService,
             _ActionService(events),
         ),
-        config=Config.model_construct(
-            external_channel_participation_enabled=True,
-        ),
         stale_threshold=datetime.timedelta(minutes=2),
         interval=datetime.timedelta(seconds=1),
         limit=2,
@@ -164,34 +160,3 @@ async def test_drain_commits_recovery_before_provider_attempts() -> None:
         "delivery-1",
         "delivery-2",
     ]
-
-
-@pytest.mark.asyncio
-async def test_drain_does_not_reconcile_bindings_while_rollout_is_disabled() -> None:
-    """The compatibility gate prevents existing-Binding rollout writes."""
-    events: list[str] = []
-    service = ExternalChannelProviderControlService(
-        session_manager=cast(
-            SessionManager[AsyncSession],
-            _SessionManager(events),
-        ),
-        repository=cast(
-            ExternalChannelWorkRepository,
-            _Repository(events),
-        ),
-        action_service=cast(
-            ExternalChannelActionService,
-            _ActionService(events),
-        ),
-        config=Config.model_construct(
-            external_channel_participation_enabled=False,
-        ),
-        stale_threshold=datetime.timedelta(minutes=2),
-        interval=datetime.timedelta(seconds=1),
-        limit=2,
-    )
-
-    result = await service.drain_once(now=_at(120))
-
-    assert result.settings_controls_created == 0
-    assert "reconcile" not in events

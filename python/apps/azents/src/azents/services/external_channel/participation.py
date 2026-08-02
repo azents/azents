@@ -7,8 +7,6 @@ from typing import Annotated, Literal
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.config import Config
-from azents.core.deps import get_config
 from azents.core.enums import (
     AgentLifecycleStatus,
     ExternalChannelAppMode,
@@ -137,7 +135,6 @@ class ExternalChannelParticipationService:
         ExternalChannelParticipationLock,
         Depends(get_external_channel_participation_lock),
     ]
-    config: Annotated[Config, Depends(get_config)]
 
     async def resolve_settings(
         self,
@@ -148,7 +145,6 @@ class ExternalChannelParticipationService:
         principal_id: str,
     ) -> ExternalChannelParticipationSettings:
         """Resolve one authorized settings surface without mutating provider state."""
-        self._require_enabled()
         async with self.session_manager() as session:
             connection = await self.repository.get_connection_configuration(
                 session,
@@ -274,7 +270,6 @@ class ExternalChannelParticipationService:
         deadline: ExternalChannelOperationDeadline,
     ) -> ExternalChannelParticipationSettingsMutation:
         """Atomically mutate a parent setting and its concrete Channel binding."""
-        self._require_enabled()
         conversation_scope = ExternalChannelConversationScope(
             connection_id=connection_id,
             kind=ExternalChannelConversationScopeKind.PARENT_CHANNEL,
@@ -417,7 +412,6 @@ class ExternalChannelParticipationService:
         deadline: ExternalChannelOperationDeadline,
     ) -> ExternalChannelParticipationSettingsMutation:
         """Mutate only one exact connected thread binding."""
-        self._require_enabled()
         del now
         async with self.session_manager() as session:
             resource_snapshot = await self.repository.get_resource(
@@ -509,12 +503,6 @@ class ExternalChannelParticipationService:
             cleanup_delivery_ids=(),
         )
 
-    def _require_enabled(self) -> None:
-        if not self.config.external_channel_participation_enabled:
-            raise ExternalChannelParticipationError(
-                "External Channel participation is not enabled."
-            )
-
     async def _authorize_settings_actor(
         self,
         session: AsyncSession,
@@ -590,10 +578,6 @@ class ExternalChannelParticipationService:
         deadline: ExternalChannelOperationDeadline,
     ) -> ExternalChannelLocationSelection:
         """Commit one first valid location selection and recover its source."""
-        if not self.config.external_channel_participation_enabled:
-            raise ExternalChannelParticipationError(
-                "External Channel participation is not enabled."
-            )
         async with self.session_manager() as session:
             snapshot = await self.repository.get_setup_claim(
                 session,

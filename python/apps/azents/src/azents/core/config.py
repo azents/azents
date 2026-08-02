@@ -89,8 +89,6 @@ class Settings(BaseSettings):
     external_channel_discord_callback_url: str | None = None
     # Rollout gate: enable only after every API and worker is mode-aware.
     external_channel_multi_app_enabled: bool = False
-    # Rollout gate: enable only after every process reads participation state.
-    external_channel_participation_enabled: bool = False
     # External conversation coordination is independent from the Session broker.
     external_channel_conversation_lock_backend: ConversationLockBackend = Field(
         default=ConversationLockBackend.REDIS
@@ -456,7 +454,6 @@ class Config(BaseModel):
     external_channel_slack_callback_url: str = ""
     external_channel_discord_callback_url: str = ""
     external_channel_multi_app_enabled: bool = False
-    external_channel_participation_enabled: bool = False
     external_channel_conversation: ExternalChannelConversationConfig = Field(
         default_factory=lambda: ExternalChannelConversationConfig(
             lock=ExternalChannelConversationLockConfig(
@@ -574,9 +571,6 @@ class Config(BaseModel):
             ),
             external_channel_multi_app_enabled=(
                 settings.external_channel_multi_app_enabled
-            ),
-            external_channel_participation_enabled=(
-                settings.external_channel_participation_enabled
             ),
             external_channel_conversation=ExternalChannelConversationConfig(
                 lock=ExternalChannelConversationLockConfig(

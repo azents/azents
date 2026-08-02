@@ -206,7 +206,6 @@ def _store(
     repository: object,
     agent_repository: object | None = None,
     root_creation_service: object | None = None,
-    participation_enabled: bool = False,
 ) -> ExternalChannelMailboxIngestionStore:
     return ExternalChannelMailboxIngestionStore(
         session_manager=MagicMock(),
@@ -218,7 +217,6 @@ def _store(
         mailbox_service=MagicMock(),
         config=Config.model_construct(
             web_url="https://azents.example/base",
-            external_channel_participation_enabled=participation_enabled,
         ),
     )
 
@@ -406,7 +404,6 @@ async def test_setup_required_commits_claim_without_conversation_side_effects() 
     store = _store(
         repository=repository,
         root_creation_service=root_creation_service,
-        participation_enabled=True,
     )
     store.work_repository = work_repository
     store.mailbox_service = mailbox_service
@@ -491,7 +488,7 @@ async def test_latest_eligible_setup_mention_replaces_continuation_source() -> N
     )
     repository.lock_nonterminal_setup_claim = AsyncMock(return_value=old_claim)
     repository.replace_setup_claim_source = AsyncMock(return_value=replacement)
-    store = _store(repository=repository, participation_enabled=True)
+    store = _store(repository=repository)
     request = _parent_slack_request(
         trigger_key="message-key-new",
         trigger_position="00000000000000000009",
@@ -534,7 +531,7 @@ async def test_discord_thread_resolves_multi_default_from_parent_channel() -> No
     repository = MagicMock()
     selected_route = ExternalChannelAgentRoute.model_construct(id="route-1")
     repository.lock_routable_channel_default = AsyncMock(return_value=selected_route)
-    store = _store(repository=repository, participation_enabled=True)
+    store = _store(repository=repository)
     request = _slack_request()
     request = dataclasses.replace(
         request,
