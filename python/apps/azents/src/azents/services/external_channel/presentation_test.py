@@ -5,11 +5,9 @@ import datetime
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelDeliveryOperation,
-    ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
-from azents.repos.external_channel.work_data import ChannelDeliveryTarget
 from azents.services.external_channel.data import ExternalChannelCapabilitySnapshot
 from azents.services.external_channel.presentation import (
     prepend_agent_blocks,
@@ -17,6 +15,7 @@ from azents.services.external_channel.presentation import (
     prepend_agent_markdown,
     resolve_slack_agent_presentation,
 )
+from azents.services.external_channel.provider_effect import ProviderTarget
 from azents.services.uploads.schema import (
     StoredImage,
     StoredImageFile,
@@ -30,11 +29,9 @@ def _target(
     app_mode: ExternalChannelAppMode = ExternalChannelAppMode.MULTI,
     capabilities: dict[str, object] | None = None,
     agent_avatar: dict[str, object] | None = None,
-) -> ChannelDeliveryTarget:
-    return ChannelDeliveryTarget(
-        delivery_attempt_id="delivery-1",
+) -> ProviderTarget:
+    return ProviderTarget(
         operation=ExternalChannelDeliveryOperation.REPLY,
-        status=ExternalChannelDeliveryStatus.PENDING,
         binding_id="binding-1",
         resource_id=None,
         connection_id="connection-1",

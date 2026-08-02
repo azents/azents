@@ -62,6 +62,7 @@ from azents.services.external_channel.discord_settings_scope import (
     build_discord_binding_settings_open_custom_id,
     build_discord_settings_custom_id,
 )
+from azents.services.external_channel.provider_effect import ProviderOperationKey
 from azents.services.external_channel.slack_events import (
     SlackControlMessageResult,
     SlackConversationClient,
@@ -1007,7 +1008,7 @@ async def test_discord_reply_agent_prefix_follows_app_mode(
                 "guild_id": "111",
                 "channel_id": "444",
                 "content": expected_content,
-                "delivery_attempt_id": "delivery-1",
+                "operation_key": ProviderOperationKey.from_seed("delivery-1"),
             },
         ),
     ]
@@ -1061,7 +1062,7 @@ async def test_discord_parent_reply_posts_directly_without_thread_provisioning()
                 "guild_id": "111",
                 "channel_id": "222",
                 "content": "Reply",
-                "delivery_attempt_id": "delivery-1",
+                "operation_key": ProviderOperationKey.from_seed("delivery-1"),
             },
         )
     ]
@@ -1219,7 +1220,7 @@ async def test_discord_approval_control_delivery_uses_text_create() -> None:
                     "Approval is required. "
                     "[Review access](https://azents.example/request-1)"
                 ),
-                "delivery_attempt_id": "delivery-1",
+                "operation_key": ProviderOperationKey.from_seed("delivery-1"),
             },
         ),
     ]
@@ -1569,7 +1570,7 @@ async def test_discord_session_presence_control_uses_signed_settings_action() ->
                 "guild_id": "111",
                 "channel_id": "333",
                 "content": "",
-                "delivery_attempt_id": "delivery-1",
+                "operation_key": ProviderOperationKey.from_seed("delivery-1"),
                 "components": [
                     {
                         "type": 1,
