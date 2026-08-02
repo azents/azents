@@ -140,6 +140,41 @@ const manifest: SlackManifestGuidance = {
 }`,
 };
 
+const httpManifest: SlackManifestGuidance = {
+  ...manifest,
+  transport: "http",
+  socket_mode_enabled: false,
+  app_token_scope: null,
+  callback_url:
+    "https://azents-api.hardtack.me/external-channel/v1/slack/events",
+  manifest: {
+    display_information: { name: "Incident Coordinator" },
+    settings: {
+      event_subscriptions: {
+        request_url:
+          "https://azents-api.hardtack.me/external-channel/v1/slack/events",
+      },
+      interactivity: {
+        is_enabled: true,
+        request_url:
+          "https://azents-api.hardtack.me/external-channel/v1/slack/events",
+      },
+      socket_mode_enabled: false,
+    },
+  },
+  manifest_json: `{
+  "display_information": {
+    "name": "Incident Coordinator"
+  },
+  "settings": {
+    "interactivity": {
+      "is_enabled": true,
+      "request_url": "https://azents-api.hardtack.me/external-channel/v1/slack/events"
+    }
+  }
+}`,
+};
+
 const noop = (): void => {};
 
 const meta = {
@@ -231,6 +266,22 @@ export const Setup = {
       type: "SETUP",
       appId: "A0123456789",
       transport: "socket",
+      credentials: {
+        botToken: "",
+        signingSecret: "",
+        appToken: "",
+      },
+    },
+  },
+} satisfies Story;
+
+export const HttpSetupGuide = {
+  args: {
+    manifestState: { type: "LOADED", manifest: httpManifest },
+    dialogState: {
+      type: "SETUP",
+      appId: "A0123456789",
+      transport: "http",
       credentials: {
         botToken: "",
         signingSecret: "",

@@ -1242,7 +1242,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert any(
         delivery.get("session_path")
         == f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}"
-        and delivery.get("safe_category") is None
+        and delivery.get("safe_category") == "session_presence_joined"
         and delivery.get("action_ids")
         == ["view_azents_session", "azents_conversation_settings_open"]
         for delivery in deliveries
