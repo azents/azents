@@ -2,8 +2,9 @@
 
 import dataclasses
 import datetime
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
+from typing import AsyncIterator, cast
 from unittest.mock import AsyncMock, MagicMock
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +16,7 @@ from azents.core.enums import (
     ExternalChannelConnectionStatus,
     ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryStatus,
+    ExternalChannelDiscordThreadObservationStatus,
     ExternalChannelIngressProfile,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
@@ -31,7 +33,10 @@ from azents.core.enums import (
 from azents.core.external_channel_session_presence import (
     build_external_channel_session_url,
 )
+from azents.rdb.session import SessionManager
+from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
     ExternalChannelBinding,
@@ -42,19 +47,30 @@ from azents.repos.external_channel.data import (
     ExternalChannelSetupClaim,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.title import ExternalChannelTitleRepository
+from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.services.external_channel.conversation import (
+    DiscordRootThreadObservation,
+    ExternalChannelConversationLockLease,
     ExternalChannelConversationScope,
     ExternalChannelHistoryRange,
     ExternalChannelOperationDeadline,
+    ExternalChannelParticipationScope,
 )
 from azents.services.external_channel.ingestion import (
     ExternalChannelCanonicalHistoryMessage,
+    ExternalChannelConversationIngestionService,
+    ExternalChannelIngestionAcceptance,
+    ExternalChannelIngestionHistoryReader,
     ExternalChannelIngestionOperation,
+    ExternalChannelIngestionPreparation,
     ExternalChannelIngestionReason,
     ExternalChannelIngestionRequest,
     ExternalChannelIngressAuthority,
     ExternalChannelIngressAuthorityKind,
+    ExternalChannelReplayBoundary,
     ExternalChannelTriggerLocator,
+    ExternalChannelWakeDispatchResult,
 )
 from azents.services.external_channel.mailbox_ingestion_store import (
     ExternalChannelMailboxIngestionStore,
@@ -67,8 +83,167 @@ from azents.services.external_channel.participation_state import (
     setup_source_from_projection,
 )
 from azents.services.external_channel.title_artifact import (
+    ExternalChannelTitleArtifactRequest,
     ExternalChannelTitleArtifactService,
 )
+from azents.services.mailbox import MailboxService
+from azents.services.root_agent_session_creation import RootAgentSessionCreationService
+
+
+class _RecordingSessionContext(AbstractAsyncContextManager[AsyncSession]):
+    """Expose the one admission transaction commit in the event trace."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def __aenter__(self) -> AsyncSession:
+        return self.session
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        return None
+
+
+class _RecordingSessionManager:
+    """Return one transaction double with explicit commit ordering."""
+
+    def __init__(self, events: list[str]) -> None:
+        self.session = cast(
+            AsyncSession,
+            SimpleNamespace(
+                commit=AsyncMock(side_effect=lambda: events.append("commit")),
+                rollback=AsyncMock(side_effect=lambda: events.append("rollback")),
+            ),
+        )
+
+    def __call__(self) -> _RecordingSessionContext:
+        return _RecordingSessionContext(self.session)
+
+
+class _RecordingTitleArtifactService:
+    """Exercise real artifact behavior while retaining every producer request."""
+
+    def __init__(self, title_repository: ExternalChannelTitleRepository) -> None:
+        self.delegate = ExternalChannelTitleArtifactService(
+            title_repository=title_repository
+        )
+        self.create_requests: list[ExternalChannelTitleArtifactRequest] = []
+        self.projection_requests: list[ExternalChannelTitleArtifactRequest] = []
+        self.events: list[str] | None = None
+
+    async def create(
+        self,
+        session: AsyncSession,
+        *,
+        request: ExternalChannelTitleArtifactRequest,
+    ) -> object:
+        self.create_requests.append(request)
+        if self.events is not None:
+            self.events.append("artifact:create")
+        return await self.delegate.create(session, request=request)
+
+    async def create_projection_for_existing_candidate(
+        self,
+        session: AsyncSession,
+        *,
+        request: ExternalChannelTitleArtifactRequest,
+    ) -> object:
+        self.projection_requests.append(request)
+        if self.events is not None:
+            self.events.append("artifact:projection")
+        return await self.delegate.create_projection_for_existing_candidate(
+            session,
+            request=request,
+        )
+
+
+class _NoopLease:
+    """Satisfy ingestion's coordination fence without testing lock behavior here."""
+
+    async def assert_owned(self) -> None:
+        return None
+
+
+class _NoopLock:
+    """Provide the short-lived lock boundary required by ingestion orchestration."""
+
+    def acquire(
+        self,
+        *,
+        scope: ExternalChannelConversationScope | ExternalChannelParticipationScope,
+        deadline: ExternalChannelOperationDeadline,
+    ) -> AbstractAsyncContextManager[ExternalChannelConversationLockLease]:
+        del scope, deadline
+
+        @asynccontextmanager
+        async def owned() -> AsyncIterator[ExternalChannelConversationLockLease]:
+            yield _NoopLease()
+
+        return owned()
+
+
+@dataclasses.dataclass(frozen=True)
+class _StaticHistoryReader:
+    """Serve one canonical history range through the typed adapter boundary."""
+
+    history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage]
+
+    async def read_range(
+        self,
+        *,
+        locator: ExternalChannelTriggerLocator,
+        exclusive_start_position: str | None,
+        deadline: ExternalChannelOperationDeadline,
+    ) -> ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage]:
+        del locator, exclusive_start_position, deadline
+        return self.history
+
+
+@dataclasses.dataclass
+class _AdmissionStoreAdapter:
+    """Expose one real admission store through the ingestion store protocol."""
+
+    store: ExternalChannelMailboxIngestionStore
+    preparation: ExternalChannelIngestionPreparation
+
+    async def prepare(
+        self,
+        *,
+        request: ExternalChannelIngestionRequest,
+    ) -> ExternalChannelIngestionPreparation:
+        del request
+        return self.preparation
+
+    async def accept(
+        self,
+        *,
+        request: ExternalChannelIngestionRequest,
+        preparation: ExternalChannelIngestionPreparation,
+        history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
+    ) -> ExternalChannelIngestionAcceptance:
+        return await self.store.accept(
+            request=request,
+            preparation=preparation,
+            history=history,
+        )
+
+
+class _RecordingWakeDispatcher:
+    """Record the post-admission wake without adding a second transaction."""
+
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+
+    async def dispatch(
+        self,
+        *,
+        mailbox_item_id: str,
+        session_id: str,
+        now: datetime.datetime,
+        deadline: ExternalChannelOperationDeadline,
+    ) -> ExternalChannelWakeDispatchResult:
+        del mailbox_item_id, session_id, now, deadline
+        self.events.append("wake")
+        return "dispatched"
 
 
 def test_session_url_uses_canonical_workspace_route() -> None:
@@ -212,19 +387,55 @@ def _store(
     repository: object,
     agent_repository: object | None = None,
     root_creation_service: object | None = None,
+    session_manager: object | None = None,
+    work_repository: object | None = None,
+    agent_session_repository: object | None = None,
+    mailbox_service: object | None = None,
+    title_artifact_service: object | None = None,
 ) -> ExternalChannelMailboxIngestionStore:
-    title_artifact_service = MagicMock(spec=ExternalChannelTitleArtifactService)
-    title_artifact_service.create = AsyncMock()
-    title_artifact_service.create_projection_for_existing_candidate = AsyncMock()
+    default_title_artifact_service = MagicMock(spec=ExternalChannelTitleArtifactService)
+    default_title_artifact_service.create = AsyncMock()
+    default_title_artifact_service.create_projection_for_existing_candidate = (
+        AsyncMock()
+    )
     return ExternalChannelMailboxIngestionStore(
-        session_manager=MagicMock(),
+        session_manager=cast(
+            SessionManager[AsyncSession],
+            MagicMock() if session_manager is None else session_manager,
+        ),
         repository=cast(ExternalChannelRepository, repository),
-        work_repository=MagicMock(),
-        agent_repository=agent_repository or MagicMock(),
-        agent_session_repository=MagicMock(),
-        root_agent_session_creation_service=root_creation_service or MagicMock(),
-        mailbox_service=MagicMock(),
-        title_artifact_service=title_artifact_service,
+        work_repository=cast(
+            ExternalChannelWorkRepository,
+            MagicMock() if work_repository is None else work_repository,
+        ),
+        agent_repository=cast(
+            AgentRepository,
+            MagicMock() if agent_repository is None else agent_repository,
+        ),
+        agent_session_repository=cast(
+            AgentSessionRepository,
+            (
+                MagicMock()
+                if agent_session_repository is None
+                else agent_session_repository
+            ),
+        ),
+        root_agent_session_creation_service=cast(
+            RootAgentSessionCreationService,
+            (MagicMock() if root_creation_service is None else root_creation_service),
+        ),
+        mailbox_service=cast(
+            MailboxService,
+            MagicMock() if mailbox_service is None else mailbox_service,
+        ),
+        title_artifact_service=cast(
+            ExternalChannelTitleArtifactService,
+            (
+                default_title_artifact_service
+                if title_artifact_service is None
+                else title_artifact_service
+            ),
+        ),
         config=Config.model_construct(
             web_url="https://azents.example/base",
         ),
@@ -261,6 +472,7 @@ def _history(
     *,
     trigger_key: str = "message-key-1",
     trigger_position: str = "00000000000000000001",
+    discord_root_thread_observation: DiscordRootThreadObservation | None = None,
 ) -> ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage]:
     trigger = ExternalChannelCanonicalHistoryMessage(
         provider_message_key=trigger_key,
@@ -288,8 +500,433 @@ def _history(
         provider_request_count=1,
         scanned_message_count=1,
         elapsed_seconds=0,
-        discord_root_thread_observation=None,
+        discord_root_thread_observation=discord_root_thread_observation,
     )
+
+
+def _discord_access_allow_request() -> ExternalChannelIngestionRequest:
+    """Build one immutable Discord Access-Allow replay request."""
+    locator = ExternalChannelTriggerLocator(
+        connection_id="connection-discord-1",
+        provider=ExternalChannelProvider.DISCORD,
+        provider_event_type="discord_message_create",
+        provider_tenant_id="guild-1",
+        provider_channel_id="parent-1",
+        provider_parent_channel_id="parent-1",
+        provider_thread_key="root-1",
+        delivery_thread_key="root-1",
+        provider_resource_key="discord:root-1",
+        trigger_provider_message_key="discord:guild-1:root-1",
+        trigger_provider_message_id="root-1",
+        trigger_position="root-1",
+        provider_user_id="participant-1",
+        invocation=True,
+    )
+    return ExternalChannelIngestionRequest(
+        locator=locator,
+        scope=ExternalChannelConversationScope(
+            connection_id=locator.connection_id,
+            kind=ExternalChannelConversationScopeKind.THREAD,
+            provider_channel_id=locator.provider_channel_id,
+            provider_thread_key=locator.provider_thread_key,
+        ),
+        authority=ExternalChannelIngressAuthority(
+            kind=ExternalChannelIngressAuthorityKind.DURABLE_REPLAY,
+            ingress_profile=ExternalChannelIngressProfile.DISCORD_GATEWAY_HTTP,
+            configuration_generation=1,
+            lease_owner=None,
+            lease_generation=None,
+        ),
+        deadline=ExternalChannelOperationDeadline(
+            datetime.datetime(2026, 8, 2, 1, tzinfo=datetime.UTC)
+        ),
+        operation=ExternalChannelIngestionOperation.ACCESS_ALLOW,
+        selected_route_id="route-discord-1",
+        replay_boundary=ExternalChannelReplayBoundary(
+            connection_id=locator.connection_id,
+            resource_id="resource-discord-1",
+            principal_id="principal-1",
+            trigger_provider_message_key=locator.trigger_provider_message_key,
+            conversation_position_id="position-discord-1",
+            range_start_position=None,
+            trigger_position=locator.trigger_position,
+        ),
+        access_request_id="access-allow-1",
+    )
+
+
+def _discord_observation(
+    *,
+    observed_at: datetime.datetime,
+) -> DiscordRootThreadObservation:
+    """Build one qualifying root-thread absence observation."""
+    return DiscordRootThreadObservation(
+        status=ExternalChannelDiscordThreadObservationStatus.THREAD_ABSENT,
+        guild_id="guild-1",
+        parent_channel_id="parent-1",
+        root_message_id="root-1",
+        trigger_provider_message_key="discord:guild-1:root-1",
+        observed_at=observed_at,
+        root_has_thread=False,
+        thread=None,
+    )
+
+
+async def test_first_binding_persists_title_before_commit_then_wakes() -> None:
+    """Initial admission writes title authority before enqueue, commit, and wake."""
+    events: list[str] = []
+    session_manager = _RecordingSessionManager(events)
+    request = _slack_request()
+    resource = ExternalChannelResource.model_construct(
+        id="resource-1",
+        connection_id="connection-1",
+        resource_type=ExternalChannelResourceType.THREAD,
+        provider_resource_key="resource-key-1",
+        labels={"provider": "slack", "channel_id": "channel-1"},
+        status=ExternalChannelResourceStatus.ACTIVE,
+    )
+    route = SimpleNamespace(
+        id="route-1",
+        require_active_agent_id=lambda: "agent-1",
+    )
+    binding = ExternalChannelBinding.model_construct(
+        id="binding-1",
+        resource_id=resource.id,
+        route_id=route.id,
+        agent_session_id="session-1",
+        disconnected_at=None,
+    )
+    position = SimpleNamespace(
+        id="position-1",
+        connection_id="connection-1",
+        read_through_position=None,
+    )
+    conversation = _Conversation(
+        source_resource=resource,
+        resource=resource,
+        route=cast(ExternalChannelAgentRoute, route),
+        setting=None,
+        binding=None,
+        principal_id="principal-1",
+        selector=None,
+        setup_claim=None,
+        setup_required=False,
+    )
+    title_repository = MagicMock(spec=ExternalChannelTitleRepository)
+    title_repository.create_session_title_candidate = AsyncMock(
+        side_effect=lambda *_args: (
+            events.append("candidate:persist"),
+            SimpleNamespace(
+                id="candidate-1",
+                admission_provisional_title="Agent at admission",
+            ),
+        )[1]
+    )
+    title_artifacts = _RecordingTitleArtifactService(title_repository)
+    title_artifacts.events = events
+    repository = MagicMock()
+    repository.lock_conversation_position = AsyncMock(return_value=position)
+    repository.get_resource_by_provider_key = AsyncMock(return_value=resource)
+    repository.get_active_block = AsyncMock(return_value=None)
+    repository.get_active_access_grant = AsyncMock(return_value=SimpleNamespace())
+    repository.ensure_active_work = AsyncMock(return_value=SimpleNamespace())
+    repository.advance_conversation_position_if_current = AsyncMock(return_value=True)
+    work_repository = MagicMock()
+    work_repository.ensure_active_work = AsyncMock(return_value=SimpleNamespace())
+    mailbox_service = MagicMock()
+    mailbox_service.enqueue = AsyncMock(
+        side_effect=lambda *_args: (
+            events.append("mailbox:enqueue"),
+            SimpleNamespace(
+                created=True,
+                mailbox_item=SimpleNamespace(id="mailbox-1"),
+            ),
+        )[1]
+    )
+    agent_session_repository = MagicMock()
+    agent_session_repository.mark_running_for_input_wakeup = AsyncMock(
+        side_effect=lambda *_args: events.append("session:mark-running")
+    )
+    store = _store(
+        repository=repository,
+        session_manager=session_manager,
+        work_repository=work_repository,
+        agent_session_repository=agent_session_repository,
+        mailbox_service=mailbox_service,
+        title_artifact_service=title_artifacts,
+    )
+    store._lock_authority = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=SimpleNamespace(id="connection-1")
+    )
+    store._replay_source_matches = MagicMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=True
+    )
+    store._resolve_conversation = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=conversation
+    )
+    store._create_binding = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=SimpleNamespace(
+            binding=binding,
+            session_created=True,
+            provisional_title_source="Agent at admission",
+        )
+    )
+    store._create_session_presence_intent = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=None
+    )
+    store._create_initial_progress_intent = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=None
+    )
+    store._initialize_thread_position = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+    )
+    store._complete_setup_replay = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+    )
+    preparation = ExternalChannelIngestionPreparation(
+        position_id=position.id,
+        exclusive_start_position=None,
+        immediate_outcome=None,
+        wake_mailbox_item_id=None,
+        wake_session_id=None,
+        priority_request=None,
+    )
+    history = _history()
+    history_reader: ExternalChannelIngestionHistoryReader = _StaticHistoryReader(
+        history
+    )
+    service = ExternalChannelConversationIngestionService(
+        conversation_lock=_NoopLock(),
+        participation_lock=_NoopLock(),
+        history_reader=history_reader,
+        store=_AdmissionStoreAdapter(store=store, preparation=preparation),
+        wake_dispatcher=_RecordingWakeDispatcher(events),
+    )
+
+    outcome = await service.ingest(request)
+
+    assert outcome.kind.value == "accepted"
+    assert len(title_artifacts.create_requests) == 1
+    assert title_artifacts.projection_requests == []
+    artifact_request = title_artifacts.create_requests[0]
+    assert artifact_request.connection_id == "connection-1"
+    assert artifact_request.agent_session_id == "session-1"
+    assert artifact_request.binding_id == "binding-1"
+    assert artifact_request.resource is resource
+    assert artifact_request.trigger_provider_message_key == "message-key-1"
+    assert artifact_request.provider is ExternalChannelProvider.SLACK
+    assert artifact_request.provisional_title_source == "Agent at admission"
+    assert artifact_request.access_request_id is None
+    assert events == [
+        "artifact:create",
+        "candidate:persist",
+        "mailbox:enqueue",
+        "session:mark-running",
+        "commit",
+        "wake",
+    ]
+
+    store._resolve_conversation.return_value = dataclasses.replace(  # pyright: ignore[reportPrivateUsage]
+        conversation,
+        binding=binding,
+    )
+    store._create_binding_settings_on_demand_intent = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=None
+    )
+    mailbox_service.enqueue = AsyncMock(
+        return_value=SimpleNamespace(
+            created=False,
+            mailbox_item=SimpleNamespace(id="mailbox-1"),
+        )
+    )
+    await store.accept(
+        request=request,
+        preparation=preparation,
+        history=history,
+    )
+
+    assert len(title_artifacts.create_requests) == 1
+    assert title_artifacts.projection_requests == []
+
+
+async def test_access_allow_replay_uses_persisted_candidate_title_once() -> None:
+    """Replay ignores renamed Agent state and persists at most one projection."""
+    request = _discord_access_allow_request()
+    resource = ExternalChannelResource.model_construct(
+        id="resource-discord-1",
+        connection_id="connection-discord-1",
+        resource_type=ExternalChannelResourceType.THREAD,
+        provider_resource_key="discord:root-1",
+        labels={
+            "provider": "discord",
+            "guild_id": "guild-1",
+            "parent_channel_id": "parent-1",
+            "root_message_id": "root-1",
+        },
+        status=ExternalChannelResourceStatus.ACTIVE,
+    )
+    binding = ExternalChannelBinding.model_construct(
+        id="binding-discord-1",
+        resource_id=resource.id,
+        route_id="route-discord-1",
+        agent_session_id="session-discord-1",
+        disconnected_at=None,
+    )
+    position = SimpleNamespace(
+        id="position-discord-1",
+        connection_id="connection-discord-1",
+        read_through_position=None,
+    )
+    conversation = _Conversation(
+        source_resource=resource,
+        resource=resource,
+        route=cast(
+            ExternalChannelAgentRoute,
+            SimpleNamespace(
+                id="route-discord-1",
+                require_active_agent_id=lambda: "agent-1",
+            ),
+        ),
+        setting=None,
+        binding=binding,
+        principal_id="principal-1",
+        selector=None,
+        setup_claim=None,
+        setup_required=False,
+    )
+    candidate = SimpleNamespace(
+        id="candidate-1",
+        admission_access_request_id="access-allow-1",
+        admission_provisional_title="Agent before rename",
+    )
+    projection = SimpleNamespace(
+        binding_id=binding.id,
+        agent_session_id=binding.agent_session_id,
+        session_title_candidate_id=candidate.id,
+        requested_provisional_title="Agent before rename",
+        admission_connection_id="connection-discord-1",
+        admission_guild_id="guild-1",
+        admission_parent_channel_id="parent-1",
+        admission_root_message_id="root-1",
+        admission_trigger_provider_message_key="discord:guild-1:root-1",
+        admission_observation_status=(
+            ExternalChannelDiscordThreadObservationStatus.THREAD_ABSENT
+        ),
+        admission_root_has_thread=False,
+        admission_observed_thread_channel_id=None,
+    )
+    title_repository = MagicMock(spec=ExternalChannelTitleRepository)
+    title_repository.get_candidate_by_identity = AsyncMock(return_value=candidate)
+    title_repository.get_projection_by_resource_id = AsyncMock(
+        side_effect=[None, projection]
+    )
+    title_repository.create_discord_thread_title_projection = AsyncMock(
+        return_value=projection
+    )
+    title_artifacts = _RecordingTitleArtifactService(title_repository)
+    repository = MagicMock()
+    repository.lock_conversation_position = AsyncMock(return_value=position)
+    repository.get_resource_by_provider_key = AsyncMock(return_value=resource)
+    repository.get_active_block = AsyncMock(return_value=None)
+    repository.get_active_access_grant = AsyncMock(return_value=SimpleNamespace())
+    repository.ensure_active_work = AsyncMock(return_value=SimpleNamespace())
+    repository.advance_conversation_position_if_current = AsyncMock(return_value=True)
+    work_repository = MagicMock()
+    work_repository.ensure_active_work = AsyncMock(return_value=SimpleNamespace())
+    mailbox_service = MagicMock()
+    mailbox_service.enqueue = AsyncMock(
+        side_effect=[
+            SimpleNamespace(
+                created=True,
+                mailbox_item=SimpleNamespace(id="mailbox-discord-1"),
+            ),
+            SimpleNamespace(
+                created=False,
+                mailbox_item=SimpleNamespace(id="mailbox-discord-1"),
+            ),
+        ]
+    )
+    agent_session_repository = MagicMock()
+    agent_session_repository.mark_running_for_input_wakeup = AsyncMock()
+    store = _store(
+        repository=repository,
+        session_manager=_RecordingSessionManager([]),
+        work_repository=work_repository,
+        agent_session_repository=agent_session_repository,
+        mailbox_service=mailbox_service,
+        title_artifact_service=title_artifacts,
+    )
+    store._lock_authority = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=SimpleNamespace(id="connection-discord-1")
+    )
+    store._replay_source_matches = MagicMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=True
+    )
+    store._resolve_conversation = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=conversation
+    )
+    store._access_allow_matches = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=True
+    )
+    store._create_session_presence_intent = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=None
+    )
+    store._create_binding_settings_on_demand_intent = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=None
+    )
+    store._create_initial_progress_intent = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=None
+    )
+    store._initialize_thread_position = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+    )
+    store._complete_setup_replay = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+    )
+    preparation = ExternalChannelIngestionPreparation(
+        position_id=position.id,
+        exclusive_start_position=None,
+        immediate_outcome=None,
+        wake_mailbox_item_id=None,
+        wake_session_id=None,
+        priority_request=None,
+    )
+    first_history = _history(
+        trigger_key="discord:guild-1:root-1",
+        trigger_position="root-1",
+        discord_root_thread_observation=_discord_observation(
+            observed_at=datetime.datetime(2026, 8, 2, 1, tzinfo=datetime.UTC)
+        ),
+    )
+    second_history = _history(
+        trigger_key="discord:guild-1:root-1",
+        trigger_position="root-1",
+        discord_root_thread_observation=_discord_observation(
+            observed_at=datetime.datetime(2026, 8, 2, 2, tzinfo=datetime.UTC)
+        ),
+    )
+
+    first = await store.accept(
+        request=request,
+        preparation=preparation,
+        history=first_history,
+    )
+    second = await store.accept(
+        request=request,
+        preparation=preparation,
+        history=second_history,
+    )
+
+    assert first.status == "accepted"
+    assert second.status == "duplicate"
+    assert title_artifacts.create_requests == []
+    assert len(title_artifacts.projection_requests) == 2
+    assert all(
+        artifact_request.access_request_id == "access-allow-1"
+        and artifact_request.provisional_title_source is None
+        for artifact_request in title_artifacts.projection_requests
+    )
+    projection_create = (
+        title_repository.create_discord_thread_title_projection.await_args.args[1]
+    )
+    assert projection_create.requested_provisional_title == "Agent before rename"
+    assert title_repository.create_discord_thread_title_projection.await_count == 1
 
 
 async def test_session_presence_intent_replaces_open_session_control() -> None:
