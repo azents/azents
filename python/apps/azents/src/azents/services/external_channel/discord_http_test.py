@@ -198,6 +198,7 @@ class _SettingsResponseDouble:
             auth=SimpleNamespace(jwt=SimpleNamespace(secret_key="settings-secret"))
         )
         self.cleanup_delivery_ids = cleanup_delivery_ids
+        self.component_calls: list[dict[str, object]] = []
 
     async def initial_response(self, **_: object) -> object:
         return SimpleNamespace(
@@ -205,7 +206,8 @@ class _SettingsResponseDouble:
             cleanup_delivery_ids=(),
         )
 
-    async def component_response(self, **_: object) -> object:
+    async def component_response(self, **kwargs: object) -> object:
+        self.component_calls.append(kwargs)
         return SimpleNamespace(
             response={"type": 7, "data": {"content": "Saved.", "components": []}},
             cleanup_delivery_ids=self.cleanup_delivery_ids,
@@ -583,6 +585,11 @@ async def test_settings_component_preserves_every_committed_cleanup_intent() -> 
     )
     assert result.control_delivery_connection_id == "connection-1"
     assert admission.finished_interaction_ids == ["interaction-row-1"]
+    settings_response = cast(
+        _SettingsResponseDouble,
+        service.settings_response_service,
+    )
+    assert settings_response.component_calls[0]["interaction_id"] == "interaction-row-1"
 
 
 @pytest.mark.asyncio
