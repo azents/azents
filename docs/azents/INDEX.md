@@ -91,7 +91,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Responsive Context-Preserving External Conversations Requirements](requirements/channel-260729-responsive-context-preserving-conversations.md) | channel-260729 | 2026-07-29 | 2026-07-30 |
 | [Reliable External Channel Provider Connections Requirements](requirements/channel-260731-reliable-provider-connections.md) | channel-260731 | 2026-07-31 | 2026-07-31 |
 | [External Channel Binding Response Modes Requirements](requirements/channel-260801-binding-response-modes.md) | channel-260801 | 2026-08-01 | 2026-08-01 |
-| [Immediate External Channel Provider Delivery Requirements](requirements/channel-260802-immediate-provider-delivery.md) | channel-260802 | 2026-08-02 | - |
+| [Immediate External Channel Provider Delivery Requirements](requirements/channel-260802-immediate-provider-delivery.md) | channel-260802 | 2026-08-02 | 2026-08-02 |
 | [Split Chat Input Buffer into Separate RDB Table Historical Requirements Reconstruction](requirements/chat-260519-chat-input-buffer.md) | chat-260519 | 2026-05-19 | - |
 | [Chat Protocol Uses Canonical Event History/Live API Historical Requirements Reconstruction](requirements/chat-260604-chat-protocol-history-live.md) | chat-260604 | 2026-06-04 | 2026-06-04 |
 | [Chat Session Resync Converges to History/Live State After Subscribe Ack Historical Requirements Reconstruction](requirements/chat-260609-chat-resync-scroll.md) | chat-260609 | 2026-06-09 | - |

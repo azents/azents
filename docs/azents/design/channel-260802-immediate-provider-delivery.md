@@ -2,6 +2,7 @@
 title: "Immediate External Channel Provider Delivery Design"
 created: 2026-08-02
 updated: 2026-08-02
+implemented: 2026-08-02
 tags: [external-channel, slack, discord, architecture, backend, frontend]
 document_role: primary
 document_type: design
