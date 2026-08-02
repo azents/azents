@@ -86,11 +86,10 @@ The shared format applies to the core Requirements, ADR, and primary Design for 
 - Create the Requirements document after one primary scenario is established and before creating an ADR.
 - Obtain explicit requester confirmation of Requirements before accepting design decisions.
 - Create the same-basename ADR after Requirements confirmation, then create the same-basename Design after the ADR defines a coherent direction.
-- Audit every material Design mechanism against confirmed Requirements, accepted
-  ADR decisions, unchanged current Specs, or project constraints.
-- Obtain explicit approval of the complete Design after authority and feasibility
-  checks. In autonomous mode, the delegated interviewee approves the Design while
-  product-scope changes still return to the requester.
+- Audit material Design mechanisms against confirmed authority, validate
+  feasibility, and approve the complete Design before implementation. Autonomous
+  approval belongs to the delegated interviewee; product scope remains with the
+  requester.
 - Before implementation, apply product-scope and design changes in this order: Requirements → ADR → Design.
 - The valid progressive states are Requirements only, Requirements plus ADR, or the complete Requirements/ADR/Design trio.
 - Add the same `implemented: YYYY-MM-DD` date to Requirements and Design only after implementation is complete and verified. An implemented new-format snapshot must contain the complete trio.
@@ -138,17 +137,13 @@ tags: [backend, engine]
 - New development-snapshot ADRs must use the exact basename of their confirmed Requirements document.
 - Keep all material architecture or product-contract decisions for the snapshot in one ADR and identify them as `{snapshot}/ADR-D1`, `{snapshot}/ADR-D2`, and so on.
 - Reference the affected `{snapshot}/REQ-N` items instead of duplicating Requirements text.
-- A material decision changes product, architecture, security, persistence,
-  source of truth, ownership, lifecycle, an API or event boundary, configuration,
-  operational mode, failure or recovery behavior, migration, rollout,
-  compatibility, fallback, or removal of an authoritative behavior, contract,
-  persisted state, source-of-truth path, or operational mode.
+- A material decision has viable options with different product, architecture,
+  security, persistence or source-of-truth, ownership or lifecycle, interface or
+  configuration, operational, failure or recovery, migration, rollout,
+  compatibility, fallback, or authoritative-removal outcomes.
 - Keep identifiers, file layout, helper boundaries, equivalent local data
   structures, fixture names, and other non-material implementation details out of
   the ADR.
-- Material decisions remain visible and recorded when their decision owner is
-  delegated. Scoped delegation of one decision or local implementation details
-  does not authorize undisclosed later material decisions.
 - Keep the ADR append-only after acceptance. If later development changes a decision, create a new snapshot rather than rewriting the accepted ADR.
 - Legacy numbered ADR filenames and bare `ADR-NNNN-DN` references are historical provenance only and are not valid current ADR records after migration.
 
@@ -156,32 +151,29 @@ tags: [backend, engine]
 
 - `design/` documents are development-time design decision records. Do not keep overwriting them as living documents after implementation.
 - A new snapshot's primary Design must use the exact basename of its Requirements and ADR.
-- New feature designs reference the confirmed Requirements snapshot and trace `{snapshot}/REQ-N` through `{snapshot}/ADR-DN` to design mechanisms. They also trace every material Design mechanism back to confirmed authority. Do not duplicate the Requirements source of truth in the design.
+- New feature designs trace Requirements through ADR decisions to implementation
+  mechanisms and trace every material mechanism back to confirmed Requirements,
+  accepted ADRs, unchanged current Specs, or project constraints. Reference rather
+  than duplicate the Requirements source of truth.
 - Current system behavior always belongs in `spec/`. Changes to design rationale should be recorded in a new Requirements, design, or ADR document when needed.
 - `implemented` is the date when the design was implemented.
 - After `implemented` is set, do not modify the design document. Record later changes in `spec/` or a new Requirements/design/ADR document.
-- Every new primary Design must include a `## Design Authority` section containing
-  only material mechanisms. Each mechanism must cite confirmed Requirements, an
-  accepted ADR decision, an unchanged current Spec, or a project constraint. A
-  synthesis may combine these sources but does not create authority. Do not use
-  assumptions, Design approval, convention, feasibility, reversibility, or low
-  risk as authority.
-- `Design Authority` must record a Design revision and stable document-local
-  mechanism IDs. Classify each mechanism as `required`, `decided`, `existing`, or
-  `derived`. Increment the revision when a material mechanism or its authority
-  changes; retain unchanged IDs and never reuse removed IDs.
+- Every new primary Design must include `## Design Authority` with a revision,
+  stable material-mechanism IDs, confirmed authority, and `required`, `decided`,
+  `existing`, or `derived` classification. Increment the revision for material
+  changes, retain unchanged IDs, and never reuse removed IDs. Assumptions,
+  approval, convention, feasibility, reversibility, and low risk do not create
+  authority.
 - Every new primary Design must include a `## Removal and Replacement` section that
   identifies obsolete implementation, contracts, state, tests, fixtures,
   configuration, documentation, and generated surfaces as applicable. Record
   each item's removal authority, replacement or remaining authority, removal
   boundary, and absence verification. Use an explicit `None` finding only after
   system-grounded analysis finds no removal obligations.
-- Every new primary Design must include a `## Design Approval` section recording
-  collaborative or autonomous mode, the decision owner, the approval date, and
-  the approved Design revision, exact authority ID set, and material scope.
-  Complete authority and feasibility checks before approval. Approval is valid
-  only while the revision and authority ID set match. A later material change
-  requires renewed authority, feasibility, and Design approval.
+- Every new primary Design must include `## Design Approval` with the mode,
+  decision owner, date, approved revision, exact authority ID set, and material
+  scope. A material change invalidates approval and requires renewed authority,
+  feasibility, and approval.
 - Azents feature designs must include a `## Test Strategy` section. Product behavior verification should be E2E-first. Use testenv only as fallback/diagnostic support when E2E is difficult or spot diagnosis is needed.
 - `Test Strategy` must describe the E2E primary verification matrix, E2E plan, whether testenv fixture/prerequisite support is needed and why, fixture/seed requirements, credential/prerequisite snapshot requirements, evidence format, CI execution policy, and skip/fail criteria for optional/live tests. If product behavior verification has no E2E coverage and only testenv support, explain why.
 
@@ -207,12 +199,9 @@ tags: [backend, engine]
   `{feature}-phase-{number}-{slug}.md`.
 - Keep plan ownership, interfaces, dependencies, validation, and scope current
   while implementation is active.
-- Plans decompose approved Design mechanisms and never create product,
-  architecture, runtime, state, configuration, compatibility, rollout, fallback,
-  failure-handling, ownership, or source-of-truth authority.
-- Every implementation and phase plan must record approved Design mechanisms,
-  authority references, and `Design delta: None`. Return a required material
-  change to feature design before implementation.
+- Plans decompose approved Design and never create product or Design authority.
+  Every implementation and phase plan records approved mechanism IDs, authority
+  references, and `Design delta: None`; material changes return to feature design.
 - Remove the feature's multi-phase plan and all phase plans in its cleanup PR.
   The directory may disappear when no tracked plans remain.
 

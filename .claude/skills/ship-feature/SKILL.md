@@ -1,369 +1,225 @@
 ---
 name: ship-feature
-description: "Ship a large, multi-phase feature after Requirements and design discussion are complete. Convert the approved Requirements, ADR, and design into an implementation plan and stacked PRs for phased delivery. Use when: (1) a large feature design is complete and the user says to implement, (2) the user invokes 'ship-feature' for phased delivery, (3) a design document requires multiple implementation phases. Use one focused PR instead for simple fixes and small, self-contained changes."
+description: "Ship a large, multi-phase feature after Requirements, ADR, and Design are approved. Convert approved Design mechanisms into an implementation plan and reviewable delivery phases without creating new design authority. Use a focused PR for small self-contained work."
 ---
 
 # Ship Feature Workflow
 
-Use this workflow for large features that require multiple reviewable delivery phases after design is complete.
+Use this workflow after feature design is complete and the requester asks to
+implement.
 
 ## Choose the delivery shape
 
-Before creating plans or branches, choose the delivery shape based on reviewability, dependencies, validation, and rollout needs rather than an arbitrary line count.
+Choose based on reviewability, dependencies, validation, and rollout boundaries:
 
-- Use stacked PRs when the feature has multiple independently reviewable phases, sequential dependencies, cross-cutting validation, or rollout work that benefits from separate boundaries.
-- Use one focused PR for bug fixes, maintenance changes, and small self-contained features that remain reviewable end to end.
-- Include all required tests, generated artifacts, and spec or documentation updates in that single PR.
-- Do not create separate design, plan, validation, spec-promotion, or cleanup PRs only to match this workflow.
+- Use one focused PR for a small self-contained feature, fix, or maintenance change.
+  Include its tests, generated artifacts, and required documentation.
+- Use stacked PRs when independent review phases, sequential dependencies,
+  cross-cutting validation, or rollout boundaries make the work clearer.
+- Do not create extra design, plan, validation, spec, or cleanup PRs only to match
+  this workflow.
 
-For work that requires phased delivery, use this stacked PR series: approved Requirements/ADR/design baseline → implementation plan → phased implementation → validation → spec promotion → cleanup.
-
-## PR stack structure
-
-Use a consistent title prefix so reviewers can recognize the series.
+For phased work, use this sequence:
 
 ```text
-{feature-name} [1/N]: Design baseline
-{feature-name} [2/N]: Implementation plan
-{feature-name} [3/N]: Phase 1 — {phase summary}
-{feature-name} [4/N]: Phase 2 — {phase summary}
-...
-{feature-name} [N-1/N]: Spec promotion
-{feature-name} [N/N]: Cleanup
+approved design baseline
+→ implementation plan
+→ implementation phases
+→ validation
+→ spec promotion
+→ plan cleanup
 ```
 
-Recommended stack:
-
-| Order | PR | Contents |
-| --- | --- | --- |
-| 1 | Design baseline | Approved Requirements, ADR, and design under the project-approved `docs/` locations |
-| 2 | Implementation plan | Multi-phase plan under the project's documentation plans directory, including validation matrix and fixture prerequisites |
-| 3..N-3 | Phase implementation | Mandatory phase execution plan, code, and tests. Include frontend work as one or more implementation phases when needed |
-| N-2 | E2E/testenv validation | Run planned E2E and fixture/prerequisite validation, record commands/environment/evidence, compare implementation against current specs, and fix discovered issues |
-| N-1 | Spec promotion | Run `/spec-review`, mark design as implemented when appropriate, update specs, and propose ADRs if needed |
-| N | Cleanup | Remove stale implementation plan documents after the feature is implemented and specs are current |
-
-Store the multi-phase implementation plan and every phase execution plan in the
-project's documentation plans directory. For Azents, use `docs/azents/plans/`.
-Create the directory when needed; cleanup may remove it when no tracked plans
-remain.
+Use a consistent `{feature-name} [n/N]: <phase>` title prefix. Store the
+multi-phase plan and all phase execution plans under the project-approved plans
+directory; for Azents, use `docs/azents/plans/`.
 
 ## Phase 0: Confirm readiness
 
-Before implementation:
+Before planning implementation:
 
-- Identify the approved Requirements, accepted ADR, and approved primary Design.
-- Confirm all three use the same canonical snapshot ID and basename.
-- Confirm every Requirement traces forward to Design and every material Design
-  mechanism traces back to confirmed Requirements, an accepted ADR decision, an
-  unchanged current Spec, or a project constraint.
-- Confirm the Design has a complete `Design Authority` audit and `Design Approval`
-  with no pending material decision.
-- Confirm the approved Design revision and exact authority ID set match the
-  current `Design Authority` section.
-- Confirm the Design includes `Removal and Replacement` and that every removal
-  obligation has a defined boundary and absence-verification path, or records an
-  explicit `None` finding.
-- Confirm non-goals and boundaries.
-- Read relevant specs under `docs/azents/spec/`.
-- Read relevant ADRs only for rationale or hard constraints.
-- Identify impacted apps/packages and project rules.
-- Confirm whether the feature needs E2E coverage, fixtures, credentials, or external prerequisites.
+- identify the confirmed Requirements, accepted ADR, and approved primary Design;
+- confirm their shared snapshot basename and current project rules;
+- verify complete forward Requirements traceability and reverse Design Authority;
+- verify Design approval matches the current Design revision and exact material
+  mechanism ID set;
+- verify no material decision remains pending;
+- verify every Removal and Replacement obligation has a boundary and absence
+  evidence, or an explicit `None` finding;
+- read relevant current Specs and impacted application/package rules; and
+- identify E2E, fixture, credential, and external prerequisites.
 
-If Requirements are missing or unconfirmed, the core document basenames do not
-match, the ADR is missing, Design approval or authority is incomplete, or any
-material decision remains open, return to `feature-design` first. Current Azents
-core documents must use dated shared snapshot basenames; do not create numbered
-ADR files or treat legacy numbered ADRs as current records.
+Return to `feature-design` when Requirements, ADR, Design authority, approval, or a
+material decision is incomplete. Do not reconstruct missing product or design
+intent in an implementation plan.
 
 ## Phase 1: Create the implementation plan
 
-After the Design is approved:
+Plans decompose approved Design mechanisms into execution scope. They never create
+product or Design authority.
 
-Implementation plans decompose approved Design mechanisms into reviewable work.
-They do not create product, architecture, runtime, state, configuration,
-compatibility, rollout, fallback, failure-handling, ownership, or source-of-truth
-authority.
+Before writing the plan:
 
-1. Identify implementation workstreams, dependencies, paths, and interfaces.
-2. Assign one independent reviewer before the first review. Record the exact
-   agent name or path and give it to every implementation owner. Add a specialist
-   only for an explicit review requirement the primary reviewer cannot cover.
-3. Limit implementation discovery to the assigned paths, approved mechanisms,
-   interfaces, tests, dependencies, risks, validation, and blockers.
-4. Have the primary agent create the tracked multi-phase plan from the approved
-   documents and concise discovery reports.
+1. identify approved mechanism IDs, workstreams, dependencies, interfaces, paths,
+   validation, and removal obligations;
+2. assign one exact independent reviewer and distribute that reviewer identity to
+   every implementation owner; add a specialist only for an explicit review gap
+   that reviewer cannot cover; and
+3. limit implementation discovery to assigned paths, approved mechanisms,
+   interfaces, tests, dependencies, risks, validation, and blockers; and
+4. classify new findings:
+   - local detail within an approved contract → plan it;
+   - product scope or user-visible contract change → return to Requirements;
+   - new material mechanism or decision → return to `feature-design`;
+   - unsupported mechanism → omit it.
 
-Classify new findings before adding them to a plan:
+The tracked multi-phase plan must contain:
 
-- local implementation detail inside an approved contract → plan it;
-- product scope or user-visible contract change → return to Requirements;
-- new material mechanism or decision → return to `feature-design`;
-- unsupported mechanism → omit it.
+- links to Requirements, ADR, and approved Design;
+- approved mechanism IDs and authority references;
+- PR phases, dependencies, interfaces, integration boundaries, and owners;
+- context checkpoints and the exact reviewer;
+- data, API, runtime, test, E2E, fixture, and prerequisite work;
+- removal obligations and absence verification;
+- spec impact, rollout, external actions, blockers, and plan cleanup; and
+- `Design delta: None`.
 
-A plan cannot turn a risk, rollout preference, conventional pattern, or
-implementation convenience into Design authority.
+Keep phase summaries reviewable; leave file-level execution details to each phase
+plan. If discovery requires a material Design change, update and reapprove Design
+before continuing.
 
-Reuse active owners and the reviewer while their context remains relevant and
-compact. At each phase boundary, use the checkpoint and review evidence to
-continue, reset, or reassign them. Record every role change and redistribute an
-updated reviewer path before the next review.
+## Mandatory phase execution plan
 
-Create the multi-phase implementation plan as a tracked document.
+Before implementation begins for a phase, read
+[references/phase-execution-plan-template.md](references/phase-execution-plan-template.md)
+and add a tracked phase plan to that phase branch.
 
-The plan must include:
+The plan must bind the phase to approved mechanism IDs and authority references,
+set `Design delta: None`, assign non-overlapping paths and interfaces, include
+removal obligations, define integration and validation, and record the scope-drift
+and context checkpoints.
 
-- Feature summary and Requirements, ADR, and Design links
-- Approved material Design mechanism IDs and authority references
-- PR phases, dependencies, and integration boundaries
-- Implementation ownership, independent reviewer, and context checkpoints
-- Data/API/runtime changes, test strategy, E2E matrix, and fixture prerequisites
-- Design removal obligations mapped to owning phases, prerequisites, and absence
-  verification
-- Blockers, external actions, spec impact, rollout, and plan cleanup
+Report the complete phase plan, then start immediately only while `Design delta`
+remains `None`.
 
-Do not put file-by-file implementation details for every phase in the multi-phase
-plan. Every implementation PR must add its own phase execution plan before code
-implementation begins.
+## Execution ownership and context
 
-The multi-phase plan must have `Design delta: None`. If implementation discovery
-requires a material Design change, update and reapprove the Design before
-continuing.
+- The primary agent owns orchestration, shared decisions, assigned implementation,
+  reviewer assignment, phase progression, and final integration.
+- Implementation owners stay within assigned paths and interfaces, run focused
+  checks, and request the exact reviewer directly.
+- The reviewer is read-only and reviews from confirmed Requirements, accepted ADR,
+  approved Design and Design Authority, the phase contract, and the current diff.
+- Requirements, ADR, approved Design, and current Specs are product and design
+  authority. Plans are authoritative only for approved execution scope, ownership,
+  paths, ordering, and validation.
 
-## Mandatory phase execution plan gate
+At phase boundaries, record completed behavior, changed interfaces, evidence,
+remaining scope, relevant paths, risks, and blockers. Reuse an active role only
+while its context remains relevant and compact; record role changes and redistribute
+the exact reviewer identity. Update incomplete execution decomposition in the plan;
+return product intent or a material mechanism to `feature-design`. While waiting,
+prepare later inputs without starting later-phase work; silence is not progress.
 
-Before starting implementation for a phase, create a separate tracked phase
-execution plan document.
+## Phase 2: Implement each phase
 
-Keep the phase plan in the implementation PR branch. A phase summary in the
-multi-phase plan, chat transcript, task prompt, or PR body is not a substitute.
+For each phase:
 
-Use this required structure:
+1. create the stacked branch and tracked phase plan;
+2. confirm approved mechanism IDs, authorities, owners, paths, interfaces, and
+   dependencies;
+3. implement workstreams and assigned Design removal obligations in dependency
+   order;
+4. check both directions of scope drift:
+   - approved behavior or removal work is missing; or
+   - the diff adds a material mechanism absent from Design Authority;
+5. remove unrelated, unauthorized, or later-phase changes and update current Specs
+   when a behavior change cannot wait for spec promotion;
+6. have each owner run focused checks and request one read-only review from the
+   assigned reviewer;
+7. batch required corrections, apply the `/code-review` re-review criteria, and run
+   affected checks; when re-review is required, the same owner directly requests it
+   from the same reviewer;
+8. have the primary agent verify integration and run final validation on the stable
+   diff; reuse evidence only while the diff is unchanged, prerequisites are fresh,
+   and the environment is equivalent; and
+9. record the checkpoint, commit, and open the phase PR before the next phase.
 
-```markdown
-## Phase Execution Plan
+A phase may refine local implementation details within approved contracts. It may
+not add material behavior, state, configuration, contracts, fallbacks,
+compatibility paths, failure behavior, operational modes, authority, or sources of
+truth. Feasibility, reversibility, convention, or low risk does not change this
+boundary.
 
-- Phase: `<number and name>`
-- Branch/base: `<branch>` → `<base>`
-- PR boundary: `<deliverable>`
-- Inputs: `<completed dependencies>`
-- Deliverables: `<observable outcomes>`
-- Non-goals: `<explicit exclusions>`
-- Interfaces: `<contracts fixed before implementation>`
-- Approved Design mechanisms: `<material mechanism IDs implemented by this phase>`
-- Authority references: `<REQ, ADR, current Spec or project constraint>`
-- Design delta: `None`
-- Removal obligations: `<Design removal items owned by this phase, or None>`
-- Absence verification: `<proof that removed units are no longer referenced or authoritative>`
+Design-required removal belongs in its owning implementation phase, normally the
+phase that activates the replacement. Use an explicit later phase only when an
+approved dependency requires the old path temporarily.
 
-| Workstream | Owner | Owned paths | Depends on | Output | Validation |
-| --- | --- | --- | --- | --- | --- |
-| ... | ... | ... | ... | ... | ... |
+## Phase 3: Validate
 
-- Integration order: `<sequence>`
-- Independent review: `<scope, criteria, inputs, output>`
-- Final validation: `<commands>`
-- Scope-drift check: `<approved-scope coverage, unauthorized additions, and non-goal comparison>`
-- Context checkpoint: `<completed behavior, changed interfaces, evidence, remaining scope, relevant paths, risks>`
-```
+Before spec promotion, record:
 
-Report the plan when starting the phase, then begin implementation immediately
-only when `Design delta` remains `None`. Return any product-scope change or new
-material decision to `feature-design` before implementation.
+- commands, environment, test results, and E2E evidence;
+- fixture and prerequisite validation;
+- failures found and fixes applied;
+- implemented behavior versus current Specs;
+- implemented material mechanisms versus Design Authority, including missing and
+  unauthorized behavior; and
+- completed removal obligations and absence evidence.
 
-### Execution boundaries
+Fix discovered bugs in the validation PR or responsible earlier phase. Rerun only
+evidence invalidated by the correction; rerun the full matrix when it crosses
+interfaces or shared behavior. Apply `/code-review` re-review criteria and rebase
+dependent branches when an earlier phase changes. When re-review is required, the
+implementation owner directly requests the existing independent reviewer.
 
-- The primary agent owns orchestration, shared decisions, implementation work
-  assigned to it, reviewer assignment, phase progression, and final integration.
-- Implementation owners work only within their phase-plan paths and interfaces.
-- Every implementation owner runs focused checks and directly requests the
-  assigned reviewer.
-- The reviewer starts from the confirmed Requirements, accepted ADR, approved
-  Design and its Design Authority, phase contract, and diff at review time;
-  remains read-only and reports to the requesting owner.
+## Phase 4: Promote Specs
 
-### Handoff and context control
+Run `/spec-review` and update current Specs. Mark Requirements and Design with the
+same `implemented` date only after implementation and validation are complete.
+Keep implemented Requirements, accepted ADRs, and Designs immutable.
 
-- Use tracked Requirements, ADR, approved Design and its Design Authority, and
-  current Specs as product and design authority. Plans are authoritative only for
-  their approved execution scope, ownership, paths, ordering, and validation;
-  they cannot authorize behavior or mechanisms. Give each active role only the
-  relevant mechanisms, authority references, paths, interfaces, inputs, outputs,
-  non-goals, rules, and validation commands.
-- Update the plan when its decomposition is incomplete. Return unresolved product
-  intent or any new material mechanism to `feature-design`; do not complete the
-  contract inside the plan.
-- Set a time, turn, tool-call, or milestone checkpoint for implementation and
-  review work. At that boundary, collect progress, remaining scope, validation,
-  blockers, and repeated failures; then continue, rescope, reset, or stop.
-- Before opening a phase PR, record completed behavior, changed interfaces,
-  validation evidence, remaining scope, relevant paths, risks, and blockers.
-- Start the next phase from this checkpoint and review evidence. Continue a
-  role only while its retained context remains useful and compact.
-- While waiting, prepare later-phase inputs without starting later-phase work or
-  advancing the stack. Silence alone is not evidence of progress.
+If validation reveals an unrecorded material decision or mechanism, return to
+`feature-design` and complete authority, feasibility, and approval before marking
+the snapshot implemented.
 
-## Phase 2: Implement phases as stacked PRs
+## Phase 5: Clean up plans
 
-For each implementation phase:
+After implementation, validation, and spec promotion, remove the feature's
+multi-phase and phase execution plans. The remaining sources of truth are current
+Specs, immutable implemented Requirements, accepted ADRs, useful historical
+Designs, and code.
 
-1. Create the stacked branch, read project rules, and write the phase plan.
-2. Confirm approved Design mechanisms, authority references, workstream ownership,
-   dependencies, paths, and interfaces.
-3. Implement the workstreams and their assigned Design removal obligations, then
-   integrate them in dependency order.
-4. Check the diff for both missing approved behavior and material mechanisms not
-   present in Design Authority. Remove unrelated, unauthorized, or later-phase
-   changes. Update specs when the phase changes current behavior and cannot wait
-   for spec promotion.
-5. Have each owner run focused checks and directly request review from the exact
-   assigned reviewer with the relevant contract, scope, diff, and rules.
-6. Have the reviewer perform one read-only review. Batch required corrections,
-   run affected checks, and use `/code-review` for targeted re-review decisions.
-   When required, the implementation owner directly requests the same reviewer.
-7. Have the primary agent verify scope, integration, and validation evidence.
-   Apply affected checks and re-review criteria to any resulting diff change.
-8. Run final validation once on the stable integrated diff. Reuse evidence only
-   while the diff is unchanged, prerequisite snapshots are fresh, and the
-   environment is equivalent. Refresh invalidated checks and required E2E
-   evidence.
-9. Record the phase checkpoint, commit, and open the PR before the next phase.
+Cleanup PRs remove stale plan documents and references only. All Design-required
+implementation removals must already be complete in their owning phases.
 
-Keep each phase reviewable. Do not mix unrelated refactors, cleanup, or future phases.
-Design-required removal is implementation scope, not unrelated cleanup. Assign it
-to the phase that activates its replacement or to an explicit later phase when a
-dependency requires the old path to remain temporarily.
+## Stack operations
 
-A phase may refine agent-owned local implementation details within approved
-contracts. It may not add a new runtime branch, persisted state, configuration,
-API or event contract, fallback, compatibility path, background process, failure
-behavior, operational mode, authority, or source of truth. Return such a need to
-`feature-design` even when it is feasible, reversible, low-risk, or conventional.
-
-## Phase 3: Validation PR
-
-Run the planned validation before spec promotion.
-
-Include:
-
-- Commands run
-- Environment details
-- Test results
-- E2E evidence
-- Fixture/prerequisite validation results
-- Any failures found and the fixes applied
-- A strict comparison table between implemented behavior and current specs, including missing implementation or spec drift
-- A strict comparison between implemented material mechanisms and Design Authority,
-  including missing approved behavior and unauthorized additions
-- A strict comparison between the Design removal obligations and the integrated
-  code, including absence evidence and any old path that remains
-
-If validation finds a bug, address it in the validation PR or responsible
-earlier phase and run affected checks. Repeat only validation entries whose
-evidence may have been invalidated; rerun the full matrix when the correction
-crosses interfaces or shared behavior. Use the `/code-review` re-review criteria
-and, when required, have the implementation owner directly request targeted
-re-review from the existing independent reviewer. Then have the primary agent
-perform final verification and rebase following branches when an earlier phase
-changes.
-
-## Phase 4: Spec promotion PR
-
-Run `/spec-review` and update current specs under `docs/azents/spec/`.
-
-Also:
-
-- Add the same `implemented` date to the Requirements snapshot and Design only when the implementation is complete and verified.
-- Treat the implemented Requirements, accepted ADR, and Design as one immutable snapshot. Record later product or design changes in a new snapshot.
-- If validation discovers an unrecorded material decision or mechanism, return to
-  `feature-design` and complete authority, feasibility, and Design approval before
-  marking the snapshot implemented.
-- Keep implemented/adopted ADRs immutable.
-
-## Phase 5: Cleanup PR
-
-After the feature is implemented, validated, and reflected in current specs,
-remove the multi-phase implementation plan and every phase execution plan for
-the feature. The documentation plans directory may disappear when no tracked
-plans remain. The source of truth becomes:
-
-- Current specs
-- Immutable implemented Requirements snapshots
-- Adopted ADRs
-- Implemented design documents when they still carry useful historical rationale
-- Actual code
-
-Cleanup PRs should only remove stale plan documents and related references. Do not mix behavior changes or refactors.
-All Design-required implementation removals must already be complete in their
-owning implementation phases.
-
-## Stacked PR operations
-
-Use the `stacked-prs` workflow when rebasing, retargeting, or merging stacked branches.
-
-Rules:
-
-- Merge from front to back only.
-- Use `--force-with-lease` for stack branch rewrites.
-- Retarget dependent PR bases before deleting base branches.
-- Preserve a clean working tree before rebase/cherry-pick operations.
+Use the `stacked-prs` workflow for rebasing, retargeting, or merging stack branches.
+Create each planned PR before waiting on CI, merge front to back, and preserve clean
+worktrees and dependent bases. Use `--force-with-lease` for branch rewrites, and
+retarget dependent PRs before deleting their base branch.
 
 ## Output expectations
 
-When starting the shipping workflow, report:
+When starting shipping, report Requirements, Design, implementation plan, owners,
+reviewer, approved mechanism IDs, `Design delta: None`, removal obligations, stack
+shape, validation matrix, and blockers.
 
-```markdown
-## Ship Feature Plan
-
-- Requirements: `<path>` (`<short-id>`)
-- Design: `<path>`
-- Multi-phase implementation plan: `<path under the documentation plans directory>`
-- Implementation ownership and reviewer: `<owners and exact reviewer>`
-- Approved Design mechanisms: `<ID summary and authority references>`
-- Design delta: `None`
-- Removal obligations: `<summary mapped to owning phases>`
-- Stack prefix: `{feature-name}`
-- Planned PRs:
-  1. Design
-  2. Implementation plan
-  3. Phase 1 — ...
-- Validation matrix: <summary>
-- Known blockers: <none or list>
-```
-
-When starting each implementation phase, report the complete `Phase Execution
-Plan` block before editing implementation code or giving phase work to the
-implementation role owners.
-
-For each completed phase, report:
-
-- PR URL
-- Branch/base and phase plan
-- Completed scope and scope-drift result
-- Authority coverage and unauthorized-addition result
-- Completed removals and absence evidence
-- Execution roles, handoffs, and next-phase context decision
-- Review, re-review, and final validation results
-- Next stacked branch
+Before each phase, report the complete tracked phase plan. After each phase, report
+the PR, branch/base, completed scope, authority and drift result, removals, review,
+validation, checkpoint, and next branch.
 
 ## Guardrails
 
-- Do not inflate a simple fix or small self-contained change into a PR stack; use one focused PR.
-- Do not start implementation without confirmed Requirements, an accepted ADR,
-  and complete Design approval.
-- Do not treat implementation plans or phase plans as sources of Design authority.
-- Do not begin a phase unless its `Design delta` is `None`.
-- Do not classify a new runtime mode, state, configuration, contract, fallback,
-  compatibility path, failure behavior, operational responsibility, authority, or
-  source of truth as a conventional implementation detail.
-- Do not start phase implementation before the mandatory phase execution plan
-  is stored in the documentation plans directory and reported.
-- Keep phase progression and role-level orchestration with the primary agent.
-- Keep implementation and independent review separate. Use the exact reviewer
-  assigned by the primary agent and the `/code-review` re-review criteria.
-- Do not start the next phase before the current phase PR is created.
-- Do not ship an Azents feature when its new-format Requirements, ADR, and primary Design use different basenames.
-- Do not collapse a large feature into one PR when phased delivery is expected.
-- Do not leave stale plan documents after implementation is complete.
-- Do not update generated clients manually; regenerate them from OpenAPI when API routes or schemas change.
-- Keep all tracked docs, PR titles, PR bodies, comments, and examples in English.
+- Do not inflate small work into a stack.
+- Do not implement before confirmed Requirements, accepted ADR, and matching Design
+  approval.
+- Plans never create Design authority; every phase starts with `Design delta: None`.
+- Return new material decisions to `feature-design` and keep local details
+  agent-owned.
+- Keep implementation and independent review separate and use the exact reviewer.
+- Do not start the next phase before opening the current phase PR.
+- Keep snapshot basenames aligned and generated clients source-generated.
+- Remove temporary plans only after validated spec promotion.
+- Keep tracked documentation and GitHub-facing text in English.
