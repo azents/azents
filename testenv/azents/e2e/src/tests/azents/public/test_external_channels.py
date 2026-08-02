@@ -114,6 +114,11 @@ _DISCORD_GUILD_ID = "200000000000000001"
 _DISCORD_BOT_USER_ID = "300000000000000001"
 _DISCORD_CHANNEL_ID = "400000000000000001"
 _DISCORD_BOT_TOKEN = "discord-e2e-private"
+_DISCORD_COMMAND_CONTRACTS = {
+    "message_action": ("Ask an Azents Agent", 3),
+    "azents_settings": ("Azents settings", 1),
+    "conversation_settings": ("Conversation settings", 3),
+}
 _EXTERNAL_CHANNEL_LARGE_FILE_BYTES = 6 * 1024 * 1024
 
 
@@ -308,6 +313,67 @@ def _discord_provider_state(discord_provider_fake_url: str) -> dict[str, object]
     )
     response.raise_for_status()
     return cast(dict[str, object], response.json())
+
+
+def _discord_command_id(
+    discord_provider_fake_url: str,
+    *,
+    role: str,
+) -> str | None:
+    """Return one transient current Discord command ID by required role."""
+    response = requests.get(
+        f"{discord_provider_fake_url}/__testenv/command-id",
+        params={"role": role},
+        timeout=5,
+    )
+    response.raise_for_status()
+    command_id = response.json().get("command_id")
+    return command_id if isinstance(command_id, str) and command_id else None
+
+
+def _open_discord_settings(
+    *,
+    discord_provider_fake_url: str,
+    interaction_id: str,
+    application_id: str,
+    guild_id: str,
+    channel_id: str,
+    user_id: str,
+) -> None:
+    """Open parent settings through the capability-proven Discord command."""
+    command_id = cast(
+        str,
+        wait_until(
+            lambda: _discord_command_id(
+                discord_provider_fake_url,
+                role="azents_settings",
+            ),
+            timeout=15,
+            interval=0.2,
+            message="Discord settings command ID was not reconciled",
+        ),
+    )
+    command_name, command_type = _DISCORD_COMMAND_CONTRACTS["azents_settings"]
+    response = requests.post(
+        f"{discord_provider_fake_url}/__testenv/interactions",
+        json={
+            "id": interaction_id,
+            "type": 2,
+            "application_id": application_id,
+            "guild_id": guild_id,
+            "channel_id": channel_id,
+            "channel": {"id": channel_id, "type": 0},
+            "member": {"user": {"id": user_id}},
+            "data": {
+                "id": command_id,
+                "name": command_name,
+                "type": command_type,
+            },
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    assert response.json() == {"status": 200, "response_type": 4}
 
 
 def _successful_session_paths(provider_state: dict[str, object]) -> list[str]:
@@ -2829,20 +2895,26 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
                 return session, projection.items[0]
         return None
 
-    def socket_acknowledged() -> bool:
+    def socket_evidence_contains(field: str) -> bool:
         socket_state = _provider_state(slack_provider_fake_url).get("socket")
         if not isinstance(socket_state, dict):
             return False
-        acknowledgements = cast(dict[str, object], socket_state).get("acknowledgements")
-        return isinstance(acknowledgements, list) and envelope_id in cast(
+        values = cast(dict[str, object], socket_state).get(field)
+        return isinstance(values, list) and envelope_id in cast(
             list[object],
-            acknowledgements,
+            values,
         )
 
     with azents_external_channel_gateway_factory():
         wait_until(
-            socket_acknowledged,
-            timeout=20,
+            lambda: socket_evidence_contains("envelope_ids"),
+            timeout=45,
+            interval=0.2,
+            message="Socket Mode provider fake did not deliver the envelope",
+        )
+        wait_until(
+            lambda: socket_evidence_contains("acknowledgements"),
+            timeout=45,
             interval=0.2,
             message="Socket Mode envelope was not acknowledged after admission",
         )
@@ -3068,6 +3140,29 @@ def test_discord_single_activation_and_interaction_journey(
         f"{discord_provider_fake_url}/__testenv/configure",
         json={
             "allow_synthetic_roots": True,
+            "guild_commands": [
+                {
+                    "id": "500000000000000101",
+                    "name": "Ask an Azents Agent",
+                    "type": 3,
+                },
+                {
+                    "id": "500000000000000102",
+                    "name": "Ask an Azents Agent",
+                    "type": 3,
+                },
+                {
+                    "id": "500000000000000103",
+                    "name": "Azents settings",
+                    "type": 1,
+                    "description": "Stale description.",
+                },
+                {
+                    "id": "500000000000000104",
+                    "name": "Private customer command",
+                    "type": 2,
+                },
+            ],
             "root_messages": [
                 {
                     "id": "700000000000000002",
@@ -3112,6 +3207,36 @@ def test_discord_single_activation_and_interaction_journey(
     assert activation_state["interaction_configurations"] == [
         {"application_id": _DISCORD_APPLICATION_ID}
     ]
+    assert activation_state["guild_commands"] == [
+        {"role": "azents_settings", "type": 1},
+        {"role": "conversation_settings", "type": 3},
+        {"role": "message_action", "type": 3},
+        {"role": "unrelated", "type": 2},
+    ]
+    activation_request_counts = cast(
+        dict[str, int],
+        activation_state["request_counts"],
+    )
+    assert activation_request_counts["list_guild_commands"] == 1
+    assert activation_request_counts["create_guild_command"] == 1
+    assert activation_request_counts["update_guild_command"] == 1
+    assert activation_request_counts["delete_guild_command"] == 1
+    command_ids = {
+        role: cast(
+            str,
+            wait_until(
+                lambda role=role: _discord_command_id(
+                    discord_provider_fake_url,
+                    role=role,
+                ),
+                timeout=15,
+                interval=0.2,
+                message=f"Discord {role} command ID was not reconciled",
+            ),
+        )
+        for role in _DISCORD_COMMAND_CONTRACTS
+    }
+    assert len(set(command_ids.values())) == len(_DISCORD_COMMAND_CONTRACTS)
     ping = requests.post(
         f"{discord_provider_fake_url}/__testenv/interactions",
         json={
@@ -3123,20 +3248,14 @@ def test_discord_single_activation_and_interaction_journey(
     )
     ping.raise_for_status()
     assert ping.json() == {"status": 200, "response_type": 1}
-    command = requests.post(
-        f"{discord_provider_fake_url}/__testenv/interactions",
-        json={
-            "id": "700000000000000002",
-            "type": 2,
-            "application_id": _DISCORD_APPLICATION_ID,
-            "guild_id": _DISCORD_GUILD_ID,
-            "channel_id": _DISCORD_CHANNEL_ID,
-            "member": {"user": {"id": "600000000000000001"}},
-        },
-        timeout=10,
+    _open_discord_settings(
+        discord_provider_fake_url=discord_provider_fake_url,
+        interaction_id="700000000000000002",
+        application_id=_DISCORD_APPLICATION_ID,
+        guild_id=_DISCORD_GUILD_ID,
+        channel_id=_DISCORD_CHANNEL_ID,
+        user_id="600000000000000001",
     )
-    command.raise_for_status()
-    assert command.json() == {"status": 200, "response_type": 5}
 
     state = _discord_provider_state(discord_provider_fake_url)
     assert state["interactions"] == [
@@ -3150,13 +3269,17 @@ def test_discord_single_activation_and_interaction_journey(
             "interaction_id": "700000000000000002",
             "interaction_type": 2,
             "response_status": 200,
-            "response_type": 5,
+            "response_type": 4,
+            "component_count": 0,
+            "has_content": True,
         },
     ]
     rendered_state = str(state)
     assert _DISCORD_BOT_TOKEN not in rendered_state
     assert "Private Discord interaction invocation" not in rendered_state
+    assert "Private customer command" not in rendered_state
     assert "X-Signature-Ed25519" not in rendered_state
+    assert all(command_id not in rendered_state for command_id in command_ids.values())
 
 
 def test_discord_gateway_message_create_provisions_and_binds_synchronously(
@@ -3552,6 +3675,18 @@ def test_discord_message_command_selector_and_component_journey(
         )
         for agent_id in agent_ids
     ]
+    message_command_id = cast(
+        str,
+        wait_until(
+            lambda: _discord_command_id(
+                discord_provider_fake_url,
+                role="message_action",
+            ),
+            timeout=15,
+            interval=0.2,
+            message="Discord Message Command ID was not reconciled",
+        ),
+    )
     interaction = requests.post(
         f"{discord_provider_fake_url}/__testenv/interactions",
         json={
@@ -3560,8 +3695,10 @@ def test_discord_message_command_selector_and_component_journey(
             "application_id": _DISCORD_SELECTOR_APPLICATION_ID,
             "guild_id": _DISCORD_GUILD_ID,
             "channel_id": _DISCORD_CHANNEL_ID,
+            "channel": {"id": _DISCORD_CHANNEL_ID, "type": 0},
             "member": {"user": {"id": "600000000000000002"}},
             "data": {
+                "id": message_command_id,
                 "type": 3,
                 "name": "Ask an Azents Agent",
                 "target_id": source_message_id,
@@ -3618,6 +3755,7 @@ def test_discord_message_command_selector_and_component_journey(
             "application_id": _DISCORD_SELECTOR_APPLICATION_ID,
             "guild_id": _DISCORD_GUILD_ID,
             "channel_id": _DISCORD_CHANNEL_ID,
+            "channel": {"id": _DISCORD_CHANNEL_ID, "type": 0},
             "member": {"user": {"id": "600000000000000002"}},
             "message": {"id": "800000000000000001"},
             "data": {"custom_id": selector, "values": [routes[1].id]},
@@ -3764,6 +3902,7 @@ def test_discord_message_command_selector_and_component_journey(
     assert source_content not in rendered
     assert _DISCORD_BOT_TOKEN not in rendered
     assert selector not in rendered
+    assert message_command_id not in rendered
 
 
 def test_discord_multi_management_and_lifecycle_journey(

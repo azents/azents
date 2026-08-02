@@ -74,6 +74,16 @@ _MAX_HISTORY_PAGES = 32
 _MAX_HISTORY_MESSAGES_PER_PAGE = 100
 _MAX_CONFIGURED_OBJECT_BYTES = 16 * 1024
 _MAX_CONFIGURED_ROOT_MESSAGES = 100
+_MAX_CONFIGURED_GUILD_COMMANDS = 100
+_MAX_GUILD_COMMAND_ID_CHARACTERS = 32
+_MAX_GUILD_COMMAND_NAME_CHARACTERS = 100
+_MAX_GUILD_COMMAND_DESCRIPTION_CHARACTERS = 100
+_GUILD_COMMAND_TYPES = {1, 2, 3}
+_COMMAND_ROLE_CONTRACTS = {
+    "message_action": ("Ask an Azents Agent", 3),
+    "azents_settings": ("Azents settings", 1),
+    "conversation_settings": ("Conversation settings", 3),
+}
 
 
 class FakeState:
@@ -104,7 +114,12 @@ class FakeState:
             self.interaction_configurations: list[dict[str, object]] = []
             self.interactions: list[dict[str, object]] = []
             self._interaction_endpoint_url: str | None = None
-            self._transient_selector_custom_ids: list[str] = []
+            self._transient_component_custom_ids: dict[str, list[str]] = {
+                "selector": [],
+                "settings": [],
+            }
+            self.guild_commands: dict[str, dict[str, object]] = {}
+            self._command_sequence = 500000000000000000
             self.deliveries: list[dict[str, object]] = []
             self.gateway_connections = 0
             self.gateway_initial_opcodes: list[int] = []
@@ -132,6 +147,7 @@ class FakeState:
             "bot_user_id",
             "api_scenarios",
             "api_scenario_sequences",
+            "guild_commands",
             "history_scenario",
             "history_pages",
             "root_messages",
@@ -141,6 +157,9 @@ class FakeState:
         }
         if set(payload) - allowed:
             raise ValueError("Unsupported Discord fake configuration field.")
+        configured_guild_commands = _configured_guild_commands(
+            payload.get("guild_commands")
+        )
         with self.lock:
             for name in ("application_id", "guild_id", "bot_user_id"):
                 value = payload.get(name)
@@ -194,7 +213,19 @@ class FakeState:
             self.interaction_configurations = []
             self.interactions = []
             self._interaction_endpoint_url = None
-            self._transient_selector_custom_ids = []
+            self._transient_component_custom_ids = {
+                "selector": [],
+                "settings": [],
+            }
+            self.guild_commands = configured_guild_commands
+            self._command_sequence = max(
+                (
+                    int(command_id)
+                    for command_id in configured_guild_commands
+                    if command_id.isdigit()
+                ),
+                default=500000000000000000,
+            )
             self.deliveries = []
             self.gateway_connections = 0
             self.gateway_initial_opcodes = []
@@ -275,6 +306,59 @@ class FakeState:
                     self.api_scenario_sequences.pop(operation, None)
                 return scenario
             return self.api_scenarios.get(operation, "ok")
+
+    def list_guild_commands(self) -> list[dict[str, object]]:
+        """Return current fake commands to the Discord adapter."""
+        with self.lock:
+            return [dict(command) for command in self.guild_commands.values()]
+
+    def create_guild_command(self, body: Mapping[str, object]) -> dict[str, object]:
+        """Create one bounded Discord command with a deterministic ID."""
+        command_fields = _guild_command_fields(body)
+        with self.lock:
+            if len(self.guild_commands) >= _MAX_CONFIGURED_GUILD_COMMANDS:
+                raise ValueError("Discord command state exceeds its bounded size.")
+            self._command_sequence += 1
+            command: dict[str, object] = {
+                "id": str(self._command_sequence),
+                **command_fields,
+            }
+            self.guild_commands[cast(str, command["id"])] = command
+            return dict(command)
+
+    def update_guild_command(
+        self,
+        command_id: str,
+        body: Mapping[str, object],
+    ) -> dict[str, object] | None:
+        """Update one known command without retaining the request body in evidence."""
+        command_fields = _guild_command_fields(body)
+        with self.lock:
+            if command_id not in self.guild_commands:
+                return None
+            updated: dict[str, object] = {
+                "id": command_id,
+                **command_fields,
+            }
+            self.guild_commands[command_id] = updated
+            return dict(updated)
+
+    def delete_guild_command(self, command_id: str) -> bool:
+        """Delete one known command."""
+        with self.lock:
+            return self.guild_commands.pop(command_id, None) is not None
+
+    def command_id_for_role(self, role: str) -> str | None:
+        """Return one current command ID through a transient role lookup."""
+        contract = _COMMAND_ROLE_CONTRACTS.get(role)
+        if contract is None:
+            return None
+        name, command_type = contract
+        with self.lock:
+            for command_id, command in self.guild_commands.items():
+                if command.get("name") == name and command.get("type") == command_type:
+                    return command_id
+        return None
 
     def configure_delivery_barrier(self, payload: Mapping[str, object]) -> None:
         """Arm one bounded provider delivery barrier for deterministic E2E ordering."""
@@ -394,7 +478,7 @@ class FakeState:
             response_status = 0
             response_payload = None
         with self.lock:
-            self._capture_transient_selector_custom_ids(response_payload)
+            self._capture_transient_component_custom_ids(response_payload)
             evidence: dict[str, object] = {
                 "interaction_id": interaction_id,
                 "interaction_type": interaction_type,
@@ -419,25 +503,33 @@ class FakeState:
             self.interactions.append(evidence)
         return response_status, cast(object, response_payload)
 
-    def consume_transient_selector_custom_id(self) -> str | None:
-        """Consume one request-local selector ID without adding it to evidence."""
+    def consume_transient_component_custom_id(self, scope: str) -> str | None:
+        """Consume one request-local component ID without adding it to evidence."""
         with self.lock:
-            if not self._transient_selector_custom_ids:
+            custom_ids = self._transient_component_custom_ids.get(scope)
+            if not custom_ids:
                 return None
-            return self._transient_selector_custom_ids.pop(0)
+            return custom_ids.pop(0)
 
-    def _capture_transient_selector_custom_ids(self, value: object) -> None:
-        """Retain selector IDs only transiently for the next test interaction."""
+    def capture_transient_component_custom_ids(self, value: object) -> None:
+        """Capture signed component IDs from one delivered provider body."""
+        with self.lock:
+            self._capture_transient_component_custom_ids(value)
+
+    def _capture_transient_component_custom_ids(self, value: object) -> None:
+        """Retain typed component IDs only transiently for the next interaction."""
         if isinstance(value, dict):
             for key, nested in cast(dict[object, object], value).items():
                 if key == "custom_id" and isinstance(nested, str):
                     if nested.startswith("azents-selector:"):
-                        self._transient_selector_custom_ids.append(nested)
+                        self._transient_component_custom_ids["selector"].append(nested)
+                    elif nested.startswith("a:"):
+                        self._transient_component_custom_ids["settings"].append(nested)
                 else:
-                    self._capture_transient_selector_custom_ids(nested)
+                    self._capture_transient_component_custom_ids(nested)
         elif isinstance(value, list):
             for nested in cast(list[object], value):
-                self._capture_transient_selector_custom_ids(nested)
+                self._capture_transient_component_custom_ids(nested)
 
     def create_message(
         self,
@@ -658,6 +750,9 @@ class FakeState:
                 "requests": list(self.requests),
                 "interaction_configurations": list(self.interaction_configurations),
                 "interactions": list(self.interactions),
+                "guild_commands": _guild_command_evidence(
+                    list(self.guild_commands.values())
+                ),
                 "deliveries": list(self.deliveries),
                 "operations": list(self.operation_evidence),
                 "gateway": {
@@ -693,7 +788,25 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
         if parsed.path == "/__testenv/transient-selector":
             self._json_response(
                 200,
-                {"custom_id": self.state.consume_transient_selector_custom_id()},
+                {
+                    "custom_id": self.state.consume_transient_component_custom_id(
+                        "selector"
+                    )
+                },
+            )
+            return
+        if parsed.path == "/__testenv/transient-component":
+            scope = parse_qs(parsed.query).get("scope", [""])[0]
+            self._json_response(
+                200,
+                {"custom_id": self.state.consume_transient_component_custom_id(scope)},
+            )
+            return
+        if parsed.path == "/__testenv/command-id":
+            role = parse_qs(parsed.query).get("role", [""])[0]
+            self._json_response(
+                200,
+                {"command_id": self.state.command_id_for_role(role)},
             )
             return
         if parsed.path == f"{_API_PREFIX}/oauth2/applications/@me":
@@ -755,6 +868,11 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             if self._controlled_response(self._operation("guild_membership")):
                 return
             self._json_response(200, {"user": {"id": self.state.bot_user_id}})
+            return
+        if _guild_command_collection(parsed.path):
+            if self._controlled_response(self._operation("list_guild_commands")):
+                return
+            self._json_response_array(200, self.state.list_guild_commands())
             return
         if parsed.path.startswith(f"{_API_PREFIX}/channels/") and parsed.path.endswith(
             "/messages"
@@ -1003,30 +1121,15 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 },
             )
             return
-        application_command_path = parsed.path.startswith(
-            f"{_API_PREFIX}/applications/"
-        ) and parsed.path.endswith("/commands")
-        if application_command_path:
-            application_id, guild_id = _application_command_ids(parsed.path)
-            scenario = self._operation(
-                "register_command",
-                metadata={
-                    "application_id": application_id,
-                    **({"guild_id": guild_id} if guild_id is not None else {}),
-                },
-            )
-            if self._controlled_response(scenario):
+        if _guild_command_collection(parsed.path):
+            if self._controlled_response(self._operation("create_guild_command")):
                 return
-            self.state.record_operation(
-                "command_registration",
-                operation="register_command",
-                outcome="delivered",
-                metadata={
-                    "application_id": application_id,
-                    **({"guild_id": guild_id} if guild_id is not None else {}),
-                },
-            )
-            self._json_response(201, {"id": "500000000000000001"})
+            try:
+                command = self.state.create_guild_command(self._json_body())
+            except ValueError as error:
+                self._json_response(400, {"message": str(error)})
+                return
+            self._json_response(201, command)
             return
         if parsed.path.endswith("/threads"):
             thread_parent_path = parsed.path.removesuffix("/threads")
@@ -1203,6 +1306,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             response_channel_id = (
                 "0" if scenario == "response_channel_mismatch" else channel_id
             )
+            self.state.capture_transient_component_custom_ids(body)
             self.state.record_delivery(
                 operation="create_message",
                 channel_id=channel_id,
@@ -1233,6 +1337,23 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
     def do_PATCH(self) -> None:
         """Configure callback authority or update a message without retaining bodies."""
         parsed = urlparse(self.path)
+        command_id = _guild_command_item(parsed.path)
+        if command_id is not None:
+            if self._controlled_response(self._operation("update_guild_command")):
+                return
+            try:
+                command = self.state.update_guild_command(
+                    command_id,
+                    self._json_body(),
+                )
+            except ValueError as error:
+                self._json_response(400, {"message": str(error)})
+                return
+            if command is None:
+                self._json_response(404, {"message": "Not found."})
+                return
+            self._json_response(200, command)
+            return
         if parsed.path.startswith(f"{_API_PREFIX}/applications/"):
             application_id = parsed.path.rsplit("/", 1)[-1]
             scenario = self._operation(
@@ -1344,7 +1465,17 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         """Delete one fake message without preserving visible content."""
-        channel_id, message_id = _channel_message_ids(urlparse(self.path).path)
+        path = urlparse(self.path).path
+        command_id = _guild_command_item(path)
+        if command_id is not None:
+            if self._controlled_response(self._operation("delete_guild_command")):
+                return
+            if not self.state.delete_guild_command(command_id):
+                self._json_response(404, {"message": "Not found."})
+                return
+            self._json_response(204, None)
+            return
+        channel_id, message_id = _channel_message_ids(path)
         if channel_id is None or message_id is None:
             self._json_response(404, {"message": "Unknown fake endpoint."})
             return
@@ -1854,22 +1985,109 @@ def _multipart_file_evidence(raw_body: bytes) -> tuple[int, int]:
     return len(file_parts), sum(len(file_part) for file_part in file_parts)
 
 
-def _application_command_ids(path: str) -> tuple[str, str | None]:
-    """Extract bounded application/Guild identities from command registration paths."""
+def _guild_command_collection(path: str) -> bool:
+    """Recognize one Guild command collection path."""
     parts = path.strip("/").split("/")
-    try:
-        application_id = parts[parts.index("applications") + 1]
-    except ValueError:
-        application_id = "unknown"
-    except IndexError:
-        application_id = "unknown"
-    guild_id: str | None = None
-    if "guilds" in parts:
-        try:
-            guild_id = parts[parts.index("guilds") + 1]
-        except IndexError:
-            guild_id = None
-    return application_id, guild_id
+    return (
+        len(parts) == 7
+        and parts[:3] == ["api", "v10", "applications"]
+        and (parts[4] == "guilds" and parts[6] == "commands")
+    )
+
+
+def _guild_command_item(path: str) -> str | None:
+    """Return one command ID only for a Guild command item path."""
+    parts = path.strip("/").split("/")
+    if (
+        len(parts) != 8
+        or parts[:3] != ["api", "v10", "applications"]
+        or parts[4] != "guilds"
+        or parts[6] != "commands"
+        or not parts[7]
+    ):
+        return None
+    return parts[7]
+
+
+def _configured_guild_commands(value: object) -> dict[str, dict[str, object]]:
+    """Validate bounded initial Guild command state for reconciliation tests."""
+    if value is None:
+        return {}
+    if not isinstance(value, list):
+        raise ValueError("guild_commands must be a list.")
+    raw_commands = cast(list[object], value)
+    if len(raw_commands) > _MAX_CONFIGURED_GUILD_COMMANDS:
+        raise ValueError("guild_commands exceeds its bounded size.")
+    commands: dict[str, dict[str, object]] = {}
+    for raw_command in raw_commands:
+        if not isinstance(raw_command, dict):
+            raise ValueError("guild_commands entries must be objects.")
+        command = cast(dict[str, object], raw_command)
+        command_id = command.get("id")
+        if (
+            not isinstance(command_id, str)
+            or not command_id.isdigit()
+            or len(command_id) > _MAX_GUILD_COMMAND_ID_CHARACTERS
+            or command_id in commands
+        ):
+            raise ValueError("guild_commands entry is invalid.")
+        command_fields = _guild_command_fields(command)
+        commands[command_id] = {
+            "id": command_id,
+            **command_fields,
+        }
+    return commands
+
+
+def _guild_command_fields(body: Mapping[str, object]) -> dict[str, object]:
+    """Validate one bounded Discord command body without retaining extra fields."""
+    name = body.get("name")
+    command_type = body.get("type")
+    description = body.get("description")
+    if (
+        not isinstance(name, str)
+        or not name
+        or len(name) > _MAX_GUILD_COMMAND_NAME_CHARACTERS
+        or not isinstance(command_type, int)
+        or isinstance(command_type, bool)
+        or command_type not in _GUILD_COMMAND_TYPES
+        or description is not None
+        and (
+            not isinstance(description, str)
+            or len(description) > _MAX_GUILD_COMMAND_DESCRIPTION_CHARACTERS
+        )
+    ):
+        raise ValueError("Invalid Discord command payload.")
+    return {
+        "name": name,
+        "type": command_type,
+        **({} if description is None else {"description": description}),
+    }
+
+
+def _guild_command_evidence(
+    commands: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Project command roles without retaining provider identifiers or names."""
+    evidence = [
+        {
+            "role": _guild_command_role(command),
+            "type": command["type"],
+        }
+        for command in commands
+    ]
+    return sorted(
+        evidence,
+        key=lambda item: (str(item["role"]), int(cast(int, item["type"]))),
+    )
+
+
+def _guild_command_role(command: Mapping[str, object]) -> str:
+    """Classify one command into a required role or an unrelated category."""
+    for role, (name, command_type) in _COMMAND_ROLE_CONTRACTS.items():
+        if command.get("name") == name and command.get("type") == command_type:
+            return role
+    return "unrelated"
 
 
 def _channel_message_ids(path: str) -> tuple[str | None, str | None]:

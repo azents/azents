@@ -37,6 +37,12 @@ from azents.services.external_channel.discord_interaction import (
 from azents.services.external_channel.discord_selector import (
     DiscordSelectorResponseService,
 )
+from azents.services.external_channel.discord_settings import (
+    DiscordSettingsResponseService,
+)
+from azents.services.external_channel.discord_settings_scope import (
+    build_discord_settings_custom_id,
+)
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
 )
@@ -184,6 +190,28 @@ class _SelectorResponseDouble:
         )
 
 
+class _SettingsResponseDouble:
+    """Provide deterministic settings rendering without provider I/O."""
+
+    def __init__(self, *, cleanup_delivery_ids: tuple[str, ...] = ()) -> None:
+        self.config = SimpleNamespace(
+            auth=SimpleNamespace(jwt=SimpleNamespace(secret_key="settings-secret"))
+        )
+        self.cleanup_delivery_ids = cleanup_delivery_ids
+
+    async def initial_response(self, **_: object) -> object:
+        return SimpleNamespace(
+            response={"type": 4, "data": {"flags": 64, "content": "Settings."}},
+            cleanup_delivery_ids=(),
+        )
+
+    async def component_response(self, **_: object) -> object:
+        return SimpleNamespace(
+            response={"type": 7, "data": {"content": "Saved.", "components": []}},
+            cleanup_delivery_ids=self.cleanup_delivery_ids,
+        )
+
+
 def _configuration(
     public_key: str,
     *,
@@ -203,7 +231,17 @@ def _configuration(
         provider_bot_user_id=None,
         http_callback_selector_hash="unused",
         encrypted_credentials="ciphertext",
-        capabilities={"interaction_public_key": public_key},
+        capabilities={
+            "interaction_public_key": public_key,
+            "discord_command_set": {
+                "schema_version": 1,
+                "command_ids": {
+                    "message_action": "100",
+                    "azents_settings": "101",
+                    "conversation_settings": "102",
+                },
+            },
+        },
         provider_config={"target_guild_id": "guild-1"},
         last_verified_at=_NOW,
         last_health_at=_NOW,
@@ -222,6 +260,7 @@ def _service(
     *,
     configuration: ExternalChannelConnectionConfiguration,
     admission: _AdmissionDouble,
+    cleanup_delivery_ids: tuple[str, ...] = (),
 ) -> tuple[DiscordHTTPAdmissionService, _RepositoryDouble, _ShortcutSourceDouble]:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
@@ -230,6 +269,9 @@ def _service(
     repository = _RepositoryDouble(configuration)
     shortcut_source = _ShortcutSourceDouble()
     selector_response = _SelectorResponseDouble()
+    settings_response = _SettingsResponseDouble(
+        cleanup_delivery_ids=cleanup_delivery_ids
+    )
     return (
         DiscordHTTPAdmissionService(
             session_manager=cast(SessionManager[AsyncSession], session_manager),
@@ -242,6 +284,10 @@ def _service(
             selector_response_service=cast(
                 DiscordSelectorResponseService,
                 selector_response,
+            ),
+            settings_response_service=cast(
+                DiscordSettingsResponseService,
+                settings_response,
             ),
         ),
         repository,
@@ -262,10 +308,13 @@ def _body(
             "application_id": application_id,
             "guild_id": guild_id,
             "channel_id": "channel-1",
+            "channel": {"id": "channel-1", "type": 0},
             "member": {"user": {"id": "user-1"}},
             "token": "interaction-token-must-not-persist",
             "data": {
-                "name": "Ask an Azents Agent",
+                "id": "101",
+                "name": "Azents settings",
+                "type": 1,
                 "content": "private command content",
                 "attachments": [{"id": "attachment-1"}],
             },
@@ -288,9 +337,11 @@ def _message_command_body() -> bytes:
             "application_id": "app-1",
             "guild_id": "guild-1",
             "channel_id": "channel-1",
+            "channel": {"id": "channel-1", "type": 0},
             "member": {"user": {"id": "user-1"}},
             "token": "interaction-token-must-not-persist",
             "data": {
+                "id": "100",
                 "type": 3,
                 "name": "Ask an Azents Agent",
                 "target_id": "100",
@@ -332,12 +383,35 @@ def _selector_component_body() -> bytes:
             "application_id": "app-1",
             "guild_id": "guild-1",
             "channel_id": "channel-1",
+            "channel": {"id": "channel-1", "type": 0},
             "member": {"user": {"id": "user-1"}},
             "token": "interaction-token-must-not-persist",
             "data": {
                 "custom_id": "azents-selector:select:admission-1:0:signature",
                 "values": ["route-1"],
             },
+        },
+        separators=(",", ":"),
+    ).encode()
+
+
+def _settings_component_body() -> bytes:
+    """Build one signed settings component callback."""
+    custom_id = build_discord_settings_custom_id(
+        secret="settings-secret",
+        action="open",
+        origin_interaction_id="origin-interaction-1",
+    )
+    return json.dumps(
+        {
+            "id": "discord-settings-component-1",
+            "type": 3,
+            "application_id": "app-1",
+            "guild_id": "guild-1",
+            "channel_id": "channel-1",
+            "channel": {"id": "channel-1", "type": 0},
+            "member": {"user": {"id": "user-1"}},
+            "data": {"custom_id": custom_id},
         },
         separators=(",", ":"),
     ).encode()
@@ -377,12 +451,14 @@ async def test_signed_interaction_admission_redacts_sensitive_input() -> None:
         "interaction_type": "shortcut",
         "guild_id": "guild-1",
         "channel_id": "channel-1",
+        "provider_parent_channel_id": "channel-1",
         "discord_interaction_type": "2",
+        "command_role": "azents_settings",
     }
     assert principal.provider is ExternalChannelProvider.DISCORD
     assert principal.provider_tenant_id == "guild-1"
     assert principal.provider_user_id == "user-1"
-    assert admission.finished_interaction_ids == []
+    assert admission.finished_interaction_ids == ["interaction-row-1"]
     persisted = repr((create, principal, result))
     assert "interaction-token" not in persisted
     assert "private command content" not in persisted
@@ -463,6 +539,7 @@ async def test_selector_component_keeps_scope_and_route_request_local() -> None:
         "interaction_type": "block_action",
         "guild_id": "guild-1",
         "channel_id": "channel-1",
+        "provider_parent_channel_id": "channel-1",
         "discord_interaction_type": "3",
     }
     assert admission.claimed_interaction_ids == ["interaction-row-1"]
@@ -473,6 +550,39 @@ async def test_selector_component_keeps_scope_and_route_request_local() -> None:
     }
     assert "route-1" not in repr(create)
     assert "interaction-token" not in repr((create, result))
+
+
+@pytest.mark.asyncio
+async def test_settings_component_preserves_every_committed_cleanup_intent() -> None:
+    """Return all cleanup deliveries without raising after the settings commit."""
+    private_key = Ed25519PrivateKey.generate()
+    admission = _AdmissionDouble()
+    service, _, _ = _service(
+        configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
+        admission=admission,
+        cleanup_delivery_ids=("presence-delete-1", "progress-delete-1"),
+    )
+    body = _settings_component_body()
+    timestamp, signature = _signature(private_key, body)
+
+    result = await service.handle(
+        selector="opaque-selector",
+        raw_body=body,
+        timestamp=timestamp,
+        signature=signature,
+        received_at=_NOW,
+    )
+
+    assert result.response == {
+        "type": 7,
+        "data": {"content": "Saved.", "components": []},
+    }
+    assert result.control_delivery_attempt_ids == (
+        "presence-delete-1",
+        "progress-delete-1",
+    )
+    assert result.control_delivery_connection_id == "connection-1"
+    assert admission.finished_interaction_ids == ["interaction-row-1"]
 
 
 @pytest.mark.asyncio

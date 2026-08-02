@@ -67,6 +67,9 @@ from azents.services.external_channel.discord_delivery import (
 from azents.services.external_channel.discord_presentation import (
     render_discord_session_presence,
 )
+from azents.services.external_channel.discord_settings_scope import (
+    build_discord_binding_settings_open_custom_id,
+)
 from azents.services.external_channel.file_transfer import (
     ExternalChannelFileTransferError,
     iter_external_channel_exchange_file_chunks,
@@ -771,9 +774,15 @@ class ExternalChannelActionService:
         if files is None:
             return _discord_invalid_payload()
         delivery_channel_id = channel_id
+        conversation_scope = payload.get("conversation_scope")
         parent_channel_id = payload.get("thread_parent_channel_id")
         root_message_id = payload.get("thread_root_message_id")
-        if parent_channel_id is not None or root_message_id is not None:
+        if conversation_scope == "parent_channel":
+            if parent_channel_id is not None or root_message_id is not None:
+                return _discord_invalid_payload()
+        elif conversation_scope in {None, "thread"} and (
+            parent_channel_id is not None or root_message_id is not None
+        ):
             if (
                 not isinstance(parent_channel_id, str)
                 or not parent_channel_id.isdigit()
@@ -798,6 +807,8 @@ class ExternalChannelActionService:
                     resource_id=target.resource_id,
                     delivery_channel_id=resolved_thread_id,
                 )
+        elif conversation_scope not in {None, "thread"}:
+            return _discord_invalid_payload()
         match target.operation:
             case (
                 ExternalChannelDeliveryOperation.REPLY
@@ -818,6 +829,16 @@ class ExternalChannelActionService:
                         agent_name=presence.agent_name,
                         session_url=presence.session_url,
                         state=presence.state,
+                        settings_custom_id=(
+                            build_discord_binding_settings_open_custom_id(
+                                secret=self.config.auth.jwt.secret_key,
+                                binding_id=target.binding_id,
+                            )
+                            if presence.state == "joined"
+                            and isinstance(target.binding_id, str)
+                            and target.binding_id
+                            else None
+                        ),
                     )
                     return await self.discord_client.create_message(
                         bot_token=bot_token,

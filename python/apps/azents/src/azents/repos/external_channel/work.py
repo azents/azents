@@ -3472,30 +3472,41 @@ def _provider_payload(
                 }
         case ExternalChannelProvider.DISCORD:
             guild_id = labels.get("guild_id")
-            delivery_channel_id = labels.get("delivery_channel_id")
-            thread_id = (
-                delivery_channel_id
-                if isinstance(delivery_channel_id, str) and delivery_channel_id
-                else labels.get("thread_id")
-            )
+            conversation_scope = labels.get("conversation_scope")
+            parent_channel_id = labels.get("parent_channel_id")
             if not isinstance(guild_id, str) or not guild_id:
                 raise ValueError("Discord resource has no provider Guild.")
-            if not isinstance(thread_id, str) or not thread_id:
-                raise ValueError("Discord resource has no provider thread.")
-            payload = {
-                "guild_id": guild_id,
-                "channel_id": thread_id,
-            }
-            parent_channel_id = labels.get("parent_channel_id")
-            root_message_id = labels.get("root_message_id")
-            if delivery_channel_id is None and (
-                isinstance(parent_channel_id, str)
-                and parent_channel_id
-                and isinstance(root_message_id, str)
-                and root_message_id == thread_id
-            ):
-                payload["thread_parent_channel_id"] = parent_channel_id
-                payload["thread_root_message_id"] = root_message_id
+            if conversation_scope == "parent_channel":
+                if not isinstance(parent_channel_id, str) or not parent_channel_id:
+                    raise ValueError("Discord parent Resource has no provider channel.")
+                payload = {
+                    "guild_id": guild_id,
+                    "channel_id": parent_channel_id,
+                    "conversation_scope": "parent_channel",
+                }
+            else:
+                delivery_channel_id = labels.get("delivery_channel_id")
+                thread_id = (
+                    delivery_channel_id
+                    if isinstance(delivery_channel_id, str) and delivery_channel_id
+                    else labels.get("thread_id")
+                )
+                if not isinstance(thread_id, str) or not thread_id:
+                    raise ValueError("Discord resource has no provider thread.")
+                payload = {
+                    "guild_id": guild_id,
+                    "channel_id": thread_id,
+                    "conversation_scope": "thread",
+                }
+                root_message_id = labels.get("root_message_id")
+                if delivery_channel_id is None and (
+                    isinstance(parent_channel_id, str)
+                    and parent_channel_id
+                    and isinstance(root_message_id, str)
+                    and root_message_id == thread_id
+                ):
+                    payload["thread_parent_channel_id"] = parent_channel_id
+                    payload["thread_root_message_id"] = root_message_id
         case _ as unreachable:
             assert_never(unreachable)
     if text is not None:

@@ -50,6 +50,16 @@ def session_presence_payload(
             payload["thread_ts"] = thread_ts
         return payload
     if provider == "discord":
+        conversation_scope = labels.get("conversation_scope")
+        if conversation_scope == "parent_channel":
+            payload.update(
+                {
+                    "guild_id": labels.get("guild_id"),
+                    "channel_id": labels.get("parent_channel_id"),
+                    "conversation_scope": "parent_channel",
+                }
+            )
+            return payload
         delivery_channel_id = labels.get("delivery_channel_id")
         thread_id = (
             delivery_channel_id
@@ -60,6 +70,7 @@ def session_presence_payload(
             {
                 "guild_id": labels.get("guild_id"),
                 "channel_id": thread_id,
+                "conversation_scope": "thread",
             }
         )
         parent_channel_id = labels.get("parent_channel_id")

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.config import Config
 from azents.core.enums import (
+    ExternalChannelConnectionStatus,
     ExternalChannelConversationLocation,
     ExternalChannelConversationScopeKind,
     ExternalChannelParticipationSettingStatus,
@@ -170,6 +171,34 @@ def _service(
         participation_lock=cast(Any, _Lock()),
         config=Config.model_construct(external_channel_participation_enabled=True),
     )
+
+
+@pytest.mark.asyncio
+async def test_thread_settings_never_fall_back_to_parent_scope() -> None:
+    """A proven thread scope requires its exact connected thread Binding."""
+    repository = MagicMock()
+    repository.get_connection_configuration = AsyncMock(
+        return_value=SimpleNamespace(
+            id="connection-1",
+            status=ExternalChannelConnectionStatus.ACTIVE,
+        )
+    )
+    repository.get_resource_by_provider_key = AsyncMock(return_value=None)
+    repository.get_active_participation_setting = AsyncMock(return_value=_setting())
+    service = _service(repository=repository)
+
+    with pytest.raises(
+        ExternalChannelParticipationError,
+        match="thread settings are unavailable",
+    ):
+        await service.resolve_settings(
+            connection_id="connection-1",
+            provider_parent_channel_id="channel-1",
+            provider_thread_resource_key="slack:tenant-1:channel-1:1.000000",
+            principal_id="principal-1",
+        )
+
+    repository.get_active_participation_setting.assert_not_awaited()
 
 
 @pytest.mark.asyncio

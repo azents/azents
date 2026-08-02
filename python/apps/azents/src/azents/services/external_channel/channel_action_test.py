@@ -58,6 +58,9 @@ from azents.services.external_channel.discord_delivery import (
     DiscordDeliveryResult,
     DiscordOutboundFile,
 )
+from azents.services.external_channel.discord_settings_scope import (
+    build_discord_binding_settings_open_custom_id,
+)
 from azents.services.external_channel.slack_events import (
     SlackControlMessageResult,
     SlackConversationClient,
@@ -679,6 +682,9 @@ def _service(
             SimpleNamespace(
                 avatar_cdn_base_url=None,
                 web_url="https://azents.example",
+                auth=SimpleNamespace(
+                    jwt=SimpleNamespace(secret_key="test-signing-secret")
+                ),
             ),
         ),
     )
@@ -1002,6 +1008,60 @@ async def test_discord_reply_agent_prefix_follows_app_mode(
 
 
 @pytest.mark.asyncio
+async def test_discord_parent_reply_posts_directly_without_thread_provisioning() -> (
+    None
+):
+    """A parent Resource never asks Discord to provision a reply thread."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "provider": ExternalChannelProvider.DISCORD,
+            "provider_tenant_id": "111",
+            "resource_id": "resource-1",
+            "request_payload": {
+                "guild_id": "111",
+                "channel_id": "222",
+                "conversation_scope": "parent_channel",
+                "text": "Reply",
+            },
+        }
+    )
+    discord_client = _DiscordClient()
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+        discord_client=discord_client,
+    )
+
+    result = await service.attempt_delivery("delivery-1")
+
+    assert result is ExternalChannelDeliveryStatus.DELIVERED
+    assert discord_client.calls == [
+        (
+            "create",
+            {
+                "bot_token": "xoxb-secret",
+                "guild_id": "111",
+                "channel_id": "222",
+                "content": "Reply",
+                "delivery_attempt_id": "delivery-1",
+            },
+        )
+    ]
+    assert repository.recorded_delivery_channels == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("app_mode", "expected_content"),
     [
@@ -1286,8 +1346,8 @@ async def test_slack_session_presence_control_replaces_open_session() -> None:
 
 
 @pytest.mark.asyncio
-async def test_discord_session_presence_control_uses_embed_and_link() -> None:
-    """A committed Discord binding presence uses an Embed and Session button."""
+async def test_discord_session_presence_control_uses_signed_settings_action() -> None:
+    """A joined Discord binding presence contains a signed settings action."""
     events: list[str] = []
     repository = _RepositoryDouble(events)
     repository.target = repository.target.model_copy(
@@ -1298,7 +1358,7 @@ async def test_discord_session_presence_control_uses_embed_and_link() -> None:
             "agent_name": "Research Agent",
             "request_payload": {
                 "control_kind": "session_presence",
-                "presence_state": "left",
+                "presence_state": "joined",
                 "guild_id": "111",
                 "channel_id": "333",
             },
@@ -1344,14 +1404,25 @@ async def test_discord_session_presence_control_uses_embed_and_link() -> None:
                                     "https://azents.example/w/workspace/agents/"
                                     "agent-1/sessions/session-1"
                                 ),
-                            }
+                            },
+                            {
+                                "type": 2,
+                                "style": 2,
+                                "label": "Conversation settings",
+                                "custom_id": (
+                                    build_discord_binding_settings_open_custom_id(
+                                        secret="test-signing-secret",
+                                        binding_id="binding-1",
+                                    )
+                                ),
+                            },
                         ],
                     }
                 ],
                 "embeds": [
                     {
-                        "description": "**Research Agent** left this conversation.",
-                        "color": 0x99AAB5,
+                        "description": "**Research Agent** joined this conversation.",
+                        "color": 0x57F287,
                     }
                 ],
             },

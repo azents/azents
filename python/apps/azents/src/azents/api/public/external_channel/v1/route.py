@@ -82,15 +82,17 @@ async def receive_discord_interaction(
     if result.ping:
         return JSONResponse(content={"type": 1})
     if result.response is not None:
-        if (
-            result.control_delivery_attempt_id is not None
-            and result.control_delivery_connection_id is not None
-        ):
-            background_tasks.add_task(
-                service.attempt_control_delivery,
-                connection_id=result.control_delivery_connection_id,
-                delivery_attempt_id=result.control_delivery_attempt_id,
-            )
+        if result.control_delivery_attempt_ids:
+            if result.control_delivery_connection_id is None:
+                raise RuntimeError(
+                    "Discord control deliveries require a connection identity."
+                )
+            for delivery_attempt_id in result.control_delivery_attempt_ids:
+                background_tasks.add_task(
+                    service.attempt_control_delivery,
+                    connection_id=result.control_delivery_connection_id,
+                    delivery_attempt_id=delivery_attempt_id,
+                )
         return JSONResponse(content=result.response)
     return JSONResponse(
         content={

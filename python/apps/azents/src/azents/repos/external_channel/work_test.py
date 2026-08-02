@@ -104,6 +104,50 @@ def test_slack_thread_delivery_payload_retains_root_target() -> None:
     }
 
 
+def test_discord_parent_delivery_payload_uses_the_parent_channel() -> None:
+    """Lower a parent Resource to a direct Discord parent-channel post."""
+    payload = _provider_payload(
+        ExternalChannelProvider.DISCORD,
+        {
+            "guild_id": "111",
+            "parent_channel_id": "222",
+            "conversation_scope": "parent_channel",
+            "thread_id": "must-not-be-used",
+        },
+        text="Reply",
+    )
+
+    assert payload == {
+        "guild_id": "111",
+        "channel_id": "222",
+        "conversation_scope": "parent_channel",
+        "text": "Reply",
+    }
+
+
+def test_discord_thread_delivery_payload_retains_thread_provisioning_target() -> None:
+    """Lower a Discord thread Resource to its existing root-thread target."""
+    payload = _provider_payload(
+        ExternalChannelProvider.DISCORD,
+        {
+            "guild_id": "111",
+            "parent_channel_id": "222",
+            "root_message_id": "333",
+            "thread_id": "333",
+        },
+        text="Reply",
+    )
+
+    assert payload == {
+        "guild_id": "111",
+        "channel_id": "333",
+        "conversation_scope": "thread",
+        "thread_parent_channel_id": "222",
+        "thread_root_message_id": "333",
+        "text": "Reply",
+    }
+
+
 def _task(
     *,
     id: str,

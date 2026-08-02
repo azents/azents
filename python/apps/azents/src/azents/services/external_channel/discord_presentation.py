@@ -54,8 +54,9 @@ def render_discord_session_presence(
     agent_name: str,
     session_url: str,
     state: ExternalChannelSessionPresenceState,
+    settings_custom_id: str | None,
 ) -> DiscordSessionPresencePresentation:
-    """Render one Session binding presence Embed with navigation."""
+    """Render one Session binding presence Embed with connected settings control."""
     escaped_name = (
         agent_name.replace("\\", "\\\\")
         .replace("*", "\\*")
@@ -65,6 +66,23 @@ def render_discord_session_presence(
     )
     verb = "joined" if state == "joined" else "left"
     description = f"**{escaped_name}** {verb} this conversation."
+    components: list[dict[str, object]] = [
+        {
+            "type": 2,
+            "style": 5,
+            "label": "View session",
+            "url": session_url,
+        }
+    ]
+    if state == "joined" and settings_custom_id is not None:
+        components.append(
+            {
+                "type": 2,
+                "style": 2,
+                "label": "Conversation settings",
+                "custom_id": settings_custom_id,
+            }
+        )
     return DiscordSessionPresencePresentation(
         text="",
         embeds=[
@@ -78,14 +96,7 @@ def render_discord_session_presence(
         components=[
             {
                 "type": 1,
-                "components": [
-                    {
-                        "type": 2,
-                        "style": 5,
-                        "label": "View session",
-                        "url": session_url,
-                    }
-                ],
+                "components": components,
             }
         ],
     )
