@@ -33,6 +33,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
+    ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
     ExternalChannelSetupClaimStatus,
@@ -1906,6 +1907,66 @@ class ExternalChannelRepository:
         )
         return self._as(ExternalChannelParticipationSetting, rdb)
 
+    async def update_participation_setting(
+        self,
+        session: AsyncSession,
+        *,
+        setting_id: str,
+        expected_settings_generation: int,
+        location: ExternalChannelConversationLocation,
+        response_mode: ExternalChannelResponseMode,
+        configured_by_principal_id: str,
+    ) -> ExternalChannelParticipationSetting | None:
+        """Replace one active provider-configured setting behind its generation."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelParticipationSetting)
+            .where(
+                RDBExternalChannelParticipationSetting.id == setting_id,
+                RDBExternalChannelParticipationSetting.status
+                == ExternalChannelParticipationSettingStatus.ACTIVE,
+                RDBExternalChannelParticipationSetting.settings_generation
+                == expected_settings_generation,
+            )
+            .with_for_update()
+        )
+        if rdb is None:
+            return None
+        rdb.location = location
+        rdb.response_mode = response_mode
+        rdb.settings_generation += 1
+        rdb.configured_by_user_id = None
+        rdb.configured_by_principal_id = configured_by_principal_id
+        await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
+        return ExternalChannelParticipationSetting.model_validate(rdb)
+
+    async def update_connected_binding_response_mode(
+        self,
+        session: AsyncSession,
+        *,
+        binding_id: str,
+        expected_response_mode: ExternalChannelResponseMode,
+        expected_updated_at: datetime.datetime,
+        response_mode: ExternalChannelResponseMode,
+    ) -> ExternalChannelBinding | None:
+        """Update one connected binding behind its concrete current mode."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelBinding)
+            .where(
+                RDBExternalChannelBinding.id == binding_id,
+                RDBExternalChannelBinding.disconnected_at.is_(None),
+                RDBExternalChannelBinding.response_mode == expected_response_mode,
+                RDBExternalChannelBinding.updated_at == expected_updated_at,
+            )
+            .with_for_update()
+        )
+        if rdb is None:
+            return None
+        rdb.response_mode = response_mode
+        await session.flush()
+        await session.refresh(rdb, attribute_names=["updated_at"])
+        return ExternalChannelBinding.model_validate(rdb)
+
     async def invalidate_participation_setting(
         self,
         session: AsyncSession,
@@ -2239,6 +2300,27 @@ class ExternalChannelRepository:
                 RDBExternalChannelResource.provider_resource_key
                 == provider_resource_key,
             )
+        )
+        return self._as(ExternalChannelResource, rdb)
+
+    async def lock_resource_by_provider_key(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        resource_type: ExternalChannelResourceType,
+        provider_resource_key: str,
+    ) -> ExternalChannelResource | None:
+        """Lock one canonical resource by typed connection-scoped identity."""
+        rdb = await session.scalar(
+            sa.select(RDBExternalChannelResource)
+            .where(
+                RDBExternalChannelResource.connection_id == connection_id,
+                RDBExternalChannelResource.resource_type == resource_type,
+                RDBExternalChannelResource.provider_resource_key
+                == provider_resource_key,
+            )
+            .with_for_update()
         )
         return self._as(ExternalChannelResource, rdb)
 

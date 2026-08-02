@@ -12,22 +12,30 @@ from azents.core.deps import get_config
 from azents.core.enums import (
     AgentLifecycleStatus,
     ExternalChannelAppMode,
+    ExternalChannelConnectionStatus,
     ExternalChannelConversationLocation,
+    ExternalChannelConversationScopeKind,
     ExternalChannelParticipationSettingStatus,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
+    ExternalChannelResponseMode,
     ExternalChannelSetupClaimStatus,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.external_channel.data import (
+    ExternalChannelAgentRoute,
+    ExternalChannelBinding,
     ExternalChannelParticipationSetting,
     ExternalChannelParticipationSettingCreate,
     ExternalChannelResource,
     ExternalChannelResourceCreate,
     ExternalChannelSetupClaim,
+)
+from azents.repos.external_channel.management import (
+    ExternalChannelManagementRepository,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.conversation import (
@@ -69,6 +77,26 @@ class ExternalChannelLocationSelection:
 
 
 @dataclass(frozen=True)
+class ExternalChannelParticipationSettings:
+    """Authorized canonical setup, parent, or connected-thread settings."""
+
+    target: Literal["setup", "parent", "thread"]
+    agent_name: str
+    setting: ExternalChannelParticipationSetting | None
+    claim: ExternalChannelSetupClaim | None
+    resource: ExternalChannelResource | None
+    binding: ExternalChannelBinding | None
+
+
+@dataclass(frozen=True)
+class ExternalChannelParticipationSettingsMutation:
+    """Committed settings state and independent provider cleanup intents."""
+
+    settings: ExternalChannelParticipationSettings
+    cleanup_delivery_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class _CommittedLocation:
     """Setting and claim committed before independent replay begins."""
 
@@ -89,6 +117,10 @@ class ExternalChannelParticipationService:
         ExternalChannelRepository,
         Depends(ExternalChannelRepository),
     ]
+    management_repository: Annotated[
+        ExternalChannelManagementRepository,
+        Depends(ExternalChannelManagementRepository),
+    ]
     agent_repository: Annotated[
         AgentRepository,
         Depends(AgentRepository),
@@ -106,6 +138,442 @@ class ExternalChannelParticipationService:
         Depends(get_external_channel_participation_lock),
     ]
     config: Annotated[Config, Depends(get_config)]
+
+    async def resolve_settings(
+        self,
+        *,
+        connection_id: str,
+        provider_parent_channel_id: str,
+        provider_thread_resource_key: str | None,
+        principal_id: str,
+    ) -> ExternalChannelParticipationSettings:
+        """Resolve one authorized settings surface without mutating provider state."""
+        self._require_enabled()
+        async with self.session_manager() as session:
+            connection = await self.repository.get_connection_configuration(
+                session,
+                connection_id=connection_id,
+            )
+            if connection is None or connection.status not in {
+                ExternalChannelConnectionStatus.ACTIVE,
+                ExternalChannelConnectionStatus.DEGRADED,
+            }:
+                raise ExternalChannelParticipationError(
+                    "External Channel settings are unavailable."
+                )
+            if provider_thread_resource_key is not None:
+                resource = await self.repository.get_resource_by_provider_key(
+                    session,
+                    connection_id=connection.id,
+                    resource_type=ExternalChannelResourceType.THREAD,
+                    provider_resource_key=provider_thread_resource_key,
+                )
+                binding = (
+                    None
+                    if resource is None
+                    else await self.repository.get_connected_binding_by_resource(
+                        session,
+                        resource_id=resource.id,
+                    )
+                )
+                if resource is not None and binding is not None:
+                    route, agent_name = await self._authorize_settings_actor(
+                        session,
+                        connection_id=connection.id,
+                        route_id=binding.route_id,
+                        principal_id=principal_id,
+                        agent_session_id=binding.agent_session_id,
+                    )
+                    del route
+                    return ExternalChannelParticipationSettings(
+                        target="thread",
+                        agent_name=agent_name,
+                        setting=None,
+                        claim=None,
+                        resource=resource,
+                        binding=binding,
+                    )
+            setting = await self.repository.get_active_participation_setting(
+                session,
+                connection_id=connection.id,
+                provider_parent_channel_id=provider_parent_channel_id,
+            )
+            if setting is not None:
+                _, agent_name = await self._authorize_settings_actor(
+                    session,
+                    connection_id=connection.id,
+                    route_id=setting.route_id,
+                    principal_id=principal_id,
+                    agent_session_id=None,
+                )
+                resource = await self.repository.get_resource_by_provider_key(
+                    session,
+                    connection_id=connection.id,
+                    resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+                    provider_resource_key=provider_parent_channel_id,
+                )
+                binding = (
+                    None
+                    if resource is None
+                    else await self.repository.get_connected_binding_by_resource(
+                        session,
+                        resource_id=resource.id,
+                    )
+                )
+                return ExternalChannelParticipationSettings(
+                    target="parent",
+                    agent_name=agent_name,
+                    setting=setting,
+                    claim=None,
+                    resource=resource,
+                    binding=binding,
+                )
+            claim = await self.repository.get_nonterminal_setup_claim(
+                session,
+                connection_id=connection.id,
+                provider_parent_channel_id=provider_parent_channel_id,
+            )
+            if (
+                claim is None
+                or claim.route_id is None
+                or claim.status is not ExternalChannelSetupClaimStatus.PENDING_LOCATION
+            ):
+                raise ExternalChannelParticipationError(
+                    "Mention the App in this channel to begin conversation setup."
+                )
+            _, agent_name = await self._authorize_settings_actor(
+                session,
+                connection_id=connection.id,
+                route_id=claim.route_id,
+                principal_id=principal_id,
+                agent_session_id=None,
+            )
+            return ExternalChannelParticipationSettings(
+                target="setup",
+                agent_name=agent_name,
+                setting=None,
+                claim=claim,
+                resource=None,
+                binding=None,
+            )
+
+    async def mutate_parent_settings(
+        self,
+        *,
+        connection_id: str,
+        provider_parent_channel_id: str,
+        principal_id: str,
+        expected_setting_id: str,
+        expected_settings_generation: int,
+        location: ExternalChannelConversationLocation,
+        response_mode: ExternalChannelResponseMode,
+        now: datetime.datetime,
+        deadline: ExternalChannelOperationDeadline,
+    ) -> ExternalChannelParticipationSettingsMutation:
+        """Atomically mutate a parent setting and its concrete Channel binding."""
+        self._require_enabled()
+        conversation_scope = ExternalChannelConversationScope(
+            connection_id=connection_id,
+            kind=ExternalChannelConversationScopeKind.PARENT_CHANNEL,
+            provider_channel_id=provider_parent_channel_id,
+            provider_thread_key=None,
+        )
+        participation_scope = ExternalChannelParticipationScope(
+            connection_id=connection_id,
+            provider_parent_channel_id=provider_parent_channel_id,
+        )
+        cleanup_delivery_ids: tuple[str, ...] = ()
+        async with self.conversation_lock.acquire(
+            scope=conversation_scope,
+            deadline=deadline,
+        ) as conversation_lease:
+            await conversation_lease.assert_owned()
+            async with self.participation_lock.acquire(
+                scope=participation_scope,
+                deadline=deadline,
+            ) as participation_lease:
+                await participation_lease.assert_owned()
+                await conversation_lease.assert_owned()
+                async with self.session_manager() as session:
+                    connection = await self.repository.lock_connection_for_routing(
+                        session,
+                        connection_id=connection_id,
+                    )
+                    setting = await self.repository.lock_active_participation_setting(
+                        session,
+                        connection_id=connection_id,
+                        provider_parent_channel_id=provider_parent_channel_id,
+                    )
+                    if (
+                        connection is None
+                        or setting is None
+                        or setting.id != expected_setting_id
+                        or setting.settings_generation != expected_settings_generation
+                    ):
+                        raise ExternalChannelParticipationError(
+                            "External Channel settings changed before submission."
+                        )
+                    _, agent_name = await self._authorize_settings_actor(
+                        session,
+                        connection_id=connection.id,
+                        route_id=setting.route_id,
+                        principal_id=principal_id,
+                        agent_session_id=None,
+                    )
+                    resource = await self.repository.lock_resource_by_provider_key(
+                        session,
+                        connection_id=connection.id,
+                        resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+                        provider_resource_key=provider_parent_channel_id,
+                    )
+                    binding = (
+                        None
+                        if resource is None
+                        else await self.repository.lock_connected_binding_by_resource(
+                            session,
+                            resource_id=resource.id,
+                        )
+                    )
+                    if (
+                        setting.location is ExternalChannelConversationLocation.CHANNEL
+                        and location is ExternalChannelConversationLocation.THREADS
+                        and resource is not None
+                        and binding is not None
+                    ):
+                        disconnected = await (
+                            self.management_repository
+                        ).disconnect_parent_binding_for_participation(
+                            session,
+                            connection_id=connection.id,
+                            route_id=setting.route_id,
+                            resource_id=resource.id,
+                            binding_id=binding.id,
+                            now=now,
+                        )
+                        if disconnected is None:
+                            raise ExternalChannelParticipationError(
+                                "External Channel parent conversation changed."
+                            )
+                        cleanup_delivery_ids = disconnected
+                        binding = None
+                    updated = await self.repository.update_participation_setting(
+                        session,
+                        setting_id=setting.id,
+                        expected_settings_generation=setting.settings_generation,
+                        location=location,
+                        response_mode=response_mode,
+                        configured_by_principal_id=principal_id,
+                    )
+                    if updated is None:
+                        raise ExternalChannelParticipationError(
+                            "External Channel settings changed before submission."
+                        )
+                    if (
+                        location is ExternalChannelConversationLocation.CHANNEL
+                        and binding is not None
+                        and binding.response_mode is not response_mode
+                    ):
+                        binding = await (
+                            self.repository.update_connected_binding_response_mode(
+                                session,
+                                binding_id=binding.id,
+                                expected_response_mode=binding.response_mode,
+                                expected_updated_at=binding.updated_at,
+                                response_mode=response_mode,
+                            )
+                        )
+                        if binding is None:
+                            raise ExternalChannelParticipationError(
+                                "External Channel parent conversation changed."
+                            )
+                    await session.commit()
+        return ExternalChannelParticipationSettingsMutation(
+            settings=ExternalChannelParticipationSettings(
+                target="parent",
+                agent_name=agent_name,
+                setting=updated,
+                claim=None,
+                resource=resource,
+                binding=binding,
+            ),
+            cleanup_delivery_ids=cleanup_delivery_ids,
+        )
+
+    async def mutate_thread_settings(
+        self,
+        *,
+        connection_id: str,
+        provider_parent_channel_id: str,
+        resource_id: str,
+        binding_id: str,
+        principal_id: str,
+        expected_response_mode: ExternalChannelResponseMode,
+        expected_binding_updated_at: datetime.datetime,
+        response_mode: ExternalChannelResponseMode,
+        now: datetime.datetime,
+        deadline: ExternalChannelOperationDeadline,
+    ) -> ExternalChannelParticipationSettingsMutation:
+        """Mutate only one exact connected thread binding."""
+        self._require_enabled()
+        del now
+        async with self.session_manager() as session:
+            resource_snapshot = await self.repository.get_resource(
+                session,
+                resource_id=resource_id,
+            )
+        if (
+            resource_snapshot is None
+            or resource_snapshot.connection_id != connection_id
+            or resource_snapshot.resource_type is not ExternalChannelResourceType.THREAD
+        ):
+            raise ExternalChannelParticipationError(
+                "External Channel thread settings are unavailable."
+            )
+        labels = resource_snapshot.labels or {}
+        provider_thread_key = labels.get("thread_ts")
+        if not isinstance(provider_thread_key, str) or not provider_thread_key:
+            raise ExternalChannelParticipationError(
+                "External Channel thread settings are unavailable."
+            )
+        conversation_scope = ExternalChannelConversationScope(
+            connection_id=connection_id,
+            kind=ExternalChannelConversationScopeKind.THREAD,
+            provider_channel_id=provider_parent_channel_id,
+            provider_thread_key=provider_thread_key,
+        )
+        async with self.conversation_lock.acquire(
+            scope=conversation_scope,
+            deadline=deadline,
+        ) as conversation_lease:
+            await conversation_lease.assert_owned()
+            async with self.session_manager() as session:
+                connection = await self.repository.lock_connection_for_routing(
+                    session,
+                    connection_id=connection_id,
+                )
+                resource = await self.repository.lock_resource(
+                    session,
+                    resource_id=resource_id,
+                )
+                binding = await self.repository.lock_binding(
+                    session,
+                    binding_id=binding_id,
+                )
+                if (
+                    connection is None
+                    or resource is None
+                    or resource.connection_id != connection.id
+                    or resource.resource_type is not ExternalChannelResourceType.THREAD
+                    or binding is None
+                    or binding.resource_id != resource.id
+                    or binding.disconnected_at is not None
+                    or binding.response_mode is not expected_response_mode
+                    or binding.updated_at != expected_binding_updated_at
+                ):
+                    raise ExternalChannelParticipationError(
+                        "External Channel thread settings changed before submission."
+                    )
+                _, agent_name = await self._authorize_settings_actor(
+                    session,
+                    connection_id=connection.id,
+                    route_id=binding.route_id,
+                    principal_id=principal_id,
+                    agent_session_id=binding.agent_session_id,
+                )
+                updated_binding = (
+                    await self.repository.update_connected_binding_response_mode(
+                        session,
+                        binding_id=binding.id,
+                        expected_response_mode=binding.response_mode,
+                        expected_updated_at=binding.updated_at,
+                        response_mode=response_mode,
+                    )
+                )
+                if updated_binding is None:
+                    raise ExternalChannelParticipationError(
+                        "External Channel thread settings changed before submission."
+                    )
+                await session.commit()
+        return ExternalChannelParticipationSettingsMutation(
+            settings=ExternalChannelParticipationSettings(
+                target="thread",
+                agent_name=agent_name,
+                setting=None,
+                claim=None,
+                resource=resource,
+                binding=updated_binding,
+            ),
+            cleanup_delivery_ids=(),
+        )
+
+    def _require_enabled(self) -> None:
+        if not self.config.external_channel_participation_enabled:
+            raise ExternalChannelParticipationError(
+                "External Channel participation is not enabled."
+            )
+
+    async def _authorize_settings_actor(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        route_id: str,
+        principal_id: str,
+        agent_session_id: str | None,
+    ) -> tuple[ExternalChannelAgentRoute, str]:
+        """Revalidate one human provider actor against the selected route."""
+        connection = await self.repository.get_connection_configuration(
+            session,
+            connection_id=connection_id,
+        )
+        route = await self.repository.get_routable_route_by_id(
+            session,
+            route_id=route_id,
+        )
+        principal = await self.repository.get_principal(
+            session,
+            principal_id=principal_id,
+        )
+        if (
+            connection is None
+            or route is None
+            or route.connection_id != connection_id
+            or principal is None
+            or principal.provider is not connection.provider
+            or principal.provider_tenant_id != connection.provider_tenant_id
+            or principal.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
+        ):
+            raise ExternalChannelParticipationError(
+                "External Channel settings actor is unavailable."
+            )
+        agent_id = route.require_active_agent_id()
+        if (
+            await self.repository.get_active_block(
+                session,
+                agent_id=agent_id,
+                principal_id=principal.id,
+            )
+            is not None
+        ):
+            raise ExternalChannelParticipationError(
+                "External Channel settings actor is blocked."
+            )
+        grant = await self.repository.get_active_access_grant(
+            session,
+            agent_id=agent_id,
+            principal_id=principal.id,
+            agent_session_id=agent_session_id,
+        )
+        if grant is None and not route.open_access_enabled:
+            raise ExternalChannelParticipationError(
+                "External Channel settings actor is not authorized."
+            )
+        agent = await self.agent_repository.get_by_id(session, agent_id)
+        if agent is None or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE:
+            raise ExternalChannelParticipationError(
+                "External Channel settings Agent is unavailable."
+            )
+        return route, agent.name
 
     async def select_location(
         self,

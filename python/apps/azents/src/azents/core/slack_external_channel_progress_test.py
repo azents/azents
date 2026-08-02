@@ -197,6 +197,8 @@ def test_session_presence_contains_copy_and_navigation() -> None:
         agent_name="Research Agent",
         session_url=_SESSION_URL,
         state="joined",
+        settings_action_id="azents_conversation_settings_open",
+        settings_action_value="signed-settings-locator",
     )
 
     assert presentation.text == "Research Agent joined this conversation."
@@ -219,7 +221,16 @@ def test_session_presence_contains_copy_and_navigation() -> None:
                         "text": "View session",
                     },
                     "url": _SESSION_URL,
-                }
+                },
+                {
+                    "type": "button",
+                    "action_id": "azents_conversation_settings_open",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Conversation settings",
+                    },
+                    "value": "signed-settings-locator",
+                },
             ],
         },
     ]
@@ -228,6 +239,8 @@ def test_session_presence_contains_copy_and_navigation() -> None:
         agent_name="Research Agent",
         session_url=_SESSION_URL,
         state="left",
+        settings_action_id="azents_conversation_settings_open",
+        settings_action_value=None,
     )
     assert left.text == "Research Agent left this conversation."
     assert left.blocks[0]["text"] == {

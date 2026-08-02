@@ -72,8 +72,11 @@ from azents.services.external_channel.provider import (
     SlackExternalChannelProviderContract,
 )
 from azents.services.external_channel.slack_http import (
+    SLACK_AZENTS_COMMAND,
+    SLACK_INVOCATION_SHORTCUT_CALLBACK_ID,
     SLACK_OPTIONAL_FILE_BOT_SCOPES,
     SLACK_REQUIRED_BOT_SCOPES,
+    SLACK_SETTINGS_SHORTCUT_CALLBACK_ID,
 )
 
 
@@ -1527,8 +1530,19 @@ def slack_manifest_guidance(
     }
     if transport is ExternalChannelTransport.HTTP:
         event_settings["request_url"] = callback_url
+    slash_command: dict[str, object] = {
+        "command": SLACK_AZENTS_COMMAND,
+        "description": "Open Azents conversation settings",
+        "usage_hint": "settings",
+        "should_escape": False,
+    }
+    interactivity: dict[str, object] = {"is_enabled": True}
+    if transport is ExternalChannelTransport.HTTP:
+        slash_command["url"] = callback_url
+        interactivity["request_url"] = callback_url
     settings: dict[str, object] = {
         "event_subscriptions": event_settings,
+        "interactivity": interactivity,
         "org_deploy_enabled": False,
         "socket_mode_enabled": transport is ExternalChannelTransport.SOCKET,
         "token_rotation_enabled": False,
@@ -1542,7 +1556,22 @@ def slack_manifest_guidance(
             "bot_user": {
                 "display_name": bot_name,
                 "always_online": False,
-            }
+            },
+            "slash_commands": [slash_command],
+            "shortcuts": [
+                {
+                    "name": "Ask an Azents Agent",
+                    "type": "message",
+                    "callback_id": SLACK_INVOCATION_SHORTCUT_CALLBACK_ID,
+                    "description": "Ask an Azents Agent about this message",
+                },
+                {
+                    "name": "Conversation settings",
+                    "type": "message",
+                    "callback_id": SLACK_SETTINGS_SHORTCUT_CALLBACK_ID,
+                    "description": "View or change Azents conversation settings",
+                },
+            ],
         },
         "oauth_config": {"scopes": {"bot": list(bot_scopes)}},
         "settings": settings,

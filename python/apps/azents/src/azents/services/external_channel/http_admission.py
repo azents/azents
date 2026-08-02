@@ -287,7 +287,7 @@ class SlackHTTPAdmissionService:
                     )
                     if (
                         configuration.app_mode is ExternalChannelAppMode.MULTI
-                        and callback.requires_selector_processing()
+                        and callback.handler == "selector_open"
                     )
                     else None
                 )
@@ -304,25 +304,24 @@ class SlackHTTPAdmissionService:
                         interaction_id=admission.interaction.id,
                         now=received_at,
                     )
-                selector_supported = (
-                    configuration.app_mode is ExternalChannelAppMode.MULTI
-                    and callback.requires_selector_processing()
+                interaction_supported = callback.requires_provider_processing(
+                    app_mode=configuration.app_mode,
                 )
                 claim = (
                     await self.admission_service.begin_interaction_provider_mutation(
                         interaction_id=admission.interaction.id,
                         now=received_at,
                     )
-                    if selector_supported
+                    if interaction_supported
                     else None
                 )
-                if not selector_supported:
+                if not interaction_supported:
                     await self.admission_service.finish_interaction_provider_mutation(
                         interaction_id=admission.interaction.id,
                         status=ExternalChannelInteractionStatus.REJECTED,
                         error_kind="interaction_unsupported",
                         error_summary=(
-                            "Slack interaction is outside the supported selector flow."
+                            "Slack interaction has no supported callback handler."
                         ),
                     )
                 return SlackHTTPAdmissionResult(
@@ -333,6 +332,14 @@ class SlackHTTPAdmissionService:
                     interaction_handoff=(
                         ExternalChannelInteractionHandoff(
                             interaction_id=claim.interaction.id,
+                            handler=callback.handler,
+                            provider_parent_channel_id=(
+                                callback.provider_parent_channel_id
+                            ),
+                            provider_thread_key=callback.provider_thread_key,
+                            settings_metadata=callback.settings_metadata,
+                            settings_location=callback.settings_location,
+                            settings_response_mode=callback.settings_response_mode,
                             trigger_id=callback.trigger_id,
                             selector_interaction_id=callback.selector_interaction_id,
                             selector_metadata=callback.selector_metadata,

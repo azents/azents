@@ -40,9 +40,14 @@ def session_presence_payload(
             {
                 "tenant_id": labels.get("tenant_id"),
                 "channel_id": labels.get("channel_id"),
-                "thread_ts": labels.get("thread_ts"),
             }
         )
+        conversation_scope = labels.get("conversation_scope")
+        if isinstance(conversation_scope, str) and conversation_scope:
+            payload["conversation_scope"] = conversation_scope
+        thread_ts = labels.get("thread_ts")
+        if isinstance(thread_ts, str) and thread_ts:
+            payload["thread_ts"] = thread_ts
         return payload
     if provider == "discord":
         delivery_channel_id = labels.get("delivery_channel_id")

@@ -45,6 +45,9 @@ from azents.services.external_channel.interaction import (
     build_selector_metadata,
     verify_selector_metadata,
 )
+from azents.services.external_channel.participation import (
+    ExternalChannelParticipationService,
+)
 from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
 )
@@ -275,6 +278,7 @@ def _processor(
     slack: _Slack,
     replay: _Replay | None = None,
     provider_control: _ProviderControl | None = None,
+    participation: object | None = None,
 ) -> ExternalChannelInteractionProcessor:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
@@ -293,6 +297,10 @@ def _processor(
         ingestion_replay_service=cast(
             ExternalChannelIngestionReplayService,
             replay or _Replay(),
+        ),
+        participation_service=cast(
+            ExternalChannelParticipationService,
+            participation or SimpleNamespace(),
         ),
         config=cast(
             Config,
@@ -330,6 +338,12 @@ def _handoff(
 ) -> ExternalChannelInteractionHandoff:
     return ExternalChannelInteractionHandoff(
         interaction_id="interaction-1",
+        handler="selector_open",
+        provider_parent_channel_id=None,
+        provider_thread_key=None,
+        settings_metadata=None,
+        settings_location=None,
+        settings_response_mode=None,
         trigger_id="trigger-secret-must-not-persist",
         selector_interaction_id=selector_interaction_id,
     )
@@ -558,6 +572,12 @@ async def test_navigation_requeries_search_page_and_updates_current_modal() -> N
     await _processor(repository, selector, slack).process(
         ExternalChannelInteractionHandoff(
             interaction_id="interaction-2",
+            handler="selector_navigation",
+            provider_parent_channel_id=None,
+            provider_thread_key=None,
+            settings_metadata=None,
+            settings_location=None,
+            settings_response_mode=None,
             selector_metadata=metadata,
             selector_navigation="next",
             selector_search="ops",
@@ -624,6 +644,12 @@ async def test_submission_revalidates_signed_modal_scope_before_selection() -> N
     await _processor(repository, selector, slack, replay).process(
         ExternalChannelInteractionHandoff(
             interaction_id="interaction-2",
+            handler="selector_submission",
+            provider_parent_channel_id=None,
+            provider_thread_key=None,
+            settings_metadata=None,
+            settings_location=None,
+            settings_response_mode=None,
             selector_metadata=metadata,
             selected_route_id="route-alpha",
         )
@@ -699,6 +725,12 @@ async def test_typed_submission_replays_and_delivers_committed_control() -> None
     ).process(
         ExternalChannelInteractionHandoff(
             interaction_id="interaction-2",
+            handler="selector_submission",
+            provider_parent_channel_id=None,
+            provider_thread_key=None,
+            settings_metadata=None,
+            settings_location=None,
+            settings_response_mode=None,
             selector_metadata=metadata,
             selected_route_id="route-alpha",
         )
@@ -744,6 +776,12 @@ async def test_submission_rejects_tampered_metadata_before_selection() -> None:
         await _processor(repository, selector, slack).process(
             ExternalChannelInteractionHandoff(
                 interaction_id="interaction-2",
+                handler="selector_submission",
+                provider_parent_channel_id=None,
+                provider_thread_key=None,
+                settings_metadata=None,
+                settings_location=None,
+                settings_response_mode=None,
                 selector_metadata=metadata[:-1] + ("A" if metadata[-1] != "A" else "B"),
                 selected_route_id="route-alpha",
             )

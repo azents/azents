@@ -3449,18 +3449,27 @@ def _provider_payload(
 ) -> dict[str, object]:
     """Build one persisted provider request intent without credentials."""
     labels = labels or {}
+    payload: dict[str, object]
     match provider:
         case ExternalChannelProvider.SLACK:
             channel_id = labels.get("channel_id")
             thread_ts = labels.get("thread_ts")
+            conversation_scope = labels.get("conversation_scope")
             if not isinstance(channel_id, str) or not channel_id:
                 raise ValueError("External Channel resource has no provider channel.")
-            if not isinstance(thread_ts, str) or not thread_ts:
+            if conversation_scope == "parent_channel":
+                payload = {
+                    "channel_id": channel_id,
+                    "conversation_scope": "parent_channel",
+                }
+            elif not isinstance(thread_ts, str) or not thread_ts:
                 raise ValueError("External Channel resource has no provider thread.")
-            payload: dict[str, object] = {
-                "channel_id": channel_id,
-                "thread_ts": thread_ts,
-            }
+            else:
+                payload = {
+                    "channel_id": channel_id,
+                    "thread_ts": thread_ts,
+                    "conversation_scope": "thread",
+                }
         case ExternalChannelProvider.DISCORD:
             guild_id = labels.get("guild_id")
             delivery_channel_id = labels.get("delivery_channel_id")

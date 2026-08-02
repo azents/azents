@@ -126,7 +126,7 @@ def _interactive_envelope(*, envelope_id: str = "interactive-envelope-1") -> str
                 "user": {"id": "U-1"},
                 "trigger_id": "trigger-secret-must-not-persist",
                 "response_url": "https://hooks.slack.com/actions/private",
-                "callback_id": "ask-agent",
+                "callback_id": "azents_ask_agent",
                 "channel": {"id": "C-1"},
                 "message": {
                     "ts": "100.0001",
@@ -405,6 +405,12 @@ async def test_interactive_handoff_is_scheduled_only_after_socket_ack() -> None:
         assert shortcut_source_event is not None
         return ExternalChannelInteractionHandoff(
             interaction_id="interaction-1",
+            handler=callback.handler,
+            provider_parent_channel_id=callback.provider_parent_channel_id,
+            provider_thread_key=callback.provider_thread_key,
+            settings_metadata=callback.settings_metadata,
+            settings_location=callback.settings_location,
+            settings_response_mode=callback.settings_response_mode,
             trigger_id=callback.trigger_id,
         )
 

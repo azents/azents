@@ -87,7 +87,11 @@ from azents.services.external_channel.slack_events import (
     SlackOutboundFile,
     SlackOutboundFileContentError,
 )
+from azents.services.external_channel.slack_http import SLACK_SETTINGS_OPEN_ACTION_ID
 from azents.services.external_channel.slack_sdk_client import create_slack_web_client
+from azents.services.external_channel.slack_settings import (
+    build_slack_settings_locator,
+)
 from azents.services.file_storage import FileStorage, RangedFileStorage
 from azents.services.session_resource_authority import SessionResourceAuthority
 
@@ -977,11 +981,16 @@ class ExternalChannelActionService:
         tenant_id = target.provider_tenant_id
         channel_id = payload.get("channel_id")
         thread_ts = payload.get("thread_ts")
+        conversation_scope = payload.get("conversation_scope")
         if (
             not isinstance(tenant_id, str)
             or not tenant_id
             or not isinstance(channel_id, str)
-            or not isinstance(thread_ts, str)
+            or (conversation_scope == "parent_channel" and thread_ts is not None)
+            or (
+                conversation_scope != "parent_channel"
+                and not isinstance(thread_ts, str)
+            )
         ):
             return SlackControlMessageResult(
                 status="failed",
@@ -1075,7 +1084,7 @@ class ExternalChannelActionService:
         bot_token: str,
         tenant_id: str,
         channel_id: str,
-        thread_ts: str,
+        thread_ts: str | None,
         presentation: SlackAgentPresentation | None,
     ) -> SlackControlMessageResult:
         """Deliver one validated selector, notice, or approval control."""
@@ -1112,6 +1121,22 @@ class ExternalChannelActionService:
                 agent_name=context.agent_name,
                 session_url=context.session_url,
                 state=context.state,
+                settings_action_id=SLACK_SETTINGS_OPEN_ACTION_ID,
+                settings_action_value=(
+                    build_slack_settings_locator(
+                        secret=self.config.auth.jwt.secret_key,
+                        connection_id=target.connection_id,
+                        provider_parent_channel_id=channel_id,
+                        resource_id=target.resource_id,
+                        binding_id=target.binding_id,
+                    )
+                    if (
+                        context.state == "joined"
+                        and target.resource_id is not None
+                        and target.binding_id is not None
+                    )
+                    else None
+                ),
             )
             return await self.slack_client.post_blocks(
                 bot_token=bot_token,
@@ -1162,6 +1187,7 @@ class ExternalChannelActionService:
             or not participant_provider_user_id
             or not isinstance(participant_label, str)
             or not participant_label
+            or thread_ts is None
         ):
             return _invalid_payload()
         return await self.slack_client.post_approval_control_message(
@@ -1191,7 +1217,7 @@ class ExternalChannelActionService:
         bot_token: str,
         tenant_id: str,
         channel_id: str,
-        thread_ts: str,
+        thread_ts: str | None,
         markdown_text: str,
         files: tuple[ExternalChannelOutboundFileManifest, ...],
         delivery_attempt_id: str,
