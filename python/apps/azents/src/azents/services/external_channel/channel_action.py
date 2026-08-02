@@ -468,7 +468,7 @@ class ExternalChannelActionService:
                     now=datetime.datetime.now(datetime.UTC),
                     runtime_target=(
                         provider_delivery_capability.target
-                        if runtime_provider_transfer
+                        if _has_runtime_outbound_source(target.request_payload)
                         and provider_delivery_capability is not None
                         else None
                     ),

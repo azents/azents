@@ -1531,7 +1531,7 @@ class ExternalChannelWorkRepository:
                     RDBAgentRuntime.agent_id == agent.id,
                     RDBAgentRuntime.desired_generation
                     == runtime_target.desired_generation,
-                    RDBAgentRuntime.runner_generation
+                    RDBAgentRuntime.provider_observed_generation
                     == runtime_target.desired_generation,
                     RDBAgentRuntime.desired_state == RuntimeDesiredState.RUNNING,
                     RDBAgentRuntime.provider_observed_state
@@ -1754,7 +1754,8 @@ class ExternalChannelWorkRepository:
                 RDBAgentRuntime.id == runtime_target.runtime_id,
                 RDBAgentRuntime.agent_id == agent.id,
                 RDBAgentRuntime.desired_generation == runtime_target.desired_generation,
-                RDBAgentRuntime.runner_generation == runtime_target.desired_generation,
+                RDBAgentRuntime.provider_observed_generation
+                == runtime_target.desired_generation,
                 RDBAgentRuntime.desired_state == RuntimeDesiredState.RUNNING,
                 RDBAgentRuntime.provider_observed_state
                 == RuntimeProviderObservedState.RUNNING,

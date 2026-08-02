@@ -97,6 +97,7 @@ class _RepositoryDouble:
         ] = []
         self.recorded_delivery_channels: list[tuple[str, str]] = []
         self.runtime_provider_states: list[tuple[str, dict[str, object]]] = []
+        self.started_runtime_targets: list[object | None] = []
         self.settlement_accepted = True
         self.settlement_status: ExternalChannelDeliveryStatus | None = None
         self.target = ChannelDeliveryTarget(
@@ -152,8 +153,9 @@ class _RepositoryDouble:
         now: datetime.datetime,
         runtime_target: object | None,
     ) -> ChannelDeliveryTarget | None:
-        del now, runtime_target
+        del now
         self.events.append("start")
+        self.started_runtime_targets.append(runtime_target)
         return await self.get_delivery_target(
             session,
             delivery_attempt_id=delivery_attempt_id,
@@ -1771,15 +1773,22 @@ async def test_discord_file_delivery_streams_the_current_runtime_source() -> Non
         discord_client=discord_client,
     )
     storage = _RangedStorage(b"report")
+    capability = _RuntimeProviderCapability({})
 
     await service.attempt_delivery(
         "delivery-1",
         file_storage=cast(FileStorage, storage),
         agent_id="agent-1",
+        provider_delivery_capability=cast(
+            RuntimeToProviderDeliveryCapability,
+            capability,
+        ),
     )
 
     assert discord_client.calls[0][0] == "file"
     assert discord_client.uploaded == [("report.txt", b"report")]
+    assert repository.started_runtime_targets == [capability.target]
+    assert capability.requests == []
     assert storage.calls == [
         ("/workspace/agent/report.txt", "agent-1", 0, 6),
         ("/workspace/agent/report.txt", "agent-1", 6, 1),

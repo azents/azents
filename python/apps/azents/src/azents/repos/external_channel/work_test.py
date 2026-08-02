@@ -30,9 +30,14 @@ from azents.core.enums import (
     ExternalChannelWorkStatus,
     ExternalChannelWorkTaskStatus,
     LLMProvider,
+    RuntimeDesiredState,
+    RuntimeProviderConnectionState,
+    RuntimeProviderObservedState,
+    RuntimeRunnerState,
 )
 from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAction,
@@ -1301,6 +1306,112 @@ async def test_runtime_authority_revocation_after_provider_start_is_unknown(
     assert not current
     assert attempt.status is ExternalChannelDeliveryStatus.UNKNOWN
     assert attempt.error_kind == "runtime_delivery_authority_revoked"
+
+
+@pytest.mark.parametrize(
+    ("provider_observed_generation", "authorized"),
+    [(7, True), (6, False)],
+)
+async def test_runtime_file_delivery_uses_lifecycle_generation_authority(
+    rdb_session: AsyncSession,
+    provider_observed_generation: int,
+    authorized: bool,
+) -> None:
+    """Authorize only the current lifecycle generation, not Runner connection."""
+    agent_id, binding_id = await _setup_binding(rdb_session)
+    agent = await rdb_session.get(RDBAgent, agent_id)
+    agent_session = await rdb_session.scalar(
+        sa.select(RDBAgentSession).where(RDBAgentSession.agent_id == agent_id)
+    )
+    binding = await rdb_session.get(RDBExternalChannelBinding, binding_id)
+    assert agent is not None
+    assert agent_session is not None
+    assert binding is not None
+    connection = await rdb_session.scalar(
+        sa.select(RDBExternalChannelConnection)
+        .join(
+            RDBExternalChannelAgentRoute,
+            RDBExternalChannelAgentRoute.connection_id
+            == RDBExternalChannelConnection.id,
+        )
+        .where(RDBExternalChannelAgentRoute.id == binding.route_id)
+    )
+    assert connection is not None
+    connection.capabilities = {"upload_files": True}
+    runtime = RDBAgentRuntime(
+        workspace_id=agent.workspace_id,
+        agent_id=agent.id,
+    )
+    rdb_session.add(runtime)
+    await rdb_session.flush()
+    runtime.desired_state = RuntimeDesiredState.RUNNING
+    runtime.desired_generation = 7
+    runtime.provider_observed_state = RuntimeProviderObservedState.RUNNING
+    runtime.provider_observed_generation = provider_observed_generation
+    runtime.provider_connection_state = RuntimeProviderConnectionState.CONNECTED
+    runtime.runner_state = RuntimeRunnerState.READY
+    runtime.runner_generation = 411
+    repository = ExternalChannelWorkRepository()
+    await repository.ensure_active_work(rdb_session, binding_id=binding_id)
+    committed = await repository.commit_action(
+        rdb_session,
+        session_id=agent_session.id,
+        agent_id=agent.id,
+        run_id=None,
+        client_tool_call_id=(
+            f"call-runtime-lifecycle-generation-{provider_observed_generation}"
+        ),
+        binding_id=binding_id,
+        mode=ExternalChannelActionMode.CONTINUE,
+        message="Uploading the report.",
+        title=None,
+        tasks=None,
+        files=(
+            ExternalChannelOutboundFileManifest(
+                path="/workspace/agent/report.txt",
+                filename="report.txt",
+                media_type="text/plain",
+                expected_size=6,
+            ),
+        ),
+        now=_at(2),
+    )
+    reply = next(
+        delivery
+        for delivery in committed.deliveries
+        if delivery.operation is ExternalChannelDeliveryOperation.REPLY
+    )
+
+    started = await repository.start_delivery(
+        rdb_session,
+        delivery_attempt_id=reply.id,
+        now=_at(3),
+        runtime_target=ServerToRuntimeTarget(
+            runtime_id=runtime.id,
+            desired_generation=7,
+        ),
+    )
+
+    if authorized:
+        assert started is not None
+        assert started.status is ExternalChannelDeliveryStatus.ATTEMPTING
+        current = await repository.revalidate_runtime_delivery_authority(
+            rdb_session,
+            delivery_attempt_id=reply.id,
+            runtime_target=ServerToRuntimeTarget(
+                runtime_id=runtime.id,
+                desired_generation=7,
+            ),
+            provider_started=False,
+            now=_at(4),
+        )
+        assert current
+    else:
+        assert started is None
+        attempt = await rdb_session.get(RDBExternalChannelDeliveryAttempt, reply.id)
+        assert attempt is not None
+        assert attempt.status is ExternalChannelDeliveryStatus.NOT_ATTEMPTED
+        assert attempt.error_kind == "runtime_delivery_authority_revoked"
 
 
 async def test_provider_control_final_settlement_revalidates_current_authority(
