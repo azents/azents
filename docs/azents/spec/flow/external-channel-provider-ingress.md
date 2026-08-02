@@ -51,7 +51,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-08-02
-spec_version: 30
+spec_version: 31
 ---
 
 # External Channel Provider Ingress
@@ -103,11 +103,12 @@ Slack sends HTTP callbacks to the single fixed endpoint
    input, wake, or AgentRun.
    Configured traffic or selected setup replay reads provider history and commits the
    real Session, Binding, canonical mailbox input, conversation-position advance,
-   running transition, and independent provider-control intents. A new eligible
+   running transition, and zero or more process-local provider-control plans. A new eligible
    explicit mention in an existing Binding may additionally create one idempotent
    settings entry point; ordinary traffic, deployment, startup, and the background
    worker do not create it. The mailbox item is also the pending wake-recovery
-   identity. Provider controls never gate execution.
+   identity. After the response is acknowledged, the caller attempts each plan once;
+   controls never gate execution and create no recovery work.
 7. Success is acknowledged only for a completed non-retryable outcome. A retryable
    coordination, history, position, or wake failure remains unacknowledged so the
    provider may retry.
@@ -278,19 +279,21 @@ the canonical message source nor a durable queue item.
    mode change during provider-history I/O discards the fetched range without side
    effects or position advancement. An admitted request creates or reuses the connected
    Binding, real root Session, initial Channel Work, deterministic canonical mailbox
-   input, and versioned joined-presence and progress delivery intents. The same transaction
+   input, and versioned joined-presence and progress state. The same transaction
    marks the Session running, initializes thread position, and compare-and-set advances
-   the conversation position.
+   the conversation position, then returns any joined-presence and progress plans to
+   the transport caller.
    PostgreSQL conversation position is the sole duplicate-prevention and ordering
    authority; a mismatch restarts provider-history preparation.
 5. After commit, the service claims the pending mailbox item and sends routing-only
    `SessionWakeUp(session_id)`. A crash or broker failure leaves that item recoverable,
    so duplicate transport delivery can complete the same logical wake without creating
    another Session input.
-6. The Agent Worker attempts committed joined-presence and progress controls through
-   the shared one-attempt delivery fence. Delivered, failed, unknown, not-attempted,
-   and cancelled outcomes remain provider-delivery evidence only; none gates mailbox
-   promotion, Session wake, or AgentRun creation.
+6. After the HTTP response, Socket acknowledgement, or Gateway admission boundary,
+   the transport caller attempts every returned control plan once. Failure, ambiguity,
+   cancellation, or process termination is recorded only through safe logs and metrics;
+   none gates mailbox promotion, Session wake, or AgentRun creation, and no Worker
+   later drains or reconstructs the control.
 
 An exact connected thread Binding wins route resolution. Otherwise Single uses its
 sole route, Multi uses one valid channel default, and the active participation setting
@@ -309,8 +312,8 @@ provider-history range. Already committed mailbox input, wake, Channel Work, or
 AgentRun state is never cancelled or reclassified by a later mode change.
 
 Restricted access persists the trigger source plus immutable conversation-position,
-range-start, and trigger-position replay authority and commits an approval-control
-intent without waking a Session. For a setup-linked request, Allow commits the grant
+range-start, and trigger-position replay authority and returns one immediate
+approval-control plan without waking a Session. For a setup-linked request, Allow commits the grant
 and resumes `pending_location` setup without creating a Binding or entering access
 replay. Legacy configured-thread Allow invokes the same synchronous ingestion service
 with its durable replay boundary. Replay works whether the shared position is still
@@ -331,11 +334,12 @@ moves the current connection to `reconnect_required` without terminating binding
 App uninstall terminally disconnects the connection, creates one leave-presence
 control for each newly disconnected binding, captures its provider target before
 credential purge, and attempts that target only after the terminal commit. Repeated
-uninstall delivery is idempotent. Provider-history, coordination, position, or wake
+uninstall handling returns no additional cleanup plan. Provider-history, coordination, position, or wake
 failures return a retryable transport outcome. Invalid or stale authority and
 malformed replay boundaries fail closed. Committed selector, approval,
 joined-presence, leave-presence, and progress controls are attempted after their
-commit without gating accepted input or terminal lifecycle state. Presence-control
+commit without gating accepted input or terminal lifecycle state and without durable
+provider work or recovery. Presence-control
 Session links use only
 `/w/{workspace}/agents/{agent}/sessions/{session}` and target the same durable Session
 exposed by existing Agent Session list and detail APIs.
@@ -387,6 +391,9 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-02** (spec_version 31) — Replaced committed provider-control intents and
+  Worker delivery with process-local plans attempted once after the transport
+  acknowledgement boundary, independently from canonical mailbox execution.
 - **2026-08-02** (spec_version 30) — Accepted the connected Discord Bot's
   provider-managed role mention as an explicit invocation while rejecting arbitrary,
   manually created, and other-Bot roles.

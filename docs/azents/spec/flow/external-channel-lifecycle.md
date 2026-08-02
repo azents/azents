@@ -31,7 +31,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-02
-spec_version: 28
+spec_version: 29
 ---
 
 # External Channel Lifecycle
@@ -39,8 +39,8 @@ spec_version: 28
 ## Direct Management Transitions
 
 Disconnecting a connected binding terminally sets `disconnected_at`, ends active
-Channel Work, commits one leave-presence control, and commits Activity Tracker cleanup
-delivery when needed. Slack renders the presence control with Block Kit and Discord
+Channel Work, and captures one leave-presence plan plus Activity Tracker cleanup plans
+when needed. Slack renders the presence control with Block Kit and Discord
 uses an Embed; both include the current Agent name and one `View session` button.
 Provider conversation positions and already projected AgentSession history remain.
 The timestamp is the only binding connectedness authority; no lifecycle path clears
@@ -55,7 +55,7 @@ Binding; Threads-to-Channel updates the setting but creates no empty Session, le
 parent Binding creation to the next eligible explicit mention.
 
 Replacing a connected binding's concrete response mode preserves its binding,
-Session, work, delivery, and conversation-position lifecycle state. The management
+Session, work, provider projection, and conversation-position lifecycle state. The management
 boundary scopes the mutation to the requested Workspace, Agent, Session, and connected
 binding. A parent Binding replacement updates the active participation setting and
 Binding atomically; a thread replacement updates only that Binding. Once
@@ -64,13 +64,13 @@ same mutation returns the not-found-shaped management result.
 
 Disconnecting a connection accepts every lifecycle and credential state. It
 terminalizes the connection, terminates owned active resources/bindings/work, commits
-one leave-presence control for each newly disconnected binding, clears credentials,
+one leave-presence plan for each newly disconnected binding, clears credentials,
 and commits terminal local state before provider cleanup runs. Provider targets are
-captured in memory before route detachment or credential purge. Post-commit delivery
-revalidates the durable connection, route, resource, binding, Session, attempt
-identity, terminal binding state, and purged connection state before using that
-captured target. Credentials are not copied into delivery rows or another persistence
-surface. Repeating the command is safe.
+captured in memory before route detachment or credential purge. Post-commit execution
+revalidates the durable connection, route, resource, binding, Session, terminal
+binding state, and purged connection state before using that captured target.
+Credentials and plans are not copied into another persistence surface. Repeating the
+command is safe and returns no duplicate cleanup plan.
 Disconnected connection rows remain durable history roots but are excluded from the
 active Single management list. Disconnected Multi Apps remain readable through
 Workspace history but reject mutation.
@@ -85,7 +85,7 @@ rollout-enabled; detached historical Agent snapshots never become routable.
 
 Replacing or clearing a Multi channel default is generation-fenced. It invalidates the
 old participation setting and pending setup claim, terminally disconnects only the old
-connected parent Binding with its provider cleanup intents, and preserves every thread
+connected parent Binding with its process-local provider cleanup plans, and preserves every thread
 Resource, Binding, Session, and concrete mode. The replacement route starts without a
 participation setting; a later eligible top-level mention begins setup. Stale impact
 previews fail with conflict instead of applying a destructive mutation against newer
@@ -142,19 +142,19 @@ shared synchronous ingestion. Selected setup instead replays only after a valid
 location choice. Either canonical acceptance
 atomically creates or reuses the real Session, work projection, deterministic canonical
 mailbox input, conversation-position advance, Session running state, recoverable
-wake-up identity, and Session navigation/progress intents. Provider-control delivery
-runs independently after commit. Repeated Allow decisions reuse the same durable
-binding, delivery, and mailbox
-identities. Final Allow,
-Deny, and Block decisions create a provider-aware idempotent delete intent when their
-approval control was delivered.
+wake-up identity, and Session navigation/progress plans. Provider controls run once
+after commit and remain independent from execution. Repeated Allow decisions reuse the
+same durable binding and mailbox identities. Final Allow, Deny, and Block decisions
+return one direct delete plan when their approval control has a current provider
+identity.
 
 Every new file download and file-bearing publication revalidates the current Agent,
 Session, route, binding, connection, and directional capability. Binding disconnect,
 connection disconnect, Session archive, and Agent decommission therefore prevent new
 transfers immediately through the existing lifecycle fences. A provider access change or
 file deletion is observed at download time. An in-progress outbound provider attempt
-retains its existing one-attempt outcome and is never replayed after a lifecycle change.
+continues only within its current Tool execution and is never replayed after a
+lifecycle change.
 
 Provider credential and permission failures move only connection health to
 `reconnect_required`; they preserve route relationships, bindings, and work.
@@ -192,7 +192,8 @@ top-level manager stops the gateway process so Kubernetes cannot keep a partiall
 supervised gateway ready.
 
 Discord callback and Gateway authority are released during disconnect after terminal
-local state commits; provider cleanup failure remains a visible post-commit outcome.
+local state commits; provider cleanup failure does not roll back the disconnect and
+creates no recovery work.
 
 ## Session Archive and Restore
 
@@ -204,13 +205,13 @@ Archive uses the explicit terminal transition policy inside the caller-owned arc
 2. set their terminal disconnect timestamps and preserve their history;
 3. end Channel Work;
 4. preserve already projected Session history and normal mailbox lifecycle state; and
-5. create one leave-presence control per disconnected binding plus one cleanup
-   delivery intent for each retained Activity Tracker.
+5. capture one leave-presence plan per disconnected binding plus one cleanup plan for
+   each retained Activity Tracker.
 
-Provider presence and cleanup delivery run after commit. Failure or an unknown result
-does not roll back Session archive.
+Provider presence and cleanup effects run once after commit. Failure, ambiguity, or
+interruption does not roll back Session archive and creates no recovery work.
 External Channel file transfer adds no stored byte object or file-specific cleanup
-participant; only existing metadata, action, and delivery rows follow lifecycle cleanup.
+participant.
 
 Restore uses `preserve`. It validates that terminal bindings, ended work, and cleanup
 bookkeeping remain terminal. Restore never reactivates External Channel state;
@@ -224,9 +225,9 @@ earlier snapshot and do not retroactively add or execute it. Restrictive
 AgentSession ownership still prevents finalization if Session-owned External
 Channel roots exist outside that earlier snapshot.
 
-- **Prepare** resolves incomplete delivery bookkeeping without provider execution.
+- **Prepare** validates the terminal owner-local state without provider execution.
 - **Cleanup** deletes access decisions tied directly to the Session, Channel
-  Work/tasks/actions/delivery rows, and bindings in restrictive ownership order.
+  Work/tasks/projection parts, and bindings in restrictive ownership order.
 - **Verify/finalize** rejects AgentSession tree finalization while actionable binding/work state remains.
 
 Connection, route, resource, conversation-position, principal, interaction,
@@ -237,7 +238,7 @@ Agent-scoped grant, and block roots are not cascade-deleted through AgentSession
 Agent deletion is asynchronous and irreversible. Its lifecycle status fences new
 routing and invocation, then decommission archives/terminalizes owned Session state
 through the normal lifecycle participant and commits leave-presence and Tracker
-cleanup intents. A Single App route removal disconnects that App; a Multi App route
+cleanup plans. A Single App route removal disconnects that App; a Multi App route
 removal preserves the Workspace-owned App and its other Agents. Historical routes
 retain the immutable Agent snapshot with no routable Agent ID. The finalizer never
 bypasses restrictive ownership boundaries.
@@ -254,12 +255,15 @@ and terminal disconnect. Destructive connection, route, default, grant, and bloc
 actions use in-product confirmation dialogs.
 
 Session Channels remains readable after archive and displays disconnected bindings,
-ended work, ordered task state, the Activity Tracker projection state, and delivery
-outcomes. Binding disconnect also uses an in-product confirmation
+ended work, ordered task state, and the Activity Tracker projection state. Binding
+disconnect also uses an in-product confirmation
 dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-08-02** (spec_version 29) — Replaced lifecycle delivery intents and
+  bookkeeping with bounded process-local post-commit plans while retaining terminal
+  canonical state and owner-local current projection.
 - **2026-08-02** (spec_version 28) — Coupled parent location and selected-Agent
   transitions to participation-setting generations, setup-claim invalidation, and
   parent-only Binding terminalization while preserving thread conversations and

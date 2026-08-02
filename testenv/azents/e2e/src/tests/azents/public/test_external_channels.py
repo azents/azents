@@ -828,7 +828,9 @@ def _channel_action_tool_evidence(
         if isinstance(status, str):
             item["status"] = status
         output = event_payload.get("output")
-        if isinstance(output, list):
+        if isinstance(output, str):
+            item["output"] = output[:1_000]
+        elif isinstance(output, list):
             texts = [
                 cast(dict[str, object], part).get("text")
                 for part in cast(list[object], output)
@@ -2439,6 +2441,13 @@ def test_provider_native_channel_work_progress_journey(
     requests.post(
         f"{slack_provider_fake_url}/__testenv/configure",
         json={
+            "delivery_scenarios": {
+                "chat.postMessage": "delivered",
+                "chat.update": "delivered",
+            },
+            "delivery_scenario_sequences": {
+                "chat.update": ["delivered", "ambiguous", "failed"],
+            },
             "history_pages": [
                 [
                     {
@@ -2683,6 +2692,13 @@ def test_provider_native_channel_work_progress_journey(
         and item.get("call_id") == "call_external_channel_progress"
     )
     assert progress_result.get("status") == "completed", tool_evidence
+    result_output = progress_result.get("output")
+    assert isinstance(result_output, str), tool_evidence
+    assert '"outcomes"' in result_output
+    assert '"status": "delivered"' in result_output
+    assert "delivery_id" not in result_output
+    assert "action_id" not in result_output
+    assert "credentials" not in result_output
 
     def rich_management_projection() -> object | None:
         projection = external_api.external_channel_v1_list_session_channels(
@@ -2711,6 +2727,7 @@ def test_provider_native_channel_work_progress_journey(
     )
     work = projection.items[0].work
     assert work is not None
+    assert "deliveries" not in projection.items[0].model_dump(by_alias=True)
     assert [task.status for task in work.tasks] == [
         ExternalChannelWorkTaskStatus.IN_PROGRESS,
         ExternalChannelWorkTaskStatus.COMPLETED,
@@ -2804,6 +2821,80 @@ def test_provider_native_channel_work_progress_journey(
     provider_state = _provider_state(slack_provider_fake_url)
     assert _BOT_TOKEN not in str(provider_state)
     assert _SIGNING_SECRET not in str(provider_state)
+
+    def completed_outcome_actions() -> list[dict[str, object]]:
+        evidence = _channel_action_tool_evidence(
+            azents_public_server_url,
+            token,
+            session_id,
+            call_ids=frozenset(
+                {
+                    "call_external_channel_outcome_progress",
+                    "call_external_channel_failure_progress",
+                    "call_external_channel_finish",
+                }
+            ),
+        )
+        results = {
+            cast(str, item["call_id"]): item
+            for item in evidence
+            if item.get("kind") == "client_tool_result"
+            and isinstance(item.get("call_id"), str)
+        }
+        assert set(results) == {
+            "call_external_channel_outcome_progress",
+            "call_external_channel_failure_progress",
+            "call_external_channel_finish",
+        }, evidence
+        return evidence
+
+    outcome_evidence = wait_until(
+        completed_outcome_actions,
+        timeout=90,
+        interval=0.2,
+        message="Direct failed and unknown Channel Action results did not complete",
+    )
+    outcome_results = {
+        cast(str, item["call_id"]): item
+        for item in outcome_evidence
+        if item.get("kind") == "client_tool_result"
+        and isinstance(item.get("call_id"), str)
+    }
+    unknown_output = outcome_results["call_external_channel_outcome_progress"].get(
+        "output"
+    )
+    failed_output = outcome_results["call_external_channel_failure_progress"].get(
+        "output"
+    )
+    finish_output = outcome_results["call_external_channel_finish"].get("output")
+    assert all(
+        item.get("status") == "completed" for item in outcome_results.values()
+    ), outcome_evidence
+    assert isinstance(failed_output, str), outcome_evidence
+    assert isinstance(unknown_output, str), outcome_evidence
+    assert isinstance(finish_output, str), outcome_evidence
+    assert '"status": "failed"' in failed_output
+    assert '"status": "unknown"' in unknown_output
+    assert '"status": "delivered"' in finish_output
+    for output in (failed_output, unknown_output, finish_output):
+        assert "delivery_id" not in output
+        assert "action_id" not in output
+        assert "credentials" not in output
+
+    outcome_state = _provider_state(slack_provider_fake_url)
+    outcome_counts = cast(dict[str, int], outcome_state["request_counts"])
+    assert outcome_counts["chat.update"] == 3
+    assert outcome_counts["chat.delete"] == 1
+    time.sleep(2)
+    assert (
+        cast(
+            dict[str, int],
+            _provider_state(slack_provider_fake_url)["request_counts"],
+        )
+        == outcome_counts
+    )
+    assert _BOT_TOKEN not in str(outcome_state)
+    assert _SIGNING_SECRET not in str(outcome_state)
 
 
 @pytest.mark.runtime_provider
@@ -3268,6 +3359,373 @@ def test_external_channel_file_transfer_journey(
     assert selected_content_pattern.decode().strip() not in rendered_provider_state
     assert ignored_content.decode() not in rendered_provider_state
     assert "selected-input.txt" not in rendered_provider_state
+
+
+@pytest.mark.runtime_provider
+def test_discord_runtime_file_publication_journey(
+    request: pytest.FixtureRequest,
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    azents_engine_worker_container: Container,
+    azents_runtime_provider_docker_container: Container,
+    discord_provider_fake_url: str,
+    openai_proxy_url: str,
+) -> None:
+    """Download one Discord attachment and publish two Runtime files."""
+    del azents_engine_worker_container, azents_runtime_provider_docker_container
+    application_id = "100000000000000006"
+    guild_id = "200000000000000006"
+    bot_user_id = "300000000000000006"
+    channel_id = "400000000000000006"
+    message_id = "500000000000000006"
+    participant_id = "600000000000000006"
+    attachment_bytes = b"deterministic-discord-attachment"
+    message_text = (
+        "External Channel file transfer E2E. "
+        "Process only the first attached file and return two results."
+    )
+    attachments = [
+        {
+            "id": "900000000000000001",
+            "filename": "selected-discord-input.txt",
+            "size": len(attachment_bytes),
+            "content_type": "text/plain",
+            "url": (
+                "http://discord-fake:8085/attachments/"
+                f"{channel_id}/{message_id}/selected"
+            ),
+        },
+        {
+            "id": "900000000000000002",
+            "filename": "ignored-discord-input.txt",
+            "size": len(attachment_bytes),
+            "content_type": "text/plain",
+            "url": (
+                "http://discord-fake:8085/attachments/"
+                f"{channel_id}/{message_id}/ignored"
+            ),
+        },
+    ]
+    source_message: dict[str, object] = {
+        "id": message_id,
+        "channel_id": channel_id,
+        "guild_id": guild_id,
+        "content": message_text,
+        "timestamp": "2026-08-02T00:00:00.000000+00:00",
+        "author": {"id": participant_id},
+        "attachments": attachments,
+    }
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/configure",
+        json={
+            "application_id": application_id,
+            "guild_id": guild_id,
+            "bot_user_id": bot_user_id,
+            "root_messages": [source_message],
+            "allow_synthetic_roots": True,
+        },
+        timeout=5,
+    ).raise_for_status()
+    requests.delete(
+        f"{openai_proxy_url}/v1/_external_channel_file_requests",
+        timeout=5,
+    ).raise_for_status()
+    token, _, handle, agent_id = _create_agent(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+        runtime_profile_provider_id="system-docker",
+        shell_enabled=True,
+    )
+    _wait_for_runtime_runner_ready(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        agent_id=agent_id,
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    external_api = ExternalChannelV1Api(public_api_client)
+    setup = external_api.external_channel_v1_setup_multi_discord_connection(
+        handle=handle,
+        discord_connection_setup_request=DiscordConnectionSetupRequest(
+            app_id=application_id,
+            configuration=DiscordConnectionConfiguration(target_guild_id=guild_id),
+            credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
+        ),
+        _headers=headers,
+    )
+    route = external_api.external_channel_v1_add_multi_discord_route(
+        connection_id=setup.connection.id,
+        handle=handle,
+        multi_route_create_request=MultiRouteCreateRequest(agent_id=agent_id),
+        _headers=headers,
+    )
+
+    def disconnect_connection() -> None:
+        impact = external_api.external_channel_v1_get_multi_discord_connection_impact(
+            connection_id=setup.connection.id,
+            handle=handle,
+            _headers=headers,
+        )
+        external_api.external_channel_v1_disconnect_multi_discord_connection(
+            connection_id=setup.connection.id,
+            handle=handle,
+            generation_fence_request=GenerationFenceRequest(
+                expected_generation=impact.generation
+            ),
+            _headers=headers,
+        )
+
+    request.addfinalizer(disconnect_connection)
+    validated = external_api.external_channel_v1_validate_multi_discord_connection(
+        connection_id=setup.connection.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert validated.status is ExternalChannelConnectionStatus.ACTIVE
+    assert validated.capabilities is not None
+    assert validated.capabilities.download_files is True
+    assert validated.capabilities.upload_files is True
+    message_command_id = cast(
+        str,
+        wait_until(
+            lambda: _discord_command_id(
+                discord_provider_fake_url,
+                role="message_action",
+            ),
+            timeout=15,
+            interval=0.2,
+            message="Discord Message Command ID was not reconciled",
+        ),
+    )
+    command = requests.post(
+        f"{discord_provider_fake_url}/__testenv/interactions",
+        json={
+            "id": "700000000000000601",
+            "type": 2,
+            "application_id": application_id,
+            "guild_id": guild_id,
+            "channel_id": channel_id,
+            "channel": {"id": channel_id, "type": 0},
+            "member": {"user": {"id": participant_id}},
+            "data": {
+                "id": message_command_id,
+                "type": 3,
+                "name": "Ask an Azents Agent",
+                "target_id": message_id,
+                "resolved": {"messages": {message_id: source_message}},
+            },
+        },
+        timeout=10,
+    )
+    command.raise_for_status()
+    assert command.json() == {"status": 200, "response_type": 4}
+    selector = cast(
+        str,
+        wait_until(
+            lambda: (
+                requests.get(
+                    f"{discord_provider_fake_url}/__testenv/transient-selector",
+                    timeout=5,
+                )
+                .json()
+                .get("custom_id")
+            ),
+            timeout=15,
+            interval=0.2,
+            message="Discord file journey did not expose its Agent selector",
+        ),
+    )
+    selected = requests.post(
+        f"{discord_provider_fake_url}/__testenv/interactions",
+        json={
+            "id": "700000000000000602",
+            "type": 3,
+            "application_id": application_id,
+            "guild_id": guild_id,
+            "channel_id": channel_id,
+            "channel": {"id": channel_id, "type": 0},
+            "member": {"user": {"id": participant_id}},
+            "message": {"id": "800000000000000602"},
+            "data": {"custom_id": selector, "values": [route.id]},
+        },
+        timeout=10,
+    )
+    selected.raise_for_status()
+    assert selected.json() == {"status": 200, "response_type": 7}
+    _open_discord_settings(
+        discord_provider_fake_url=discord_provider_fake_url,
+        interaction_id="700000000000000603",
+        application_id=application_id,
+        guild_id=guild_id,
+        channel_id=channel_id,
+        user_id=participant_id,
+    )
+    setup_threads_custom_id = cast(
+        str,
+        wait_until(
+            lambda: _discord_settings_component_id(
+                discord_provider_fake_url,
+                action_code="st",
+            ),
+            timeout=15,
+            interval=0.2,
+            message="Discord file journey did not expose thread setup",
+        ),
+    )
+    _select_discord_setup_location(
+        discord_provider_fake_url=discord_provider_fake_url,
+        interaction_id="700000000000000604",
+        application_id=application_id,
+        guild_id=guild_id,
+        channel_id=channel_id,
+        user_id=participant_id,
+        custom_id=setup_threads_custom_id,
+    )
+    chat_api = ChatV1Api(public_api_client)
+
+    def selected_binding() -> tuple[str, str] | None:
+        sessions = chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        )
+        for session in sessions.items:
+            projection = external_api.external_channel_v1_list_session_channels(
+                agent_id=agent_id,
+                session_id=session.id,
+                handle=handle,
+                _headers=headers,
+            )
+            if (
+                len(projection.items) == 1
+                and projection.items[0].provider.value == "discord"
+            ):
+                return session.id, projection.items[0].id
+        return None
+
+    session_id, binding_id = cast(
+        tuple[str, str],
+        wait_until(
+            selected_binding,
+            timeout=20,
+            interval=0.2,
+            message="Discord file journey did not create one Session binding",
+        ),
+    )
+
+    def completed_file_model_stages() -> list[dict[str, object]]:
+        evidence = [
+            item
+            for item in _file_request_evidence(openai_proxy_url)
+            if item.get("binding") == binding_id
+        ]
+        stages = [item.get("stage") for item in evidence]
+        previous_index = -1
+        for stage in ("initial", "after_download", "after_process", "after_finish"):
+            assert stage in stages, evidence
+            index = stages.index(stage)
+            assert index > previous_index, evidence
+            previous_index = index
+        initial = evidence[stages.index("initial")]
+        assert initial.get("locator_count") == 2, evidence
+        assert initial.get("download_tool_available") is True, evidence
+        assert initial.get("process_tool_available") is True, evidence
+        assert initial.get("channel_action_tool_available") is True, evidence
+        for item in evidence:
+            tool_outputs = cast(
+                dict[str, dict[str, object]],
+                item.get("tool_outputs", {}),
+            )
+            assert all(
+                output.get("error") is None for output in tool_outputs.values()
+            ), evidence
+        return evidence
+
+    wait_until(
+        completed_file_model_stages,
+        timeout=120,
+        interval=0.2,
+        message="Discord Runtime file stages did not complete",
+    )
+
+    def completed_file_action() -> list[dict[str, object]] | None:
+        evidence = _channel_action_tool_evidence(
+            azents_public_server_url,
+            token,
+            session_id,
+            call_ids=frozenset({"call_external_channel_file_finish"}),
+        )
+        if any(
+            item.get("kind") == "client_tool_result"
+            and item.get("call_id") == "call_external_channel_file_finish"
+            and item.get("status") == "completed"
+            for item in evidence
+        ):
+            return evidence
+        return None
+
+    tool_evidence = cast(
+        list[dict[str, object]],
+        wait_until(
+            completed_file_action,
+            timeout=30,
+            interval=0.2,
+            message="Discord Runtime file Channel Action did not complete",
+        ),
+    )
+    tool_result = next(
+        item for item in tool_evidence if item.get("kind") == "client_tool_result"
+    )
+    tool_output = tool_result.get("output")
+    assert isinstance(tool_output, str), tool_evidence
+    assert '"status": "delivered"' in tool_output
+    assert "delivery_id" not in tool_output
+    assert "action_id" not in tool_output
+    assert "credentials" not in tool_output
+
+    def multipart_delivery() -> dict[str, object]:
+        deliveries = _discord_provider_state(discord_provider_fake_url).get(
+            "deliveries"
+        )
+        if not isinstance(deliveries, list):
+            return {}
+        for raw_delivery in reversed(cast(list[object], deliveries)):
+            if not isinstance(raw_delivery, dict):
+                continue
+            delivery = cast(dict[str, object], raw_delivery)
+            if (
+                delivery.get("operation") == "create_message"
+                and delivery.get("file_count") == 2
+            ):
+                return delivery
+        return {}
+
+    delivery = wait_until(
+        multipart_delivery,
+        timeout=30,
+        interval=0.2,
+        message="Discord Runtime multipart publication was not delivered",
+    )
+    assert delivery["outcome"] == "created"
+    assert delivery["file_count"] == 2
+    assert delivery["file_bytes"] == 2 * (8 + len(attachment_bytes))
+
+    provider_state = _discord_provider_state(discord_provider_fake_url)
+    request_counts = cast(dict[str, int], provider_state["request_counts"])
+    assert request_counts["download_attachment"] == 1
+    rendered_state = str(provider_state)
+    assert _DISCORD_BOT_TOKEN not in rendered_state
+    assert message_text not in rendered_state
+    assert attachment_bytes.decode() not in rendered_state
+    assert "selected-discord-input.txt" not in rendered_state
+    assert "ignored-discord-input.txt" not in rendered_state
+    assert message_command_id not in rendered_state
+    assert setup_threads_custom_id not in rendered_state
 
 
 def test_socket_mode_recovers_then_acknowledges_and_preserves_route(

@@ -52,8 +52,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-07-28
-spec_version: 77
+last_verified_at: 2026-08-02
+spec_version: 78
 ---
 
 # Toolkit
@@ -712,25 +712,32 @@ External Channel turn or continuation and for an ordinary user who explicitly as
 for external publication. Active bindings or prior External Channel history alone do
 not classify the current ordinary user input as an External Channel request.
 Compaction preserves only unfinished work continuity: binding, provider, resource
-label, current title, and ordered tasks. It omits state revisions, latest actions,
-projection diagnostics, and delivery outcomes.
+label, current title, and ordered tasks. It omits state revisions, provider projection
+diagnostics, and provider-effect outcomes.
 
 Ingress creates the current work cycle and its initial Slack Activity Tracker before
 Agent execution. The tool atomically commits an optional conversational reply and
 an optional current-work title plus complete ordered task replacement before any
-provider call. Task updates require a same-call title. The tool guides the Agent to
+provider call. It then executes the returned process-local provider effects in order
+and returns ordered sanitized `delivered`, `failed`, `unknown`, or `not_attempted`
+outcomes. The normal Tool call/result events are the only durable execution history;
+the tool creates no Action, Delivery, provider-operation, retry, or recovery record.
+Task updates require a same-call title. The tool guides the Agent to
 write a concise concrete in-progress phrase in the participant's language ending in
 an ellipsis. Tasks have stable IDs, `pending`, `in_progress`, `completed`, or
 `failed` state, and optional details, output, and labeled URL sources. One update
 supports at most 49 tasks, and its complete desired progress snapshot must fit the
 64 KiB aggregate canonical bound. `continue` preserves unfinished Channel Work and
 updates the retained Tracker; message-only continuation leaves progress unchanged.
-`finish` requires a final reply, ends the work cycle, and deletes the Tracker only
-after the reply is durably delivered. Ordinary Session Todo state remains separate
+`finish` requires a final reply, ends the work cycle, and attempts Tracker deletion
+only after the direct reply effect is delivered. Ordinary Session Todo state remains separate
 and never becomes the Channel Work source of truth.
 
 ## Changelog
 
+- **2026-08-02** (spec_version 78) — Replaced durable External Channel Action and
+  Delivery execution records with normal Tool call/result history and ordered
+  immediate provider-effect outcomes.
 - **2026-07-28** (spec_version 77) — Scoped the static publication boundary to explicitly marked current Channel input and moved ordinary-user invocation rules into the `channel_action` description.
 - **2026-07-28** (spec_version 76) — Deferred External Channel tools through Tool Search, retained only a capability-aware static publication boundary, moved usage guidance into tool schemas, and reduced compaction to unfinished-work continuity.
 - **2026-07-26** (spec_version 75) — Replaced the legacy `wait_agent` description with the independent

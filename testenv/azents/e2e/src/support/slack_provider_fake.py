@@ -56,6 +56,7 @@ class FakeState:
                 "chat.update": "delivered",
                 "chat.delete": "delivered",
             }
+            self.delivery_scenario_sequences: dict[str, list[str]] = {}
             self.file_scenarios: dict[str, str] = {
                 "files.info": "available",
                 "file.download": "available",
@@ -97,6 +98,7 @@ class FakeState:
             "provider_bot_user_id",
             "granted_scopes",
             "delivery_scenarios",
+            "delivery_scenario_sequences",
             "file_scenarios",
             "view_scenarios",
             "files",
@@ -139,6 +141,27 @@ class FakeState:
                         delivery_scenarios,
                     ).items()
                 }
+            delivery_scenario_sequences = payload.get("delivery_scenario_sequences")
+            if delivery_scenario_sequences is not None:
+                if not isinstance(delivery_scenario_sequences, dict):
+                    raise ValueError("delivery_scenario_sequences must be an object.")
+                sequences = cast(
+                    dict[object, object],
+                    delivery_scenario_sequences,
+                )
+                typed_sequences: dict[str, list[str]] = {}
+                for key, value in sequences.items():
+                    if not isinstance(key, str) or not isinstance(value, list):
+                        raise ValueError(
+                            "delivery_scenario_sequences must contain string lists."
+                        )
+                    items = cast(list[object], value)
+                    if not items or not all(isinstance(item, str) for item in items):
+                        raise ValueError(
+                            "delivery_scenario_sequences must contain string lists."
+                        )
+                    typed_sequences[key] = [cast(str, item) for item in items]
+                self.delivery_scenario_sequences = typed_sequences
             file_scenarios = payload.get("file_scenarios")
             if file_scenarios is not None:
                 if not isinstance(file_scenarios, dict):
@@ -750,7 +773,13 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
 
     def _delivery(self, operation: str, body: dict[str, object]) -> None:
         with self.state.lock:
-            scenario = self.state.delivery_scenarios.get(operation, "delivered")
+            sequence = self.state.delivery_scenario_sequences.get(operation)
+            if sequence:
+                scenario = sequence.pop(0)
+                if not sequence:
+                    self.state.delivery_scenario_sequences.pop(operation, None)
+            else:
+                scenario = self.state.delivery_scenarios.get(operation, "delivered")
         if scenario == "ambiguous":
             self.close_connection = True
             try:

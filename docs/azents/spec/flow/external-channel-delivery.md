@@ -32,7 +32,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-02
-spec_version: 30
+spec_version: 31
 ---
 
 # External Channel Delivery and Channel Work
@@ -52,7 +52,7 @@ Channel tool. Normal turns do not reload canonical Channel Work into a dynamic p
 Mode selection, binding-handle, Channel Work, and file-materialization guidance lives
 in tool descriptions and field schemas. Compaction alone preserves unfinished binding,
 provider, resource, title, and ordered task continuity while excluding revisions,
-projection diagnostics, latest actions, and delivery outcomes.
+projection diagnostics, and provider-effect outcomes.
 
 A tool call must identify a binding owned by the current Agent and Session. The tool supports two atomic modes:
 
@@ -97,38 +97,39 @@ falls back to the normal App icon without failing the underlying delivery. Agent
 identity is therefore always present through the required bold name even when icon
 customization is unavailable.
 
-## Durable Commit Before Provider Calls
+## Canonical Commit and Immediate Provider Effects
 
-`ExternalChannelActionService.execute` commits the canonical action, work mutation, task snapshot, and every provider delivery intent in one database transaction. Only after commit does it attempt each pending delivery.
+`ExternalChannelActionService.execute` commits the canonical Channel Work transition
+before provider I/O and returns an ordered tuple of process-local effect plans. It then
+revalidates the current Agent, Session, binding, resource, route, connection,
+credentials, capability, and effect-specific authority before attempting each effect
+without an open database transaction.
 
-Provider calls occur without an open database transaction. A delivery is claimed from `pending` to `attempting` before the call and finishes as exactly one of:
+The Tool result contains one identifier-free outcome for each ordered effect:
 
-- `delivered`: provider confirmed success and returned a provider message identity when applicable;
-- `failed`: provider confirmed rejection or the committed payload/credentials are invalid;
-- `unknown`: cancellation, timeout, or ambiguous transport outcome prevents safe classification.
+- `delivered`: the provider confirmed the mutation;
+- `failed`: the provider confirmed rejection or current validation failed;
+- `unknown`: timeout, cancellation, or another ambiguous provider result prevents safe
+  classification; or
+- `not_attempted`: current provider authority is unavailable or a dependent earlier
+  effect did not complete.
 
-Provider mutations are never automatically retried. Stale `attempting` recovery marks an ambiguous outcome conservatively instead of re-executing the call. An explicit Slack `ok: false` response not covered by a specialized provider error is a confirmed `failed` result with the bounded Slack error code retained in its sanitized summary; it is not classified as a transport-ambiguous `unknown` result.
+The result includes only the operation, ordered part, status, and sanitized reason or
+detail. Normal Session client-tool call/result events are the only durable
+Agent-requested execution history. No Channel Action, delivery attempt, pending
+provider work item, retry, replay, recovery, or compensation record is created.
 
-Provider controls created by synchronous ingestion or lifecycle operations use the
-same delivery fence. The Agent Worker periodically recovers stale `attempting`
-controls to `unknown`, lists bounded pending control IDs, and delegates each attempt to
-the shared action service. It never scans Bindings to create rollout or backfill
-messages and never reconstructs provider content from callbacks.
-Initial joined-presence and progress controls are independent post-acceptance work.
-`failed`, `unknown`, `not_attempted`, or cancelled delivery remains durable provider
-evidence but does not gate canonical mailbox promotion, Session wake, or AgentRun
-creation.
-After provider I/O, final settlement opens a new transaction, locks the delivery and
-current connection/binding/work authority, and verifies that the same claimed attempt
-still owns settlement before recording the provider result. A stale owner or changed
-authority cannot settle newer state.
+Progress effect results compare-and-set only the current Work-owned projection part
+for the expected desired revision. A stale result cannot overwrite a newer desired
+snapshot. Reply results have no separate durable projection. Confirmed Slack API
+rejection is `failed`; transport or server ambiguity is `unknown`.
 
-Discord Create Message uses a deterministic, bounded nonce derived from the durable
-delivery attempt and sends `enforce_nonce=true`. A matching provider message identity
-converges duplicate creates. Credential, permission, missing-message, rate-limit, and
-confirmed provider rejection outcomes are `failed`; network, timeout, invalid success
-payload, and server ambiguity are `unknown`. An unknown Discord write is never blindly
-replayed.
+Discord Create Message uses a bounded operation key derived from the current Tool call
+and ordered effect and sends `enforce_nonce=true`. The key is a provider duplicate
+fence for that live operation, not durable replay authority. Credential, permission,
+missing-message, rate-limit, and confirmed provider rejection outcomes are `failed`;
+network, timeout, invalid success payload, and server ambiguity are `unknown`. An
+unknown write is not replayed automatically.
 
 ## Provider File Download
 
@@ -149,16 +150,17 @@ fallback for the replaced shorter key shape.
 
 ## File-bearing Reply Delivery
 
-Before the action transaction commits, the service resolves each source and enforces the
+Before the canonical Work transaction commits, the Tool resolves each source and enforces the
 effective outbound per-file and aggregate byte limits. Runtime sources must be readable
 regular files with a positive size. Exchange sources must resolve under the current
 canonical `SessionResourceAuthority`; their metadata and returned byte length must agree.
 Any missing, unauthorized, expired, unreadable, unsupported, oversized, or
-recovered-without-source file fails before provider mutation. The committed action and
-existing `REPLY` delivery store only ordered manifests containing source kind, source
-reference, filename, media type, and expected size.
+unavailable file fails before provider mutation. Ordered manifests containing source
+kind, source reference, filename, media type, and expected size remain in the current
+Tool effect only; External Channel does not persist a file-delivery record.
 
-After commit, every Runtime manifest creates one metadata-only Runtime upload attempt.
+After commit, every Runtime manifest creates one metadata-only Runtime transfer attempt
+through the existing trusted transfer coordinator.
 The trusted provider-delivery capability claims the verified transfer object, resolves
 its opaque object handle only inside trusted backend code, and exposes only a bounded
 async byte stream to Slack. The ordered batch retains every Runtime consumer claim
@@ -178,24 +180,22 @@ Slack processes files sequentially:
    data with ordered file IDs serialized in `files`, the conversational text, channel,
    and root thread.
 
-Slack `delivered` is not the final Runtime-source success boundary. It first records batch
-provider completion, then acknowledges and settles every Runtime consumer claim. A failed
-Slack result abandons and cancels only the exact uncommitted Runtime attempts. If provider
-work has started and its result is ambiguous, or if authoritative cleanup or post-provider
-settlement cannot be confirmed, the delivery is `unknown` and its Runtime claims remain for
-expiry or reconciliation. Cancellation before provider work attempts the same exact cleanup;
-cancellation after provider work is ambiguous.
+Slack `delivered` requires provider completion followed by acknowledgement and
+settlement of every Runtime consumer claim. A confirmed pre-provider failure abandons
+and cancels only the current Runtime attempts. If provider work has started and its
+result is ambiguous, or if post-provider settlement cannot be confirmed, the Tool
+effect is `unknown`; Runtime claims follow their existing bounded expiry lifecycle.
+External Channel creates no persistent recovery work and does not replay the transfer
+or provider mutation.
 
-If a Runtime transfer cannot be admitted, verified, claimed, or streamed, the delivery
-fails before a provider mutation. After a Slack external-upload mutation starts, the
-delivery ledger records one terminal result or an explicit ambiguous outcome; it does
-not automatically replay the transfer or provider mutation. Exchange-only replies
-retain their authority-resolved bounded stream path, and ordinary Agent output is never
-uploaded without the explicit Channel action.
+If a Runtime transfer cannot be admitted, verified, claimed, or streamed, the current
+Tool effect fails before provider mutation. Exchange-only replies retain their
+authority-resolved bounded stream path, and ordinary Agent output is never uploaded
+without the explicit Channel action.
 
 Discord splits oversized replies into stable ordered message parts. Each part is
 bounded to the provider message limit, preserves balanced fenced Markdown where
-possible, and is delivered through a durable per-part intent. A Channel Work snapshot
+possible, and is one ordered process-local effect. A Channel Work snapshot
 instead becomes one retained compact Embed Tracker. The Embed title contains the
 bounded work title, and its description contains completion/failure counts plus every
 ordered task's status marker and bounded title. Remaining description space is
@@ -204,11 +204,12 @@ dropping a task. The functional Tracker body is not duplicated as ordinary messa
 content.
 Discord file-bearing messages stream a bounded multipart body from the
 already-authorized Runtime or Exchange source manifest. The multipart request includes
-the same durable-attempt nonce, validates each emitted byte count against preflight
-size, and is bounded by the provider request limit. The durable records retain source
-manifests and delivery evidence, never file bytes.
+the current effect's bounded operation key, validates each emitted byte count against
+preflight size, and is bounded by the provider request limit. Neither External Channel
+rows nor Session history retain file bytes, provider upload URLs, credentials, or
+provider identifiers.
 
-For a Discord root-message thread Resource, the first route-resolved outbound intent ensures
+For a Discord root-message thread Resource, the first route-resolved outbound effect ensures
 one provider thread and records its returned channel ID on the resource under a lock.
 New thread creation uses the current routed Agent name after trimming and provider
 length bounding, with the safe product fallback only for a blank name. Existing
@@ -219,23 +220,27 @@ target behavior: Slack uses the bound root and Discord reuses an existing thread
 provisions one delivery thread. New Discord provider threads explicitly use the
 minimum supported 60-minute automatic archive duration instead of inheriting the
 parent channel default. All later approval, Session navigation, reply, file, progress,
-recovery, and cleanup intents use the Resource's explicit target. A failed or ambiguous
-thread creation is a terminal delivery outcome and never causes an unsafe replay.
+and cleanup effects use the Resource's explicit target. A failed or ambiguous thread
+creation returns that immediate outcome and does not cause automatic replay.
 
 ## Activity Tracker Lifecycle
 
 - Conversational replies use `chat.postMessage` with Slack `markdown_text` in the bound thread. The Tool schema and the provider delivery boundary enforce Slack's current 12,000-character Markdown limit before a mutation request.
-- Releasing the first eligible invocation while a binding has no unanswered work creates Channel Work and one Block Kit Activity Tracker intent before Session wake-up. Creation does not depend on Todo state or a `channel_action` call.
+- Releasing the first eligible invocation while a binding has no unanswered work
+  creates Channel Work and plans one Activity Tracker effect before Session wake-up.
+  Creation does not depend on Todo state or a `channel_action` call.
 - Initial binding acceptance separately creates one Session presence control and the
-  initial Activity Tracker in the same durable transaction as the triggering mailbox
+  initial Activity Tracker plan in the same transaction as the triggering mailbox
   input. The versioned presence control replaces the former button-only Session link.
   Slack uses Block Kit and Discord uses an Embed; both state that the current Agent
   joined the conversation and place `View session` and provider-native
   `Conversation settings` actions below the message while the Binding remains
-  connected. The Worker attempts those controls independently after commit. Retries
-  reuse the same mailbox and delivery attempts. Later invocations on the binding do
-  not repeat the provider mutation, and Activity Tracker desired state never contains
-  the Session URL.
+  connected. The ingress caller attempts every returned plan once only after the
+  canonical commit and HTTP/provider acknowledgement boundary. Failure, ambiguity,
+  cancellation, or process termination creates no recovery work and does not gate the
+  mailbox, wake, or AgentRun. Later invocations on the binding do not repeat the
+  joined-presence mutation, and Activity Tracker desired state never contains the
+  Session URL.
 - The initial Tracker states that the Agent is checking the message with one
   `task_card` carrying the `in_progress` state. Once Channel Work exists, one
   `plan` block carries the Agent-authored title and complete ordered task list.
@@ -247,8 +252,8 @@ thread creation is a terminal delivery outcome and never causes an unsafe replay
   latest Block Kit payload through `chat.update`. A revision-derived provider-only
   `block_id` changes for each message iteration. Slack Agent streaming methods are
   not used.
-- Finishing requires a final reply. The reply is attempted first; only a durable
-  `delivered` result permits `chat.delete` for the Tracker. Failed, unknown, or
+- Finishing requires a final reply. Reply effects are attempted first; only
+  `delivered` results permit `chat.delete` for the Tracker. Failed, unknown, or
   not-attempted replies leave deletion `not_attempted`.
 - A later work cycle creates a new Tracker rather than reusing the deleted cycle's
   provider identity.
@@ -257,16 +262,14 @@ thread creation is a terminal delivery outcome and never causes an unsafe replay
   transaction. Later complete snapshots replace that retained message's content with an
   empty string and its Embed with the current bounded title, status summary, ordered
   checklist, prioritized context, and labeled sources. Update, delete, replacement,
-  recovery, and final-reply cleanup use the same durable Tracker identity and gating.
-- Existing connected Bindings without the versioned settings action are reconciled
+  and final-reply cleanup use the same Work-owned Tracker identity and revision fence.
 - An eligible explicit mention in an existing connected Binding may create one
   idempotent version-3 settings control for that Binding. The control contains only
   provider-native `Conversation settings`, does not repeat joined presence or rewrite
   provider history, and is never created by deployment, startup, connection
-  activation, or periodic worker reconciliation. Rollout-era version-2 pending
-  controls are terminalized as invalid without provider I/O.
-- A first eligible mention with no participation setting creates a durable setup
-  control before Session or AgentRun creation. Slack opens the authenticated
+  activation, or periodic background work.
+- A first eligible mention with no participation setting creates the setup claim and
+  one immediate setup-control plan before Session or AgentRun creation. Slack opens the authenticated
   parent-scoped location selector. Discord posts `Answer in this channel` and
   `Answer in threads` directly in the parent channel and never provisions a thread
   until a valid selection commits.
@@ -274,16 +277,11 @@ thread creation is a terminal delivery outcome and never causes an unsafe replay
 The work cycle stores its title, complete provider-neutral version-2 desired
 snapshot, desired revision, and retained provider identity. A matching Slack
 deletion event or confirmed
-`message_not_found` update clears that identity and commits one replacement create
-only while work is active and desired state exists. Ambiguous provider outcomes and
-finished work do not trigger replacement. If work advances while a replacement
-create is in flight, delivery commits and attempts one follow-up update for the
-replacement identity and latest desired revision.
-
-Tracker creation and final-reply completion may race. Both completion paths
-idempotently ensure the finished action's delete intent after the reply is delivered
-and a provider Tracker identity exists. A Tracker delete that returns
-`message_not_found` is reconciled as already absent and never recreates the Tracker.
+`message_not_found` result clears that identity for the matching desired revision.
+Neither confirmed absence nor an ambiguous outcome creates replacement, catch-up,
+retry, or recovery work. A later explicit `channel_action` progress change may plan a
+new create from the then-current desired state. A Tracker delete that returns
+`message_not_found` is treated as already absent.
 
 ## Approval Control Messages
 
@@ -292,32 +290,32 @@ fallback text; they do not expose an approval URL as ordinary body text. Provide
 participant labels and IDs are rendered in Slack plain-text objects so untrusted
 mrkdwn cannot create mentions, links, or formatting.
 
-Discord authorization controls use the same durable `CONTROL_MESSAGE` create intent
-and Discord Create Message nonce fence as ordinary text output. They contain a bounded
+Discord authorization controls use the same immediate `CONTROL_MESSAGE` effect and
+Discord operation-key nonce fence as ordinary text output. They contain a bounded
 approval explanation with a labelled Markdown review link, never a bare URL. Discord
-control payloads retain only Guild/channel identifiers, the authenticated approval
-link, and bounded text; they retain no interaction token, credential, raw event, or
-attachment URL.
+request-local control payloads contain only the provider target, authenticated
+approval link, and bounded text; durable access state retains no interaction token,
+credential, raw event, attachment URL, or provider body.
 
 Slack API validation responses for approval controls are confirmed
 `failed/provider_rejected` outcomes. Only transport or server ambiguity is
 `unknown/provider_ambiguous`.
 
-Every compatible final approval decision creates a delete intent for a successfully
-delivered control message in the same transaction as the decision, then attempts
-that provider delete after commit. Deny and block use the access request's route and
-do not require a Session binding. Cleanup failure or ambiguity remains visible
-without changing the final decision.
+Before access-control creation, the access request claims its owner-local control
+projection as `unknown`. This conservative preclaim prevents a duplicate callback from
+creating another control while provider I/O is in flight. A delivered create stores
+only the current provider message key and `present` state on the access request;
+confirmed failure or ambiguity stores only the current projection status.
 
-Control delivery and the access decision may complete in either order. A pending
-request never deletes its control message. After a delivered control result commits,
-a separate reconciliation transaction locks the request before the control delivery
-and creates the same idempotent delete intent if the request is already final. This
-lock order matches the decision transaction and avoids request/control lock
-inversion. Whichever path observes both prerequisites attempts the pending delete;
-the delivery claim preserves one provider mutation.
+Every compatible final approval decision returns one direct delete plan when the
+access request has a current provider message key. The decision commits before the
+caller attempts that delete. Deny and block use the access request's route and do not
+require a Session binding. Delete success clears the key; failure or ambiguity updates
+only current access projection state, does not change the final decision, and creates
+no retry or reconciliation work.
 
-The Activity Tracker identity and delivery state are durable management data.
+The Activity Tracker identity and current projection status are Work-owned management
+data.
 Session Channels renders the canonical ordered task snapshot and one derived
 projection state:
 
@@ -336,25 +334,28 @@ Channel Work state.
 
 A successfully completed run with unfinished Channel Work remains eligible for idle continuation. Continuation is binding-aware and includes the current unfinished work snapshot. Sending an intermediate reply does not finish active work. Completing/clearing tasks, or explicitly finishing with no follow-up work, stops continuation for that binding. Other connected bindings can still require continuation in the same Session.
 
-## Cleanup Delivery
+## Lifecycle Cleanup Controls
 
-Every binding termination commits one leave-presence control in addition to any
-required Tracker-delete intents. Slack renders `Agent name left this conversation.`
+Every binding termination captures one leave-presence plan in addition to any
+required Tracker-delete plans. Slack renders `Agent name left this conversation.`
 in Block Kit and Discord renders the same statement in an Embed; both retain the
 `View session` button. Manual binding disconnect, route or connection termination,
-Session archive, and Agent decommission use this common delivery identity. Lifecycle
+Session archive, and Agent decommission use this common presentation. Lifecycle
 transactions never call a provider directly. When terminal connection cleanup purges
 provider credentials, the service captures the delivery target in memory before the
-purge. Its post-commit claim accepts only the same pending binding-disconnect
-presence or Tracker-delete attempt after revalidating the durable connection, route,
-resource, binding, Session, and terminal state. The captured credential is never
-persisted in the delivery ledger. Other cleanup paths continue to resolve current
-credentials normally. The post-commit consumer attempts each current disconnect
-intent once; unresolved attempts remain visible as failed or unknown without rolling
-back the terminal lifecycle transition.
+purge. Post-commit execution revalidates the durable connection, route, resource,
+binding, Session, and terminal state before using that captured target. The captured
+credential and plans remain process-local. Other cleanup paths resolve current
+credentials normally. Each captured plan is attempted at most once; failure,
+ambiguity, cancellation, or process termination does not roll back the terminal
+lifecycle transition and creates no recovery work.
 
 ## Changelog
 
+- **2026-08-02** (spec_version 31) — Replaced durable Channel Action, delivery
+  attempt, Worker recovery, and lifecycle intent authority with ordinary Tool
+  call/result history, immediate ordered effects, owner-local current projection, and
+  process-local post-commit controls.
 - **2026-08-02** (spec_version 29) — Added direct parent-channel targeting, versioned
   conversation-settings presence actions, and bounded existing-Binding control
   reconciliation without history rewrite.

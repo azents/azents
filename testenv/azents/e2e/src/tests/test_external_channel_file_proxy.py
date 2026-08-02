@@ -22,8 +22,10 @@ def _request() -> dict[str, object]:
                     "External Channel file transfer E2E.\n"
                     "Files:\n"
                     "1. Name: first.txt\n"
+                    "   Declared size: 32 bytes\n"
                     "   File: external-file:v1:slack:binding-file-123:::F1\n"
                     "2. Name: second.txt\n"
+                    "   Declared size: 64 bytes\n"
                     "   File: external-file:v1:slack:binding-file-123:::F2"
                 ),
             }
@@ -57,6 +59,7 @@ def test_file_proxy_recognizes_two_locators_and_required_tools() -> None:
         "external-file:v1:slack:binding-file-123:::F1",
         "external-file:v1:slack:binding-file-123:::F2",
     ]
+    assert proxy.external_channel_file_declared_sizes(request) == [32, 64]
     assert proxy.external_channel_file_evidence(request) == {
         "matched": True,
         "binding": "binding-file-123",

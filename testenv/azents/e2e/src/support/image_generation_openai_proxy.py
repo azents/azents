@@ -106,10 +106,13 @@ _EXTERNAL_CHANNEL_PROGRESS_MARKER = "Provider-native Channel Work progress E2E"
 _EXTERNAL_CHANNEL_SEARCH_CALL_ID = "call_external_channel_tool_search"
 _EXTERNAL_CHANNEL_PROGRESS_CALL_ID = "call_external_channel_progress"
 _EXTERNAL_CHANNEL_FINISH_CALL_ID = "call_external_channel_finish"
+_EXTERNAL_CHANNEL_OUTCOME_PROGRESS_CALL_ID = "call_external_channel_outcome_progress"
+_EXTERNAL_CHANNEL_FAILURE_PROGRESS_CALL_ID = "call_external_channel_failure_progress"
 _EXTERNAL_CHANNEL_TURN_BINDING = re.compile(r"Binding: ([A-Za-z0-9_-]+)")
 _EXTERNAL_CHANNEL_COMPACTION_BINDING = re.compile(r"### Binding `([^`]+)`")
 _EXTERNAL_CHANNEL_FILE_MARKER = "External Channel file transfer E2E"
 _EXTERNAL_CHANNEL_FILE_LOCATOR = re.compile(r"File: (external-file:v1:[^\\\s\"']+)")
+_EXTERNAL_CHANNEL_FILE_DECLARED_SIZE = re.compile(r"Declared size: (\d+) bytes")
 _EXTERNAL_CHANNEL_FILE_SEARCH_CALL_ID = "call_external_channel_file_tool_search"
 _EXTERNAL_CHANNEL_FILE_DOWNLOAD_CALL_ID = "call_external_channel_file_download"
 _EXTERNAL_CHANNEL_FILE_PROCESS_CALL_ID = "call_external_channel_file_process"
@@ -418,6 +421,16 @@ def external_channel_file_locators(request: dict[str, object]) -> list[str]:
     return list(dict.fromkeys(_EXTERNAL_CHANNEL_FILE_LOCATOR.findall(serialized)))
 
 
+def external_channel_file_declared_sizes(
+    request: dict[str, object],
+) -> list[int]:
+    """Extract ordered declared sizes from rendered file metadata."""
+    serialized = json.dumps(request, ensure_ascii=False)
+    return [
+        int(value) for value in _EXTERNAL_CHANNEL_FILE_DECLARED_SIZE.findall(serialized)
+    ]
+
+
 def is_external_channel_file_request(request: dict[str, object]) -> bool:
     """Recognize the file journey before or after deferred-tool activation."""
     serialized = json.dumps(request, ensure_ascii=False)
@@ -706,6 +719,7 @@ class _Handler(BaseHTTPRequestHandler):
             binding = external_channel_binding(request)
             locators = external_channel_file_locators(request)
             if binding is not None and locators:
+                declared_sizes = external_channel_file_declared_sizes(request)
                 if (
                     _request_has_named_tool(request, "tool_search")
                     and not request_has_tool_output(
@@ -794,7 +808,11 @@ class _Handler(BaseHTTPRequestHandler):
                     name="download_external_file",
                     arguments={
                         "file": locators[0],
-                        "expected_size_bytes": _EXTERNAL_CHANNEL_FILE_INPUT_BYTES,
+                        "expected_size_bytes": (
+                            declared_sizes[0]
+                            if declared_sizes
+                            else _EXTERNAL_CHANNEL_FILE_INPUT_BYTES
+                        ),
                         "path": _EXTERNAL_CHANNEL_FILE_INPUT_PATH,
                         "overwrite": True,
                     },
@@ -835,7 +853,7 @@ class _Handler(BaseHTTPRequestHandler):
                     return
                 if request_has_tool_output(
                     request,
-                    _EXTERNAL_CHANNEL_PROGRESS_CALL_ID,
+                    _EXTERNAL_CHANNEL_FAILURE_PROGRESS_CALL_ID,
                 ):
                     self._write_function_call_response(
                         request,
@@ -845,6 +863,36 @@ class _Handler(BaseHTTPRequestHandler):
                             "mode": "finish",
                             "binding": binding,
                             "message": "The deterministic investigation is complete.",
+                        },
+                    )
+                    return
+                if request_has_tool_output(
+                    request,
+                    _EXTERNAL_CHANNEL_OUTCOME_PROGRESS_CALL_ID,
+                ):
+                    self._write_function_call_response(
+                        request,
+                        call_id=_EXTERNAL_CHANNEL_FAILURE_PROGRESS_CALL_ID,
+                        name="channel_action",
+                        arguments={
+                            "mode": "continue",
+                            "binding": binding,
+                            "title": "Investigating error logs…",
+                        },
+                    )
+                    return
+                if request_has_tool_output(
+                    request,
+                    _EXTERNAL_CHANNEL_PROGRESS_CALL_ID,
+                ):
+                    self._write_function_call_response(
+                        request,
+                        call_id=_EXTERNAL_CHANNEL_OUTCOME_PROGRESS_CALL_ID,
+                        name="channel_action",
+                        arguments={
+                            "mode": "continue",
+                            "binding": binding,
+                            "title": "Investigating error logs…",
                         },
                     )
                     return
