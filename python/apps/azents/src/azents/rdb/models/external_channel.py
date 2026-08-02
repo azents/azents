@@ -2227,6 +2227,12 @@ class RDBExternalChannelSessionTitleCandidate(RDBModel):
         "(status <> 'relinquished' AND relinquished_reason IS NULL)",
         name="ck_ec_session_title_candidates_relinquished_reason",
     )
+    CK_ACCESS_PROVISIONAL_TITLE = sa.CheckConstraint(
+        "admission_access_request_id IS NULL OR "
+        "(admission_provisional_title IS NOT NULL "
+        "AND length(btrim(admission_provisional_title)) > 0)",
+        name="ck_ec_session_title_candidates_access_provisional_title",
+    )
 
     id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -2245,6 +2251,15 @@ class RDBExternalChannelSessionTitleCandidate(RDBModel):
         nullable=False,
     )
     trigger_provider_message_key: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    admission_access_request_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_access_requests.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    admission_provisional_title: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
+    )
     status: Mapped[ExternalChannelSessionTitleCandidateStatus] = mapped_column(
         external_channel_session_title_candidate_status_enum,
         nullable=False,
@@ -2281,6 +2296,7 @@ class RDBExternalChannelSessionTitleCandidate(RDBModel):
         UQ_BINDING_TRIGGER,
         CK_CONSUMED_EVENT,
         CK_RELINQUISHED_REASON,
+        CK_ACCESS_PROVISIONAL_TITLE,
     )
 
 

@@ -148,6 +148,7 @@ class ExternalChannelIngestionReplayService:
             operation=ExternalChannelIngestionOperation.ACCESS_ALLOW,
             deadline=deadline,
             provider_user_id=source.principal.provider_user_id,
+            access_request_id=access_request_id,
         )
 
     async def replay_selected_interaction(
@@ -197,6 +198,7 @@ class ExternalChannelIngestionReplayService:
             operation=ExternalChannelIngestionOperation.SELECTOR_CONTINUATION,
             deadline=deadline,
             provider_user_id=None,
+            access_request_id=None,
         )
 
     async def replay_setup_claim(
@@ -323,6 +325,7 @@ class ExternalChannelIngestionReplayService:
         operation: ExternalChannelIngestionOperation,
         deadline: ExternalChannelOperationDeadline,
         provider_user_id: str | None,
+        access_request_id: str | None,
     ) -> ExternalChannelIngestionOutcome:
         delivery_thread_key = await self._resolve_delivery_thread_key(
             source,
@@ -340,6 +343,7 @@ class ExternalChannelIngestionReplayService:
                 deadline=deadline,
                 provider_user_id=provider_user_id,
                 delivery_thread_key=delivery_thread_key,
+                access_request_id=access_request_id,
             )
         )
 
@@ -450,6 +454,7 @@ def _build_request(
     deadline: ExternalChannelOperationDeadline,
     provider_user_id: str | None,
     delivery_thread_key: str | None,
+    access_request_id: str | None,
 ) -> ExternalChannelIngestionRequest:
     configuration = source.configuration
     tenant_id = configuration.provider_tenant_id
@@ -511,6 +516,7 @@ def _build_request(
             range_start_position=source.range_start_position,
             trigger_position=source.trigger_position,
         ),
+        access_request_id=access_request_id,
     )
 
 

@@ -1,13 +1,17 @@
 """Bounded Discord conversation-history hydration primitives."""
 
 import asyncio
+import datetime
 import json
 import time
 from dataclasses import dataclass
 
 import httpx
 
+from azents.core.enums import ExternalChannelDiscordThreadObservationStatus
 from azents.services.external_channel.conversation import (
+    DiscordObservedThread,
+    DiscordRootThreadObservation,
     ExternalChannelHistoryCredentialsInvalid,
     ExternalChannelHistoryDeadlineExceeded,
     ExternalChannelHistoryMalformed,
@@ -67,6 +71,7 @@ MAX_DISCORD_HISTORY_MESSAGE_BYTES = 64 * 1024
 MAX_DISCORD_HISTORY_PAGES = 20
 MAX_DISCORD_HISTORY_SCANNED_MESSAGES = 2_000
 MAX_DISCORD_HISTORY_RETAINED_MESSAGES = 20
+_DISCORD_MESSAGE_FLAG_HAS_THREAD = 1 << 5
 
 
 class DiscordHistoryRequestRejected(DiscordHistoryProviderError):
@@ -209,6 +214,7 @@ class DiscordConversationHistoryClient:
         pages = 0
         scanned = 0
         normalized_messages: list[DiscordNormalizedMessage] = []
+        root_thread_observation: DiscordRootThreadObservation | None = None
         while True:
             if deadline.remaining_seconds() <= 0:
                 raise ExternalChannelHistoryDeadlineExceeded(
@@ -239,6 +245,11 @@ class DiscordConversationHistoryClient:
                         exact_payload,
                         trigger=trigger,
                     )
+                    if trigger.conversation_channel_id == trigger.source_channel_id:
+                        root_thread_observation = self._observe_exact_root_thread(
+                            payload=exact_payload,
+                            trigger=trigger,
+                        )
                     exact_message = self._normalize(
                         guild_id=trigger.guild_id,
                         raw_message=exact_payload,
@@ -403,6 +414,7 @@ class DiscordConversationHistoryClient:
             provider_request_count=pages,
             scanned_message_count=scanned,
             elapsed_seconds=max(0.0, time.monotonic() - started),
+            discord_root_thread_observation=root_thread_observation,
         )
 
     def _normalize(
@@ -532,6 +544,126 @@ class DiscordConversationHistoryClient:
             raise ExternalChannelHistoryMalformed(
                 "Discord history item had an invalid thread boundary."
             )
+
+    @staticmethod
+    def _observe_exact_root_thread(
+        *,
+        payload: dict[str, object],
+        trigger: DiscordConversationHistoryTrigger,
+    ) -> DiscordRootThreadObservation:
+        """Normalize exact-root evidence without treating ambiguity as absence."""
+        observed_at = datetime.datetime.now(datetime.UTC)
+        raw_flags = payload.get("flags")
+        root_has_thread = (
+            bool(raw_flags & _DISCORD_MESSAGE_FLAG_HAS_THREAD)
+            if isinstance(raw_flags, int) and not isinstance(raw_flags, bool)
+            else None
+        )
+        raw_thread = payload.get("thread")
+        if raw_thread is None:
+            return DiscordRootThreadObservation(
+                status=(
+                    ExternalChannelDiscordThreadObservationStatus.THREAD_ABSENT
+                    if root_has_thread is False
+                    else ExternalChannelDiscordThreadObservationStatus.UNKNOWN
+                ),
+                guild_id=trigger.guild_id,
+                parent_channel_id=trigger.source_channel_id,
+                root_message_id=trigger.trigger_message_id,
+                trigger_provider_message_key=(
+                    f"discord:{trigger.guild_id}:{trigger.trigger_message_id}"
+                ),
+                observed_at=observed_at,
+                root_has_thread=root_has_thread,
+                thread=None,
+            )
+        if not isinstance(raw_thread, dict) or root_has_thread is not True:
+            return DiscordRootThreadObservation(
+                status=ExternalChannelDiscordThreadObservationStatus.UNKNOWN,
+                guild_id=trigger.guild_id,
+                parent_channel_id=trigger.source_channel_id,
+                root_message_id=trigger.trigger_message_id,
+                trigger_provider_message_key=(
+                    f"discord:{trigger.guild_id}:{trigger.trigger_message_id}"
+                ),
+                observed_at=observed_at,
+                root_has_thread=root_has_thread,
+                thread=None,
+            )
+        thread = DiscordConversationHistoryClient._observed_thread(
+            raw_thread=raw_thread,
+            trigger=trigger,
+        )
+        if thread is None:
+            return DiscordRootThreadObservation(
+                status=ExternalChannelDiscordThreadObservationStatus.UNKNOWN,
+                guild_id=trigger.guild_id,
+                parent_channel_id=trigger.source_channel_id,
+                root_message_id=trigger.trigger_message_id,
+                trigger_provider_message_key=(
+                    f"discord:{trigger.guild_id}:{trigger.trigger_message_id}"
+                ),
+                observed_at=observed_at,
+                root_has_thread=root_has_thread,
+                thread=None,
+            )
+        return DiscordRootThreadObservation(
+            status=ExternalChannelDiscordThreadObservationStatus.THREAD_PRESENT,
+            guild_id=trigger.guild_id,
+            parent_channel_id=trigger.source_channel_id,
+            root_message_id=trigger.trigger_message_id,
+            trigger_provider_message_key=(
+                f"discord:{trigger.guild_id}:{trigger.trigger_message_id}"
+            ),
+            observed_at=observed_at,
+            root_has_thread=root_has_thread,
+            thread=thread,
+        )
+
+    @staticmethod
+    def _observed_thread(
+        *,
+        raw_thread: dict[str, object],
+        trigger: DiscordConversationHistoryTrigger,
+    ) -> DiscordObservedThread | None:
+        """Return only complete exact-root thread metadata suitable for later proof."""
+        channel_id = raw_thread.get("id")
+        parent_channel_id = raw_thread.get("parent_id")
+        owner_id = raw_thread.get("owner_id")
+        name = raw_thread.get("name")
+        metadata = raw_thread.get("thread_metadata")
+        created_at_raw = (
+            metadata.get("create_timestamp") if isinstance(metadata, dict) else None
+        )
+        if (
+            not isinstance(channel_id, str)
+            or not channel_id
+            or raw_thread.get("guild_id") != trigger.guild_id
+            or parent_channel_id != trigger.source_channel_id
+            or not isinstance(owner_id, str)
+            or not owner_id
+            or not isinstance(name, str)
+            or not name
+            or not isinstance(created_at_raw, str)
+        ):
+            return None
+        try:
+            created_at = datetime.datetime.fromisoformat(
+                created_at_raw.replace("Z", "+00:00")
+            )
+        except ValueError:
+            return None
+        if created_at.tzinfo is None or created_at.utcoffset() is None:
+            return None
+        return DiscordObservedThread(
+            channel_id=channel_id,
+            guild_id=trigger.guild_id,
+            parent_channel_id=trigger.source_channel_id,
+            root_message_id=trigger.trigger_message_id,
+            owner_id=owner_id,
+            name=name,
+            created_at=created_at,
+        )
 
     @staticmethod
     def _object_payload(response: httpx.Response) -> dict[str, object]:

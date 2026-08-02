@@ -346,6 +346,7 @@ class ExternalChannelIngestionRequest:
     operation: ExternalChannelIngestionOperation
     selected_route_id: str | None
     replay_boundary: ExternalChannelAnyReplayBoundary | None
+    access_request_id: str | None
 
     def __post_init__(self) -> None:
         """Require operation-specific replay and scope ownership."""
@@ -371,6 +372,20 @@ class ExternalChannelIngestionRequest:
         ) != isinstance(self.replay_boundary, ExternalChannelSetupReplayBoundary):
             raise ValueError(
                 "External Channel setup continuation requires its typed boundary."
+            )
+        if (self.operation is ExternalChannelIngestionOperation.ACCESS_ALLOW) != (
+            self.access_request_id is not None and bool(self.access_request_id)
+        ):
+            raise ValueError(
+                "External Channel access replay requires its access request identity."
+            )
+        if (
+            self.operation is not ExternalChannelIngestionOperation.ACCESS_ALLOW
+            and self.access_request_id is not None
+        ):
+            raise ValueError(
+                "Only External Channel access replay carries an access request "
+                "identity."
             )
 
     def __repr__(self) -> str:

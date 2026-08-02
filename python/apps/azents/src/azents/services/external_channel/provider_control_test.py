@@ -13,6 +13,10 @@ from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
 )
+from azents.services.external_channel.discord_projection import (
+    DiscordProjectionProvisioningDrain,
+    DiscordProjectionReconciliationService,
+)
 from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
 )
@@ -114,6 +118,22 @@ class _ActionService:
         return ExternalChannelDeliveryStatus.DELIVERED
 
 
+class _ProjectionReconciliationService:
+    async def drain_once(
+        self,
+        *,
+        now: datetime.datetime,
+    ) -> DiscordProjectionProvisioningDrain:
+        assert now == _at(120)
+        return DiscordProjectionProvisioningDrain(
+            claimed=0,
+            ready=0,
+            unmanaged=0,
+            retried=0,
+            failed=0,
+        )
+
+
 @pytest.mark.asyncio
 async def test_drain_commits_recovery_before_provider_attempts() -> None:
     """The scan transaction closes before each existing delivery primitive runs."""
@@ -131,6 +151,10 @@ async def test_drain_commits_recovery_before_provider_attempts() -> None:
             ExternalChannelActionService,
             _ActionService(events),
         ),
+        projection_reconciliation=cast(
+            DiscordProjectionReconciliationService,
+            _ProjectionReconciliationService(),
+        ),
         stale_threshold=datetime.timedelta(minutes=2),
         interval=datetime.timedelta(seconds=1),
         limit=2,
@@ -140,6 +164,7 @@ async def test_drain_commits_recovery_before_provider_attempts() -> None:
 
     assert result.stale_unknown == 1
     assert result.attempted == 2
+    assert result.provisioning.claimed == 0
     assert events == [
         "recover",
         "list",

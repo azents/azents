@@ -66,6 +66,9 @@ from azents.services.external_channel.participation_state import (
     projection_with_setup_source,
     setup_source_from_projection,
 )
+from azents.services.external_channel.title_artifact import (
+    ExternalChannelTitleArtifactService,
+)
 
 
 def test_session_url_uses_canonical_workspace_route() -> None:
@@ -132,6 +135,7 @@ def _slack_request() -> ExternalChannelIngestionRequest:
         operation=ExternalChannelIngestionOperation.CURRENT_TRIGGER,
         selected_route_id=None,
         replay_boundary=None,
+        access_request_id=None,
     )
 
 
@@ -209,6 +213,9 @@ def _store(
     agent_repository: object | None = None,
     root_creation_service: object | None = None,
 ) -> ExternalChannelMailboxIngestionStore:
+    title_artifact_service = MagicMock(spec=ExternalChannelTitleArtifactService)
+    title_artifact_service.create = AsyncMock()
+    title_artifact_service.create_projection_for_existing_candidate = AsyncMock()
     return ExternalChannelMailboxIngestionStore(
         session_manager=MagicMock(),
         repository=cast(ExternalChannelRepository, repository),
@@ -217,6 +224,7 @@ def _store(
         agent_session_repository=MagicMock(),
         root_agent_session_creation_service=root_creation_service or MagicMock(),
         mailbox_service=MagicMock(),
+        title_artifact_service=title_artifact_service,
         config=Config.model_construct(
             web_url="https://azents.example/base",
         ),
@@ -280,6 +288,7 @@ def _history(
         provider_request_count=1,
         scanned_message_count=1,
         elapsed_seconds=0,
+        discord_root_thread_observation=None,
     )
 
 
@@ -738,6 +747,7 @@ async def test_create_binding_reports_only_the_new_root_session() -> None:
         return_value=Agent.model_construct(
             id="agent-1",
             workspace_id="workspace-1",
+            name="Agent One",
             lifecycle_status=AgentLifecycleStatus.ACTIVE,
             external_channel_default_response_mode=(
                 ExternalChannelResponseMode.ALL_MESSAGES

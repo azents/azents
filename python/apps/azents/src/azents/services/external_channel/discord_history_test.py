@@ -21,6 +21,34 @@ from azents.services.external_channel.discord_history import (
 )
 
 
+def test_root_thread_observation_rejects_missing_or_mismatched_provider_guild() -> None:
+    """Admission history cannot turn caller-supplied Guild into thread proof."""
+    trigger = DiscordConversationHistoryTrigger(
+        guild_id="111",
+        source_channel_id="222",
+        conversation_channel_id="222",
+        trigger_message_id="333",
+        connected_bot_user_id=None,
+    )
+    for thread_guild_id in (None, "other-guild"):
+        thread: dict[str, object] = {
+            "id": "444",
+            "parent_id": "222",
+            "owner_id": "bot-001",
+            "name": "Stored title",
+            "thread_metadata": {"create_timestamp": "2026-08-02T00:00:00+00:00"},
+        }
+        if thread_guild_id is not None:
+            thread["guild_id"] = thread_guild_id
+        observation = DiscordConversationHistoryClient._observe_exact_root_thread(  # pyright: ignore[reportPrivateUsage]
+            payload={"flags": 32, "thread": thread},
+            trigger=trigger,
+        )
+
+        assert observation.status.value == "unknown"
+        assert observation.thread is None
+
+
 @pytest.mark.asyncio
 async def test_root_history_fetches_only_the_canonical_source_message() -> None:
     """An unthreaded root never imports unrelated parent-channel history."""

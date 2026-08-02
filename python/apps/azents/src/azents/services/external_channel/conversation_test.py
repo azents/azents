@@ -77,6 +77,7 @@ def test_history_range_requires_the_exact_trigger_and_sanitized_counts() -> None
         provider_request_count=2,
         scanned_message_count=3,
         elapsed_seconds=0.25,
+        discord_root_thread_observation=None,
     )
 
     assert history.messages == ("first", "trigger")
@@ -91,4 +92,5 @@ def test_history_range_requires_the_exact_trigger_and_sanitized_counts() -> None
             provider_request_count=1,
             scanned_message_count=1,
             elapsed_seconds=0.1,
+            discord_root_thread_observation=None,
         )

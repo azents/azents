@@ -8,12 +8,25 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
+    AgentSessionStatus,
+    ExternalChannelConnectionStatus,
+    ExternalChannelDiscordThreadTitleProofKind,
     ExternalChannelDiscordThreadTitleProvisioningStatus,
     ExternalChannelDiscordThreadTitleStatus,
+    ExternalChannelProvider,
+    ExternalChannelResourceStatus,
+    ExternalChannelRouteCatalogStatus,
     ExternalChannelSessionTitleCandidateStatus,
 )
+from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
+    RDBExternalChannelAgentRoute,
+    RDBExternalChannelBinding,
+    RDBExternalChannelConnection,
     RDBExternalChannelDiscordThreadTitleProjection,
+    RDBExternalChannelResource,
     RDBExternalChannelSessionTitleCandidate,
 )
 
@@ -24,6 +37,8 @@ from .data import (
     ExternalChannelSessionTitleCandidateCreate,
 )
 
+SUPPORTED_DISCORD_THREAD_TITLE_PROVISIONING_PROTOCOL_VERSION = 1
+
 
 class ExternalChannelTitleRepository:
     """Persist exact External Channel title eligibility and projection state."""
@@ -33,6 +48,21 @@ class ExternalChannelTitleRepository:
         """Reject empty or oversized terminal reason codes."""
         if not reason.strip() or len(reason) > 120:
             raise ValueError("Candidate relinquishment reason is invalid.")
+
+    @staticmethod
+    def _validate_failure(
+        *,
+        failure_kind: str,
+        failure_summary: str,
+    ) -> None:
+        """Reject malformed bounded projection failure diagnostics."""
+        if (
+            not failure_kind.strip()
+            or len(failure_kind) > 120
+            or not failure_summary.strip()
+            or len(failure_summary) > 255
+        ):
+            raise ValueError("Projection failure diagnostics are invalid.")
 
     @staticmethod
     def _candidate(
@@ -48,6 +78,201 @@ class ExternalChannelTitleRepository:
         """Build an immutable projection repository record."""
         return ExternalChannelDiscordThreadTitleProjection.model_validate(row)
 
+    @staticmethod
+    async def _refresh_projections(
+        session: AsyncSession,
+        rows: list[RDBExternalChannelDiscordThreadTitleProjection],
+    ) -> None:
+        """Refresh server-managed timestamps before immutable DTO conversion."""
+        for row in rows:
+            await session.refresh(row)
+
+    @staticmethod
+    async def _lock_attempting_provisioning(
+        session: AsyncSession,
+        *,
+        projection_id: str,
+        expected_provision_attempt_count: int,
+        expected_provision_claimed_at: datetime.datetime,
+    ) -> RDBExternalChannelDiscordThreadTitleProjection | None:
+        """Lock only the exact current provisioning claim fence."""
+        return await session.scalar(
+            sa.select(RDBExternalChannelDiscordThreadTitleProjection)
+            .where(
+                RDBExternalChannelDiscordThreadTitleProjection.id == projection_id,
+                RDBExternalChannelDiscordThreadTitleProjection.provisioning_status
+                == ExternalChannelDiscordThreadTitleProvisioningStatus.ATTEMPTING,
+                RDBExternalChannelDiscordThreadTitleProjection.provision_attempt_count
+                == expected_provision_attempt_count,
+                RDBExternalChannelDiscordThreadTitleProjection.provision_claimed_at
+                == expected_provision_claimed_at,
+            )
+            .with_for_update()
+        )
+
+    @staticmethod
+    async def _lock_projection_resource(
+        session: AsyncSession,
+        *,
+        projection: RDBExternalChannelDiscordThreadTitleProjection,
+    ) -> RDBExternalChannelResource | None:
+        """Lock the projection's one canonical Resource delivery target."""
+        return await session.scalar(
+            sa.select(RDBExternalChannelResource)
+            .where(RDBExternalChannelResource.id == projection.resource_id)
+            .with_for_update()
+        )
+
+    @staticmethod
+    async def _lock_current_settlement_resource(
+        session: AsyncSession,
+        *,
+        projection: RDBExternalChannelDiscordThreadTitleProjection,
+    ) -> RDBExternalChannelResource | None:
+        """Lock and revalidate every durable owner before provider settlement."""
+        resource = await ExternalChannelTitleRepository._lock_projection_resource(
+            session,
+            projection=projection,
+        )
+        if (
+            resource is None
+            or resource.connection_id != projection.admission_connection_id
+            or resource.status is not ExternalChannelResourceStatus.ACTIVE
+        ):
+            return None
+        binding = await session.scalar(
+            sa.select(RDBExternalChannelBinding)
+            .where(
+                RDBExternalChannelBinding.id == projection.binding_id,
+                RDBExternalChannelBinding.resource_id == resource.id,
+                RDBExternalChannelBinding.agent_session_id
+                == projection.agent_session_id,
+                RDBExternalChannelBinding.disconnected_at.is_(None),
+            )
+            .with_for_update()
+        )
+        candidate = await session.scalar(
+            sa.select(RDBExternalChannelSessionTitleCandidate)
+            .where(
+                RDBExternalChannelSessionTitleCandidate.id
+                == projection.session_title_candidate_id,
+                RDBExternalChannelSessionTitleCandidate.agent_session_id
+                == projection.agent_session_id,
+                RDBExternalChannelSessionTitleCandidate.binding_id
+                == projection.binding_id,
+                RDBExternalChannelSessionTitleCandidate.trigger_provider_message_key
+                == projection.admission_trigger_provider_message_key,
+                RDBExternalChannelSessionTitleCandidate.admission_provisional_title
+                == projection.requested_provisional_title,
+                RDBExternalChannelSessionTitleCandidate.status.in_(
+                    (
+                        ExternalChannelSessionTitleCandidateStatus.PENDING,
+                        ExternalChannelSessionTitleCandidateStatus.CONSUMED,
+                    )
+                ),
+            )
+            .with_for_update()
+        )
+        agent_session = await session.scalar(
+            sa.select(RDBAgentSession)
+            .where(
+                RDBAgentSession.id == projection.agent_session_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                RDBAgentSession.stop_requested_at.is_(None),
+                RDBAgentSession.ended_at.is_(None),
+            )
+            .with_for_update()
+        )
+        if binding is None or candidate is None or agent_session is None:
+            return None
+        route = await session.scalar(
+            sa.select(RDBExternalChannelAgentRoute)
+            .where(
+                RDBExternalChannelAgentRoute.id == binding.route_id,
+                RDBExternalChannelAgentRoute.connection_id
+                == projection.admission_connection_id,
+                RDBExternalChannelAgentRoute.agent_id == agent_session.agent_id,
+                RDBExternalChannelAgentRoute.catalog_status
+                == ExternalChannelRouteCatalogStatus.AVAILABLE,
+            )
+            .with_for_update()
+        )
+        if route is None:
+            return None
+        agent = await session.scalar(
+            sa.select(RDBAgent)
+            .where(
+                RDBAgent.id == agent_session.agent_id,
+                RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+            )
+            .with_for_update()
+        )
+        connection = await session.scalar(
+            sa.select(RDBExternalChannelConnection)
+            .where(
+                RDBExternalChannelConnection.id == projection.admission_connection_id,
+                RDBExternalChannelConnection.provider
+                == ExternalChannelProvider.DISCORD,
+                RDBExternalChannelConnection.status.in_(
+                    (
+                        ExternalChannelConnectionStatus.ACTIVE,
+                        ExternalChannelConnectionStatus.DEGRADED,
+                    )
+                ),
+                RDBExternalChannelConnection.disconnected_at.is_(None),
+                RDBExternalChannelConnection.provider_tenant_id
+                == projection.admission_guild_id,
+                RDBExternalChannelConnection.provider_bot_user_id.is_not(None),
+                RDBExternalChannelConnection.encrypted_credentials.is_not(None),
+                RDBExternalChannelConnection.app_mode == route.connection_app_mode,
+            )
+            .with_for_update()
+        )
+        return resource if agent is not None and connection is not None else None
+
+    @staticmethod
+    def _terminalize_provisioning(
+        projection: RDBExternalChannelDiscordThreadTitleProjection,
+        *,
+        provisioning_status: ExternalChannelDiscordThreadTitleProvisioningStatus,
+        reason: str,
+        now: datetime.datetime,
+    ) -> None:
+        """Terminalize one projection without reopening title authority."""
+        projection.provisioning_status = provisioning_status
+        projection.provision_next_attempt_at = None
+        projection.provision_claimed_at = None
+        projection.provision_failure_kind = reason
+        projection.provision_failure_summary = reason
+        projection.provision_completed_at = now
+        projection.title_status = ExternalChannelDiscordThreadTitleStatus.RELINQUISHED
+        projection.title_next_attempt_at = None
+        projection.title_claimed_at = None
+        projection.title_failure_kind = reason
+        projection.title_failure_summary = reason
+        projection.title_completed_at = now
+
+    @staticmethod
+    def _set_delivery_channel_if_compatible(
+        resource: RDBExternalChannelResource,
+        *,
+        delivery_channel_id: str,
+    ) -> bool:
+        """Set one canonical delivery target or reject a conflicting target."""
+        if not delivery_channel_id.strip():
+            raise ValueError("Discord delivery channel identity is invalid.")
+        labels = dict(resource.labels or {})
+        existing = labels.get("delivery_channel_id")
+        if existing is not None and (
+            not isinstance(existing, str) or existing != delivery_channel_id
+        ):
+            return False
+        labels["delivery_channel_id"] = delivery_channel_id
+        labels["thread_channel_id"] = delivery_channel_id
+        labels["thread_id"] = delivery_channel_id
+        resource.labels = labels
+        return True
+
     async def create_session_title_candidate(
         self,
         session: AsyncSession,
@@ -61,6 +286,8 @@ class ExternalChannelTitleRepository:
                 agent_session_id=create.agent_session_id,
                 binding_id=create.binding_id,
                 trigger_provider_message_key=create.trigger_provider_message_key,
+                admission_access_request_id=create.admission_access_request_id,
+                admission_provisional_title=create.admission_provisional_title,
                 status=create.status,
                 consumed_event_id=create.consumed_event_id,
                 relinquished_reason=create.relinquished_reason,
@@ -91,6 +318,10 @@ class ExternalChannelTitleRepository:
             existing.binding_id != create.binding_id
             or existing.trigger_provider_message_key
             != create.trigger_provider_message_key
+            or existing.admission_access_request_id
+            != create.admission_access_request_id
+            or existing.admission_provisional_title
+            != create.admission_provisional_title
         ):
             raise ValueError("Session title candidate identity does not match.")
         return self._candidate(existing)
@@ -146,6 +377,41 @@ class ExternalChannelTitleRepository:
         if any(getattr(existing, field) != values[field] for field in immutable_fields):
             raise ValueError("Discord title projection identity does not match.")
         return self._projection(existing)
+
+    async def get_projection_by_resource_id(
+        self,
+        session: AsyncSession,
+        *,
+        resource_id: str,
+    ) -> ExternalChannelDiscordThreadTitleProjection | None:
+        """Read one Resource-owned projection without affecting legacy delivery."""
+        row = await session.scalar(
+            sa.select(RDBExternalChannelDiscordThreadTitleProjection).where(
+                RDBExternalChannelDiscordThreadTitleProjection.resource_id
+                == resource_id
+            )
+        )
+        return None if row is None else self._projection(row)
+
+    async def get_candidate_by_identity(
+        self,
+        session: AsyncSession,
+        *,
+        agent_session_id: str,
+        binding_id: str,
+        trigger_provider_message_key: str,
+    ) -> ExternalChannelSessionTitleCandidate | None:
+        """Read one exact title candidate without changing its terminal state."""
+        row = await session.scalar(
+            sa.select(RDBExternalChannelSessionTitleCandidate).where(
+                RDBExternalChannelSessionTitleCandidate.agent_session_id
+                == agent_session_id,
+                RDBExternalChannelSessionTitleCandidate.binding_id == binding_id,
+                RDBExternalChannelSessionTitleCandidate.trigger_provider_message_key
+                == trigger_provider_message_key,
+            )
+        )
+        return None if row is None else self._candidate(row)
 
     async def get_pending_candidate_for_event(
         self,
@@ -303,11 +569,34 @@ class ExternalChannelTitleRepository:
         limit: int,
     ) -> tuple[ExternalChannelDiscordThreadTitleProjection, ...]:
         """Claim bounded due or stale provisioning projections for current Workers."""
+        candidate_status = RDBExternalChannelSessionTitleCandidate.status
+        candidate_provisional_title = (
+            RDBExternalChannelSessionTitleCandidate.admission_provisional_title
+        )
+        projection_provisional_title = (
+            RDBExternalChannelDiscordThreadTitleProjection.requested_provisional_title
+        )
         rows = list(
             (
                 await session.scalars(
                     sa.select(RDBExternalChannelDiscordThreadTitleProjection)
+                    .join(
+                        RDBExternalChannelSessionTitleCandidate,
+                        RDBExternalChannelSessionTitleCandidate.id
+                        == (
+                            RDBExternalChannelDiscordThreadTitleProjection.session_title_candidate_id
+                        ),
+                    )
                     .where(
+                        RDBExternalChannelDiscordThreadTitleProjection.provisioning_protocol_version
+                        == SUPPORTED_DISCORD_THREAD_TITLE_PROVISIONING_PROTOCOL_VERSION,
+                        candidate_provisional_title == projection_provisional_title,
+                        candidate_status.in_(
+                            (
+                                ExternalChannelSessionTitleCandidateStatus.PENDING,
+                                ExternalChannelSessionTitleCandidateStatus.CONSUMED,
+                            )
+                        ),
                         sa.or_(
                             sa.and_(
                                 RDBExternalChannelDiscordThreadTitleProjection.provisioning_status
@@ -334,7 +623,7 @@ class ExternalChannelTitleRepository:
                                 RDBExternalChannelDiscordThreadTitleProjection.provision_claimed_at
                                 < stale_before,
                             ),
-                        )
+                        ),
                     )
                     .order_by(RDBExternalChannelDiscordThreadTitleProjection.id)
                     .limit(limit)
@@ -406,3 +695,245 @@ class ExternalChannelTitleRepository:
         for row in rows:
             await session.refresh(row)
         return tuple(self._projection(row) for row in rows)
+
+    async def persist_provisioning_preflight(
+        self,
+        session: AsyncSession,
+        *,
+        projection_id: str,
+        expected_provision_attempt_count: int,
+        expected_provision_claimed_at: datetime.datetime,
+        observed_absent_at: datetime.datetime,
+    ) -> ExternalChannelDiscordThreadTitleProjection | None:
+        """Persist exact absence evidence before one projection-owned POST."""
+        projection = await self._lock_attempting_provisioning(
+            session,
+            projection_id=projection_id,
+            expected_provision_attempt_count=expected_provision_attempt_count,
+            expected_provision_claimed_at=expected_provision_claimed_at,
+        )
+        if projection is None:
+            return None
+        projection.preflight_absent_at = observed_absent_at
+        await session.flush()
+        await self._refresh_projections(session, [projection])
+        return self._projection(projection)
+
+    async def settle_provisioning_ready(
+        self,
+        session: AsyncSession,
+        *,
+        projection_id: str,
+        expected_provision_attempt_count: int,
+        expected_provision_claimed_at: datetime.datetime,
+        delivery_channel_id: str,
+        thread_channel_id: str,
+        expected_provisional_title: str,
+        proof_kind: ExternalChannelDiscordThreadTitleProofKind,
+        now: datetime.datetime,
+    ) -> ExternalChannelDiscordThreadTitleProjection | None:
+        """Atomically record exact owned thread proof and canonical delivery target."""
+        if (
+            not thread_channel_id.strip()
+            or delivery_channel_id != thread_channel_id
+            or not expected_provisional_title.strip()
+        ):
+            raise ValueError("Discord thread proof identity is invalid.")
+        projection = await self._lock_attempting_provisioning(
+            session,
+            projection_id=projection_id,
+            expected_provision_attempt_count=expected_provision_attempt_count,
+            expected_provision_claimed_at=expected_provision_claimed_at,
+        )
+        if projection is None or (
+            projection.requested_provisional_title != expected_provisional_title
+        ):
+            return None
+        resource = await self._lock_current_settlement_resource(
+            session,
+            projection=projection,
+        )
+        if resource is None:
+            self._terminalize_provisioning(
+                projection,
+                provisioning_status=(
+                    ExternalChannelDiscordThreadTitleProvisioningStatus.FAILED
+                ),
+                reason="authority_revoked",
+                now=now,
+            )
+            await session.flush()
+            await self._refresh_projections(session, [projection])
+            return self._projection(projection)
+        if not self._set_delivery_channel_if_compatible(
+            resource,
+            delivery_channel_id=delivery_channel_id,
+        ):
+            self._terminalize_provisioning(
+                projection,
+                provisioning_status=(
+                    ExternalChannelDiscordThreadTitleProvisioningStatus.UNMANAGED
+                ),
+                reason="delivery_channel_conflict",
+                now=now,
+            )
+            await session.flush()
+            await self._refresh_projections(session, [projection])
+            return self._projection(projection)
+        projection.provisioning_status = (
+            ExternalChannelDiscordThreadTitleProvisioningStatus.READY
+        )
+        projection.thread_channel_id = thread_channel_id
+        projection.expected_provisional_title = expected_provisional_title
+        projection.provisioning_proof_kind = proof_kind
+        projection.provision_next_attempt_at = None
+        projection.provision_claimed_at = None
+        projection.provision_failure_kind = None
+        projection.provision_failure_summary = None
+        projection.provision_completed_at = now
+        if (
+            projection.title_status is ExternalChannelDiscordThreadTitleStatus.WAITING
+            and projection.desired_title is not None
+            and projection.title_generation_event_id is not None
+        ):
+            projection.title_status = ExternalChannelDiscordThreadTitleStatus.PENDING
+            projection.title_next_attempt_at = now
+        await session.flush()
+        await self._refresh_projections(session, [projection])
+        return self._projection(projection)
+
+    async def settle_provisioning_unmanaged(
+        self,
+        session: AsyncSession,
+        *,
+        projection_id: str,
+        expected_provision_attempt_count: int,
+        expected_provision_claimed_at: datetime.datetime,
+        delivery_channel_id: str,
+        reason: str,
+        now: datetime.datetime,
+    ) -> ExternalChannelDiscordThreadTitleProjection | None:
+        """Preserve a usable non-owned thread while terminally relinquishing title."""
+        self._validate_relinquished_reason(reason)
+        projection = await self._lock_attempting_provisioning(
+            session,
+            projection_id=projection_id,
+            expected_provision_attempt_count=expected_provision_attempt_count,
+            expected_provision_claimed_at=expected_provision_claimed_at,
+        )
+        if projection is None:
+            return None
+        resource = await self._lock_current_settlement_resource(
+            session,
+            projection=projection,
+        )
+        if resource is None:
+            self._terminalize_provisioning(
+                projection,
+                provisioning_status=(
+                    ExternalChannelDiscordThreadTitleProvisioningStatus.FAILED
+                ),
+                reason="authority_revoked",
+                now=now,
+            )
+        elif not self._set_delivery_channel_if_compatible(
+            resource,
+            delivery_channel_id=delivery_channel_id,
+        ):
+            self._terminalize_provisioning(
+                projection,
+                provisioning_status=(
+                    ExternalChannelDiscordThreadTitleProvisioningStatus.UNMANAGED
+                ),
+                reason="delivery_channel_conflict",
+                now=now,
+            )
+        else:
+            self._terminalize_provisioning(
+                projection,
+                provisioning_status=(
+                    ExternalChannelDiscordThreadTitleProvisioningStatus.UNMANAGED
+                ),
+                reason=reason,
+                now=now,
+            )
+        await session.flush()
+        await self._refresh_projections(session, [projection])
+        return self._projection(projection)
+
+    async def retry_provisioning(
+        self,
+        session: AsyncSession,
+        *,
+        projection_id: str,
+        expected_provision_attempt_count: int,
+        expected_provision_claimed_at: datetime.datetime,
+        next_attempt_at: datetime.datetime,
+        failure_kind: str,
+        failure_summary: str,
+    ) -> ExternalChannelDiscordThreadTitleProjection | None:
+        """Release one exact transient provisioning claim for GET-first retry."""
+        self._validate_failure(
+            failure_kind=failure_kind,
+            failure_summary=failure_summary,
+        )
+        projection = await self._lock_attempting_provisioning(
+            session,
+            projection_id=projection_id,
+            expected_provision_attempt_count=expected_provision_attempt_count,
+            expected_provision_claimed_at=expected_provision_claimed_at,
+        )
+        if projection is None:
+            return None
+        projection.provisioning_status = (
+            ExternalChannelDiscordThreadTitleProvisioningStatus.RETRY_WAIT
+        )
+        projection.provision_next_attempt_at = next_attempt_at
+        projection.provision_claimed_at = None
+        projection.provision_failure_kind = failure_kind
+        projection.provision_failure_summary = failure_summary
+        await session.flush()
+        await self._refresh_projections(session, [projection])
+        return self._projection(projection)
+
+    async def fail_provisioning_and_relinquish_title(
+        self,
+        session: AsyncSession,
+        *,
+        projection_id: str,
+        expected_provision_attempt_count: int,
+        expected_provision_claimed_at: datetime.datetime,
+        failure_kind: str,
+        failure_summary: str,
+        now: datetime.datetime,
+    ) -> ExternalChannelDiscordThreadTitleProjection | None:
+        """Terminalize permanent provisioning failure without affecting execution."""
+        self._validate_failure(
+            failure_kind=failure_kind,
+            failure_summary=failure_summary,
+        )
+        projection = await self._lock_attempting_provisioning(
+            session,
+            projection_id=projection_id,
+            expected_provision_attempt_count=expected_provision_attempt_count,
+            expected_provision_claimed_at=expected_provision_claimed_at,
+        )
+        if projection is None:
+            return None
+        projection.provisioning_status = (
+            ExternalChannelDiscordThreadTitleProvisioningStatus.FAILED
+        )
+        projection.provision_next_attempt_at = None
+        projection.provision_claimed_at = None
+        projection.provision_failure_kind = failure_kind
+        projection.provision_failure_summary = failure_summary
+        projection.provision_completed_at = now
+        projection.title_status = ExternalChannelDiscordThreadTitleStatus.RELINQUISHED
+        projection.title_next_attempt_at = None
+        projection.title_claimed_at = None
+        projection.title_failure_kind = failure_kind
+        projection.title_failure_summary = failure_summary
+        projection.title_completed_at = now
+        await session.flush()
+        await self._refresh_projections(session, [projection])
+        return self._projection(projection)

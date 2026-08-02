@@ -39,6 +39,7 @@ from azents.core.slack_external_channel_progress import (
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.external_channel.title import ExternalChannelTitleRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_data import (
     ChannelActionCommit,
@@ -128,6 +129,14 @@ class _SessionNavigationContext:
     session_url: str
 
 
+@dataclass(frozen=True)
+class _DiscordThreadTitleResolution:
+    """One exact title decision before any Discord thread mutation."""
+
+    provider_mutation_allowed: bool
+    provisional_title: str | None
+
+
 def get_slack_delivery_client(
     http_client: Annotated[
         httpx.AsyncClient,
@@ -176,6 +185,10 @@ class ExternalChannelActionService:
     repository: Annotated[
         ExternalChannelWorkRepository,
         Depends(ExternalChannelWorkRepository),
+    ]
+    title_repository: Annotated[
+        ExternalChannelTitleRepository,
+        Depends(ExternalChannelTitleRepository),
     ]
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,
@@ -804,11 +817,14 @@ class ExternalChannelActionService:
                 or root_message_id != channel_id
             ):
                 return _discord_invalid_payload()
+            title = await self._discord_thread_provisional_title(target)
+            if not title.provider_mutation_allowed:
+                return _discord_invalid_payload()
             thread = await self.discord_client.ensure_thread(
                 bot_token=bot_token,
                 parent_channel_id=parent_channel_id,
                 root_message_id=root_message_id,
-                name=target.agent_name,
+                name=title.provisional_title,
             )
             if thread.status != "delivered":
                 return thread
@@ -1079,6 +1095,39 @@ class ExternalChannelActionService:
                 delivery_channel_id=delivery_channel_id,
             )
             await session.commit()
+
+    async def _discord_thread_provisional_title(
+        self,
+        target: ChannelDeliveryTarget,
+    ) -> _DiscordThreadTitleResolution:
+        """Return exact stored candidate title or preserve the legacy Agent path."""
+        if target.resource_id is None:
+            return _DiscordThreadTitleResolution(
+                provider_mutation_allowed=True,
+                provisional_title=target.agent_name,
+            )
+        async with self.session_manager() as session:
+            projection = await self.title_repository.get_projection_by_resource_id(
+                session,
+                resource_id=target.resource_id,
+            )
+        if projection is None:
+            return _DiscordThreadTitleResolution(
+                provider_mutation_allowed=True,
+                provisional_title=target.agent_name,
+            )
+        if (
+            projection.binding_id != target.binding_id
+            or projection.agent_session_id != target.agent_session_id
+        ):
+            return _DiscordThreadTitleResolution(
+                provider_mutation_allowed=False,
+                provisional_title=None,
+            )
+        return _DiscordThreadTitleResolution(
+            provider_mutation_allowed=True,
+            provisional_title=projection.requested_provisional_title,
+        )
 
     async def _deliver_slack(
         self,

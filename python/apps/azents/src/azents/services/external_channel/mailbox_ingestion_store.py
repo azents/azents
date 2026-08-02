@@ -98,6 +98,10 @@ from azents.services.external_channel.selector_state import (
     selector_provider_interaction_key,
     selector_state_from_interaction,
 )
+from azents.services.external_channel.title_artifact import (
+    ExternalChannelTitleArtifactRequest,
+    ExternalChannelTitleArtifactService,
+)
 from azents.services.mailbox import (
     MailboxEnqueue,
     MailboxService,
@@ -133,6 +137,7 @@ class _BindingCreation:
 
     binding: ExternalChannelBinding
     session_created: bool
+    provisional_title_source: str
 
 
 @dataclasses.dataclass
@@ -161,6 +166,10 @@ class ExternalChannelMailboxIngestionStore:
         Depends(RootAgentSessionCreationService),
     ]
     mailbox_service: Annotated[MailboxService, Depends(MailboxService)]
+    title_artifact_service: Annotated[
+        ExternalChannelTitleArtifactService,
+        Depends(ExternalChannelTitleArtifactService),
+    ]
     config: Annotated[Config, Depends(get_config)]
 
     async def prepare(
@@ -510,6 +519,56 @@ class ExternalChannelMailboxIngestionStore:
                 )
                 binding = creation.binding
                 session_created = creation.session_created
+                await self.title_artifact_service.create(
+                    session,
+                    request=ExternalChannelTitleArtifactRequest(
+                        connection_id=connection.id,
+                        agent_session_id=binding.agent_session_id,
+                        binding_id=binding.id,
+                        resource=conversation.resource,
+                        trigger_provider_message_key=(
+                            request.locator.trigger_provider_message_key
+                        ),
+                        provider=request.locator.provider,
+                        provisional_title_source=creation.provisional_title_source,
+                        access_request_id=None,
+                        discord_root_thread_observation=(
+                            history.discord_root_thread_observation
+                        ),
+                    ),
+                )
+            elif request.operation is ExternalChannelIngestionOperation.ACCESS_ALLOW:
+                if not await self._access_allow_matches(
+                    session,
+                    request=request,
+                    conversation=conversation,
+                    position=position,
+                    binding=binding,
+                ):
+                    return _rejected(
+                        ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY
+                    )
+                create_projection = (
+                    self.title_artifact_service.create_projection_for_existing_candidate
+                )
+                await create_projection(
+                    session,
+                    request=ExternalChannelTitleArtifactRequest(
+                        connection_id=connection.id,
+                        agent_session_id=binding.agent_session_id,
+                        binding_id=binding.id,
+                        resource=conversation.resource,
+                        trigger_provider_message_key=(
+                            request.locator.trigger_provider_message_key
+                        ),
+                        provider=request.locator.provider,
+                        provisional_title_source=None,
+                        access_request_id=request.access_request_id,
+                        discord_root_thread_observation=(
+                            history.discord_root_thread_observation
+                        ),
+                    ),
+                )
             work = await self.repository.ensure_active_work(
                 session,
                 binding_id=binding.id,
@@ -1414,6 +1473,42 @@ class ExternalChannelMailboxIngestionStore:
         return _BindingCreation(
             binding=binding,
             session_created=root.created,
+            provisional_title_source=agent.name,
+        )
+
+    async def _access_allow_matches(
+        self,
+        session: AsyncSession,
+        *,
+        request: ExternalChannelIngestionRequest,
+        conversation: _Conversation,
+        position: ExternalChannelConversationPosition,
+        binding: ExternalChannelBinding,
+    ) -> bool:
+        """Revalidate the exact Allow that owns this replay-bound Binding."""
+        access_request_id = request.access_request_id
+        route = conversation.route
+        boundary = request.replay_boundary
+        if access_request_id is None or route is None or boundary is None:
+            return False
+        access_request = await self.repository.get_access_request(
+            session,
+            access_request_id=access_request_id,
+        )
+        return (
+            access_request is not None
+            and access_request.status is ExternalChannelAccessRequestStatus.ALLOWED
+            and access_request.setup_claim_id is None
+            and access_request.route_id == route.id
+            and access_request.resource_id == conversation.resource.id
+            and access_request.principal_id == conversation.principal_id
+            and access_request.agent_session_id == binding.agent_session_id
+            and access_request.connection_id == request.locator.connection_id
+            and access_request.conversation_position_id == position.id
+            and access_request.trigger_provider_message_key
+            == request.locator.trigger_provider_message_key
+            and access_request.trigger_position == request.locator.trigger_position
+            and access_request.range_start_position == boundary.range_start_position
         )
 
     async def _prepare_position(

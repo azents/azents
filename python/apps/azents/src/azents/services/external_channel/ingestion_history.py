@@ -219,6 +219,7 @@ class ExternalChannelProviderHistoryReader:
             provider_request_count=history.provider_request_count,
             scanned_message_count=history.scanned_message_count,
             elapsed_seconds=history.elapsed_seconds,
+            discord_root_thread_observation=history.discord_root_thread_observation,
         )
 
 

@@ -476,6 +476,8 @@ class ExternalChannelSessionTitleCandidate(_Record):
     agent_session_id: str
     binding_id: str
     trigger_provider_message_key: str
+    admission_access_request_id: str | None
+    admission_provisional_title: str | None
     status: ExternalChannelSessionTitleCandidateStatus
     consumed_event_id: str | None
     relinquished_reason: str | None
@@ -489,6 +491,8 @@ class ExternalChannelSessionTitleCandidateCreate(_Record):
     agent_session_id: str
     binding_id: str
     trigger_provider_message_key: str
+    admission_access_request_id: str | None
+    admission_provisional_title: str | None
     status: ExternalChannelSessionTitleCandidateStatus
     consumed_event_id: str | None
     relinquished_reason: str | None

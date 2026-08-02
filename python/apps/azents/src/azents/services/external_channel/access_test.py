@@ -65,6 +65,7 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
         id="access-secret",
         route_id="route-1",
         resource_id="resource-secret",
+        trigger_provider_message_key="message-secret",
         principal_id="principal-secret",
         agent_session_id=None,
         setup_claim_id=None,
@@ -122,6 +123,7 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
         return_value=SimpleNamespace(
             id="agent-1",
             workspace_id="workspace-secret",
+            name="Agent One",
             lifecycle_status=AgentLifecycleStatus.ACTIVE,
             external_channel_default_response_mode=(
                 ExternalChannelResponseMode.MENTION_ONLY
@@ -145,12 +147,14 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
             connection_id=None,
         )
     )
+    title_artifact_service = SimpleNamespace(create=AsyncMock())
     service = ExternalChannelAccessService(
         session_manager=cast(Any, _SessionManager()),
         repository=cast(Any, repository),
         agent_repository=cast(Any, agent_repository),
         root_agent_session_creation_service=cast(Any, root_creation),
         ingestion_replay_service=cast(Any, replay),
+        title_artifact_service=cast(Any, title_artifact_service),
     )
 
     with caplog.at_level(
@@ -180,6 +184,12 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
     assert "session-secret" not in caplog.text
     created_binding = repository.create_binding_idempotent.await_args.args[1]
     assert created_binding.response_mode is ExternalChannelResponseMode.MENTION_ONLY
+    assert title_artifact_service.create.await_count == 1
+    artifact_request = title_artifact_service.create.await_args.kwargs["request"]
+    assert artifact_request.agent_session_id == "session-secret"
+    assert artifact_request.binding_id == "binding-1"
+    assert artifact_request.trigger_provider_message_key == "message-secret"
+    assert artifact_request.access_request_id == "access-secret"
 
 
 async def test_setup_allow_grants_access_without_binding_session_or_replay() -> None:
@@ -244,6 +254,10 @@ async def test_setup_allow_grants_access_without_binding_session_or_replay() -> 
         agent_repository=cast(Any, MagicMock()),
         root_agent_session_creation_service=cast(Any, root_creation),
         ingestion_replay_service=cast(Any, replay),
+        title_artifact_service=cast(
+            Any,
+            SimpleNamespace(create=AsyncMock()),
+        ),
     )
 
     result = await service.allow(

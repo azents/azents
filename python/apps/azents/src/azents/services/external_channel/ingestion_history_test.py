@@ -120,6 +120,7 @@ async def test_slack_history_uses_native_trigger_and_returns_canonical_messages(
                 provider_request_count=1,
                 scanned_message_count=1,
                 elapsed_seconds=0,
+                discord_root_thread_observation=None,
             )
         ),
         get_permalink=AsyncMock(
@@ -247,6 +248,7 @@ async def test_slack_history_resolves_visible_bot_author_display_name() -> None:
                 provider_request_count=1,
                 scanned_message_count=1,
                 elapsed_seconds=0,
+                discord_root_thread_observation=None,
             )
         ),
         get_permalink=AsyncMock(return_value=None),
@@ -331,6 +333,7 @@ async def test_slack_history_skips_optional_enrichment_inside_required_reserve()
                 provider_request_count=1,
                 scanned_message_count=1,
                 elapsed_seconds=0,
+                discord_root_thread_observation=None,
             )
         ),
         get_permalink=AsyncMock(return_value="https://example.invalid/source"),
@@ -407,6 +410,7 @@ async def test_discord_history_preserves_reference_mappings() -> None:
                 provider_request_count=2,
                 scanned_message_count=21,
                 elapsed_seconds=0,
+                discord_root_thread_observation=None,
             )
         )
     )

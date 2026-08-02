@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentLifecycleStatus,
     EventKind,
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
@@ -27,9 +28,12 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.event import RDBEvent
 from azents.rdb.models.external_channel import (
     RDBExternalChannelDiscordThreadTitleProjection,
+    RDBExternalChannelResource,
+    RDBExternalChannelSessionTitleCandidate,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.agent_session import AgentSessionRepository
@@ -193,6 +197,8 @@ async def _create_title_fixture(
             agent_session_id=agent_session.id,
             binding_id=binding.id,
             trigger_provider_message_key=f"discord:title-trigger:{suffix}",
+            admission_access_request_id=None,
+            admission_provisional_title="New conversation",
             status=ExternalChannelSessionTitleCandidateStatus.PENDING,
             consumed_event_id=None,
             relinquished_reason=None,
@@ -287,6 +293,8 @@ class TestExternalChannelTitleRepository:
                 agent_session_id=fixture.agent_session_id,
                 binding_id=fixture.binding_id,
                 trigger_provider_message_key="discord:title-trigger:idempotent",
+                admission_access_request_id=None,
+                admission_provisional_title="New conversation",
                 status=ExternalChannelSessionTitleCandidateStatus.PENDING,
                 consumed_event_id=None,
                 relinquished_reason=None,
@@ -454,6 +462,8 @@ class TestExternalChannelTitleRepository:
                 agent_session_id=consumed_fixture.agent_session_id,
                 binding_id=consumed_fixture.binding_id,
                 trigger_provider_message_key=("discord:title-trigger:retry-consumed"),
+                admission_access_request_id=None,
+                admission_provisional_title="New conversation",
                 status=ExternalChannelSessionTitleCandidateStatus.PENDING,
                 consumed_event_id=None,
                 relinquished_reason=None,
@@ -467,6 +477,8 @@ class TestExternalChannelTitleRepository:
                 trigger_provider_message_key=(
                     "discord:title-trigger:retry-relinquished"
                 ),
+                admission_access_request_id=None,
+                admission_provisional_title="New conversation",
                 status=ExternalChannelSessionTitleCandidateStatus.PENDING,
                 consumed_event_id=None,
                 relinquished_reason=None,
@@ -704,3 +716,139 @@ class TestExternalChannelTitleRepository:
         assert second_title == ()
         assert [item.id for item in recovered_title] == [fixture.projection_id]
         assert recovered_title[0].title_attempt_count == 2
+
+    async def test_provisioning_claim_requires_supported_protocol_and_candidate(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Current Workers skip unsupported protocols and terminal candidates."""
+        unsupported = await _create_title_fixture(rdb_session, suffix="unsupported")
+        relinquished = await _create_title_fixture(
+            rdb_session,
+            suffix="relinquished-claim",
+        )
+        unsupported_projection = await rdb_session.get(
+            RDBExternalChannelDiscordThreadTitleProjection,
+            unsupported.projection_id,
+        )
+        relinquished_candidate = await rdb_session.get(
+            RDBExternalChannelSessionTitleCandidate,
+            relinquished.candidate_id,
+        )
+        assert unsupported_projection is not None
+        assert relinquished_candidate is not None
+        unsupported_projection.provisioning_protocol_version = 2
+        relinquished_candidate.status = (
+            ExternalChannelSessionTitleCandidateStatus.RELINQUISHED
+        )
+        relinquished_candidate.relinquished_reason = "manual_title"
+        await rdb_session.flush()
+
+        claimed = await ExternalChannelTitleRepository().claim_due_provisioning(
+            rdb_session,
+            now=_at(1),
+            stale_before=_at(0),
+            limit=10,
+        )
+
+        assert claimed == ()
+
+    async def test_settlement_terminalizes_delivery_target_conflict(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """A competing canonical delivery target relinquishes without overwriting it."""
+        fixture = await _create_title_fixture(rdb_session, suffix="delivery-conflict")
+        repository = ExternalChannelTitleRepository()
+        claimed = await repository.claim_due_provisioning(
+            rdb_session,
+            now=_at(1),
+            stale_before=_at(0),
+            limit=10,
+        )
+        assert len(claimed) == 1
+        claim = claimed[0]
+        assert claim.provision_claimed_at is not None
+        resource = await rdb_session.get(
+            RDBExternalChannelResource,
+            fixture.resource_id,
+        )
+        assert resource is not None
+        resource.labels = {
+            **(resource.labels or {}),
+            "delivery_channel_id": "existing-thread",
+        }
+        await rdb_session.flush()
+
+        settled = await repository.settle_provisioning_ready(
+            rdb_session,
+            projection_id=fixture.projection_id,
+            expected_provision_attempt_count=claim.provision_attempt_count,
+            expected_provision_claimed_at=claim.provision_claimed_at,
+            delivery_channel_id="new-thread",
+            thread_channel_id="new-thread",
+            expected_provisional_title="New conversation",
+            proof_kind=ExternalChannelDiscordThreadTitleProofKind.DIRECT,
+            now=_at(2),
+        )
+
+        assert settled is not None
+        assert (
+            settled.provisioning_status
+            is ExternalChannelDiscordThreadTitleProvisioningStatus.UNMANAGED
+        )
+        assert (
+            settled.title_status is ExternalChannelDiscordThreadTitleStatus.RELINQUISHED
+        )
+        assert settled.provision_failure_kind == "delivery_channel_conflict"
+        labels = resource.labels
+        assert labels is not None
+        assert labels["delivery_channel_id"] == "existing-thread"
+
+    async def test_settlement_terminalizes_revoked_authority(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Final settlement fails closed when an owner revokes title authority."""
+        fixture = await _create_title_fixture(rdb_session, suffix="authority-revoked")
+        repository = ExternalChannelTitleRepository()
+        claimed = await repository.claim_due_provisioning(
+            rdb_session,
+            now=_at(1),
+            stale_before=_at(0),
+            limit=10,
+        )
+        assert len(claimed) == 1
+        claim = claimed[0]
+        assert claim.provision_claimed_at is not None
+        agent_session = await rdb_session.get(
+            RDBAgentSession,
+            fixture.agent_session_id,
+        )
+        assert agent_session is not None
+        agent = await rdb_session.get(RDBAgent, agent_session.agent_id)
+        assert agent is not None
+        agent.lifecycle_status = AgentLifecycleStatus.DECOMMISSIONING
+        await rdb_session.flush()
+
+        settled = await repository.settle_provisioning_ready(
+            rdb_session,
+            projection_id=fixture.projection_id,
+            expected_provision_attempt_count=claim.provision_attempt_count,
+            expected_provision_claimed_at=claim.provision_claimed_at,
+            delivery_channel_id="new-thread",
+            thread_channel_id="new-thread",
+            expected_provisional_title="New conversation",
+            proof_kind=ExternalChannelDiscordThreadTitleProofKind.DIRECT,
+            now=_at(2),
+        )
+
+        assert settled is not None
+        assert (
+            settled.provisioning_status
+            is ExternalChannelDiscordThreadTitleProvisioningStatus.FAILED
+        )
+        assert (
+            settled.title_status is ExternalChannelDiscordThreadTitleStatus.RELINQUISHED
+        )
+        assert settled.provision_failure_kind == "authority_revoked"

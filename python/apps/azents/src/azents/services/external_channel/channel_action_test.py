@@ -29,6 +29,7 @@ from azents.core.external_channel_file import (
 )
 from azents.rdb.session import SessionManager
 from azents.repos.exchange_file.data import ExchangeFile
+from azents.repos.external_channel.title import ExternalChannelTitleRepository
 from azents.repos.external_channel.work import (
     DeliverySettlement,
     ExternalChannelWorkRepository,
@@ -391,6 +392,20 @@ class _CredentialsCodec:
         )
 
 
+class _TitleRepository:
+    def __init__(self, projection: object | None = None) -> None:
+        self.projection = projection
+
+    async def get_projection_by_resource_id(
+        self,
+        session: AsyncSession,
+        *,
+        resource_id: str,
+    ) -> object | None:
+        del session, resource_id
+        return self.projection
+
+
 class _SlackClient:
     def __init__(
         self,
@@ -667,6 +682,7 @@ def _service(
     slack_client: _SlackClient,
     exchange_file_service: _ExchangeFileService | None = None,
     discord_client: _DiscordClient | None = None,
+    title_repository: _TitleRepository | None = None,
 ) -> ExternalChannelActionService:
     return ExternalChannelActionService(
         session_manager=cast(
@@ -674,6 +690,10 @@ def _service(
             lambda: _session_manager(events),
         ),
         repository=cast(ExternalChannelWorkRepository, repository),
+        title_repository=cast(
+            ExternalChannelTitleRepository,
+            title_repository or _TitleRepository(),
+        ),
         credentials_codec=cast(
             ExternalChannelCredentialsCodec,
             _CredentialsCodec(),
@@ -1147,6 +1167,118 @@ async def test_discord_progress_update_sends_tracker_embed(
                     }
                 ],
             },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_discord_candidate_delivery_uses_stored_provisional_title() -> None:
+    """A candidate projection never rereads a later Agent name for thread creation."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "provider": ExternalChannelProvider.DISCORD,
+            "provider_tenant_id": "111",
+            "resource_id": "resource-1",
+            "agent_name": "Renamed Agent",
+            "request_payload": {
+                "guild_id": "111",
+                "channel_id": "333",
+                "thread_parent_channel_id": "222",
+                "thread_root_message_id": "333",
+                "text": "Reply",
+            },
+        }
+    )
+    discord_client = _DiscordClient()
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+        discord_client=discord_client,
+        title_repository=_TitleRepository(
+            SimpleNamespace(
+                binding_id="binding-1",
+                agent_session_id="session-1",
+                requested_provisional_title="Original Agent",
+            )
+        ),
+    )
+
+    await service.attempt_delivery("delivery-1")
+
+    assert discord_client.calls[0] == (
+        "ensure_thread",
+        {
+            "bot_token": "xoxb-secret",
+            "parent_channel_id": "222",
+            "root_message_id": "333",
+            "name": "Original Agent",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_discord_projection_target_mismatch_never_mutates_provider() -> None:
+    """A mismatched projection fails closed instead of normalizing to Azents."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "provider": ExternalChannelProvider.DISCORD,
+            "provider_tenant_id": "111",
+            "resource_id": "resource-1",
+            "agent_name": "Renamed Agent",
+            "request_payload": {
+                "guild_id": "111",
+                "channel_id": "333",
+                "thread_parent_channel_id": "222",
+                "thread_root_message_id": "333",
+                "text": "Reply",
+            },
+        }
+    )
+    discord_client = _DiscordClient()
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+        discord_client=discord_client,
+        title_repository=_TitleRepository(
+            SimpleNamespace(
+                binding_id="other-binding",
+                agent_session_id="session-1",
+                requested_provisional_title="Stored title",
+            )
+        ),
+    )
+
+    status = await service.attempt_delivery("delivery-1")
+
+    assert status is ExternalChannelDeliveryStatus.FAILED
+    assert discord_client.calls == []
+    assert repository.finished == [
+        (
+            ExternalChannelDeliveryStatus.FAILED,
+            None,
+            "provider_payload_invalid",
         )
     ]
 

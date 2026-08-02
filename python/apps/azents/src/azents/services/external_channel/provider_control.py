@@ -15,6 +15,11 @@ from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
 )
+from azents.services.external_channel.discord_projection import (
+    DiscordProjectionProvisioningDrain,
+    DiscordProjectionReconciliationService,
+    get_discord_projection_reconciliation_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +34,7 @@ class ExternalChannelProviderControlDrain:
 
     stale_unknown: int
     attempted: int
+    provisioning: DiscordProjectionProvisioningDrain
 
 
 @dataclasses.dataclass(frozen=True)
@@ -47,6 +53,7 @@ class ExternalChannelProviderControlService:
         ExternalChannelActionService,
         Depends(ExternalChannelActionService),
     ]
+    projection_reconciliation: DiscordProjectionReconciliationService
     stale_threshold: datetime.timedelta = _DEFAULT_STALE_THRESHOLD
     interval: datetime.timedelta = _DEFAULT_INTERVAL
     limit: int = _DEFAULT_LIMIT
@@ -109,9 +116,11 @@ class ExternalChannelProviderControlService:
             outcome = await self.action_service.attempt_delivery(delivery_attempt_id)
             if outcome is not None:
                 attempted += 1
+        provisioning = await self.projection_reconciliation.drain_once(now=current)
         return ExternalChannelProviderControlDrain(
             stale_unknown=stale_unknown,
             attempted=attempted,
+            provisioning=provisioning,
         )
 
     async def attempt_delivery(self, delivery_attempt_id: str) -> None:
@@ -132,10 +141,15 @@ def get_external_channel_provider_control_service(
         ExternalChannelActionService,
         Depends(ExternalChannelActionService),
     ],
+    projection_reconciliation: Annotated[
+        DiscordProjectionReconciliationService,
+        Depends(get_discord_projection_reconciliation_service),
+    ],
 ) -> ExternalChannelProviderControlService:
     """Compose provider-control delivery without exposing worker tuning as API input."""
     return ExternalChannelProviderControlService(
         session_manager=session_manager,
         repository=repository,
         action_service=action_service,
+        projection_reconciliation=projection_reconciliation,
     )

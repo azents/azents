@@ -10,6 +10,7 @@ from azents.services.external_channel.discord_delivery import (
     DiscordDeliveryClient,
     DiscordOutboundFile,
     discord_delivery_nonce,
+    normalize_discord_thread_name,
 )
 
 
@@ -179,7 +180,10 @@ async def test_ensure_thread_treats_root_200_without_thread_as_absent() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
         if request.method == "GET":
-            return httpx.Response(200, json={"id": "333", "channel_id": "222"})
+            return httpx.Response(
+                200,
+                json={"id": "333", "channel_id": "222", "flags": 0},
+            )
         return httpx.Response(201, json={"id": "444", "parent_id": "222"})
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
@@ -192,6 +196,135 @@ async def test_ensure_thread_treats_root_200_without_thread_as_absent() -> None:
 
     assert result.status == "delivered"
     assert [request.method for request in calls] == ["GET", "POST"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payload", "expected_status"),
+    [
+        ({"id": "333", "channel_id": "222", "flags": 0}, "absent"),
+        ({"id": "333", "channel_id": "222"}, "unknown"),
+        (
+            {
+                "id": "333",
+                "channel_id": "222",
+                "flags": 32,
+            },
+            "unknown",
+        ),
+    ],
+)
+async def test_read_root_thread_fails_closed_for_incomplete_thread_evidence(
+    payload: dict[str, object],
+    expected_status: str,
+) -> None:
+    """Only a complete no-thread flag can establish current root absence."""
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
+    ) as client:
+        result = await DiscordDeliveryClient(client).read_root_thread(
+            bot_token="discord-secret",
+            guild_id="111",
+            parent_channel_id="222",
+            root_message_id="333",
+        )
+
+    assert result.status == expected_status
+
+
+@pytest.mark.asyncio
+async def test_read_root_thread_maps_rate_limit_to_retryable_unknown() -> None:
+    """Discord rate limiting never terminalizes projection provisioning."""
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(429, json={"retry_after": 1})
+        )
+    ) as client:
+        result = await DiscordDeliveryClient(client).read_root_thread(
+            bot_token="discord-secret",
+            guild_id="111",
+            parent_channel_id="222",
+            root_message_id="333",
+        )
+
+    assert result.status == "unknown"
+    assert result.error_kind == "rate_limited"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("thread_guild_id", [None, "other-guild"])
+async def test_read_root_thread_keeps_guild_mismatch_out_of_ownership_proof(
+    thread_guild_id: str | None,
+) -> None:
+    """Usable thread delivery metadata cannot synthesize exact Guild ownership."""
+    thread: dict[str, object] = {
+        "id": "444",
+        "parent_id": "222",
+        "owner_id": "bot-001",
+        "name": "Stored title",
+        "thread_metadata": {"create_timestamp": "2026-08-02T00:00:00+00:00"},
+    }
+    if thread_guild_id is not None:
+        thread["guild_id"] = thread_guild_id
+    payload = {
+        "id": "333",
+        "channel_id": "222",
+        "flags": 32,
+        "thread": thread,
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
+    ) as client:
+        result = await DiscordDeliveryClient(client).read_root_thread(
+            bot_token="discord-secret",
+            guild_id="111",
+            parent_channel_id="222",
+            root_message_id="333",
+        )
+
+    assert result.status == "present"
+    assert result.thread_channel_id == "444"
+    assert result.observed_thread is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("thread_guild_id", [None, "other-guild"])
+async def test_create_root_thread_keeps_guild_mismatch_out_of_ownership_proof(
+    thread_guild_id: str | None,
+) -> None:
+    """A create response also needs provider-supplied exact Guild proof."""
+    thread: dict[str, object] = {
+        "id": "444",
+        "parent_id": "222",
+        "owner_id": "bot-001",
+        "name": "Stored title",
+        "thread_metadata": {"create_timestamp": "2026-08-02T00:00:00+00:00"},
+    }
+    if thread_guild_id is not None:
+        thread["guild_id"] = thread_guild_id
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(201, json=thread))
+    ) as client:
+        result = await DiscordDeliveryClient(client).create_root_thread(
+            bot_token="discord-secret",
+            guild_id="111",
+            parent_channel_id="222",
+            root_message_id="333",
+            requested_provisional_title="Stored title",
+        )
+
+    assert result.status == "present"
+    assert result.thread_channel_id == "444"
+    assert result.observed_thread is None
+
+
+def test_normalize_discord_thread_name_is_deterministic_and_bounded() -> None:
+    """Stored provisional names use one public provider-valid normalizer."""
+    assert (
+        normalize_discord_thread_name("  Incident   response ") == "Incident response"
+    )
+    assert normalize_discord_thread_name(None) == "Azents"
+    assert len(normalize_discord_thread_name("x" * 101)) == 100
 
 
 @pytest.mark.asyncio

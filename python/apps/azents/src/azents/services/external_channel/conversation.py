@@ -7,7 +7,10 @@ from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from typing import Protocol
 
-from azents.core.enums import ExternalChannelConversationScopeKind
+from azents.core.enums import (
+    ExternalChannelConversationScopeKind,
+    ExternalChannelDiscordThreadObservationStatus,
+)
 
 
 @dataclass(frozen=True, repr=False)
@@ -155,6 +158,94 @@ class ExternalChannelParticipationLock(Protocol):
 
 
 @dataclass(frozen=True)
+class DiscordObservedThread:
+    """One complete credential-free Discord root-thread observation."""
+
+    channel_id: str
+    guild_id: str
+    parent_channel_id: str
+    root_message_id: str
+    owner_id: str
+    name: str
+    created_at: datetime.datetime
+
+    def __post_init__(self) -> None:
+        """Reject incomplete or ambiguous provider ownership evidence."""
+        if not all(
+            (
+                self.channel_id,
+                self.guild_id,
+                self.parent_channel_id,
+                self.root_message_id,
+                self.owner_id,
+                self.name,
+            )
+        ):
+            raise ValueError("Discord observed thread evidence must be complete.")
+        if self.created_at.tzinfo is None or self.created_at.utcoffset() is None:
+            raise ValueError(
+                "Discord observed thread timestamp must be timezone-aware."
+            )
+
+
+@dataclass(frozen=True)
+class DiscordRootThreadObservation:
+    """One exact-root Discord thread observation with fail-closed status."""
+
+    status: ExternalChannelDiscordThreadObservationStatus
+    guild_id: str
+    parent_channel_id: str
+    root_message_id: str
+    trigger_provider_message_key: str
+    observed_at: datetime.datetime
+    root_has_thread: bool | None
+    thread: DiscordObservedThread | None
+
+    def __post_init__(self) -> None:
+        """Enforce exact-root absence and presence proof invariants."""
+        if not all(
+            (
+                self.guild_id,
+                self.parent_channel_id,
+                self.root_message_id,
+                self.trigger_provider_message_key,
+            )
+        ):
+            raise ValueError(
+                "Discord root-thread observation identity must be complete."
+            )
+        if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
+            raise ValueError(
+                "Discord root-thread observation timestamp must be timezone-aware."
+            )
+        match self.status:
+            case ExternalChannelDiscordThreadObservationStatus.THREAD_ABSENT:
+                if self.root_has_thread is not False or self.thread is not None:
+                    raise ValueError(
+                        "Discord thread absence requires an exact no-thread "
+                        "observation."
+                    )
+            case ExternalChannelDiscordThreadObservationStatus.THREAD_PRESENT:
+                if self.root_has_thread is not True or self.thread is None:
+                    raise ValueError(
+                        "Discord thread presence requires complete thread evidence."
+                    )
+                if (
+                    self.thread.guild_id != self.guild_id
+                    or self.thread.parent_channel_id != self.parent_channel_id
+                    or self.thread.root_message_id != self.root_message_id
+                ):
+                    raise ValueError(
+                        "Discord observed thread must match the exact root identity."
+                    )
+            case ExternalChannelDiscordThreadObservationStatus.UNKNOWN:
+                if self.thread is not None:
+                    raise ValueError(
+                        "Unknown Discord root-thread observations cannot carry proof."
+                    )
+
+
+@dataclass(frozen=True)
 class ExternalChannelHistoryRange[MessageT]:
     """One complete bounded provider-history range."""
 
@@ -166,6 +257,7 @@ class ExternalChannelHistoryRange[MessageT]:
     provider_request_count: int
     scanned_message_count: int
     elapsed_seconds: float
+    discord_root_thread_observation: DiscordRootThreadObservation | None
 
     def __post_init__(self) -> None:
         """Validate bounded, sanitized range metadata."""

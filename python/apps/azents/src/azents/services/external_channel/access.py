@@ -39,6 +39,10 @@ from azents.services.external_channel.ingestion_replay import (
     ExternalChannelIngestionReplayService,
     external_channel_replay_deadline,
 )
+from azents.services.external_channel.title_artifact import (
+    ExternalChannelTitleArtifactRequest,
+    ExternalChannelTitleArtifactService,
+)
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
 )
@@ -123,6 +127,10 @@ class ExternalChannelAccessService:
     ingestion_replay_service: Annotated[
         ExternalChannelIngestionReplayService,
         Depends(ExternalChannelIngestionReplayService),
+    ]
+    title_artifact_service: Annotated[
+        ExternalChannelTitleArtifactService,
+        Depends(ExternalChannelTitleArtifactService),
     ]
 
     async def allow(
@@ -250,6 +258,7 @@ class ExternalChannelAccessService:
                     "The external participant is blocked."
                 )
 
+            binding_created_for_request = binding is None
             if binding is not None:
                 agent_session_id = binding.agent_session_id
             elif request.agent_session_id is not None:
@@ -315,6 +324,23 @@ class ExternalChannelAccessService:
             )
             if decided is None:
                 raise ExternalChannelAccessRequestNotFound(access_request_id)
+            if binding_created_for_request:
+                await self.title_artifact_service.create(
+                    session,
+                    request=ExternalChannelTitleArtifactRequest(
+                        connection_id=connection.id,
+                        agent_session_id=binding.agent_session_id,
+                        binding_id=binding.id,
+                        resource=resource,
+                        trigger_provider_message_key=(
+                            request.trigger_provider_message_key
+                        ),
+                        provider=connection.provider,
+                        provisional_title_source=agent.name,
+                        access_request_id=request.id,
+                        discord_root_thread_observation=None,
+                    ),
+                )
             delete_intent = (
                 await self.repository.create_access_request_control_delete_intent(
                     session,

@@ -1,5 +1,6 @@
 """Bounded Discord message delivery primitives for durable Channel Actions."""
 
+import datetime
 import hashlib
 import json
 import secrets
@@ -9,10 +10,12 @@ from typing import Literal
 
 import httpx
 
+from azents.services.external_channel.conversation import DiscordObservedThread
 from azents.services.external_channel.discord_endpoint import discord_api_base_url
 
 _DISCORD_NONCE_MAX_LENGTH = 25
 _DISCORD_MIN_AUTO_ARCHIVE_MINUTES = 60
+_DISCORD_MESSAGE_FLAG_HAS_THREAD = 1 << 5
 DISCORD_DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024
 DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES = 25 * 1024 * 1024
 
@@ -23,6 +26,17 @@ class DiscordDeliveryResult:
 
     status: Literal["delivered", "failed", "unknown"]
     provider_message_key: str | None
+    error_kind: str | None
+    error_summary: str | None
+
+
+@dataclass(frozen=True)
+class DiscordThreadProvisioningResult:
+    """Sanitized exact-root provider read or one direct thread-create result."""
+
+    status: Literal["absent", "present", "failed", "unknown"]
+    thread_channel_id: str | None
+    observed_thread: DiscordObservedThread | None
     error_kind: str | None
     error_summary: str | None
 
@@ -68,7 +82,7 @@ class DiscordDeliveryClient:
             f"/channels/{parent_channel_id}/messages/{root_message_id}/threads",
             bot_token=bot_token,
             json_body={
-                "name": _discord_thread_name(name),
+                "name": normalize_discord_thread_name(name),
                 "auto_archive_duration": _DISCORD_MIN_AUTO_ARCHIVE_MINUTES,
             },
         )
@@ -90,6 +104,102 @@ class DiscordDeliveryClient:
         if reconciled is not None:
             return reconciled
         return result
+
+    async def read_root_thread(
+        self,
+        *,
+        bot_token: str,
+        guild_id: str,
+        parent_channel_id: str,
+        root_message_id: str,
+    ) -> DiscordThreadProvisioningResult:
+        """Read one exact root and retain only a usable thread or proof metadata."""
+        try:
+            response = await self.http_client.get(
+                (
+                    f"{discord_api_base_url()}/channels/{parent_channel_id}/messages/"
+                    f"{root_message_id}"
+                ),
+                headers={"Authorization": f"Bot {bot_token}"},
+            )
+        except httpx.RequestError:
+            return _unknown_thread_provisioning_result(
+                error_kind="transport_unknown",
+                error_summary="Discord root-thread read transport failed.",
+            )
+        failure = _response_failure(response)
+        if failure is not None:
+            return _thread_provisioning_from_delivery_result(failure)
+        try:
+            payload: object = response.json()
+        except ValueError:
+            return _unknown_thread_provisioning_result(
+                error_kind="response_malformed",
+                error_summary="Discord root-thread response was malformed.",
+            )
+        if (
+            not isinstance(payload, dict)
+            or payload.get("id") != root_message_id
+            or payload.get("channel_id") != parent_channel_id
+        ):
+            return _unknown_thread_provisioning_result(
+                error_kind="root_identity_mismatch",
+                error_summary="Discord root-thread response did not match the root.",
+            )
+        raw_flags = payload.get("flags")
+        root_has_thread = (
+            bool(raw_flags & _DISCORD_MESSAGE_FLAG_HAS_THREAD)
+            if isinstance(raw_flags, int) and not isinstance(raw_flags, bool)
+            else None
+        )
+        raw_thread = payload.get("thread")
+        if raw_thread is None and root_has_thread is False:
+            return DiscordThreadProvisioningResult(
+                status="absent",
+                thread_channel_id=None,
+                observed_thread=None,
+                error_kind=None,
+                error_summary=None,
+            )
+        if raw_thread is None or root_has_thread is not True:
+            return _unknown_thread_provisioning_result(
+                error_kind="root_thread_evidence_incomplete",
+                error_summary="Discord root-thread evidence was incomplete.",
+            )
+        return _thread_provisioning_result(
+            raw_thread=raw_thread,
+            guild_id=guild_id,
+            parent_channel_id=parent_channel_id,
+            root_message_id=root_message_id,
+        )
+
+    async def create_root_thread(
+        self,
+        *,
+        bot_token: str,
+        guild_id: str,
+        parent_channel_id: str,
+        root_message_id: str,
+        requested_provisional_title: str,
+    ) -> DiscordThreadProvisioningResult:
+        """Create one root thread after a persisted projection preflight."""
+        response = await self._request(
+            "POST",
+            f"/channels/{parent_channel_id}/messages/{root_message_id}/threads",
+            bot_token=bot_token,
+            json_body={
+                "name": requested_provisional_title,
+                "auto_archive_duration": _DISCORD_MIN_AUTO_ARCHIVE_MINUTES,
+            },
+        )
+        if isinstance(response, DiscordDeliveryResult):
+            return _thread_provisioning_from_delivery_result(response)
+        return _thread_provisioning_result(
+            raw_thread=response.json() if _json_object(response) is not None else None,
+            guild_id=guild_id,
+            parent_channel_id=parent_channel_id,
+            root_message_id=root_message_id,
+        )
 
     async def _read_root_thread(
         self,
@@ -305,7 +415,7 @@ class DiscordDeliveryClient:
         return _response_failure(response) or response
 
 
-def _discord_thread_name(name: str | None) -> str:
+def normalize_discord_thread_name(name: str | None) -> str:
     """Return one bounded valid Discord thread name."""
     normalized = "" if name is None else " ".join(name.split())
     return (normalized or "Azents")[:100]
@@ -350,6 +460,132 @@ def _response_failure(response: httpx.Response) -> DiscordDeliveryResult | None:
     if response.status_code >= 400:
         return _rejected_result()
     return None
+
+
+def _thread_provisioning_result(
+    *,
+    raw_thread: object,
+    guild_id: str,
+    parent_channel_id: str,
+    root_message_id: str,
+) -> DiscordThreadProvisioningResult:
+    """Validate a usable thread ID and retain complete ownership metadata if present."""
+    if not isinstance(raw_thread, dict):
+        return _unknown_thread_provisioning_result(
+            error_kind="thread_response_invalid",
+            error_summary="Discord thread response omitted its thread object.",
+        )
+    thread_id = raw_thread.get("id")
+    if (
+        not isinstance(thread_id, str)
+        or not thread_id.isdigit()
+        or raw_thread.get("parent_id") != parent_channel_id
+    ):
+        return _unknown_thread_provisioning_result(
+            error_kind="thread_identity_invalid",
+            error_summary="Discord thread response did not match the root parent.",
+        )
+    observed_thread = _complete_observed_thread(
+        raw_thread=raw_thread,
+        guild_id=guild_id,
+        parent_channel_id=parent_channel_id,
+        root_message_id=root_message_id,
+    )
+    return DiscordThreadProvisioningResult(
+        status="present",
+        thread_channel_id=thread_id,
+        observed_thread=observed_thread,
+        error_kind=None,
+        error_summary=None,
+    )
+
+
+def _complete_observed_thread(
+    *,
+    raw_thread: dict[str, object],
+    guild_id: str,
+    parent_channel_id: str,
+    root_message_id: str,
+) -> DiscordObservedThread | None:
+    """Build proof metadata only when Discord supplied every required field."""
+    if raw_thread.get("guild_id") != guild_id:
+        return None
+    owner_id = raw_thread.get("owner_id")
+    name = raw_thread.get("name")
+    metadata = raw_thread.get("thread_metadata")
+    created_at_raw = (
+        metadata.get("create_timestamp") if isinstance(metadata, dict) else None
+    )
+    if (
+        not isinstance(owner_id, str)
+        or not owner_id
+        or not isinstance(name, str)
+        or not name
+        or not isinstance(created_at_raw, str)
+    ):
+        return None
+    try:
+        created_at = datetime.datetime.fromisoformat(
+            created_at_raw.replace("Z", "+00:00")
+        )
+    except ValueError:
+        return None
+    if created_at.tzinfo is None or created_at.utcoffset() is None:
+        return None
+    thread_id = raw_thread.get("id")
+    if not isinstance(thread_id, str):
+        return None
+    return DiscordObservedThread(
+        channel_id=thread_id,
+        guild_id=guild_id,
+        parent_channel_id=parent_channel_id,
+        root_message_id=root_message_id,
+        owner_id=owner_id,
+        name=name,
+        created_at=created_at,
+    )
+
+
+def _thread_provisioning_from_delivery_result(
+    result: DiscordDeliveryResult,
+) -> DiscordThreadProvisioningResult:
+    """Translate existing provider outcome categories without retaining responses."""
+    if result.status == "failed" and result.error_kind != "rate_limited":
+        return DiscordThreadProvisioningResult(
+            status="failed",
+            thread_channel_id=None,
+            observed_thread=None,
+            error_kind=result.error_kind,
+            error_summary=result.error_summary,
+        )
+    return _unknown_thread_provisioning_result(
+        error_kind=result.error_kind or "provider_ambiguous",
+        error_summary=result.error_summary or "Discord provider outcome is unknown.",
+    )
+
+
+def _unknown_thread_provisioning_result(
+    *,
+    error_kind: str,
+    error_summary: str,
+) -> DiscordThreadProvisioningResult:
+    """Return one non-provable provider outcome for GET-first retry."""
+    return DiscordThreadProvisioningResult(
+        status="unknown",
+        thread_channel_id=None,
+        observed_thread=None,
+        error_kind=error_kind,
+        error_summary=error_summary,
+    )
+
+
+def _json_object(response: httpx.Response) -> dict[str, object] | None:
+    """Parse one provider object without exposing its raw body to callers."""
+    try:
+        payload: object = response.json()
+    except ValueError:
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def discord_delivery_nonce(delivery_attempt_id: str) -> str:

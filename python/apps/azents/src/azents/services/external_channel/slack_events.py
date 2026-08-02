@@ -942,6 +942,7 @@ class SlackConversationClient:
             provider_request_count=pages,
             scanned_message_count=scanned,
             elapsed_seconds=max(0.0, time.monotonic() - started),
+            discord_root_thread_observation=None,
         )
 
     async def get_permalink(

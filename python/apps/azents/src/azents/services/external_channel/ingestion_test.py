@@ -134,6 +134,7 @@ class _History:
             provider_request_count=1,
             scanned_message_count=1,
             elapsed_seconds=0,
+            discord_root_thread_observation=None,
         )
 
 
@@ -209,6 +210,7 @@ class _EventHistory:
             provider_request_count=1,
             scanned_message_count=1,
             elapsed_seconds=0,
+            discord_root_thread_observation=None,
         )
 
 
@@ -344,6 +346,11 @@ def _request(
                 trigger_position="00000000000000000002",
             )
         ),
+        access_request_id=(
+            "access-1"
+            if operation is ExternalChannelIngestionOperation.ACCESS_ALLOW
+            else None
+        ),
     )
 
 
@@ -401,6 +408,7 @@ def _setup_request() -> ExternalChannelIngestionRequest:
             range_start_position=None,
             trigger_position=locator.trigger_position,
         ),
+        access_request_id=None,
     )
 
 
@@ -737,4 +745,5 @@ def test_current_trigger_rejects_replay_boundary() -> None:
             operation=ExternalChannelIngestionOperation.CURRENT_TRIGGER,
             selected_route_id=None,
             replay_boundary=request.replay_boundary,
+            access_request_id=None,
         )

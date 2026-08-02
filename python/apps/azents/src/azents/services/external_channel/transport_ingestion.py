@@ -134,6 +134,7 @@ class ExternalChannelTransportIngestionService:
             operation=ExternalChannelIngestionOperation.CURRENT_TRIGGER,
             selected_route_id=None,
             replay_boundary=None,
+            access_request_id=None,
         )
         return await self.ingestion_service.ingest(request)
 
@@ -257,6 +258,7 @@ class ExternalChannelTransportIngestionService:
             operation=ExternalChannelIngestionOperation.CURRENT_TRIGGER,
             selected_route_id=None,
             replay_boundary=None,
+            access_request_id=None,
         )
         return await self.ingestion_service.ingest(request)
 
