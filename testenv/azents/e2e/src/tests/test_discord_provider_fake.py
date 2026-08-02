@@ -1,7 +1,9 @@
 """Deterministic Discord provider fake contract tests."""
 
+import hashlib
 import json
 import threading
+import time
 from collections.abc import Generator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -925,6 +927,405 @@ def test_discord_fake_root_reads_require_configured_or_explicit_synthetic_mode(
     synthetic = requests.get(root_url, timeout=5)
     synthetic.raise_for_status()
     assert synthetic.json()["id"] == "root-a"
+
+
+def test_discord_fake_preserves_complete_root_thread_proof_and_redacted_evidence(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Serve exact root/thread proof while keeping raw names out of state evidence."""
+    discord_fake_url, _ = discord_fake_urls
+    root_id = "500000000000000201"
+    thread_id = "700000000000000201"
+    provisional_name = "Provisional private title"
+    takeover_name = "Human private title"
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={
+            "root_messages": [
+                {
+                    "id": root_id,
+                    "channel_id": "400000000000000001",
+                    "flags": 32,
+                    "thread": {
+                        "id": thread_id,
+                        "guild_id": "200000000000000001",
+                        "parent_id": "400000000000000001",
+                        "root_message_id": root_id,
+                        "owner_id": "300000000000000001",
+                        "name": provisional_name,
+                        "flags": 0,
+                        "thread_metadata": {
+                            "create_timestamp": "2026-08-02T00:00:00.000000+00:00"
+                        },
+                    },
+                }
+            ]
+        },
+        timeout=5,
+    ).raise_for_status()
+
+    root = requests.get(
+        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/{root_id}",
+        timeout=5,
+    )
+    root.raise_for_status()
+    assert root.json()["flags"] == 32
+    assert root.json()["thread"] == {
+        "id": thread_id,
+        "guild_id": "200000000000000001",
+        "parent_id": "400000000000000001",
+        "root_message_id": root_id,
+        "owner_id": "300000000000000001",
+        "name": provisional_name,
+        "flags": 0,
+        "thread_metadata": {"create_timestamp": "2026-08-02T00:00:00.000000+00:00"},
+    }
+
+    direct = requests.get(
+        f"{discord_fake_url}/api/v10/channels/{thread_id}",
+        timeout=5,
+    )
+    direct.raise_for_status()
+    assert direct.json()["name"] == provisional_name
+    assert direct.json()["owner_id"] == "300000000000000001"
+
+    patched = requests.patch(
+        f"{discord_fake_url}/api/v10/channels/{thread_id}",
+        json={"name": "Final private title"},
+        timeout=5,
+    )
+    patched.raise_for_status()
+    assert patched.json()["name"] == "Final private title"
+
+    mutated = requests.post(
+        f"{discord_fake_url}/__testenv/thread-mutate",
+        json={"thread_channel_id": thread_id, "name": takeover_name},
+        timeout=5,
+    )
+    mutated.raise_for_status()
+    assert mutated.json() == {"status": "mutated"}
+    assert (
+        requests.get(
+            f"{discord_fake_url}/api/v10/channels/{thread_id}",
+            timeout=5,
+        ).json()["name"]
+        == takeover_name
+    )
+
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert evidence["thread_evidence"] == [
+        {
+            "thread_channel_id": thread_id,
+            "parent_channel_id": "400000000000000001",
+            "root_message_id": root_id,
+            "guild_id": "200000000000000001",
+            "owner_id": "300000000000000001",
+            "flags": 0,
+            "name_length": len(takeover_name),
+            "name_sha256": hashlib.sha256(takeover_name.encode()).hexdigest(),
+            "create_timestamp": "2026-08-02T00:00:00.000000+00:00",
+        }
+    ]
+    rendered = str(evidence)
+    assert provisional_name not in rendered
+    assert "Final private title" not in rendered
+    assert takeover_name not in rendered
+    assert evidence["request_counts"]["update_thread"] == 1
+
+
+def test_discord_fake_provider_thread_uses_requested_name_and_bot_owner(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Create one complete provider-owned thread from the requested provisional name."""
+    discord_fake_url, _ = discord_fake_urls
+    root_id = "500000000000000202"
+    requested_name = "Requested private provisional title"
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={
+            "allow_synthetic_roots": True,
+            "root_messages": [
+                {
+                    "id": root_id,
+                    "channel_id": "400000000000000001",
+                    "flags": 64,
+                }
+            ],
+        },
+        timeout=5,
+    ).raise_for_status()
+    created = requests.post(
+        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/{root_id}/threads",
+        json={"name": requested_name},
+        timeout=5,
+    )
+    created.raise_for_status()
+    thread = created.json()
+    assert thread["parent_id"] == "400000000000000001"
+    assert thread["root_message_id"] == root_id
+    assert thread["guild_id"] == "200000000000000001"
+    assert thread["owner_id"] == "300000000000000001"
+    assert thread["name"] == requested_name
+    assert thread["thread_metadata"]["create_timestamp"].endswith("+00:00")
+    assert (
+        requests.get(
+            f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/{root_id}",
+            timeout=5,
+        ).json()["flags"]
+        == 96
+    )
+
+
+def test_discord_fake_rejects_overlong_thread_patch_without_connection_loss(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Reject overlong names before scenario selection or provider mutation."""
+    discord_fake_url, _ = discord_fake_urls
+    root_id = "500000000000000204"
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={"allow_synthetic_roots": True},
+        timeout=5,
+    ).raise_for_status()
+    created = requests.post(
+        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/{root_id}/threads",
+        json={"name": "Original private title"},
+        timeout=5,
+    )
+    created.raise_for_status()
+    thread_id = created.json()["id"]
+    overlong_name = "x" * 101
+
+    normal = requests.patch(
+        f"{discord_fake_url}/api/v10/channels/{thread_id}",
+        json={"name": overlong_name},
+        timeout=5,
+    )
+    assert normal.status_code == 400
+    requests.post(
+        f"{discord_fake_url}/__testenv/scenario",
+        json={"api_scenario_sequences": {"update_thread": ["ambiguous"]}},
+        timeout=5,
+    ).raise_for_status()
+    ambiguous = requests.patch(
+        f"{discord_fake_url}/api/v10/channels/{thread_id}",
+        json={"name": overlong_name},
+        timeout=5,
+    )
+    assert ambiguous.status_code == 400
+    current = requests.get(
+        f"{discord_fake_url}/api/v10/channels/{thread_id}",
+        timeout=5,
+    )
+    current.raise_for_status()
+    assert current.json()["name"] == "Original private title"
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert evidence["request_counts"].get("update_thread", 0) == 0
+
+
+def test_discord_fake_ambiguous_thread_patch_commits_before_response_loss(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Make an ambiguous PATCH recoverable by a subsequent direct GET."""
+    discord_fake_url, _ = discord_fake_urls
+    root_id = "500000000000000203"
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={"allow_synthetic_roots": True},
+        timeout=5,
+    ).raise_for_status()
+    created = requests.post(
+        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/{root_id}/threads",
+        json={"name": "Ambiguous private title"},
+        timeout=5,
+    )
+    created.raise_for_status()
+    thread_id = created.json()["id"]
+    requests.post(
+        f"{discord_fake_url}/__testenv/scenario",
+        json={"api_scenario_sequences": {"update_thread": ["ambiguous"]}},
+        timeout=5,
+    ).raise_for_status()
+    with pytest.raises(requests.exceptions.ConnectionError):
+        requests.patch(
+            f"{discord_fake_url}/api/v10/channels/{thread_id}",
+            json={"name": "Committed private final title"},
+            timeout=5,
+        )
+    recovered = requests.get(
+        f"{discord_fake_url}/api/v10/channels/{thread_id}",
+        timeout=5,
+    )
+    recovered.raise_for_status()
+    assert recovered.json()["name"] == "Committed private final title"
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    update_events = [
+        event
+        for event in evidence["operations"]
+        if event["operation"] == "update_thread"
+    ]
+    assert update_events[-1]["outcome"] == "unknown"
+    assert update_events[-1]["safe_category"] == "provider_5xx_unknown"
+
+
+@pytest.mark.parametrize(
+    "operation",
+    ["create_thread", "get_message", "get_thread", "update_thread"],
+)
+def test_discord_fake_accepts_thread_operation_barriers(
+    discord_fake_urls: tuple[str, str],
+    operation: str,
+) -> None:
+    """Pause and release each title-provisioning operation deterministically."""
+    discord_fake_url, _ = discord_fake_urls
+    root_id = f"5000000000000002{operation[-1]}"
+    root_url = (
+        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/{root_id}"
+    )
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={
+            "allow_synthetic_roots": True,
+            "root_messages": [
+                {
+                    "id": root_id,
+                    "channel_id": "400000000000000001",
+                    "flags": 0,
+                }
+            ],
+        },
+        timeout=5,
+    ).raise_for_status()
+    thread_id = ""
+    if operation in {"get_thread", "update_thread"}:
+        created = requests.post(
+            f"{root_url}/threads",
+            json={"name": "Barrier private title"},
+            timeout=5,
+        )
+        created.raise_for_status()
+        thread_id = created.json()["id"]
+    requests.post(
+        f"{discord_fake_url}/__testenv/barrier",
+        json={"operation": operation, "occurrence": 1},
+        timeout=5,
+    ).raise_for_status()
+
+    request_url: str
+    request_method: str
+    request_kwargs: dict[str, object] = {"timeout": 10}
+    if operation == "create_thread":
+        request_url = root_url + "/threads"
+        request_method = "post"
+        request_kwargs["json"] = {"name": "Barrier private title"}
+    elif operation == "get_message":
+        request_url = root_url
+        request_method = "get"
+    elif operation == "get_thread":
+        request_url = f"{discord_fake_url}/api/v10/channels/{thread_id}"
+        request_method = "get"
+    else:
+        request_url = f"{discord_fake_url}/api/v10/channels/{thread_id}"
+        request_method = "patch"
+        request_kwargs["json"] = {"name": "Barrier private final title"}
+
+    responses: list[requests.Response] = []
+    errors: list[BaseException] = []
+
+    def invoke() -> None:
+        try:
+            response = getattr(requests, request_method)(request_url, **request_kwargs)
+            responses.append(response)
+        except BaseException as error:  # pragma: no cover - assertion aid
+            errors.append(error)
+
+    request_thread = threading.Thread(target=invoke, daemon=True)
+    request_thread.start()
+    try:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            barrier = requests.get(f"{discord_fake_url}/__testenv/barrier", timeout=5)
+            barrier.raise_for_status()
+            if barrier.json()["reached"] is True:
+                break
+            time.sleep(0.01)
+        else:
+            pytest.fail(f"Barrier was not reached for {operation}.")
+        assert barrier.json()["operation"] == operation
+        assert barrier.json()["occurrence"] == 1
+    finally:
+        requests.post(
+            f"{discord_fake_url}/__testenv/barrier/release",
+            timeout=5,
+        ).raise_for_status()
+        request_thread.join(timeout=5)
+    assert not errors
+    assert len(responses) == 1
+    assert responses[0].status_code in {200, 201}
+
+
+@pytest.mark.parametrize("reset_action", ["reset", "configure"])
+def test_discord_fake_barrier_reset_releases_blocked_waiter(
+    discord_fake_urls: tuple[str, str],
+    reset_action: str,
+) -> None:
+    """Resetting fake state releases a waiter captured on the old barrier Event."""
+    del discord_fake_urls
+    STATE.configure_delivery_barrier({"operation": "get_thread", "occurrence": 1})
+    STATE.record_request("get_thread", method="GET")
+    result: list[bool] = []
+    waiter = threading.Thread(
+        target=lambda: result.append(STATE.wait_for_delivery_barrier("get_thread")),
+        daemon=True,
+    )
+    waiter.start()
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if STATE.delivery_barrier_evidence()["reached"]:
+            break
+        time.sleep(0.01)
+    else:
+        pytest.fail("Barrier waiter did not reach the old barrier.")
+    try:
+        if reset_action == "reset":
+            STATE.reset()
+        else:
+            STATE.configure({})
+    finally:
+        STATE.release_delivery_barrier()
+    waiter.join(timeout=1)
+    assert not waiter.is_alive()
+    assert result == [True]
+
+
+def test_discord_fake_rejects_provider_thread_overflow_at_bounded_limit(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Reject the first provider-created thread beyond the bounded state size."""
+    discord_fake_url, _ = discord_fake_urls
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={"allow_synthetic_roots": True},
+        timeout=5,
+    ).raise_for_status()
+    thread_url = f"{discord_fake_url}/api/v10/channels/400000000000000001/messages"
+    for index in range(100):
+        response = requests.post(
+            f"{thread_url}/5000000000000003{index:02d}/threads",
+            json={"name": f"Bounded private title {index}"},
+            timeout=5,
+        )
+        assert response.status_code == 201
+    overflow = requests.post(
+        f"{thread_url}/500000000000000400/threads",
+        json={"name": "Overflow private title"},
+        timeout=5,
+    )
+    assert overflow.status_code == 400
+    assert overflow.json() == {"message": "Thread state limit reached."}
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert len(evidence["thread_evidence"]) == 100
+    assert evidence["operations"][-1]["safe_category"] == "provider_rejected"
 
 
 def test_discord_fake_rejects_unbounded_history_root_and_command_fixtures(

@@ -12,7 +12,7 @@ import threading
 import time
 from collections.abc import Mapping, Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Lock
+from threading import RLock
 from typing import ClassVar, cast
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
@@ -74,15 +74,25 @@ _MAX_HISTORY_PAGES = 32
 _MAX_HISTORY_MESSAGES_PER_PAGE = 100
 _MAX_CONFIGURED_OBJECT_BYTES = 16 * 1024
 _MAX_CONFIGURED_ROOT_MESSAGES = 100
+_MAX_CONFIGURED_THREADS = 100
 _MAX_CONFIGURED_GUILD_COMMANDS = 100
 _MAX_GUILD_COMMAND_ID_CHARACTERS = 32
 _MAX_GUILD_COMMAND_NAME_CHARACTERS = 100
 _MAX_GUILD_COMMAND_DESCRIPTION_CHARACTERS = 100
+_MAX_THREAD_NAME_CHARACTERS = 100
 _GUILD_COMMAND_TYPES = {1, 2, 3}
 _COMMAND_ROLE_CONTRACTS = {
     "message_action": ("Ask an Azents Agent", 3),
     "azents_settings": ("Azents settings", 1),
     "conversation_settings": ("Conversation settings", 3),
+}
+_DISCORD_MESSAGE_FLAG_HAS_THREAD = 1 << 5
+_THREAD_BARRIER_OPERATIONS = {
+    "create_message",
+    "create_thread",
+    "get_message",
+    "get_thread",
+    "update_thread",
 }
 
 
@@ -90,12 +100,15 @@ class FakeState:
     """Thread-safe Discord scenarios and sanitized provider evidence."""
 
     def __init__(self) -> None:
-        self.lock = Lock()
+        self.lock = RLock()
         self.reset()
 
     def reset(self) -> None:
         """Reset all mutable deterministic provider state."""
         with self.lock:
+            previous_release = getattr(self, "_delivery_barrier_release", None)
+            if previous_release is not None:
+                previous_release.set()
             self.application_id = "100000000000000001"
             self.guild_id = "200000000000000001"
             self.bot_user_id = "300000000000000001"
@@ -135,6 +148,7 @@ class FakeState:
             self._delivery_barrier_reached = threading.Event()
             self._delivery_barrier_release = threading.Event()
             self._root_threads: dict[tuple[str, str], str] = {}
+            self._threads: dict[str, dict[str, object]] = {}
             self._thread_reconciliation_pending: set[tuple[str, str]] = set()
             self._evidence_sequence = 0
             self.operation_evidence: list[dict[str, object]] = []
@@ -151,6 +165,7 @@ class FakeState:
             "history_scenario",
             "history_pages",
             "root_messages",
+            "threads",
             "allow_synthetic_roots",
             "gateway_dispatches",
             "gateway_scenarios",
@@ -197,6 +212,22 @@ class FakeState:
             root_messages = payload.get("root_messages")
             if root_messages is not None:
                 self.root_messages = _root_messages(root_messages)
+            self._threads = _configured_threads(payload.get("threads"))
+            for message in self.root_messages.values():
+                configured_thread = message.get("thread")
+                if not isinstance(configured_thread, dict):
+                    continue
+                configured_thread_object = cast(dict[str, object], configured_thread)
+                thread_id = configured_thread_object.get("id")
+                if isinstance(thread_id, str) and thread_id:
+                    if (
+                        thread_id not in self._threads
+                        and len(self._threads) >= _MAX_CONFIGURED_THREADS
+                    ):
+                        raise ValueError(
+                            "Configured threads exceed the thread state bound."
+                        )
+                    self._threads.setdefault(thread_id, dict(configured_thread_object))
             allow_synthetic_roots = payload.get("allow_synthetic_roots")
             if allow_synthetic_roots is not None:
                 if not isinstance(allow_synthetic_roots, bool):
@@ -238,8 +269,9 @@ class FakeState:
             self._deleted_message_ids = set()
             self._delivery_barrier_operation = None
             self._delivery_barrier_occurrence = None
-            self._delivery_barrier_reached.clear()
-            self._delivery_barrier_release.clear()
+            self._delivery_barrier_release.set()
+            self._delivery_barrier_reached = threading.Event()
+            self._delivery_barrier_release = threading.Event()
             self._root_threads = {}
             self._thread_reconciliation_pending = set()
             self._evidence_sequence = 0
@@ -365,16 +397,15 @@ class FakeState:
         operation = payload.get("operation")
         occurrence = payload.get("occurrence")
         if (
-            operation != "create_message"
+            not isinstance(operation, str)
+            or operation not in _THREAD_BARRIER_OPERATIONS
             or not isinstance(occurrence, int)
             or isinstance(occurrence, bool)
             or occurrence < 1
         ):
-            raise ValueError(
-                "Barrier requires create_message and a positive occurrence."
-            )
+            raise ValueError("Barrier requires a supported operation and occurrence.")
         with self.lock:
-            self._delivery_barrier_operation = "create_message"
+            self._delivery_barrier_operation = operation
             self._delivery_barrier_occurrence = occurrence
             self._delivery_barrier_reached.clear()
             self._delivery_barrier_release.clear()
@@ -402,6 +433,8 @@ class FakeState:
     def wait_for_delivery_barrier(self, operation: str) -> bool:
         """Pause one targeted delivery until the test explicitly releases it."""
         with self.lock:
+            release = self._delivery_barrier_release
+            reached = self._delivery_barrier_reached
             if (
                 self._delivery_barrier_operation != operation
                 or self._delivery_barrier_occurrence is None
@@ -409,8 +442,8 @@ class FakeState:
                 != self._delivery_barrier_occurrence
             ):
                 return True
-        self._delivery_barrier_reached.set()
-        return self._delivery_barrier_release.wait(timeout=60)
+        reached.set()
+        return release.wait(timeout=60)
 
     def record_operation(
         self,
@@ -613,6 +646,92 @@ class FakeState:
                     return configured_thread
             return None
 
+    def root_thread_payload(
+        self, *, parent_channel_id: str, root_message_id: str
+    ) -> dict[str, object] | None:
+        """Return the complete configured or provider-created root thread object."""
+        with self.lock:
+            thread_id = self._root_threads.get((parent_channel_id, root_message_id))
+            if thread_id is not None:
+                thread = self._threads.get(thread_id)
+                return dict(thread) if thread is not None else None
+            message = self.root_messages.get((parent_channel_id, root_message_id))
+            configured_thread = message.get("thread") if message is not None else None
+            if not isinstance(configured_thread, dict):
+                return None
+            configured_thread_object = cast(dict[str, object], configured_thread)
+            thread_id = configured_thread_object.get("id")
+            if not isinstance(thread_id, str) or not thread_id:
+                return dict(configured_thread_object)
+            thread = self._threads.get(thread_id, configured_thread_object)
+            return dict(thread)
+
+    def provider_created_root_thread(
+        self, *, parent_channel_id: str, root_message_id: str
+    ) -> bool:
+        """Return whether the fake created the current root thread."""
+        with self.lock:
+            return (parent_channel_id, root_message_id) in self._root_threads
+
+    def thread(self, thread_channel_id: str) -> dict[str, object] | None:
+        """Return one thread payload without exposing state by reference."""
+        with self.lock:
+            thread = self._threads.get(thread_channel_id)
+            return dict(thread) if thread is not None else None
+
+    def mutate_thread(
+        self,
+        *,
+        thread_channel_id: str,
+        name: str | None = None,
+        owner_id: str | None = None,
+    ) -> bool:
+        """Mutate thread ownership or name without recording provider evidence."""
+        if name is None and owner_id is None:
+            raise ValueError("Thread mutation requires a name or owner_id.")
+        if name is not None and (not name or len(name) > _MAX_THREAD_NAME_CHARACTERS):
+            raise ValueError("Thread name is invalid.")
+        if owner_id is not None and not owner_id:
+            raise ValueError("Thread owner is invalid.")
+        with self.lock:
+            thread = self._threads.get(thread_channel_id)
+            if thread is None:
+                return False
+            if name is not None:
+                thread["name"] = name
+            if owner_id is not None:
+                thread["owner_id"] = owner_id
+            return True
+
+    def thread_evidence(self, thread_channel_id: str) -> dict[str, object] | None:
+        """Return bounded thread evidence without exposing the raw title."""
+        with self.lock:
+            thread = self._threads.get(thread_channel_id)
+            if thread is None:
+                return None
+            name = thread.get("name")
+            metadata = thread.get("thread_metadata")
+            create_timestamp = (
+                cast(dict[str, object], metadata).get("create_timestamp")
+                if isinstance(metadata, dict)
+                else None
+            )
+            return {
+                "thread_channel_id": thread.get("id"),
+                "parent_channel_id": thread.get("parent_id"),
+                "root_message_id": thread.get("root_message_id"),
+                "guild_id": thread.get("guild_id"),
+                "owner_id": thread.get("owner_id"),
+                "flags": thread.get("flags"),
+                "name_length": len(name) if isinstance(name, str) else None,
+                "name_sha256": (
+                    hashlib.sha256(name.encode()).hexdigest()
+                    if isinstance(name, str)
+                    else None
+                ),
+                "create_timestamp": create_timestamp,
+            }
+
     def mark_thread_reconciliation(
         self, *, parent_channel_id: str, root_message_id: str
     ) -> None:
@@ -674,16 +793,34 @@ class FakeState:
             return [dict(item) for item in page], next_cursor
 
     def ensure_root_thread(
-        self, *, parent_channel_id: str, root_message_id: str
+        self,
+        *,
+        parent_channel_id: str,
+        root_message_id: str,
+        requested_name: str | None = None,
     ) -> str:
         """Create or reuse one deterministic numeric thread channel identity."""
         with self.lock:
             key = (parent_channel_id, root_message_id)
             thread_id = self._root_threads.get(key)
             if thread_id is None:
+                if len(self._threads) >= _MAX_CONFIGURED_THREADS:
+                    raise ValueError("Thread state limit reached.")
                 self._message_sequence += 1
                 thread_id = str(700000000000000000 + self._message_sequence)
                 self._root_threads[key] = thread_id
+                self._threads[thread_id] = {
+                    "id": thread_id,
+                    "parent_id": parent_channel_id,
+                    "root_message_id": root_message_id,
+                    "guild_id": self.guild_id,
+                    "owner_id": self.bot_user_id,
+                    "name": requested_name or "Azents",
+                    "flags": 0,
+                    "thread_metadata": {
+                        "create_timestamp": "2026-08-02T00:00:00.000000+00:00"
+                    },
+                }
             return thread_id
 
     def gateway_start(self, opcode: int) -> tuple[list[dict[str, object]], str]:
@@ -755,6 +892,11 @@ class FakeState:
                 ),
                 "deliveries": list(self.deliveries),
                 "operations": list(self.operation_evidence),
+                "thread_evidence": [
+                    evidence
+                    for thread_id in sorted(self._threads)
+                    if (evidence := self.thread_evidence(thread_id)) is not None
+                ],
                 "gateway": {
                     "connections": self.gateway_connections,
                     "initial_opcodes": list(self.gateway_initial_opcodes),
@@ -874,6 +1016,75 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 return
             self._json_response_array(200, self.state.list_guild_commands())
             return
+        thread_channel_id = _channel_id_only(parsed.path)
+        if thread_channel_id is not None:
+            scenario = self._operation(
+                "get_thread",
+                metadata={"thread_channel_id": thread_channel_id},
+            )
+            if not self.state.wait_for_delivery_barrier("get_thread"):
+                self.state.record_operation(
+                    "thread_read",
+                    operation="get_thread",
+                    outcome="unknown",
+                    safe_category="transport_unknown",
+                    metadata={"thread_channel_id": thread_channel_id},
+                )
+                self._close_connection()
+                return
+            if self._controlled_response(scenario):
+                self.state.record_operation(
+                    "thread_read",
+                    operation="get_thread",
+                    outcome=(
+                        "unknown"
+                        if _safe_category(scenario)
+                        in {"transport_unknown", "provider_5xx_unknown"}
+                        else "failed"
+                    ),
+                    safe_category=_safe_category(scenario),
+                    metadata={"thread_channel_id": thread_channel_id},
+                )
+                return
+            thread = self.state.thread(thread_channel_id)
+            if thread is None:
+                self.state.record_operation(
+                    "thread_read",
+                    operation="get_thread",
+                    outcome="failed",
+                    safe_category="message_not_found",
+                    metadata={"thread_channel_id": thread_channel_id},
+                )
+                self._json_response(404, {"message": "Not found."})
+                return
+            if scenario in {"malformed_json", "response_malformed"}:
+                self.state.record_operation(
+                    "thread_read",
+                    operation="get_thread",
+                    outcome="unknown",
+                    safe_category="response_malformed",
+                    metadata={"thread_channel_id": thread_channel_id},
+                )
+                self._raw_response(200, b"{malformed")
+                return
+            if scenario == "response_shape_invalid":
+                self.state.record_operation(
+                    "thread_read",
+                    operation="get_thread",
+                    outcome="unknown",
+                    safe_category="response_shape_invalid",
+                    metadata={"thread_channel_id": thread_channel_id},
+                )
+                self._json_response_array(200, [])
+                return
+            self.state.record_operation(
+                "thread_read",
+                operation="get_thread",
+                outcome="delivered",
+                metadata={"thread_channel_id": thread_channel_id},
+            )
+            self._json_response(200, thread)
+            return
         if parsed.path.startswith(f"{_API_PREFIX}/channels/") and parsed.path.endswith(
             "/messages"
         ):
@@ -949,6 +1160,19 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                     "get_message",
                     metadata={"channel_id": channel_id, "message_id": message_id},
                 )
+                if not self.state.wait_for_delivery_barrier("get_message"):
+                    self.state.record_operation(
+                        "thread_read",
+                        operation="get_message",
+                        outcome="unknown",
+                        safe_category="transport_unknown",
+                        metadata={
+                            "parent_channel_id": channel_id,
+                            "root_message_id": message_id,
+                        },
+                    )
+                    self._close_connection()
+                    return
                 if self._controlled_response(scenario):
                     safe_category = _safe_category(scenario)
                     outcome = (
@@ -1002,11 +1226,22 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                     parent_channel_id=channel_id,
                     root_message_id=message_id,
                 )
-                if thread_id is not None:
-                    payload["thread"] = {
-                        "id": thread_id,
-                        "parent_id": channel_id,
-                    }
+                thread_payload = self.state.root_thread_payload(
+                    parent_channel_id=channel_id,
+                    root_message_id=message_id,
+                )
+                if thread_payload is not None:
+                    payload["thread"] = thread_payload
+                    if self.state.provider_created_root_thread(
+                        parent_channel_id=channel_id,
+                        root_message_id=message_id,
+                    ):
+                        flags = payload.get("flags")
+                        payload["flags"] = (
+                            flags | _DISCORD_MESSAGE_FLAG_HAS_THREAD
+                            if isinstance(flags, int) and not isinstance(flags, bool)
+                            else _DISCORD_MESSAGE_FLAG_HAS_THREAD
+                        )
                 if scenario == "response_shape_invalid":
                     self.state.record_operation(
                         "thread_read",
@@ -1098,6 +1333,32 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             self.state.release_delivery_barrier()
             self._json_response(200, {"status": "ok"})
             return
+        if parsed.path == "/__testenv/thread-mutate":
+            try:
+                body = self._json_body()
+                if set(body) - {"thread_channel_id", "name", "owner_id"}:
+                    raise ValueError("Unsupported thread mutation field.")
+                thread_channel_id = body.get("thread_channel_id")
+                if not isinstance(thread_channel_id, str) or not thread_channel_id:
+                    raise ValueError("thread_channel_id is required.")
+                name = body.get("name")
+                owner_id = body.get("owner_id")
+                if name is not None and not isinstance(name, str):
+                    raise ValueError("name must be a string.")
+                if owner_id is not None and not isinstance(owner_id, str):
+                    raise ValueError("owner_id must be a string.")
+                if not self.state.mutate_thread(
+                    thread_channel_id=thread_channel_id,
+                    name=name,
+                    owner_id=owner_id,
+                ):
+                    self._json_response(404, {"message": "Not found."})
+                    return
+            except ValueError as error:
+                self._json_response(400, {"message": str(error)})
+                return
+            self._json_response(200, {"status": "mutated"})
+            return
         if parsed.path == "/__testenv/interactions":
             try:
                 status, response = self.state.deliver_interaction(self._json_body())
@@ -1135,15 +1396,51 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             thread_parent_path = parsed.path.removesuffix("/threads")
             channel_id, message_id = _channel_message_ids(thread_parent_path)
             if channel_id is not None and message_id is not None:
+                body = self._json_body_or_empty()
+                requested_name = body.get("name")
                 scenario = self._operation(
                     "create_thread",
                     metadata={"channel_id": channel_id, "message_id": message_id},
                 )
-                if scenario == "thread_create_committed_unknown":
-                    thread_id = self.state.ensure_root_thread(
-                        parent_channel_id=channel_id,
-                        root_message_id=message_id,
+                if not self.state.wait_for_delivery_barrier("create_thread"):
+                    self.state.record_operation(
+                        "thread_create",
+                        operation="create_thread",
+                        outcome="unknown",
+                        safe_category="transport_unknown",
+                        metadata={
+                            "parent_channel_id": channel_id,
+                            "root_message_id": message_id,
+                        },
                     )
+                    self._close_connection()
+                    return
+                if scenario == "thread_create_committed_unknown":
+                    try:
+                        thread_id = self.state.ensure_root_thread(
+                            parent_channel_id=channel_id,
+                            root_message_id=message_id,
+                            requested_name=(
+                                requested_name
+                                if isinstance(requested_name, str)
+                                else None
+                            ),
+                        )
+                    except ValueError:
+                        self.state.record_operation(
+                            "thread_create",
+                            operation="create_thread",
+                            outcome="failed",
+                            safe_category="provider_rejected",
+                            metadata={
+                                "parent_channel_id": channel_id,
+                                "root_message_id": message_id,
+                            },
+                        )
+                        self._json_response(
+                            400, {"message": "Thread state limit reached."}
+                        )
+                        return
                     self.state.mark_thread_reconciliation(
                         parent_channel_id=channel_id,
                         root_message_id=message_id,
@@ -1183,10 +1480,28 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                         },
                     )
                     return
-                thread_id = self.state.ensure_root_thread(
-                    parent_channel_id=channel_id,
-                    root_message_id=message_id,
-                )
+                if not isinstance(requested_name, str) or not requested_name:
+                    self._json_response(400, {"message": "Missing thread name."})
+                    return
+                try:
+                    thread_id = self.state.ensure_root_thread(
+                        parent_channel_id=channel_id,
+                        root_message_id=message_id,
+                        requested_name=requested_name,
+                    )
+                except ValueError:
+                    self.state.record_operation(
+                        "thread_create",
+                        operation="create_thread",
+                        outcome="failed",
+                        safe_category="provider_rejected",
+                        metadata={
+                            "parent_channel_id": channel_id,
+                            "root_message_id": message_id,
+                        },
+                    )
+                    self._json_response(400, {"message": "Thread state limit reached."})
+                    return
                 if scenario == "thread_response_invalid":
                     self.state.mark_thread_reconciliation(
                         parent_channel_id=channel_id,
@@ -1216,7 +1531,8 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 )
                 self._json_response(
                     201,
-                    {"id": thread_id, "parent_id": channel_id},
+                    self.state.thread(thread_id)
+                    or {"id": thread_id, "parent_id": channel_id},
                 )
                 return
         if parsed.path.startswith(f"{_API_PREFIX}/channels/") and parsed.path.endswith(
@@ -1373,6 +1689,85 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                     endpoint_url,
                 )
             self._json_response(200, {})
+            return
+        thread_channel_id = _channel_id_only(parsed.path)
+        if thread_channel_id is not None:
+            body = self._json_body_or_empty()
+            name = body.get("name")
+            if (
+                set(body) != {"name"}
+                or not isinstance(name, str)
+                or not name
+                or len(name) > _MAX_THREAD_NAME_CHARACTERS
+            ):
+                self._json_response(
+                    400, {"message": "Name-only thread update required."}
+                )
+                return
+            scenario = self._operation(
+                "update_thread",
+                metadata={"thread_channel_id": thread_channel_id},
+            )
+            safe_category = _safe_category(scenario)
+            if scenario == "ambiguous":
+                if not self.state.wait_for_delivery_barrier("update_thread"):
+                    self._close_connection()
+                    return
+                self.state.mutate_thread(
+                    thread_channel_id=thread_channel_id,
+                    name=name,
+                )
+                self.state.record_operation(
+                    "thread_update",
+                    operation="update_thread",
+                    outcome="unknown",
+                    safe_category="provider_5xx_unknown",
+                    metadata={"thread_channel_id": thread_channel_id},
+                )
+                self._close_connection()
+                return
+            if self._controlled_response(scenario):
+                self.state.record_operation(
+                    "thread_update",
+                    operation="update_thread",
+                    outcome=(
+                        "unknown"
+                        if safe_category
+                        in {"transport_unknown", "provider_5xx_unknown"}
+                        else "failed"
+                    ),
+                    safe_category=safe_category,
+                    metadata={"thread_channel_id": thread_channel_id},
+                )
+                return
+            if not self.state.wait_for_delivery_barrier("update_thread"):
+                self.state.record_operation(
+                    "thread_update",
+                    operation="update_thread",
+                    outcome="unknown",
+                    safe_category="transport_unknown",
+                    metadata={"thread_channel_id": thread_channel_id},
+                )
+                self._close_connection()
+                return
+            if self.state.thread(thread_channel_id) is None:
+                self.state.record_operation(
+                    "thread_update",
+                    operation="update_thread",
+                    outcome="failed",
+                    safe_category="message_not_found",
+                    metadata={"thread_channel_id": thread_channel_id},
+                )
+                self._json_response(404, {"message": "Not found."})
+                return
+            self.state.mutate_thread(thread_channel_id=thread_channel_id, name=name)
+            self.state.record_operation(
+                "thread_update",
+                operation="update_thread",
+                outcome="delivered",
+                metadata={"thread_channel_id": thread_channel_id},
+            )
+            self._json_response(200, self.state.thread(thread_channel_id) or {})
             return
         channel_id, message_id = _channel_message_ids(parsed.path)
         if channel_id is not None and message_id is not None:
@@ -1834,6 +2229,31 @@ def _root_messages(value: object) -> dict[tuple[str, str], dict[str, object]]:
     return result
 
 
+def _configured_threads(value: object) -> dict[str, dict[str, object]]:
+    """Validate bounded direct thread fixtures while preserving incomplete proof."""
+    if value is None:
+        return {}
+    if not isinstance(value, list):
+        raise ValueError("threads must be a list.")
+    raw_items = cast(list[object], value)
+    if len(raw_items) > _MAX_CONFIGURED_THREADS:
+        raise ValueError("threads exceeds the configured thread bound.")
+    result: dict[str, dict[str, object]] = {}
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            raise ValueError("threads items must be objects.")
+        item = cast(dict[str, object], raw_item)
+        thread_id = item.get("id")
+        if not isinstance(thread_id, str) or not thread_id:
+            raise ValueError("threads require a non-empty string id.")
+        if thread_id in result:
+            raise ValueError("threads contains duplicate ids.")
+        if _serialized_size(item) > _MAX_CONFIGURED_OBJECT_BYTES:
+            raise ValueError("thread exceeds the configured size bound.")
+        result[thread_id] = dict(item)
+    return result
+
+
 def _serialized_size(value: Mapping[str, object]) -> int:
     """Return bounded JSON size for one provider fixture object."""
     try:
@@ -2100,6 +2520,15 @@ def _channel_message_ids(path: str) -> tuple[str | None, str | None]:
     if len(parts) <= message_index + 1 or channel_index + 1 >= len(parts):
         return None, None
     return parts[channel_index + 1], parts[message_index + 1]
+
+
+def _channel_id_only(path: str) -> str | None:
+    """Return one exact Discord channel path without matching nested resources."""
+    parts = path.strip("/").split("/")
+    if len(parts) == 4 and parts[:3] == ["api", "v10", "channels"]:
+        channel_id = parts[3]
+        return channel_id if channel_id else None
+    return None
 
 
 def _read_http_headers(connection: socket.socket) -> dict[str, str]:
