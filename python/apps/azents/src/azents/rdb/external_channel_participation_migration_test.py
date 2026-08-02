@@ -7,6 +7,7 @@ import pytest
 import sqlalchemy as sa
 from alembic import command as alembic_command
 from alembic.config import Config as AlembicConfig
+from alembic.script import ScriptDirectory
 from testcontainers.postgres import PostgresContainer
 
 from azents.consts import PROJECT_ROOT
@@ -111,10 +112,16 @@ def test_participation_enum_models_do_not_own_postgresql_types() -> None:
     assert external_channel_conversation_location_enum.create_type is False
     assert external_channel_participation_setting_status_enum.create_type is False
     assert external_channel_setup_claim_status_enum.create_type is False
-    assert (
+    config = AlembicConfig(PROJECT_ROOT / "db-schemas" / "rdb" / "alembic.ini")
+    script_directory = ScriptDirectory.from_config(config)
+    revision = (
         PROJECT_ROOT.joinpath("db-schemas", "rdb", "revision").read_text().strip()
-        == _PARTICIPATION_REVISION
     )
+
+    assert revision == script_directory.get_current_head()
+    assert _PARTICIPATION_REVISION in {
+        script.revision for script in script_directory.walk_revisions("base", revision)
+    }
 
 
 def test_participation_migration_preserves_threads_and_guards_downgrade(
