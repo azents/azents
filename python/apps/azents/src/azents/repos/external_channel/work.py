@@ -35,6 +35,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelBinding,
     RDBExternalChannelConnection,
     RDBExternalChannelResource,
+    RDBExternalChannelSetupClaim,
     RDBExternalChannelWork,
     RDBExternalChannelWorkProjectionPart,
 )
@@ -227,6 +228,21 @@ class ExternalChannelWorkRepository:
     ) -> ProviderEffectPlan | None:
         """Refresh one process-local control against current provider authority."""
         target = plan.target
+        route_id: str | None = None
+        if (
+            target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+            and target.request_payload.get("control_kind") == "setup_required"
+        ):
+            setup_claim_id = target.request_payload.get("setup_claim_id")
+            if not isinstance(setup_claim_id, str):
+                return None
+            claim = await session.get(
+                RDBExternalChannelSetupClaim,
+                setup_claim_id,
+            )
+            if claim is None or claim.route_id is None:
+                return None
+            route_id = claim.route_id
         access_request_id = target.request_payload.get("access_request_id")
         if (
             target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
@@ -250,7 +266,7 @@ class ExternalChannelWorkRepository:
             session,
             connection_id=target.connection_id,
             resource_id=target.resource_id,
-            route_id=None,
+            route_id=route_id,
             binding_id=target.binding_id,
             operation=target.operation,
             request_payload=target.request_payload,
