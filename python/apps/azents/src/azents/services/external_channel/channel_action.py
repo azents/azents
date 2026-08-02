@@ -89,6 +89,12 @@ from azents.services.external_channel.presentation import (
     resolve_slack_agent_name_presentation,
     resolve_slack_agent_presentation,
 )
+from azents.services.external_channel.provider_effect import (
+    ProviderEffectPlan,
+    ProviderMutationOutcome,
+    ProviderOperationKey,
+    ProviderTarget,
+)
 from azents.services.external_channel.slack_events import (
     SlackControlMessageResult,
     SlackConversationClient,
@@ -478,7 +484,8 @@ class ExternalChannelActionService:
             return None
         try:
             result = await self._deliver(
-                started,
+                _provider_effect_plan(started),
+                delivery_attempt_id=started.delivery_attempt_id,
                 file_storage=file_storage,
                 agent_id=agent_id,
                 authority=authority,
@@ -727,15 +734,17 @@ class ExternalChannelActionService:
 
     async def _deliver(
         self,
-        target: ChannelDeliveryTarget,
+        plan: ProviderEffectPlan,
         *,
+        delivery_attempt_id: str,
         file_storage: FileStorage | None,
         agent_id: str | None,
         authority: SessionResourceAuthority | None,
         provider_delivery_capability: RuntimeToProviderDeliveryCapability | None,
-    ) -> SlackControlMessageResult | DiscordDeliveryResult:
+    ) -> ProviderMutationOutcome:
+        target = plan.target
         if target.encrypted_credentials is None:
-            return SlackControlMessageResult(
+            return ProviderMutationOutcome(
                 status="failed",
                 provider_message_key=None,
                 error_kind="credentials_missing",
@@ -744,29 +753,36 @@ class ExternalChannelActionService:
         credentials = self.credentials_codec.decrypt(target.encrypted_credentials)
         match target.provider:
             case ExternalChannelProvider.SLACK:
-                return await self._deliver_slack(
-                    target,
-                    bot_token=credentials.bot_token,
-                    file_storage=file_storage,
-                    agent_id=agent_id,
-                    authority=authority,
-                    provider_delivery_capability=provider_delivery_capability,
+                return _provider_mutation_outcome(
+                    await self._deliver_slack(
+                        target,
+                        delivery_attempt_id=delivery_attempt_id,
+                        bot_token=credentials.bot_token,
+                        file_storage=file_storage,
+                        agent_id=agent_id,
+                        authority=authority,
+                        provider_delivery_capability=provider_delivery_capability,
+                    )
                 )
             case ExternalChannelProvider.DISCORD:
-                return await self._deliver_discord(
-                    target,
-                    bot_token=credentials.bot_token,
-                    file_storage=file_storage,
-                    agent_id=agent_id,
-                    authority=authority,
+                return _provider_mutation_outcome(
+                    await self._deliver_discord(
+                        target,
+                        operation_key=plan.operation_key,
+                        bot_token=credentials.bot_token,
+                        file_storage=file_storage,
+                        agent_id=agent_id,
+                        authority=authority,
+                    )
                 )
             case _ as unreachable:
                 assert_never(unreachable)
 
     async def _deliver_discord(
         self,
-        target: ChannelDeliveryTarget,
+        target: ProviderTarget,
         *,
+        operation_key: ProviderOperationKey,
         bot_token: str,
         file_storage: FileStorage | None,
         agent_id: str | None,
@@ -859,7 +875,7 @@ class ExternalChannelActionService:
                         guild_id=guild_id,
                         channel_id=delivery_channel_id,
                         content=control.text,
-                        delivery_attempt_id=target.delivery_attempt_id,
+                        operation_key=operation_key,
                         components=control.components,
                         embeds=control.embeds,
                     )
@@ -908,7 +924,7 @@ class ExternalChannelActionService:
                         guild_id=guild_id,
                         channel_id=delivery_channel_id,
                         content=control.text,
-                        delivery_attempt_id=target.delivery_attempt_id,
+                        operation_key=operation_key,
                         components=control.components,
                         embeds=control.embeds,
                     )
@@ -941,7 +957,7 @@ class ExternalChannelActionService:
                         guild_id=guild_id,
                         channel_id=delivery_channel_id,
                         content=control.text,
-                        delivery_attempt_id=target.delivery_attempt_id,
+                        operation_key=operation_key,
                         components=control.components,
                         embeds=control.embeds,
                     )
@@ -1014,7 +1030,7 @@ class ExternalChannelActionService:
                             )
                             for file in files
                         ),
-                        delivery_attempt_id=target.delivery_attempt_id,
+                        operation_key=operation_key,
                     )
                 if components is None and embeds is None:
                     return await self.discord_client.create_message(
@@ -1022,14 +1038,14 @@ class ExternalChannelActionService:
                         guild_id=guild_id,
                         channel_id=delivery_channel_id,
                         content=_discord_agent_content(target, text),
-                        delivery_attempt_id=target.delivery_attempt_id,
+                        operation_key=operation_key,
                     )
                 return await self.discord_client.create_message(
                     bot_token=bot_token,
                     guild_id=guild_id,
                     channel_id=delivery_channel_id,
                     content=_discord_agent_content(target, text),
-                    delivery_attempt_id=target.delivery_attempt_id,
+                    operation_key=operation_key,
                     components=components,
                     embeds=embeds,
                 )
@@ -1082,8 +1098,9 @@ class ExternalChannelActionService:
 
     async def _deliver_slack(
         self,
-        target: ChannelDeliveryTarget,
+        target: ProviderTarget,
         *,
+        delivery_attempt_id: str,
         bot_token: str,
         file_storage: FileStorage | None,
         agent_id: str | None,
@@ -1132,7 +1149,7 @@ class ExternalChannelActionService:
                         thread_ts=thread_ts,
                         markdown_text=prepend_agent_markdown(presentation, text),
                         files=files,
-                        delivery_attempt_id=target.delivery_attempt_id,
+                        delivery_attempt_id=delivery_attempt_id,
                         authority=authority,
                         provider_delivery_capability=provider_delivery_capability,
                     )
@@ -1196,7 +1213,7 @@ class ExternalChannelActionService:
 
     async def _deliver_slack_control(
         self,
-        target: ChannelDeliveryTarget,
+        target: ProviderTarget,
         *,
         bot_token: str,
         tenant_id: str,
@@ -1660,6 +1677,46 @@ class ExternalChannelActionService:
         return result
 
 
+def _provider_effect_plan(target: ChannelDeliveryTarget) -> ProviderEffectPlan:
+    """Adapt one durable target into the process-local provider boundary."""
+    return ProviderEffectPlan(
+        target=ProviderTarget(
+            operation=target.operation,
+            binding_id=target.binding_id,
+            resource_id=target.resource_id,
+            connection_id=target.connection_id,
+            provider=target.provider,
+            app_mode=target.app_mode,
+            encrypted_credentials=target.encrypted_credentials,
+            provider_tenant_id=target.provider_tenant_id,
+            capabilities=(
+                None if target.capabilities is None else dict(target.capabilities)
+            ),
+            workspace_handle=target.workspace_handle,
+            agent_id=target.agent_id,
+            agent_session_id=target.agent_session_id,
+            agent_name=target.agent_name,
+            agent_avatar=(
+                None if target.agent_avatar is None else dict(target.agent_avatar)
+            ),
+            request_payload=dict(target.request_payload),
+        ),
+        operation_key=ProviderOperationKey.from_seed(target.delivery_attempt_id),
+    )
+
+
+def _provider_mutation_outcome(
+    result: SlackControlMessageResult | DiscordDeliveryResult,
+) -> ProviderMutationOutcome:
+    """Normalize provider-specific results before durable settlement."""
+    return ProviderMutationOutcome(
+        status=result.status,
+        provider_message_key=result.provider_message_key,
+        error_kind=result.error_kind,
+        error_summary=result.error_summary,
+    )
+
+
 def _has_runtime_outbound_source(payload: dict[str, object]) -> bool:
     """Return whether one persisted delivery requires a Runtime upload."""
     files = payload.get("files")
@@ -1804,7 +1861,7 @@ def _discord_provider_message_id(
     return message_id
 
 
-def _discord_agent_content(target: ChannelDeliveryTarget, text: str) -> str:
+def _discord_agent_content(target: ProviderTarget, text: str) -> str:
     """Prefix visible Discord text with a safely rendered current Agent name."""
     if target.app_mode is not ExternalChannelAppMode.MULTI:
         return text
@@ -1818,7 +1875,7 @@ def _discord_agent_content(target: ChannelDeliveryTarget, text: str) -> str:
 
 
 def _session_presence_context(
-    target: ChannelDeliveryTarget,
+    target: ProviderTarget,
     *,
     web_url: str,
 ) -> _SessionPresenceContext | None:
@@ -1841,7 +1898,7 @@ def _session_presence_context(
 
 
 def _session_navigation_context(
-    target: ChannelDeliveryTarget,
+    target: ProviderTarget,
     *,
     web_url: str,
 ) -> _SessionNavigationContext | None:

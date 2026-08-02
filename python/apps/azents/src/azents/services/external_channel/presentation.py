@@ -6,8 +6,8 @@ from urllib.parse import quote, urlsplit
 from pydantic import ValidationError
 
 from azents.core.enums import ExternalChannelAppMode
-from azents.repos.external_channel.work_data import ChannelDeliveryTarget
 from azents.services.external_channel.data import ExternalChannelCapabilitySnapshot
+from azents.services.external_channel.provider_effect import ProviderTarget
 from azents.services.uploads.schema import StoredImage
 
 _MAX_AGENT_NAME_LENGTH = 80
@@ -24,7 +24,7 @@ class SlackAgentPresentation:
 
 
 def resolve_slack_agent_presentation(
-    target: ChannelDeliveryTarget | None,
+    target: ProviderTarget | None,
     *,
     avatar_cdn_base_url: str | None,
 ) -> SlackAgentPresentation | None:

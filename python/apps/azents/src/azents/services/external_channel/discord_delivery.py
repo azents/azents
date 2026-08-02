@@ -1,6 +1,5 @@
-"""Bounded Discord message delivery primitives for durable Channel Actions."""
+"""Bounded Discord message delivery primitives."""
 
-import hashlib
 import json
 import secrets
 from collections.abc import AsyncIterator, Callable
@@ -10,8 +9,8 @@ from typing import Literal
 import httpx
 
 from azents.services.external_channel.discord_endpoint import discord_api_base_url
+from azents.services.external_channel.provider_effect import ProviderOperationKey
 
-_DISCORD_NONCE_MAX_LENGTH = 25
 _DISCORD_MIN_AUTO_ARCHIVE_MINUTES = 60
 DISCORD_DEFAULT_MAX_FILE_BYTES = 10 * 1024 * 1024
 DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES = 25 * 1024 * 1024
@@ -146,14 +145,14 @@ class DiscordDeliveryClient:
         guild_id: str,
         channel_id: str,
         content: str,
-        delivery_attempt_id: str,
+        operation_key: ProviderOperationKey,
         components: list[dict[str, object]] | None = None,
         embeds: list[dict[str, object]] | None = None,
     ) -> DiscordDeliveryResult:
-        """Create one message with a durable-attempt-derived duplicate nonce."""
+        """Create one message with a live-operation duplicate nonce."""
         payload: dict[str, object] = {
             "content": content,
-            "nonce": discord_delivery_nonce(delivery_attempt_id),
+            "nonce": discord_delivery_nonce(operation_key),
             "enforce_nonce": True,
         }
         if components is not None:
@@ -182,7 +181,7 @@ class DiscordDeliveryClient:
         channel_id: str,
         content: str,
         files: tuple[DiscordOutboundFile, ...],
-        delivery_attempt_id: str,
+        operation_key: ProviderOperationKey,
     ) -> DiscordDeliveryResult:
         """Create one nonce-fenced multipart message from streaming file sources."""
         if not files:
@@ -191,7 +190,7 @@ class DiscordDeliveryClient:
             stream = _DiscordMultipartStream(
                 payload={
                     "content": content,
-                    "nonce": discord_delivery_nonce(delivery_attempt_id),
+                    "nonce": discord_delivery_nonce(operation_key),
                     "enforce_nonce": True,
                     "attachments": [
                         {"id": str(index), "filename": file.filename}
@@ -352,11 +351,9 @@ def _response_failure(response: httpx.Response) -> DiscordDeliveryResult | None:
     return None
 
 
-def discord_delivery_nonce(delivery_attempt_id: str) -> str:
-    """Return a bounded deterministic nonce for one durable create attempt."""
-    return hashlib.sha256(delivery_attempt_id.encode()).hexdigest()[
-        :_DISCORD_NONCE_MAX_LENGTH
-    ]
+def discord_delivery_nonce(operation_key: ProviderOperationKey) -> str:
+    """Return the bounded duplicate nonce for one live create operation."""
+    return operation_key.value
 
 
 def _created_message_result(
