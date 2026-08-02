@@ -62,6 +62,8 @@ from azents.services.external_channel.mailbox_ingestion_store import (
     _response_mode_ignored_reason,  # pyright: ignore[reportPrivateUsage]
 )
 from azents.services.external_channel.participation_state import (
+    ExternalChannelSetupSourceProjection,
+    projection_with_setup_source,
     setup_source_from_projection,
 )
 
@@ -548,7 +550,24 @@ async def test_latest_eligible_setup_mention_replaces_continuation_source() -> N
         conversation_position_id="position-old",
         source_resource_id="source-old",
         principal_id="principal-old",
-        source_projection={"setup_source": {"schema_version": 0}},
+        source_projection=projection_with_setup_source(
+            ExternalChannelSetupSourceProjection(
+                schema_version=1,
+                provider=ExternalChannelProvider.SLACK,
+                provider_event_type="message",
+                provider_tenant_id="tenant-1",
+                provider_channel_id="channel-1",
+                provider_parent_channel_id="channel-1",
+                scope_kind=ExternalChannelConversationScopeKind.PARENT_CHANNEL,
+                provider_thread_key=None,
+                delivery_thread_key="00000000000000000003",
+                provider_resource_key="resource-key-old",
+                trigger_provider_message_key="message-key-old",
+                trigger_provider_message_id="3.000000",
+                trigger_position="00000000000000000003",
+                range_start_position="00000000000000000002",
+            )
+        ),
         source_revision=3,
         claim_generation=2,
         status=ExternalChannelSetupClaimStatus.PENDING_LOCATION,
@@ -599,6 +618,63 @@ async def test_latest_eligible_setup_mention_replaces_continuation_source() -> N
     source = setup_source_from_projection(call["source_projection"])
     assert source.trigger_provider_message_key == "message-key-new"
     assert source.trigger_position == "00000000000000000009"
+
+
+async def test_duplicate_slack_event_types_reuse_setup_claim_source() -> None:
+    """Slack message and app_mention callbacks for one message create one revision."""
+    repository = MagicMock()
+    request = _parent_slack_request()
+    old_claim = ExternalChannelSetupClaim.model_construct(
+        id="claim-1",
+        connection_id="connection-1",
+        provider_parent_channel_id="channel-1",
+        route_id="route-1",
+        conversation_position_id="position-1",
+        source_resource_id="source-1",
+        principal_id="principal-1",
+        source_projection=projection_with_setup_source(
+            ExternalChannelSetupSourceProjection(
+                schema_version=1,
+                provider=ExternalChannelProvider.SLACK,
+                provider_event_type="message",
+                provider_tenant_id=request.locator.provider_tenant_id,
+                provider_channel_id=request.locator.provider_channel_id,
+                provider_parent_channel_id="channel-1",
+                scope_kind=ExternalChannelConversationScopeKind.PARENT_CHANNEL,
+                provider_thread_key=None,
+                delivery_thread_key=request.locator.delivery_thread_key,
+                provider_resource_key=request.locator.provider_resource_key,
+                trigger_provider_message_key=(
+                    request.locator.trigger_provider_message_key
+                ),
+                trigger_provider_message_id=(
+                    request.locator.trigger_provider_message_id
+                ),
+                trigger_position=request.locator.trigger_position,
+                range_start_position=None,
+            )
+        ),
+        source_revision=5,
+        claim_generation=5,
+        status=ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+    )
+    repository.lock_nonterminal_setup_claim = AsyncMock(return_value=old_claim)
+    repository.replace_setup_claim_source = AsyncMock()
+    store = _store(repository=repository)
+
+    result = await store._ensure_setup_claim(  # pyright: ignore[reportPrivateUsage]
+        cast(AsyncSession, MagicMock()),
+        request=request,
+        position=ExternalChannelConversationPosition.model_construct(id="position-1"),
+        source_resource=ExternalChannelResource.model_construct(id="source-1"),
+        principal_id="principal-1",
+        route=ExternalChannelAgentRoute.model_construct(id="route-1"),
+        history=_history(),
+        now=datetime.datetime(2026, 8, 2, tzinfo=datetime.UTC),
+    )
+
+    assert result is old_claim
+    repository.replace_setup_claim_source.assert_not_awaited()
 
 
 async def test_discord_thread_resolves_multi_default_from_parent_channel() -> None:

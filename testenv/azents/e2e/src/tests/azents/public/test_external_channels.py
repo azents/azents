@@ -1209,7 +1209,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
         if not isinstance(counts, dict):
             return None
         typed = cast(dict[str, Any], counts)
-        if typed.get("chat.postMessage") == 4 and typed.get("chat.delete") == 1:
+        if typed.get("chat.postMessage") == 3 and typed.get("chat.delete") == 1:
             return state
         return None
 
@@ -1230,12 +1230,11 @@ def test_http_admission_unknown_participant_and_approval_journey(
     # provider history before one mailbox input wins.
     assert typed_counts["conversations.history"] == 3
     assert typed_counts["chat.getPermalink"] == 3
-    # One access-review control is deleted after approval. Durable acceptance then
-    # delivers joined presence, initial progress, and the versioned settings control.
-    assert typed_counts["chat.postMessage"] == 4
+    # One access-review control is deleted after approval. Setup selection then
+    # delivers the claim-scoped setup control, joined presence, and initial progress.
+    assert typed_counts["chat.postMessage"] == 3
     assert typed_counts["chat.delete"] == 1
     assert _successful_session_paths(provider_state) == [
-        f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
         f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
     ]
     assert _successful_session_presence_states(provider_state) == ["joined"]
@@ -1283,10 +1282,9 @@ def test_http_admission_unknown_participant_and_approval_journey(
         ),
     )
     disconnected_counts = cast(dict[str, Any], disconnected_state["request_counts"])
-    assert disconnected_counts["chat.postMessage"] == 5
+    assert disconnected_counts["chat.postMessage"] == 4
     assert disconnected_counts["chat.delete"] == 2
     assert _successful_session_paths(disconnected_state) == [
-        f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
         f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
         f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
     ]
@@ -4577,10 +4575,7 @@ def test_discord_message_command_selector_and_component_journey(
             message="Discord HTTP selector replay did not deliver joined presence",
         ),
     )
-    assert _successful_session_paths(activation_state) == [
-        expected_session_path,
-        expected_session_path,
-    ]
+    assert _successful_session_paths(activation_state) == [expected_session_path]
     assert _successful_session_presence_states(activation_state) == ["joined"]
     assert source_content not in rendered
     assert _DISCORD_BOT_TOKEN not in rendered
