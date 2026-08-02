@@ -504,7 +504,7 @@ async def test_setup_required_commits_claim_without_conversation_side_effects() 
     assert acceptance.reason is ExternalChannelIngestionReason.SETUP_REQUIRED
     assert acceptance.mailbox_item_id is None
     assert acceptance.session_id is None
-    assert acceptance.control_plan == plan
+    assert acceptance.control_plans == (plan,)
     assert acceptance.connection_id == "connection-1"
     call = work_repository.prepare_direct_control.await_args.kwargs
     assert call["operation_seed"] == "setup:claim-1:1:1"

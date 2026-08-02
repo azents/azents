@@ -68,6 +68,47 @@ from azents.services.external_channel.slack_events import (
 class ExternalChannelWorkRepository:
     """Own canonical Channel Work and current provider projection state."""
 
+    async def prepare_access_control_create(
+        self,
+        session: AsyncSession,
+        *,
+        access_request_id: str,
+        connection_id: str,
+        resource_id: str | None,
+        route_id: str | None,
+        binding_id: str | None,
+        request_payload: dict[str, object],
+        operation_seed: str,
+    ) -> ProviderEffectPlan | None:
+        """Claim one access-control create as conservatively unknown before I/O."""
+        request = await session.scalar(
+            sa.select(RDBExternalChannelAccessRequest)
+            .where(
+                RDBExternalChannelAccessRequest.id == access_request_id,
+                RDBExternalChannelAccessRequest.status
+                == ExternalChannelAccessRequestStatus.PENDING,
+            )
+            .with_for_update()
+        )
+        if (
+            request is None
+            or request.control_provider_message_key is not None
+            or request.control_projection_status is not None
+        ):
+            return None
+        request.control_projection_status = ExternalChannelWorkProjectionStatus.UNKNOWN
+        await session.flush()
+        return await self.prepare_direct_control(
+            session,
+            connection_id=connection_id,
+            resource_id=resource_id,
+            route_id=route_id,
+            binding_id=binding_id,
+            operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            request_payload=request_payload,
+            operation_seed=operation_seed,
+        )
+
     async def prepare_direct_control(
         self,
         session: AsyncSession,
@@ -186,6 +227,25 @@ class ExternalChannelWorkRepository:
     ) -> ProviderEffectPlan | None:
         """Refresh one process-local control against current provider authority."""
         target = plan.target
+        access_request_id = target.request_payload.get("access_request_id")
+        if (
+            target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+            and isinstance(access_request_id, str)
+        ):
+            request = await session.scalar(
+                sa.select(RDBExternalChannelAccessRequest).where(
+                    RDBExternalChannelAccessRequest.id == access_request_id,
+                    RDBExternalChannelAccessRequest.status
+                    == ExternalChannelAccessRequestStatus.PENDING,
+                    RDBExternalChannelAccessRequest.control_provider_message_key.is_(
+                        None
+                    ),
+                    RDBExternalChannelAccessRequest.control_projection_status
+                    == ExternalChannelWorkProjectionStatus.UNKNOWN,
+                )
+            )
+            if request is None:
+                return None
         return await self.prepare_direct_control(
             session,
             connection_id=target.connection_id,

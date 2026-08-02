@@ -214,7 +214,7 @@ def test_slack_control_plan_runs_after_committed_admission() -> None:
         event_id="event-1",
         interaction_id=None,
         created=False,
-        control_plan=plan,
+        control_plans=(plan,),
         control_delivery_connection_id="connection-1",
     )
 

@@ -141,7 +141,7 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
             kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
             reason=ExternalChannelIngestionReason.ACCEPTED,
             mailbox_item_id="mailbox-secret",
-            control_plan=None,
+            control_plans=(),
             connection_id=None,
         )
     )

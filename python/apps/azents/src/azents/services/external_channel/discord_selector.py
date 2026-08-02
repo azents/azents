@@ -218,7 +218,13 @@ class DiscordSelectorResponseService:
                     connection_id = None
                 case ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS:
                     awaiting_access = True
-                    control_plan = outcome.control_plan
+                    if len(outcome.control_plans) > 1:
+                        raise RuntimeError(
+                            "Discord selector access produced multiple controls."
+                        )
+                    control_plan = (
+                        None if not outcome.control_plans else outcome.control_plans[0]
+                    )
                     connection_id = outcome.connection_id
                 case (
                     ExternalChannelIngestionOutcomeKind.AWAITING_SELECTION

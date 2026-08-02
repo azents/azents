@@ -122,7 +122,7 @@ class _ReplayDouble:
             kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
             reason=ExternalChannelIngestionReason.ACCEPTED,
             mailbox_item_id=None,
-            control_plan=None,
+            control_plans=(),
             connection_id=None,
         )
         self.calls: list[tuple[str, str]] = []
@@ -266,7 +266,7 @@ async def test_typed_component_selection_replays_shared_ingestion() -> None:
             kind=ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS,
             reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
             mailbox_item_id=None,
-            control_plan=plan,
+            control_plans=(plan,),
             connection_id="connection-1",
         )
     )

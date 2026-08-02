@@ -1,6 +1,13 @@
 """Focused current-projection tests for direct External Channel Work."""
 
+from types import SimpleNamespace
+from typing import cast
+from unittest.mock import AsyncMock, MagicMock
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from azents.core.enums import (
+    ExternalChannelAccessRequestStatus,
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
 )
@@ -8,7 +15,11 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelWork,
     RDBExternalChannelWorkProjectionPart,
 )
-from azents.repos.external_channel.work import projection_state
+from azents.repos.external_channel.work import (
+    ExternalChannelWorkRepository,
+    projection_state,
+)
+from azents.testing.external_channel import make_provider_effect_plan
 
 
 def _work(*, desired: bool) -> RDBExternalChannelWork:
@@ -99,3 +110,47 @@ def test_projection_state_accepts_orm_sequence_contract() -> None:
         )
     ]
     assert projection_state(_work(desired=False), parts) == "none"
+
+
+async def test_access_control_create_is_claimed_once_before_provider_io() -> None:
+    """A repeated access callback cannot create a second provider control."""
+    request = SimpleNamespace(
+        status=ExternalChannelAccessRequestStatus.PENDING,
+        control_provider_message_key=None,
+        control_projection_status=None,
+    )
+    session = MagicMock()
+    session.scalar = AsyncMock(return_value=request)
+    session.flush = AsyncMock()
+    repository = ExternalChannelWorkRepository()
+    plan = make_provider_effect_plan("access-control")
+    repository.prepare_direct_control = AsyncMock(return_value=plan)
+
+    first = await repository.prepare_access_control_create(
+        cast(AsyncSession, session),
+        access_request_id="access-request-1",
+        connection_id="connection-1",
+        resource_id="resource-1",
+        route_id="route-1",
+        binding_id=None,
+        request_payload={"access_request_id": "access-request-1"},
+        operation_seed="access-request:access-request-1",
+    )
+    second = await repository.prepare_access_control_create(
+        cast(AsyncSession, session),
+        access_request_id="access-request-1",
+        connection_id="connection-1",
+        resource_id="resource-1",
+        route_id="route-1",
+        binding_id=None,
+        request_payload={"access_request_id": "access-request-1"},
+        operation_seed="access-request:access-request-1",
+    )
+
+    assert first == plan
+    assert second is None
+    assert (
+        request.control_projection_status is ExternalChannelWorkProjectionStatus.UNKNOWN
+    )
+    session.flush.assert_awaited_once()
+    repository.prepare_direct_control.assert_awaited_once()

@@ -147,15 +147,17 @@ async def receive_slack_event(
             service.run_interaction_handoff,
             result.interaction_handoff,
         )
-    if (
-        result.control_plan is not None
-        and result.control_delivery_connection_id is not None
-    ):
-        background_tasks.add_task(
-            service.attempt_control_delivery,
-            connection_id=result.control_delivery_connection_id,
-            plan=result.control_plan,
-        )
+    if result.control_plans:
+        if result.control_delivery_connection_id is None:
+            raise RuntimeError(
+                "Slack control deliveries require a connection identity."
+            )
+        for plan in result.control_plans:
+            background_tasks.add_task(
+                service.attempt_control_delivery,
+                connection_id=result.control_delivery_connection_id,
+                plan=plan,
+            )
     return Response(status_code=status.HTTP_200_OK)
 
 

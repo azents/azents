@@ -75,7 +75,7 @@ class SlackHTTPAdmissionResult:
         default=None,
         repr=False,
     )
-    control_plan: ProviderEffectPlan | None = field(default=None, repr=False)
+    control_plans: tuple[ProviderEffectPlan, ...] = field(default=(), repr=False)
     control_delivery_connection_id: str | None = field(default=None, repr=False)
 
 
@@ -259,7 +259,7 @@ class SlackHTTPAdmissionService:
                     created=(
                         result.kind is ExternalChannelIngestionOutcomeKind.ACCEPTED
                     ),
-                    control_plan=result.control_plan,
+                    control_plans=result.control_plans,
                     control_delivery_connection_id=result.connection_id,
                 )
             case (

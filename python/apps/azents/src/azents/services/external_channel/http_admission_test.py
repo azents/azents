@@ -144,7 +144,7 @@ class _AdmissionDouble:
                 kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                 reason=ExternalChannelIngestionReason.HISTORY_UNAVAILABLE,
                 mailbox_item_id=None,
-                control_plan=None,
+                control_plans=(),
                 connection_id=None,
             )
         if self.awaiting_access:
@@ -152,7 +152,7 @@ class _AdmissionDouble:
                 kind=ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS,
                 reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
                 mailbox_item_id=None,
-                control_plan=self.control_plan,
+                control_plans=(self.control_plan,),
                 connection_id=event.connection_id,
             )
         if event.event_type == "app_uninstalled":
@@ -170,7 +170,7 @@ class _AdmissionDouble:
             kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
             reason=ExternalChannelIngestionReason.ACCEPTED,
             mailbox_item_id="batch-1",
-            control_plan=None,
+            control_plans=(),
             connection_id=None,
         )
 
@@ -475,7 +475,7 @@ async def test_awaiting_access_exposes_only_committed_control_delivery_identity(
 
     assert result.event_id == "Ev-1"
     assert result.created is False
-    assert result.control_plan == admission.control_plan
+    assert result.control_plans == (admission.control_plan,)
     assert result.control_delivery_connection_id == "connection-1"
 
 

@@ -279,7 +279,7 @@ class ExternalChannelMailboxIngestionStore:
                         kind=ExternalChannelIngestionOutcomeKind.DUPLICATE,
                         reason=ExternalChannelIngestionReason.DUPLICATE,
                         mailbox_item_id=wake_item_id,
-                        control_plan=None,
+                        control_plans=(),
                         connection_id=None,
                     ),
                     wake_mailbox_item_id=wake_item_id,
@@ -416,7 +416,7 @@ class ExternalChannelMailboxIngestionStore:
                     reason=ExternalChannelIngestionReason.SELECTION_REQUIRED,
                     mailbox_item_id=None,
                     session_id=None,
-                    control_plan=delivery_id,
+                    control_plans=(() if delivery_id is None else (delivery_id,)),
                     connection_id=connection.id if delivery_id is not None else None,
                 )
             agent_id = conversation.route.require_active_agent_id()
@@ -488,7 +488,7 @@ class ExternalChannelMailboxIngestionStore:
                     reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
                     mailbox_item_id=None,
                     session_id=None,
-                    control_plan=delivery_id,
+                    control_plans=(() if delivery_id is None else (delivery_id,)),
                     connection_id=connection.id if delivery_id is not None else None,
                 )
             session_created = False
@@ -604,7 +604,19 @@ class ExternalChannelMailboxIngestionStore:
                         "provider_event_type": request.locator.provider_event_type,
                     },
                 )
-            control_id = settings_control_id or session_presence_id or progress_id
+            control_plans = (
+                ()
+                if not enqueue.created
+                else tuple(
+                    plan
+                    for plan in (
+                        settings_control_id,
+                        session_presence_id,
+                        progress_id,
+                    )
+                    if plan is not None
+                )
+            )
             return ExternalChannelIngestionAcceptance(
                 status="accepted" if enqueue.created else "duplicate",
                 reason=(
@@ -614,8 +626,8 @@ class ExternalChannelMailboxIngestionStore:
                 ),
                 mailbox_item_id=enqueue.mailbox_item.id,
                 session_id=binding.agent_session_id,
-                control_plan=control_id,
-                connection_id=connection.id if control_id is not None else None,
+                control_plans=control_plans,
+                connection_id=connection.id if control_plans else None,
             )
 
     async def _get_source_resource(
@@ -1031,7 +1043,7 @@ class ExternalChannelMailboxIngestionStore:
                 reason=ExternalChannelIngestionReason.SELECTION_REQUIRED,
                 mailbox_item_id=None,
                 session_id=None,
-                control_plan=delivery_id,
+                control_plans=(() if delivery_id is None else (delivery_id,)),
                 connection_id=connection.id if delivery_id is not None else None,
             )
         grant = await self.repository.get_active_access_grant(
@@ -1085,7 +1097,7 @@ class ExternalChannelMailboxIngestionStore:
                 reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
                 mailbox_item_id=None,
                 session_id=None,
-                control_plan=delivery_id,
+                control_plans=(() if delivery_id is None else (delivery_id,)),
                 connection_id=connection.id if delivery_id is not None else None,
             )
         delivery_id = await self._create_setup_control_intent(
@@ -1099,7 +1111,7 @@ class ExternalChannelMailboxIngestionStore:
             reason=ExternalChannelIngestionReason.SETUP_REQUIRED,
             mailbox_item_id=None,
             session_id=None,
-            control_plan=delivery_id,
+            control_plans=(() if delivery_id is None else (delivery_id,)),
             connection_id=connection.id if delivery_id is not None else None,
         )
 
@@ -1629,13 +1641,13 @@ class ExternalChannelMailboxIngestionStore:
                 ),
             }
             _add_discord_thread_provisioning(payload, request=request)
-        return await self.work_repository.prepare_direct_control(
+        return await self.work_repository.prepare_access_control_create(
             session,
+            access_request_id=request_id,
             connection_id=request.locator.connection_id,
             resource_id=None if binding is None else binding.resource_id,
             route_id=None if binding is None else binding.route_id,
             binding_id=None if binding is None else binding.id,
-            operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
             request_payload=payload,
             operation_seed=f"access-request:{request_id}",
         )
@@ -1792,7 +1804,7 @@ class ExternalChannelMailboxIngestionStore:
             reason=reason,
             mailbox_item_id=None,
             session_id=None,
-            control_plan=None,
+            control_plans=(),
             connection_id=None,
         )
 
@@ -1957,7 +1969,7 @@ def _immediate(
             kind=kind,
             reason=reason,
             mailbox_item_id=None,
-            control_plan=None,
+            control_plans=(),
             connection_id=None,
         ),
         wake_mailbox_item_id=None,
@@ -1983,7 +1995,7 @@ def _rejected(
         reason=reason,
         mailbox_item_id=None,
         session_id=None,
-        control_plan=None,
+        control_plans=(),
         connection_id=None,
     )
 

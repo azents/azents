@@ -36,12 +36,17 @@ from azents.services.external_channel.connection_revocation import (
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import SlackConnectionCredentials
 from azents.services.external_channel.ingestion import (
+    ExternalChannelIngestionOutcome,
     ExternalChannelIngressAuthority,
     ExternalChannelIngressAuthorityKind,
 )
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
     ExternalChannelInteractionProcessor,
+)
+from azents.services.external_channel.provider_control import (
+    ExternalChannelProviderControlService,
+    get_external_channel_provider_control_service,
 )
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
@@ -111,6 +116,15 @@ class SlackSocketManagerService:
         ExternalChannelConnectionRevocationService,
         Depends(ExternalChannelConnectionRevocationService),
     ]
+    provider_control: Annotated[
+        ExternalChannelProviderControlService,
+        Depends(get_external_channel_provider_control_service),
+    ]
+    control_tasks: set[asyncio.Task[object]] = dataclasses.field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
     manager_id: str = dataclasses.field(default_factory=lambda: uuid4().hex)
     poll_interval: datetime.timedelta = _DEFAULT_POLL_INTERVAL
     lease_duration: datetime.timedelta = _DEFAULT_LEASE_DURATION
@@ -407,7 +421,19 @@ class SlackSocketManagerService:
             raise SlackSocketRetryableIngestion(
                 "Slack Socket message ingestion is temporarily unavailable."
             )
+        self._schedule_control_plans(result)
         return result
+
+    def _schedule_control_plans(
+        self,
+        outcome: ExternalChannelIngestionOutcome,
+    ) -> None:
+        """Run direct controls without delaying Socket Mode acknowledgement."""
+        for plan in outcome.control_plans:
+            task = asyncio.create_task(self.provider_control.attempt(plan))
+            self.control_tasks.add(task)
+            task.add_done_callback(self.control_tasks.discard)
+            task.add_done_callback(_log_provider_control_task_failure)
 
     def _message_ingress_quiesced(
         self,
@@ -559,3 +585,15 @@ def _log_interaction_task_failure(task: asyncio.Task[None]) -> None:
         return
     except Exception:
         logger.exception("Slack interaction handoff task failed")
+
+
+def _log_provider_control_task_failure(
+    task: asyncio.Task[object],
+) -> None:
+    """Observe one direct control task without exposing provider payloads."""
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        logger.exception("Slack provider control task failed")

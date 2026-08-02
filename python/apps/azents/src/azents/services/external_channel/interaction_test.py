@@ -268,7 +268,7 @@ class _Replay:
             kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
             reason=ExternalChannelIngestionReason.ACCEPTED,
             mailbox_item_id=None,
-            control_plan=None,
+            control_plans=(),
             connection_id=None,
         )
         self.calls: list[dict[str, object]] = []
@@ -807,7 +807,7 @@ async def test_typed_submission_replays_and_delivers_committed_control() -> None
             kind=ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS,
             reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
             mailbox_item_id=None,
-            control_plan=plan,
+            control_plans=(plan,),
             connection_id="connection-1",
         )
     )

@@ -214,7 +214,7 @@ class DiscordSettingsResponseService:
             raise ExternalChannelParticipationError(
                 "External Channel setup changed before submission."
             )
-        await self.participation_service.select_location(
+        selection = await self.participation_service.select_location(
             setup_claim_id=claim.id,
             expected_claim_generation=claim.claim_generation,
             expected_source_revision=claim.source_revision,
@@ -226,7 +226,11 @@ class DiscordSettingsResponseService:
         committed = await self._resolve(context)
         return DiscordSettingsResponse(
             response=_confirmation_response(committed),
-            cleanup_plans=(),
+            cleanup_plans=(
+                ()
+                if selection.replay_outcome is None
+                else selection.replay_outcome.control_plans
+            ),
         )
 
     async def _mutate_parent(
