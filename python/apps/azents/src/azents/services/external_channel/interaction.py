@@ -271,6 +271,8 @@ class ExternalChannelInteractionProcessor:
             raise ValueError("Slack selector interaction expired.")
         if selection.status == "already_bound":
             return
+        if selection.status == "setup_pending_location":
+            return
         if selection.selector_interaction.id != metadata.selector_interaction_id:
             raise ValueError("Slack selector interaction is unavailable.")
         outcome = await self.ingestion_replay_service.replay_selected_interaction(

@@ -10,6 +10,8 @@ from typing import Annotated, Literal, Protocol, assert_never
 from fastapi import Depends
 
 from azents.core.enums import (
+    ExternalChannelConversationLocation,
+    ExternalChannelConversationScopeKind,
     ExternalChannelIngressProfile,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
@@ -23,9 +25,12 @@ from azents.services.external_channel.conversation import (
     ExternalChannelHistoryError,
     ExternalChannelHistoryRange,
     ExternalChannelOperationDeadline,
+    ExternalChannelParticipationLock,
+    ExternalChannelParticipationScope,
 )
 from azents.services.external_channel.deps import (
     get_external_channel_conversation_lock,
+    get_external_channel_participation_lock,
 )
 
 
@@ -35,6 +40,7 @@ class ExternalChannelIngestionOperation(enum.StrEnum):
     CURRENT_TRIGGER = "current_trigger"
     SELECTOR_CONTINUATION = "selector_continuation"
     ACCESS_ALLOW = "access_allow"
+    SETUP_CONTINUATION = "setup_continuation"
 
 
 class ExternalChannelIngressAuthorityKind(enum.StrEnum):
@@ -63,6 +69,7 @@ class ExternalChannelIngestionReason(enum.StrEnum):
     ACCEPTED = "accepted"
     DUPLICATE = "duplicate"
     SELECTION_REQUIRED = "selection_required"
+    SETUP_REQUIRED = "setup_required"
     ACCESS_REQUIRED = "access_required"
     NOT_AN_INVOCATION = "not_an_invocation"
     RESPONSE_MODE_NOT_TRIGGERED = "response_mode_not_triggered"
@@ -261,6 +268,74 @@ class ExternalChannelReplayBoundary:
 
 
 @dataclasses.dataclass(frozen=True, repr=False)
+class ExternalChannelSetupReplayBoundary:
+    """Frozen selected setup continuation and target conversation authority."""
+
+    connection_id: str
+    claim_id: str
+    expected_claim_generation: int
+    selected_source_revision: int
+    setting_id: str
+    settings_generation: int
+    location: ExternalChannelConversationLocation
+    source_resource_id: str
+    target_resource_id: str
+    principal_id: str
+    trigger_provider_message_key: str
+    conversation_position_id: str
+    range_start_position: str | None
+    trigger_position: str
+
+    def __post_init__(self) -> None:
+        """Require complete positive selected-setup identities."""
+        required = (
+            self.connection_id,
+            self.claim_id,
+            self.setting_id,
+            self.source_resource_id,
+            self.target_resource_id,
+            self.principal_id,
+            self.trigger_provider_message_key,
+            self.conversation_position_id,
+            self.trigger_position,
+        )
+        if (
+            any(not value for value in required)
+            or self.expected_claim_generation < 1
+            or self.selected_source_revision < 1
+            or self.settings_generation < 1
+        ):
+            raise ValueError("External Channel setup replay boundary is incomplete.")
+
+    @property
+    def resource_id(self) -> str:
+        """Expose the source Resource through the common replay contract."""
+        return self.source_resource_id
+
+    def __repr__(self) -> str:
+        """Exclude provider and durable row identifiers from diagnostics."""
+        digest = hashlib.sha256(
+            "\0".join(
+                (
+                    self.connection_id,
+                    self.claim_id,
+                    self.setting_id,
+                    self.source_resource_id,
+                    self.target_resource_id,
+                    self.trigger_provider_message_key,
+                    self.trigger_position,
+                )
+            ).encode()
+        ).hexdigest()
+        return f"ExternalChannelSetupReplayBoundary(digest={digest!r})"
+
+
+ExternalChannelAnyReplayBoundary = (
+    ExternalChannelReplayBoundary | ExternalChannelSetupReplayBoundary
+)
+
+
+@dataclasses.dataclass(frozen=True, repr=False)
 class ExternalChannelIngestionRequest:
     """One synchronous current-trigger or immutable replay operation."""
 
@@ -270,7 +345,7 @@ class ExternalChannelIngestionRequest:
     deadline: ExternalChannelOperationDeadline
     operation: ExternalChannelIngestionOperation
     selected_route_id: str | None
-    replay_boundary: ExternalChannelReplayBoundary | None
+    replay_boundary: ExternalChannelAnyReplayBoundary | None
 
     def __post_init__(self) -> None:
         """Require operation-specific replay and scope ownership."""
@@ -287,11 +362,16 @@ class ExternalChannelIngestionRequest:
             raise ValueError(
                 "Current trigger ingestion cannot carry a replay boundary."
             )
-        if (
-            self.operation is not ExternalChannelIngestionOperation.CURRENT_TRIGGER
-            and self.replay_boundary is None
+        if self.operation is not ExternalChannelIngestionOperation.CURRENT_TRIGGER and (
+            self.replay_boundary is None
         ):
             raise ValueError("External Channel replay operation requires a boundary.")
+        if (
+            self.operation is ExternalChannelIngestionOperation.SETUP_CONTINUATION
+        ) != isinstance(self.replay_boundary, ExternalChannelSetupReplayBoundary):
+            raise ValueError(
+                "External Channel setup continuation requires its typed boundary."
+            )
 
     def __repr__(self) -> str:
         """Return only closed operation and content-free locator identity."""
@@ -359,13 +439,24 @@ class ExternalChannelIngestionPreparation:
     immediate_outcome: ExternalChannelIngestionOutcome | None
     wake_mailbox_item_id: str | None
     wake_session_id: str | None
+    priority_request: ExternalChannelIngestionRequest | None
 
     def __post_init__(self) -> None:
         """Require either a history position or one completed outcome."""
-        if self.immediate_outcome is None and self.position_id is None:
+        completed = self.immediate_outcome is not None
+        prepared = self.position_id is not None
+        prioritized = self.priority_request is not None
+        if sum((completed, prepared, prioritized)) != 1:
             raise ValueError("External Channel ingestion position is unavailable.")
         if (self.wake_mailbox_item_id is None) != (self.wake_session_id is None):
             raise ValueError("External Channel wake recovery identity is incomplete.")
+        if prioritized and (
+            self.exclusive_start_position is not None
+            or self.wake_mailbox_item_id is not None
+        ):
+            raise ValueError(
+                "External Channel priority recovery cannot carry prepared state."
+            )
 
 
 ExternalChannelAcceptanceStatus = Literal[
@@ -470,6 +561,10 @@ class ExternalChannelConversationIngestionService:
         ExternalChannelConversationLock,
         Depends(get_external_channel_conversation_lock),
     ]
+    participation_lock: Annotated[
+        ExternalChannelParticipationLock,
+        Depends(get_external_channel_participation_lock),
+    ]
     history_reader: ExternalChannelIngestionHistoryReader
     store: ExternalChannelIngestionStore
     wake_dispatcher: ExternalChannelWakeDispatcher
@@ -481,55 +576,53 @@ class ExternalChannelConversationIngestionService:
     ) -> ExternalChannelIngestionOutcome:
         """Return one completed terminal result without retaining inbound content."""
         try:
-            async with self.conversation_lock.acquire(
-                scope=request.scope,
-                deadline=request.deadline,
-            ) as lease:
-                for _ in range(self.maximum_position_restarts):
-                    await lease.assert_owned()
-                    preparation = await self.store.prepare(request=request)
-                    if preparation.immediate_outcome is not None:
-                        return await self._finish_prepared(
-                            preparation,
-                            deadline=request.deadline,
-                        )
-                    history = await self.history_reader.read_range(
-                        locator=request.locator,
-                        exclusive_start_position=(preparation.exclusive_start_position),
+            for _ in range(self.maximum_position_restarts):
+                preparation = await self._prepare_locked(request)
+                if preparation.priority_request is not None:
+                    recovery = await self.ingest(preparation.priority_request)
+                    if recovery.kind not in {
+                        ExternalChannelIngestionOutcomeKind.ACCEPTED,
+                        ExternalChannelIngestionOutcomeKind.DUPLICATE,
+                    }:
+                        return recovery
+                    continue
+                if preparation.immediate_outcome is not None:
+                    return await self._finish_prepared(
+                        preparation,
                         deadline=request.deadline,
                     )
-                    if history.trigger_position != request.locator.trigger_position:
-                        return ExternalChannelIngestionOutcome(
-                            kind=(
-                                ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION
-                            ),
-                            reason=(
-                                ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY
-                            ),
-                            mailbox_item_id=None,
-                            control_delivery_attempt_id=None,
-                            connection_id=None,
-                        )
-                    await lease.assert_owned()
-                    acceptance = await self.store.accept(
-                        request=request,
-                        preparation=preparation,
-                        history=history,
-                    )
-                    if acceptance.status == "position_mismatch":
-                        continue
-                    return await self._finish_acceptance(
-                        acceptance,
-                        now=_utc_now(),
-                        deadline=request.deadline,
-                    )
-                return ExternalChannelIngestionOutcome(
-                    kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
-                    reason=ExternalChannelIngestionReason.POSITION_CHANGED,
-                    mailbox_item_id=None,
-                    control_delivery_attempt_id=None,
-                    connection_id=None,
+                history = await self.history_reader.read_range(
+                    locator=request.locator,
+                    exclusive_start_position=(preparation.exclusive_start_position),
+                    deadline=request.deadline,
                 )
+                if history.trigger_position != request.locator.trigger_position:
+                    return ExternalChannelIngestionOutcome(
+                        kind=ExternalChannelIngestionOutcomeKind.TERMINAL_REJECTION,
+                        reason=ExternalChannelIngestionReason.INVALID_REPLAY_BOUNDARY,
+                        mailbox_item_id=None,
+                        control_delivery_attempt_id=None,
+                        connection_id=None,
+                    )
+                acceptance = await self._accept_locked(
+                    request=request,
+                    preparation=preparation,
+                    history=history,
+                )
+                if acceptance.status == "position_mismatch":
+                    continue
+                return await self._finish_acceptance(
+                    acceptance,
+                    now=_utc_now(),
+                    deadline=request.deadline,
+                )
+            return ExternalChannelIngestionOutcome(
+                kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
+                reason=ExternalChannelIngestionReason.POSITION_CHANGED,
+                mailbox_item_id=None,
+                control_delivery_attempt_id=None,
+                connection_id=None,
+            )
         except asyncio.CancelledError:
             raise
         except ExternalChannelConversationLockError:
@@ -556,6 +649,59 @@ class ExternalChannelConversationIngestionService:
                 control_delivery_attempt_id=None,
                 connection_id=None,
             )
+
+    async def _prepare_locked(
+        self,
+        request: ExternalChannelIngestionRequest,
+    ) -> ExternalChannelIngestionPreparation:
+        """Prepare under conversation then optional parent participation lock."""
+        async with self.conversation_lock.acquire(
+            scope=request.scope,
+            deadline=request.deadline,
+        ) as conversation_lease:
+            await conversation_lease.assert_owned()
+            participation_scope = _participation_scope(request)
+            if participation_scope is None:
+                return await self.store.prepare(request=request)
+            async with self.participation_lock.acquire(
+                scope=participation_scope,
+                deadline=request.deadline,
+            ) as participation_lease:
+                await participation_lease.assert_owned()
+                await conversation_lease.assert_owned()
+                return await self.store.prepare(request=request)
+
+    async def _accept_locked(
+        self,
+        *,
+        request: ExternalChannelIngestionRequest,
+        preparation: ExternalChannelIngestionPreparation,
+        history: ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage],
+    ) -> ExternalChannelIngestionAcceptance:
+        """Accept under conversation then optional parent participation lock."""
+        async with self.conversation_lock.acquire(
+            scope=request.scope,
+            deadline=request.deadline,
+        ) as conversation_lease:
+            await conversation_lease.assert_owned()
+            participation_scope = _participation_scope(request)
+            if participation_scope is None:
+                return await self.store.accept(
+                    request=request,
+                    preparation=preparation,
+                    history=history,
+                )
+            async with self.participation_lock.acquire(
+                scope=participation_scope,
+                deadline=request.deadline,
+            ) as participation_lease:
+                await participation_lease.assert_owned()
+                await conversation_lease.assert_owned()
+                return await self.store.accept(
+                    request=request,
+                    preparation=preparation,
+                    history=history,
+                )
 
     async def _finish_prepared(
         self,
@@ -641,3 +787,18 @@ class ExternalChannelConversationIngestionService:
 def _utc_now() -> datetime.datetime:
     """Return the current timezone-aware UTC time."""
     return datetime.datetime.now(datetime.UTC)
+
+
+def _participation_scope(
+    request: ExternalChannelIngestionRequest,
+) -> ExternalChannelParticipationScope | None:
+    """Return the parent participation lock required by top-level ingestion."""
+    if request.scope.kind is not ExternalChannelConversationScopeKind.PARENT_CHANNEL:
+        return None
+    return ExternalChannelParticipationScope(
+        connection_id=request.locator.connection_id,
+        provider_parent_channel_id=(
+            request.locator.provider_parent_channel_id
+            or request.scope.provider_channel_id
+        ),
+    )

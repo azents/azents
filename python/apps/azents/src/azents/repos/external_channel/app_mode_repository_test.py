@@ -1154,6 +1154,28 @@ async def test_setup_claim_selection_enforces_location_resource_identity(
     )
     assert selected_channel is not None
     assert selected_channel.selected_resource_id == selected_parent.id
+    fetched_channel = await repo.get_setup_claim(
+        rdb_session,
+        claim_id=selected_channel.id,
+    )
+    assert fetched_channel == selected_channel
+    selected_claims = await repo.list_selected_setup_claims(rdb_session, limit=10)
+    assert [claim.id for claim in selected_claims] == [
+        selected_threads.id,
+        selected_channel.id,
+    ]
+    selected_source_revision = selected_threads.selected_source_revision
+    assert selected_source_revision is not None
+    completed_threads = await repo.complete_setup_claim(
+        rdb_session,
+        claim_id=selected_threads.id,
+        expected_claim_generation=selected_threads.claim_generation,
+        expected_selected_source_revision=selected_source_revision,
+        completed_at=_at(5),
+    )
+    assert completed_threads is not None
+    selected_claims = await repo.list_selected_setup_claims(rdb_session, limit=10)
+    assert [claim.id for claim in selected_claims] == [selected_channel.id]
 
 
 async def test_binding_creation_serializes_on_resource_lock(

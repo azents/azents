@@ -11,9 +11,11 @@ from azents.core.enums import (
     ExternalChannelAccessRequestStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelInteractionStatus,
+    ExternalChannelParticipationSettingStatus,
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
+    ExternalChannelSetupClaimStatus,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -43,6 +45,10 @@ from azents.services.external_channel.ingestion import (
 )
 from azents.services.external_channel.ingestion_deps import (
     get_external_channel_conversation_ingestion_service,
+)
+from azents.services.external_channel.participation_state import (
+    build_setup_continuation_request,
+    setup_source_from_projection,
 )
 from azents.services.external_channel.selector_state import (
     selector_state_from_interaction,
@@ -89,7 +95,7 @@ class _ReplaySource:
 
 @dataclasses.dataclass
 class ExternalChannelIngestionReplayService:
-    """Reconstruct immutable access and selector replay without provider content."""
+    """Reconstruct immutable access, selector, and setup replay."""
 
     session_manager: Annotated[
         SessionManager[AsyncSession],
@@ -191,6 +197,123 @@ class ExternalChannelIngestionReplayService:
             operation=ExternalChannelIngestionOperation.SELECTOR_CONTINUATION,
             deadline=deadline,
             provider_user_id=None,
+        )
+
+    async def replay_setup_claim(
+        self,
+        *,
+        setup_claim_id: str,
+        deadline: ExternalChannelOperationDeadline,
+    ) -> ExternalChannelIngestionOutcome:
+        """Replay one selected setup claim through its frozen source."""
+        async with self.session_manager() as session:
+            request = await self._load_setup_request(
+                session,
+                setup_claim_id=setup_claim_id,
+                deadline=deadline,
+            )
+        return await self.ingestion_service.ingest(request)
+
+    async def recover_selected_setup_claims(
+        self,
+        *,
+        limit: int,
+        now: datetime.datetime,
+    ) -> tuple[ExternalChannelIngestionOutcome, ...]:
+        """Attempt a bounded oldest-first selected-setup recovery pass."""
+        async with self.session_manager() as session:
+            claims = await self.repository.list_selected_setup_claims(
+                session,
+                limit=limit,
+            )
+        outcomes: list[ExternalChannelIngestionOutcome] = []
+        for claim in claims:
+            outcomes.append(
+                await self.replay_setup_claim(
+                    setup_claim_id=claim.id,
+                    deadline=external_channel_replay_deadline(now=now),
+                )
+            )
+        return tuple(outcomes)
+
+    async def _load_setup_request(
+        self,
+        session: AsyncSession,
+        *,
+        setup_claim_id: str,
+        deadline: ExternalChannelOperationDeadline,
+    ) -> ExternalChannelIngestionRequest:
+        claim = await self.repository.get_setup_claim(
+            session,
+            claim_id=setup_claim_id,
+        )
+        if (
+            claim is None
+            or claim.status is not ExternalChannelSetupClaimStatus.SELECTED
+            or claim.route_id is None
+            or claim.selected_setting_id is None
+            or claim.selected_resource_id is None
+            or claim.selected_source_revision is None
+        ):
+            raise ExternalChannelIngestionReplayUnavailable(
+                "External Channel setup replay boundary is unavailable."
+            )
+        configuration = await self.repository.get_connection_configuration(
+            session,
+            connection_id=claim.connection_id,
+        )
+        setting = await self.repository.get_active_participation_setting(
+            session,
+            connection_id=claim.connection_id,
+            provider_parent_channel_id=claim.provider_parent_channel_id,
+        )
+        source_resource = await self.repository.get_resource(
+            session,
+            resource_id=claim.source_resource_id,
+        )
+        target_resource = await self.repository.get_resource(
+            session,
+            resource_id=claim.selected_resource_id,
+        )
+        principal = await self.repository.get_principal(
+            session,
+            principal_id=claim.principal_id,
+        )
+        if (
+            configuration is None
+            or configuration.provider_tenant_id is None
+            or configuration.status
+            not in {
+                ExternalChannelConnectionStatus.ACTIVE,
+                ExternalChannelConnectionStatus.DEGRADED,
+                ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
+            }
+            or setting is None
+            or setting.id != claim.selected_setting_id
+            or setting.route_id != claim.route_id
+            or setting.status is not ExternalChannelParticipationSettingStatus.ACTIVE
+            or source_resource is None
+            or source_resource.connection_id != claim.connection_id
+            or source_resource.status is not ExternalChannelResourceStatus.ACTIVE
+            or target_resource is None
+            or target_resource.connection_id != claim.connection_id
+            or target_resource.status is not ExternalChannelResourceStatus.ACTIVE
+            or principal is None
+            or principal.provider is not configuration.provider
+            or principal.provider_tenant_id != configuration.provider_tenant_id
+            or principal.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
+        ):
+            raise ExternalChannelIngestionReplayUnavailable(
+                "External Channel setup replay owners are unavailable."
+            )
+        return build_setup_continuation_request(
+            configuration=configuration,
+            claim=claim,
+            setting=setting,
+            source_resource=source_resource,
+            principal=principal,
+            source=setup_source_from_projection(claim.source_projection),
+            deadline=deadline,
         )
 
     async def _ingest_source(

@@ -16,12 +16,16 @@ from azents.core.enums import (
     ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryStatus,
     ExternalChannelIngressProfile,
+    ExternalChannelMessageLifecycle,
+    ExternalChannelMessageRevisionKind,
+    ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
     ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
+    ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
 )
 from azents.core.external_channel_session_presence import (
@@ -35,13 +39,16 @@ from azents.repos.external_channel.data import (
     ExternalChannelConversationPosition,
     ExternalChannelDeliveryAttempt,
     ExternalChannelResource,
+    ExternalChannelSetupClaim,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.conversation import (
     ExternalChannelConversationScope,
+    ExternalChannelHistoryRange,
     ExternalChannelOperationDeadline,
 )
 from azents.services.external_channel.ingestion import (
+    ExternalChannelCanonicalHistoryMessage,
     ExternalChannelIngestionOperation,
     ExternalChannelIngestionReason,
     ExternalChannelIngestionRequest,
@@ -51,7 +58,11 @@ from azents.services.external_channel.ingestion import (
 )
 from azents.services.external_channel.mailbox_ingestion_store import (
     ExternalChannelMailboxIngestionStore,
+    _Conversation,  # pyright: ignore[reportPrivateUsage]
     _response_mode_ignored_reason,  # pyright: ignore[reportPrivateUsage]
+)
+from azents.services.external_channel.participation_state import (
+    setup_source_from_projection,
 )
 
 
@@ -195,6 +206,7 @@ def _store(
     repository: object,
     agent_repository: object | None = None,
     root_creation_service: object | None = None,
+    participation_enabled: bool = False,
 ) -> ExternalChannelMailboxIngestionStore:
     return ExternalChannelMailboxIngestionStore(
         session_manager=MagicMock(),
@@ -204,7 +216,70 @@ def _store(
         agent_session_repository=MagicMock(),
         root_agent_session_creation_service=root_creation_service or MagicMock(),
         mailbox_service=MagicMock(),
-        config=Config.model_construct(web_url="https://azents.example/base"),
+        config=Config.model_construct(
+            web_url="https://azents.example/base",
+            external_channel_participation_enabled=participation_enabled,
+        ),
+    )
+
+
+def _parent_slack_request(
+    *,
+    trigger_key: str = "message-key-1",
+    trigger_position: str = "00000000000000000001",
+) -> ExternalChannelIngestionRequest:
+    request = _slack_request()
+    return dataclasses.replace(
+        request,
+        locator=dataclasses.replace(
+            request.locator,
+            provider_parent_channel_id="channel-1",
+            provider_thread_key=None,
+            delivery_thread_key=trigger_position,
+            trigger_provider_message_key=trigger_key,
+            trigger_provider_message_id=trigger_position,
+            trigger_position=trigger_position,
+        ),
+        scope=ExternalChannelConversationScope(
+            connection_id=request.locator.connection_id,
+            kind=ExternalChannelConversationScopeKind.PARENT_CHANNEL,
+            provider_channel_id=request.locator.provider_channel_id,
+            provider_thread_key=None,
+        ),
+    )
+
+
+def _history(
+    *,
+    trigger_key: str = "message-key-1",
+    trigger_position: str = "00000000000000000001",
+) -> ExternalChannelHistoryRange[ExternalChannelCanonicalHistoryMessage]:
+    trigger = ExternalChannelCanonicalHistoryMessage(
+        provider_message_key=trigger_key,
+        provider_position=trigger_position,
+        revision_key=f"{trigger_key}:original",
+        revision_kind=ExternalChannelMessageRevisionKind.ORIGINAL,
+        lifecycle=ExternalChannelMessageLifecycle.CURRENT,
+        author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+        provider_user_id="participant-1",
+        sender_display_name="Participant",
+        normalized_body="provider history body",
+        attachment_metadata=None,
+        reference_mappings=None,
+        normalized_size=21,
+        provider_created_at=datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC),
+        provider_updated_at=None,
+        original_url=None,
+    )
+    return ExternalChannelHistoryRange(
+        messages=(trigger,),
+        trigger=trigger,
+        context_omitted=False,
+        range_start_position=None,
+        trigger_position=trigger_position,
+        provider_request_count=1,
+        scanned_message_count=1,
+        elapsed_seconds=0,
     )
 
 
@@ -279,6 +354,7 @@ async def test_conversation_resolution_does_not_create_session_before_acceptance
     """Provider-history preparation does not leave a Session without mailbox input."""
     repository = MagicMock()
     repository.lock_connected_binding_by_resource = AsyncMock(return_value=None)
+    repository.lock_active_participation_setting = AsyncMock(return_value=None)
     root_creation_service = MagicMock()
     root_creation_service.create_root_session = AsyncMock()
     store = _store(
@@ -299,14 +375,201 @@ async def test_conversation_resolution_does_not_create_session_before_acceptance
         cast(AsyncSession, MagicMock()),
         request=_slack_request(),
         connection=ExternalChannelConnection.model_construct(id="connection-1"),
-        resource=ExternalChannelResource.model_construct(id="resource-1"),
+        source_resource=ExternalChannelResource.model_construct(id="resource-1"),
         position=ExternalChannelConversationPosition.model_construct(id="position-1"),
-        binding=None,
         now=datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC),
     )
 
     assert conversation.binding is None
     root_creation_service.create_root_session.assert_not_awaited()
+
+
+async def test_setup_required_commits_claim_without_conversation_side_effects() -> None:
+    """Authorized setup admission creates no Binding, Session, mailbox, or wake."""
+    session = cast(
+        AsyncSession,
+        SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock()),
+    )
+    repository = MagicMock()
+    repository.get_active_block = AsyncMock(return_value=None)
+    repository.get_active_access_grant = AsyncMock(return_value=object())
+    repository.create_binding_idempotent = AsyncMock()
+    work_repository = MagicMock()
+    work_repository.ensure_active_work = AsyncMock()
+    root_creation_service = MagicMock()
+    root_creation_service.create_root_session = AsyncMock()
+    mailbox_service = MagicMock()
+    mailbox_service.enqueue = AsyncMock()
+    agent_session_repository = MagicMock()
+    agent_session_repository.mark_running_for_input_wakeup = AsyncMock()
+    store = _store(
+        repository=repository,
+        root_creation_service=root_creation_service,
+        participation_enabled=True,
+    )
+    store.work_repository = work_repository
+    store.mailbox_service = mailbox_service
+    store.agent_session_repository = agent_session_repository
+    route = ExternalChannelAgentRoute.model_construct(
+        id="route-1",
+        connection_id="connection-1",
+        agent_id="agent-1",
+    )
+    source_resource = ExternalChannelResource.model_construct(
+        id="source-resource-1",
+        connection_id="connection-1",
+        resource_type=ExternalChannelResourceType.THREAD,
+        status=ExternalChannelResourceStatus.ACTIVE,
+    )
+    claim = ExternalChannelSetupClaim.model_construct(
+        id="claim-1",
+        connection_id="connection-1",
+        provider_parent_channel_id="channel-1",
+        route_id=route.id,
+        source_resource_id=source_resource.id,
+        status=ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+    )
+    store._ensure_setup_claim = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=claim
+    )
+
+    acceptance = await store._accept_setup_required(  # pyright: ignore[reportPrivateUsage]
+        session,
+        request=_parent_slack_request(),
+        connection=ExternalChannelConnection.model_construct(id="connection-1"),
+        position=ExternalChannelConversationPosition.model_construct(id="position-1"),
+        history=_history(),
+        conversation=_Conversation(
+            source_resource=source_resource,
+            resource=source_resource,
+            route=route,
+            setting=None,
+            binding=None,
+            principal_id="principal-1",
+            selector=None,
+            setup_claim=None,
+            setup_required=True,
+        ),
+        now=datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC),
+    )
+
+    assert acceptance.reason is ExternalChannelIngestionReason.SETUP_REQUIRED
+    assert acceptance.mailbox_item_id is None
+    assert acceptance.session_id is None
+    session.commit.assert_awaited_once()  # type: ignore[attr-defined]
+    repository.create_binding_idempotent.assert_not_awaited()
+    work_repository.ensure_active_work.assert_not_awaited()
+    root_creation_service.create_root_session.assert_not_awaited()
+    mailbox_service.enqueue.assert_not_awaited()
+    agent_session_repository.mark_running_for_input_wakeup.assert_not_awaited()
+
+
+async def test_latest_eligible_setup_mention_replaces_continuation_source() -> None:
+    """A later eligible mention advances only the pending claim source revision."""
+    repository = MagicMock()
+    old_claim = ExternalChannelSetupClaim.model_construct(
+        id="claim-1",
+        connection_id="connection-1",
+        provider_parent_channel_id="channel-1",
+        route_id="route-1",
+        conversation_position_id="position-old",
+        source_resource_id="source-old",
+        principal_id="principal-old",
+        source_projection={"setup_source": {"schema_version": 0}},
+        source_revision=3,
+        claim_generation=2,
+        status=ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+    )
+    replacement = old_claim.model_copy(
+        update={
+            "conversation_position_id": "position-new",
+            "source_resource_id": "source-new",
+            "principal_id": "principal-new",
+            "source_revision": 4,
+        }
+    )
+    repository.lock_nonterminal_setup_claim = AsyncMock(return_value=old_claim)
+    repository.replace_setup_claim_source = AsyncMock(return_value=replacement)
+    store = _store(repository=repository, participation_enabled=True)
+    request = _parent_slack_request(
+        trigger_key="message-key-new",
+        trigger_position="00000000000000000009",
+    )
+    position = ExternalChannelConversationPosition.model_construct(
+        id="position-new",
+        read_through_position="00000000000000000008",
+    )
+    source_resource = ExternalChannelResource.model_construct(id="source-new")
+    route = ExternalChannelAgentRoute.model_construct(id="route-1")
+
+    result = await store._ensure_setup_claim(  # pyright: ignore[reportPrivateUsage]
+        cast(AsyncSession, MagicMock()),
+        request=request,
+        position=position,
+        source_resource=source_resource,
+        principal_id="principal-new",
+        route=route,
+        history=_history(
+            trigger_key="message-key-new",
+            trigger_position="00000000000000000009",
+        ),
+        now=datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC),
+    )
+
+    assert result is replacement
+    call = repository.replace_setup_claim_source.await_args.kwargs
+    assert call["expected_claim_generation"] == 2
+    assert call["expected_source_revision"] == 3
+    assert call["conversation_position_id"] == "position-new"
+    assert call["source_resource_id"] == "source-new"
+    assert call["principal_id"] == "principal-new"
+    source = setup_source_from_projection(call["source_projection"])
+    assert source.trigger_provider_message_key == "message-key-new"
+    assert source.trigger_position == "00000000000000000009"
+
+
+async def test_discord_thread_resolves_multi_default_from_parent_channel() -> None:
+    """A new Discord thread uses the parent channel's one selected Agent route."""
+    repository = MagicMock()
+    selected_route = ExternalChannelAgentRoute.model_construct(id="route-1")
+    repository.lock_routable_channel_default = AsyncMock(return_value=selected_route)
+    store = _store(repository=repository, participation_enabled=True)
+    request = _slack_request()
+    request = dataclasses.replace(
+        request,
+        locator=dataclasses.replace(
+            request.locator,
+            provider=ExternalChannelProvider.DISCORD,
+            provider_event_type="discord_message_create",
+            provider_channel_id="thread-channel-1",
+            provider_parent_channel_id="parent-channel-1",
+            provider_thread_key="thread-channel-1",
+            delivery_thread_key="thread-channel-1",
+        ),
+        scope=ExternalChannelConversationScope(
+            connection_id=request.locator.connection_id,
+            kind=ExternalChannelConversationScopeKind.THREAD,
+            provider_channel_id="thread-channel-1",
+            provider_thread_key="thread-channel-1",
+        ),
+    )
+
+    route = await store._resolve_route(  # pyright: ignore[reportPrivateUsage]
+        cast(AsyncSession, MagicMock()),
+        request=request,
+        connection=ExternalChannelConnection.model_construct(
+            id="connection-1",
+            app_mode=ExternalChannelAppMode.MULTI,
+        ),
+    )
+
+    assert route is selected_route
+    assert (
+        repository.lock_routable_channel_default.await_args.kwargs[
+            "provider_channel_id"
+        ]
+        == "parent-channel-1"
+    )
 
 
 async def test_create_binding_reports_only_the_new_root_session() -> None:
@@ -360,11 +623,13 @@ async def test_create_binding_reports_only_the_new_root_session() -> None:
         cast(AsyncSession, MagicMock()),
         route=route,
         resource=resource,
+        response_mode=None,
     )
     repeated = await store._create_binding(  # pyright: ignore[reportPrivateUsage]
         cast(AsyncSession, MagicMock()),
         route=route,
         resource=resource,
+        response_mode=None,
     )
 
     assert first.binding.agent_session_id == "session-1"

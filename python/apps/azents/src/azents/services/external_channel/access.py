@@ -15,6 +15,7 @@ from azents.core.enums import (
     ExternalChannelAccessRequestStatus,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
+    ExternalChannelSetupClaimStatus,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -28,6 +29,7 @@ from azents.repos.external_channel.data import (
     ExternalChannelBindingCreate,
     ExternalChannelBlock,
     ExternalChannelBlockCreate,
+    ExternalChannelSetupClaim,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.ingestion import (
@@ -56,13 +58,24 @@ class ExternalChannelAccessRequestNotFound(LookupError):
 
 
 @dataclass(frozen=True)
+class ExternalChannelSetupContinuation:
+    """Provider-neutral location setup state after an Allow decision."""
+
+    setup_claim_id: str
+    claim_generation: int
+    source_revision: int
+    route_id: str
+
+
+@dataclass(frozen=True)
 class ExternalChannelAllowedAccess:
     """Durable result of an idempotent Allow decision."""
 
     request: ExternalChannelAccessRequest
-    binding: ExternalChannelBinding
+    binding: ExternalChannelBinding | None
     grant: ExternalChannelAccessGrant
     control_delete_delivery_id: str | None
+    setup_continuation: ExternalChannelSetupContinuation | None
 
 
 @dataclass(frozen=True)
@@ -121,7 +134,7 @@ class ExternalChannelAccessService:
         decision_summary: str | None,
         now: datetime.datetime,
     ) -> ExternalChannelAllowedAccess:
-        """Allow one participant and create its Session binding atomically."""
+        """Allow one participant and commit the applicable authorization state."""
         async with self.session_manager() as session:
             created_provider_event_type: str | None = None
             request_snapshot = await self.repository.get_access_request(
@@ -130,6 +143,15 @@ class ExternalChannelAccessService:
             )
             if request_snapshot is None:
                 raise ExternalChannelAccessRequestNotFound(access_request_id)
+            if request_snapshot.setup_claim_id is not None:
+                return await self._allow_setup_request(
+                    session,
+                    request_snapshot=request_snapshot,
+                    scope=scope,
+                    decided_by_user_id=decided_by_user_id,
+                    decision_summary=decision_summary,
+                    now=now,
+                )
             route_snapshot = await self.repository.get_agent_route(
                 session,
                 route_id=request_snapshot.route_id,
@@ -200,6 +222,7 @@ class ExternalChannelAccessService:
                     control_delete_delivery_id=(
                         None if delete_intent is None else delete_intent.id
                     ),
+                    setup_continuation=None,
                 )
             self._require_pending(request, now=now)
             if (
@@ -318,7 +341,160 @@ class ExternalChannelAccessService:
                 control_delete_delivery_id=(
                     None if delete_intent is None else delete_intent.id
                 ),
+                setup_continuation=None,
             )
+
+    async def _allow_setup_request(
+        self,
+        session: AsyncSession,
+        *,
+        request_snapshot: ExternalChannelAccessRequest,
+        scope: ExternalChannelAccessGrantScope,
+        decided_by_user_id: str,
+        decision_summary: str | None,
+        now: datetime.datetime,
+    ) -> ExternalChannelAllowedAccess:
+        """Grant setup access without creating or replaying a Binding."""
+        if scope is not ExternalChannelAccessGrantScope.AGENT:
+            raise ExternalChannelAccessDecisionError(
+                "Initial channel setup requires an Agent-scoped access grant."
+            )
+        setup_claim_id = request_snapshot.setup_claim_id
+        assert setup_claim_id is not None
+        route_snapshot = await self.repository.get_agent_route(
+            session,
+            route_id=request_snapshot.route_id,
+        )
+        if route_snapshot is None:
+            raise ExternalChannelAccessDecisionError(
+                "The External Channel route is unavailable."
+            )
+        connection = await self.repository.lock_connection_for_routing(
+            session,
+            connection_id=route_snapshot.connection_id,
+        )
+        route = await self.repository.get_routable_route_by_id(
+            session,
+            route_id=request_snapshot.route_id,
+        )
+        resource = await self.repository.lock_resource(
+            session,
+            resource_id=request_snapshot.resource_id,
+        )
+        claim = await self.repository.lock_setup_claim(
+            session,
+            claim_id=setup_claim_id,
+        )
+        request = await self._locked_request(
+            session,
+            access_request_id=request_snapshot.id,
+        )
+        if (
+            connection is None
+            or route is None
+            or route.connection_id != connection.id
+            or resource is None
+            or resource.connection_id != connection.id
+            or resource.status is not ExternalChannelResourceStatus.ACTIVE
+            or claim is None
+            or claim.connection_id != connection.id
+            or claim.route_id != route.id
+            or claim.source_resource_id != resource.id
+            or claim.principal_id != request.principal_id
+            or claim.status
+            not in {
+                ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+                ExternalChannelSetupClaimStatus.SELECTED,
+                ExternalChannelSetupClaimStatus.COMPLETED,
+            }
+            or request.setup_claim_id != claim.id
+        ):
+            raise ExternalChannelAccessDecisionError(
+                "The External Channel setup request is unavailable."
+            )
+        active_agent_id = route.require_active_agent_id()
+        if (
+            await self.repository.get_active_block(
+                session,
+                agent_id=active_agent_id,
+                principal_id=request.principal_id,
+            )
+            is not None
+        ):
+            raise ExternalChannelAccessDecisionError(
+                "The external participant is blocked."
+            )
+        if request.status is ExternalChannelAccessRequestStatus.ALLOWED:
+            grant = await self.repository.get_active_access_grant(
+                session,
+                agent_id=active_agent_id,
+                principal_id=request.principal_id,
+                agent_session_id=None,
+            )
+            if (
+                grant is None
+                or grant.scope is not ExternalChannelAccessGrantScope.AGENT
+            ):
+                raise ExternalChannelAccessDecisionError(
+                    "The prior setup Allow decision no longer has its active grant."
+                )
+            delete_intent = (
+                await self.repository.create_access_request_control_delete_intent(
+                    session,
+                    access_request_id=request.id,
+                )
+            )
+            await session.commit()
+            return ExternalChannelAllowedAccess(
+                request=request,
+                binding=None,
+                grant=grant,
+                control_delete_delivery_id=(
+                    None if delete_intent is None else delete_intent.id
+                ),
+                setup_continuation=_setup_continuation(claim),
+            )
+        self._require_pending(request, now=now)
+        grant = await self.repository.ensure_access_grant(
+            session,
+            ExternalChannelAccessGrantCreate(
+                agent_id=active_agent_id,
+                principal_id=request.principal_id,
+                scope=ExternalChannelAccessGrantScope.AGENT,
+                agent_session_id=None,
+                granted_by_user_id=decided_by_user_id,
+                source_access_request_id=request.id,
+                revoked_by_user_id=None,
+                revoked_at=None,
+            ),
+        )
+        decided = await self.repository.decide_access_request(
+            session,
+            access_request_id=request.id,
+            status=ExternalChannelAccessRequestStatus.ALLOWED,
+            agent_session_id=None,
+            decided_by_user_id=decided_by_user_id,
+            decision_summary=decision_summary,
+            decided_at=now,
+        )
+        if decided is None:
+            raise ExternalChannelAccessRequestNotFound(request.id)
+        delete_intent = (
+            await self.repository.create_access_request_control_delete_intent(
+                session,
+                access_request_id=request.id,
+            )
+        )
+        await session.commit()
+        return ExternalChannelAllowedAccess(
+            request=decided,
+            binding=None,
+            grant=grant,
+            control_delete_delivery_id=(
+                None if delete_intent is None else delete_intent.id
+            ),
+            setup_continuation=_setup_continuation(claim),
+        )
 
     async def _replay_allowed_request(
         self,
@@ -445,6 +621,16 @@ class ExternalChannelAccessService:
                 if action == "block"
                 else ExternalChannelAccessRequestStatus.DENIED
             )
+            if request_snapshot.setup_claim_id is not None:
+                return await self._resolve_setup_request(
+                    session,
+                    request_snapshot=request_snapshot,
+                    action=action,
+                    expected_status=expected_status,
+                    decided_by_user_id=decided_by_user_id,
+                    decision_summary=decision_summary,
+                    now=now,
+                )
             if request_snapshot.status is expected_status:
                 request = await self._locked_request(
                     session,
@@ -564,6 +750,135 @@ class ExternalChannelAccessService:
                 ),
             )
 
+    async def _resolve_setup_request(
+        self,
+        session: AsyncSession,
+        *,
+        request_snapshot: ExternalChannelAccessRequest,
+        action: Literal["deny", "block"],
+        expected_status: ExternalChannelAccessRequestStatus,
+        decided_by_user_id: str,
+        decision_summary: str | None,
+        now: datetime.datetime,
+    ) -> ExternalChannelResolvedAccess:
+        """Resolve setup access and terminate its pre-Session continuation."""
+        setup_claim_id = request_snapshot.setup_claim_id
+        assert setup_claim_id is not None
+        route_snapshot = await self.repository.get_agent_route(
+            session,
+            route_id=request_snapshot.route_id,
+        )
+        if route_snapshot is None:
+            raise ExternalChannelAccessDecisionError(
+                "The External Channel route does not exist."
+            )
+        connection = await self.repository.lock_connection_for_routing(
+            session,
+            connection_id=route_snapshot.connection_id,
+        )
+        route = await self.repository.get_routable_route_by_id(
+            session,
+            route_id=request_snapshot.route_id,
+        )
+        resource = await self.repository.lock_resource(
+            session,
+            resource_id=request_snapshot.resource_id,
+        )
+        claim = await self.repository.lock_setup_claim(
+            session,
+            claim_id=setup_claim_id,
+        )
+        request = await self._locked_request(
+            session,
+            access_request_id=request_snapshot.id,
+        )
+        if (
+            connection is None
+            or route is None
+            or route.connection_id != connection.id
+            or resource is None
+            or resource.connection_id != connection.id
+            or claim is None
+            or claim.connection_id != connection.id
+            or claim.route_id != route.id
+            or claim.source_resource_id != resource.id
+            or claim.principal_id != request.principal_id
+            or request.setup_claim_id != claim.id
+        ):
+            raise ExternalChannelAccessDecisionError(
+                "The External Channel setup request is unavailable."
+            )
+        if request.status is expected_status:
+            delete_intent = (
+                await self.repository.create_access_request_control_delete_intent(
+                    session,
+                    access_request_id=request.id,
+                )
+            )
+            await session.commit()
+            return ExternalChannelResolvedAccess(
+                request=request,
+                control_delete_delivery_id=(
+                    None if delete_intent is None else delete_intent.id
+                ),
+            )
+        self._require_pending(request, now=now)
+        if action == "block":
+            await self.repository.create_block_idempotent(
+                session,
+                ExternalChannelBlockCreate(
+                    agent_id=route.require_active_agent_id(),
+                    principal_id=request.principal_id,
+                    blocked_by_user_id=decided_by_user_id,
+                    reason=decision_summary,
+                    removed_by_user_id=None,
+                    removed_at=None,
+                ),
+            )
+        decided = await self.repository.decide_access_request(
+            session,
+            access_request_id=request.id,
+            status=expected_status,
+            agent_session_id=None,
+            decided_by_user_id=decided_by_user_id,
+            decision_summary=decision_summary,
+            decided_at=now,
+        )
+        if decided is None:
+            raise ExternalChannelAccessRequestNotFound(request.id)
+        if claim.status in {
+            ExternalChannelSetupClaimStatus.PENDING_AGENT,
+            ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+            ExternalChannelSetupClaimStatus.SELECTED,
+        }:
+            terminated = await self.repository.terminate_setup_claim(
+                session,
+                claim_id=claim.id,
+                expected_claim_generation=claim.claim_generation,
+                status=(
+                    ExternalChannelSetupClaimStatus.INVALIDATED
+                    if action == "block"
+                    else ExternalChannelSetupClaimStatus.EXPIRED
+                ),
+            )
+            if terminated is None:
+                raise ExternalChannelAccessDecisionError(
+                    "The External Channel setup changed during access resolution."
+                )
+        delete_intent = (
+            await self.repository.create_access_request_control_delete_intent(
+                session,
+                access_request_id=request.id,
+            )
+        )
+        await session.commit()
+        return ExternalChannelResolvedAccess(
+            request=decided,
+            control_delete_delivery_id=(
+                None if delete_intent is None else delete_intent.id
+            ),
+        )
+
     async def _locked_request(
         self,
         session: AsyncSession,
@@ -605,4 +920,22 @@ def _provider_event_type(
     }
     return (
         value if isinstance(value, str) and value in expected[provider] else "unknown"
+    )
+
+
+def _setup_continuation(
+    claim: ExternalChannelSetupClaim,
+) -> ExternalChannelSetupContinuation | None:
+    """Project a pending location claim for provider-control continuation."""
+    route_id = claim.route_id
+    if (
+        claim.status is not ExternalChannelSetupClaimStatus.PENDING_LOCATION
+        or route_id is None
+    ):
+        return None
+    return ExternalChannelSetupContinuation(
+        setup_claim_id=claim.id,
+        claim_generation=claim.claim_generation,
+        source_revision=claim.source_revision,
+        route_id=route_id,
     )
