@@ -46,6 +46,7 @@ class FakeState:
                 "groups:history",
                 "groups:read",
                 "chat:write",
+                "commands",
                 "users:read",
                 "files:read",
                 "files:write",
