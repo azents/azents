@@ -37,6 +37,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.title import ExternalChannelTitleRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.message import MessageRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
@@ -183,6 +184,7 @@ def _service(
             action_execution_repository=ActionExecutionRepository(),
             vfs_projection_service=None,
             external_channel_repository=ExternalChannelRepository(),
+            external_channel_title_repository=ExternalChannelTitleRepository(),
         ),
         session_git_worktree_service=(
             session_git_worktree_service

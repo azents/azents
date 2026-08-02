@@ -868,6 +868,52 @@ class ExternalChannelResourceStatus(enum.StrEnum):
     DELETED = "deleted"
 
 
+class ExternalChannelSessionTitleCandidateStatus(enum.StrEnum):
+    """Lifecycle state of one External Channel automatic-title candidate."""
+
+    PENDING = "pending"
+    CONSUMED = "consumed"
+    RELINQUISHED = "relinquished"
+
+
+class ExternalChannelDiscordThreadObservationStatus(enum.StrEnum):
+    """Bounded admission-time evidence about one Discord root thread."""
+
+    THREAD_ABSENT = "thread_absent"
+    THREAD_PRESENT = "thread_present"
+    UNKNOWN = "unknown"
+
+
+class ExternalChannelDiscordThreadTitleProvisioningStatus(enum.StrEnum):
+    """Desired-state lifecycle for Discord thread provisioning proof."""
+
+    PENDING = "pending"
+    ATTEMPTING = "attempting"
+    RETRY_WAIT = "retry_wait"
+    READY = "ready"
+    UNMANAGED = "unmanaged"
+    FAILED = "failed"
+
+
+class ExternalChannelDiscordThreadTitleStatus(enum.StrEnum):
+    """Desired-state lifecycle for one Discord initial title projection."""
+
+    WAITING = "waiting"
+    PENDING = "pending"
+    ATTEMPTING = "attempting"
+    RETRY_WAIT = "retry_wait"
+    APPLIED = "applied"
+    RELINQUISHED = "relinquished"
+    FAILED = "failed"
+
+
+class ExternalChannelDiscordThreadTitleProofKind(enum.StrEnum):
+    """Provider evidence that establishes initial-title ownership."""
+
+    DIRECT = "direct"
+    ADOPTED = "adopted"
+
+
 class ExternalChannelPrincipalAuthorType(enum.StrEnum):
     """External principal author category."""
 

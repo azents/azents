@@ -4,7 +4,7 @@ import datetime
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import pytest
 
@@ -23,6 +23,9 @@ from azents.core.enums import (
     AgentSessionTitleSource,
     AgentType,
     EventKind,
+    ExternalChannelPrincipalAuthorType,
+    ExternalChannelProvider,
+    ExternalChannelResourceType,
     ExternalChannelResponseMode,
     LLMModelDeveloper,
     LLMProvider,
@@ -31,10 +34,11 @@ from azents.core.llm_catalog import ModelCapabilities
 from azents.engine.events.types import (
     AssistantMessagePayload,
     Event,
+    ExternalChannelMessagePayload,
     NativeArtifact,
     UserMessagePayload,
 )
-from azents.engine.model_stream import ModelStreamCallContext
+from azents.engine.model_stream import ModelStreamCallContext, ModelStreamWatchdog
 from azents.engine.run.provider_failure import (
     UnclassifiedModelProviderError,
     model_provider_failure,
@@ -44,12 +48,14 @@ from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
+from azents.repos.external_channel.title import ExternalChannelTitleRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.data import LLMProviderIntegrationWithSecrets
 from azents.services.session_title import (
     SessionTitleService,
     clean_generated_title,
     generate_session_title_with_model,
+    initial_title_from_external_channel_event,
     initial_title_from_user_text,
     title_context_from_events,
     title_context_from_initial_prompt,
@@ -70,6 +76,59 @@ class TestSessionTitleHelpers:
         assert title == "Plan a 3 day trip to Kyoto with family and museum…"
         assert title is not None
         assert len(title) <= 50
+
+    def test_external_authorized_invocation_uses_body_and_safe_file_metadata(
+        self,
+    ) -> None:
+        """Only safe authorized external input becomes title text."""
+        event = _external_channel_event(
+            authorization="authorized_invocation",
+            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+            body="Investigate the incident report.",
+            attachment_metadata={
+                "files": [
+                    {
+                        "name": "report.pdf",
+                        "media_type": "application/pdf",
+                        "file": (
+                            "external-file:v1:discord:binding-1:channel:message:file"
+                        ),
+                    }
+                ]
+            },
+        )
+
+        assert initial_title_from_external_channel_event(event) == (
+            "Investigate the incident report. Attachment: repo…"
+        )
+        assert title_context_from_initial_prompt(event) == (
+            "Investigate the incident report. Attachment: report.pdf (application/pdf)"
+        )
+
+    @pytest.mark.parametrize(
+        ("authorization", "author_type"),
+        [
+            ("context_only", ExternalChannelPrincipalAuthorType.HUMAN),
+            ("authorized_invocation", ExternalChannelPrincipalAuthorType.BOT),
+        ],
+    )
+    def test_external_context_or_bot_never_becomes_title_input(
+        self,
+        authorization: Literal["context_only", "authorized_invocation"],
+        author_type: ExternalChannelPrincipalAuthorType,
+    ) -> None:
+        """Context and non-human provider messages cannot contribute title text."""
+        event = _external_channel_event(
+            authorization=authorization,
+            author_type=author_type,
+            body="Ignore this input.",
+            attachment_metadata={
+                "files": [{"name": "ignored.txt", "media_type": "text/plain"}]
+            },
+        )
+
+        assert initial_title_from_external_channel_event(event) is None
+        assert title_context_from_initial_prompt(event) == ""
 
     def test_clean_generated_title_uses_first_non_empty_line(self) -> None:
         """Generated title output ignores thinking and extra lines."""
@@ -201,6 +260,10 @@ class TestSessionTitleHelpers:
                 AgentSessionRepository,
                 _AgentSessionRepository(),
             ),
+            external_channel_title_repository=cast(
+                ExternalChannelTitleRepository,
+                _ExternalChannelTitleRepository(),
+            ),
             integration_repository=cast(
                 LLMProviderIntegrationRepository,
                 _IntegrationRepository(),
@@ -292,6 +355,10 @@ class TestSessionTitleHelpers:
                 AgentSessionRepository,
                 _AgentSessionRepository(),
             ),
+            external_channel_title_repository=cast(
+                ExternalChannelTitleRepository,
+                _ExternalChannelTitleRepository(),
+            ),
             integration_repository=cast(
                 LLMProviderIntegrationRepository,
                 _IntegrationRepository(),
@@ -365,6 +432,10 @@ class TestSessionTitleHelpers:
         service = SessionTitleService(
             agent_repository=cast(AgentRepository, _AgentRepository()),
             agent_session_repository=cast(AgentSessionRepository, title_repository),
+            external_channel_title_repository=cast(
+                ExternalChannelTitleRepository,
+                _ExternalChannelTitleRepository(),
+            ),
             integration_repository=cast(
                 LLMProviderIntegrationRepository,
                 _IntegrationRepository(),
@@ -472,6 +543,68 @@ class TestSessionTitleHelpers:
             "Assistant: I can compare coverage and cost."
         )
 
+    async def test_winning_generated_title_arms_projection_before_commit(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A final automatic title arms eligible projections in its transaction."""
+        calls: list[str] = []
+        repository = _ReplacingAgentSessionRepository(calls)
+        title_repository = _RecordingExternalChannelTitleRepository(calls)
+        session = _CommitSession(calls)
+
+        @asynccontextmanager
+        async def session_manager() -> AsyncIterator[_CommitSession]:
+            yield session
+
+        service = SessionTitleService(
+            agent_repository=cast(AgentRepository, object()),
+            agent_session_repository=cast(AgentSessionRepository, repository),
+            external_channel_title_repository=cast(
+                ExternalChannelTitleRepository,
+                title_repository,
+            ),
+            integration_repository=cast(LLMProviderIntegrationRepository, object()),
+            session_manager=cast(Any, session_manager),
+            model_stream_watchdog=cast(ModelStreamWatchdog, object()),
+            retry_policy=cast(FailedRunRetryPolicy, object()),
+        )
+
+        async def generate_title(**kwargs: object) -> str:
+            del kwargs
+            return "Generated external title"
+
+        monkeypatch.setattr(service, "_generate_title", generate_title)
+        event = Event(
+            id="0" * 32,
+            session_id="session-001",
+            kind=EventKind.USER_MESSAGE,
+            payload=UserMessagePayload(
+                sender_user_id=None,
+                content="Generate an external title",
+                attachments=[],
+                metadata={},
+            ),
+            created_at=datetime.datetime.now(datetime.UTC),
+        )
+
+        result = await service.generate_from_initial_prompt(
+            session_id="session-001",
+            event=event,
+        )
+
+        assert result is not None
+        assert result.title == "Generated external title"
+        assert title_repository.calls == [
+            {
+                "agent_session_id": "session-001",
+                "generation_event_id": event.id,
+                "desired_title": "Generated external title",
+                "session": session,
+            }
+        ]
+        assert calls == ["replace", "arm", "commit"]
+
 
 def _model_selection() -> AgentModelSelection:
     return AgentModelSelection(
@@ -482,6 +615,47 @@ def _model_selection() -> AgentModelSelection:
         model_developer=LLMModelDeveloper.OPENAI,
         normalized_capabilities=ModelCapabilities(),
         model_snapshot={},
+    )
+
+
+def _external_channel_event(
+    *,
+    authorization: Literal["context_only", "authorized_invocation"],
+    author_type: ExternalChannelPrincipalAuthorType,
+    body: str | None,
+    attachment_metadata: dict[str, object],
+) -> Event:
+    """Create one external Event for title-input tests."""
+    return Event(
+        id="2" * 32,
+        session_id="session-001",
+        kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
+        payload=ExternalChannelMessagePayload(
+            provider=ExternalChannelProvider.DISCORD,
+            provider_tenant_id="guild-001",
+            resource_id="resource-001",
+            resource_label="incident-thread",
+            resource_type=ExternalChannelResourceType.THREAD,
+            binding_id="binding-001",
+            invocation_batch_id="batch-001",
+            external_message_id="message-001",
+            projection_root_id="external-channel:binding-001:message-001",
+            provider_message_key="message-001",
+            provider_position="1",
+            principal_id="principal-001",
+            provider_user_id="provider-user-001",
+            sender_display_name="Participant",
+            author_type=author_type,
+            authorization=authorization,
+            body=body,
+            attachment_metadata=attachment_metadata,
+            provider_created_at=datetime.datetime.now(datetime.UTC),
+            provider_updated_at=None,
+            original_url=None,
+            truncated_context_message_count=0,
+            truncated_context_size=0,
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
     )
 
 
@@ -543,6 +717,17 @@ async def _session_manager() -> AsyncIterator[object]:
     yield object()
 
 
+class _CommitSession:
+    """Minimal database-session double recording commit order."""
+
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    async def commit(self) -> None:
+        """Record the transaction commit."""
+        self.calls.append("commit")
+
+
 class _AgentSessionRepository:
     async def get_by_id(self, session: object, session_id: str) -> AgentSession:
         del session, session_id
@@ -570,5 +755,83 @@ class _AgentSessionRepository:
             updated_at=now,
         )
 
-    async def replace_initial_auto_title(self, *args: object, **kwargs: object) -> None:
+    async def replace_initial_auto_title(
+        self,
+        session: object,
+        *,
+        session_id: str,
+        title: str,
+        event_id: str,
+    ) -> AgentSession | None:
+        del session, session_id, title, event_id
         raise AssertionError("replace should not be called when generation fails")
+
+
+class _ReplacingAgentSessionRepository(_AgentSessionRepository):
+    """Session repository double that wins the final automatic title update."""
+
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    async def replace_initial_auto_title(
+        self,
+        session: object,
+        *,
+        session_id: str,
+        title: str,
+        event_id: str,
+    ) -> AgentSession:
+        """Record and return one matching automatic-title replacement."""
+        del session, session_id
+        self.calls.append("replace")
+        current = await self.get_by_id(object(), "session-001")
+        return current.model_copy(
+            update={
+                "title": title,
+                "title_source": AgentSessionTitleSource.AUTO_GENERATED,
+                "title_generation_event_id": event_id,
+            }
+        )
+
+
+class _ExternalChannelTitleRepository:
+    """External title repository double for title-generation tests."""
+
+    async def arm_title_projections_for_generated_title(
+        self,
+        *args: object,
+        **kwargs: object,
+    ) -> tuple[object, ...]:
+        """Return no eligible projection."""
+        del args, kwargs
+        return ()
+
+
+class _RecordingExternalChannelTitleRepository:
+    """Record final projection arming in the title replacement transaction."""
+
+    def __init__(self, call_order: list[str]) -> None:
+        self.call_order = call_order
+        self.calls: list[dict[str, object]] = []
+
+    async def arm_title_projections_for_generated_title(
+        self,
+        session: object,
+        *,
+        agent_session_id: str,
+        generation_event_id: str,
+        desired_title: str,
+        now: datetime.datetime,
+    ) -> tuple[object, ...]:
+        """Record one projection arm request."""
+        del now
+        self.call_order.append("arm")
+        self.calls.append(
+            {
+                "agent_session_id": agent_session_id,
+                "generation_event_id": generation_event_id,
+                "desired_title": desired_title,
+                "session": session,
+            }
+        )
+        return ()

@@ -44,6 +44,8 @@ from azents.engine.events.action_messages import GoalAction, SkillAction
 from azents.engine.events.types import (
     AgentMessagePayload,
     AgentRunState,
+    Event,
+    ExternalChannelMessagePayload,
     FileOutputPart,
     SkillLoadedPayload,
     UserMessagePayload,
@@ -72,6 +74,7 @@ from azents.repos.external_channel.data import (
     ExternalChannelMailboxProjectionItem,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.title import ExternalChannelTitleRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import MailboxItem, MailboxItemCreate
 from azents.repos.model_file.data import ModelFile
@@ -135,6 +138,161 @@ def test_fold_turn_eligibility(
     for effect in effects:
         eligible = fold_turn_eligibility(eligible, effect)
     assert eligible is expected
+
+
+class _MailboxServiceTitleCandidateDouble:
+    """Minimal collaborator holder for the candidate terminalization boundary."""
+
+    def __init__(
+        self,
+        *,
+        title_repository: AsyncMock,
+        agent_session_repository: AsyncMock,
+    ) -> None:
+        self.external_channel_title_repository = title_repository
+        self.agent_session_repository = agent_session_repository
+
+    async def _relinquish_external_channel_title_candidate(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        candidate_id: str,
+        payload: ExternalChannelMessagePayload,
+        reason: str,
+    ) -> None:
+        """Delegate the focused helper through the typed service boundary."""
+        await MailboxService._relinquish_external_channel_title_candidate(  # pyright: ignore[reportPrivateUsage]  # Exercise the exact candidate terminalization boundary directly.
+            cast(MailboxService, self),
+            session,
+            session_id=session_id,
+            candidate_id=candidate_id,
+            payload=payload,
+            reason=reason,
+        )
+
+
+@pytest.mark.parametrize(
+    ("body", "initial_title_result", "expected_operation", "expected_reason"),
+    [
+        (
+            "Investigate the incident.",
+            object(),
+            "consume",
+            None,
+        ),
+        (
+            None,
+            object(),
+            "relinquish",
+            "empty_title_input",
+        ),
+        (
+            "Investigate the incident.",
+            None,
+            "relinquish",
+            "initial_title_not_unset",
+        ),
+    ],
+)
+async def test_external_title_candidate_is_exactly_consumed_or_relinquished(
+    body: str | None,
+    initial_title_result: object | None,
+    expected_operation: str,
+    expected_reason: str | None,
+) -> None:
+    """A candidate cannot remain pending after its exact Event is promoted."""
+    candidate = SimpleNamespace(id="candidate-001")
+    title_repository = AsyncMock()
+    title_repository.get_pending_candidate_for_event.return_value = candidate
+    title_repository.consume_pending_candidate.return_value = candidate
+    title_repository.relinquish_pending_candidate.return_value = candidate
+    agent_session_repository = AsyncMock()
+    agent_session_repository.set_initial_auto_title_if_unset.return_value = (
+        initial_title_result
+    )
+    service = _MailboxServiceTitleCandidateDouble(
+        title_repository=title_repository,
+        agent_session_repository=agent_session_repository,
+    )
+    event = _external_title_event(body=body)
+    session = cast(AsyncSession, object())
+
+    await MailboxService._set_initial_auto_title_from_event(  # pyright: ignore[reportPrivateUsage]  # Exercise the exact candidate title boundary directly.
+        cast(MailboxService, service),
+        session,
+        session_id="session-001",
+        event=event,
+    )
+
+    title_repository.get_pending_candidate_for_event.assert_awaited_once_with(
+        session,
+        agent_session_id="session-001",
+        binding_id="binding-001",
+        trigger_provider_message_key="message-001",
+        for_update=True,
+    )
+    if expected_operation == "consume":
+        agent_session_repository.set_initial_auto_title_if_unset.assert_awaited_once_with(
+            session,
+            session_id="session-001",
+            title="Investigate the incident.",
+            event_id=event.id,
+        )
+        title_repository.consume_pending_candidate.assert_awaited_once_with(
+            session,
+            candidate_id="candidate-001",
+            agent_session_id="session-001",
+            binding_id="binding-001",
+            trigger_provider_message_key="message-001",
+            consumed_event_id=event.id,
+        )
+        title_repository.relinquish_pending_candidate.assert_not_awaited()
+    else:
+        title_repository.consume_pending_candidate.assert_not_awaited()
+        title_repository.relinquish_pending_candidate.assert_awaited_once_with(
+            session,
+            candidate_id="candidate-001",
+            agent_session_id="session-001",
+            binding_id="binding-001",
+            trigger_provider_message_key="message-001",
+            reason=expected_reason,
+        )
+
+
+def _external_title_event(*, body: str | None) -> Event:
+    """Create one exact authorized External Channel Event for title tests."""
+    return Event(
+        id="2" * 32,
+        session_id="session-001",
+        kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
+        payload=ExternalChannelMessagePayload(
+            provider=ExternalChannelProvider.DISCORD,
+            provider_tenant_id="guild-001",
+            resource_id="resource-001",
+            resource_label="thread-001",
+            resource_type=ExternalChannelResourceType.THREAD,
+            binding_id="binding-001",
+            invocation_batch_id="batch-001",
+            external_message_id="message-001",
+            projection_root_id="external-channel:binding-001:message-001",
+            provider_message_key="message-001",
+            provider_position="1",
+            principal_id="principal-001",
+            provider_user_id="provider-user-001",
+            sender_display_name="Participant",
+            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+            authorization="authorized_invocation",
+            body=body,
+            attachment_metadata={},
+            provider_created_at=datetime.datetime.now(datetime.UTC),
+            provider_updated_at=None,
+            original_url=None,
+            truncated_context_message_count=0,
+            truncated_context_size=0,
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
 
 
 async def _create_workspace(session: AsyncSession, handle: str) -> str:
@@ -800,6 +958,7 @@ def _mailbox_item_service(
         action_execution_repository=ActionExecutionRepository(),
         vfs_projection_service=vfs_projection_service,  # pyright: ignore[reportArgumentType]
         external_channel_repository=ExternalChannelRepository(),
+        external_channel_title_repository=ExternalChannelTitleRepository(),
     )
 
 
@@ -906,6 +1065,10 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
             AsyncMock(spec=ActionExecutionRepository),
         ),
         external_channel_repository=cast(ExternalChannelRepository, object()),
+        external_channel_title_repository=cast(
+            ExternalChannelTitleRepository,
+            object(),
+        ),
         vfs_projection_service=None,
     )
 
@@ -1036,6 +1199,10 @@ async def test_prepare_skips_deferred_action_attachment_materialization() -> Non
             AsyncMock(spec=ActionExecutionRepository),
         ),
         external_channel_repository=cast(ExternalChannelRepository, object()),
+        external_channel_title_repository=cast(
+            ExternalChannelTitleRepository,
+            object(),
+        ),
         vfs_projection_service=None,
     )
 
@@ -1067,6 +1234,10 @@ async def test_cancelled_promotion_discards_prepared_model_files() -> None:
         agent_run_repository=cast(AgentRunRepository, object()),
         action_execution_repository=cast(ActionExecutionRepository, object()),
         external_channel_repository=cast(ExternalChannelRepository, object()),
+        external_channel_title_repository=cast(
+            ExternalChannelTitleRepository,
+            object(),
+        ),
         vfs_projection_service=None,
     )
     prepared = PreparedMailboxFiles(
@@ -1312,6 +1483,7 @@ class TestMailboxService:
             action_execution_repository=ActionExecutionRepository(),
             vfs_projection_service=None,
             external_channel_repository=ExternalChannelRepository(),
+            external_channel_title_repository=ExternalChannelTitleRepository(),
         )
         enqueue = MailboxEnqueue(
             session_id="session-001",

@@ -68,6 +68,7 @@ from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.external_channel.data import ExternalChannelMailboxProjectionItem
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.title import ExternalChannelTitleRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import (
     ExternalChannelInvocationMailboxPayload,
@@ -79,7 +80,10 @@ from azents.repos.mailbox.data import (
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
 from azents.services.session_resource_authority import SessionResourceAuthority
-from azents.services.session_title import initial_title_from_event
+from azents.services.session_title import (
+    initial_title_from_event,
+    initial_title_from_external_channel_event,
+)
 from azents.services.vfs import VfsFileResolutionError, VfsProjectionService
 
 logger = logging.getLogger(__name__)
@@ -265,6 +269,10 @@ class MailboxService:
     external_channel_repository: Annotated[
         ExternalChannelRepository,
         Depends(ExternalChannelRepository),
+    ]
+    external_channel_title_repository: Annotated[
+        ExternalChannelTitleRepository,
+        Depends(ExternalChannelTitleRepository),
     ]
 
     async def enqueue(
@@ -578,14 +586,11 @@ class MailboxService:
                 promoted,
             )
             for event in event_inserted:
-                title = initial_title_from_event(event)
-                if title is not None:
-                    await self.agent_session_repository.set_initial_auto_title_if_unset(
-                        session,
-                        session_id=session_id,
-                        title=title,
-                        event_id=event.id,
-                    )
+                await self._set_initial_auto_title_from_event(
+                    session,
+                    session_id=session_id,
+                    event=event,
+                )
             events_by_external_id = {
                 event.external_id: event
                 for event in event_inserted
@@ -661,6 +666,102 @@ class MailboxService:
             inserted_count=len(event_inserted),
             deduped_count=len(deduped),
         )
+
+    async def _set_initial_auto_title_from_event(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        event: Event,
+    ) -> None:
+        """Set one initial automatic title under its exact source authority."""
+        if event.kind is EventKind.USER_MESSAGE:
+            title = initial_title_from_event(event)
+            if title is not None:
+                await self.agent_session_repository.set_initial_auto_title_if_unset(
+                    session,
+                    session_id=session_id,
+                    title=title,
+                    event_id=event.id,
+                )
+            return
+        if event.kind is not EventKind.EXTERNAL_CHANNEL_MESSAGE:
+            return
+        if not isinstance(event.payload, ExternalChannelMessagePayload):
+            raise ValueError("External Channel title Event payload is malformed.")
+        title_repository = self.external_channel_title_repository
+        candidate = await title_repository.get_pending_candidate_for_event(
+            session,
+            agent_session_id=session_id,
+            binding_id=event.payload.binding_id,
+            trigger_provider_message_key=event.payload.provider_message_key,
+            for_update=True,
+        )
+        if candidate is None:
+            return
+        title = initial_title_from_external_channel_event(event)
+        if title is None:
+            await self._relinquish_external_channel_title_candidate(
+                session,
+                session_id=session_id,
+                candidate_id=candidate.id,
+                payload=event.payload,
+                reason="empty_title_input",
+            )
+            return
+        updated = await self.agent_session_repository.set_initial_auto_title_if_unset(
+            session,
+            session_id=session_id,
+            title=title,
+            event_id=event.id,
+        )
+        if updated is None:
+            await self._relinquish_external_channel_title_candidate(
+                session,
+                session_id=session_id,
+                candidate_id=candidate.id,
+                payload=event.payload,
+                reason="initial_title_not_unset",
+            )
+            return
+        consumed = await title_repository.consume_pending_candidate(
+            session,
+            candidate_id=candidate.id,
+            agent_session_id=session_id,
+            binding_id=event.payload.binding_id,
+            trigger_provider_message_key=event.payload.provider_message_key,
+            consumed_event_id=event.id,
+        )
+        if consumed is None:
+            raise RuntimeError(
+                "External Channel title candidate could not be consumed after "
+                "title assignment"
+            )
+
+    async def _relinquish_external_channel_title_candidate(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        candidate_id: str,
+        payload: ExternalChannelMessagePayload,
+        reason: str,
+    ) -> None:
+        """Terminalize one exact title candidate that cannot create a title."""
+        relinquished = (
+            await self.external_channel_title_repository.relinquish_pending_candidate(
+                session,
+                candidate_id=candidate_id,
+                agent_session_id=session_id,
+                binding_id=payload.binding_id,
+                trigger_provider_message_key=payload.provider_message_key,
+                reason=reason,
+            )
+        )
+        if relinquished is None:
+            raise RuntimeError(
+                "External Channel title candidate could not be relinquished"
+            )
 
     async def _acknowledge_promoted_agent_results(
         self,

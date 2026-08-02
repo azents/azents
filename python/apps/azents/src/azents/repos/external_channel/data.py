@@ -17,6 +17,10 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
+    ExternalChannelDiscordThreadObservationStatus,
+    ExternalChannelDiscordThreadTitleProofKind,
+    ExternalChannelDiscordThreadTitleProvisioningStatus,
+    ExternalChannelDiscordThreadTitleStatus,
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
@@ -29,6 +33,7 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
+    ExternalChannelSessionTitleCandidateStatus,
     ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
     ExternalChannelWorkProjectionStatus,
@@ -462,6 +467,114 @@ class ExternalChannelBindingCreate(_Record):
     response_mode: ExternalChannelResponseMode
     disconnected_at: datetime.datetime | None
     disconnect_reason: str | None
+
+
+class ExternalChannelSessionTitleCandidate(_Record):
+    """Durable exact-trigger authority for one External Channel Session title."""
+
+    id: str
+    agent_session_id: str
+    binding_id: str
+    trigger_provider_message_key: str
+    status: ExternalChannelSessionTitleCandidateStatus
+    consumed_event_id: str | None
+    relinquished_reason: str | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class ExternalChannelSessionTitleCandidateCreate(_Record):
+    """Idempotent creation payload for a new Session title candidate."""
+
+    agent_session_id: str
+    binding_id: str
+    trigger_provider_message_key: str
+    status: ExternalChannelSessionTitleCandidateStatus
+    consumed_event_id: str | None
+    relinquished_reason: str | None
+
+
+class ExternalChannelDiscordThreadTitleProjection(_Record):
+    """Resource-scoped desired state for one initial Discord thread title."""
+
+    id: str
+    resource_id: str
+    binding_id: str
+    agent_session_id: str
+    session_title_candidate_id: str
+    provisioning_protocol_version: int
+    requested_provisional_title: str
+    admission_connection_id: str
+    admission_guild_id: str
+    admission_parent_channel_id: str
+    admission_root_message_id: str
+    admission_trigger_provider_message_key: str
+    admission_observation_status: ExternalChannelDiscordThreadObservationStatus
+    admission_root_has_thread: bool | None
+    admission_observed_thread_channel_id: str | None
+    admission_observed_at: datetime.datetime
+    provisioning_status: ExternalChannelDiscordThreadTitleProvisioningStatus
+    preflight_absent_at: datetime.datetime | None
+    thread_channel_id: str | None
+    expected_provisional_title: str | None
+    provisioning_proof_kind: ExternalChannelDiscordThreadTitleProofKind | None
+    provision_attempt_count: int
+    provision_next_attempt_at: datetime.datetime | None
+    provision_claimed_at: datetime.datetime | None
+    provision_failure_kind: str | None
+    provision_failure_summary: str | None
+    provision_completed_at: datetime.datetime | None
+    desired_title: str | None
+    title_generation_event_id: str | None
+    title_status: ExternalChannelDiscordThreadTitleStatus
+    title_attempt_count: int
+    title_next_attempt_at: datetime.datetime | None
+    title_claimed_at: datetime.datetime | None
+    title_failure_kind: str | None
+    title_failure_summary: str | None
+    title_completed_at: datetime.datetime | None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+
+class ExternalChannelDiscordThreadTitleProjectionCreate(_Record):
+    """Creation payload for one initial Discord thread title projection."""
+
+    resource_id: str
+    binding_id: str
+    agent_session_id: str
+    session_title_candidate_id: str
+    provisioning_protocol_version: int
+    requested_provisional_title: str
+    admission_connection_id: str
+    admission_guild_id: str
+    admission_parent_channel_id: str
+    admission_root_message_id: str
+    admission_trigger_provider_message_key: str
+    admission_observation_status: ExternalChannelDiscordThreadObservationStatus
+    admission_root_has_thread: bool | None
+    admission_observed_thread_channel_id: str | None
+    admission_observed_at: datetime.datetime
+    provisioning_status: ExternalChannelDiscordThreadTitleProvisioningStatus
+    preflight_absent_at: datetime.datetime | None
+    thread_channel_id: str | None
+    expected_provisional_title: str | None
+    provisioning_proof_kind: ExternalChannelDiscordThreadTitleProofKind | None
+    provision_attempt_count: int
+    provision_next_attempt_at: datetime.datetime | None
+    provision_claimed_at: datetime.datetime | None
+    provision_failure_kind: str | None
+    provision_failure_summary: str | None
+    provision_completed_at: datetime.datetime | None
+    desired_title: str | None
+    title_generation_event_id: str | None
+    title_status: ExternalChannelDiscordThreadTitleStatus
+    title_attempt_count: int
+    title_next_attempt_at: datetime.datetime | None
+    title_claimed_at: datetime.datetime | None
+    title_failure_kind: str | None
+    title_failure_summary: str | None
+    title_completed_at: datetime.datetime | None
 
 
 class ExternalChannelMailboxProjectionItem(_Record):

@@ -54,6 +54,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession, AgentSessionCreate
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.title import ExternalChannelTitleRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_git_worktree.data import SessionGitWorktreeCreate
@@ -679,6 +680,7 @@ def _input_service(
             action_execution_repository=ActionExecutionRepository(),
             vfs_projection_service=None,
             external_channel_repository=ExternalChannelRepository(),
+            external_channel_title_repository=ExternalChannelTitleRepository(),
         ),
         session_manager=session_manager,
     )
@@ -710,6 +712,7 @@ async def _execute_first_setup_action(
         action_execution_repository=ActionExecutionRepository(),
         vfs_projection_service=None,
         external_channel_repository=ExternalChannelRepository(),
+        external_channel_title_repository=ExternalChannelTitleRepository(),
     ).flush_session_mailbox_items(
         session_id=session_id,
         owner_generation=0,

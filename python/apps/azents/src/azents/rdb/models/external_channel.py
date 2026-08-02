@@ -21,6 +21,10 @@ from azents.core.enums import (
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
+    ExternalChannelDiscordThreadObservationStatus,
+    ExternalChannelDiscordThreadTitleProofKind,
+    ExternalChannelDiscordThreadTitleProvisioningStatus,
+    ExternalChannelDiscordThreadTitleStatus,
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
@@ -32,6 +36,7 @@ from azents.core.enums import (
     ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
+    ExternalChannelSessionTitleCandidateStatus,
     ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
     ExternalChannelWorkProjectionStatus,
@@ -145,6 +150,36 @@ external_channel_resource_type_enum = ENUM(
 external_channel_resource_status_enum = ENUM(
     ExternalChannelResourceStatus,
     name="external_channel_resource_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_session_title_candidate_status_enum = ENUM(
+    ExternalChannelSessionTitleCandidateStatus,
+    name="external_channel_session_title_candidate_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_discord_thread_observation_status_enum = ENUM(
+    ExternalChannelDiscordThreadObservationStatus,
+    name="external_channel_discord_thread_observation_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_discord_thread_title_provisioning_status_enum = ENUM(
+    ExternalChannelDiscordThreadTitleProvisioningStatus,
+    name="external_channel_discord_thread_title_provisioning_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_discord_thread_title_status_enum = ENUM(
+    ExternalChannelDiscordThreadTitleStatus,
+    name="external_channel_discord_thread_title_status",
+    create_type=False,
+    values_callable=_enum_values,
+)
+external_channel_discord_thread_title_proof_kind_enum = ENUM(
+    ExternalChannelDiscordThreadTitleProofKind,
+    name="external_channel_discord_thread_title_proof_kind",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -2159,3 +2194,417 @@ class RDBExternalChannelWorkProjectionPart(RDBModel):
     )
 
     __table_args__ = (UQ_WORK_PART_ORDINAL, IX_STATUS_UPDATED_AT)
+
+
+class RDBExternalChannelSessionTitleCandidate(RDBModel):
+    """Durable exact-trigger authority for one External Channel Session title."""
+
+    __tablename__ = "external_channel_session_title_candidates"
+
+    UQ_AGENT_SESSION_ID = sa.UniqueConstraint(
+        "agent_session_id",
+        name="uq_ec_session_title_candidates_agent_session",
+    )
+    UQ_ID_SESSION_BINDING_TRIGGER = sa.UniqueConstraint(
+        "id",
+        "agent_session_id",
+        "binding_id",
+        "trigger_provider_message_key",
+        name="uq_ec_session_title_candidates_id_session_binding_trigger",
+    )
+    UQ_BINDING_TRIGGER = sa.UniqueConstraint(
+        "binding_id",
+        "trigger_provider_message_key",
+        name="uq_ec_session_title_candidates_binding_trigger",
+    )
+    CK_CONSUMED_EVENT = sa.CheckConstraint(
+        "(status = 'consumed' AND consumed_event_id IS NOT NULL) OR "
+        "(status <> 'consumed' AND consumed_event_id IS NULL)",
+        name="ck_ec_session_title_candidates_consumed_event",
+    )
+    CK_RELINQUISHED_REASON = sa.CheckConstraint(
+        "(status = 'relinquished' AND relinquished_reason IS NOT NULL) OR "
+        "(status <> 'relinquished' AND relinquished_reason IS NULL)",
+        name="ck_ec_session_title_candidates_relinquished_reason",
+    )
+
+    id: Mapped[str] = mapped_column(
+        sa.String(32),
+        primary_key=True,
+        init=False,
+        default_factory=lambda: uuid7().hex,
+    )
+    agent_session_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("agent_sessions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    binding_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_bindings.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    trigger_provider_message_key: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    status: Mapped[ExternalChannelSessionTitleCandidateStatus] = mapped_column(
+        external_channel_session_title_candidate_status_enum,
+        nullable=False,
+        server_default=ExternalChannelSessionTitleCandidateStatus.PENDING.value,
+    )
+    consumed_event_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("events.id", ondelete="RESTRICT"),
+        nullable=True,
+        default=None,
+    )
+    relinquished_reason: Mapped[str | None] = mapped_column(
+        sa.String(120),
+        nullable=True,
+        default=None,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+    )
+
+    __table_args__ = (
+        UQ_AGENT_SESSION_ID,
+        UQ_ID_SESSION_BINDING_TRIGGER,
+        UQ_BINDING_TRIGGER,
+        CK_CONSUMED_EVENT,
+        CK_RELINQUISHED_REASON,
+    )
+
+
+class RDBExternalChannelDiscordThreadTitleProjection(RDBModel):
+    """One Resource-scoped initial Discord thread title projection aggregate."""
+
+    __tablename__ = "external_channel_discord_thread_title_projections"
+
+    UQ_RESOURCE_ID = sa.UniqueConstraint(
+        "resource_id",
+        name="uq_ec_discord_title_projections_resource",
+    )
+    IX_PROVISION_DUE = sa.Index(
+        "ix_ec_discord_title_projections_provision_due",
+        "provisioning_status",
+        "provision_next_attempt_at",
+    )
+    IX_TITLE_DUE = sa.Index(
+        "ix_ec_discord_title_projections_title_due",
+        "title_status",
+        "title_next_attempt_at",
+    )
+    FK_CANDIDATE_OWNER = sa.ForeignKeyConstraint(
+        [
+            "session_title_candidate_id",
+            "agent_session_id",
+            "binding_id",
+            "admission_trigger_provider_message_key",
+        ],
+        [
+            "external_channel_session_title_candidates.id",
+            "external_channel_session_title_candidates.agent_session_id",
+            "external_channel_session_title_candidates.binding_id",
+            "external_channel_session_title_candidates.trigger_provider_message_key",
+        ],
+        name="fk_ec_discord_title_projection_candidate_owner",
+        ondelete="RESTRICT",
+    )
+    CK_PROTOCOL_VERSION = sa.CheckConstraint(
+        "provisioning_protocol_version > 0",
+        name="ck_ec_discord_title_projection_protocol_version",
+    )
+    CK_REQUESTED_TITLE = sa.CheckConstraint(
+        "length(btrim(requested_provisional_title)) > 0",
+        name="ck_ec_discord_title_projection_requested_title",
+    )
+    CK_ADMISSION_OBSERVATION = sa.CheckConstraint(
+        "(admission_observation_status = 'thread_absent' "
+        "AND admission_root_has_thread = false "
+        "AND admission_observed_thread_channel_id IS NULL) OR "
+        "(admission_observation_status = 'thread_present' "
+        "AND admission_root_has_thread = true "
+        "AND admission_observed_thread_channel_id IS NOT NULL) OR "
+        "admission_observation_status = 'unknown'",
+        name="ck_ec_discord_title_projection_admission",
+    )
+    CK_PROVISION_RETRY = sa.CheckConstraint(
+        "(provisioning_status = 'retry_wait' "
+        "AND provision_next_attempt_at IS NOT NULL) OR "
+        "provisioning_status <> 'retry_wait'",
+        name="ck_ec_discord_title_projection_provision_retry",
+    )
+    CK_PROVISION_CLAIM = sa.CheckConstraint(
+        "(provisioning_status = 'attempting' "
+        "AND provision_claimed_at IS NOT NULL) OR "
+        "provisioning_status <> 'attempting'",
+        name="ck_ec_discord_title_projection_provision_claim",
+    )
+    CK_PROVISION_READY = sa.CheckConstraint(
+        "(provisioning_status = 'ready' "
+        "AND thread_channel_id IS NOT NULL "
+        "AND expected_provisional_title IS NOT NULL "
+        "AND provisioning_proof_kind IS NOT NULL "
+        "AND provision_completed_at IS NOT NULL) OR "
+        "provisioning_status <> 'ready'",
+        name="ck_ec_discord_title_projection_provision_ready",
+    )
+    CK_PROVISION_TERMINAL = sa.CheckConstraint(
+        "(provisioning_status IN ('ready', 'unmanaged', 'failed') "
+        "AND provision_completed_at IS NOT NULL) OR "
+        "provisioning_status NOT IN ('ready', 'unmanaged', 'failed')",
+        name="ck_ec_discord_title_projection_provision_terminal",
+    )
+    CK_TITLE_READY = sa.CheckConstraint(
+        "("
+        "title_status IN ('pending', 'attempting', 'retry_wait', 'applied') "
+        "AND desired_title IS NOT NULL "
+        "AND title_generation_event_id IS NOT NULL"
+        ") OR ("
+        "title_status NOT IN ('pending', 'attempting', 'retry_wait', 'applied') "
+        "AND ("
+        "(desired_title IS NULL AND title_generation_event_id IS NULL) OR "
+        "(desired_title IS NOT NULL AND title_generation_event_id IS NOT NULL)"
+        ")"
+        ")",
+        name="ck_ec_discord_title_projection_title_ready",
+    )
+    CK_TITLE_RETRY = sa.CheckConstraint(
+        "(title_status = 'retry_wait' "
+        "AND title_next_attempt_at IS NOT NULL) OR "
+        "title_status <> 'retry_wait'",
+        name="ck_ec_discord_title_projection_title_retry",
+    )
+    CK_TITLE_CLAIM = sa.CheckConstraint(
+        "(title_status = 'attempting' AND title_claimed_at IS NOT NULL) OR "
+        "title_status <> 'attempting'",
+        name="ck_ec_discord_title_projection_title_claim",
+    )
+    CK_TITLE_PROVIDER_READY = sa.CheckConstraint(
+        "title_status IN ('waiting', 'relinquished', 'failed') OR "
+        "provisioning_status = 'ready'",
+        name="ck_ec_discord_title_projection_title_provider_ready",
+    )
+    CK_TITLE_TERMINAL = sa.CheckConstraint(
+        "(title_status IN ('applied', 'relinquished', 'failed') "
+        "AND title_completed_at IS NOT NULL) OR "
+        "title_status NOT IN ('applied', 'relinquished', 'failed')",
+        name="ck_ec_discord_title_projection_title_terminal",
+    )
+
+    id: Mapped[str] = mapped_column(
+        sa.String(32),
+        primary_key=True,
+        init=False,
+        default_factory=lambda: uuid7().hex,
+    )
+    resource_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_resources.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    binding_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("external_channel_bindings.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    agent_session_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("agent_sessions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    session_title_candidate_id: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+    )
+    provisioning_protocol_version: Mapped[int] = mapped_column(
+        sa.Integer,
+        nullable=False,
+        server_default="1",
+    )
+    requested_provisional_title: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    admission_connection_id: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    admission_guild_id: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    admission_parent_channel_id: Mapped[str] = mapped_column(
+        sa.String(255),
+        nullable=False,
+    )
+    admission_root_message_id: Mapped[str] = mapped_column(
+        sa.String(255),
+        nullable=False,
+    )
+    admission_trigger_provider_message_key: Mapped[str] = mapped_column(
+        sa.Text,
+        nullable=False,
+    )
+    admission_observation_status: Mapped[
+        ExternalChannelDiscordThreadObservationStatus
+    ] = mapped_column(
+        external_channel_discord_thread_observation_status_enum,
+        nullable=False,
+    )
+    admission_observed_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        nullable=False,
+    )
+    provisioning_status: Mapped[ExternalChannelDiscordThreadTitleProvisioningStatus] = (
+        mapped_column(
+            external_channel_discord_thread_title_provisioning_status_enum,
+            nullable=False,
+            server_default=(
+                ExternalChannelDiscordThreadTitleProvisioningStatus.PENDING.value
+            ),
+        )
+    )
+    admission_root_has_thread: Mapped[bool | None] = mapped_column(
+        sa.Boolean,
+        nullable=True,
+        default=None,
+    )
+    admission_observed_thread_channel_id: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        nullable=True,
+        default=None,
+    )
+    preflight_absent_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    thread_channel_id: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        nullable=True,
+        default=None,
+    )
+    expected_provisional_title: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
+        default=None,
+    )
+    provisioning_proof_kind: Mapped[
+        ExternalChannelDiscordThreadTitleProofKind | None
+    ] = mapped_column(
+        external_channel_discord_thread_title_proof_kind_enum,
+        nullable=True,
+        default=None,
+    )
+    provision_attempt_count: Mapped[int] = mapped_column(
+        sa.Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    provision_next_attempt_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    provision_claimed_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    provision_failure_kind: Mapped[str | None] = mapped_column(
+        sa.String(120),
+        nullable=True,
+        default=None,
+    )
+    provision_failure_summary: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        nullable=True,
+        default=None,
+    )
+    provision_completed_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    desired_title: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
+        default=None,
+    )
+    title_generation_event_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("events.id", ondelete="RESTRICT"),
+        nullable=True,
+        default=None,
+    )
+    title_status: Mapped[ExternalChannelDiscordThreadTitleStatus] = mapped_column(
+        external_channel_discord_thread_title_status_enum,
+        nullable=False,
+        default=ExternalChannelDiscordThreadTitleStatus.WAITING,
+        server_default=ExternalChannelDiscordThreadTitleStatus.WAITING.value,
+    )
+    title_attempt_count: Mapped[int] = mapped_column(
+        sa.Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    title_next_attempt_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    title_claimed_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    title_failure_kind: Mapped[str | None] = mapped_column(
+        sa.String(120),
+        nullable=True,
+        default=None,
+    )
+    title_failure_summary: Mapped[str | None] = mapped_column(
+        sa.String(255),
+        nullable=True,
+        default=None,
+    )
+    title_completed_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TimeZoneDateTime,
+        init=False,
+        nullable=False,
+        server_default=sa.func.now(),
+        onupdate=sa.func.now(),
+    )
+
+    __table_args__ = (
+        UQ_RESOURCE_ID,
+        IX_PROVISION_DUE,
+        IX_TITLE_DUE,
+        FK_CANDIDATE_OWNER,
+        CK_PROTOCOL_VERSION,
+        CK_REQUESTED_TITLE,
+        CK_ADMISSION_OBSERVATION,
+        CK_PROVISION_RETRY,
+        CK_PROVISION_CLAIM,
+        CK_PROVISION_READY,
+        CK_PROVISION_TERMINAL,
+        CK_TITLE_READY,
+        CK_TITLE_RETRY,
+        CK_TITLE_CLAIM,
+        CK_TITLE_PROVIDER_READY,
+        CK_TITLE_TERMINAL,
+    )

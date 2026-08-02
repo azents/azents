@@ -2,6 +2,7 @@
 
 import asyncio
 import dataclasses
+import datetime
 import logging
 import re
 from collections.abc import Sequence
@@ -13,13 +14,19 @@ from litellm.exceptions import OpenAIError as LiteLLMOpenAIError
 from openai import OpenAIError as OpenAIBaseError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentSessionTitleSource, EventKind, LLMProvider
+from azents.core.enums import (
+    AgentSessionTitleSource,
+    EventKind,
+    ExternalChannelPrincipalAuthorType,
+    LLMProvider,
+)
 from azents.core.llm_mapping import build_credential_kwargs, to_runtime_model
 from azents.engine.events.litellm_responses import map_litellm_provider_error
 from azents.engine.events.openai_responses import call_openai_responses_text
 from azents.engine.events.types import (
     AssistantMessagePayload,
     Event,
+    ExternalChannelMessagePayload,
     FileOutputPart,
     InputTextPart,
     OutputTextPart,
@@ -51,6 +58,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
+from azents.repos.external_channel.title import ExternalChannelTitleRepository
 from azents.repos.llm_provider_integration import LLMProviderIntegrationRepository
 from azents.repos.llm_provider_integration.deps import (
     get_llm_provider_integration_repository,
@@ -126,11 +134,26 @@ def initial_title_from_event(event: Event) -> str | None:
     return initial_title_from_user_text(_user_payload_text(event.payload))
 
 
+def initial_title_from_external_channel_event(event: Event) -> str | None:
+    """Create a title from one candidate-authorized external invocation Event."""
+    if event.kind is not EventKind.EXTERNAL_CHANNEL_MESSAGE:
+        return None
+    return initial_title_from_user_text(
+        _external_channel_authorized_invocation_text(event.payload)
+    )
+
+
 def title_context_from_initial_prompt(event: Event) -> str:
     """Render the initial user prompt for title generation."""
-    if event.kind is not EventKind.USER_MESSAGE:
-        return ""
-    return _user_payload_text(event.payload)[:_TITLE_CONTEXT_CHAR_LIMIT]
+    match event.kind:
+        case EventKind.USER_MESSAGE:
+            return _user_payload_text(event.payload)[:_TITLE_CONTEXT_CHAR_LIMIT]
+        case EventKind.EXTERNAL_CHANNEL_MESSAGE:
+            return _external_channel_authorized_invocation_text(event.payload)[
+                :_TITLE_CONTEXT_CHAR_LIMIT
+            ]
+        case _:
+            return ""
 
 
 def title_context_from_events(events: Sequence[Event]) -> str:
@@ -170,6 +193,9 @@ class SessionTitleService:
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
+    ]
+    external_channel_title_repository: Annotated[
+        ExternalChannelTitleRepository, Depends(ExternalChannelTitleRepository)
     ]
     integration_repository: Annotated[
         LLMProviderIntegrationRepository,
@@ -223,6 +249,15 @@ class SessionTitleService:
                 title=generated,
                 event_id=event.id,
             )
+            if updated is not None:
+                title_repository = self.external_channel_title_repository
+                await title_repository.arm_title_projections_for_generated_title(
+                    session,
+                    agent_session_id=session_id,
+                    generation_event_id=event.id,
+                    desired_title=generated,
+                    now=datetime.datetime.now(datetime.UTC),
+                )
             await session.commit()
             return updated
 
@@ -432,6 +467,48 @@ def _assistant_payload_text(payload: object) -> str:
     if not isinstance(payload, AssistantMessagePayload):
         return ""
     return _content_text(payload.content)
+
+
+def _external_channel_authorized_invocation_text(payload: object) -> str:
+    """Render safe title input from one authorized human provider invocation."""
+    if (
+        not isinstance(payload, ExternalChannelMessagePayload)
+        or payload.authorization != "authorized_invocation"
+        or payload.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
+    ):
+        return ""
+    parts: list[str] = []
+    if payload.body:
+        parts.append(payload.body)
+    parts.extend(_external_channel_attachment_title_parts(payload.attachment_metadata))
+    return _normalize_space("\n".join(parts))
+
+
+def _external_channel_attachment_title_parts(
+    attachment_metadata: dict[str, object],
+) -> list[str]:
+    """Return bounded file name and media-type hints without content or locators."""
+    files = attachment_metadata.get("files")
+    if not isinstance(files, list):
+        return []
+    parts: list[str] = []
+    for item in files[:20]:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        media_type = item.get("media_type")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        normalized_name = _normalize_space(name)[:255]
+        if not normalized_name:
+            continue
+        if isinstance(media_type, str) and media_type.strip():
+            normalized_media_type = _normalize_space(media_type)[:255]
+            if normalized_media_type:
+                parts.append(f"Attachment: {normalized_name} ({normalized_media_type})")
+                continue
+        parts.append(f"Attachment: {normalized_name}")
+    return parts
 
 
 def _content_text(content: object) -> str:

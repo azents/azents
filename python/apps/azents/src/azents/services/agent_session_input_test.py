@@ -53,6 +53,7 @@ from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSession
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.title import ExternalChannelTitleRepository
 from azents.repos.mailbox import MailboxRepository
 from azents.repos.mailbox.data import MailboxItem
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
@@ -320,6 +321,7 @@ def _mailbox_item_service(
         action_execution_repository=ActionExecutionRepository(),
         vfs_projection_service=None,
         external_channel_repository=ExternalChannelRepository(),
+        external_channel_title_repository=ExternalChannelTitleRepository(),
     )
 
 
