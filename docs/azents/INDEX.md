@@ -15,9 +15,9 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
-| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-01 | 61 |
+| [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-02 | 62 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-01 | 137 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-01 | 38 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-02 | 39 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-01 | 18 |
@@ -25,7 +25,7 @@ Design documents are accumulated records and are not listed individually in this
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-07-28 | 77 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-01 | 54 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-02 | 55 |
 
 ## Living Specs — Flow
 
@@ -37,10 +37,10 @@ Design documents are accumulated records and are not listed individually in this
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
-| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-01 | 18 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-01 | 28 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-01 | 27 |
-| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-01 | 27 |
+| [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-02 | 19 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-02 | 29 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-02 | 28 |
+| [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-02 | 28 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-07-30 | 36 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](spec/flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
@@ -48,7 +48,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-26 | 11 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-24 | 25 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-01 | 17 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-02 | 18 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-01 | 3 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-08-01 | 6 |
 
@@ -118,7 +118,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Session Context Inspector Historical Requirements Reconstruction](requirements/context-260530-context-inspector.md) | context-260530 | 2026-05-30 | 2026-05-30 |
 | [Display Context Usage from the Resolved Run Profile Historical Requirements Reconstruction](requirements/context-260710-context-usage-display.md) | context-260710 | 2026-07-10 | - |
 | [Sandbox Provider Control Distributed Recovery Historical Requirements Reconstruction](requirements/control-260524-sandbox-control-distributed-recovery.md) | control-260524 | 2026-05-24 | 2026-05-24 |
-| [Provider Channel Participation Settings Requirements](requirements/conversation-260801-provider-channel-participation.md) | conversation-260801 | 2026-08-01 | - |
+| [Provider Channel Participation Settings Requirements](requirements/conversation-260801-provider-channel-participation.md) | conversation-260801 | 2026-08-01 | 2026-08-02 |
 | [nointern Core Concepts Historical Requirements Reconstruction](requirements/core-260207-core-concepts.md) | core-260207 | 2026-02-07 | 2026-03-06 |
 | [Calculate OpenAI-Compatible Costs from SDK Usage Historical Requirements Reconstruction](requirements/costs-260716-openai-costs-from-sdk-usage.md) | costs-260716 | 2026-07-16 | - |
 | [Introduce credential provider model and admin password reset token Historical Requirements Reconstruction](requirements/credential-260618-credential-and-admin-password.md) | credential-260618 | 2026-06-18 | - |

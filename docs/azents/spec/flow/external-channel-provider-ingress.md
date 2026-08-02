@@ -50,21 +50,23 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-01
-spec_version: 27
+last_verified_at: 2026-08-02
+spec_version: 28
 ---
 
 # External Channel Provider Ingress
 
 ## Scope
 
-The Slack adapter accepts app-member public or private channel traffic plus the
-supported message-shortcut and selector interaction callbacks. The Discord adapter
-accepts target-Guild typed SDK message callbacks and signed interaction callbacks. Slack
-Connect, Discord DMs/group DMs, reactions, slash commands, and unrelated bot
-auto-triggers are outside the current scope. A tracked conversation is one provider
-thread rooted by an eligible App mention or message shortcut and resolved to one
-available Agent route whose Agent lifecycle is active.
+The Slack adapter accepts app-member public or private channel traffic plus signed
+Slash Commands, message shortcuts, block actions, and modal submissions. Authenticated
+Slack `block_suggestion` option requests return the explicit unsupported result and
+perform no settings mutation. The
+Discord adapter accepts target-Guild typed SDK message callbacks and signed command,
+message-context, component, option, and modal interactions. Slack Connect, Discord
+DMs/group DMs, reactions, and unrelated bot auto-triggers are outside the current
+scope. A tracked conversation is an explicit parent-channel or thread Resource
+resolved to one available Agent route whose Agent lifecycle is active.
 
 Slack invocation classification accepts the provider-native `app_mention` event and
 also a subtype-free human `message` whose bounded text explicitly references a
@@ -86,11 +88,14 @@ Slack sends HTTP callbacks to the single fixed endpoint
    and the raw-body HMAC signature against that candidate's encrypted Signing Secret.
 5. The fully parsed event identity must match the selected connection before the
    authenticated request is projected into a typed, content-free trigger locator.
-6. Original message triggers enter synchronous conversation ingestion. Provider
-   history is read; then one transaction commits the real Session, binding, canonical
-   mailbox input, conversation-position advance, running transition, and independent
-   provider-control intents. The mailbox item is also the pending wake-recovery
-   identity. Session-presence or Tracker delivery never gates Agent execution.
+6. Original message triggers enter synchronous conversation ingestion. An explicit
+   eligible top-level trigger first resolves the selected route and participation
+   setting. If no setting exists, it creates or replaces one setup claim and setup
+   control with no Binding, Session, canonical mailbox input, wake, or AgentRun.
+   Configured traffic or selected setup replay reads provider history and commits the
+   real Session, Binding, canonical mailbox input, conversation-position advance,
+   running transition, and independent provider-control intents. The mailbox item is
+   also the pending wake-recovery identity. Provider controls never gate execution.
 7. Success is acknowledged only for a completed non-retryable outcome. A retryable
    coordination, history, position, or wake failure remains unacknowledged so the
    provider may retry.
@@ -137,10 +142,21 @@ bounded before parsing and authenticated against the selected connection's Signi
 Secret.
 
 Message shortcuts retain a content-free provider locator and conversation-position
-boundary in the owning interaction before acknowledgement. A Multi App mention with no
-valid channel default uses the same interaction-owned selector state and creates one
-selector control. The provider trigger ID is carried only in the in-memory handoff
-needed for the immediate modal mutation; it is never persisted, logged, or replayed.
+boundary in the owning interaction before acknowledgement. A Multi App top-level
+invocation with no valid channel default creates or replaces the channel setup claim
+in `pending_agent`; its selector lists only routes the initiating principal may invoke.
+Selection creates the provider-principal-authored default and moves that same claim to
+`pending_location` without creating a Binding or Session. The provider trigger ID is
+carried only in the in-memory handoff needed for the immediate modal mutation; it is
+never persisted, logged, or replayed.
+
+Supported signed Slash Commands, Message Commands, message-context shortcuts,
+presence actions, components, Discord options, and modal submissions dispatch through
+explicit setup/settings operation kinds. Slack option requests remain authenticated
+but unsupported. Each supported callback revalidates the current setup source revision,
+selected route, participation-setting or Binding generation, actor, and parent/thread scope.
+Stale or unprovable scope returns a bounded current-state or unsupported result without
+falling back to a parent mutation.
 
 Block actions open a paged/searchable modal from the current available route catalog.
 Private metadata is signed and binds connection, resource, interaction, initiating
@@ -225,12 +241,17 @@ the canonical message source nor a durable queue item.
    use owner-token fencing; Redis unavailability is a retryable failure and never
    switches implicitly to memory.
 2. A short preparation transaction revalidates ingress authority, creates or reads the
-   PostgreSQL conversation position, and resolves the resource and connected binding.
+   PostgreSQL conversation position, and resolves an exact connected thread Binding
+   before the selected route, participation setting, configured location, Resource,
+   and connected Binding.
    An ordinary non-invocation stops here when no binding exists or when the connected
    binding is `mention_only`; this creates no principal, selector, access request,
    mailbox input, wake, provider control, or position advance. Other requests resolve
-   the remaining route/selector/access state and return the exclusive provider-history
-   start position. Preparation performs no provider I/O.
+   the remaining route/selector/access state. An explicit eligible top-level invocation
+   with no setting creates or replaces the latest-source setup claim and returns before
+   provider-history I/O or canonical side effects. Configured or replay operations
+   return the exclusive provider-history start position. Preparation performs no
+   provider I/O.
 3. The provider adapter reads an exclusive-start, inclusive-trigger history range
    outside any database transaction. It retains the newest 20 eligible visible
    messages and records one leading omission reminder when earlier eligible context
@@ -239,12 +260,13 @@ the canonical message source nor a durable queue item.
    Slack display-name and permalink enrichment is optional and starts only while a
    fixed reserve remains for durable acceptance and wake dispatch.
 4. A short admission transaction locks and revalidates the same authority,
-   conversation position, active resource, current connected binding response mode,
-   route/binding/selector, and access boundary. A mode change to `mention_only` during
-   provider-history I/O discards the fetched range without side effects or position
-   advancement. An admitted request creates or reuses the connected binding, real root
-   Session, initial Channel Work, deterministic canonical mailbox input, and
-   deterministic joined-presence and progress delivery intents. The same transaction
+   conversation position, selected route, participation-setting generation and
+   location, active Resource, current connected Binding response mode,
+   selector/setup replay revision, and access boundary. A location, selected-Agent, or
+   mode change during provider-history I/O discards the fetched range without side
+   effects or position advancement. An admitted request creates or reuses the connected
+   Binding, real root Session, initial Channel Work, deterministic canonical mailbox
+   input, and versioned joined-presence and progress delivery intents. The same transaction
    marks the Session running, initializes thread position, and compare-and-set advances
    the conversation position.
    PostgreSQL conversation position is the sole duplicate-prevention and ordering
@@ -258,12 +280,13 @@ the canonical message source nor a durable queue item.
    and cancelled outcomes remain provider-delivery evidence only; none gates mailbox
    promotion, Session wake, or AgentRun creation.
 
-An existing connected binding wins route resolution. Otherwise Single uses its sole
-route, Multi uses one valid channel default, and unresolved Multi traffic creates an
-interaction-owned typed selection boundary. Empty, removed, stale, or ambiguous catalogs never fall
-back to an arbitrary Agent. An already-granted first invocation snapshots the Agent's
-current automatic Project policy through the shared root Session creation boundary;
-an existing binding keeps its prior snapshot.
+An exact connected thread Binding wins route resolution. Otherwise Single uses its
+sole route, Multi uses one valid channel default, and the active participation setting
+selects parent-channel or addressed-thread behavior. Missing settings return only
+explicit eligible top-level invocations to setup. Empty, removed, stale, or ambiguous
+catalogs never fall back to an arbitrary Agent. Selected setup replay snapshots the
+Agent's current automatic Project policy through the shared root Session creation
+boundary; an existing Binding keeps its prior snapshot.
 
 The shared response predicate is provider-neutral: explicit invocations proceed in
 either mode; an ordinary message proceeds only for an existing connected
@@ -275,8 +298,10 @@ AgentRun state is never cancelled or reclassified by a later mode change.
 
 Restricted access persists the trigger source plus immutable conversation-position,
 range-start, and trigger-position replay authority and commits an approval-control
-intent without waking a Session. Allow invokes the same synchronous ingestion service
-with that durable replay boundary. Replay works whether the shared position is still
+intent without waking a Session. For a setup-linked request, Allow commits the grant
+and resumes `pending_location` setup without creating a Binding or entering access
+replay. Legacy configured-thread Allow invokes the same synchronous ingestion service
+with its durable replay boundary. Replay works whether the shared position is still
 before the trigger or has advanced, and converges on one mailbox identity.
 Deny, block, revocation, malformed triggers, and non-invoking edit/delete callbacks
 never release new Session input.
@@ -350,6 +375,10 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-02** (spec_version 28) — Inserted latest-source channel setup before
+  provider-history I/O, added selected setup replay and explicit settings interaction
+  dispatch, preserved exact thread-Binding precedence, and fenced final admission by
+  participation location, setting generation, and selected Agent.
 - **2026-08-01** (spec_version 27) — Added the shared binding response-mode
   predicate at preparation and final admission, preserving ignored messages as later
   bounded context without provider-history I/O, mailbox input, wake, or position

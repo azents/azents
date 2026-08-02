@@ -30,8 +30,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-01
-spec_version: 27
+last_verified_at: 2026-08-02
+spec_version: 28
 ---
 
 # External Channel Lifecycle
@@ -47,10 +47,19 @@ The timestamp is the only binding connectedness authority; no lifecycle path cle
 it or reactivates history. Repeating a manual binding disconnect does not create a
 second leave-presence control.
 
+Disconnecting a parent Binding does not clear its active participation setting. A later
+eligible explicit top-level mention may create a new parent Binding according to that
+setting. Changing location uses the provider-native settings transition instead:
+Channel-to-Threads bumps the setting generation and disconnects only the parent
+Binding; Threads-to-Channel updates the setting but creates no empty Session, leaving
+parent Binding creation to the next eligible explicit mention.
+
 Replacing a connected binding's concrete response mode preserves its binding,
 Session, work, delivery, and conversation-position lifecycle state. The management
 boundary scopes the mutation to the requested Workspace, Agent, Session, and connected
-binding. Once `disconnected_at` is set, the retained final mode is read-only and the
+binding. A parent Binding replacement updates the active participation setting and
+Binding atomically; a thread replacement updates only that Binding. Once
+`disconnected_at` is set, the retained final mode is read-only and the
 same mutation returns the not-found-shaped management result.
 
 Disconnecting a connection accepts every lifecycle and credential state. It
@@ -69,13 +78,18 @@ Workspace history but reject mutation.
 Removing the sole Single App association disconnects the entire App. Removing one
 Multi App route generation-fences the connection, marks only that catalog route
 removed, disconnects bindings owned by that route, and invalidates its active channel
-defaults. It preserves the connection and every other route. A removed Multi route
+defaults, participation settings, and pending setup claims. It preserves the connection
+and every other route. A removed Multi route
 can be explicitly re-enabled only while the connection is mutable and Multi growth is
 rollout-enabled; detached historical Agent snapshots never become routable.
 
-Replacing or clearing a Multi channel default is generation-fenced and never rewrites
-an established resource binding. Stale impact previews fail with conflict instead of
-applying a destructive mutation against newer state.
+Replacing or clearing a Multi channel default is generation-fenced. It invalidates the
+old participation setting and pending setup claim, terminally disconnects only the old
+connected parent Binding with its provider cleanup intents, and preserves every thread
+Resource, Binding, Session, and concrete mode. The replacement route starts without a
+participation setting; a later eligible top-level mention begins setup. Stale impact
+previews fail with conflict instead of applying a destructive mutation against newer
+state.
 
 Editing a visible Slack connection replaces App ID, HTTP/Socket transport, and the
 complete submitted credential set in one operation. It clears stale provider
@@ -119,10 +133,13 @@ Revoking a participant grant deletes the selected grant policy row after an owne
 check. It does not delete canonical provider content, invocation history, projected
 Session events, or unrelated grants.
 
-An Allow decision locks and revalidates the connection, route, resource, binding,
-and request before creating or reusing its grant and connected binding. After
-the authorization transaction commits, Slack and Discord replay the immutable
-conversation-position boundary through shared synchronous ingestion. That acceptance
+An Allow decision locks and revalidates the connection, route, Resource, optional
+setup claim, Binding, and request. Setup-linked Allow creates the grant and returns the
+claim to location setup without creating Session-owned state. Legacy configured-thread
+Allow may create or reuse its connected Binding and, after its authorization
+transaction commits, replays the immutable conversation-position boundary through
+shared synchronous ingestion. Selected setup instead replays only after a valid
+location choice. Either canonical acceptance
 atomically creates or reuses the real Session, work projection, deterministic canonical
 mailbox input, conversation-position advance, Session running state, recoverable
 wake-up identity, and Session navigation/progress intents. Provider-control delivery
@@ -232,8 +249,9 @@ localized safe Discord cause and recovery action, revocation, transport, complet
 connection editing, unconditional disconnect, complete provider user IDs for grants
 and blocks, and associated Multi Apps as read-only Workspace-managed context.
 Workspace integrations owns Multi App setup, catalog, channel defaults, impact
-previews, and terminal disconnect. Destructive connection, route, default, grant,
-and block actions use in-product confirmation dialogs.
+previews including participation-setting invalidation and parent-Binding disconnect,
+and terminal disconnect. Destructive connection, route, default, grant, and block
+actions use in-product confirmation dialogs.
 
 Session Channels remains readable after archive and displays disconnected bindings,
 ended work, ordered task state, the Activity Tracker projection state, and delivery
@@ -242,6 +260,10 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-08-02** (spec_version 28) — Coupled parent location and selected-Agent
+  transitions to participation-setting generations, setup-claim invalidation, and
+  parent-only Binding terminalization while preserving thread conversations and
+  allowing later parent-Binding recreation.
 - **2026-08-01** (spec_version 27) — Added connected-only binding response-mode
   replacement as a lifecycle-preserving management transition and retained the final
   mode as read-only terminal history.

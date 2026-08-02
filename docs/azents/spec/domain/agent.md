@@ -81,8 +81,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-08-01
-spec_version: 61
+last_verified_at: 2026-08-02
+spec_version: 62
 ---
 
 # Agent Domain Spec
@@ -115,7 +115,7 @@ Agent is central execution unit of azents. Within Workspace, it bundles an order
 | `memory_enabled` | whether memory prompt/tool is exposed |
 | `max_turns` | run turn limit. null means unlimited |
 | `auto_archive_ttl_days` | positive whole-day inactivity TTL for automatic archive of this Agent's non-primary root Sessions. Defaults to `30` and applies dynamically to existing active Sessions |
-| `external_channel_default_response_mode` | required `mention_only` or `all_messages` value copied into each newly created External Channel binding. Existing Agents default to `all_messages` |
+| `external_channel_default_response_mode` | required `mention_only` or `all_messages` value copied into each newly selected provider-channel participation setting and into legacy isolated-thread Bindings that have no setup claim. Existing Agents default to `all_messages` |
 | `subagent_settings` | JSON settings for session-scoped subagent execution limits. Default is `{ "max_subagents": 3, "max_depth": 1 }` |
 | `avatar` | Agent avatar stored image metadata |
 
@@ -125,9 +125,11 @@ Agent is central execution unit of azents. Within Workspace, it bundles an order
 
 `external_channel_default_response_mode` belongs to External Channel management rather
 than the generic Agent create, response, or patch contract. Agent administrators read
-and replace it through the Agent-scoped External Channel settings API. A binding
-creation transaction copies the current concrete value; later default changes never
-rewrite existing bindings.
+and replace it through the Agent-scoped External Channel settings API. Provider-channel
+location selection copies the current value into the new participation setting, and
+later configured Bindings copy that setting. Legacy isolated-thread access replay
+without a setup claim copies the Agent value directly. Later Agent default changes
+never rewrite an active setting or existing Binding.
 
 ### 1.2 Runtime Profile selection
 
@@ -443,6 +445,12 @@ connection lifecycle are not Agent-admin mutations. Agent settings show those
 associations as read-only context and direct operators to Workspace integrations.
 Agent visibility does not grant Workspace External Channel permissions.
 
+Provider participants use External Channel principal authorization rather than an
+AgentAdmin identity. They may complete initial Agent/location setup or mutate a safely
+scoped parent/thread conversation setting through provider-native controls. Shared
+repository mutation units preserve the distinct provider-principal and Web User actor
+provenance; no synthetic User or AgentAdmin bypass is created.
+
 ## 3. Runtime Resolve
 
 Every inference-bearing input has a requested inference profile: an Agent-owned `model_target_label` plus nullable `reasoning_effort`. Null effort means the selected model or provider default, not the Agent-level reasoning parameter. Normal user configuration and composer input always select a concrete effort when the selected model advertises explicit effort levels; `Default` is not a user-facing option. Agent settings place `Default reasoning effort` beside the default model control, and effort choices are rendered as raw lowercase enum values without localization. Models with an empty explicit effort list hide the control and use null. The request source is `explicit_input`, `session_last_used`, `agent_default`, `retry_original`, `parent_run`, or `spawn_override`.
@@ -501,6 +509,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-08-02 | 62 | Made the Agent response mode the initial source for provider-channel participation settings and legacy isolated-thread creation while preserving separate provider-principal and AgentAdmin management authority. |
 | 2026-08-01 | 61 | Added the Agent-owned External Channel default response mode, AgentAdmin-managed External Channel API, and creation-time copy semantics without generic Agent API exposure or retroactive binding updates. |
 | 2026-08-01 | 60 | Added binding leave-presence and purge-safe post-commit provider cleanup to Agent decommission while preserving shared Multi App authority. |
 | 2026-07-31 | 59 | Replaced Agent Provider preference and execution-policy intent with exact Workspace Runtime Profile selection, creation-time default precedence, optimistic replacement, availability projection, and no Apply path. |

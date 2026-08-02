@@ -34,8 +34,8 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-08-01
-spec_version: 18
+last_verified_at: 2026-08-02
+spec_version: 19
 ---
 
 # External Channel Authorization
@@ -61,9 +61,12 @@ route access. A grant continues to authorize an eligible human when automatic ro
 access is disabled.
 
 Only a human Multi App invocation can create selector state in its owning interaction.
-Its catalog and route selection revalidate the initiating human principal before a
-route-specific access decision. Duplicate source callbacks validate and reuse that
-state; they never clear an already selected route.
+For channel setup, the selector is linked to the latest-source setup claim and may
+create the first provider-principal-authored channel default only from routes the
+initiating principal may invoke. It then moves the claim to `pending_location` without
+Binding replay. Legacy isolated-thread selectors without a setup claim retain their
+resource-bound replay behavior. Duplicate source callbacks validate and reuse current
+state; they never clear or silently replace an already selected route.
 
 The authenticated Azents administrator who grants or revokes access is a requester for that public
 management operation only. Neither the administrator nor the ExternalChannelPrincipal becomes an
@@ -82,10 +85,11 @@ human follows synchronous authorized ingestion directly.
 
 When a restricted participant invokes the Agent:
 
-1. A bound thread or resolved Single/default route proceeds directly. An unresolved
-   Multi App shortcut or mention first requires one explicit selector interaction and
-   validates the chosen route. Slack presents its selector through Block Kit; Discord
-   uses a verified command or component interaction.
+1. An exact bound thread proceeds directly. An explicit top-level invocation with a
+   selected route but no participation setting creates or replaces one setup claim.
+   An unresolved Multi App invocation first requires one explicit selector interaction
+   and validates the chosen route. Slack presents its selector through Block Kit;
+   Discord uses a verified command or component interaction.
 2. Synchronous ingestion creates one idempotent access request for the selected route
    and metadata-only provider-history source identity.
 3. The request snapshots the connection, conversation position, exclusive range start,
@@ -106,29 +110,34 @@ never becomes the execution User or replaces the initiating principal.
 
 Supported decisions are `allow_session`, `allow_agent`, `deny`, and `block`.
 
-- **Allow Session** creates or reuses the resource binding and grants the principal only for that AgentSession.
-- **Allow Agent** creates or reuses the binding and grants the principal across connected bindings for that Agent.
+- **Allow Session** grants the principal only for the proven AgentSession scope. For
+  legacy configured-thread requests it creates or reuses the Resource Binding.
+- **Allow Agent** grants the principal across connected Bindings for that Agent. For
+  legacy configured-thread requests it creates or reuses the Binding.
 - **Deny** resolves only the current request.
 - **Block** resolves the request and creates an Agent-scoped block that takes precedence over grants.
 
 The decision transaction first resolves the request identity, then locks and
-revalidates the route connection, active resource and binding, and the same request.
-It verifies an `active` or `degraded` ingress connection, available route,
-active resource, and active Agent, creates the External Channel AgentSession only when
-no connected binding exists, and writes the connected binding, grant, and decision
-atomically. Repeating the same compatible Allow decision returns the existing binding
-and grant. Conflicting or stale decisions return a conflict instead of creating
-parallel state.
+revalidates the route connection, active Resource and Binding, optional setup claim,
+and the same request. It verifies the operation-permitted connection state, available
+route, active Resource, active Agent, principal authorization, and current setup source
+revision. A setup-linked Allow writes the grant and decision atomically, then resumes
+the same claim at `pending_location`; it creates no Binding, Session, mailbox input, or
+AgentRun and cannot enter `replay_access_allow`. A legacy configured-thread Allow may
+create the External Channel AgentSession and connected Binding atomically. Repeating
+the same compatible decision returns the existing authorization state. Conflicting or
+stale decisions return a conflict instead of creating parallel state.
 
-When Allow needs a new binding, the shared root Session creation boundary reads the
+When a legacy Allow needs a new Binding, the shared root Session creation boundary reads the
 routed Agent's current automatic Project policy and creates the root
 `SessionAgentContext` Project snapshot before the binding commit. It performs no
 Runtime validation or filesystem access in this transaction; policy save-time
 validation is authoritative. If the resource already has a connected binding, Allow
 reuses that binding's Session and context snapshot instead of rereading or merging
-the current policy. A newly created binding also copies the routed Agent's current
-required External Channel response-mode default. Reusing a binding retains its
-existing concrete mode.
+the current policy. A newly created Binding also copies the routed Agent's current
+required External Channel response-mode default. Reusing a Binding retains its
+existing concrete mode. Setup-linked Allow defers both snapshots until selected setup
+replay creates the configured Binding.
 
 When the original approval control message has a delivered provider identity, every
 compatible final decision also creates one idempotent access-request-origin delete
@@ -138,8 +147,8 @@ and never rolls back the authorization result.
 
 ## Synchronous Replay and Context Release
 
-Allow commits authorization before replay and then calls the shared synchronous
-ingestion service with the request's immutable conversation-position boundary. The
+Legacy configured-thread Allow commits authorization before replay and then calls the
+shared synchronous ingestion service with the request's immutable conversation-position boundary. The
 service re-reads provider history outside a database transaction. If the shared
 position is still before the trigger, it reads forward normally; if another accepted
 invocation advanced past the trigger, it reuses the saved range start and exact trigger
@@ -180,6 +189,13 @@ missing, and disconnected targets remain indistinguishable through the existing
 not-found response. Neither mutation changes grants, blocks, route access policy,
 principal identity, past messages, or already accepted work.
 
+Provider-native setup and settings use a separate principal-authorized service around
+the same repository mutations. Parent operations require the selected route and active
+setting generation; thread operations require an exact connected Binding. Open access,
+an Agent grant, or a same-Session grant for the proven target may authorize the
+operation, while blocks always win. A Session grant cannot establish an unrelated new
+parent setting, and an unproven thread scope never falls back to parent mutation.
+
 ## Revocation
 
 Agent administrators can revoke active grants or remove blocks. Grant revocation
@@ -189,6 +205,9 @@ Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-08-02** (spec_version 19) — Added setup-linked authorization that resumes
+  location selection without Binding replay, provider-principal channel-default and
+  settings authority, exact scope proof, and the no-synthetic-User boundary.
 - **2026-08-01** (spec_version 18) — Added AgentAdmin-managed Agent and binding
   response modes, creation-time default copy in Allow, connected ownership scoping,
   and mention-only authorization-preserving admission.

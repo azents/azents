@@ -2,6 +2,7 @@
 title: "Provider Channel Participation Settings Design"
 created: 2026-08-01
 updated: 2026-08-01
+implemented: 2026-08-02
 tags: [architecture, external-channel, slack, discord, conversation, backend, frontend]
 document_role: primary
 document_type: design
