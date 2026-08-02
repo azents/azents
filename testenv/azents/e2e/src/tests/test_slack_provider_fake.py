@@ -258,18 +258,25 @@ def test_slack_fake_configures_installation_identity_and_captures_selector_view(
     assert evidence["views"] == [
         {
             "operation": "views.open",
-            "view_id": "V-E2E-1",
-            "view_hash": "hash-1",
-            "callback_id": "azents_agent_selector",
-            "private_metadata": "signed-opaque-metadata",
-            "route_ids": ["route-1"],
+            "control_scope": "selector",
+            "route_count": 1,
             "has_submit": True,
             "outcome": "delivered",
         }
     ]
+    transient = requests.get(
+        f"{slack_fake_url}/__testenv/transient-view",
+        params={"scope": "selector"},
+        timeout=5,
+    ).json()
+    assert transient["view_id"] == "V-E2E-1"
+    assert transient["view_hash"] == "hash-1"
+    assert transient["private_metadata"] == "signed-opaque-metadata"
+    assert transient["route_ids"] == ["route-1"]
     assert "trigger-secret" not in rendered
     assert "xoxb-private-token" not in rendered
     assert "Private Agent Name" not in rendered
+    assert "signed-opaque-metadata" not in rendered
 
 
 def test_slack_fake_captures_selector_control_without_visible_copy(

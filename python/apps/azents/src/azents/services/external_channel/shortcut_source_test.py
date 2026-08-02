@@ -15,10 +15,13 @@ from azents.core.enums import (
     ExternalChannelInteractionType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
+    ExternalChannelSetupClaimStatus,
+    ExternalChannelTransport,
 )
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelInteraction,
+    ExternalChannelSetupClaim,
     ExternalChannelTrigger,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
@@ -51,6 +54,8 @@ class _Repository:
         self.resource_creates: list[object] = []
         self.position_creates: list[object] = []
         self.resource_status = ExternalChannelResourceStatus.ACTIVE
+        self.setup_claim: ExternalChannelSetupClaim | None = None
+        self.admitted_interactions: list[object] = []
         self.interaction = ExternalChannelInteraction.model_construct(
             id="interaction-1",
             connection_id="connection-1",
@@ -96,6 +101,7 @@ class _Repository:
             app_mode=ExternalChannelAppMode.MULTI,
             provider=self.provider,
             provider_bot_user_id="UBOT",
+            transport=ExternalChannelTransport.HTTP,
         )
 
     async def create_resource_idempotent(
@@ -146,6 +152,81 @@ class _Repository:
             update={"projection": projection}
         )
         return self.interaction
+
+    async def get_active_participation_setting(
+        self,
+        session: object,
+        *,
+        connection_id: str,
+        provider_parent_channel_id: str,
+    ) -> None:
+        del session, connection_id, provider_parent_channel_id
+        self.calls.append("participation_setting")
+        return None
+
+    async def lock_routable_channel_default(
+        self,
+        session: object,
+        *,
+        connection_id: str,
+        provider_channel_id: str,
+    ) -> None:
+        del session, connection_id, provider_channel_id
+        self.calls.append("channel_default")
+        return None
+
+    async def lock_nonterminal_setup_claim(
+        self,
+        session: object,
+        *,
+        connection_id: str,
+        provider_parent_channel_id: str,
+    ) -> ExternalChannelSetupClaim | None:
+        del session, connection_id, provider_parent_channel_id
+        self.calls.append("setup_claim_lock")
+        return self.setup_claim
+
+    async def create_setup_claim(
+        self,
+        session: object,
+        create: object,
+    ) -> ExternalChannelSetupClaim:
+        del session
+        self.calls.append("setup_claim_create")
+        self.setup_claim = ExternalChannelSetupClaim.model_construct(
+            id="claim-1",
+            **cast(Any, create).model_dump(),
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
+        return self.setup_claim
+
+    async def get_interaction_by_provider_key(
+        self,
+        session: object,
+        *,
+        connection_id: str,
+        provider_interaction_key: str,
+    ) -> None:
+        del session, connection_id, provider_interaction_key
+        self.calls.append("selector_lookup")
+        return None
+
+    async def admit_interaction(
+        self,
+        session: object,
+        create: object,
+    ) -> object:
+        del session
+        self.calls.append("selector_create")
+        self.admitted_interactions.append(create)
+        selector = ExternalChannelInteraction.model_construct(
+            id="selector-1",
+            **cast(Any, create).model_dump(),
+            created_at=_NOW,
+            updated_at=_NOW,
+        )
+        return SimpleNamespace(interaction=selector, created=True)
 
 
 def _source_event() -> ExternalChannelTrigger:
@@ -200,6 +281,8 @@ def _discord_source_event() -> ExternalChannelTrigger:
 def _service(
     session: _Session,
     repository: _Repository,
+    *,
+    participation_enabled: bool = False,
 ) -> ExternalChannelShortcutSourceService:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
@@ -208,6 +291,12 @@ def _service(
     return ExternalChannelShortcutSourceService(
         session_manager=cast(SessionManager[AsyncSession], session_manager),
         repository=cast(ExternalChannelRepository, repository),
+        config=cast(
+            Any,
+            SimpleNamespace(
+                external_channel_participation_enabled=participation_enabled
+            ),
+        ),
     )
 
 
@@ -367,3 +456,39 @@ async def test_discord_message_command_source_preserves_thread_identity() -> Non
     state = selector_state_from_interaction(result.selector_interaction)
     assert state.trigger_provider_message_key == "discord:guild-1:100"
     assert state.trigger_position == "00000000000000000100"
+
+
+@pytest.mark.asyncio
+async def test_discord_parent_message_command_creates_setup_linked_selector() -> None:
+    """Keep route selection behind the parent location setup gate."""
+    session = _Session()
+    repository = _Repository()
+    repository.provider = ExternalChannelProvider.DISCORD
+
+    result = await _service(
+        session,
+        repository,
+        participation_enabled=True,
+    ).ensure(
+        shortcut_source_event=_discord_source_event(),
+        interaction_id="interaction-1",
+        now=_NOW,
+    )
+
+    assert result.selector_interaction is not None
+    assert result.selector_interaction.id == "selector-1"
+    assert result.selector_interaction.setup_claim_id == "claim-1"
+    assert repository.setup_claim is not None
+    assert (
+        repository.setup_claim.status is ExternalChannelSetupClaimStatus.PENDING_AGENT
+    )
+    assert repository.setup_claim.route_id is None
+    assert repository.setup_claim.provider_parent_channel_id == "channel-1"
+    assert (
+        repository.setup_claim.source_projection["setup_source"]["delivery_thread_key"]
+        == "100"
+    )
+    state = selector_state_from_interaction(result.selector_interaction)
+    assert state.resource_id == "resource-1"
+    assert state.selected_route_id is None
+    assert "projection_replace" not in repository.calls

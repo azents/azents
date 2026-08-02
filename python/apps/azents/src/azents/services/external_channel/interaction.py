@@ -504,10 +504,14 @@ class ExternalChannelInteractionProcessor:
         if (
             interaction.principal_id is None
             or interaction.principal_id != metadata.principal_id
-            or interaction.id != metadata.interaction_id
             or configuration.id != metadata.connection_id
         ):
             raise ValueError("Slack settings submission scope is unavailable.")
+        await self._validate_settings_submission_origin(
+            metadata=metadata,
+            interaction=interaction,
+            configuration=configuration,
+        )
         deadline = external_channel_replay_deadline(now=now)
         try:
             if metadata.target == "setup":
@@ -601,6 +605,32 @@ class ExternalChannelInteractionProcessor:
         if result.status == "expired":
             raise SlackInteractionTriggerExpired
         raise RuntimeError("Slack settings confirmation could not be opened.")
+
+    async def _validate_settings_submission_origin(
+        self,
+        *,
+        metadata: _SettingsMetadata,
+        interaction: ExternalChannelInteraction,
+        configuration: ExternalChannelConnectionConfiguration,
+    ) -> None:
+        """Bind a new modal submission to its authenticated origin interaction."""
+        async with self.session_manager() as session:
+            origin = await self.repository.lock_interaction(
+                session,
+                interaction_id=metadata.interaction_id,
+            )
+        if (
+            origin is None
+            or origin.id == interaction.id
+            or origin.connection_id != configuration.id
+            or origin.principal_id != interaction.principal_id
+            or origin.status
+            not in {
+                ExternalChannelInteractionStatus.PROCESSING,
+                ExternalChannelInteractionStatus.COMPLETED,
+            }
+        ):
+            raise ValueError("Slack settings submission scope is unavailable.")
 
     async def _load_processing_interaction(
         self,

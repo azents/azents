@@ -77,6 +77,7 @@ class FakeState:
             self.requests: list[dict[str, object]] = []
             self.deliveries: list[dict[str, object]] = []
             self.views: list[dict[str, object]] = []
+            self._transient_views: dict[str, dict[str, object]] = {}
             self.socket_connections = 0
             self.socket_envelope_ids: list[str] = []
             self.socket_acknowledgements: list[str] = []
@@ -173,6 +174,7 @@ class FakeState:
             self.requests = []
             self.deliveries = []
             self.views = []
+            self._transient_views = {}
             self.uploads = {}
             self.socket_connections = 0
             self.socket_envelope_ids = []
@@ -246,24 +248,34 @@ class FakeState:
         route_ids: list[str],
         has_submit: bool,
     ) -> tuple[str, str]:
-        """Record one sanitized view mutation and return provider view identity."""
+        """Record bounded view evidence without persisting signed metadata."""
         with self.lock:
             self._view_sequence += 1
             view_id = requested_view_id or f"V-E2E-{self._view_sequence}"
             view_hash = f"hash-{self._view_sequence}"
+            control_scope = _view_control_scope(callback_id)
             self.views.append(
                 {
                     "operation": operation,
-                    "view_id": view_id,
-                    "view_hash": view_hash,
-                    "callback_id": callback_id,
-                    "private_metadata": private_metadata,
-                    "route_ids": route_ids,
+                    "control_scope": control_scope,
+                    "route_count": len(route_ids),
                     "has_submit": has_submit,
                     "outcome": "delivered",
                 }
             )
+            self._transient_views[control_scope] = {
+                "view_id": view_id,
+                "view_hash": view_hash,
+                "private_metadata": private_metadata,
+                "route_ids": route_ids,
+            }
             return view_id, view_hash
+
+    def transient_view(self, control_scope: str) -> dict[str, object] | None:
+        """Return one test-local signed view handoff outside persistent evidence."""
+        with self.lock:
+            view = self._transient_views.get(control_scope)
+            return dict(view) if view is not None else None
 
     def completed_uploads(
         self,
@@ -315,6 +327,10 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/__testenv/state":
             self._json_response(200, self.state.evidence())
+            return
+        if parsed.path == "/__testenv/transient-view":
+            scope = parse_qs(parsed.query).get("scope", [""])[0]
+            self._json_response(200, self.state.transient_view(scope) or {})
             return
         if parsed.path.startswith("/files/"):
             provider_file_id = parsed.path.removeprefix("/files/")
@@ -1195,6 +1211,17 @@ def _selector_route_ids(view: dict[str, object]) -> list[str]:
             if isinstance(value, str) and value:
                 route_ids.append(value)
     return route_ids
+
+
+def _view_control_scope(callback_id: str | None) -> str:
+    """Classify a supported Slack modal without retaining callback metadata."""
+    if callback_id == "azents_agent_selector":
+        return "selector"
+    if callback_id == "azents_conversation_setup":
+        return "setup"
+    if callback_id == "azents_conversation_settings":
+        return "settings"
+    return "unknown"
 
 
 def _read_http_headers(connection: socket.socket) -> dict[str, str]:

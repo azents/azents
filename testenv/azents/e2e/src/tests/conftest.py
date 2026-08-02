@@ -684,6 +684,7 @@ def _configure_azents_server_container(
         )
         .with_env("AZ_TESTENV_SLACK_ALLOW_INSECURE_WEBSOCKET", "true")
         .with_env("AZ_EXTERNAL_CHANNEL_MULTI_APP_ENABLED", "true")
+        .with_env("AZ_EXTERNAL_CHANNEL_PARTICIPATION_ENABLED", "true")
         .with_env(
             "AZ_EXTERNAL_CHANNEL_DISCORD_CALLBACK_URL",
             "http://azents-public-server:8010",
