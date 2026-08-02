@@ -73,6 +73,7 @@ def project_discord_gateway_event(
     connection_id: str,
     provider_app_id: str | None,
     target_guild_id: str,
+    connected_bot_user_id: str | None,
     event: DiscordGatewayMessageEvent,
     received_at: datetime.datetime,
 ) -> ExternalChannelTrigger | None:
@@ -81,7 +82,11 @@ def project_discord_gateway_event(
     guild_id = str(event.channel.guild.id)
     if guild_id != target_guild_id:
         return None
-    projection = _project_discord_sdk_event(event=event, guild_id=guild_id)
+    projection = _project_discord_sdk_event(
+        event=event,
+        guild_id=guild_id,
+        connected_bot_user_id=connected_bot_user_id,
+    )
     channel_id = _required_string(projection, "channel_id")
     provider_event_id = _discord_gateway_event_id(
         event_type=event_type,
@@ -106,6 +111,7 @@ def _project_discord_sdk_event(
     *,
     event: DiscordGatewayMessageEvent,
     guild_id: str,
+    connected_bot_user_id: str | None,
 ) -> dict[str, object]:
     """Project public SDK attributes into the bounded provider-neutral envelope."""
     channel_id = str(event.channel.id)
@@ -138,6 +144,19 @@ def _project_discord_sdk_event(
             for attachment in message.attachments
         ],
     }
+    managed_bot_role_mentions = [
+        projection
+        for role in message.role_mentions
+        if (
+            projection := _sdk_managed_bot_role(
+                role,
+                connected_bot_user_id=connected_bot_user_id,
+            )
+        )
+        is not None
+    ][:MAX_EXTERNAL_CHANNEL_FILES]
+    if managed_bot_role_mentions:
+        source["managed_bot_role_mentions"] = managed_bot_role_mentions
     embeds = [_sdk_embed(embed) for embed in message.embeds]
     if embeds:
         source["embeds"] = embeds
@@ -177,6 +196,21 @@ def _sdk_user(user: discord.abc.User) -> dict[str, object]:
         ),
         **({"bot": True} if user.bot else {}),
         **({"system": True} if user.system else {}),
+    }
+
+
+def _sdk_managed_bot_role(
+    role: discord.Role,
+    *,
+    connected_bot_user_id: str | None,
+) -> dict[str, object] | None:
+    """Project only identity required to prove one Bot-managed role mention."""
+    tags = role.tags
+    if tags is None or tags.bot_id is None or str(tags.bot_id) != connected_bot_user_id:
+        return None
+    return {
+        "id": str(role.id),
+        "bot_user_id": str(tags.bot_id),
     }
 
 
@@ -275,6 +309,11 @@ def project_discord_message(
     mentions = message.get("mentions")
     if isinstance(mentions, list):
         projection["mentions"] = _project_mentions(mentions)
+    managed_bot_role_mentions = message.get("managed_bot_role_mentions")
+    if isinstance(managed_bot_role_mentions, list):
+        projection["managed_bot_role_mentions"] = _project_managed_bot_role_mentions(
+            managed_bot_role_mentions
+        )
     return projection
 
 
@@ -310,6 +349,9 @@ def normalize_projected_discord_event(
     thread_id, parent_channel_id = _thread_identity(raw_message)
     invocation = _mentions_connected_bot(
         raw_message.get("mentions"),
+        connected_bot_user_id=connected_bot_user_id,
+    ) or _managed_role_mentions_connected_bot(
+        raw_message.get("managed_bot_role_mentions"),
         connected_bot_user_id=connected_bot_user_id,
     )
     reference_mappings = _reference_mappings(raw_message)
@@ -392,6 +434,28 @@ def _project_mentions(mentions: list[object]) -> list[dict[str, object]]:
                 if value is not None:
                     projected_mention[key] = value
             projected.append(projected_mention)
+    return projected
+
+
+def _project_managed_bot_role_mentions(
+    mentions: list[object],
+) -> list[dict[str, object]]:
+    """Retain bounded role and owning Bot identities without role metadata."""
+    projected: list[dict[str, object]] = []
+    for mention in mentions:
+        if not isinstance(mention, dict):
+            continue
+        role_id = _bounded_string(mention.get("id"))
+        bot_user_id = _bounded_string(mention.get("bot_user_id"))
+        if role_id is not None and bot_user_id is not None:
+            projected.append(
+                {
+                    "id": role_id,
+                    "bot_user_id": bot_user_id,
+                }
+            )
+            if len(projected) >= MAX_EXTERNAL_CHANNEL_FILES:
+                break
     return projected
 
 
@@ -680,6 +744,19 @@ def _mentions_connected_bot(
         return False
     return any(
         isinstance(item, dict) and item.get("id") == connected_bot_user_id
+        for item in value
+    )
+
+
+def _managed_role_mentions_connected_bot(
+    value: object,
+    *,
+    connected_bot_user_id: str | None,
+) -> bool:
+    if connected_bot_user_id is None or not isinstance(value, list):
+        return False
+    return any(
+        isinstance(item, dict) and item.get("bot_user_id") == connected_bot_user_id
         for item in value
     )
 

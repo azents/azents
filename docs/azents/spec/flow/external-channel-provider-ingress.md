@@ -51,7 +51,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-08-02
-spec_version: 29
+spec_version: 30
 ---
 
 # External Channel Provider Ingress
@@ -73,6 +73,14 @@ also a subtype-free human `message` whose bounded text explicitly references a
 same-Team Bot User identity from the authenticated callback authorization or current
 connection configuration. Other `message` callbacks remain context-only, including
 connected-App output, unrelated mentions, and visible message subtypes.
+
+Discord invocation classification accepts either a direct mention of the connected
+Bot user or a mention of a Discord-managed role whose provider-owned Bot tag matches
+that same validated connection Bot identity. Role names, ordinary role membership,
+manually created roles, and other Bots' managed roles do not invoke the Agent. The
+typed Gateway projection filters against the validated connection Bot identity before
+retaining only the bounded matching role and owning-Bot identities; unresolved role
+state fails closed without a provider REST lookup or durable role configuration.
 
 ## HTTP Admission
 
@@ -379,6 +387,9 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-02** (spec_version 30) — Accepted the connected Discord Bot's
+  provider-managed role mention as an explicit invocation while rejecting arbitrary,
+  manually created, and other-Bot roles.
 - **2026-08-02** (spec_version 28) — Inserted latest-source channel setup before
   provider-history I/O, added selected setup replay and explicit settings interaction
   dispatch, preserved exact thread-Binding precedence, and fenced final admission by

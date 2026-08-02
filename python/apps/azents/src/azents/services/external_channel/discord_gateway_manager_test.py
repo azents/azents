@@ -194,6 +194,7 @@ class _OwnedRepository(_Repository):
             encrypted_credentials="ciphertext",
             provider_app_id="app-1",
             provider_tenant_id="300",
+            provider_bot_user_id="900",
             configuration_generation=2,
         )
 
@@ -284,6 +285,7 @@ def _event(*, guild_id: int = 300) -> DiscordGatewayMessageEvent:
     message.edited_at = None
     message.author = author
     message.mentions = []
+    message.role_mentions = []
     message.attachments = []
     return DiscordGatewayMessageEvent(
         event_type="message_create",
@@ -351,6 +353,7 @@ async def test_admits_typed_event_under_current_lease() -> None:
         lease=_lease(),
         provider_app_id="app-1",
         target_guild_id="300",
+        connected_bot_user_id="900",
         configuration_generation=2,
         event=_event(),
     )
@@ -387,6 +390,7 @@ async def test_retries_same_typed_event_before_later_callback_can_advance(
         lease=_lease(),
         provider_app_id="app-1",
         target_guild_id="300",
+        connected_bot_user_id="900",
         configuration_generation=2,
         event=_event(),
     )
@@ -412,6 +416,7 @@ async def test_quiesced_gateway_rejects_message_create() -> None:
             lease=_lease(),
             provider_app_id="app-1",
             target_guild_id="300",
+            connected_bot_user_id="900",
             configuration_generation=2,
             event=_event(),
         )
@@ -429,6 +434,7 @@ async def test_cross_guild_event_is_not_admitted() -> None:
         lease=_lease(),
         provider_app_id="app-1",
         target_guild_id="300",
+        connected_bot_user_id="900",
         configuration_generation=2,
         event=_event(guild_id=301),
     )
@@ -448,6 +454,7 @@ async def test_stale_lease_stops_typed_event_admission() -> None:
             lease=_lease(),
             provider_app_id="app-1",
             target_guild_id="300",
+            connected_bot_user_id="900",
             configuration_generation=2,
             event=_event(),
         )
@@ -557,6 +564,7 @@ async def test_manager_passes_typed_lifecycle_and_event_handlers_to_sdk() -> Non
             bot_token="test-token",
             provider_app_id="app-1",
             target_guild_id="300",
+            connected_bot_user_id="900",
             configuration_generation=2,
             shutdown_event=asyncio.Event(),
         )
@@ -585,6 +593,7 @@ async def test_active_sdk_lifecycle_renews_gateway_lease() -> None:
             bot_token="test-token",
             provider_app_id="app-1",
             target_guild_id="300",
+            connected_bot_user_id="900",
             configuration_generation=2,
             shutdown_event=shutdown,
         )

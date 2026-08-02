@@ -167,6 +167,7 @@ class DiscordGatewayManagerService:
                 bot_token=credentials.bot_token,
                 provider_app_id=configuration.provider_app_id,
                 target_guild_id=configuration.provider_tenant_id,
+                connected_bot_user_id=configuration.provider_bot_user_id,
                 configuration_generation=configuration.configuration_generation,
                 shutdown_event=shutdown_event,
             )
@@ -217,6 +218,7 @@ class DiscordGatewayManagerService:
         bot_token: str,
         provider_app_id: str | None,
         target_guild_id: str,
+        connected_bot_user_id: str | None,
         configuration_generation: int,
         shutdown_event: asyncio.Event,
     ) -> None:
@@ -229,6 +231,7 @@ class DiscordGatewayManagerService:
                     lease=lease,
                     provider_app_id=provider_app_id,
                     target_guild_id=target_guild_id,
+                    connected_bot_user_id=connected_bot_user_id,
                     configuration_generation=configuration_generation,
                     event=event,
                 ),
@@ -394,6 +397,7 @@ class DiscordGatewayManagerService:
         lease: ExternalChannelIngressLease,
         provider_app_id: str | None,
         target_guild_id: str,
+        connected_bot_user_id: str | None,
         configuration_generation: int,
         event: DiscordGatewayMessageEvent,
     ) -> None:
@@ -413,6 +417,7 @@ class DiscordGatewayManagerService:
             connection_id=connection_id,
             provider_app_id=provider_app_id,
             target_guild_id=target_guild_id,
+            connected_bot_user_id=connected_bot_user_id,
             event=event,
             received_at=received_at,
         )

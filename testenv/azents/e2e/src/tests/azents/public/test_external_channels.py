@@ -3862,10 +3862,11 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     application_id = "100000000000000004"
     guild_id = "200000000000000004"
     bot_user_id = "300000000000000004"
+    bot_role_id = "350000000000000004"
     channel_id = "400000000000000004"
     message_id = "500000000000000004"
     participant_id = "600000000000000004"
-    source_text = "Private Discord Gateway invocation"
+    source_text = f"<@&{bot_role_id}> Private Discord Gateway invocation"
     timestamp = "2026-07-29T00:00:00.000000+00:00"
     author: dict[str, object] = {
         "id": participant_id,
@@ -3888,8 +3889,8 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         "timestamp": timestamp,
         "edited_timestamp": None,
         "author": author,
-        "mentions": [bot],
-        "mention_roles": [],
+        "mentions": [],
+        "mention_roles": [bot_role_id],
         "attachments": [],
         "embeds": [],
         "components": [],
@@ -3903,7 +3904,20 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         "name": "Gateway E2E",
         "unavailable": False,
         "owner_id": participant_id,
-        "roles": [],
+        "roles": [
+            {
+                "id": bot_role_id,
+                "name": "Azents",
+                "color": 0,
+                "hoist": False,
+                "position": 1,
+                "permissions": "0",
+                "managed": True,
+                "mentionable": True,
+                "flags": 0,
+                "tags": {"bot_id": bot_user_id},
+            }
+        ],
         "emojis": [],
         "stickers": [],
         "features": [],
@@ -3921,7 +3935,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         "members": [
             {
                 "user": bot,
-                "roles": [],
+                "roles": [bot_role_id],
                 "joined_at": timestamp,
                 "deaf": False,
                 "mute": False,
