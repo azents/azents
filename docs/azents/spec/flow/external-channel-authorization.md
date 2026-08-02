@@ -35,7 +35,7 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
 last_verified_at: 2026-08-02
-spec_version: 19
+spec_version: 20
 ---
 
 # External Channel Authorization
@@ -94,10 +94,12 @@ When a restricted participant invokes the Agent:
    and metadata-only provider-history source identity.
 3. The request snapshots the connection, conversation position, exclusive range start,
    and inclusive trigger position, expires after seven days, and contains an opaque ID.
-4. One provider control-message intent is persisted and attempted once with the
-   participant display label, complete provider user ID, and an authenticated Azents
-   approval URL rendered through the provider's safe control shape. Pending selector
-   and approval rows contain no provider body, revision, attachment metadata,
+4. The access request conservatively preclaims its current control projection as
+   `unknown`, then returns one process-local provider control plan with the participant
+   display label, complete provider user ID, and an authenticated Azents approval URL
+   rendered through the provider's safe control shape. A delivered result stores only
+   the current provider message key and projection status on the request. Pending
+   selector and approval rows contain no provider body, revision, attachment metadata,
    reference mappings, or original-message URL.
 5. The approval page requires an authenticated user who is an administrator of the routed Agent. Unauthorized, cross-Agent, missing, and expired requests do not disclose the request and appear not found or unavailable.
 
@@ -140,10 +142,11 @@ existing concrete mode. Setup-linked Allow defers both snapshots until selected 
 replay creates the configured Binding.
 
 When the original approval control message has a delivered provider identity, every
-compatible final decision also creates one idempotent access-request-origin delete
-intent in the decision transaction. The provider delete is attempted only after the
-decision commits. Failed or ambiguous deletion remains a durable delivery outcome
-and never rolls back the authorization result.
+compatible final decision also returns one access-request-origin direct delete plan
+from the decision transaction. The provider delete is attempted only after the
+decision commits. Failed or ambiguous deletion updates only the request's current
+control projection, never rolls back the authorization result, and creates no retry or
+recovery work.
 
 ## Synchronous Replay and Context Release
 
@@ -154,12 +157,12 @@ position is still before the trigger, it reads forward normally; if another acce
 invocation advanced past the trigger, it reuses the saved range start and exact trigger
 boundary. It then reuses the committed binding and atomically commits the deterministic
 canonical mailbox item, conversation-position advance, Session running transition, and
-deterministic joined-presence and initial-progress delivery intents. Both position
+deterministic joined-presence and initial-progress plans. Both position
 cases converge on one mailbox item and logical wake.
 Repeating a compatible Allow may perform the same provider-history replay to recover a
 post-commit failure, but mailbox identity prevents another Session input or execution.
 Replay failure never reverts the already committed access decision or binding, and it
-does not couple provider-control delivery outcomes to accepted mailbox execution.
+does not couple provider-control success to accepted mailbox execution.
 This durable replay remains available while connection ingress health is `active`,
 `degraded`, or `reconnect_required`; `configuring`, `disconnecting`, and `disconnected`
 connections cannot start it. Transient Gateway or Socket recovery therefore does not
@@ -205,6 +208,9 @@ Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-08-02** (spec_version 20) — Replaced access-control delivery intents with
+  access-request-owned current projection and one-shot process-local create/delete
+  plans while preserving authorization and mailbox replay authority.
 - **2026-08-02** (spec_version 19) — Added setup-linked authorization that resumes
   location selection without Binding replay, provider-principal channel-default and
   settings authority, exact scope proof, and the no-synthetic-User boundary.

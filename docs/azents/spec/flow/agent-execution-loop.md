@@ -77,8 +77,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-01
-spec_version: 140
+last_verified_at: 2026-08-02
+spec_version: 141
 ---
 
 # Agent Execution Loop
@@ -1159,11 +1159,14 @@ updated by the user.
 
 Synchronous External Channel acceptance atomically commits the real Session, immutable
 provider-history projection in one `wake_session` mailbox item, conversation-position
-advance, Session running transition, and provider-control intents. The conversation
+advance, Session running transition, and zero or more process-local provider-control
+plans. The conversation
 position is the sole duplicate-prevention authority. The post-commit broker signal
 contains only `session_id`; a duplicate callback recovers the same mailbox item and
-pending logical wake. Provider-control failure, ambiguity, or cancellation is recorded
-independently and does not block mailbox promotion or AgentRun creation.
+pending logical wake. The caller attempts each plan once after commit or after the
+provider acknowledgement boundary. Provider-control failure, ambiguity, cancellation,
+or process termination creates no recovery work and does not block mailbox promotion
+or AgentRun creation.
 
 FIFO preparation resolves the mailbox payload into contiguous source-attributed
 `external_channel_message` events and associates them with the run before model
@@ -1177,8 +1180,10 @@ when the history adapter resolved mappings.
 When an active binding exists, runtime adds the direct `channel_action` tool and
 the current binding/work snapshot. Normal assistant text is retained only in
 Azents history and is never implicitly published to the provider. A
-`channel_action` call commits canonical work and delivery intents before its
-provider operations execute outside the transaction.
+`channel_action` call commits canonical work before its process-local provider
+effects execute outside the transaction. The normal client-tool call and result
+events retain the ordered sanitized outcomes; no separate Action or Delivery history
+is created.
 
 After a successful run, unfinished Channel Work is an idle-continuation source.
 Continuation remains eligible until every relevant binding finishes or clears
@@ -1193,6 +1198,9 @@ icon.
 
 ## Changelog
 
+- **2026-08-02** (spec_version 141) — Replaced External Channel provider-control and
+  Tool delivery intents with process-local immediate effect plans while keeping
+  mailbox admission, wake, and AgentRun creation independent from provider success.
 - **2026-08-01** (spec_version 140) — Removed External Channel activation and
   provider-delivery execution gates; accepted mailbox input now enters the ordinary
   FIFO execution path immediately after its cursor transaction commits.
