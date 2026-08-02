@@ -4068,21 +4068,6 @@ def test_discord_gateway_message_waits_for_location_then_binds(
             headers=headers,
             baseline_session_ids=baseline_session_ids,
         )
-        setup_gate_state = _discord_provider_state(discord_provider_fake_url)
-        setup_gate_counts = cast(
-            dict[str, int],
-            setup_gate_state["request_counts"],
-        )
-        assert setup_gate_counts.get("create_thread", 0) == 0
-        assert setup_gate_counts.get("create_message", 0) == 0
-        _open_discord_settings(
-            discord_provider_fake_url=discord_provider_fake_url,
-            interaction_id="700000000000000004",
-            application_id=application_id,
-            guild_id=guild_id,
-            channel_id=channel_id,
-            user_id=participant_id,
-        )
         setup_threads_custom_id = cast(
             str,
             wait_until(
@@ -4095,9 +4080,16 @@ def test_discord_gateway_message_waits_for_location_then_binds(
                 message="Discord Gateway setup control was not delivered",
             ),
         )
+        setup_gate_state = _discord_provider_state(discord_provider_fake_url)
+        setup_gate_counts = cast(
+            dict[str, int],
+            setup_gate_state["request_counts"],
+        )
+        assert setup_gate_counts.get("create_thread", 0) == 0
+        assert setup_gate_counts.get("create_message", 0) == 1
         _select_discord_setup_location(
             discord_provider_fake_url=discord_provider_fake_url,
-            interaction_id="700000000000000005",
+            interaction_id="700000000000000004",
             application_id=application_id,
             guild_id=guild_id,
             channel_id=channel_id,
@@ -4166,10 +4158,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
     )
     state = _discord_provider_state(discord_provider_fake_url)
-    assert _successful_session_paths(state) == [
-        expected_session_path,
-        expected_session_path,
-    ]
+    assert _successful_session_paths(state) == [expected_session_path]
     assert _successful_session_presence_states(state) == ["joined"]
     request_counts = cast(dict[str, int], state["request_counts"])
     assert request_counts["create_thread"] >= 1
@@ -4215,7 +4204,6 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         ),
     )
     assert _successful_session_paths(terminal_state) == [
-        expected_session_path,
         expected_session_path,
         expected_session_path,
     ]

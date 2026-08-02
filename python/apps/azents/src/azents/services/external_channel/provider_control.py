@@ -28,7 +28,6 @@ class ExternalChannelProviderControlDrain:
     """Aggregate content-free result of one bounded provider-control drain."""
 
     stale_unknown: int
-    settings_controls_created: int
     attempted: int
 
 
@@ -61,18 +60,11 @@ class ExternalChannelProviderControlService:
         while not shutdown_event.is_set():
             try:
                 result = await self.drain_once()
-                if (
-                    result.stale_unknown
-                    or result.settings_controls_created
-                    or result.attempted
-                ):
+                if result.stale_unknown or result.attempted:
                     logger.info(
                         "Drained External Channel provider controls",
                         extra={
                             "stale_unknown": result.stale_unknown,
-                            "settings_controls_created": (
-                                result.settings_controls_created
-                            ),
                             "attempted": result.attempted,
                         },
                     )
@@ -105,12 +97,6 @@ class ExternalChannelProviderControlService:
                     limit=self.limit,
                 )
             )
-            settings_control_ids = (
-                await self.repository.ensure_binding_settings_available_delivery_ids(
-                    session,
-                    limit=self.limit,
-                )
-            )
             delivery_attempt_ids = (
                 await self.repository.list_pending_provider_control_delivery_ids(
                     session,
@@ -125,7 +111,6 @@ class ExternalChannelProviderControlService:
                 attempted += 1
         return ExternalChannelProviderControlDrain(
             stale_unknown=stale_unknown,
-            settings_controls_created=len(settings_control_ids),
             attempted=attempted,
         )
 

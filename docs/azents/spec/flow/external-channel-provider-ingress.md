@@ -51,7 +51,7 @@ api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
 last_verified_at: 2026-08-02
-spec_version: 28
+spec_version: 29
 ---
 
 # External Channel Provider Ingress
@@ -91,11 +91,15 @@ Slack sends HTTP callbacks to the single fixed endpoint
 6. Original message triggers enter synchronous conversation ingestion. An explicit
    eligible top-level trigger first resolves the selected route and participation
    setting. If no setting exists, it creates or replaces one setup claim and setup
-   control with no Binding, Session, canonical mailbox input, wake, or AgentRun.
+   control in the provider parent channel with no Binding, Session, canonical mailbox
+   input, wake, or AgentRun.
    Configured traffic or selected setup replay reads provider history and commits the
    real Session, Binding, canonical mailbox input, conversation-position advance,
-   running transition, and independent provider-control intents. The mailbox item is
-   also the pending wake-recovery identity. Provider controls never gate execution.
+   running transition, and independent provider-control intents. A new eligible
+   explicit mention in an existing Binding may additionally create one idempotent
+   settings entry point; ordinary traffic, deployment, startup, and the background
+   worker do not create it. The mailbox item is also the pending wake-recovery
+   identity. Provider controls never gate execution.
 7. Success is acknowledged only for a completed non-retryable outcome. A retryable
    coordination, history, position, or wake failure remains unacknowledged so the
    provider may retry.

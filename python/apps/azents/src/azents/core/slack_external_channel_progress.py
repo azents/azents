@@ -146,18 +146,17 @@ def render_slack_session_presence(
     )
 
 
-def render_slack_settings_available(
+def render_slack_setup_required(
     *,
     agent_name: str,
-    session_url: str,
     settings_action_id: str,
     settings_action_value: str,
 ) -> SlackProgressPresentation:
-    """Render one concise existing-Binding settings availability control."""
+    """Render one first-mention conversation-location setup action."""
     escaped_name = (
         agent_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     )
-    text = f"Conversation settings are available for {agent_name}."
+    text = f"Choose where {agent_name} should answer this conversation."
     return SlackProgressPresentation(
         text=text,
         blocks=[
@@ -166,7 +165,8 @@ def render_slack_settings_available(
                 "text": {
                     "type": "mrkdwn",
                     "text": (
-                        f"Conversation settings are available for *{escaped_name}*."
+                        f"Choose where *{escaped_name}* should answer this "
+                        "conversation."
                     ),
                 },
             },
@@ -175,13 +175,44 @@ def render_slack_settings_available(
                 "elements": [
                     {
                         "type": "button",
-                        "action_id": "view_azents_session",
+                        "style": "primary",
+                        "action_id": settings_action_id,
                         "text": {
                             "type": "plain_text",
-                            "text": "View session",
+                            "text": "Choose conversation location",
                         },
-                        "url": session_url,
-                    },
+                        "value": settings_action_value,
+                    }
+                ],
+            },
+        ],
+    )
+
+
+def render_slack_binding_settings_on_demand(
+    *,
+    agent_name: str,
+    settings_action_id: str,
+    settings_action_value: str,
+) -> SlackProgressPresentation:
+    """Render settings access after an eligible mention in an existing Binding."""
+    escaped_name = (
+        agent_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+    text = f"Conversation settings for {agent_name}."
+    return SlackProgressPresentation(
+        text=text,
+        blocks=[
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"Conversation settings for *{escaped_name}*.",
+                },
+            },
+            {
+                "type": "actions",
+                "elements": [
                     {
                         "type": "button",
                         "action_id": settings_action_id,
@@ -190,7 +221,7 @@ def render_slack_settings_available(
                             "text": "Conversation settings",
                         },
                         "value": settings_action_value,
-                    },
+                    }
                 ],
             },
         ],

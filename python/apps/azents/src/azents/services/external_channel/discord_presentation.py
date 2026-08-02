@@ -102,13 +102,13 @@ def render_discord_session_presence(
     )
 
 
-def render_discord_settings_available(
+def render_discord_setup_required(
     *,
     agent_name: str,
-    session_url: str,
-    settings_custom_id: str,
+    channel_custom_id: str,
+    threads_custom_id: str,
 ) -> DiscordSessionPresencePresentation:
-    """Render one concise existing-Binding settings availability control."""
+    """Render first-mention conversation-location choices."""
     escaped_name = (
         agent_name.replace("\\", "\\\\")
         .replace("*", "\\*")
@@ -121,7 +121,7 @@ def render_discord_settings_available(
         embeds=[
             {
                 "description": (
-                    f"Conversation settings are available for **{escaped_name}**."
+                    f"Choose where **{escaped_name}** should answer this conversation."
                 ),
                 "color": _TRACKER_COLOR,
             }
@@ -132,16 +132,53 @@ def render_discord_settings_available(
                 "components": [
                     {
                         "type": 2,
-                        "style": 5,
-                        "label": "View session",
-                        "url": session_url,
+                        "style": 1,
+                        "label": "Answer in this channel",
+                        "custom_id": channel_custom_id,
                     },
+                    {
+                        "type": 2,
+                        "style": 2,
+                        "label": "Answer in threads",
+                        "custom_id": threads_custom_id,
+                    },
+                ],
+            }
+        ],
+    )
+
+
+def render_discord_binding_settings_on_demand(
+    *,
+    agent_name: str,
+    settings_custom_id: str,
+) -> DiscordSessionPresencePresentation:
+    """Render settings access after an eligible mention in an existing Binding."""
+    escaped_name = (
+        agent_name.replace("\\", "\\\\")
+        .replace("*", "\\*")
+        .replace("_", "\\_")
+        .replace("~", "\\~")
+        .replace("`", "\\`")
+    )
+    return DiscordSessionPresencePresentation(
+        text="",
+        embeds=[
+            {
+                "description": f"Conversation settings for **{escaped_name}**.",
+                "color": _TRACKER_COLOR,
+            }
+        ],
+        components=[
+            {
+                "type": 1,
+                "components": [
                     {
                         "type": 2,
                         "style": 2,
                         "label": "Conversation settings",
                         "custom_id": settings_custom_id,
-                    },
+                    }
                 ],
             }
         ],

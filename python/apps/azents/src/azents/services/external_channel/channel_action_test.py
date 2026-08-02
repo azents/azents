@@ -60,11 +60,16 @@ from azents.services.external_channel.discord_delivery import (
 )
 from azents.services.external_channel.discord_settings_scope import (
     build_discord_binding_settings_open_custom_id,
+    build_discord_settings_custom_id,
 )
 from azents.services.external_channel.slack_events import (
     SlackControlMessageResult,
     SlackConversationClient,
     SlackOutboundFile,
+)
+from azents.services.external_channel.slack_settings import (
+    SlackSettingsLocator,
+    parse_slack_settings_locator,
 )
 from azents.services.file_storage import FileStorage
 from azents.services.session_resource_authority import SessionResourceAuthority
@@ -1346,8 +1351,137 @@ async def test_slack_session_presence_control_replaces_open_session() -> None:
 
 
 @pytest.mark.asyncio
-async def test_slack_existing_binding_settings_control_has_both_actions() -> None:
-    """The rollout control adds settings without repeating joined presence."""
+async def test_slack_setup_required_control_opens_parent_location_settings() -> None:
+    """A new unconfigured mention receives one parent-scoped setup action."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "operation": ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            "binding_id": None,
+            "resource_id": "source-resource-1",
+            "agent_name": "Research Agent",
+            "request_payload": {
+                "control_kind": "setup_required",
+                "control_version": 2,
+                "setup_claim_id": "claim-1",
+                "claim_generation": 1,
+                "source_revision": 1,
+                "tenant_id": "T1",
+                "channel_id": "C1",
+                "thread_ts": "1.000001",
+            },
+        }
+    )
+
+    class _SetupSlackClient(_SlackClient):
+        async def post_blocks(self, **kwargs: object) -> SlackControlMessageResult:
+            self.events.append("provider")
+            blocks = cast(list[dict[str, object]], kwargs["blocks"])
+            assert kwargs["text"] == (
+                "Choose where Research Agent should answer this conversation."
+            )
+            actions = cast(list[dict[str, object]], blocks[1]["elements"])
+            assert actions[0]["text"] == {
+                "type": "plain_text",
+                "text": "Choose conversation location",
+            }
+            value = actions[0]["value"]
+            assert isinstance(value, str)
+            assert parse_slack_settings_locator(
+                metadata=value,
+                secret="test-signing-secret",
+            ) == SlackSettingsLocator(
+                connection_id="connection-1",
+                provider_parent_channel_id="C1",
+                resource_id=None,
+                binding_id=None,
+            )
+            return self._result()
+
+    service = _service(
+        events,
+        repository,
+        _SetupSlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key="slack:T1:C1:2.000001",
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+    )
+
+    result = await service.attempt_delivery("delivery-1")
+
+    assert result is ExternalChannelDeliveryStatus.DELIVERED
+    assert events == ["start", "commit", "provider", "finish", "commit"]
+
+
+@pytest.mark.asyncio
+async def test_slack_existing_binding_settings_are_exposed_on_demand() -> None:
+    """An eligible mention can expose settings without replaying joined presence."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "operation": ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            "resource_id": "resource-1",
+            "agent_name": "Research Agent",
+            "request_payload": {
+                "control_kind": "binding_settings_on_demand",
+                "control_version": 3,
+                "tenant_id": "T1",
+                "channel_id": "C1",
+                "thread_ts": "1.000001",
+            },
+        }
+    )
+
+    class _SettingsSlackClient(_SlackClient):
+        async def post_blocks(self, **kwargs: object) -> SlackControlMessageResult:
+            self.events.append("provider")
+            assert kwargs["text"] == "Conversation settings for Research Agent."
+            blocks = cast(list[dict[str, object]], kwargs["blocks"])
+            assert "joined" not in str(blocks)
+            actions = cast(list[dict[str, object]], blocks[1]["elements"])
+            value = actions[0]["value"]
+            assert isinstance(value, str)
+            assert parse_slack_settings_locator(
+                metadata=value,
+                secret="test-signing-secret",
+            ) == SlackSettingsLocator(
+                connection_id="connection-1",
+                provider_parent_channel_id="C1",
+                resource_id="resource-1",
+                binding_id="binding-1",
+            )
+            return self._result()
+
+    service = _service(
+        events,
+        repository,
+        _SettingsSlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key="slack:T1:C1:2.000001",
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+    )
+
+    result = await service.attempt_delivery("delivery-1")
+
+    assert result is ExternalChannelDeliveryStatus.DELIVERED
+    assert events == ["start", "commit", "provider", "finish", "commit"]
+
+
+@pytest.mark.asyncio
+async def test_legacy_binding_settings_delivery_never_reaches_slack() -> None:
+    """A pending rollout-era intent is terminalized without provider I/O."""
     events: list[str] = []
     repository = _RepositoryDouble(events)
     repository.target = repository.target.model_copy(
@@ -1364,32 +1498,14 @@ async def test_slack_existing_binding_settings_control_has_both_actions() -> Non
             },
         }
     )
-
-    class _SettingsAvailableSlackClient(_SlackClient):
-        async def post_blocks(self, **kwargs: object) -> SlackControlMessageResult:
-            self.events.append("provider")
-            blocks = cast(list[dict[str, object]], kwargs["blocks"])
-            assert kwargs["text"] == (
-                "Conversation settings are available for Research Agent."
-            )
-            assert "joined" not in str(blocks)
-            actions = cast(list[dict[str, object]], blocks[1]["elements"])
-            labels: list[object] = []
-            for action in actions:
-                text = cast(dict[str, object], action["text"])
-                labels.append(text["text"])
-            assert labels == ["View session", "Conversation settings"]
-            assert isinstance(actions[1]["value"], str)
-            return self._result()
-
     service = _service(
         events,
         repository,
-        _SettingsAvailableSlackClient(
+        _SlackClient(
             events,
             SlackControlMessageResult(
                 status="delivered",
-                provider_message_key="slack:T1:C1:2.000001",
+                provider_message_key=None,
                 error_kind=None,
                 error_summary=None,
             ),
@@ -1398,8 +1514,11 @@ async def test_slack_existing_binding_settings_control_has_both_actions() -> Non
 
     result = await service.attempt_delivery("delivery-1")
 
-    assert result is ExternalChannelDeliveryStatus.DELIVERED
-    assert events == ["start", "commit", "provider", "finish", "commit"]
+    assert result is ExternalChannelDeliveryStatus.FAILED
+    assert events == ["start", "commit", "finish", "commit"]
+    assert repository.finished == [
+        (ExternalChannelDeliveryStatus.FAILED, None, "provider_payload_invalid")
+    ]
 
 
 @pytest.mark.asyncio
@@ -1488,8 +1607,8 @@ async def test_discord_session_presence_control_uses_signed_settings_action() ->
 
 
 @pytest.mark.asyncio
-async def test_discord_existing_binding_settings_control_has_both_actions() -> None:
-    """The rollout control adds settings without repeating joined presence."""
+async def test_discord_setup_required_control_uses_claim_fenced_choices() -> None:
+    """A new unconfigured mention receives two claim-fenced location choices."""
     events: list[str] = []
     repository = _RepositoryDouble(events)
     repository.target = repository.target.model_copy(
@@ -1497,10 +1616,15 @@ async def test_discord_existing_binding_settings_control_has_both_actions() -> N
             "provider": ExternalChannelProvider.DISCORD,
             "provider_tenant_id": "111",
             "operation": ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            "binding_id": None,
+            "resource_id": "source-resource-1",
             "agent_name": "Research Agent",
             "request_payload": {
-                "control_kind": "binding_settings_available",
+                "control_kind": "setup_required",
                 "control_version": 2,
+                "setup_claim_id": "claim-1",
+                "claim_generation": 2,
+                "source_revision": 4,
                 "guild_id": "111",
                 "channel_id": "333",
             },
@@ -1525,23 +1649,85 @@ async def test_discord_existing_binding_settings_control_has_both_actions() -> N
     result = await service.attempt_delivery("delivery-1")
 
     assert result is ExternalChannelDeliveryStatus.DELIVERED
-    assert discord_client.calls[0][0] == "create"
     create = discord_client.calls[0][1]
-    embeds = cast(list[dict[str, object]], create["embeds"])
-    assert "joined" not in str(embeds)
-    assert embeds == [
-        {
-            "description": (
-                "Conversation settings are available for **Research Agent**."
-            ),
-            "color": 0x5865F2,
-        }
-    ]
     components = cast(list[dict[str, object]], create["components"])
     actions = cast(list[dict[str, object]], components[0]["components"])
     assert [action["label"] for action in actions] == [
-        "View session",
-        "Conversation settings",
+        "Answer in this channel",
+        "Answer in threads",
+    ]
+    assert actions[0]["custom_id"] == build_discord_settings_custom_id(
+        secret="test-signing-secret",
+        action="setup_channel",
+        origin_interaction_id="claim-1",
+        setup_claim_id="claim-1",
+        claim_generation=2,
+        source_revision=4,
+    )
+    assert actions[1]["custom_id"] == build_discord_settings_custom_id(
+        secret="test-signing-secret",
+        action="setup_threads",
+        origin_interaction_id="claim-1",
+        setup_claim_id="claim-1",
+        claim_generation=2,
+        source_revision=4,
+    )
+
+
+@pytest.mark.asyncio
+async def test_discord_existing_binding_settings_are_exposed_on_demand() -> None:
+    """An eligible mention can expose settings without replaying joined presence."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "provider": ExternalChannelProvider.DISCORD,
+            "provider_tenant_id": "111",
+            "operation": ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            "resource_id": "resource-1",
+            "agent_name": "Research Agent",
+            "request_payload": {
+                "control_kind": "binding_settings_on_demand",
+                "control_version": 3,
+                "guild_id": "111",
+                "channel_id": "333",
+            },
+        }
+    )
+    discord_client = _DiscordClient()
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+        discord_client=discord_client,
+    )
+
+    result = await service.attempt_delivery("delivery-1")
+
+    assert result is ExternalChannelDeliveryStatus.DELIVERED
+    create = discord_client.calls[0][1]
+    embeds = cast(list[dict[str, object]], create["embeds"])
+    assert "joined" not in str(embeds)
+    components = cast(list[dict[str, object]], create["components"])
+    actions = cast(list[dict[str, object]], components[0]["components"])
+    assert actions == [
+        {
+            "type": 2,
+            "style": 2,
+            "label": "Conversation settings",
+            "custom_id": build_discord_binding_settings_open_custom_id(
+                secret="test-signing-secret",
+                binding_id="binding-1",
+            ),
+        }
     ]
 
 

@@ -4,6 +4,7 @@ import pytest
 
 from azents.services.external_channel.slack_settings import (
     SlackSettingsLocator,
+    build_slack_parent_settings_locator,
     build_slack_settings_locator,
     parse_slack_settings_locator,
 )
@@ -27,6 +28,25 @@ def test_settings_locator_round_trips_exact_connected_binding_scope() -> None:
         provider_parent_channel_id="channel-1",
         resource_id="resource-1",
         binding_id="binding-1",
+    )
+
+
+def test_parent_settings_locator_round_trips_without_binding_scope() -> None:
+    """A first-mention setup action authenticates only its parent conversation."""
+    metadata = build_slack_parent_settings_locator(
+        secret="secret",
+        connection_id="connection-1",
+        provider_parent_channel_id="channel-1",
+    )
+
+    assert parse_slack_settings_locator(
+        metadata=metadata,
+        secret="secret",
+    ) == SlackSettingsLocator(
+        connection_id="connection-1",
+        provider_parent_channel_id="channel-1",
+        resource_id=None,
+        binding_id=None,
     )
 
 
