@@ -341,6 +341,7 @@ async def test_session_presence_intent_replaces_open_session_control() -> None:
     create = repository.create_delivery_attempt_idempotent.await_args.args[1]
     assert create.request_payload == {
         "control_kind": "session_presence",
+        "control_version": 2,
         "presence_state": "joined",
         "tenant_id": "tenant-1",
         "channel_id": "channel-1",

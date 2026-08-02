@@ -1237,6 +1237,14 @@
           "all_messages": "All eligible messages",
           "mention_only": "Mentions only"
         },
+        "conversationLocation": {
+          "channel": "Channel conversation",
+          "threads": "Thread conversation"
+        },
+        "resourceType": {
+          "parent_channel": "Parent channel",
+          "thread": "Thread"
+        },
         "archivedTitle": "Archived session",
         "archivedDescription": "External channels were terminally disconnected at archive time. This projection is read-only.",
         "retentionUnlimited": "Retention: unlimited",
@@ -1766,7 +1774,7 @@
       "reenable": "Re-enable",
       "remove": "Remove",
       "routeImpactTitle": "Review route removal impact",
-      "routeImpactDescription": "This removes {defaults, plural, =0 {no channel defaults} one {# channel default} other {# channel defaults}}, ends {bindings, plural, =0 {no active bindings} one {# active binding} other {# active bindings}}, and expires {admissions, plural, =0 {no open admissions} one {# open admission} other {# open admissions}}.",
+      "routeImpactDescription": "This removes {defaults, plural, =0 {no channel defaults} one {# channel default} other {# channel defaults}}, invalidates {settings, plural, =0 {no participation settings} one {# participation setting} other {# participation settings}}, ends {claims, plural, =0 {no setup requests} one {# setup request} other {# setup requests}}, ends {bindings, plural, =0 {no active bindings} one {# active binding} other {# active bindings}} including {parentBindings, plural, =0 {no connected parent conversations} one {# connected parent conversation} other {# connected parent conversations}}, and expires {admissions, plural, =0 {no open admissions} one {# open admission} other {# open admissions}}.",
       "loadingImpact": "Loading the current impact preview…",
       "retry": "Retry",
       "confirmRemove": "Remove Agent",
@@ -1776,6 +1784,9 @@
       "channelId": "Slack channel ID",
       "route": "Agent",
       "setDefault": "Set default",
+      "defaultMutationChangedTitle": "Channel selection updated",
+      "defaultMutationUnchangedTitle": "Channel selection already current",
+      "defaultMutationImpact": "Participation cleanup: {settings} setting(s) invalidated, {claims} setup request(s) ended, {interactions} pending control(s) expired, {bindings} parent conversation(s) disconnected, and {deliveries} cleanup message(s) queued.",
       "channel": "Channel",
       "defaultAgent": "Default Agent",
       "defaultStatus": "Default status",
@@ -1784,7 +1795,7 @@
       "disconnectDescription": "Disconnecting removes active routes, defaults, and bound provider conversations.",
       "disconnect": "Disconnect",
       "connectionImpactTitle": "Review full disconnect impact",
-      "connectionImpactDescription": "This disconnects {routes, plural, =0 {no active routes} one {# active route} other {# active routes}}, invalidates {defaults, plural, =0 {no channel defaults} one {# channel default} other {# channel defaults}}, and ends {bindings, plural, =0 {no active bindings} one {# active binding} other {# active bindings}}.",
+      "connectionImpactDescription": "This disconnects {routes, plural, =0 {no active routes} one {# active route} other {# active routes}}, invalidates {defaults, plural, =0 {no channel defaults} one {# channel default} other {# channel defaults}} and {settings, plural, =0 {no participation settings} one {# participation setting} other {# participation settings}}, ends {claims, plural, =0 {no setup requests} one {# setup request} other {# setup requests}}, and ends {bindings, plural, =0 {no active bindings} one {# active binding} other {# active bindings}} including {parentBindings, plural, =0 {no connected parent conversations} one {# connected parent conversation} other {# connected parent conversations}}.",
       "confirmDisconnect": "Disconnect Workspace App",
       "transport": {
         "http": "HTTP",

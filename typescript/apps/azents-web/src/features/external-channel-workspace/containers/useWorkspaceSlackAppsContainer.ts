@@ -13,6 +13,7 @@ import type {
   ExternalChannelMultiConnectionImpact,
   ExternalChannelMultiRouteImpact,
   ManagedChannelDefault,
+  ManagedChannelDefaultMutation,
   ManagedMultiConnection,
   ManagedMultiRoute,
 } from "@azents/public-client";
@@ -47,6 +48,7 @@ export interface WorkspaceSlackAppsContainerOutput {
   defaultOffset: number;
   routeImpact: ExternalChannelMultiRouteImpact | null;
   connectionImpact: ExternalChannelMultiConnectionImpact | null;
+  defaultMutation: ManagedChannelDefaultMutation | null;
   previewRouteId: string | null;
   previewDisconnect: boolean;
   setupDraft: MultiConnectionDraft;
@@ -151,6 +153,8 @@ export function useWorkspaceSlackAppsContainer({
   const [defaultRouteId, setDefaultRouteId] = useState("");
   const [previewRouteId, setPreviewRouteId] = useState<string | null>(null);
   const [previewDisconnect, setPreviewDisconnect] = useState(false);
+  const [defaultMutation, setDefaultMutation] =
+    useState<ManagedChannelDefaultMutation | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const meQuery = trpc.workspaceMember.me.useQuery({ handle });
   const listQuery = trpc.externalChannel.listMultiConnections.useQuery({
@@ -363,7 +367,8 @@ export function useWorkspaceSlackAppsContainer({
     });
   const replaceDefaultMutation =
     trpc.externalChannel.replaceMultiChannelDefault.useMutation({
-      onSuccess: () => {
+      onSuccess: (result) => {
+        setDefaultMutation(result);
         if (interactionId === null) {
           setProviderChannelId("");
         }
@@ -373,7 +378,10 @@ export function useWorkspaceSlackAppsContainer({
     });
   const clearDefaultMutation =
     trpc.externalChannel.clearMultiChannelDefault.useMutation({
-      onSuccess: () => void refresh(),
+      onSuccess: (result) => {
+        setDefaultMutation(result);
+        void refresh();
+      },
       onError: (error) => void fail(error),
     });
   const disconnectMutation =
@@ -442,6 +450,7 @@ export function useWorkspaceSlackAppsContainer({
     defaultOffset,
     routeImpact: routeImpactQuery.data ?? null,
     connectionImpact: connectionImpactQuery.data ?? null,
+    defaultMutation,
     previewRouteId,
     previewDisconnect,
     setupDraft,
@@ -478,6 +487,7 @@ export function useWorkspaceSlackAppsContainer({
       setDefaultRouteId("");
       setPreviewRouteId(null);
       setPreviewDisconnect(false);
+      setDefaultMutation(null);
       setActionError(null);
     },
     onSetupDraftChange: setSetupDraft,
@@ -603,6 +613,7 @@ export function useWorkspaceSlackAppsContainer({
         generation !== null
       ) {
         setActionError(null);
+        setDefaultMutation(null);
         replaceDefaultMutation.mutate({
           handle,
           connectionId: selectedConnectionId,
@@ -616,6 +627,7 @@ export function useWorkspaceSlackAppsContainer({
     onClearDefault: (channelId) => {
       if (selectedConnectionId !== null && generation !== null) {
         setActionError(null);
+        setDefaultMutation(null);
         clearDefaultMutation.mutate({
           handle,
           connectionId: selectedConnectionId,
@@ -656,6 +668,7 @@ export function useWorkspaceSlackAppsContainer({
       setDefaultRouteId("");
       setPreviewRouteId(null);
       setPreviewDisconnect(false);
+      setDefaultMutation(null);
       setActionError(null);
     },
     onRoutePage: (offset) => {

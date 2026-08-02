@@ -276,6 +276,7 @@ async def test_archive_selects_only_active_work_for_progress_cleanup() -> None:
     presence = cast(RDBExternalChannelDeliveryAttempt, session.added[0])
     assert presence.request_payload == {
         "control_kind": "session_presence",
+        "control_version": 2,
         "presence_state": "left",
         "tenant_id": "tenant-1",
         "channel_id": "channel-1",

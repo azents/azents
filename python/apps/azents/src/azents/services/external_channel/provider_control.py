@@ -9,6 +9,8 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.config import Config
+from azents.core.deps import get_config
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
@@ -28,6 +30,7 @@ class ExternalChannelProviderControlDrain:
     """Aggregate content-free result of one bounded provider-control drain."""
 
     stale_unknown: int
+    settings_controls_created: int
     attempted: int
 
 
@@ -47,6 +50,7 @@ class ExternalChannelProviderControlService:
         ExternalChannelActionService,
         Depends(ExternalChannelActionService),
     ]
+    config: Annotated[Config, Depends(get_config)]
     stale_threshold: datetime.timedelta = _DEFAULT_STALE_THRESHOLD
     interval: datetime.timedelta = _DEFAULT_INTERVAL
     limit: int = _DEFAULT_LIMIT
@@ -60,11 +64,18 @@ class ExternalChannelProviderControlService:
         while not shutdown_event.is_set():
             try:
                 result = await self.drain_once()
-                if result.stale_unknown or result.attempted:
+                if (
+                    result.stale_unknown
+                    or result.settings_controls_created
+                    or result.attempted
+                ):
                     logger.info(
                         "Drained External Channel provider controls",
                         extra={
                             "stale_unknown": result.stale_unknown,
+                            "settings_controls_created": (
+                                result.settings_controls_created
+                            ),
                             "attempted": result.attempted,
                         },
                     )
@@ -97,6 +108,14 @@ class ExternalChannelProviderControlService:
                     limit=self.limit,
                 )
             )
+            settings_control_ids = (
+                await self.repository.ensure_binding_settings_available_delivery_ids(
+                    session,
+                    limit=self.limit,
+                )
+                if self.config.external_channel_participation_enabled
+                else []
+            )
             delivery_attempt_ids = (
                 await self.repository.list_pending_provider_control_delivery_ids(
                     session,
@@ -111,6 +130,7 @@ class ExternalChannelProviderControlService:
                 attempted += 1
         return ExternalChannelProviderControlDrain(
             stale_unknown=stale_unknown,
+            settings_controls_created=len(settings_control_ids),
             attempted=attempted,
         )
 
@@ -132,10 +152,12 @@ def get_external_channel_provider_control_service(
         ExternalChannelActionService,
         Depends(ExternalChannelActionService),
     ],
+    config: Annotated[Config, Depends(get_config)],
 ) -> ExternalChannelProviderControlService:
     """Compose provider-control delivery without exposing worker tuning as API input."""
     return ExternalChannelProviderControlService(
         session_manager=session_manager,
         repository=repository,
         action_service=action_service,
+        config=config,
     )

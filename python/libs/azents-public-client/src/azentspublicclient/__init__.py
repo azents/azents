@@ -182,6 +182,7 @@ __all__ = [
     "ExternalChannelChannelDefaultStatus",
     "ExternalChannelConnectionStatus",
     "ExternalChannelConnectionStatusSnapshot",
+    "ExternalChannelConversationLocation",
     "ExternalChannelCredentialSnapshot",
     "ExternalChannelDecisionInput",
     "ExternalChannelDeliveryOperation",
@@ -192,6 +193,7 @@ __all__ = [
     "ExternalChannelMultiRouteImpact",
     "ExternalChannelProvider",
     "ExternalChannelProviderIdentity",
+    "ExternalChannelResourceType",
     "ExternalChannelResponseMode",
     "ExternalChannelResponseModeSetting",
     "ExternalChannelRouteCatalogStatus",
@@ -265,6 +267,7 @@ __all__ = [
     "ManagedBlock",
     "ManagedChannelDefault",
     "ManagedChannelDefaultListResponse",
+    "ManagedChannelDefaultMutation",
     "ManagedConnection",
     "ManagedConnectionListResponse",
     "ManagedConnectionSetup",
@@ -621,6 +624,7 @@ from azentspublicclient.models.external_channel_capability_snapshot import Exter
 from azentspublicclient.models.external_channel_channel_default_status import ExternalChannelChannelDefaultStatus as ExternalChannelChannelDefaultStatus
 from azentspublicclient.models.external_channel_connection_status import ExternalChannelConnectionStatus as ExternalChannelConnectionStatus
 from azentspublicclient.models.external_channel_connection_status_snapshot import ExternalChannelConnectionStatusSnapshot as ExternalChannelConnectionStatusSnapshot
+from azentspublicclient.models.external_channel_conversation_location import ExternalChannelConversationLocation as ExternalChannelConversationLocation
 from azentspublicclient.models.external_channel_credential_snapshot import ExternalChannelCredentialSnapshot as ExternalChannelCredentialSnapshot
 from azentspublicclient.models.external_channel_decision_input import ExternalChannelDecisionInput as ExternalChannelDecisionInput
 from azentspublicclient.models.external_channel_delivery_operation import ExternalChannelDeliveryOperation as ExternalChannelDeliveryOperation
@@ -631,6 +635,7 @@ from azentspublicclient.models.external_channel_multi_impact_default import Exte
 from azentspublicclient.models.external_channel_multi_route_impact import ExternalChannelMultiRouteImpact as ExternalChannelMultiRouteImpact
 from azentspublicclient.models.external_channel_provider import ExternalChannelProvider as ExternalChannelProvider
 from azentspublicclient.models.external_channel_provider_identity import ExternalChannelProviderIdentity as ExternalChannelProviderIdentity
+from azentspublicclient.models.external_channel_resource_type import ExternalChannelResourceType as ExternalChannelResourceType
 from azentspublicclient.models.external_channel_response_mode import ExternalChannelResponseMode as ExternalChannelResponseMode
 from azentspublicclient.models.external_channel_response_mode_setting import ExternalChannelResponseModeSetting as ExternalChannelResponseModeSetting
 from azentspublicclient.models.external_channel_route_catalog_status import ExternalChannelRouteCatalogStatus as ExternalChannelRouteCatalogStatus
@@ -704,6 +709,7 @@ from azentspublicclient.models.managed_binding_list_response import ManagedBindi
 from azentspublicclient.models.managed_block import ManagedBlock as ManagedBlock
 from azentspublicclient.models.managed_channel_default import ManagedChannelDefault as ManagedChannelDefault
 from azentspublicclient.models.managed_channel_default_list_response import ManagedChannelDefaultListResponse as ManagedChannelDefaultListResponse
+from azentspublicclient.models.managed_channel_default_mutation import ManagedChannelDefaultMutation as ManagedChannelDefaultMutation
 from azentspublicclient.models.managed_connection import ManagedConnection as ManagedConnection
 from azentspublicclient.models.managed_connection_list_response import ManagedConnectionListResponse as ManagedConnectionListResponse
 from azentspublicclient.models.managed_connection_setup import ManagedConnectionSetup as ManagedConnectionSetup

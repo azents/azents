@@ -65,7 +65,8 @@ const binding: ManagedBinding = {
   agent_session_id: session.id,
   provider: "slack",
   response_mode: "all_messages",
-  resource_type: "private_channel_thread",
+  resource_type: "thread",
+  conversation_location: "threads",
   resource_label: "#incident-database · thread",
   connected_at: "2026-07-22T02:05:00Z",
   disconnected_at: null,
@@ -238,6 +239,25 @@ export const MentionsOnly = {
       type: "LOADED",
       session,
       bindings: [{ ...binding, response_mode: "mention_only" }],
+      grants: [grant],
+    },
+  },
+} satisfies Story;
+
+export const ParentChannel = {
+  args: {
+    state: {
+      type: "LOADED",
+      session,
+      bindings: [
+        {
+          ...binding,
+          id: "binding_parent_01",
+          resource_type: "parent_channel",
+          conversation_location: "channel",
+          resource_label: "#incident-database",
+        },
+      ],
       grants: [grant],
     },
   },

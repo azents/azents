@@ -10,7 +10,10 @@ Name | Type | Description | Notes
 **generation** | **datetime** |  | 
 **active_route_count** | **int** |  | 
 **active_default_count** | **int** |  | 
+**active_participation_setting_count** | **int** |  | 
+**nonterminal_setup_claim_count** | **int** |  | 
 **active_binding_count** | **int** |  | 
+**connected_parent_binding_count** | **int** |  | 
 **bound_resource_count** | **int** |  | 
 **open_admission_count** | **int** |  | 
 **pending_access_request_count** | **int** |  | 

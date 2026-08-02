@@ -17,25 +17,25 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, StrictInt
-from typing import Any, ClassVar, Dict, List
+from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt
+from typing import Any, ClassVar, Dict, List, Optional
+from azentspublicclient.models.managed_channel_default import ManagedChannelDefault
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ManagedMultiConnectionDisconnect(BaseModel):
+class ManagedChannelDefaultMutation(BaseModel):
     """
-    Sanitized terminal Multi App disconnect summary.
+    Sanitized selected-Agent mutation result and terminal lifecycle impact.
     """ # noqa: E501
-    disconnected_route_count: StrictInt
-    invalidated_default_count: StrictInt
+    channel_default: Optional[ManagedChannelDefault]
+    changed: StrictBool
     invalidated_participation_setting_count: StrictInt
     terminated_setup_claim_count: StrictInt
-    expired_admission_count: StrictInt
-    expired_access_request_count: StrictInt
-    unavailable_resource_count: StrictInt
-    disconnected_binding_count: StrictInt
+    expired_interaction_count: StrictInt
+    disconnected_parent_binding_count: StrictInt
+    cleanup_delivery_count: StrictInt
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["disconnected_route_count", "invalidated_default_count", "invalidated_participation_setting_count", "terminated_setup_claim_count", "expired_admission_count", "expired_access_request_count", "unavailable_resource_count", "disconnected_binding_count"]
+    __properties: ClassVar[List[str]] = ["channel_default", "changed", "invalidated_participation_setting_count", "terminated_setup_claim_count", "expired_interaction_count", "disconnected_parent_binding_count", "cleanup_delivery_count"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -55,7 +55,7 @@ class ManagedMultiConnectionDisconnect(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ManagedMultiConnectionDisconnect from a JSON string"""
+        """Create an instance of ManagedChannelDefaultMutation from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -78,16 +78,24 @@ class ManagedMultiConnectionDisconnect(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of channel_default
+        if self.channel_default:
+            _dict['channel_default'] = self.channel_default.to_dict()
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if channel_default (nullable) is None
+        # and model_fields_set contains the field
+        if self.channel_default is None and "channel_default" in self.model_fields_set:
+            _dict['channel_default'] = None
+
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ManagedMultiConnectionDisconnect from a dict"""
+        """Create an instance of ManagedChannelDefaultMutation from a dict"""
         if obj is None:
             return None
 
@@ -95,14 +103,13 @@ class ManagedMultiConnectionDisconnect(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "disconnected_route_count": obj.get("disconnected_route_count"),
-            "invalidated_default_count": obj.get("invalidated_default_count"),
+            "channel_default": ManagedChannelDefault.from_dict(obj["channel_default"]) if obj.get("channel_default") is not None else None,
+            "changed": obj.get("changed"),
             "invalidated_participation_setting_count": obj.get("invalidated_participation_setting_count"),
             "terminated_setup_claim_count": obj.get("terminated_setup_claim_count"),
-            "expired_admission_count": obj.get("expired_admission_count"),
-            "expired_access_request_count": obj.get("expired_access_request_count"),
-            "unavailable_resource_count": obj.get("unavailable_resource_count"),
-            "disconnected_binding_count": obj.get("disconnected_binding_count")
+            "expired_interaction_count": obj.get("expired_interaction_count"),
+            "disconnected_parent_binding_count": obj.get("disconnected_parent_binding_count"),
+            "cleanup_delivery_count": obj.get("cleanup_delivery_count")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

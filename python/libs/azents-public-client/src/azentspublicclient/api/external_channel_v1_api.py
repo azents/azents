@@ -32,8 +32,8 @@ from azentspublicclient.models.managed_access_response import ManagedAccessRespo
 from azentspublicclient.models.managed_approval_request import ManagedApprovalRequest
 from azentspublicclient.models.managed_binding import ManagedBinding
 from azentspublicclient.models.managed_binding_list_response import ManagedBindingListResponse
-from azentspublicclient.models.managed_channel_default import ManagedChannelDefault
 from azentspublicclient.models.managed_channel_default_list_response import ManagedChannelDefaultListResponse
+from azentspublicclient.models.managed_channel_default_mutation import ManagedChannelDefaultMutation
 from azentspublicclient.models.managed_connection import ManagedConnection
 from azentspublicclient.models.managed_connection_list_response import ManagedConnectionListResponse
 from azentspublicclient.models.managed_connection_setup import ManagedConnectionSetup
@@ -701,7 +701,7 @@ class ExternalChannelV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> None:
+    ) -> ManagedChannelDefaultMutation:
         """Clear Multi Discord Channel Default
 
         Generation-fence clearing one active Multi App channel default.
@@ -748,7 +748,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '204': None,
+            '200': "ManagedChannelDefaultMutation",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -781,7 +781,7 @@ class ExternalChannelV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[None]:
+    ) -> ApiResponse[ManagedChannelDefaultMutation]:
         """Clear Multi Discord Channel Default
 
         Generation-fence clearing one active Multi App channel default.
@@ -828,7 +828,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '204': None,
+            '200': "ManagedChannelDefaultMutation",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -908,7 +908,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '204': None,
+            '200': "ManagedChannelDefaultMutation",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -1023,7 +1023,7 @@ class ExternalChannelV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> None:
+    ) -> ManagedChannelDefaultMutation:
         """Clear Multi Slack Channel Default
 
         Generation-fence clearing one active Multi App channel default.
@@ -1070,7 +1070,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '204': None,
+            '200': "ManagedChannelDefaultMutation",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -1103,7 +1103,7 @@ class ExternalChannelV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[None]:
+    ) -> ApiResponse[ManagedChannelDefaultMutation]:
         """Clear Multi Slack Channel Default
 
         Generation-fence clearing one active Multi App channel default.
@@ -1150,7 +1150,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '204': None,
+            '200': "ManagedChannelDefaultMutation",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -1230,7 +1230,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '204': None,
+            '200': "ManagedChannelDefaultMutation",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -9938,7 +9938,7 @@ class ExternalChannelV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ManagedChannelDefault:
+    ) -> ManagedChannelDefaultMutation:
         """Replace Multi Discord Channel Default
 
         Generation-fence replacement of one Multi App channel default.
@@ -9985,7 +9985,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ManagedChannelDefault",
+            '200': "ManagedChannelDefaultMutation",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -10018,7 +10018,7 @@ class ExternalChannelV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[ManagedChannelDefault]:
+    ) -> ApiResponse[ManagedChannelDefaultMutation]:
         """Replace Multi Discord Channel Default
 
         Generation-fence replacement of one Multi App channel default.
@@ -10065,7 +10065,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ManagedChannelDefault",
+            '200': "ManagedChannelDefaultMutation",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -10145,7 +10145,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ManagedChannelDefault",
+            '200': "ManagedChannelDefaultMutation",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -10260,7 +10260,7 @@ class ExternalChannelV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ManagedChannelDefault:
+    ) -> ManagedChannelDefaultMutation:
         """Replace Multi Slack Channel Default
 
         Generation-fence replacement of one Multi App channel default.
@@ -10307,7 +10307,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ManagedChannelDefault",
+            '200': "ManagedChannelDefaultMutation",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -10340,7 +10340,7 @@ class ExternalChannelV1Api:
         _content_type: Optional[StrictStr] = None,
         _headers: Optional[Dict[StrictStr, Any]] = None,
         _host_index: Annotated[StrictInt, Field(ge=0, le=0)] = 0,
-    ) -> ApiResponse[ManagedChannelDefault]:
+    ) -> ApiResponse[ManagedChannelDefaultMutation]:
         """Replace Multi Slack Channel Default
 
         Generation-fence replacement of one Multi App channel default.
@@ -10387,7 +10387,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ManagedChannelDefault",
+            '200': "ManagedChannelDefaultMutation",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(
@@ -10467,7 +10467,7 @@ class ExternalChannelV1Api:
         )
 
         _response_types_map: Dict[str, Optional[str]] = {
-            '200': "ManagedChannelDefault",
+            '200': "ManagedChannelDefaultMutation",
             '422': "HTTPValidationError",
         }
         response_data = self.api_client.call_api(

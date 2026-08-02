@@ -10,6 +10,7 @@ from azents.services.external_channel.discord_presentation import (
     DISCORD_DELIVERY_TEXT_LIMIT,
     render_discord_progress,
     render_discord_session_presence,
+    render_discord_settings_available,
     split_discord_markdown,
 )
 
@@ -70,6 +71,44 @@ def test_session_presence_uses_titleless_embed_navigation_and_settings() -> None
                     "label": "View session",
                     "url": "https://azents.example/session",
                 }
+            ],
+        }
+    ]
+
+
+def test_existing_binding_settings_control_does_not_repeat_joined_copy() -> None:
+    """The rollout control exposes both actions without rewriting presence history."""
+    presentation = render_discord_settings_available(
+        agent_name="Research Agent",
+        session_url="https://azents.example/session",
+        settings_custom_id="signed-settings",
+    )
+
+    assert presentation.embeds == [
+        {
+            "description": (
+                "Conversation settings are available for **Research Agent**."
+            ),
+            "color": 0x5865F2,
+        }
+    ]
+    assert "joined" not in str(presentation.embeds)
+    assert presentation.components == [
+        {
+            "type": 1,
+            "components": [
+                {
+                    "type": 2,
+                    "style": 5,
+                    "label": "View session",
+                    "url": "https://azents.example/session",
+                },
+                {
+                    "type": 2,
+                    "style": 2,
+                    "label": "Conversation settings",
+                    "custom_id": "signed-settings",
+                },
             ],
         }
     ]

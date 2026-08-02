@@ -6129,7 +6129,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ManagedChannelDefault"
+                  "$ref": "#/components/schemas/ManagedChannelDefaultMutation"
                 }
               }
             }
@@ -6198,8 +6198,15 @@
           }
         },
         "responses": {
-          "204": {
-            "description": "Successful Response"
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedChannelDefaultMutation"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -6819,7 +6826,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ManagedChannelDefault"
+                  "$ref": "#/components/schemas/ManagedChannelDefaultMutation"
                 }
               }
             }
@@ -6888,8 +6895,15 @@
           }
         },
         "responses": {
-          "204": {
-            "description": "Successful Response"
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedChannelDefaultMutation"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -17537,6 +17551,15 @@
         "title": "ExternalChannelConnectionStatusSnapshot",
         "description": "Redacted current connection status for service and future API projection."
       },
+      "ExternalChannelConversationLocation": {
+        "type": "string",
+        "enum": [
+          "channel",
+          "threads"
+        ],
+        "title": "ExternalChannelConversationLocation",
+        "description": "Selected provider conversation location for one parent channel."
+      },
       "ExternalChannelCredentialSnapshot": {
         "properties": {
           "provider": {
@@ -17635,9 +17658,21 @@
             "type": "integer",
             "title": "Active Default Count"
           },
+          "active_participation_setting_count": {
+            "type": "integer",
+            "title": "Active Participation Setting Count"
+          },
+          "nonterminal_setup_claim_count": {
+            "type": "integer",
+            "title": "Nonterminal Setup Claim Count"
+          },
           "active_binding_count": {
             "type": "integer",
             "title": "Active Binding Count"
+          },
+          "connected_parent_binding_count": {
+            "type": "integer",
+            "title": "Connected Parent Binding Count"
           },
           "bound_resource_count": {
             "type": "integer",
@@ -17672,7 +17707,10 @@
           "generation",
           "active_route_count",
           "active_default_count",
+          "active_participation_setting_count",
+          "nonterminal_setup_claim_count",
           "active_binding_count",
+          "connected_parent_binding_count",
           "bound_resource_count",
           "open_admission_count",
           "pending_access_request_count",
@@ -17791,9 +17829,21 @@
             "type": "integer",
             "title": "Active Default Count"
           },
+          "active_participation_setting_count": {
+            "type": "integer",
+            "title": "Active Participation Setting Count"
+          },
+          "nonterminal_setup_claim_count": {
+            "type": "integer",
+            "title": "Nonterminal Setup Claim Count"
+          },
           "active_binding_count": {
             "type": "integer",
             "title": "Active Binding Count"
+          },
+          "connected_parent_binding_count": {
+            "type": "integer",
+            "title": "Connected Parent Binding Count"
           },
           "bound_resource_count": {
             "type": "integer",
@@ -17827,7 +17877,10 @@
           "route_id",
           "generation",
           "active_default_count",
+          "active_participation_setting_count",
+          "nonterminal_setup_claim_count",
           "active_binding_count",
+          "connected_parent_binding_count",
           "bound_resource_count",
           "open_admission_count",
           "pending_access_request_count",
@@ -17880,6 +17933,15 @@
         ],
         "title": "ExternalChannelProviderIdentity",
         "description": "Validated non-secret identity for one installed provider application."
+      },
+      "ExternalChannelResourceType": {
+        "type": "string",
+        "enum": [
+          "parent_channel",
+          "thread"
+        ],
+        "title": "ExternalChannelResourceType",
+        "description": "Provider resource type represented by an external conversation."
       },
       "ExternalChannelResponseMode": {
         "type": "string",
@@ -20121,8 +20183,10 @@
             "$ref": "#/components/schemas/ExternalChannelResponseMode"
           },
           "resource_type": {
-            "type": "string",
-            "title": "Resource Type"
+            "$ref": "#/components/schemas/ExternalChannelResourceType"
+          },
+          "conversation_location": {
+            "$ref": "#/components/schemas/ExternalChannelConversationLocation"
           },
           "resource_label": {
             "type": "string",
@@ -20193,6 +20257,7 @@
           "provider",
           "response_mode",
           "resource_type",
+          "conversation_location",
           "resource_label",
           "connected_at",
           "disconnected_at",
@@ -20331,8 +20396,26 @@
             "$ref": "#/components/schemas/ExternalChannelChannelDefaultStatus"
           },
           "configured_by_user_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Configured By User Id"
+          },
+          "configured_by_principal_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configured By Principal Id"
           },
           "invalidated_at": {
             "anyOf": [
@@ -20377,6 +20460,7 @@
           "agent_name",
           "status",
           "configured_by_user_id",
+          "configured_by_principal_id",
           "invalidated_at",
           "invalidation_reason",
           "created_at",
@@ -20400,6 +20484,56 @@
           "items"
         ],
         "title": "ManagedChannelDefaultListResponse"
+      },
+      "ManagedChannelDefaultMutation": {
+        "properties": {
+          "channel_default": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ManagedChannelDefault"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "invalidated_participation_setting_count": {
+            "type": "integer",
+            "title": "Invalidated Participation Setting Count"
+          },
+          "terminated_setup_claim_count": {
+            "type": "integer",
+            "title": "Terminated Setup Claim Count"
+          },
+          "expired_interaction_count": {
+            "type": "integer",
+            "title": "Expired Interaction Count"
+          },
+          "disconnected_parent_binding_count": {
+            "type": "integer",
+            "title": "Disconnected Parent Binding Count"
+          },
+          "cleanup_delivery_count": {
+            "type": "integer",
+            "title": "Cleanup Delivery Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "channel_default",
+          "changed",
+          "invalidated_participation_setting_count",
+          "terminated_setup_claim_count",
+          "expired_interaction_count",
+          "disconnected_parent_binding_count",
+          "cleanup_delivery_count"
+        ],
+        "title": "ManagedChannelDefaultMutation",
+        "description": "Sanitized selected-Agent mutation result and terminal lifecycle impact."
       },
       "ManagedConnection": {
         "properties": {
@@ -20966,6 +21100,14 @@
             "type": "integer",
             "title": "Invalidated Default Count"
           },
+          "invalidated_participation_setting_count": {
+            "type": "integer",
+            "title": "Invalidated Participation Setting Count"
+          },
+          "terminated_setup_claim_count": {
+            "type": "integer",
+            "title": "Terminated Setup Claim Count"
+          },
           "expired_admission_count": {
             "type": "integer",
             "title": "Expired Admission Count"
@@ -20987,6 +21129,8 @@
         "required": [
           "disconnected_route_count",
           "invalidated_default_count",
+          "invalidated_participation_setting_count",
+          "terminated_setup_claim_count",
           "expired_admission_count",
           "expired_access_request_count",
           "unavailable_resource_count",

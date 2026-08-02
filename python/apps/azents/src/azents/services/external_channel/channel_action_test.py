@@ -1346,6 +1346,63 @@ async def test_slack_session_presence_control_replaces_open_session() -> None:
 
 
 @pytest.mark.asyncio
+async def test_slack_existing_binding_settings_control_has_both_actions() -> None:
+    """The rollout control adds settings without repeating joined presence."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "operation": ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            "resource_id": "resource-1",
+            "agent_name": "Research Agent",
+            "request_payload": {
+                "control_kind": "binding_settings_available",
+                "control_version": 2,
+                "tenant_id": "T1",
+                "channel_id": "C1",
+                "thread_ts": "1.000001",
+            },
+        }
+    )
+
+    class _SettingsAvailableSlackClient(_SlackClient):
+        async def post_blocks(self, **kwargs: object) -> SlackControlMessageResult:
+            self.events.append("provider")
+            blocks = cast(list[dict[str, object]], kwargs["blocks"])
+            assert kwargs["text"] == (
+                "Conversation settings are available for Research Agent."
+            )
+            assert "joined" not in str(blocks)
+            actions = cast(list[dict[str, object]], blocks[1]["elements"])
+            labels: list[object] = []
+            for action in actions:
+                text = cast(dict[str, object], action["text"])
+                labels.append(text["text"])
+            assert labels == ["View session", "Conversation settings"]
+            assert isinstance(actions[1]["value"], str)
+            return self._result()
+
+    service = _service(
+        events,
+        repository,
+        _SettingsAvailableSlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key="slack:T1:C1:2.000001",
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+    )
+
+    result = await service.attempt_delivery("delivery-1")
+
+    assert result is ExternalChannelDeliveryStatus.DELIVERED
+    assert events == ["start", "commit", "provider", "finish", "commit"]
+
+
+@pytest.mark.asyncio
 async def test_discord_session_presence_control_uses_signed_settings_action() -> None:
     """A joined Discord binding presence contains a signed settings action."""
     events: list[str] = []
@@ -1427,6 +1484,64 @@ async def test_discord_session_presence_control_uses_signed_settings_action() ->
                 ],
             },
         )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_discord_existing_binding_settings_control_has_both_actions() -> None:
+    """The rollout control adds settings without repeating joined presence."""
+    events: list[str] = []
+    repository = _RepositoryDouble(events)
+    repository.target = repository.target.model_copy(
+        update={
+            "provider": ExternalChannelProvider.DISCORD,
+            "provider_tenant_id": "111",
+            "operation": ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            "agent_name": "Research Agent",
+            "request_payload": {
+                "control_kind": "binding_settings_available",
+                "control_version": 2,
+                "guild_id": "111",
+                "channel_id": "333",
+            },
+        }
+    )
+    discord_client = _DiscordClient()
+    service = _service(
+        events,
+        repository,
+        _SlackClient(
+            events,
+            SlackControlMessageResult(
+                status="delivered",
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+            ),
+        ),
+        discord_client=discord_client,
+    )
+
+    result = await service.attempt_delivery("delivery-1")
+
+    assert result is ExternalChannelDeliveryStatus.DELIVERED
+    assert discord_client.calls[0][0] == "create"
+    create = discord_client.calls[0][1]
+    embeds = cast(list[dict[str, object]], create["embeds"])
+    assert "joined" not in str(embeds)
+    assert embeds == [
+        {
+            "description": (
+                "Conversation settings are available for **Research Agent**."
+            ),
+            "color": 0x5865F2,
+        }
+    ]
+    components = cast(list[dict[str, object]], create["components"])
+    actions = cast(list[dict[str, object]], components[0]["components"])
+    assert [action["label"] for action in actions] == [
+        "View session",
+        "Conversation settings",
     ]
 
 

@@ -9,7 +9,8 @@ Name | Type | Description | Notes
 **agent_session_id** | **str** |  | 
 **provider** | [**ExternalChannelProvider**](ExternalChannelProvider.md) |  | 
 **response_mode** | [**ExternalChannelResponseMode**](ExternalChannelResponseMode.md) |  | 
-**resource_type** | **str** |  | 
+**resource_type** | [**ExternalChannelResourceType**](ExternalChannelResourceType.md) |  | 
+**conversation_location** | [**ExternalChannelConversationLocation**](ExternalChannelConversationLocation.md) |  | 
 **resource_label** | **str** |  | 
 **connected_at** | **datetime** |  | 
 **disconnected_at** | **datetime** |  | 

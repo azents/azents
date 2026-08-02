@@ -34,6 +34,9 @@ from azents.core.external_channel_file import (
 from azents.core.external_channel_progress import (
     ExternalChannelDesiredProgress,
 )
+from azents.core.external_channel_session_presence import (
+    binding_settings_available_payload,
+)
 from azents.core.slack_external_channel_progress import (
     SlackProgressPresentation,
     render_slack_persisted_progress,
@@ -3149,6 +3152,105 @@ class ExternalChannelWorkRepository:
         )
         return len(recovered_ids)
 
+    async def ensure_binding_settings_available_delivery_ids(
+        self,
+        session: AsyncSession,
+        *,
+        limit: int,
+    ) -> list[str]:
+        """Create bounded version-2 settings controls for connected Bindings."""
+        if limit <= 0:
+            raise ValueError("Binding settings reconciliation limit must be positive.")
+        existing_attempt = sa.exists(
+            sa.select(RDBExternalChannelDeliveryAttempt.id).where(
+                RDBExternalChannelDeliveryAttempt.origin_type
+                == ExternalChannelDeliveryOriginType.BINDING_SETTINGS_AVAILABLE,
+                RDBExternalChannelDeliveryAttempt.origin_id
+                == RDBExternalChannelBinding.id,
+                RDBExternalChannelDeliveryAttempt.binding_id
+                == RDBExternalChannelBinding.id,
+                RDBExternalChannelDeliveryAttempt.operation
+                == ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            )
+        )
+        rows = (
+            await session.execute(
+                sa.select(
+                    RDBExternalChannelBinding,
+                    RDBExternalChannelResource.labels,
+                )
+                .join(
+                    RDBExternalChannelResource,
+                    RDBExternalChannelResource.id
+                    == RDBExternalChannelBinding.resource_id,
+                )
+                .join(
+                    RDBExternalChannelAgentRoute,
+                    RDBExternalChannelAgentRoute.id
+                    == RDBExternalChannelBinding.route_id,
+                )
+                .join(
+                    RDBExternalChannelConnection,
+                    RDBExternalChannelConnection.id
+                    == RDBExternalChannelAgentRoute.connection_id,
+                )
+                .join(
+                    RDBAgentSession,
+                    RDBAgentSession.id == RDBExternalChannelBinding.agent_session_id,
+                )
+                .join(
+                    RDBAgent,
+                    RDBAgent.id == RDBAgentSession.agent_id,
+                )
+                .where(
+                    RDBExternalChannelBinding.disconnected_at.is_(None),
+                    RDBExternalChannelResource.status
+                    == ExternalChannelResourceStatus.ACTIVE,
+                    RDBExternalChannelAgentRoute.catalog_status
+                    == ExternalChannelRouteCatalogStatus.AVAILABLE,
+                    RDBExternalChannelAgentRoute.agent_id == RDBAgent.id,
+                    RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+                    RDBAgentSession.stop_requested_at.is_(None),
+                    RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
+                    RDBExternalChannelConnection.status
+                    == ExternalChannelConnectionStatus.ACTIVE,
+                    RDBExternalChannelConnection.encrypted_credentials.is_not(None),
+                    ~existing_attempt,
+                )
+                .order_by(
+                    RDBExternalChannelBinding.connected_at,
+                    RDBExternalChannelBinding.id,
+                )
+                .limit(limit)
+                .with_for_update(
+                    of=RDBExternalChannelBinding,
+                    skip_locked=True,
+                )
+            )
+        ).all()
+        delivery_ids: list[str] = []
+        for binding, resource_labels in rows:
+            attempt = RDBExternalChannelDeliveryAttempt(
+                origin_type=(
+                    ExternalChannelDeliveryOriginType.BINDING_SETTINGS_AVAILABLE
+                ),
+                origin_id=binding.id,
+                channel_action_id=None,
+                binding_id=binding.id,
+                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                request_payload=binding_settings_available_payload(resource_labels),
+                status=ExternalChannelDeliveryStatus.PENDING,
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+                attempted_at=None,
+                completed_at=None,
+            )
+            session.add(attempt)
+            delivery_ids.append(attempt.id)
+        await session.flush()
+        return delivery_ids
+
     async def list_pending_provider_control_delivery_ids(
         self,
         session: AsyncSession,
@@ -3358,6 +3460,7 @@ def _provider_control_predicate() -> sa.ColumnElement[bool]:
         RDBExternalChannelDeliveryAttempt.origin_type.in_(
             (
                 ExternalChannelDeliveryOriginType.ACCESS_REQUEST,
+                ExternalChannelDeliveryOriginType.BINDING_SETTINGS_AVAILABLE,
                 ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
             )
         ),
@@ -3381,6 +3484,7 @@ def _is_provider_control_attempt(
         and attempt.origin_type
         in {
             ExternalChannelDeliveryOriginType.ACCESS_REQUEST,
+            ExternalChannelDeliveryOriginType.BINDING_SETTINGS_AVAILABLE,
             ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
         }
         and attempt.operation

@@ -19,3 +19,14 @@ def test_external_channel_gateway_replaces_discord_specific_role() -> None:
     assert 'value: "8013"' in rendered
     assert "name: discord-gateway" not in rendered
     assert "./bin/discordgatewayworker.sh" not in rendered
+
+
+def test_external_channel_participation_rollout_gate_is_deployment_controlled() -> None:
+    """The shared server ConfigMap retains a disabled, overridable rollout gate."""
+    disabled = _helm_template()
+    enabled = _helm_template(
+        "server.env.AZ_EXTERNAL_CHANNEL_PARTICIPATION_ENABLED=true"
+    )
+
+    assert 'AZ_EXTERNAL_CHANNEL_PARTICIPATION_ENABLED: "false"' in disabled
+    assert 'AZ_EXTERNAL_CHANNEL_PARTICIPATION_ENABLED: "true"' in enabled

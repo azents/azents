@@ -8,6 +8,8 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **disconnected_route_count** | **int** |  | 
 **invalidated_default_count** | **int** |  | 
+**invalidated_participation_setting_count** | **int** |  | 
+**terminated_setup_claim_count** | **int** |  | 
 **expired_admission_count** | **int** |  | 
 **expired_access_request_count** | **int** |  | 
 **unavailable_resource_count** | **int** |  | 

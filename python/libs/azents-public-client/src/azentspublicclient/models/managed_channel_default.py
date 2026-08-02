@@ -34,13 +34,14 @@ class ManagedChannelDefault(BaseModel):
     agent_id: Optional[StrictStr]
     agent_name: Optional[StrictStr]
     status: ExternalChannelChannelDefaultStatus
-    configured_by_user_id: StrictStr
+    configured_by_user_id: Optional[StrictStr]
+    configured_by_principal_id: Optional[StrictStr]
     invalidated_at: Optional[datetime]
     invalidation_reason: Optional[StrictStr]
     created_at: datetime
     updated_at: datetime
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "provider_channel_id", "route_id", "agent_id", "agent_name", "status", "configured_by_user_id", "invalidated_at", "invalidation_reason", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "provider_channel_id", "route_id", "agent_id", "agent_name", "status", "configured_by_user_id", "configured_by_principal_id", "invalidated_at", "invalidation_reason", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -98,6 +99,16 @@ class ManagedChannelDefault(BaseModel):
         if self.agent_name is None and "agent_name" in self.model_fields_set:
             _dict['agent_name'] = None
 
+        # set to None if configured_by_user_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.configured_by_user_id is None and "configured_by_user_id" in self.model_fields_set:
+            _dict['configured_by_user_id'] = None
+
+        # set to None if configured_by_principal_id (nullable) is None
+        # and model_fields_set contains the field
+        if self.configured_by_principal_id is None and "configured_by_principal_id" in self.model_fields_set:
+            _dict['configured_by_principal_id'] = None
+
         # set to None if invalidated_at (nullable) is None
         # and model_fields_set contains the field
         if self.invalidated_at is None and "invalidated_at" in self.model_fields_set:
@@ -127,6 +138,7 @@ class ManagedChannelDefault(BaseModel):
             "agent_name": obj.get("agent_name"),
             "status": obj.get("status"),
             "configured_by_user_id": obj.get("configured_by_user_id"),
+            "configured_by_principal_id": obj.get("configured_by_principal_id"),
             "invalidated_at": obj.get("invalidated_at"),
             "invalidation_reason": obj.get("invalidation_reason"),
             "created_at": obj.get("created_at"),

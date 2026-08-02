@@ -37,6 +37,8 @@ class TestManagedMultiConnectionDisconnect(unittest.TestCase):
             return ManagedMultiConnectionDisconnect(
                 disconnected_route_count = 56,
                 invalidated_default_count = 56,
+                invalidated_participation_setting_count = 56,
+                terminated_setup_claim_count = 56,
                 expired_admission_count = 56,
                 expired_access_request_count = 56,
                 unavailable_resource_count = 56,
@@ -46,6 +48,8 @@ class TestManagedMultiConnectionDisconnect(unittest.TestCase):
             return ManagedMultiConnectionDisconnect(
                 disconnected_route_count = 56,
                 invalidated_default_count = 56,
+                invalidated_participation_setting_count = 56,
+                terminated_setup_claim_count = 56,
                 expired_admission_count = 56,
                 expired_access_request_count = 56,
                 unavailable_resource_count = 56,

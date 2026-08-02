@@ -146,6 +146,57 @@ def render_slack_session_presence(
     )
 
 
+def render_slack_settings_available(
+    *,
+    agent_name: str,
+    session_url: str,
+    settings_action_id: str,
+    settings_action_value: str,
+) -> SlackProgressPresentation:
+    """Render one concise existing-Binding settings availability control."""
+    escaped_name = (
+        agent_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+    text = f"Conversation settings are available for {agent_name}."
+    return SlackProgressPresentation(
+        text=text,
+        blocks=[
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        f"Conversation settings are available for *{escaped_name}*."
+                    ),
+                },
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "action_id": "view_azents_session",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "View session",
+                        },
+                        "url": session_url,
+                    },
+                    {
+                        "type": "button",
+                        "action_id": settings_action_id,
+                        "text": {
+                            "type": "plain_text",
+                            "text": "Conversation settings",
+                        },
+                        "value": settings_action_value,
+                    },
+                ],
+            },
+        ],
+    )
+
+
 def _block_id(work_id: str, desired_progress_revision: int) -> str:
     """Derive provider-only message-iteration identity."""
     return f"work_{work_id}_{desired_progress_revision}"

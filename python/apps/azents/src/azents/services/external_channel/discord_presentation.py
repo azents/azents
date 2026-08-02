@@ -102,6 +102,52 @@ def render_discord_session_presence(
     )
 
 
+def render_discord_settings_available(
+    *,
+    agent_name: str,
+    session_url: str,
+    settings_custom_id: str,
+) -> DiscordSessionPresencePresentation:
+    """Render one concise existing-Binding settings availability control."""
+    escaped_name = (
+        agent_name.replace("\\", "\\\\")
+        .replace("*", "\\*")
+        .replace("_", "\\_")
+        .replace("~", "\\~")
+        .replace("`", "\\`")
+    )
+    return DiscordSessionPresencePresentation(
+        text="",
+        embeds=[
+            {
+                "description": (
+                    f"Conversation settings are available for **{escaped_name}**."
+                ),
+                "color": _TRACKER_COLOR,
+            }
+        ],
+        components=[
+            {
+                "type": 1,
+                "components": [
+                    {
+                        "type": 2,
+                        "style": 5,
+                        "label": "View session",
+                        "url": session_url,
+                    },
+                    {
+                        "type": 2,
+                        "style": 2,
+                        "label": "Conversation settings",
+                        "custom_id": settings_custom_id,
+                    },
+                ],
+            }
+        ],
+    )
+
+
 def split_discord_markdown(text: str) -> tuple[str, ...]:
     """Split text into bounded readable parts while balancing fenced code blocks."""
     if not text:

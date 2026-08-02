@@ -32,6 +32,7 @@ def session_presence_payload(
     labels = labels or {}
     payload: dict[str, object] = {
         "control_kind": "session_presence",
+        "control_version": 2,
         "presence_state": state,
     }
     provider = labels.get("provider")
@@ -85,6 +86,16 @@ def session_presence_payload(
             payload["thread_parent_channel_id"] = parent_channel_id
             payload["thread_root_message_id"] = root_message_id
         return payload
+    return payload
+
+
+def binding_settings_available_payload(
+    labels: dict[str, object] | None,
+) -> dict[str, object]:
+    """Build one durable provider target for existing-Binding settings rollout."""
+    payload = session_presence_payload(labels, state="joined")
+    payload["control_kind"] = "binding_settings_available"
+    payload.pop("presence_state")
     return payload
 
 

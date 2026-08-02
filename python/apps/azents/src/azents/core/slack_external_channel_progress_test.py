@@ -12,6 +12,7 @@ from azents.core.slack_external_channel_progress import (
     render_slack_persisted_progress,
     render_slack_progress,
     render_slack_session_presence,
+    render_slack_settings_available,
 )
 
 _SESSION_URL = "https://azents.example/w/team/agents/agent-1/sessions/session-1"
@@ -246,4 +247,42 @@ def test_session_presence_contains_copy_and_navigation() -> None:
     assert left.blocks[0]["text"] == {
         "type": "mrkdwn",
         "text": "*Research Agent* left this conversation.",
+    }
+
+
+def test_existing_binding_settings_control_does_not_repeat_joined_copy() -> None:
+    """The rollout control exposes both actions without rewriting presence history."""
+    presentation = render_slack_settings_available(
+        agent_name="Research Agent",
+        session_url=_SESSION_URL,
+        settings_action_id="azents_conversation_settings_open",
+        settings_action_value="signed-settings-locator",
+    )
+
+    assert presentation.text == (
+        "Conversation settings are available for Research Agent."
+    )
+    assert "joined" not in str(presentation.blocks)
+    assert presentation.blocks[1] == {
+        "type": "actions",
+        "elements": [
+            {
+                "type": "button",
+                "action_id": "view_azents_session",
+                "text": {
+                    "type": "plain_text",
+                    "text": "View session",
+                },
+                "url": _SESSION_URL,
+            },
+            {
+                "type": "button",
+                "action_id": "azents_conversation_settings_open",
+                "text": {
+                    "type": "plain_text",
+                    "text": "Conversation settings",
+                },
+                "value": "signed-settings-locator",
+            },
+        ],
     }

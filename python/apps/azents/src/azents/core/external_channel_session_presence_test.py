@@ -18,6 +18,7 @@ def test_discord_parent_presence_targets_the_parent_channel_directly() -> None:
 
     assert payload == {
         "control_kind": "session_presence",
+        "control_version": 2,
         "presence_state": "joined",
         "guild_id": "111",
         "channel_id": "222",
@@ -40,6 +41,7 @@ def test_discord_thread_presence_retains_thread_provisioning_target() -> None:
 
     assert payload == {
         "control_kind": "session_presence",
+        "control_version": 2,
         "presence_state": "joined",
         "guild_id": "111",
         "channel_id": "333",

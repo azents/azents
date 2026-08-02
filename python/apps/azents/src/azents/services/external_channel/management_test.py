@@ -4,7 +4,7 @@ import datetime
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -13,10 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ClauseElement
 
 from azents.core.enums import (
+    ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
+    ExternalChannelConversationLocation,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
+    ExternalChannelResourceType,
     ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelTransport,
@@ -36,6 +39,7 @@ from azents.repos.external_channel.management import (
 )
 from azents.repos.external_channel.management_data import (
     ManagedBinding,
+    ManagedChannelDefault,
     ManagedConnection,
     ManagedMultiRoute,
 )
@@ -52,6 +56,42 @@ from azents.services.external_channel.management import (
     ExternalChannelResponseModeSetting,
     slack_manifest_guidance,
 )
+
+
+class _Lock:
+    """Provide one owned coordination lease for management tests."""
+
+    def acquire(self, **_: object) -> object:
+        @asynccontextmanager
+        async def owned() -> AsyncGenerator[object, None]:
+            yield SimpleNamespace(assert_owned=AsyncMock())
+
+        return owned()
+
+
+class _RecordingLock:
+    """Record coordination acquisition, ownership, and release order."""
+
+    def __init__(self, name: str, events: list[str]) -> None:
+        self.name = name
+        self.events = events
+
+    def acquire(self, **_: object) -> object:
+        self.events.append(f"{self.name}:acquire")
+
+        @asynccontextmanager
+        async def owned() -> AsyncGenerator[object, None]:
+            self.events.append(f"{self.name}:enter")
+
+            async def assert_owned() -> None:
+                self.events.append(f"{self.name}:owned")
+
+            try:
+                yield SimpleNamespace(assert_owned=assert_owned)
+            finally:
+                self.events.append(f"{self.name}:exit")
+
+        return owned()
 
 
 def _connection() -> ManagedConnection:
@@ -88,7 +128,8 @@ def _binding(
         agent_session_id="session-1",
         provider=ExternalChannelProvider.SLACK,
         response_mode=response_mode,
-        resource_type="thread",
+        resource_type=ExternalChannelResourceType.THREAD,
+        conversation_location=ExternalChannelConversationLocation.THREADS,
         resource_label="Channel thread",
         connected_at=now,
         disconnected_at=None,
@@ -105,6 +146,9 @@ def _management_service(
     repository: AsyncMock,
     agent_repository: AsyncMock,
     agent_admin_repository: AsyncMock,
+    action_service: AsyncMock | None = None,
+    conversation_lock: object | None = None,
+    participation_lock: object | None = None,
 ) -> ExternalChannelManagementService:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
@@ -120,9 +164,159 @@ def _management_service(
         workspace_user_repository=AsyncMock(),
         connection_service=AsyncMock(),
         discord_activation_service=AsyncMock(),
-        action_service=AsyncMock(),
+        action_service=AsyncMock() if action_service is None else action_service,
         access_service=AsyncMock(),
+        conversation_lock=cast(
+            Any,
+            _Lock() if conversation_lock is None else conversation_lock,
+        ),
+        participation_lock=cast(
+            Any,
+            _Lock() if participation_lock is None else participation_lock,
+        ),
     )
+
+
+def _channel_default() -> ManagedChannelDefault:
+    """Build one stable selected-Agent management projection."""
+    now = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
+    return ManagedChannelDefault(
+        id="default-1",
+        provider_channel_id="channel-1",
+        route_id="route-1",
+        agent_id="agent-1",
+        agent_name="Agent One",
+        status=ExternalChannelChannelDefaultStatus.ACTIVE,
+        configured_by_user_id="user-1",
+        configured_by_principal_id=None,
+        invalidated_at=None,
+        invalidation_reason=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+async def test_replace_multi_default_commits_before_cleanup_outside_locks() -> None:
+    """Selected-Agent cleanup starts only after commit and coordination release."""
+    events: list[str] = []
+    expected_generation = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
+    connection = SimpleNamespace(
+        id="connection-1",
+        updated_at=expected_generation,
+    )
+    selected = _channel_default()
+    session = AsyncMock(spec=AsyncSession)
+
+    async def commit() -> None:
+        events.append("commit")
+
+    session.commit.side_effect = commit
+    repository = AsyncMock()
+    repository.get_multi_connection.return_value = connection
+
+    async def replace(*_: object, **__: object) -> object:
+        events.append("repository")
+        return SimpleNamespace(
+            channel_default=selected,
+            changed=True,
+            invalidated_setting_count=1,
+            terminated_setup_claim_count=1,
+            expired_interaction_count=2,
+            disconnected_parent_binding_count=1,
+            cleanup_intent_ids=("cleanup-1", "cleanup-2"),
+        )
+
+    repository.replace_multi_channel_default.side_effect = replace
+    action_service = AsyncMock()
+
+    async def deliver(delivery_id: str) -> None:
+        events.append(f"delivery:{delivery_id}")
+
+    action_service.attempt_delivery.side_effect = deliver
+    service = _management_service(
+        session=session,
+        repository=repository,
+        agent_repository=AsyncMock(),
+        agent_admin_repository=AsyncMock(),
+        action_service=action_service,
+        conversation_lock=_RecordingLock("conversation", events),
+        participation_lock=_RecordingLock("participation", events),
+    )
+
+    result = await service.replace_multi_channel_default(
+        workspace_id="workspace-1",
+        connection_id="connection-1",
+        provider=ExternalChannelProvider.SLACK,
+        provider_channel_id="channel-1",
+        route_id="route-1",
+        user_id="user-1",
+        expected_generation=expected_generation,
+    )
+
+    assert result.channel_default == selected
+    assert result.changed is True
+    assert result.invalidated_participation_setting_count == 1
+    assert result.terminated_setup_claim_count == 1
+    assert result.expired_interaction_count == 2
+    assert result.disconnected_parent_binding_count == 1
+    assert result.cleanup_delivery_count == 2
+    assert events == [
+        "conversation:acquire",
+        "conversation:enter",
+        "conversation:owned",
+        "participation:acquire",
+        "participation:enter",
+        "participation:owned",
+        "repository",
+        "commit",
+        "participation:exit",
+        "conversation:exit",
+        "delivery:cleanup-1",
+        "delivery:cleanup-2",
+    ]
+
+
+async def test_replace_same_multi_default_preserves_connection_generation() -> None:
+    """An already-selected route remains a complete mutation no-op."""
+    expected_generation = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
+    connection = SimpleNamespace(
+        id="connection-1",
+        updated_at=expected_generation,
+    )
+    session = AsyncMock(spec=AsyncSession)
+    repository = AsyncMock()
+    repository.get_multi_connection.return_value = connection
+    repository.replace_multi_channel_default.return_value = SimpleNamespace(
+        channel_default=_channel_default(),
+        changed=False,
+        invalidated_setting_count=0,
+        terminated_setup_claim_count=0,
+        expired_interaction_count=0,
+        disconnected_parent_binding_count=0,
+        cleanup_intent_ids=(),
+    )
+    action_service = AsyncMock()
+    service = _management_service(
+        session=session,
+        repository=repository,
+        agent_repository=AsyncMock(),
+        agent_admin_repository=AsyncMock(),
+        action_service=action_service,
+    )
+
+    await service.replace_multi_channel_default(
+        workspace_id="workspace-1",
+        connection_id="connection-1",
+        provider=ExternalChannelProvider.SLACK,
+        provider_channel_id="channel-1",
+        route_id="route-1",
+        user_id="user-1",
+        expected_generation=expected_generation,
+    )
+
+    assert connection.updated_at == expected_generation
+    session.commit.assert_awaited_once_with()
+    action_service.attempt_delivery.assert_not_awaited()
 
 
 async def test_default_response_mode_read_projects_agent_value() -> None:
@@ -231,6 +425,11 @@ async def test_binding_response_mode_update_uses_full_ownership_scope() -> None:
     """The service supplies Workspace, Agent, Session, and binding ownership."""
     session = AsyncMock(spec=AsyncSession)
     repository = AsyncMock()
+    repository.get_binding_mutation_scope.return_value = SimpleNamespace(
+        connection_id="connection-1",
+        provider_parent_channel_id="channel-1",
+        resource_type=ExternalChannelResourceType.THREAD,
+    )
     repository.update_binding_response_mode.return_value = True
     agent_repository = AsyncMock()
     agent_repository.get_by_id.return_value = SimpleNamespace(
@@ -250,6 +449,7 @@ async def test_binding_response_mode_update_uses_full_ownership_scope() -> None:
         workspace_id="workspace-1",
         agent_id="agent-1",
         workspace_user_id="workspace-user-1",
+        user_id="user-1",
         agent_session_id="session-1",
         binding_id="binding-1",
         setting=ExternalChannelResponseModeSetting(
@@ -264,9 +464,85 @@ async def test_binding_response_mode_update_uses_full_ownership_scope() -> None:
         agent_id="agent-1",
         agent_session_id="session-1",
         binding_id="binding-1",
+        configured_by_user_id="user-1",
         response_mode=ExternalChannelResponseMode.MENTION_ONLY,
     )
     session.commit.assert_awaited_once()
+
+
+async def test_parent_binding_response_mode_update_uses_participation_locks() -> None:
+    """Parent response-mode mutation commits inside canonical coordination locks."""
+    events: list[str] = []
+    session = AsyncMock(spec=AsyncSession)
+
+    async def commit() -> None:
+        events.append("commit")
+
+    session.commit.side_effect = commit
+    repository = AsyncMock()
+    repository.get_binding_mutation_scope.return_value = SimpleNamespace(
+        connection_id="connection-1",
+        provider_parent_channel_id="channel-1",
+        resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+    )
+
+    async def update(*_: object, **__: object) -> bool:
+        events.append("repository")
+        return True
+
+    repository.update_binding_response_mode.side_effect = update
+    agent_repository = AsyncMock()
+    agent_repository.get_by_id.return_value = SimpleNamespace(
+        workspace_id="workspace-1"
+    )
+    agent_admin_repository = AsyncMock()
+    agent_admin_repository.is_admin.return_value = True
+    service = _management_service(
+        session=session,
+        repository=repository,
+        agent_repository=agent_repository,
+        agent_admin_repository=agent_admin_repository,
+        conversation_lock=_RecordingLock("conversation", events),
+        participation_lock=_RecordingLock("participation", events),
+    )
+    service.list_bindings = AsyncMock(
+        return_value=[
+            _binding().model_copy(
+                update={
+                    "resource_type": ExternalChannelResourceType.PARENT_CHANNEL,
+                    "conversation_location": (
+                        ExternalChannelConversationLocation.CHANNEL
+                    ),
+                }
+            )
+        ]
+    )
+
+    result = await service.update_binding_response_mode(
+        workspace_id="workspace-1",
+        agent_id="agent-1",
+        workspace_user_id="workspace-user-1",
+        user_id="user-1",
+        agent_session_id="session-1",
+        binding_id="binding-1",
+        setting=ExternalChannelResponseModeSetting(
+            response_mode=ExternalChannelResponseMode.MENTION_ONLY
+        ),
+    )
+
+    assert result.conversation_location is ExternalChannelConversationLocation.CHANNEL
+    assert events == [
+        "conversation:acquire",
+        "conversation:enter",
+        "conversation:owned",
+        "participation:acquire",
+        "participation:enter",
+        "participation:owned",
+        "repository",
+        "commit",
+        "participation:exit",
+        "conversation:exit",
+    ]
 
 
 async def test_setup_discord_commits_route_before_callback_activation() -> None:
@@ -320,6 +596,8 @@ async def test_setup_discord_commits_route_before_callback_activation() -> None:
         discord_activation_service=activation_service,
         action_service=AsyncMock(),
         access_service=AsyncMock(),
+        conversation_lock=cast(Any, _Lock()),
+        participation_lock=cast(Any, _Lock()),
     )
     managed = _connection().model_copy(
         update={
@@ -398,6 +676,8 @@ async def test_update_discord_commits_reset_before_callback_activation() -> None
         discord_activation_service=activation_service,
         action_service=AsyncMock(),
         access_service=AsyncMock(),
+        conversation_lock=cast(Any, _Lock()),
+        participation_lock=cast(Any, _Lock()),
     )
 
     await service.update_discord(
@@ -470,6 +750,8 @@ async def test_update_multi_discord_commits_reset_before_callback_activation() -
         discord_activation_service=activation_service,
         action_service=AsyncMock(),
         access_service=AsyncMock(),
+        conversation_lock=cast(Any, _Lock()),
+        participation_lock=cast(Any, _Lock()),
     )
 
     await service.update_multi_discord(
@@ -521,6 +803,8 @@ async def test_discord_replacement_failure_leaves_durable_fence_committed() -> N
         discord_activation_service=activation_service,
         action_service=AsyncMock(),
         access_service=AsyncMock(),
+        conversation_lock=cast(Any, _Lock()),
+        participation_lock=cast(Any, _Lock()),
     )
 
     with pytest.raises(ValueError, match="Discord callback failed"):
@@ -726,6 +1010,8 @@ async def test_add_multi_route_returns_existing_available_association() -> None:
         discord_activation_service=AsyncMock(),
         action_service=AsyncMock(),
         access_service=AsyncMock(),
+        conversation_lock=cast(Any, _Lock()),
+        participation_lock=cast(Any, _Lock()),
     )
 
     result = await service.add_multi_route(
@@ -889,6 +1175,8 @@ async def test_disconnect_prepares_cleanup_before_terminal_secret_purge() -> Non
         discord_activation_service=AsyncMock(),
         action_service=action_service,
         access_service=AsyncMock(),
+        conversation_lock=cast(Any, _Lock()),
+        participation_lock=cast(Any, _Lock()),
     )
 
     result = await service.disconnect_connection(
@@ -929,6 +1217,8 @@ async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -
     disconnected = ExternalChannelMultiConnectionDisconnect(
         disconnected_route_count=1,
         invalidated_default_count=0,
+        invalidated_participation_setting_count=0,
+        terminated_setup_claim_count=0,
         expired_admission_count=0,
         expired_access_request_count=0,
         unavailable_resource_count=0,
@@ -977,6 +1267,8 @@ async def test_multi_disconnect_captures_cleanup_before_provider_state_purge() -
         discord_activation_service=AsyncMock(),
         action_service=action_service,
         access_service=AsyncMock(),
+        conversation_lock=cast(Any, _Lock()),
+        participation_lock=cast(Any, _Lock()),
     )
 
     result = await service.disconnect_multi_connection(

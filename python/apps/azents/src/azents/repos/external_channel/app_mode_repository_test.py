@@ -44,6 +44,9 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelChannelDefault,
     RDBExternalChannelConnection,
     RDBExternalChannelDeliveryAttempt,
+    RDBExternalChannelInteraction,
+    RDBExternalChannelParticipationSetting,
+    RDBExternalChannelSetupClaim,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.agent_session import AgentSessionRepository
@@ -1694,6 +1697,7 @@ async def test_manual_binding_disconnect_creates_one_leave_presence(
     assert first == (attempts[0].id,)
     assert attempts[0].request_payload == {
         "control_kind": "session_presence",
+        "control_version": 2,
         "presence_state": "left",
         "tenant_id": "presence-team",
         "channel_id": "presence-channel",
@@ -1701,11 +1705,517 @@ async def test_manual_binding_disconnect_creates_one_leave_presence(
     }
 
 
+async def test_multi_channel_default_transition_terminalizes_only_parent_state(
+    rdb_session: AsyncSession,
+) -> None:
+    """Replace and clear terminalize parent participation without touching threads."""
+    workspace_id = await _workspace(rdb_session, "default-parent-transition")
+    user = await UserRepository().create(
+        rdb_session,
+        UserCreate(email="default-parent-transition@example.com"),
+    )
+    first_agent = await _agent(rdb_session, workspace_id, "default-parent-first")
+    second_agent = await _agent(rdb_session, workspace_id, "default-parent-second")
+    repository = ExternalChannelRepository()
+    management = ExternalChannelManagementRepository()
+    connection = RDBExternalChannelConnection(
+        **_connection_create(
+            workspace_id,
+            provider_app_id="default-parent-app",
+            provider_tenant_id="default-parent-team",
+        )
+        .model_copy(update={"app_mode": ExternalChannelAppMode.MULTI})
+        .model_dump()
+    )
+    rdb_session.add(connection)
+    await rdb_session.flush()
+    first_route = await repository.create_agent_route(
+        rdb_session,
+        _route_create(
+            connection.id,
+            first_agent.id,
+            mode=ExternalChannelAppMode.MULTI,
+        ),
+    )
+    second_route = await repository.create_agent_route(
+        rdb_session,
+        _route_create(
+            connection.id,
+            second_agent.id,
+            mode=ExternalChannelAppMode.MULTI,
+        ),
+    )
+    first_default = await repository.create_channel_default(
+        rdb_session,
+        ExternalChannelChannelDefaultCreate(
+            connection_id=connection.id,
+            provider_channel_id="C-parent",
+            route_id=first_route.id,
+            status=ExternalChannelChannelDefaultStatus.ACTIVE,
+            configured_by_user_id=user.id,
+            configured_by_principal_id=None,
+            invalidated_at=None,
+            invalidation_reason=None,
+        ),
+    )
+    parent_resource = await repository.create_resource_idempotent(
+        rdb_session,
+        ExternalChannelResourceCreate(
+            connection_id=connection.id,
+            resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+            provider_resource_key="C-parent",
+            labels={
+                "provider": "slack",
+                "tenant_id": "default-parent-team",
+                "channel_id": "C-parent",
+            },
+            status=ExternalChannelResourceStatus.ACTIVE,
+            latest_activity_at=_at(1),
+            unavailable_at=None,
+            deleted_at=None,
+        ),
+    )
+    thread_resource = await repository.create_resource_idempotent(
+        rdb_session,
+        ExternalChannelResourceCreate(
+            connection_id=connection.id,
+            resource_type=ExternalChannelResourceType.THREAD,
+            provider_resource_key="C-parent:1.000001",
+            labels={
+                "provider": "slack",
+                "tenant_id": "default-parent-team",
+                "channel_id": "C-parent",
+                "thread_ts": "1.000001",
+            },
+            status=ExternalChannelResourceStatus.ACTIVE,
+            latest_activity_at=_at(2),
+            unavailable_at=None,
+            deleted_at=None,
+        ),
+    )
+    first_parent_session = await AgentSessionRepository().create(
+        rdb_session,
+        AgentSessionCreate(
+            workspace_id=workspace_id,
+            agent_id=first_agent.id,
+            title=None,
+        ),
+    )
+    thread_session = await AgentSessionRepository().create(
+        rdb_session,
+        AgentSessionCreate(
+            workspace_id=workspace_id,
+            agent_id=first_agent.id,
+            title=None,
+        ),
+    )
+    first_parent_binding = await repository.create_binding_idempotent(
+        rdb_session,
+        ExternalChannelBindingCreate(
+            resource_id=parent_resource.id,
+            route_id=first_route.id,
+            agent_session_id=first_parent_session.id,
+            response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+            disconnected_at=None,
+            disconnect_reason=None,
+        ),
+        expected_access_request_id=None,
+    )
+    thread_binding = await repository.create_binding_idempotent(
+        rdb_session,
+        ExternalChannelBindingCreate(
+            resource_id=thread_resource.id,
+            route_id=first_route.id,
+            agent_session_id=thread_session.id,
+            response_mode=ExternalChannelResponseMode.MENTION_ONLY,
+            disconnected_at=None,
+            disconnect_reason=None,
+        ),
+        expected_access_request_id=None,
+    )
+    principal = await repository.create_principal_idempotent(
+        rdb_session,
+        ExternalChannelPrincipalCreate(
+            provider=ExternalChannelProvider.SLACK,
+            provider_tenant_id="default-parent-team",
+            provider_user_id="U-parent",
+            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+            display_name=None,
+            avatar_url=None,
+            profile=None,
+        ),
+    )
+    first_setting = await repository.create_participation_setting(
+        rdb_session,
+        ExternalChannelParticipationSettingCreate(
+            connection_id=connection.id,
+            provider_parent_channel_id="C-parent",
+            route_id=first_route.id,
+            location=ExternalChannelConversationLocation.CHANNEL,
+            response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+            settings_generation=1,
+            configured_by_user_id=None,
+            configured_by_principal_id=principal.id,
+            status=ExternalChannelParticipationSettingStatus.ACTIVE,
+            invalidated_at=None,
+            invalidation_reason=None,
+        ),
+    )
+    position = await repository.create_conversation_position_idempotent(
+        rdb_session,
+        ExternalChannelConversationPositionCreate(
+            connection_id=connection.id,
+            scope_kind=ExternalChannelConversationScopeKind.PARENT_CHANNEL,
+            provider_channel_id="C-parent",
+            provider_thread_key=None,
+            read_through_position=None,
+        ),
+    )
+    pending_first_claim = await repository.create_setup_claim(
+        rdb_session,
+        ExternalChannelSetupClaimCreate(
+            connection_id=connection.id,
+            provider_parent_channel_id="C-parent",
+            route_id=first_route.id,
+            conversation_position_id=position.id,
+            source_resource_id=thread_resource.id,
+            principal_id=principal.id,
+            source_projection={
+                "schema_version": 1,
+                "trigger_message_id": "message-first",
+            },
+            source_revision=1,
+            claim_generation=1,
+            status=ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+            selected_setting_id=None,
+            selected_resource_id=None,
+            selected_source_revision=None,
+            expires_at=_at(50),
+            selected_at=None,
+            completed_at=None,
+        ),
+    )
+    first_claim = await repository.select_setup_claim(
+        rdb_session,
+        claim_id=pending_first_claim.id,
+        expected_claim_generation=pending_first_claim.claim_generation,
+        expected_source_revision=pending_first_claim.source_revision,
+        selected_setting_id=first_setting.id,
+        selected_resource_id=parent_resource.id,
+        selected_at=_at(3),
+    )
+    assert first_claim is not None
+    first_interaction_result = await repository.admit_interaction(
+        rdb_session,
+        _interaction_create(
+            connection.id,
+            key="default-parent-first-interaction",
+            principal_id=principal.id,
+            projection={
+                "provider_parent_channel_id": "C-parent",
+                "interaction_id": "opaque-first",
+            },
+        ).model_copy(
+            update={
+                "setup_claim_id": first_claim.id,
+                "expires_at": _at(50),
+            }
+        ),
+    )
+    assert await management.update_binding_response_mode(
+        rdb_session,
+        workspace_id=workspace_id,
+        agent_id=first_agent.id,
+        agent_session_id=first_parent_session.id,
+        binding_id=first_parent_binding.id,
+        configured_by_user_id=user.id,
+        response_mode=ExternalChannelResponseMode.MENTION_ONLY,
+    )
+    first_setting_after_web_mutation = await rdb_session.get(
+        RDBExternalChannelParticipationSetting,
+        first_setting.id,
+    )
+    first_parent_binding_after_web_mutation = await rdb_session.get(
+        RDBExternalChannelBinding,
+        first_parent_binding.id,
+    )
+    assert first_setting_after_web_mutation is not None
+    assert first_setting_after_web_mutation.settings_generation == 2
+    assert (
+        first_setting_after_web_mutation.response_mode
+        is ExternalChannelResponseMode.MENTION_ONLY
+    )
+    assert first_setting_after_web_mutation.configured_by_user_id == user.id
+    assert first_setting_after_web_mutation.configured_by_principal_id is None
+    assert first_parent_binding_after_web_mutation is not None
+    assert (
+        first_parent_binding_after_web_mutation.response_mode
+        is ExternalChannelResponseMode.MENTION_ONLY
+    )
+    assert await management.update_binding_response_mode(
+        rdb_session,
+        workspace_id=workspace_id,
+        agent_id=first_agent.id,
+        agent_session_id=thread_session.id,
+        binding_id=thread_binding.id,
+        configured_by_user_id=user.id,
+        response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+    )
+    assert first_setting_after_web_mutation.settings_generation == 2
+    thread_binding_after_web_mutation = await rdb_session.get(
+        RDBExternalChannelBinding,
+        thread_binding.id,
+    )
+    assert thread_binding_after_web_mutation is not None
+    assert (
+        thread_binding_after_web_mutation.response_mode
+        is ExternalChannelResponseMode.ALL_MESSAGES
+    )
+
+    no_op = await management.replace_multi_channel_default(
+        rdb_session,
+        workspace_id=workspace_id,
+        connection_id=connection.id,
+        provider=ExternalChannelProvider.SLACK,
+        provider_channel_id="C-parent",
+        route_id=first_route.id,
+        configured_by_user_id=user.id,
+        now=_at(10),
+    )
+
+    assert no_op is not None
+    assert no_op.channel_default is not None
+    assert no_op.channel_default.id == first_default.id
+    assert no_op.channel_default.route_id == first_route.id
+    assert no_op.changed is False
+    assert no_op.cleanup_intent_ids == ()
+    assert first_parent_binding.disconnected_at is None
+
+    replaced = await management.replace_multi_channel_default(
+        rdb_session,
+        workspace_id=workspace_id,
+        connection_id=connection.id,
+        provider=ExternalChannelProvider.SLACK,
+        provider_channel_id="C-parent",
+        route_id=second_route.id,
+        configured_by_user_id=user.id,
+        now=_at(20),
+    )
+
+    assert replaced is not None
+    assert replaced.channel_default is not None
+    assert replaced.changed is True
+    assert replaced.channel_default.route_id == second_route.id
+    assert replaced.invalidated_setting_count == 1
+    assert replaced.terminated_setup_claim_count == 1
+    assert replaced.expired_interaction_count == 1
+    assert replaced.disconnected_parent_binding_count == 1
+    assert len(replaced.cleanup_intent_ids) == 1
+    first_setting_rdb = await rdb_session.get(
+        RDBExternalChannelParticipationSetting,
+        first_setting.id,
+    )
+    first_claim_rdb = await rdb_session.get(
+        RDBExternalChannelSetupClaim, first_claim.id
+    )
+    first_interaction_rdb = await rdb_session.get(
+        RDBExternalChannelInteraction,
+        first_interaction_result.interaction.id,
+    )
+    first_parent_binding_rdb = await rdb_session.get(
+        RDBExternalChannelBinding,
+        first_parent_binding.id,
+    )
+    thread_binding_rdb = await rdb_session.get(
+        RDBExternalChannelBinding,
+        thread_binding.id,
+    )
+    assert first_setting_rdb is not None
+    assert (
+        first_setting_rdb.status
+        is ExternalChannelParticipationSettingStatus.INVALIDATED
+    )
+    assert first_setting_rdb.settings_generation == 3
+    assert first_setting_rdb.invalidation_reason == "selected_agent_replaced"
+    assert first_claim_rdb is not None
+    assert first_claim_rdb.status is ExternalChannelSetupClaimStatus.INVALIDATED
+    assert first_claim_rdb.claim_generation == first_claim.claim_generation + 1
+    assert first_interaction_rdb is not None
+    assert first_interaction_rdb.status is ExternalChannelInteractionStatus.EXPIRED
+    assert first_parent_binding_rdb is not None
+    assert first_parent_binding_rdb.disconnected_at == _at(20)
+    assert first_parent_binding_rdb.disconnect_reason == "selected_agent_replaced"
+    assert thread_binding_rdb is not None
+    assert thread_binding_rdb.disconnected_at is None
+    assert await rdb_session.get(RDBAgentSession, first_parent_session.id) is not None
+    assert await rdb_session.get(RDBAgentSession, thread_session.id) is not None
+
+    second_parent_session = await AgentSessionRepository().create(
+        rdb_session,
+        AgentSessionCreate(
+            workspace_id=workspace_id,
+            agent_id=second_agent.id,
+            title=None,
+        ),
+    )
+    second_parent_binding = await repository.create_binding_idempotent(
+        rdb_session,
+        ExternalChannelBindingCreate(
+            resource_id=parent_resource.id,
+            route_id=second_route.id,
+            agent_session_id=second_parent_session.id,
+            response_mode=ExternalChannelResponseMode.MENTION_ONLY,
+            disconnected_at=None,
+            disconnect_reason=None,
+        ),
+        expected_access_request_id=None,
+    )
+    second_setting = await repository.create_participation_setting(
+        rdb_session,
+        ExternalChannelParticipationSettingCreate(
+            connection_id=connection.id,
+            provider_parent_channel_id="C-parent",
+            route_id=second_route.id,
+            location=ExternalChannelConversationLocation.CHANNEL,
+            response_mode=ExternalChannelResponseMode.MENTION_ONLY,
+            settings_generation=1,
+            configured_by_user_id=user.id,
+            configured_by_principal_id=None,
+            status=ExternalChannelParticipationSettingStatus.ACTIVE,
+            invalidated_at=None,
+            invalidation_reason=None,
+        ),
+    )
+    second_claim = await repository.create_setup_claim(
+        rdb_session,
+        ExternalChannelSetupClaimCreate(
+            connection_id=connection.id,
+            provider_parent_channel_id="C-parent",
+            route_id=second_route.id,
+            conversation_position_id=position.id,
+            source_resource_id=thread_resource.id,
+            principal_id=principal.id,
+            source_projection={
+                "schema_version": 1,
+                "trigger_message_id": "message-second",
+            },
+            source_revision=1,
+            claim_generation=1,
+            status=ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+            selected_setting_id=None,
+            selected_resource_id=None,
+            selected_source_revision=None,
+            expires_at=_at(50),
+            selected_at=None,
+            completed_at=None,
+        ),
+    )
+    second_interaction_result = await repository.admit_interaction(
+        rdb_session,
+        _interaction_create(
+            connection.id,
+            key="default-parent-second-interaction",
+            principal_id=principal.id,
+            projection={
+                "provider_parent_channel_id": "C-parent",
+                "interaction_id": "opaque-second",
+            },
+        ).model_copy(
+            update={
+                "setup_claim_id": second_claim.id,
+                "expires_at": _at(50),
+            }
+        ),
+    )
+
+    cleared = await management.clear_multi_channel_default(
+        rdb_session,
+        workspace_id=workspace_id,
+        connection_id=connection.id,
+        provider=ExternalChannelProvider.SLACK,
+        provider_channel_id="C-parent",
+        now=_at(30),
+    )
+
+    assert cleared is not None
+    assert cleared.changed is True
+    assert cleared.invalidated_setting_count == 1
+    assert cleared.terminated_setup_claim_count == 1
+    assert cleared.expired_interaction_count == 1
+    assert cleared.disconnected_parent_binding_count == 1
+    assert len(cleared.cleanup_intent_ids) == 1
+    assert set(replaced.cleanup_intent_ids).isdisjoint(cleared.cleanup_intent_ids)
+    second_setting_rdb = await rdb_session.get(
+        RDBExternalChannelParticipationSetting,
+        second_setting.id,
+    )
+    second_claim_rdb = await rdb_session.get(
+        RDBExternalChannelSetupClaim,
+        second_claim.id,
+    )
+    second_interaction_rdb = await rdb_session.get(
+        RDBExternalChannelInteraction,
+        second_interaction_result.interaction.id,
+    )
+    second_parent_binding_rdb = await rdb_session.get(
+        RDBExternalChannelBinding,
+        second_parent_binding.id,
+    )
+    active_defaults = list(
+        (
+            await rdb_session.scalars(
+                sa.select(RDBExternalChannelChannelDefault).where(
+                    RDBExternalChannelChannelDefault.connection_id == connection.id,
+                    RDBExternalChannelChannelDefault.provider_channel_id == "C-parent",
+                    RDBExternalChannelChannelDefault.status
+                    == ExternalChannelChannelDefaultStatus.ACTIVE,
+                )
+            )
+        ).all()
+    )
+    cleanup_attempts = list(
+        (
+            await rdb_session.scalars(
+                sa.select(RDBExternalChannelDeliveryAttempt).where(
+                    RDBExternalChannelDeliveryAttempt.origin_type
+                    == ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
+                    RDBExternalChannelDeliveryAttempt.operation
+                    == ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                )
+            )
+        ).all()
+    )
+    assert second_setting_rdb is not None
+    assert (
+        second_setting_rdb.status
+        is ExternalChannelParticipationSettingStatus.INVALIDATED
+    )
+    assert second_setting_rdb.invalidation_reason == "selected_agent_cleared"
+    assert second_claim_rdb is not None
+    assert second_claim_rdb.status is ExternalChannelSetupClaimStatus.EXPIRED
+    assert second_interaction_rdb is not None
+    assert second_interaction_rdb.status is ExternalChannelInteractionStatus.EXPIRED
+    assert second_parent_binding_rdb is not None
+    assert second_parent_binding_rdb.disconnected_at == _at(30)
+    assert second_parent_binding_rdb.disconnect_reason == "selected_agent_cleared"
+    assert thread_binding_rdb.disconnected_at is None
+    assert await rdb_session.get(RDBAgentSession, second_parent_session.id) is not None
+    assert active_defaults == []
+    assert {attempt.binding_id for attempt in cleanup_attempts} == {
+        first_parent_binding.id,
+        second_parent_binding.id,
+    }
+
+
 async def test_multi_route_removal_creates_leave_presence_before_detach(
     rdb_session: AsyncSession,
 ) -> None:
-    """A route terminalization retains one deliverable leave control."""
+    """Route removal terminalizes participation and retains one leave control."""
     workspace_id = await _workspace(rdb_session, "route-leave-presence")
+    user = await UserRepository().create(
+        rdb_session,
+        UserCreate(email="route-leave-presence@example.com"),
+    )
     agent = await _agent(rdb_session, workspace_id, "route-leave-presence")
     repository = ExternalChannelRepository()
     lifecycle = ExternalChannelLifecycleRepository()
@@ -1728,12 +2238,42 @@ async def test_multi_route_removal_creates_leave_presence_before_detach(
             mode=ExternalChannelAppMode.MULTI,
         ),
     )
+    channel_default = await repository.create_channel_default(
+        rdb_session,
+        ExternalChannelChannelDefaultCreate(
+            connection_id=connection.id,
+            provider_channel_id="route-presence-channel",
+            route_id=route.id,
+            status=ExternalChannelChannelDefaultStatus.ACTIVE,
+            configured_by_user_id=user.id,
+            configured_by_principal_id=None,
+            invalidated_at=None,
+            invalidation_reason=None,
+        ),
+    )
     resource = await repository.create_resource_idempotent(
         rdb_session,
         ExternalChannelResourceCreate(
             connection_id=connection.id,
+            resource_type=ExternalChannelResourceType.PARENT_CHANNEL,
+            provider_resource_key="route-presence-channel",
+            labels={
+                "provider": "slack",
+                "tenant_id": "route-presence-team",
+                "channel_id": "route-presence-channel",
+            },
+            status=ExternalChannelResourceStatus.ACTIVE,
+            latest_activity_at=_at(1),
+            unavailable_at=None,
+            deleted_at=None,
+        ),
+    )
+    source_resource = await repository.create_resource_idempotent(
+        rdb_session,
+        ExternalChannelResourceCreate(
+            connection_id=connection.id,
             resource_type=ExternalChannelResourceType.THREAD,
-            provider_resource_key="route-presence-resource",
+            provider_resource_key="route-presence-channel:2.000001",
             labels={
                 "provider": "slack",
                 "tenant_id": "route-presence-team",
@@ -1762,6 +2302,90 @@ async def test_multi_route_removal_creates_leave_presence_before_detach(
     )
     rdb_session.add(binding)
     await rdb_session.flush()
+    principal = await repository.create_principal_idempotent(
+        rdb_session,
+        ExternalChannelPrincipalCreate(
+            provider=ExternalChannelProvider.SLACK,
+            provider_tenant_id="route-presence-team",
+            provider_user_id="route-presence-user",
+            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+            display_name=None,
+            avatar_url=None,
+            profile=None,
+        ),
+    )
+    setting = await repository.create_participation_setting(
+        rdb_session,
+        ExternalChannelParticipationSettingCreate(
+            connection_id=connection.id,
+            provider_parent_channel_id="route-presence-channel",
+            route_id=route.id,
+            location=ExternalChannelConversationLocation.CHANNEL,
+            response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+            settings_generation=1,
+            configured_by_user_id=user.id,
+            configured_by_principal_id=None,
+            status=ExternalChannelParticipationSettingStatus.ACTIVE,
+            invalidated_at=None,
+            invalidation_reason=None,
+        ),
+    )
+    position = await repository.create_conversation_position_idempotent(
+        rdb_session,
+        ExternalChannelConversationPositionCreate(
+            connection_id=connection.id,
+            scope_kind=ExternalChannelConversationScopeKind.PARENT_CHANNEL,
+            provider_channel_id="route-presence-channel",
+            provider_thread_key=None,
+            read_through_position=None,
+        ),
+    )
+    claim = await repository.create_setup_claim(
+        rdb_session,
+        ExternalChannelSetupClaimCreate(
+            connection_id=connection.id,
+            provider_parent_channel_id="route-presence-channel",
+            route_id=route.id,
+            conversation_position_id=position.id,
+            source_resource_id=source_resource.id,
+            principal_id=principal.id,
+            source_projection={
+                "schema_version": 1,
+                "trigger_message_id": "route-presence-message",
+            },
+            source_revision=1,
+            claim_generation=1,
+            status=ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+            selected_setting_id=None,
+            selected_resource_id=None,
+            selected_source_revision=None,
+            expires_at=_at(50),
+            selected_at=None,
+            completed_at=None,
+        ),
+    )
+    interaction_result = await repository.admit_interaction(
+        rdb_session,
+        _interaction_create(
+            connection.id,
+            key="route-presence-interaction",
+            principal_id=principal.id,
+            projection={
+                "provider_parent_channel_id": "route-presence-channel",
+                "interaction_id": "route-presence-opaque",
+            },
+        ).model_copy(
+            update={
+                "setup_claim_id": claim.id,
+                "expires_at": _at(50),
+            }
+        ),
+    )
+    impact = await lifecycle.project_multi_route_impact(
+        rdb_session,
+        connection_id=connection.id,
+        route_id=route.id,
+    )
 
     removal = await lifecycle.remove_multi_route(
         rdb_session,
@@ -1772,10 +2396,46 @@ async def test_multi_route_removal_creates_leave_presence_before_detach(
     )
 
     assert removal is not None
+    assert impact is not None
+    assert impact.active_default_count == 1
+    assert impact.active_participation_setting_count == 1
+    assert impact.nonterminal_setup_claim_count == 1
+    assert impact.active_binding_count == 1
+    assert impact.connected_parent_binding_count == 1
     assert len(removal.cleanup_intent_ids) == 1
     persisted_route = await rdb_session.get(RDBExternalChannelAgentRoute, route.id)
     assert persisted_route is not None
     assert persisted_route.agent_id is None
+    persisted_default = await rdb_session.get(
+        RDBExternalChannelChannelDefault,
+        channel_default.id,
+    )
+    persisted_setting = await rdb_session.get(
+        RDBExternalChannelParticipationSetting,
+        setting.id,
+    )
+    persisted_claim = await rdb_session.get(
+        RDBExternalChannelSetupClaim,
+        claim.id,
+    )
+    persisted_interaction = await rdb_session.get(
+        RDBExternalChannelInteraction,
+        interaction_result.interaction.id,
+    )
+    assert persisted_default is not None
+    assert persisted_default.status is ExternalChannelChannelDefaultStatus.INVALIDATED
+    assert persisted_setting is not None
+    assert (
+        persisted_setting.status
+        is ExternalChannelParticipationSettingStatus.INVALIDATED
+    )
+    assert persisted_setting.settings_generation == 2
+    assert persisted_setting.invalidation_reason == "relationship_removed"
+    assert persisted_claim is not None
+    assert persisted_claim.status is ExternalChannelSetupClaimStatus.INVALIDATED
+    assert persisted_claim.claim_generation == 2
+    assert persisted_interaction is not None
+    assert persisted_interaction.status is ExternalChannelInteractionStatus.EXPIRED
     attempt = await rdb_session.get(
         RDBExternalChannelDeliveryAttempt,
         removal.cleanup_intent_ids[0],
@@ -1784,10 +2444,10 @@ async def test_multi_route_removal_creates_leave_presence_before_detach(
     assert attempt.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
     assert attempt.request_payload == {
         "control_kind": "session_presence",
+        "control_version": 2,
         "presence_state": "left",
         "tenant_id": "route-presence-team",
         "channel_id": "route-presence-channel",
-        "thread_ts": "2.000001",
     }
 
 
@@ -1878,6 +2538,7 @@ async def test_provider_uninstall_creates_one_leave_presence(
     assert attempt.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
     assert attempt.request_payload == {
         "control_kind": "session_presence",
+        "control_version": 2,
         "presence_state": "left",
         "tenant_id": "uninstall-presence-team",
         "channel_id": "uninstall-presence-channel",

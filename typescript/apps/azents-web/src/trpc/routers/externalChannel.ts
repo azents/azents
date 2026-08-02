@@ -609,7 +609,7 @@ export const externalChannelRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       try {
-        await (
+        const { data } = await (
           input.provider === "discord"
             ? externalChannelV1ClearMultiDiscordChannelDefault
             : externalChannelV1ClearMultiSlackChannelDefault
@@ -623,7 +623,7 @@ export const externalChannelRouter = router({
           body: { expected_generation: input.expectedGeneration },
           throwOnError: true,
         });
-        return null;
+        return data;
       } catch (error) {
         throw mapManagementError(error);
       }

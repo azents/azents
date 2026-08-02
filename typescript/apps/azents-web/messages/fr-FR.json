@@ -1237,6 +1237,14 @@
           "all_messages": "Tous les messages admissibles",
           "mention_only": "Mentions uniquement"
         },
+        "conversationLocation": {
+          "channel": "Conversation de canal",
+          "threads": "Conversation de fil"
+        },
+        "resourceType": {
+          "parent_channel": "Canal parent",
+          "thread": "Fil"
+        },
         "archivedTitle": "Session archivée",
         "archivedDescription": "Les canaux externes ont été définitivement déconnectés lors de l’archivage. Cette vue est en lecture seule.",
         "retentionUnlimited": "Conservation : illimitée",
@@ -1766,7 +1774,7 @@
       "reenable": "Réactiver",
       "remove": "Supprimer",
       "routeImpactTitle": "Vérifier l’impact de la suppression de la route",
-      "routeImpactDescription": "Cette action supprime {defaults} valeur(s) par défaut de canal, termine {bindings} liaison(s) active(s) et fait expirer {admissions} admission(s) ouverte(s).",
+      "routeImpactDescription": "Cette action supprime {defaults} valeur(s) par défaut de canal, invalide {settings} paramètre(s) de participation, termine {claims} demande(s) de configuration, termine {bindings} liaison(s) active(s), dont {parentBindings} conversation(s) parent connectée(s), et fait expirer {admissions} admission(s) ouverte(s).",
       "loadingImpact": "Chargement de l’aperçu de l’impact actuel…",
       "retry": "Réessayer",
       "confirmRemove": "Supprimer l’agent",
@@ -1776,6 +1784,9 @@
       "channelId": "ID du canal Slack",
       "route": "Agent",
       "setDefault": "Définir par défaut",
+      "defaultMutationChangedTitle": "Sélection du canal mise à jour",
+      "defaultMutationUnchangedTitle": "La sélection du canal est déjà à jour",
+      "defaultMutationImpact": "Nettoyage de la participation : {settings} paramètre(s) invalidé(s), {claims} demande(s) de configuration terminée(s), {interactions} contrôle(s) en attente expiré(s), {bindings} conversation(s) parent déconnectée(s) et {deliveries} message(s) de nettoyage mis en file d’attente.",
       "channel": "Canal",
       "defaultAgent": "Agent par défaut",
       "defaultStatus": "État de la valeur par défaut",
@@ -1784,7 +1795,7 @@
       "disconnectDescription": "La déconnexion supprime les routes actives, les valeurs par défaut et les conversations de fournisseur liées.",
       "disconnect": "Déconnecter",
       "connectionImpactTitle": "Vérifier l’impact de la déconnexion complète",
-      "connectionImpactDescription": "Cette action déconnecte {routes} route(s) active(s), invalide {defaults} valeur(s) par défaut de canal et termine {bindings} liaison(s) active(s).",
+      "connectionImpactDescription": "Cette action déconnecte {routes} route(s) active(s), invalide {defaults} valeur(s) par défaut de canal et {settings} paramètre(s) de participation, termine {claims} demande(s) de configuration et termine {bindings} liaison(s) active(s), dont {parentBindings} conversation(s) parent connectée(s).",
       "confirmDisconnect": "Déconnecter l’application d’espace de travail",
       "transport": {
         "http": "HTTP",

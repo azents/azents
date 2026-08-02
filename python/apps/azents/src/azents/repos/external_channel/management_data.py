@@ -11,9 +11,11 @@ from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
+    ExternalChannelConversationLocation,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
+    ExternalChannelResourceType,
     ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelTransport,
@@ -95,11 +97,24 @@ class ManagedChannelDefault(_Projection):
     agent_id: str | None
     agent_name: str | None
     status: ExternalChannelChannelDefaultStatus
-    configured_by_user_id: str
+    configured_by_user_id: str | None
+    configured_by_principal_id: str | None
     invalidated_at: datetime.datetime | None
     invalidation_reason: str | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
+
+
+class ManagedChannelDefaultMutation(_Projection):
+    """Sanitized selected-Agent mutation result and terminal lifecycle impact."""
+
+    channel_default: ManagedChannelDefault | None
+    changed: bool
+    invalidated_participation_setting_count: int
+    terminated_setup_claim_count: int
+    expired_interaction_count: int
+    disconnected_parent_binding_count: int
+    cleanup_delivery_count: int
 
 
 class ManagedSlackManagementHandoff(_Projection):
@@ -119,6 +134,8 @@ class ManagedMultiConnectionDisconnect(_Projection):
 
     disconnected_route_count: int
     invalidated_default_count: int
+    invalidated_participation_setting_count: int
+    terminated_setup_claim_count: int
     expired_admission_count: int
     expired_access_request_count: int
     unavailable_resource_count: int
@@ -174,7 +191,8 @@ class ManagedBinding(_Projection):
     agent_session_id: str
     provider: ExternalChannelProvider
     response_mode: ExternalChannelResponseMode
-    resource_type: str
+    resource_type: ExternalChannelResourceType
+    conversation_location: ExternalChannelConversationLocation
     resource_label: str
     connected_at: datetime.datetime
     disconnected_at: datetime.datetime | None

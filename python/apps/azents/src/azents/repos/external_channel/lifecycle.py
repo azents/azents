@@ -2,6 +2,7 @@
 
 import datetime
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
@@ -19,9 +20,12 @@ from azents.core.enums import (
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
     ExternalChannelInteractionStatus,
+    ExternalChannelParticipationSettingStatus,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
+    ExternalChannelResourceType,
     ExternalChannelRouteCatalogStatus,
+    ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
@@ -41,7 +45,9 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelConnection,
     RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelInteraction,
+    RDBExternalChannelParticipationSetting,
     RDBExternalChannelResource,
+    RDBExternalChannelSetupClaim,
     RDBExternalChannelWork,
     RDBExternalChannelWorkProjectionPart,
 )
@@ -59,6 +65,25 @@ from azents.repos.external_channel.data import (
     ExternalChannelPurgeVerification,
     ExternalChannelRestoreValidation,
 )
+
+_NONTERMINAL_SETUP_CLAIM_STATUSES = (
+    ExternalChannelSetupClaimStatus.PENDING_AGENT,
+    ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+    ExternalChannelSetupClaimStatus.SELECTED,
+)
+_LIVE_INTERACTION_STATUSES = (
+    ExternalChannelInteractionStatus.ACCEPTED,
+    ExternalChannelInteractionStatus.PROCESSING,
+    ExternalChannelInteractionStatus.COMPLETED,
+)
+
+
+@dataclass(frozen=True)
+class _LockedParticipationState:
+    """Active settings and nonterminal claims locked for lifecycle mutation."""
+
+    settings: tuple[RDBExternalChannelParticipationSetting, ...]
+    claims: tuple[RDBExternalChannelSetupClaim, ...]
 
 
 class ExternalChannelLifecycleRepository:
@@ -512,7 +537,31 @@ class ExternalChannelLifecycleRepository:
                 for route in routes
             ),
             active_default_count=len(affected_defaults),
+            active_participation_setting_count=await self._count(
+                session,
+                RDBExternalChannelParticipationSetting,
+                sa.and_(
+                    RDBExternalChannelParticipationSetting.connection_id
+                    == connection.id,
+                    RDBExternalChannelParticipationSetting.status
+                    == ExternalChannelParticipationSettingStatus.ACTIVE,
+                ),
+            ),
+            nonterminal_setup_claim_count=await self._count(
+                session,
+                RDBExternalChannelSetupClaim,
+                sa.and_(
+                    RDBExternalChannelSetupClaim.connection_id == connection.id,
+                    RDBExternalChannelSetupClaim.status.in_(
+                        _NONTERMINAL_SETUP_CLAIM_STATUSES
+                    ),
+                ),
+            ),
             active_binding_count=len(affected_bindings),
+            connected_parent_binding_count=await self._connected_parent_binding_count(
+                session,
+                route_ids=route_ids,
+            ),
             bound_resource_count=len(
                 {binding.resource_id for binding in affected_bindings}
             ),
@@ -568,6 +617,63 @@ class ExternalChannelLifecycleRepository:
         already_removed = (
             route.catalog_status is ExternalChannelRouteCatalogStatus.REMOVED
         )
+        defaults = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelChannelDefault)
+                    .where(
+                        RDBExternalChannelChannelDefault.route_id == route.id,
+                        RDBExternalChannelChannelDefault.status
+                        == ExternalChannelChannelDefaultStatus.ACTIVE,
+                    )
+                    .order_by(RDBExternalChannelChannelDefault.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        participation_state = await self._lock_participation_state(
+            session,
+            connection_id=connection.id,
+            route_ids=(route.id,),
+        )
+        settings = participation_state.settings
+        claims = participation_state.claims
+        interaction_conditions = [
+            _open_selector_condition(
+                connection_id=connection.id,
+                route_id=route.id,
+            )
+        ]
+        if claims:
+            interaction_conditions.append(
+                RDBExternalChannelInteraction.setup_claim_id.in_(
+                    [claim.id for claim in claims]
+                )
+            )
+        if settings:
+            interaction_conditions.append(
+                RDBExternalChannelInteraction.projection["provider_parent_channel_id"]
+                .as_string()
+                .in_(
+                    sorted({setting.provider_parent_channel_id for setting in settings})
+                )
+            )
+        interactions = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelInteraction)
+                    .where(
+                        RDBExternalChannelInteraction.connection_id == connection.id,
+                        RDBExternalChannelInteraction.status.in_(
+                            _LIVE_INTERACTION_STATUSES
+                        ),
+                        sa.or_(*interaction_conditions),
+                    )
+                    .order_by(RDBExternalChannelInteraction.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
         historically_bound_resource_ids = sa.select(
             RDBExternalChannelBinding.resource_id
         ).where(RDBExternalChannelBinding.route_id == route.id)
@@ -598,21 +704,6 @@ class ExternalChannelLifecycleRepository:
                 )
             ).all()
         )
-        selector_interactions = list(
-            (
-                await session.scalars(
-                    sa.select(RDBExternalChannelInteraction)
-                    .where(
-                        _open_selector_condition(
-                            connection_id=connection.id,
-                            route_id=route.id,
-                        )
-                    )
-                    .order_by(RDBExternalChannelInteraction.id)
-                    .with_for_update()
-                )
-            ).all()
-        )
         access_requests = list(
             (
                 await session.scalars(
@@ -638,21 +729,18 @@ class ExternalChannelLifecycleRepository:
             if resource.status is ExternalChannelResourceStatus.ACTIVE:
                 resource.status = ExternalChannelResourceStatus.UNAVAILABLE
                 resource.unavailable_at = now
-        await session.execute(
-            sa.update(RDBExternalChannelChannelDefault)
-            .where(
-                RDBExternalChannelChannelDefault.route_id == route.id,
-                RDBExternalChannelChannelDefault.status
-                == ExternalChannelChannelDefaultStatus.ACTIVE,
-            )
-            .values(
-                status=ExternalChannelChannelDefaultStatus.INVALIDATED,
-                invalidated_at=now,
-                invalidation_reason="relationship_removed",
-            )
+        self._terminalize_participation_state(
+            settings=settings,
+            claims=claims,
+            interactions=interactions,
+            now=now,
+            reason="relationship_removed",
+            claim_status=ExternalChannelSetupClaimStatus.INVALIDATED,
         )
-        for interaction in selector_interactions:
-            interaction.status = ExternalChannelInteractionStatus.EXPIRED
+        for channel_default in defaults:
+            channel_default.status = ExternalChannelChannelDefaultStatus.INVALIDATED
+            channel_default.invalidated_at = now
+            channel_default.invalidation_reason = "relationship_removed"
         for request in access_requests:
             request.status = ExternalChannelAccessRequestStatus.EXPIRED
             request.decision_summary = "The External Channel relationship was removed."
@@ -779,6 +867,42 @@ class ExternalChannelLifecycleRepository:
             ).all()
         )
         route_ids = [route.id for route in routes]
+        defaults = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelChannelDefault)
+                    .where(
+                        RDBExternalChannelChannelDefault.connection_id == connection.id,
+                        RDBExternalChannelChannelDefault.status
+                        == ExternalChannelChannelDefaultStatus.ACTIVE,
+                    )
+                    .order_by(RDBExternalChannelChannelDefault.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        participation_state = await self._lock_participation_state(
+            session,
+            connection_id=connection.id,
+            route_ids=None,
+        )
+        settings = participation_state.settings
+        claims = participation_state.claims
+        interactions = list(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelInteraction)
+                    .where(
+                        RDBExternalChannelInteraction.connection_id == connection.id,
+                        RDBExternalChannelInteraction.status.in_(
+                            _LIVE_INTERACTION_STATUSES
+                        ),
+                    )
+                    .order_by(RDBExternalChannelInteraction.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
         resources = list(
             (
                 await session.scalars(
@@ -798,21 +922,6 @@ class ExternalChannelLifecycleRepository:
                         RDBExternalChannelBinding.disconnected_at.is_(None),
                     )
                     .order_by(RDBExternalChannelBinding.resource_id)
-                    .with_for_update()
-                )
-            ).all()
-        )
-        selector_interactions = list(
-            (
-                await session.scalars(
-                    sa.select(RDBExternalChannelInteraction)
-                    .where(
-                        _open_selector_condition(
-                            connection_id=connection.id,
-                            route_id=None,
-                        )
-                    )
-                    .order_by(RDBExternalChannelInteraction.id)
                     .with_for_update()
                 )
             ).all()
@@ -844,22 +953,18 @@ class ExternalChannelLifecycleRepository:
                 resource.status = ExternalChannelResourceStatus.UNAVAILABLE
                 resource.unavailable_at = now
                 unavailable_resource_count += 1
-        invalidated_default_count = await self._update_count(
-            session,
-            sa.update(RDBExternalChannelChannelDefault)
-            .where(
-                RDBExternalChannelChannelDefault.connection_id == connection.id,
-                RDBExternalChannelChannelDefault.status
-                == ExternalChannelChannelDefaultStatus.ACTIVE,
-            )
-            .values(
-                status=ExternalChannelChannelDefaultStatus.INVALIDATED,
-                invalidated_at=now,
-                invalidation_reason=reason,
-            ),
+        self._terminalize_participation_state(
+            settings=settings,
+            claims=claims,
+            interactions=interactions,
+            now=now,
+            reason=reason,
+            claim_status=ExternalChannelSetupClaimStatus.INVALIDATED,
         )
-        for interaction in selector_interactions:
-            interaction.status = ExternalChannelInteractionStatus.EXPIRED
+        for channel_default in defaults:
+            channel_default.status = ExternalChannelChannelDefaultStatus.INVALIDATED
+            channel_default.invalidated_at = now
+            channel_default.invalidation_reason = reason
         for request in access_requests:
             request.status = ExternalChannelAccessRequestStatus.EXPIRED
             request.decision_summary = (
@@ -900,8 +1005,10 @@ class ExternalChannelLifecycleRepository:
         await session.flush()
         return ExternalChannelMultiConnectionDisconnect(
             disconnected_route_count=disconnected_route_count,
-            invalidated_default_count=invalidated_default_count,
-            expired_admission_count=len(selector_interactions),
+            invalidated_default_count=len(defaults),
+            invalidated_participation_setting_count=len(settings),
+            terminated_setup_claim_count=len(claims),
+            expired_admission_count=len(interactions),
             expired_access_request_count=len(access_requests),
             unavailable_resource_count=unavailable_resource_count,
             disconnected_binding_count=len(bindings),
@@ -1055,6 +1162,101 @@ class ExternalChannelLifecycleRepository:
         )
         return route
 
+    async def _lock_participation_state(
+        self,
+        session: AsyncSession,
+        *,
+        connection_id: str,
+        route_ids: Sequence[str] | None,
+    ) -> _LockedParticipationState:
+        """Lock active settings then nonterminal claims for one lifecycle root."""
+        setting_conditions = [
+            RDBExternalChannelParticipationSetting.connection_id == connection_id,
+            RDBExternalChannelParticipationSetting.status
+            == ExternalChannelParticipationSettingStatus.ACTIVE,
+        ]
+        claim_conditions = [
+            RDBExternalChannelSetupClaim.connection_id == connection_id,
+            RDBExternalChannelSetupClaim.status.in_(_NONTERMINAL_SETUP_CLAIM_STATUSES),
+        ]
+        if route_ids is not None:
+            setting_conditions.append(
+                RDBExternalChannelParticipationSetting.route_id.in_(route_ids)
+            )
+            claim_conditions.append(
+                RDBExternalChannelSetupClaim.route_id.in_(route_ids)
+            )
+        settings = tuple(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelParticipationSetting)
+                    .where(*setting_conditions)
+                    .order_by(RDBExternalChannelParticipationSetting.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        claims = tuple(
+            (
+                await session.scalars(
+                    sa.select(RDBExternalChannelSetupClaim)
+                    .where(*claim_conditions)
+                    .order_by(RDBExternalChannelSetupClaim.id)
+                    .with_for_update()
+                )
+            ).all()
+        )
+        return _LockedParticipationState(settings=settings, claims=claims)
+
+    @staticmethod
+    def _terminalize_participation_state(
+        *,
+        settings: Sequence[RDBExternalChannelParticipationSetting],
+        claims: Sequence[RDBExternalChannelSetupClaim],
+        interactions: Sequence[RDBExternalChannelInteraction],
+        now: datetime.datetime,
+        reason: str,
+        claim_status: ExternalChannelSetupClaimStatus,
+    ) -> None:
+        """Invalidate selected participation state without reviving history."""
+        for setting in settings:
+            setting.status = ExternalChannelParticipationSettingStatus.INVALIDATED
+            setting.settings_generation += 1
+            setting.invalidated_at = now
+            setting.invalidation_reason = reason
+        for claim in claims:
+            claim.status = claim_status
+            claim.claim_generation += 1
+        for interaction in interactions:
+            interaction.status = ExternalChannelInteractionStatus.EXPIRED
+
+    @staticmethod
+    async def _connected_parent_binding_count(
+        session: AsyncSession,
+        *,
+        route_ids: Sequence[str],
+    ) -> int:
+        """Count connected parent-channel Bindings for bounded impact previews."""
+        if not route_ids:
+            return 0
+        return int(
+            await session.scalar(
+                sa.select(sa.func.count(RDBExternalChannelBinding.id))
+                .join(
+                    RDBExternalChannelResource,
+                    RDBExternalChannelResource.id
+                    == RDBExternalChannelBinding.resource_id,
+                )
+                .where(
+                    RDBExternalChannelBinding.route_id.in_(route_ids),
+                    RDBExternalChannelBinding.disconnected_at.is_(None),
+                    RDBExternalChannelResource.resource_type
+                    == ExternalChannelResourceType.PARENT_CHANNEL,
+                )
+            )
+            or 0
+        )
+
     async def _project_route_impact(
         self,
         session: AsyncSession,
@@ -1087,7 +1289,30 @@ class ExternalChannelLifecycleRepository:
             route_id=route_id,
             generation=generation,
             active_default_count=len(affected_defaults),
+            active_participation_setting_count=await self._count(
+                session,
+                RDBExternalChannelParticipationSetting,
+                sa.and_(
+                    RDBExternalChannelParticipationSetting.route_id == route_id,
+                    RDBExternalChannelParticipationSetting.status
+                    == ExternalChannelParticipationSettingStatus.ACTIVE,
+                ),
+            ),
+            nonterminal_setup_claim_count=await self._count(
+                session,
+                RDBExternalChannelSetupClaim,
+                sa.and_(
+                    RDBExternalChannelSetupClaim.route_id == route_id,
+                    RDBExternalChannelSetupClaim.status.in_(
+                        _NONTERMINAL_SETUP_CLAIM_STATUSES
+                    ),
+                ),
+            ),
             active_binding_count=active_binding_count,
+            connected_parent_binding_count=await self._connected_parent_binding_count(
+                session,
+                route_ids=(route_id,),
+            ),
             bound_resource_count=bound_resource_count,
             open_admission_count=await self._count(
                 session,
