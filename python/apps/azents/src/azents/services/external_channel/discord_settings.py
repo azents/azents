@@ -106,8 +106,26 @@ class DiscordSettingsResponseService:
         try:
             if scope.action == "open_binding":
                 return await self._binding_open_response(scope=scope, context=context)
+            effective_context = (
+                DiscordSettingsContext(
+                    connection_id=context.connection_id,
+                    guild_id=context.guild_id,
+                    provider_parent_channel_id=context.provider_parent_channel_id,
+                    provider_thread_resource_key=None,
+                    principal_id=context.principal_id,
+                )
+                if scope.action in {"setup_channel", "setup_threads"}
+                else context
+            )
+            settings = await self._resolve(effective_context)
+            if scope.action in {"setup_channel", "setup_threads"}:
+                return await self._select_setup_location(
+                    scope=scope,
+                    settings=settings,
+                    context=effective_context,
+                    now=now,
+                )
             await self._validate_origin(scope=scope, context=context)
-            settings = await self._resolve(context)
             if scope.action == "open":
                 return DiscordSettingsResponse(
                     response=_settings_response(
@@ -116,13 +134,6 @@ class DiscordSettingsResponseService:
                         secret=self.config.auth.jwt.secret_key,
                     ),
                     cleanup_delivery_ids=(),
-                )
-            if scope.action in {"setup_channel", "setup_threads"}:
-                return await self._select_setup_location(
-                    scope=scope,
-                    settings=settings,
-                    context=context,
-                    now=now,
                 )
             if scope.action in {
                 "parent_channel",

@@ -90,17 +90,6 @@ class _Repository:
         self.events.append("list")
         return ["delivery-1", "delivery-2"]
 
-    async def ensure_binding_settings_available_delivery_ids(
-        self,
-        session: AsyncSession,
-        *,
-        limit: int,
-    ) -> list[str]:
-        del session
-        assert limit == 2
-        self.events.append("reconcile")
-        return ["settings-1"]
-
     async def get_delivery_status(
         self,
         session: AsyncSession,
@@ -150,11 +139,9 @@ async def test_drain_commits_recovery_before_provider_attempts() -> None:
     result = await service.drain_once(now=_at(120))
 
     assert result.stale_unknown == 1
-    assert result.settings_controls_created == 1
     assert result.attempted == 2
     assert events == [
         "recover",
-        "reconcile",
         "list",
         "commit",
         "delivery-1",

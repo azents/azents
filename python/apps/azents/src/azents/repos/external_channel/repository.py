@@ -1666,6 +1666,7 @@ class ExternalChannelRepository:
                 ExternalChannelInteractionStatus.COMPLETED,
                 ExternalChannelInteractionStatus.FAILED,
                 ExternalChannelInteractionStatus.EXPIRED,
+                ExternalChannelInteractionStatus.REJECTED,
             },
             ExternalChannelInteractionStatus.COMPLETED: {
                 ExternalChannelInteractionStatus.COMPLETED,

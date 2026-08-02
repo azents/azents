@@ -438,7 +438,11 @@ class ExternalChannelInteractionProcessor:
             raise ValueError("Slack conversation settings scope is unavailable.")
         provider_thread_resource_key = (
             None
-            if handoff.provider_thread_key is None
+            if (
+                handoff.provider_thread_key is None
+                or locator is not None
+                and locator.resource_id is None
+            )
             else _slack_thread_resource_key(
                 tenant_id=configuration.provider_tenant_id,
                 channel_id=provider_parent_channel_id,
@@ -452,11 +456,15 @@ class ExternalChannelInteractionProcessor:
                 provider_thread_resource_key=provider_thread_resource_key,
                 principal_id=interaction.principal_id,
             )
-            if locator is not None and (
-                settings.resource is None
-                or settings.binding is None
-                or settings.resource.id != locator.resource_id
-                or settings.binding.id != locator.binding_id
+            if (
+                locator is not None
+                and locator.resource_id is not None
+                and (
+                    settings.resource is None
+                    or settings.binding is None
+                    or settings.resource.id != locator.resource_id
+                    or settings.binding.id != locator.binding_id
+                )
             ):
                 raise ExternalChannelParticipationError(
                     "External Channel conversation settings changed."

@@ -16,8 +16,8 @@ class SlackSettingsLocator:
 
     connection_id: str
     provider_parent_channel_id: str
-    resource_id: str
-    binding_id: str
+    resource_id: str | None
+    binding_id: str | None
 
 
 def build_slack_settings_locator(
@@ -35,6 +35,27 @@ def build_slack_settings_locator(
         "h": provider_parent_channel_id,
         "r": resource_id,
         "b": binding_id,
+    }
+    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    signature = hmac.new(secret.encode(), encoded, hashlib.sha256).digest()
+    return (
+        base64.urlsafe_b64encode(encoded).decode().rstrip("=")
+        + "."
+        + base64.urlsafe_b64encode(signature).decode().rstrip("=")
+    )
+
+
+def build_slack_parent_settings_locator(
+    *,
+    secret: str,
+    connection_id: str,
+    provider_parent_channel_id: str,
+) -> str:
+    """Build one signed locator for current parent setup or settings."""
+    payload: dict[str, object] = {
+        "v": _SLACK_SETTINGS_LOCATOR_VERSION,
+        "c": connection_id,
+        "h": provider_parent_channel_id,
     }
     encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
     signature = hmac.new(secret.encode(), encoded, hashlib.sha256).digest()
@@ -71,8 +92,6 @@ def parse_slack_settings_locator(
     for key, attribute in {
         "c": "connection_id",
         "h": "provider_parent_channel_id",
-        "r": "resource_id",
-        "b": "binding_id",
     }.items():
         value = payload.get(key)
         if (
@@ -82,7 +101,25 @@ def parse_slack_settings_locator(
         ):
             raise ValueError("Slack settings locator is invalid.")
         values[attribute] = value
-    return SlackSettingsLocator(**values)
+    resource_id = payload.get("r")
+    binding_id = payload.get("b")
+    if (resource_id is None) != (binding_id is None):
+        raise ValueError("Slack settings locator is invalid.")
+    if resource_id is not None and (
+        not isinstance(resource_id, str)
+        or not resource_id
+        or len(resource_id) > _MAX_LOCATOR_IDENTIFIER_LENGTH
+        or not isinstance(binding_id, str)
+        or not binding_id
+        or len(binding_id) > _MAX_LOCATOR_IDENTIFIER_LENGTH
+    ):
+        raise ValueError("Slack settings locator is invalid.")
+    return SlackSettingsLocator(
+        connection_id=values["connection_id"],
+        provider_parent_channel_id=values["provider_parent_channel_id"],
+        resource_id=resource_id,
+        binding_id=binding_id,
+    )
 
 
 def _base64url_decode(value: str) -> bytes:

@@ -1,6 +1,9 @@
 """Provider-neutral Session presence delivery-target tests."""
 
-from azents.core.external_channel_session_presence import session_presence_payload
+from azents.core.external_channel_session_presence import (
+    session_presence_payload,
+    setup_required_payload,
+)
 
 
 def test_discord_parent_presence_targets_the_parent_channel_directly() -> None:
@@ -48,4 +51,32 @@ def test_discord_thread_presence_retains_thread_provisioning_target() -> None:
         "conversation_scope": "thread",
         "thread_parent_channel_id": "222",
         "thread_root_message_id": "333",
+    }
+
+
+def test_discord_setup_targets_parent_without_provisioning_a_thread() -> None:
+    """Setup choices remain in the parent channel until location selection."""
+    payload = setup_required_payload(
+        {
+            "provider": "discord",
+            "guild_id": "111",
+            "source_channel_id": "222",
+            "parent_channel_id": "222",
+            "root_message_id": "333",
+            "thread_id": "333",
+        },
+        setup_claim_id="claim-1",
+        claim_generation=2,
+        source_revision=4,
+    )
+
+    assert payload == {
+        "control_kind": "setup_required",
+        "control_version": 2,
+        "setup_claim_id": "claim-1",
+        "claim_generation": 2,
+        "source_revision": 4,
+        "guild_id": "111",
+        "channel_id": "222",
+        "conversation_scope": "parent_channel",
     }

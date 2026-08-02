@@ -32,7 +32,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-02
-spec_version: 29
+spec_version: 30
 ---
 
 # External Channel Delivery and Channel Work
@@ -112,7 +112,8 @@ Provider mutations are never automatically retried. Stale `attempting` recovery 
 Provider controls created by synchronous ingestion or lifecycle operations use the
 same delivery fence. The Agent Worker periodically recovers stale `attempting`
 controls to `unknown`, lists bounded pending control IDs, and delegates each attempt to
-the shared action service. It never reconstructs provider content from callbacks.
+the shared action service. It never scans Bindings to create rollout or backfill
+messages and never reconstructs provider content from callbacks.
 Initial joined-presence and progress controls are independent post-acceptance work.
 `failed`, `unknown`, `not_attempted`, or cancelled delivery remains durable provider
 evidence but does not gate canonical mailbox promotion, Session wake, or AgentRun
@@ -258,10 +259,17 @@ thread creation is a terminal delivery outcome and never causes an unsafe replay
   checklist, prioritized context, and labeled sources. Update, delete, replacement,
   recovery, and final-reply cleanup use the same durable Tracker identity and gating.
 - Existing connected Bindings without the versioned settings action are reconciled
-  through one distinct idempotent `binding_settings_available` control. It contains
-  both `View session` and `Conversation settings`, never rewrites historical provider
-  messages, excludes disconnected Bindings, and treats delivered, failed, and unknown
-  outcomes as final one-attempt evidence rather than blindly retrying them.
+- An eligible explicit mention in an existing connected Binding may create one
+  idempotent version-3 settings control for that Binding. The control contains only
+  provider-native `Conversation settings`, does not repeat joined presence or rewrite
+  provider history, and is never created by deployment, startup, connection
+  activation, or periodic worker reconciliation. Rollout-era version-2 pending
+  controls are terminalized as invalid without provider I/O.
+- A first eligible mention with no participation setting creates a durable setup
+  control before Session or AgentRun creation. Slack opens the authenticated
+  parent-scoped location selector. Discord posts `Answer in this channel` and
+  `Answer in threads` directly in the parent channel and never provisions a thread
+  until a valid selection commits.
 
 The work cycle stores its title, complete provider-neutral version-2 desired
 snapshot, desired revision, and retained provider identity. A matching Slack

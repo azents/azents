@@ -13,15 +13,18 @@ from azents.core.enums import (
     ExternalChannelActionMode,
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
+    ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
     ExternalChannelDeliveryOriginType,
     ExternalChannelDeliveryStatus,
+    ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
     ExternalChannelResponseMode,
     ExternalChannelRouteCatalogStatus,
     ExternalChannelRouteMode,
+    ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
@@ -36,8 +39,11 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelAgentRoute,
     RDBExternalChannelBinding,
     RDBExternalChannelConnection,
+    RDBExternalChannelConversationPosition,
     RDBExternalChannelDeliveryAttempt,
+    RDBExternalChannelPrincipal,
     RDBExternalChannelResource,
+    RDBExternalChannelSetupClaim,
     RDBExternalChannelWork,
     RDBExternalChannelWorkProjectionPart,
 )
@@ -1353,91 +1359,93 @@ async def test_provider_control_final_settlement_revalidates_current_authority(
     assert attempt.completed_at == _at(3)
 
 
-@pytest.mark.parametrize(
-    "terminal_status",
-    [
-        ExternalChannelDeliveryStatus.DELIVERED,
-        ExternalChannelDeliveryStatus.FAILED,
-        ExternalChannelDeliveryStatus.UNKNOWN,
-    ],
-)
-async def test_binding_settings_reconciliation_never_retries_terminal_evidence(
+async def test_stale_setup_control_is_rejected_before_provider_attempt(
     rdb_session: AsyncSession,
-    terminal_status: ExternalChannelDeliveryStatus,
 ) -> None:
-    """Delivered, failed, and unknown rollout attempts each remain final evidence."""
+    """A replaced setup source cannot cross the provider-attempt boundary."""
     _agent_id, binding_id = await _setup_binding(rdb_session)
     binding = await rdb_session.get(RDBExternalChannelBinding, binding_id)
     assert binding is not None
     resource = await rdb_session.get(RDBExternalChannelResource, binding.resource_id)
+    route = await rdb_session.get(RDBExternalChannelAgentRoute, binding.route_id)
     assert resource is not None
-    resource.labels = {
-        "provider": "slack",
-        "tenant_id": "T1",
-        "channel_id": "C1",
-        "thread_ts": "1.000001",
-    }
+    assert route is not None
+    position = RDBExternalChannelConversationPosition(
+        connection_id=route.connection_id,
+        scope_kind=ExternalChannelConversationScopeKind.PARENT_CHANNEL,
+        provider_channel_id="C1",
+        provider_thread_key=None,
+        read_through_position=None,
+    )
+    principal = RDBExternalChannelPrincipal(
+        provider=ExternalChannelProvider.SLACK,
+        provider_tenant_id="T1",
+        provider_user_id="U1",
+        author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+        display_name="Participant",
+        avatar_url=None,
+        profile=None,
+    )
+    rdb_session.add_all((position, principal))
+    await rdb_session.flush()
+    claim = RDBExternalChannelSetupClaim(
+        connection_id=route.connection_id,
+        provider_parent_channel_id="C1",
+        route_id=route.id,
+        conversation_position_id=position.id,
+        source_resource_id=resource.id,
+        principal_id=principal.id,
+        source_projection={},
+        source_revision=1,
+        claim_generation=1,
+        status=ExternalChannelSetupClaimStatus.PENDING_LOCATION,
+        selected_setting_id=None,
+        selected_resource_id=None,
+        selected_source_revision=None,
+        expires_at=_at(30),
+        selected_at=None,
+        completed_at=None,
+    )
+    rdb_session.add(claim)
+    await rdb_session.flush()
+    attempt = RDBExternalChannelDeliveryAttempt(
+        origin_type=ExternalChannelDeliveryOriginType.SETUP_CLAIM,
+        origin_id=claim.id,
+        operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+        request_payload={
+            "control_kind": "setup_required",
+            "control_version": 2,
+            "setup_claim_id": claim.id,
+            "claim_generation": 1,
+            "source_revision": 1,
+            "tenant_id": "T1",
+            "channel_id": "C1",
+            "thread_ts": "1.000001",
+        },
+        status=ExternalChannelDeliveryStatus.PENDING,
+        channel_action_id=None,
+        binding_id=None,
+        provider_message_key=None,
+        error_kind=None,
+        error_summary=None,
+        attempted_at=None,
+        completed_at=None,
+    )
+    rdb_session.add(attempt)
+    await rdb_session.flush()
+    claim.source_revision = 2
     repository = ExternalChannelWorkRepository()
 
-    delivery_ids = await repository.ensure_binding_settings_available_delivery_ids(
+    target = await repository.start_delivery(
         rdb_session,
-        limit=10,
+        delivery_attempt_id=attempt.id,
+        now=_at(3),
     )
 
-    assert len(delivery_ids) == 1
-    attempt = await rdb_session.get(
-        RDBExternalChannelDeliveryAttempt,
-        delivery_ids[0],
-    )
-    assert attempt is not None
-    assert (
-        attempt.origin_type
-        is ExternalChannelDeliveryOriginType.BINDING_SETTINGS_AVAILABLE
-    )
-    assert attempt.request_payload == {
-        "control_kind": "binding_settings_available",
-        "control_version": 2,
-        "tenant_id": "T1",
-        "channel_id": "C1",
-        "thread_ts": "1.000001",
-    }
-    assert (
-        await repository.ensure_binding_settings_available_delivery_ids(
-            rdb_session,
-            limit=10,
-        )
-        == []
-    )
-    attempt.status = terminal_status
-    attempt.completed_at = _at(3)
-    await rdb_session.flush()
-
-    duplicate_ids = await repository.ensure_binding_settings_available_delivery_ids(
-        rdb_session,
-        limit=10,
-    )
-
-    assert duplicate_ids == []
-
-
-async def test_binding_settings_reconciliation_excludes_disconnected_bindings(
-    rdb_session: AsyncSession,
-) -> None:
-    """A disconnected Binding without rollout evidence remains untouched."""
-    _agent_id, binding_id = await _setup_binding(rdb_session)
-    binding = await rdb_session.get(RDBExternalChannelBinding, binding_id)
-    assert binding is not None
-    binding.disconnected_at = _at(2)
-    binding.disconnect_reason = "test_disconnected"
-    await rdb_session.flush()
-
-    repository = ExternalChannelWorkRepository()
-    delivery_ids = await repository.ensure_binding_settings_available_delivery_ids(
-        rdb_session,
-        limit=10,
-    )
-
-    assert delivery_ids == []
+    assert target is None
+    assert attempt.status is ExternalChannelDeliveryStatus.NOT_ATTEMPTED
+    assert attempt.error_kind == "provider_control_authority_revoked"
+    assert attempt.attempted_at is None
 
 
 async def test_initial_discord_delivery_uses_active_binding_authority(

@@ -35,7 +35,11 @@ from azents.core.enums import (
     MailboxSchedulingMode,
 )
 from azents.core.external_channel_progress import checking_progress
-from azents.core.external_channel_session_presence import session_presence_payload
+from azents.core.external_channel_session_presence import (
+    binding_settings_on_demand_payload,
+    session_presence_payload,
+    setup_required_payload,
+)
 from azents.core.slack_external_channel_progress import (
     render_slack_progress,
 )
@@ -492,6 +496,7 @@ class ExternalChannelMailboxIngestionStore:
                 )
             session_created = False
             binding = conversation.binding
+            existing_binding = binding is not None
             if binding is None:
                 creation = await self._create_binding(
                     session,
@@ -514,6 +519,15 @@ class ExternalChannelMailboxIngestionStore:
                 session,
                 resource=conversation.resource,
                 binding=binding,
+            )
+            settings_control_id = (
+                await self._create_binding_settings_on_demand_intent(
+                    session,
+                    resource=conversation.resource,
+                    binding=binding,
+                )
+                if existing_binding and request.locator.invocation
+                else None
             )
             progress_id = await self._create_initial_progress_intent(
                 session,
@@ -593,7 +607,7 @@ class ExternalChannelMailboxIngestionStore:
                         "provider_event_type": request.locator.provider_event_type,
                     },
                 )
-            control_id = session_presence_id or progress_id
+            control_id = settings_control_id or session_presence_id or progress_id
             return ExternalChannelIngestionAcceptance(
                 status="accepted" if enqueue.created else "duplicate",
                 reason=(
@@ -1075,14 +1089,19 @@ class ExternalChannelMailboxIngestionStore:
                 control_delivery_attempt_id=delivery_id,
                 connection_id=connection.id if delivery_id is not None else None,
             )
+        delivery_id = await self._create_setup_control_intent(
+            session,
+            resource=conversation.source_resource,
+            claim=claim,
+        )
         await session.commit()
         return ExternalChannelIngestionAcceptance(
             status="awaiting_selection",
             reason=ExternalChannelIngestionReason.SETUP_REQUIRED,
             mailbox_item_id=None,
             session_id=None,
-            control_delivery_attempt_id=None,
-            connection_id=None,
+            control_delivery_attempt_id=delivery_id,
+            connection_id=connection.id if delivery_id is not None else None,
         )
 
     async def _ensure_setup_claim(
@@ -1663,6 +1682,77 @@ class ExternalChannelMailboxIngestionStore:
                 request_payload=session_presence_payload(
                     resource.labels,
                     state="joined",
+                ),
+                status=ExternalChannelDeliveryStatus.PENDING,
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+                attempted_at=None,
+                completed_at=None,
+            ),
+        )
+        return (
+            attempt.id
+            if attempt.status is ExternalChannelDeliveryStatus.PENDING
+            else None
+        )
+
+    async def _create_binding_settings_on_demand_intent(
+        self,
+        session: AsyncSession,
+        *,
+        resource: ExternalChannelResource,
+        binding: ExternalChannelBinding,
+    ) -> str | None:
+        """Create settings access after the next eligible mention, at most once."""
+        attempt = await self.repository.create_delivery_attempt_idempotent(
+            session,
+            ExternalChannelDeliveryAttemptCreate(
+                origin_type=(
+                    ExternalChannelDeliveryOriginType.BINDING_SETTINGS_AVAILABLE
+                ),
+                origin_id=binding.id,
+                channel_action_id=None,
+                binding_id=binding.id,
+                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                part_ordinal=3,
+                request_payload=binding_settings_on_demand_payload(resource.labels),
+                status=ExternalChannelDeliveryStatus.PENDING,
+                provider_message_key=None,
+                error_kind=None,
+                error_summary=None,
+                attempted_at=None,
+                completed_at=None,
+            ),
+        )
+        return (
+            attempt.id
+            if attempt.status is ExternalChannelDeliveryStatus.PENDING
+            else None
+        )
+
+    async def _create_setup_control_intent(
+        self,
+        session: AsyncSession,
+        *,
+        resource: ExternalChannelResource,
+        claim: ExternalChannelSetupClaim,
+    ) -> str | None:
+        """Create the current first-mention setup control once per source revision."""
+        attempt = await self.repository.create_delivery_attempt_idempotent(
+            session,
+            ExternalChannelDeliveryAttemptCreate(
+                origin_type=ExternalChannelDeliveryOriginType.SETUP_CLAIM,
+                origin_id=claim.id,
+                channel_action_id=None,
+                binding_id=None,
+                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+                part_ordinal=claim.source_revision,
+                request_payload=setup_required_payload(
+                    resource.labels,
+                    setup_claim_id=claim.id,
+                    claim_generation=claim.claim_generation,
+                    source_revision=claim.source_revision,
                 ),
                 status=ExternalChannelDeliveryStatus.PENDING,
                 provider_message_key=None,

@@ -33,8 +33,9 @@ from azents.core.external_channel_session_presence import (
     build_external_channel_session_url,
 )
 from azents.core.slack_external_channel_progress import (
+    render_slack_binding_settings_on_demand,
     render_slack_session_presence,
-    render_slack_settings_available,
+    render_slack_setup_required,
 )
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
@@ -66,11 +67,13 @@ from azents.services.external_channel.discord_delivery import (
     DiscordOutboundFileContentError,
 )
 from azents.services.external_channel.discord_presentation import (
+    render_discord_binding_settings_on_demand,
     render_discord_session_presence,
-    render_discord_settings_available,
+    render_discord_setup_required,
 )
 from azents.services.external_channel.discord_settings_scope import (
     build_discord_binding_settings_open_custom_id,
+    build_discord_settings_custom_id,
 )
 from azents.services.external_channel.file_transfer import (
     ExternalChannelFileTransferError,
@@ -95,6 +98,7 @@ from azents.services.external_channel.slack_events import (
 from azents.services.external_channel.slack_http import SLACK_SETTINGS_OPEN_ACTION_ID
 from azents.services.external_channel.slack_sdk_client import create_slack_web_client
 from azents.services.external_channel.slack_settings import (
+    build_slack_parent_settings_locator,
     build_slack_settings_locator,
 )
 from azents.services.file_storage import FileStorage, RangedFileStorage
@@ -861,7 +865,56 @@ class ExternalChannelActionService:
                     )
                 if (
                     target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-                    and payload.get("control_kind") == "binding_settings_available"
+                    and payload.get("control_kind") == "setup_required"
+                ):
+                    setup_claim_id = payload.get("setup_claim_id")
+                    claim_generation = payload.get("claim_generation")
+                    source_revision = payload.get("source_revision")
+                    if (
+                        files
+                        or not isinstance(target.agent_name, str)
+                        or not target.agent_name
+                        or not isinstance(setup_claim_id, str)
+                        or not setup_claim_id
+                        or not isinstance(claim_generation, int)
+                        or isinstance(claim_generation, bool)
+                        or claim_generation <= 0
+                        or not isinstance(source_revision, int)
+                        or isinstance(source_revision, bool)
+                        or source_revision <= 0
+                    ):
+                        return _discord_invalid_payload()
+                    control = render_discord_setup_required(
+                        agent_name=target.agent_name,
+                        channel_custom_id=build_discord_settings_custom_id(
+                            secret=self.config.auth.jwt.secret_key,
+                            action="setup_channel",
+                            origin_interaction_id=setup_claim_id,
+                            setup_claim_id=setup_claim_id,
+                            claim_generation=claim_generation,
+                            source_revision=source_revision,
+                        ),
+                        threads_custom_id=build_discord_settings_custom_id(
+                            secret=self.config.auth.jwt.secret_key,
+                            action="setup_threads",
+                            origin_interaction_id=setup_claim_id,
+                            setup_claim_id=setup_claim_id,
+                            claim_generation=claim_generation,
+                            source_revision=source_revision,
+                        ),
+                    )
+                    return await self.discord_client.create_message(
+                        bot_token=bot_token,
+                        guild_id=guild_id,
+                        channel_id=delivery_channel_id,
+                        content=control.text,
+                        delivery_attempt_id=target.delivery_attempt_id,
+                        components=control.components,
+                        embeds=control.embeds,
+                    )
+                if (
+                    target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+                    and payload.get("control_kind") == "binding_settings_on_demand"
                 ):
                     context = _session_navigation_context(
                         target,
@@ -874,9 +927,8 @@ class ExternalChannelActionService:
                         or not target.binding_id
                     ):
                         return _discord_invalid_payload()
-                    control = render_discord_settings_available(
+                    control = render_discord_binding_settings_on_demand(
                         agent_name=context.agent_name,
-                        session_url=context.session_url,
                         settings_custom_id=(
                             build_discord_binding_settings_open_custom_id(
                                 secret=self.config.auth.jwt.secret_key,
@@ -1175,6 +1227,58 @@ class ExternalChannelActionService:
                 blocks=selector.blocks,
                 icon_url=None,
             )
+        if control_kind == "setup_required":
+            if not isinstance(target.agent_name, str) or not target.agent_name:
+                return _invalid_payload()
+            control = render_slack_setup_required(
+                agent_name=target.agent_name,
+                settings_action_id=SLACK_SETTINGS_OPEN_ACTION_ID,
+                settings_action_value=build_slack_parent_settings_locator(
+                    secret=self.config.auth.jwt.secret_key,
+                    connection_id=target.connection_id,
+                    provider_parent_channel_id=channel_id,
+                ),
+            )
+            return await self.slack_client.post_blocks(
+                bot_token=bot_token,
+                tenant_id=tenant_id,
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text=control.text,
+                blocks=control.blocks,
+                icon_url=None,
+            )
+        if control_kind == "binding_settings_on_demand":
+            context = _session_navigation_context(
+                target,
+                web_url=self.config.web_url,
+            )
+            if (
+                context is None
+                or target.resource_id is None
+                or target.binding_id is None
+            ):
+                return _invalid_payload()
+            control = render_slack_binding_settings_on_demand(
+                agent_name=context.agent_name,
+                settings_action_id=SLACK_SETTINGS_OPEN_ACTION_ID,
+                settings_action_value=build_slack_settings_locator(
+                    secret=self.config.auth.jwt.secret_key,
+                    connection_id=target.connection_id,
+                    provider_parent_channel_id=channel_id,
+                    resource_id=target.resource_id,
+                    binding_id=target.binding_id,
+                ),
+            )
+            return await self.slack_client.post_blocks(
+                bot_token=bot_token,
+                tenant_id=tenant_id,
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                text=control.text,
+                blocks=control.blocks,
+                icon_url=None,
+            )
         if control_kind == "session_presence":
             context = _session_presence_context(
                 target,
@@ -1201,38 +1305,6 @@ class ExternalChannelActionService:
                         and target.binding_id is not None
                     )
                     else None
-                ),
-            )
-            return await self.slack_client.post_blocks(
-                bot_token=bot_token,
-                tenant_id=tenant_id,
-                channel_id=channel_id,
-                thread_ts=thread_ts,
-                text=control.text,
-                blocks=control.blocks,
-                icon_url=None,
-            )
-        if control_kind == "binding_settings_available":
-            context = _session_navigation_context(
-                target,
-                web_url=self.config.web_url,
-            )
-            if (
-                context is None
-                or target.resource_id is None
-                or target.binding_id is None
-            ):
-                return _invalid_payload()
-            control = render_slack_settings_available(
-                agent_name=context.agent_name,
-                session_url=context.session_url,
-                settings_action_id=SLACK_SETTINGS_OPEN_ACTION_ID,
-                settings_action_value=build_slack_settings_locator(
-                    secret=self.config.auth.jwt.secret_key,
-                    connection_id=target.connection_id,
-                    provider_parent_channel_id=channel_id,
-                    resource_id=target.resource_id,
-                    binding_id=target.binding_id,
                 ),
             )
             return await self.slack_client.post_blocks(

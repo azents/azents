@@ -89,13 +89,52 @@ def session_presence_payload(
     return payload
 
 
-def binding_settings_available_payload(
+def setup_required_payload(
+    labels: dict[str, object] | None,
+    *,
+    setup_claim_id: str,
+    claim_generation: int,
+    source_revision: int,
+) -> dict[str, object]:
+    """Build one durable provider target for a first-mention setup choice."""
+    labels = labels or {}
+    if labels.get("provider") == "discord":
+        parent_channel_id = labels.get("parent_channel_id")
+        if not isinstance(parent_channel_id, str) or not parent_channel_id:
+            parent_channel_id = labels.get("source_channel_id")
+        payload: dict[str, object] = {
+            "control_kind": "setup_required",
+            "control_version": 2,
+            "guild_id": labels.get("guild_id"),
+            "channel_id": parent_channel_id,
+            "conversation_scope": "parent_channel",
+        }
+    else:
+        payload = session_presence_payload(labels, state="joined")
+        payload.pop("presence_state")
+    payload.update(
+        {
+            "control_kind": "setup_required",
+            "setup_claim_id": setup_claim_id,
+            "claim_generation": claim_generation,
+            "source_revision": source_revision,
+        }
+    )
+    return payload
+
+
+def binding_settings_on_demand_payload(
     labels: dict[str, object] | None,
 ) -> dict[str, object]:
-    """Build one durable provider target for existing-Binding settings rollout."""
+    """Build one provider target for settings requested by a new mention."""
     payload = session_presence_payload(labels, state="joined")
-    payload["control_kind"] = "binding_settings_available"
     payload.pop("presence_state")
+    payload.update(
+        {
+            "control_kind": "binding_settings_on_demand",
+            "control_version": 3,
+        }
+    )
     return payload
 
 
