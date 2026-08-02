@@ -21,12 +21,8 @@ def test_external_channel_gateway_replaces_discord_specific_role() -> None:
     assert "./bin/discordgatewayworker.sh" not in rendered
 
 
-def test_external_channel_participation_rollout_gate_is_deployment_controlled() -> None:
-    """The shared server ConfigMap retains a disabled, overridable rollout gate."""
-    disabled = _helm_template()
-    enabled = _helm_template(
-        "server.env.AZ_EXTERNAL_CHANNEL_PARTICIPATION_ENABLED=true"
-    )
+def test_external_channel_participation_has_no_rollout_gate() -> None:
+    """Provider participation is canonical and has no deployment opt-in."""
+    rendered = _helm_template()
 
-    assert 'AZ_EXTERNAL_CHANNEL_PARTICIPATION_ENABLED: "false"' in disabled
-    assert 'AZ_EXTERNAL_CHANNEL_PARTICIPATION_ENABLED: "true"' in enabled
+    assert "AZ_EXTERNAL_CHANNEL_PARTICIPATION_ENABLED" not in rendered

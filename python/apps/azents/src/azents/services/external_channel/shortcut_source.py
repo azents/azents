@@ -7,8 +7,6 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.config import Config
-from azents.core.deps import get_config
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConversationScopeKind,
@@ -75,7 +73,6 @@ class ExternalChannelShortcutSourceService:
         ExternalChannelRepository,
         Depends(ExternalChannelRepository),
     ]
-    config: Annotated[Config, Depends(get_config)]
 
     async def ensure(
         self,
@@ -228,8 +225,7 @@ class ExternalChannelShortcutSourceService:
                     selector_interaction=None
                 )
             if (
-                self.config.external_channel_participation_enabled
-                and position_scope_kind
+                position_scope_kind
                 is ExternalChannelConversationScopeKind.PARENT_CHANNEL
                 and await self.repository.get_active_participation_setting(
                     session,

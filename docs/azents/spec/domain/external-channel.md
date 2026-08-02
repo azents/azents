@@ -57,7 +57,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-08-02
-spec_version: 39
+spec_version: 40
 ---
 
 # External Channel
@@ -151,11 +151,6 @@ contain multiple independent bindings.
   connection and provider parent channel. A later eligible explicit mention replaces
   the pending claim's source and increments its revision. The first valid location
   selection freezes the latest revision and releases exactly one canonical continuation.
-- The deployment participation gate defaults to disabled in backend and Helm
-  configuration. While disabled, the system remains read-compatible with the additive
-  schema but does not create setup claims, participation settings, parent-channel
-  Resources, or provider settings controls. The deterministic E2E fixture explicitly
-  enables the gate.
 - Durable execution mutations are fenced by the current Session owner generation.
   Provider principals, Slack callback actors, Workspace requesters, and approvers
   remain provenance or authorization identities and never become the execution User.
@@ -384,6 +379,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-02** (spec_version 40) — Removed the deployment participation gate and
+  made first-mention setup, participation settings, parent-channel Resources, and
+  provider settings controls unconditional canonical behavior.
 - **2026-08-02** (spec_version 39) — Added provider-channel participation settings,
   latest-source setup claims, explicit parent-channel Resources, setup continuation,
   provider-native settings controls, selected-Agent lifecycle coupling, and direct

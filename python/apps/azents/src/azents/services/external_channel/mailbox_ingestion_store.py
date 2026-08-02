@@ -929,8 +929,7 @@ class ExternalChannelMailboxIngestionStore:
                 setup_required=False,
             )
         setup_required = (
-            self.config.external_channel_participation_enabled
-            and request.operation is ExternalChannelIngestionOperation.CURRENT_TRIGGER
+            request.operation is ExternalChannelIngestionOperation.CURRENT_TRIGGER
             and request.scope.kind
             is ExternalChannelConversationScopeKind.PARENT_CHANNEL
             and request.locator.invocation

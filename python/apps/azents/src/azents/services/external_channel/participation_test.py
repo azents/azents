@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.config import Config
 from azents.core.enums import (
     ExternalChannelConnectionStatus,
     ExternalChannelConversationLocation,
@@ -169,7 +168,6 @@ def _service(
         ingestion_replay_service=cast(Any, replay or MagicMock()),
         conversation_lock=cast(Any, _Lock()),
         participation_lock=cast(Any, _Lock()),
-        config=Config.model_construct(external_channel_participation_enabled=True),
     )
 
 
