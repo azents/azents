@@ -2895,20 +2895,26 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
                 return session, projection.items[0]
         return None
 
-    def socket_acknowledged() -> bool:
+    def socket_evidence_contains(field: str) -> bool:
         socket_state = _provider_state(slack_provider_fake_url).get("socket")
         if not isinstance(socket_state, dict):
             return False
-        acknowledgements = cast(dict[str, object], socket_state).get("acknowledgements")
-        return isinstance(acknowledgements, list) and envelope_id in cast(
+        values = cast(dict[str, object], socket_state).get(field)
+        return isinstance(values, list) and envelope_id in cast(
             list[object],
-            acknowledgements,
+            values,
         )
 
     with azents_external_channel_gateway_factory():
         wait_until(
-            socket_acknowledged,
-            timeout=20,
+            lambda: socket_evidence_contains("envelope_ids"),
+            timeout=45,
+            interval=0.2,
+            message="Socket Mode provider fake did not deliver the envelope",
+        )
+        wait_until(
+            lambda: socket_evidence_contains("acknowledgements"),
+            timeout=45,
             interval=0.2,
             message="Socket Mode envelope was not acknowledged after admission",
         )
