@@ -1696,9 +1696,16 @@ def test_multi_app_workspace_management_default_and_disconnect_journey(
             _headers=manager_headers,
         )
     )
-    assert channel_default.route_id == first_route.id
-    assert channel_default.agent_id == agent_ids[0]
-    assert channel_default.status is ExternalChannelChannelDefaultStatus.ACTIVE
+    assert channel_default.channel_default is not None
+    assert channel_default.channel_default.route_id == first_route.id
+    assert channel_default.channel_default.agent_id == agent_ids[0]
+    assert (
+        channel_default.channel_default.status
+        is ExternalChannelChannelDefaultStatus.ACTIVE
+    )
+    assert channel_default.invalidated_participation_setting_count == 0
+    assert channel_default.terminated_setup_claim_count == 0
+    assert channel_default.disconnected_parent_binding_count == 0
 
     with pytest.raises(ApiException) as stale_error:
         external_api.external_channel_v1_clear_multi_slack_channel_default(
@@ -3981,8 +3988,12 @@ def test_discord_multi_management_and_lifecycle_journey(
         ),
         _headers=headers,
     )
-    assert default.route_id == first_route.id
-    assert default.status is ExternalChannelChannelDefaultStatus.ACTIVE
+    assert default.channel_default is not None
+    assert default.channel_default.route_id == first_route.id
+    assert default.channel_default.status is ExternalChannelChannelDefaultStatus.ACTIVE
+    assert default.invalidated_participation_setting_count == 0
+    assert default.terminated_setup_claim_count == 0
+    assert default.disconnected_parent_binding_count == 0
 
     impact = external_api.external_channel_v1_get_multi_discord_route_impact(
         connection_id=connection.id,
