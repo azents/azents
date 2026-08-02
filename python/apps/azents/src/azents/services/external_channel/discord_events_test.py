@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import discord
 import pytest
 
+from azents.core.external_channel_file import MAX_EXTERNAL_CHANNEL_FILES
 from azents.services.external_channel.discord_events import (
     DiscordEventExcluded,
     DiscordEventNormalizationError,
@@ -59,6 +60,7 @@ def _event(
     message.edited_at = None
     message.author = author
     message.mentions = []
+    message.role_mentions = []
     message.attachments = [attachment]
     return DiscordGatewayMessageEvent(
         event_type="message_create",
@@ -73,6 +75,7 @@ def test_projects_message_event_without_attachment_urls_or_raw_payload() -> None
         connection_id="connection-1",
         provider_app_id="app-1",
         target_guild_id="300",
+        connected_bot_user_id="900",
         event=_event(),
         received_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
     )
@@ -122,12 +125,148 @@ def test_projects_message_event_without_attachment_urls_or_raw_payload() -> None
     assert '"avatar"' not in serialized
 
 
+def test_projects_connected_bot_managed_role_as_invocation() -> None:
+    """A provider-owned Bot role is equivalent to directly mentioning that Bot."""
+    role_tags = MagicMock(spec=discord.RoleTags)
+    role_tags.bot_id = 900
+    role = MagicMock(spec=discord.Role)
+    role.id = 901
+    role.tags = role_tags
+    gateway_event = _event()
+    assert gateway_event.message is not None
+    gateway_event.message.role_mentions = [role]
+
+    event = project_discord_gateway_event(
+        connection_id="connection-1",
+        provider_app_id="app-1",
+        target_guild_id="300",
+        connected_bot_user_id="900",
+        event=gateway_event,
+        received_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
+    )
+
+    assert event is not None
+    raw_message = event.envelope["message"]
+    assert isinstance(raw_message, dict)
+    assert raw_message["managed_bot_role_mentions"] == [
+        {
+            "id": "901",
+            "bot_user_id": "900",
+        }
+    ]
+    normalized = normalize_projected_discord_event(
+        event_type=event.event_type,
+        tenant_id="300",
+        connected_bot_user_id="900",
+        envelope=event.envelope,
+    )
+    assert normalized.invocation is True
+
+
+def test_projects_connected_bot_role_after_unrelated_managed_role_volume() -> None:
+    """Other Bots' roles cannot displace the connected Bot's managed role."""
+    unrelated_roles: list[MagicMock] = []
+    for role_id in range(MAX_EXTERNAL_CHANNEL_FILES):
+        role_tags = MagicMock(spec=discord.RoleTags)
+        role_tags.bot_id = 1_000 + role_id
+        role = MagicMock(spec=discord.Role)
+        role.id = role_id
+        role.tags = role_tags
+        unrelated_roles.append(role)
+    role_tags = MagicMock(spec=discord.RoleTags)
+    role_tags.bot_id = 900
+    managed_role = MagicMock(spec=discord.Role)
+    managed_role.id = 901
+    managed_role.tags = role_tags
+    gateway_event = _event()
+    assert gateway_event.message is not None
+    gateway_event.message.role_mentions = [*unrelated_roles, managed_role]
+
+    event = project_discord_gateway_event(
+        connection_id="connection-1",
+        provider_app_id="app-1",
+        target_guild_id="300",
+        connected_bot_user_id="900",
+        event=gateway_event,
+        received_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
+    )
+
+    assert event is not None
+    raw_message = event.envelope["message"]
+    assert isinstance(raw_message, dict)
+    assert raw_message["managed_bot_role_mentions"] == [
+        {
+            "id": "901",
+            "bot_user_id": "900",
+        }
+    ]
+
+
+def test_rejects_unrelated_managed_bot_role_as_invocation() -> None:
+    """Another Bot's managed role cannot invoke the connected Agent."""
+    projection = project_discord_message(
+        guild_id="guild-1",
+        message={
+            "id": "100",
+            "channel_id": "200",
+            "content": "<@&901> help",
+            "managed_bot_role_mentions": [
+                {
+                    "id": "901",
+                    "bot_user_id": "902",
+                }
+            ],
+        },
+    )
+
+    normalized = normalize_projected_discord_event(
+        event_type="discord_message_create",
+        tenant_id="guild-1",
+        connected_bot_user_id="900",
+        envelope={"message": projection},
+    )
+
+    assert normalized.invocation is False
+
+
+def test_omits_ordinary_role_from_invocation_projection() -> None:
+    """A manually managed role has no Bot ownership invocation authority."""
+    role = MagicMock(spec=discord.Role)
+    role.id = 901
+    role.tags = None
+    gateway_event = _event()
+    assert gateway_event.message is not None
+    gateway_event.message.role_mentions = [role]
+
+    event = project_discord_gateway_event(
+        connection_id="connection-1",
+        provider_app_id="app-1",
+        target_guild_id="300",
+        connected_bot_user_id="900",
+        event=gateway_event,
+        received_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
+    )
+
+    assert event is not None
+    raw_message = event.envelope["message"]
+    assert isinstance(raw_message, dict)
+    assert "managed_bot_role_mentions" not in raw_message
+    normalized = normalize_projected_discord_event(
+        event_type=event.event_type,
+        tenant_id="300",
+        connected_bot_user_id="900",
+        envelope=event.envelope,
+    )
+    assert normalized.invocation is False
+
+
 def test_projects_only_message_create_events() -> None:
     """The Gateway projects only message-create callbacks into ingestion."""
     event = project_discord_gateway_event(
         connection_id="connection-1",
         provider_app_id="app-1",
         target_guild_id="300",
+        connected_bot_user_id="900",
         event=_event(),
         received_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
     )
@@ -142,6 +281,7 @@ def test_ignores_cross_guild_typed_events() -> None:
         connection_id="connection-1",
         provider_app_id="app-1",
         target_guild_id="300",
+        connected_bot_user_id="900",
         event=_event(guild_id=301),
         received_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
     )
@@ -160,6 +300,7 @@ def test_rejects_typed_create_without_message() -> None:
             connection_id="connection-1",
             provider_app_id="app-1",
             target_guild_id="300",
+            connected_bot_user_id="900",
             event=malformed,
             received_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
         )
