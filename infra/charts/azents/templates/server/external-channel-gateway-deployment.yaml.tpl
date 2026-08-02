@@ -22,6 +22,10 @@ spec:
     spec:
       terminationGracePeriodSeconds: 60
       serviceAccountName: {{ include "azents.serverServiceAccountName" . | quote }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: external-channel-gateway
           image: {{ include "azents.serverImage" . | quote }}
