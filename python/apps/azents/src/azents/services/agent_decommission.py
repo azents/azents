@@ -251,7 +251,7 @@ class AgentDecommissionService:
         """Stop and archive one root tree through the shared lifecycle registry."""
         stop_session_ids: list[str] = []
         active = False
-        archive_cleanup_ids: tuple[str, ...] = ()
+        archive_cleanup_plans = ()
         async with self.session_manager() as session:
             tree = await self.agent_session_repository.lock_root_tree_sessions(
                 session,
@@ -306,7 +306,7 @@ class AgentDecommissionService:
                     context: SessionLifecycleTransitionContext,
                 ) -> None:
                     """Apply lifecycle-owned state before archiving the root tree."""
-                    nonlocal archive_cleanup_ids
+                    nonlocal archive_cleanup_plans
                     lifecycle = self.external_channel_lifecycle_service
                     result = await lifecycle.archive_participant(
                         session,
@@ -314,7 +314,7 @@ class AgentDecommissionService:
                         context,
                     )
                     if result is not None:
-                        archive_cleanup_ids = result.cleanup_intent_ids
+                        archive_cleanup_plans = result.cleanup_plans
 
                 await self.lifecycle_orchestrator.archive(
                     context=SessionLifecycleTransitionContext(
@@ -345,7 +345,7 @@ class AgentDecommissionService:
 
         if not active:
             await self.external_channel_lifecycle_service.consume_archive_cleanup(
-                archive_cleanup_ids
+                archive_cleanup_plans
             )
         for session_id in stop_session_ids:
             await self.broker.send_message(SessionStopSignal(session_id=session_id))
@@ -358,7 +358,7 @@ class AgentDecommissionService:
         lease_owner: str,
     ) -> None:
         """Clean direct Agent-owned blobs and request terminal Runtime deletion."""
-        external_cleanup_targets = ()
+        external_cleanup_plans = ()
         async with self.session_manager() as session:
             runtime = await self.runtime_repository.get_by_agent_id(
                 session,
@@ -379,12 +379,7 @@ class AgentDecommissionService:
                 agent_id=job.agent_id,
                 now=now,
             )
-            external_cleanup_targets = (
-                await self.external_channel_lifecycle_service.prepare_cleanup(
-                    session,
-                    external_cleanup.cleanup_intent_ids,
-                )
-            )
+            external_cleanup_plans = external_cleanup.cleanup_plans
             await cleanup_service.purge_decommissioned_provider_state(
                 session,
                 external_cleanup.provider_state_purge_connection_ids,
@@ -409,9 +404,8 @@ class AgentDecommissionService:
                 raise RuntimeError("Agent decommission lease was lost")
             await session.commit()
 
-        await self.external_channel_lifecycle_service.consume_prepared_cleanup(
-            external_cleanup_targets,
-            external_cleanup.provider_state_purge_connection_ids,
+        await self.external_channel_lifecycle_service.consume_archive_cleanup(
+            external_cleanup_plans
         )
         for file in files:
             if file.blob_deleted_at is not None:

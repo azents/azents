@@ -1,149 +1,66 @@
-"""External Channel provider-control recovery tests."""
+"""Tests for one-shot post-commit provider controls."""
 
-import datetime
-from contextlib import AbstractAsyncContextManager
 from typing import cast
+from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import ExternalChannelDeliveryStatus
-from azents.rdb.session import SessionManager
-from azents.repos.external_channel.work import ExternalChannelWorkRepository
-from azents.services.external_channel.channel_action import (
-    ExternalChannelActionService,
+from azents.core.enums import (
+    ExternalChannelAppMode,
+    ExternalChannelDeliveryOperation,
+    ExternalChannelProvider,
 )
+from azents.services.external_channel.channel_action import ExternalChannelActionService
 from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
 )
+from azents.services.external_channel.provider_effect import (
+    ProviderEffectPlan,
+    ProviderMutationOutcome,
+    ProviderOperationKey,
+    ProviderTarget,
+)
 
 
-def _at(second: int) -> datetime.datetime:
-    return datetime.datetime(
-        2026,
-        7,
-        29,
-        tzinfo=datetime.UTC,
-    ) + datetime.timedelta(seconds=second)
-
-
-class _Session:
-    def __init__(self, events: list[str]) -> None:
-        self.events = events
-
-    async def commit(self) -> None:
-        self.events.append("commit")
-
-
-class _SessionScope(AbstractAsyncContextManager[AsyncSession]):
-    def __init__(self, session: _Session) -> None:
-        self.session = session
-
-    async def __aenter__(self) -> AsyncSession:
-        return cast(AsyncSession, self.session)
-
-    async def __aexit__(self, *exc_info: object) -> None:
-        return None
-
-
-class _SessionManager:
-    def __init__(self, events: list[str]) -> None:
-        self.session = _Session(events)
-
-    def __call__(self) -> _SessionScope:
-        return _SessionScope(self.session)
-
-
-class _Repository:
-    def __init__(
-        self,
-        events: list[str],
-        *,
-        delivery_statuses: list[ExternalChannelDeliveryStatus | None] | None = None,
-    ) -> None:
-        self.events = events
-        self.delivery_statuses = delivery_statuses or []
-
-    async def recover_stale_provider_control_deliveries(
-        self,
-        session: AsyncSession,
-        *,
-        stale_before: datetime.datetime,
-        completed_at: datetime.datetime,
-        limit: int,
-    ) -> int:
-        del session
-        assert stale_before == _at(0)
-        assert completed_at == _at(120)
-        assert limit == 2
-        self.events.append("recover")
-        return 1
-
-    async def list_pending_provider_control_delivery_ids(
-        self,
-        session: AsyncSession,
-        *,
-        limit: int,
-    ) -> list[str]:
-        del session
-        assert limit == 2
-        self.events.append("list")
-        return ["delivery-1", "delivery-2"]
-
-    async def get_delivery_status(
-        self,
-        session: AsyncSession,
-        *,
-        delivery_attempt_id: str,
-    ) -> ExternalChannelDeliveryStatus | None:
-        del session
-        assert delivery_attempt_id == "delivery-1"
-        self.events.append("status")
-        return self.delivery_statuses.pop(0)
-
-
-class _ActionService:
-    def __init__(self, events: list[str]) -> None:
-        self.events = events
-
-    async def attempt_delivery(
-        self,
-        delivery_attempt_id: str,
-    ) -> ExternalChannelDeliveryStatus:
-        self.events.append(delivery_attempt_id)
-        return ExternalChannelDeliveryStatus.DELIVERED
+def _plan() -> ProviderEffectPlan:
+    return ProviderEffectPlan(
+        target=ProviderTarget(
+            operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            binding_id=None,
+            resource_id="resource-1",
+            connection_id="connection-1",
+            provider=ExternalChannelProvider.SLACK,
+            app_mode=ExternalChannelAppMode.SINGLE,
+            encrypted_credentials="encrypted",
+            provider_tenant_id="tenant-1",
+            capabilities=None,
+            workspace_handle=None,
+            agent_id=None,
+            agent_session_id=None,
+            agent_name=None,
+            agent_avatar=None,
+            request_payload={"control_kind": "setup_required"},
+        ),
+        operation_key=ProviderOperationKey.from_seed("control-1"),
+    )
 
 
 @pytest.mark.asyncio
-async def test_drain_commits_recovery_before_provider_attempts() -> None:
-    """The scan transaction closes before each existing delivery primitive runs."""
-    events: list[str] = []
-    service = ExternalChannelProviderControlService(
-        session_manager=cast(
-            SessionManager[AsyncSession],
-            _SessionManager(events),
-        ),
-        repository=cast(
-            ExternalChannelWorkRepository,
-            _Repository(events),
-        ),
-        action_service=cast(
-            ExternalChannelActionService,
-            _ActionService(events),
-        ),
-        stale_threshold=datetime.timedelta(minutes=2),
-        interval=datetime.timedelta(seconds=1),
-        limit=2,
+async def test_attempt_delegates_exactly_once_without_drain() -> None:
+    action_service = AsyncMock(spec=ExternalChannelActionService)
+    action_service.execute_direct_control.return_value = ProviderMutationOutcome(
+        status="delivered",
+        provider_message_key=None,
+        error_kind=None,
+        error_summary=None,
     )
+    service = ExternalChannelProviderControlService(
+        action_service=cast(ExternalChannelActionService, action_service)
+    )
+    plan = _plan()
 
-    result = await service.drain_once(now=_at(120))
+    result = await service.attempt(plan)
 
-    assert result.stale_unknown == 1
-    assert result.attempted == 2
-    assert events == [
-        "recover",
-        "list",
-        "commit",
-        "delivery-1",
-        "delivery-2",
-    ]
+    assert result is not None
+    assert result.status == "delivered"
+    action_service.execute_direct_control.assert_awaited_once_with(plan)

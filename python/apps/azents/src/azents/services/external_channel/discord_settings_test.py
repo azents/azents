@@ -45,6 +45,7 @@ from azents.services.external_channel.participation import (
     ExternalChannelParticipationSettings,
     ExternalChannelParticipationSettingsMutation,
 )
+from azents.testing.external_channel import make_provider_effect_plan
 
 _NOW = datetime.datetime(2026, 8, 1, tzinfo=datetime.UTC)
 _CONTEXT = DiscordSettingsContext(
@@ -259,6 +260,8 @@ async def test_setup_control_passes_exact_claim_fences_to_canonical_selection() 
 @pytest.mark.asyncio
 async def test_parent_control_preserves_every_cleanup_delivery() -> None:
     """A parent location mutation returns all committed disconnect cleanup intents."""
+    presence_plan = make_provider_effect_plan("presence-delete")
+    progress_plan = make_provider_effect_plan("progress-delete")
     current = ExternalChannelParticipationSettings(
         target="parent",
         agent_name="Agent One",
@@ -280,7 +283,7 @@ async def test_parent_control_preserves_every_cleanup_delivery() -> None:
         mutate_parent_settings=AsyncMock(
             return_value=ExternalChannelParticipationSettingsMutation(
                 settings=updated,
-                cleanup_delivery_ids=("presence-delete-1", "progress-delete-1"),
+                cleanup_plans=(presence_plan, progress_plan),
             )
         ),
     )
@@ -306,10 +309,7 @@ async def test_parent_control_preserves_every_cleanup_delivery() -> None:
     call = participation.mutate_parent_settings.await_args.kwargs
     assert call["location"] is ExternalChannelConversationLocation.THREADS
     assert call["response_mode"] is ExternalChannelResponseMode.MENTION_ONLY
-    assert response.cleanup_delivery_ids == (
-        "presence-delete-1",
-        "progress-delete-1",
-    )
+    assert response.cleanup_plans == (presence_plan, progress_plan)
 
 
 @pytest.mark.asyncio
@@ -344,7 +344,7 @@ async def test_thread_control_mutates_only_the_exact_connected_binding() -> None
         mutate_thread_settings=AsyncMock(
             return_value=ExternalChannelParticipationSettingsMutation(
                 settings=updated,
-                cleanup_delivery_ids=(),
+                cleanup_plans=(),
             )
         ),
     )
@@ -443,7 +443,7 @@ async def test_binding_open_rebinds_follow_up_controls_to_component_interaction(
         mutate_parent_settings=AsyncMock(
             return_value=ExternalChannelParticipationSettingsMutation(
                 settings=updated,
-                cleanup_delivery_ids=(),
+                cleanup_plans=(),
             )
         ),
     )

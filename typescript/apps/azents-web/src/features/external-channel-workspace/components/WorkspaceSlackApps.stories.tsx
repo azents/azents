@@ -87,7 +87,7 @@ const defaultMutation: ManagedChannelDefaultMutation = {
   terminated_setup_claim_count: 1,
   expired_interaction_count: 2,
   disconnected_parent_binding_count: 1,
-  cleanup_delivery_count: 1,
+  direct_cleanup_count: 1,
 };
 
 const handoff: ManagedSlackManagementHandoff = {

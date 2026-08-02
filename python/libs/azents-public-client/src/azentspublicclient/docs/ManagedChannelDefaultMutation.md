@@ -12,7 +12,7 @@ Name | Type | Description | Notes
 **terminated_setup_claim_count** | **int** |  | 
 **expired_interaction_count** | **int** |  | 
 **disconnected_parent_binding_count** | **int** |  | 
-**cleanup_delivery_count** | **int** |  | 
+**direct_cleanup_count** | **int** |  | 
 
 ## Example
 

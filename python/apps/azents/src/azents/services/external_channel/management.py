@@ -766,8 +766,8 @@ class ExternalChannelManagementService:
                 raise ExternalChannelManagementNotFound(route_id)
             connection.updated_at = now
             await session.commit()
-        for delivery_id in removal.cleanup_intent_ids:
-            await self.action_service.attempt_delivery(delivery_id)
+        for plan in removal.cleanup_plans:
+            await self.action_service.execute_terminal_control(plan)
         return removal.impact
 
     async def reenable_multi_route(
@@ -891,8 +891,8 @@ class ExternalChannelManagementService:
                     if transition.changed:
                         connection.updated_at = now
                     await session.commit()
-        for delivery_id in transition.cleanup_intent_ids:
-            await self.action_service.attempt_delivery(delivery_id)
+        for plan in transition.cleanup_plans:
+            await self.action_service.execute_terminal_control(plan)
         return _managed_channel_default_mutation(transition)
 
     async def clear_multi_channel_default(
@@ -949,8 +949,8 @@ class ExternalChannelManagementService:
                         raise ExternalChannelManagementNotFound(provider_channel_id)
                     connection.updated_at = now
                     await session.commit()
-        for delivery_id in transition.cleanup_intent_ids:
-            await self.action_service.attempt_delivery(delivery_id)
+        for plan in transition.cleanup_plans:
+            await self.action_service.execute_terminal_control(plan)
         return _managed_channel_default_mutation(transition)
 
     async def disconnect_multi_connection(
@@ -963,7 +963,7 @@ class ExternalChannelManagementService:
     ) -> ManagedMultiConnectionDisconnect:
         """Generation-fence terminal Multi App disconnect around provider I/O."""
         now = datetime.datetime.now(datetime.UTC)
-        cleanup_targets = []
+        cleanup_plans = ()
         async with self.session_manager() as session:
             connection = await self._lock_multi_connection_generation(
                 session,
@@ -982,13 +982,7 @@ class ExternalChannelManagementService:
             )
             if disconnected is None:
                 raise ExternalChannelManagementNotFound(connection_id)
-            for delivery_id in disconnected.cleanup_intent_ids:
-                target = await self.action_service.prepare_delivery_in_session(
-                    session,
-                    delivery_id,
-                )
-                if target is not None:
-                    cleanup_targets.append(target)
+            cleanup_plans = disconnected.cleanup_plans
             await (
                 self.lifecycle_repository.purge_disconnected_connection_provider_state(
                     session,
@@ -997,8 +991,8 @@ class ExternalChannelManagementService:
             )
             connection.updated_at = now
             await session.commit()
-        for target in cleanup_targets:
-            await self.action_service.attempt_captured_terminal_delivery(target)
+        for plan in cleanup_plans:
+            await self.action_service.execute_terminal_control(plan)
         return _managed_multi_disconnect(disconnected)
 
     async def load_multi_management_handoff(
@@ -1162,21 +1156,16 @@ class ExternalChannelManagementService:
         )
         now = datetime.datetime.now(datetime.UTC)
         async with self.session_manager() as session:
-            cleanup_ids = await self.repository.begin_connection_disconnect(
+            cleanup_plans = await self.repository.begin_connection_disconnect(
                 session,
                 workspace_id=workspace_id,
                 agent_id=agent_id,
                 connection_id=connection_id,
                 now=now,
             )
-            if cleanup_ids is None:
+            if cleanup_plans is None:
                 raise ExternalChannelManagementNotFound(connection_id)
             await session.commit()
-        cleanup_targets = []
-        for cleanup_id in cleanup_ids:
-            target = await self.action_service.prepare_delivery(cleanup_id)
-            if target is not None:
-                cleanup_targets.append(target)
         async with self.session_manager() as session:
             disconnected = await self.lifecycle_repository.disconnect_single_connection(
                 session,
@@ -1196,8 +1185,8 @@ class ExternalChannelManagementService:
             if connection is None:
                 raise ExternalChannelManagementNotFound(connection_id)
             await session.commit()
-        for target in cleanup_targets:
-            await self.action_service.attempt_captured_terminal_delivery(target)
+        for plan in cleanup_plans:
+            await self.action_service.execute_terminal_control(plan)
         return connection
 
     async def update_connection_access_policy(
@@ -1260,7 +1249,7 @@ class ExternalChannelManagementService:
             admin=True,
         )
         async with self.session_manager() as session:
-            cleanup_ids = await self.repository.disconnect_binding(
+            cleanup_plans = await self.repository.disconnect_binding(
                 session,
                 workspace_id=workspace_id,
                 agent_id=agent_id,
@@ -1269,11 +1258,11 @@ class ExternalChannelManagementService:
                 now=datetime.datetime.now(datetime.UTC),
                 reason="manager_disconnected",
             )
-            if cleanup_ids is None:
+            if cleanup_plans is None:
                 raise ExternalChannelManagementNotFound(binding_id)
             await session.commit()
-        for cleanup_id in cleanup_ids:
-            await self.action_service.attempt_delivery(cleanup_id)
+        for plan in cleanup_plans:
+            await self.action_service.execute_terminal_control(plan)
         return await self.list_bindings(
             workspace_id=workspace_id,
             agent_id=agent_id,
@@ -1535,10 +1524,8 @@ class ExternalChannelManagementService:
                 decision_summary=decision.summary,
                 now=now,
             )
-        if result.control_delete_delivery_id is not None:
-            await self.action_service.attempt_delivery(
-                result.control_delete_delivery_id
-            )
+        if result.control_delete_plan is not None:
+            await self.action_service.execute_direct_control(result.control_delete_plan)
         return await self.get_approval(
             access_request_id=access_request_id,
             user_id=user_id,
@@ -1648,7 +1635,7 @@ def _managed_channel_default_mutation(
         disconnected_parent_binding_count=(
             transition.disconnected_parent_binding_count
         ),
-        cleanup_delivery_count=len(transition.cleanup_intent_ids),
+        direct_cleanup_count=len(transition.cleanup_plans),
     )
 
 

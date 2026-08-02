@@ -117,7 +117,7 @@ class _Ingestion:
             kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
             reason=ExternalChannelIngestionReason.ACCEPTED,
             mailbox_item_id="batch-1",
-            control_delivery_attempt_id=None,
+            control_plan=None,
             connection_id=None,
         )
 

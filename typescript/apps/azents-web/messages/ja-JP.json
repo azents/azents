@@ -1282,8 +1282,6 @@
           "unknown": "プロバイダー結果不明",
           "none": "有効な projection なし"
         },
-        "deliveries": "Delivery 結果",
-        "noDeliveries": "Provider delivery はまだ試行されていません。",
         "grantsTitle": "セッションアクセス",
         "grantsDescription": "このセッションに限定して許可された参加者です。",
         "noGrants": "有効な session-scoped grant はありません。",
@@ -1292,21 +1290,6 @@
         "workStatus": {
           "active": "Work 実行中",
           "finished": "Work 完了"
-        },
-        "deliveryStatus": {
-          "pending": "待機中",
-          "attempting": "試行中",
-          "delivered": "配信済み",
-          "failed": "失敗",
-          "unknown": "結果不明",
-          "not_attempted": "未試行"
-        },
-        "operation": {
-          "reply": "返信",
-          "progress_create": "Progress を作成",
-          "progress_update": "Progress を更新",
-          "progress_delete": "Progress を削除",
-          "control_message": "Control message"
         },
         "grantScope": {
           "session": "セッションアクセス",
@@ -1789,7 +1772,7 @@
       "setDefault": "既定値を設定",
       "defaultMutationChangedTitle": "チャンネル選択を更新しました",
       "defaultMutationUnchangedTitle": "チャンネル選択はすでに最新です",
-      "defaultMutationImpact": "参加状態のクリーンアップ: 設定 {settings} 件を無効化し、セットアップ要求 {claims} 件を終了し、保留中の操作 {interactions} 件を期限切れにし、親会話 {bindings} 件を切断し、クリーンアップメッセージ {deliveries} 件をキューに追加しました。",
+      "defaultMutationImpact": "参加状態のクリーンアップ: 設定 {settings} 件を無効化し、セットアップ要求 {claims} 件を終了し、保留中の操作 {interactions} 件を期限切れにし、親会話 {bindings} 件を切断し、クリーンアップメッセージ {cleanups} 件を即時に試行しました。",
       "channel": "チャンネル",
       "defaultAgent": "既定エージェント",
       "defaultStatus": "既定値の状態",

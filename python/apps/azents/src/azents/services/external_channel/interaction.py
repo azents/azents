@@ -51,6 +51,7 @@ from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
     get_external_channel_provider_control_service,
 )
+from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.external_channel.selector import (
     ExternalChannelSelectorCatalog,
     ExternalChannelSelectorService,
@@ -394,11 +395,11 @@ class ExternalChannelInteractionProcessor:
             ):
                 return
             case ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS:
-                if outcome.control_delivery_attempt_id is not None:
+                if outcome.control_plan is not None:
                     assert outcome.connection_id is not None
                     await self.attempt_control_delivery(
                         connection_id=outcome.connection_id,
-                        delivery_attempt_id=outcome.control_delivery_attempt_id,
+                        plan=outcome.control_plan,
                     )
                 return
             case (
@@ -546,7 +547,7 @@ class ExternalChannelInteractionProcessor:
                     provider_thread_resource_key=None,
                     principal_id=interaction.principal_id,
                 )
-                cleanup_delivery_ids: tuple[str, ...] = ()
+                cleanup_plans: tuple[ProviderEffectPlan, ...] = ()
             elif metadata.target == "parent":
                 if (
                     metadata.setting_id is None
@@ -571,7 +572,7 @@ class ExternalChannelInteractionProcessor:
                         "External Channel parent settings changed."
                     )
                 settings = mutation.settings
-                cleanup_delivery_ids = mutation.cleanup_delivery_ids
+                cleanup_plans = mutation.cleanup_plans
             else:
                 if (
                     metadata.resource_id is None
@@ -595,9 +596,9 @@ class ExternalChannelInteractionProcessor:
                     deadline=deadline,
                 )
                 settings = mutation.settings
-                cleanup_delivery_ids = mutation.cleanup_delivery_ids
-            for delivery_id in cleanup_delivery_ids:
-                await self.provider_control.attempt_delivery(delivery_id)
+                cleanup_plans = mutation.cleanup_plans
+            for plan in cleanup_plans:
+                await self.provider_control.attempt(plan)
             view = _settings_confirmation_view(settings)
         except ExternalChannelParticipationError as error:
             view = _settings_notice_view(str(error))
@@ -686,11 +687,11 @@ class ExternalChannelInteractionProcessor:
         self,
         *,
         connection_id: str,
-        delivery_attempt_id: str,
+        plan: ProviderEffectPlan,
     ) -> None:
-        """Attempt one committed access control through the provider adapter."""
+        """Attempt one post-commit access control through the provider adapter."""
         del connection_id
-        await self.provider_control.attempt_delivery(delivery_attempt_id)
+        await self.provider_control.attempt(plan)
 
     async def _load_scope(
         self,

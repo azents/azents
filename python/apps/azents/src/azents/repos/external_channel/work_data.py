@@ -1,20 +1,20 @@
-"""Channel Work, Channel Action, and delivery repository records."""
+"""Channel Work and direct provider-effect repository records."""
 
-import datetime
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
 from azents.core.enums import (
-    ExternalChannelActionMode,
-    ExternalChannelAppMode,
-    ExternalChannelDeliveryOperation,
-    ExternalChannelDeliveryStatus,
     ExternalChannelProvider,
     ExternalChannelWorkStatus,
 )
 from azents.core.external_channel_progress import (
     ExternalChannelWorkTask as ChannelWorkTask,
+)
+from azents.services.external_channel.provider_effect import (
+    ProviderEffectOutcome,
+    ProviderEffectPlan,
 )
 
 
@@ -22,19 +22,6 @@ class _Record(BaseModel):
     """Immutable repository data base."""
 
     model_config = ConfigDict(frozen=True)
-
-
-class ChannelWorkDelivery(_Record):
-    """Safe delivery outcome exposed to model and management projections."""
-
-    id: str
-    operation: ExternalChannelDeliveryOperation
-    status: ExternalChannelDeliveryStatus
-    provider_message_key: str | None
-    error_kind: str | None
-    error_summary: str | None
-    created_at: datetime.datetime
-    completed_at: datetime.datetime | None
 
 
 class ChannelWorkSnapshot(_Record):
@@ -45,45 +32,37 @@ class ChannelWorkSnapshot(_Record):
     resource_label: str
     title: str | None
     tasks: list[ChannelWorkTask]
-    state_revision: int
-    desired_progress_revision: int
-    progress_provider_message_key: str | None
-    projection_drift: str
-    latest_action_mode: ExternalChannelActionMode | None
-    latest_deliveries: list[ChannelWorkDelivery]
 
 
-class ChannelActionCommit(_Record):
-    """Committed canonical Channel Action and its provider intents."""
+@dataclass(frozen=True)
+class ChannelActionEffectPlan:
+    """One ordered process-local effect owned by a canonical Work transition."""
 
-    action_id: str
+    provider: ProviderEffectPlan
+    part: int
+    work_id: str
+    expected_desired_progress_revision: int | None
+
+
+@dataclass(frozen=True)
+class ChannelActionTransition:
+    """Canonical Work transition and its process-local direct effects."""
+
     binding_id: str
     work_id: str
     work_status: ExternalChannelWorkStatus
     state_revision: int
-    deliveries: list[ChannelWorkDelivery]
+    effects: tuple[ChannelActionEffectPlan, ...]
 
 
-class ChannelDeliveryTarget(_Record):
-    """Internal provider target reconstructed for one delivery attempt."""
+@dataclass(frozen=True)
+class ChannelActionResult:
+    """Canonical Work result with ordered identifier-free provider outcomes."""
 
-    delivery_attempt_id: str
-    operation: ExternalChannelDeliveryOperation
-    status: ExternalChannelDeliveryStatus
-    binding_id: str | None
-    resource_id: str | None
-    connection_id: str
-    provider: ExternalChannelProvider
-    app_mode: ExternalChannelAppMode
-    encrypted_credentials: str | None
-    provider_tenant_id: str | None
-    capabilities: dict[str, Any] | None
-    workspace_handle: str | None
-    agent_id: str | None
-    agent_session_id: str | None
-    agent_name: str | None
-    agent_avatar: dict[str, Any] | None
-    request_payload: dict[str, Any]
+    binding_id: str
+    work_status: ExternalChannelWorkStatus
+    state_revision: int
+    outcomes: tuple[ProviderEffectOutcome, ...]
 
 
 class ExternalChannelFileAccessTarget(_Record):

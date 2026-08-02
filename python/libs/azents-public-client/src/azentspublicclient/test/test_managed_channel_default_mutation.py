@@ -53,7 +53,7 @@ class TestManagedChannelDefaultMutation(unittest.TestCase):
                 terminated_setup_claim_count = 56,
                 expired_interaction_count = 56,
                 disconnected_parent_binding_count = 56,
-                cleanup_delivery_count = 56
+                direct_cleanup_count = 56
             )
         else:
             return ManagedChannelDefaultMutation(
@@ -75,7 +75,7 @@ class TestManagedChannelDefaultMutation(unittest.TestCase):
                 terminated_setup_claim_count = 56,
                 expired_interaction_count = 56,
                 disconnected_parent_binding_count = 56,
-                cleanup_delivery_count = 56,
+                direct_cleanup_count = 56,
         )
         """
 

@@ -25,6 +25,7 @@ from azents.services.external_channel.slack_http import (
     MAX_SLACK_HTTP_BODY_BYTES,
     SlackHTTPUnauthorized,
 )
+from azents.testing.external_channel import make_provider_effect_plan
 
 from .route import router
 
@@ -86,9 +87,11 @@ def test_discord_admission_returns_matching_initial_response(
     assert call["raw_body"] == b'{"token":"request-local-only"}'
 
 
-def test_discord_control_deliveries_run_after_provider_response() -> None:
-    """Attempt every committed cleanup intent after returning the response."""
+def test_discord_control_plans_run_after_provider_response() -> None:
+    """Attempt every committed direct plan after returning the response."""
     service = AsyncMock(spec=DiscordHTTPAdmissionService)
+    first_plan = make_provider_effect_plan("discord-control-1")
+    second_plan = make_provider_effect_plan("discord-control-2")
     service.handle.return_value = DiscordHTTPAdmissionResult(
         envelope=DiscordInteractionEnvelope(
             interaction_id="interaction-1",
@@ -107,7 +110,7 @@ def test_discord_control_deliveries_run_after_provider_response() -> None:
         ),
         admission=None,
         response={"type": 7, "data": {"content": "Saved.", "components": []}},
-        control_delivery_attempt_ids=("delivery-1", "delivery-2"),
+        control_plans=(first_plan, second_plan),
         control_delivery_connection_id="connection-1",
     )
 
@@ -124,11 +127,11 @@ def test_discord_control_deliveries_run_after_provider_response() -> None:
     assert service.attempt_control_delivery.await_count == 2
     assert service.attempt_control_delivery.await_args_list[0].kwargs == {
         "connection_id": "connection-1",
-        "delivery_attempt_id": "delivery-1",
+        "plan": first_plan,
     }
     assert service.attempt_control_delivery.await_args_list[1].kwargs == {
         "connection_id": "connection-1",
-        "delivery_attempt_id": "delivery-2",
+        "plan": second_plan,
     }
 
 
@@ -202,15 +205,16 @@ def test_url_verification_returns_challenge() -> None:
     assert call["raw_body"] == b'{"type":"url_verification"}'
 
 
-def test_slack_control_delivery_runs_after_committed_admission() -> None:
-    """Attempt one durable approval control after returning provider success."""
+def test_slack_control_plan_runs_after_committed_admission() -> None:
+    """Attempt one direct approval control after returning provider success."""
     service = AsyncMock(spec=SlackHTTPAdmissionService)
+    plan = make_provider_effect_plan("slack-control")
     service.handle.return_value = SlackHTTPAdmissionResult(
         challenge=None,
         event_id="event-1",
         interaction_id=None,
         created=False,
-        control_delivery_attempt_id="delivery-1",
+        control_plan=plan,
         control_delivery_connection_id="connection-1",
     )
 
@@ -226,7 +230,7 @@ def test_slack_control_delivery_runs_after_committed_admission() -> None:
     assert response.status_code == 200
     service.attempt_control_delivery.assert_awaited_once_with(
         connection_id="connection-1",
-        delivery_attempt_id="delivery-1",
+        plan=plan,
     )
 
 

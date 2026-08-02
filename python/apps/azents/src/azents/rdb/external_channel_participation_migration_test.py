@@ -18,6 +18,7 @@ from azents.rdb.models.external_channel import (
 
 _PARENT_REVISION = "d0a55d801644"
 _PARTICIPATION_REVISION = "772e7ab22a8e"
+_HEAD_REVISION = "ef9fddb71222"
 
 
 @contextmanager
@@ -113,7 +114,7 @@ def test_participation_enum_models_do_not_own_postgresql_types() -> None:
     assert external_channel_setup_claim_status_enum.create_type is False
     assert (
         PROJECT_ROOT.joinpath("db-schemas", "rdb", "revision").read_text().strip()
-        == _PARTICIPATION_REVISION
+        == _HEAD_REVISION
     )
 
 

@@ -128,7 +128,7 @@ async def test_access_allow_rebuilds_slack_replay_without_content() -> None:
         kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
         reason=ExternalChannelIngestionReason.ACCEPTED,
         mailbox_item_id="batch-1",
-        control_delivery_attempt_id=None,
+        control_plan=None,
         connection_id=None,
     )
     ingestion = SimpleNamespace(ingest=AsyncMock(return_value=expected))
@@ -228,7 +228,7 @@ async def test_access_allow_rebuilds_discord_replay_from_legacy_thread_label() -
                 kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
                 reason=ExternalChannelIngestionReason.ACCEPTED,
                 mailbox_item_id=None,
-                control_delivery_attempt_id=None,
+                control_plan=None,
                 connection_id=None,
             )
         )
@@ -329,7 +329,7 @@ async def test_access_allow_retains_unresolved_discord_root_for_durable_ingestio
                 kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
                 reason=ExternalChannelIngestionReason.ACCEPTED,
                 mailbox_item_id=None,
-                control_delivery_attempt_id=None,
+                control_plan=None,
                 connection_id=None,
             )
         )
@@ -437,7 +437,7 @@ async def test_access_allow_replay_uses_durable_connection_authority(
         kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
         reason=ExternalChannelIngestionReason.ACCEPTED,
         mailbox_item_id="mailbox-1",
-        control_delivery_attempt_id=None,
+        control_plan=None,
         connection_id=None,
     )
     ingestion = SimpleNamespace(ingest=AsyncMock(return_value=expected))
@@ -541,7 +541,7 @@ async def test_selector_replay_keeps_actor_separate_from_source_author() -> None
         kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
         reason=ExternalChannelIngestionReason.ACCEPTED,
         mailbox_item_id="mailbox-1",
-        control_delivery_attempt_id=None,
+        control_plan=None,
         connection_id=None,
     )
     ingestion = SimpleNamespace(ingest=AsyncMock(return_value=expected))

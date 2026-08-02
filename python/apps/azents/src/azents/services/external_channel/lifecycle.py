@@ -20,17 +20,16 @@ from azents.repos.external_channel.data import (
     ExternalChannelMultiRouteImpact,
     ExternalChannelMultiRouteRemoval,
     ExternalChannelPurgeCleanup,
-    ExternalChannelPurgePreparation,
     ExternalChannelPurgeVerification,
     ExternalChannelRestoreValidation,
 )
 from azents.repos.external_channel.lifecycle import (
     ExternalChannelLifecycleRepository,
 )
-from azents.repos.external_channel.work_data import ChannelDeliveryTarget
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
 )
+from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
 _PARTICIPANT_KEY = "session.external-channel"
 
@@ -82,15 +81,12 @@ class ExternalChannelLifecycleService:
         session: AsyncSession,
         definition: SessionLifecycleParticipantDefinition,
         context: SessionLifecyclePurgeContext,
-    ) -> ExternalChannelPurgePreparation | None:
-        """Prepare durable delivery state without a provider operation."""
+    ) -> None:
+        """Require no provider-delivery preparation before canonical purge."""
         if definition.key != _PARTICIPANT_KEY:
             return None
-        return await self.repository.prepare_session_tree_purge(
-            session,
-            session_ids=context.subtree_session_ids,
-            now=datetime.datetime.now(datetime.UTC),
-        )
+        del session, context
+        return None
 
     async def cleanup_purge_participant(
         self,
@@ -209,26 +205,12 @@ class ExternalChannelLifecycleService:
 
     async def consume_archive_cleanup(
         self,
-        delivery_ids: Sequence[str],
+        plans: Sequence[ProviderEffectPlan],
     ) -> int:
-        """Attempt every committed archive provider cleanup once."""
-        return await self.action_service.drain_archive_cleanup(delivery_ids)
-
-    async def prepare_cleanup(
-        self,
-        session: AsyncSession,
-        delivery_ids: Sequence[str],
-    ) -> tuple[ChannelDeliveryTarget, ...]:
-        """Capture provider targets before a terminal transaction purges secrets."""
-        targets: list[ChannelDeliveryTarget] = []
-        for delivery_id in delivery_ids:
-            target = await self.action_service.prepare_delivery_in_session(
-                session,
-                delivery_id,
-            )
-            if target is not None:
-                targets.append(target)
-        return tuple(targets)
+        """Attempt every captured archive cleanup once."""
+        for plan in plans:
+            await self.action_service.execute_terminal_control(plan)
+        return len(plans)
 
     async def purge_decommissioned_provider_state(
         self,
@@ -240,17 +222,3 @@ class ExternalChannelLifecycleService:
             session,
             connection_ids=connection_ids,
         )
-
-    async def consume_prepared_cleanup(
-        self,
-        targets: Sequence[ChannelDeliveryTarget],
-        purged_connection_ids: Sequence[str],
-    ) -> int:
-        """Attempt every target once after its terminal transaction commits."""
-        purged = frozenset(purged_connection_ids)
-        for target in targets:
-            if target.connection_id in purged:
-                await self.action_service.attempt_captured_terminal_delivery(target)
-            else:
-                await self.action_service.attempt_prepared_delivery(target)
-        return len(targets)

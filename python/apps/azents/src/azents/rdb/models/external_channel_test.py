@@ -11,6 +11,8 @@ from azents.rdb.models.base import RDBModel
 from azents.rdb.models.external_channel import RDBExternalChannelConnection
 
 _RETIRED_TABLES = {
+    "external_channel_actions",
+    "external_channel_delivery_attempts",
     "external_channel_messages",
     "external_channel_message_revisions",
     "external_channel_invocation_batches",
@@ -19,6 +21,7 @@ _RETIRED_TABLES = {
     "external_channel_resource_provisionings",
 }
 _RETIRED_ENUMS = {
+    "external_channel_action_mode",
     "external_channel_conversation_admission_origin",
     "external_channel_conversation_admission_status",
     "external_channel_invocation_wake_dispatch_status",
@@ -26,6 +29,9 @@ _RETIRED_ENUMS = {
     "external_channel_message_revision_kind",
     "external_channel_resource_provisioning_operation",
     "external_channel_resource_provisioning_status",
+    "external_channel_delivery_operation",
+    "external_channel_delivery_origin_type",
+    "external_channel_delivery_status",
 }
 
 
@@ -75,8 +81,6 @@ def test_external_channel_model_metadata_excludes_retired_inbound_storage() -> N
         "external_channel_access_requests",
         "external_channel_access_grants",
         "external_channel_works",
-        "external_channel_actions",
-        "external_channel_delivery_attempts",
     } <= model_tables
 
 
@@ -84,7 +88,7 @@ def test_external_channel_installed_schema_matches_replacement_boundary(
     latest_db_schema: None,
     postgres_container: PostgresContainer,
 ) -> None:
-    """The installed head retains replay state but removes inbound content tables."""
+    """The installed head retains current state without provider-operation history."""
     engine = create_engine(postgres_container.get_connection_url())
     try:
         inspector = inspect(engine)
@@ -107,10 +111,22 @@ def test_external_channel_installed_schema_matches_replacement_boundary(
         assert "source_message_id" not in access_columns
         assert {
             "connection_id",
+            "control_projection_status",
+            "control_provider_message_key",
             "conversation_position_id",
             "range_start_position",
             "trigger_position",
         } <= access_columns.keys()
+        work_columns = _columns_by_name(inspector, "external_channel_works")
+        assert "progress_provider_message_key" not in work_columns
+        projection_columns = _columns_by_name(
+            inspector,
+            "external_channel_work_projection_parts",
+        )
+        assert {
+            "latest_delivery_attempt_id",
+            "deleted_at",
+        }.isdisjoint(projection_columns)
 
         access_foreign_keys = inspector.get_foreign_keys(
             "external_channel_access_requests"
@@ -140,5 +156,23 @@ def test_external_channel_installed_schema_matches_replacement_boundary(
                 ).scalars()
             )
         assert _RETIRED_ENUMS.isdisjoint(enum_names)
+        with engine.connect() as connection:
+            projection_status_values = set(
+                connection.execute(
+                    text(
+                        "SELECT enumlabel "
+                        "FROM pg_enum "
+                        "JOIN pg_type ON pg_type.oid = pg_enum.enumtypid "
+                        "WHERE pg_type.typname = "
+                        "'external_channel_work_projection_status'"
+                    )
+                ).scalars()
+            )
+        assert projection_status_values == {
+            "present",
+            "failed",
+            "unknown",
+            "deleted",
+        }
     finally:
         engine.dispose()

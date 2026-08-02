@@ -30,6 +30,7 @@ from azents.services.external_channel.selector import (
     ExternalChannelSelectorSelection,
     ExternalChannelSelectorService,
 )
+from azents.testing.external_channel import make_provider_effect_plan
 
 _NOW = datetime.datetime(2026, 7, 28, tzinfo=datetime.UTC)
 _SECRET = "selector-test-secret"
@@ -121,7 +122,7 @@ class _ReplayDouble:
             kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
             reason=ExternalChannelIngestionReason.ACCEPTED,
             mailbox_item_id=None,
-            control_delivery_attempt_id=None,
+            control_plan=None,
             connection_id=None,
         )
         self.calls: list[tuple[str, str]] = []
@@ -240,13 +241,14 @@ async def test_component_next_requeries_signed_offset() -> None:
 
     assert selector.catalog_calls == [("admission-1", "principal-1", None, 20)]
     assert response.response["type"] == 7
-    assert response.control_delivery_attempt_id is None
+    assert response.control_plan is None
     assert response.connection_id is None
 
 
 @pytest.mark.asyncio
 async def test_typed_component_selection_replays_shared_ingestion() -> None:
     """A typed Discord selection returns the shared access-control identity."""
+    plan = make_provider_effect_plan("discord-selector")
     selector = _SelectorDouble()
     selector.selection = ExternalChannelSelectorSelection(
         status="selected",
@@ -264,7 +266,7 @@ async def test_typed_component_selection_replays_shared_ingestion() -> None:
             kind=ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS,
             reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
             mailbox_item_id=None,
-            control_delivery_attempt_id="delivery-1",
+            control_plan=plan,
             connection_id="connection-1",
         )
     )
@@ -287,7 +289,7 @@ async def test_typed_component_selection_replays_shared_ingestion() -> None:
     )
 
     assert replay.calls == [("admission-1", "principal-1")]
-    assert response.control_delivery_attempt_id == "delivery-1"
+    assert response.control_plan == plan
     assert response.connection_id == "connection-1"
     assert response.response["type"] == 7
 
@@ -328,5 +330,5 @@ async def test_component_selection_replays_durable_admission_once() -> None:
             "components": [],
         },
     }
-    assert response.control_delivery_attempt_id is None
+    assert response.control_plan is None
     assert response.connection_id is None

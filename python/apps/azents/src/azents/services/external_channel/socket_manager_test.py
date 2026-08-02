@@ -215,7 +215,7 @@ def _outcome(
         mailbox_item_id=(
             "batch-1" if kind is ExternalChannelIngestionOutcomeKind.ACCEPTED else None
         ),
-        control_delivery_attempt_id=None,
+        control_plan=None,
         connection_id=None,
     )
 

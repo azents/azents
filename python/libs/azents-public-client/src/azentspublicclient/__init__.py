@@ -185,8 +185,6 @@ __all__ = [
     "ExternalChannelConversationLocation",
     "ExternalChannelCredentialSnapshot",
     "ExternalChannelDecisionInput",
-    "ExternalChannelDeliveryOperation",
-    "ExternalChannelDeliveryStatus",
     "ExternalChannelMultiConnectionImpact",
     "ExternalChannelMultiImpactBinding",
     "ExternalChannelMultiImpactDefault",
@@ -271,7 +269,6 @@ __all__ = [
     "ManagedConnection",
     "ManagedConnectionListResponse",
     "ManagedConnectionSetup",
-    "ManagedDelivery",
     "ManagedGrant",
     "ManagedMultiConnection",
     "ManagedMultiConnectionDisconnect",
@@ -627,8 +624,6 @@ from azentspublicclient.models.external_channel_connection_status_snapshot impor
 from azentspublicclient.models.external_channel_conversation_location import ExternalChannelConversationLocation as ExternalChannelConversationLocation
 from azentspublicclient.models.external_channel_credential_snapshot import ExternalChannelCredentialSnapshot as ExternalChannelCredentialSnapshot
 from azentspublicclient.models.external_channel_decision_input import ExternalChannelDecisionInput as ExternalChannelDecisionInput
-from azentspublicclient.models.external_channel_delivery_operation import ExternalChannelDeliveryOperation as ExternalChannelDeliveryOperation
-from azentspublicclient.models.external_channel_delivery_status import ExternalChannelDeliveryStatus as ExternalChannelDeliveryStatus
 from azentspublicclient.models.external_channel_multi_connection_impact import ExternalChannelMultiConnectionImpact as ExternalChannelMultiConnectionImpact
 from azentspublicclient.models.external_channel_multi_impact_binding import ExternalChannelMultiImpactBinding as ExternalChannelMultiImpactBinding
 from azentspublicclient.models.external_channel_multi_impact_default import ExternalChannelMultiImpactDefault as ExternalChannelMultiImpactDefault
@@ -713,7 +708,6 @@ from azentspublicclient.models.managed_channel_default_mutation import ManagedCh
 from azentspublicclient.models.managed_connection import ManagedConnection as ManagedConnection
 from azentspublicclient.models.managed_connection_list_response import ManagedConnectionListResponse as ManagedConnectionListResponse
 from azentspublicclient.models.managed_connection_setup import ManagedConnectionSetup as ManagedConnectionSetup
-from azentspublicclient.models.managed_delivery import ManagedDelivery as ManagedDelivery
 from azentspublicclient.models.managed_grant import ManagedGrant as ManagedGrant
 from azentspublicclient.models.managed_multi_connection import ManagedMultiConnection as ManagedMultiConnection
 from azentspublicclient.models.managed_multi_connection_disconnect import ManagedMultiConnectionDisconnect as ManagedMultiConnectionDisconnect

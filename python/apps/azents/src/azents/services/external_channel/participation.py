@@ -58,6 +58,7 @@ from azents.services.external_channel.participation_state import (
     ExternalChannelSetupSourceProjection,
     setup_source_from_projection,
 )
+from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
 
 class ExternalChannelParticipationError(ValueError):
@@ -91,7 +92,7 @@ class ExternalChannelParticipationSettingsMutation:
     """Committed settings state and independent provider cleanup intents."""
 
     settings: ExternalChannelParticipationSettings
-    cleanup_delivery_ids: tuple[str, ...]
+    cleanup_plans: tuple[ProviderEffectPlan, ...]
 
 
 @dataclass(frozen=True)
@@ -280,7 +281,7 @@ class ExternalChannelParticipationService:
             connection_id=connection_id,
             provider_parent_channel_id=provider_parent_channel_id,
         )
-        cleanup_delivery_ids: tuple[str, ...] = ()
+        cleanup_plans: tuple[ProviderEffectPlan, ...] = ()
         async with self.conversation_lock.acquire(
             scope=conversation_scope,
             deadline=deadline,
@@ -352,7 +353,7 @@ class ExternalChannelParticipationService:
                             raise ExternalChannelParticipationError(
                                 "External Channel parent conversation changed."
                             )
-                        cleanup_delivery_ids = disconnected
+                        cleanup_plans = disconnected
                         binding = None
                     updated = await self.repository.update_participation_setting(
                         session,
@@ -394,7 +395,7 @@ class ExternalChannelParticipationService:
                 resource=resource,
                 binding=binding,
             ),
-            cleanup_delivery_ids=cleanup_delivery_ids,
+            cleanup_plans=cleanup_plans,
         )
 
     async def mutate_thread_settings(
@@ -500,7 +501,7 @@ class ExternalChannelParticipationService:
                 resource=resource,
                 binding=updated_binding,
             ),
-            cleanup_delivery_ids=(),
+            cleanup_plans=(),
         )
 
     async def _authorize_settings_actor(
