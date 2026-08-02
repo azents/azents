@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Literal, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,17 +14,21 @@ from azents.core.config import Config
 from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
+    ExternalChannelConversationLocation,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
     ExternalChannelResourceType,
+    ExternalChannelResponseMode,
 )
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.data import (
     ExternalChannelConnectionConfiguration,
     ExternalChannelInteraction,
+    ExternalChannelParticipationSetting,
     ExternalChannelResource,
+    ExternalChannelSetupClaim,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.credentials import (
@@ -43,10 +48,12 @@ from azents.services.external_channel.interaction import (
     ExternalChannelInteractionProcessor,
     SlackInteractionTriggerExpired,
     build_selector_metadata,
+    build_settings_metadata,
     verify_selector_metadata,
 )
 from azents.services.external_channel.participation import (
     ExternalChannelParticipationService,
+    ExternalChannelParticipationSettings,
 )
 from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
@@ -346,6 +353,92 @@ def _handoff(
         settings_response_mode=None,
         trigger_id="trigger-secret-must-not-persist",
         selector_interaction_id=selector_interaction_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_settings_submission_revalidates_distinct_origin_interaction() -> None:
+    """Accept a view submission only through its signed settings-open origin."""
+    repository = _Repository()
+    origin = repository.interaction.model_copy(
+        update={"status": ExternalChannelInteractionStatus.COMPLETED}
+    )
+    submission = repository.interaction.model_copy(
+        update={
+            "id": "submission-1",
+            "interaction_type": ExternalChannelInteractionType.VIEW_SUBMISSION,
+        }
+    )
+    repository.interactions = {
+        origin.id: origin,
+        submission.id: submission,
+    }
+    claim = ExternalChannelSetupClaim.model_construct(
+        id="claim-1",
+        claim_generation=1,
+        source_revision=1,
+    )
+    setup_settings = ExternalChannelParticipationSettings(
+        target="setup",
+        agent_name="Research Agent",
+        setting=None,
+        claim=claim,
+        resource=None,
+        binding=None,
+    )
+    committed_settings = ExternalChannelParticipationSettings(
+        target="parent",
+        agent_name="Research Agent",
+        setting=ExternalChannelParticipationSetting.model_construct(
+            id="setting-1",
+            location=ExternalChannelConversationLocation.THREADS,
+            response_mode=ExternalChannelResponseMode.MENTION_ONLY,
+        ),
+        claim=None,
+        resource=None,
+        binding=None,
+    )
+    participation = SimpleNamespace(
+        select_location=AsyncMock(),
+        resolve_settings=AsyncMock(return_value=committed_settings),
+    )
+    metadata = build_settings_metadata(
+        secret=_SECRET,
+        settings=setup_settings,
+        connection_id="connection-1",
+        provider_parent_channel_id="C-1",
+        principal_id="principal-1",
+        interaction_id=origin.id,
+    )
+
+    await _processor(
+        repository,
+        _Selector(_catalog()),
+        _Slack(
+            SlackInteractionViewResult(
+                status="opened",
+                error_kind=None,
+                error_summary=None,
+            )
+        ),
+        participation=participation,
+    ).process(
+        ExternalChannelInteractionHandoff(
+            interaction_id=submission.id,
+            handler="settings_submission",
+            provider_parent_channel_id=None,
+            provider_thread_key=None,
+            settings_metadata=metadata,
+            settings_location=ExternalChannelConversationLocation.THREADS,
+            settings_response_mode=None,
+            trigger_id=None,
+        )
+    )
+
+    participation.select_location.assert_awaited_once()
+    assert (
+        participation.select_location.await_args.kwargs["configured_by_principal_id"]
+        == "principal-1"
     )
 
 

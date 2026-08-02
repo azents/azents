@@ -331,6 +331,27 @@ def _discord_command_id(
     return command_id if isinstance(command_id, str) and command_id else None
 
 
+def _discord_settings_component_id(
+    discord_provider_fake_url: str,
+    *,
+    action_code: str,
+) -> str | None:
+    """Consume transient settings controls until one requested action is found."""
+    for _ in range(10):
+        response = requests.get(
+            f"{discord_provider_fake_url}/__testenv/transient-component",
+            params={"scope": "settings"},
+            timeout=5,
+        )
+        response.raise_for_status()
+        custom_id = response.json().get("custom_id")
+        if custom_id is None:
+            return None
+        if isinstance(custom_id, str) and custom_id.startswith(f"a:{action_code}:"):
+            return custom_id
+    raise AssertionError("Discord settings control queue exceeded its bounded size.")
+
+
 def _open_discord_settings(
     *,
     discord_provider_fake_url: str,
@@ -374,6 +395,36 @@ def _open_discord_settings(
     )
     response.raise_for_status()
     assert response.json() == {"status": 200, "response_type": 4}
+
+
+def _select_discord_setup_location(
+    *,
+    discord_provider_fake_url: str,
+    interaction_id: str,
+    application_id: str,
+    guild_id: str,
+    channel_id: str,
+    user_id: str,
+    custom_id: str,
+) -> None:
+    """Commit one signed Discord setup component through the real callback."""
+    response = requests.post(
+        f"{discord_provider_fake_url}/__testenv/interactions",
+        json={
+            "id": interaction_id,
+            "type": 3,
+            "application_id": application_id,
+            "guild_id": guild_id,
+            "channel_id": channel_id,
+            "channel": {"id": channel_id, "type": 0},
+            "member": {"user": {"id": user_id}},
+            "message": {"id": f"message-{interaction_id}"},
+            "data": {"custom_id": custom_id},
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    assert response.json() == {"status": 200, "response_type": 7}
 
 
 def _successful_session_paths(provider_state: dict[str, object]) -> list[str]:
@@ -541,17 +592,140 @@ def _selector_admission_id(slack_provider_fake_url: str) -> str:
 def _latest_selector_view(
     slack_provider_fake_url: str,
 ) -> dict[str, object] | None:
-    """Return the latest sanitized selector view evidence."""
-    views = _provider_state(slack_provider_fake_url).get("views")
-    if not isinstance(views, list):
-        return None
-    for raw_view in reversed(cast(list[object], views)):
-        if not isinstance(raw_view, dict):
-            continue
-        view = cast(dict[str, object], raw_view)
-        if view.get("callback_id") == "azents_agent_selector":
-            return view
-    return None
+    """Return the transient selector handoff without exposing it as evidence."""
+    response = requests.get(
+        f"{slack_provider_fake_url}/__testenv/transient-view",
+        params={"scope": "selector"},
+        timeout=5,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    return cast(dict[str, object], payload) if isinstance(payload, dict) else None
+
+
+def _latest_setup_view(
+    slack_provider_fake_url: str,
+) -> dict[str, object] | None:
+    """Return the transient setup handoff without exposing it as evidence."""
+    response = requests.get(
+        f"{slack_provider_fake_url}/__testenv/transient-view",
+        params={"scope": "setup"},
+        timeout=5,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    return cast(dict[str, object], payload) if isinstance(payload, dict) else None
+
+
+def _open_slack_setup_modal(
+    *,
+    callback_url: str,
+    app_id: str,
+    team_id: str,
+    channel_id: str,
+    user_id: str,
+) -> None:
+    """Open the pending parent setup modal through Slack's signed command flow."""
+    command_body = urlencode(
+        {
+            "command": "/azents",
+            "text": "settings",
+            "api_app_id": app_id,
+            "team_id": team_id,
+            "channel_id": channel_id,
+            "user_id": user_id,
+            "trigger_id": f"trigger-setup-{unique()}",
+        }
+    ).encode()
+    response = requests.post(
+        callback_url,
+        data=command_body,
+        headers=_signed_headers(
+            command_body,
+            content_type="application/x-www-form-urlencoded",
+        ),
+        timeout=5,
+    )
+    assert response.status_code == 200
+
+
+def _submit_slack_setup_location(
+    *,
+    callback_url: str,
+    app_id: str,
+    team_id: str,
+    user_id: str,
+    setup_view: dict[str, object],
+    location: str = "threads",
+) -> None:
+    """Commit one signed Slack setup location selection through the real callback."""
+    metadata = setup_view.get("private_metadata")
+    view_id = setup_view.get("view_id")
+    view_hash = setup_view.get("view_hash")
+    assert isinstance(metadata, str) and metadata
+    assert isinstance(view_id, str) and view_id
+    assert isinstance(view_hash, str) and view_hash
+    submission_payload = {
+        "type": "view_submission",
+        "api_app_id": app_id,
+        "team": {"id": team_id},
+        "user": {"id": user_id},
+        "trigger_id": f"trigger-setup-submission-{unique()}",
+        "view": {
+            "id": view_id,
+            "hash": view_hash,
+            "callback_id": "azents_conversation_setup",
+            "private_metadata": metadata,
+            "state": {
+                "values": {
+                    "azents_conversation_location": {
+                        "azents_conversation_location": {
+                            "selected_option": {"value": location}
+                        }
+                    }
+                }
+            },
+        },
+    }
+    submission_body = urlencode(
+        {"payload": json.dumps(submission_payload, separators=(",", ":"))}
+    ).encode()
+    response = requests.post(
+        callback_url,
+        data=submission_body,
+        headers=_signed_headers(
+            submission_body,
+            content_type="application/x-www-form-urlencoded",
+        ),
+        timeout=5,
+    )
+    assert response.status_code == 200
+
+
+def _assert_no_pending_slack_participation_lifecycle(
+    *,
+    chat_api: ChatV1Api,
+    external_api: ExternalChannelV1Api,
+    agent_id: str,
+    handle: str,
+    headers: dict[str, str],
+    baseline_session_ids: set[str] | None,
+) -> None:
+    """Assert setup has not created a Session or External Channel Binding."""
+    sessions = chat_api.chat_v1_list_agent_sessions(
+        agent_id=agent_id,
+        _headers=headers,
+    )
+    if baseline_session_ids is not None:
+        assert {session.id for session in sessions.items} == baseline_session_ids
+    for session in sessions.items:
+        projection = external_api.external_channel_v1_list_session_channels(
+            agent_id=agent_id,
+            session_id=session.id,
+            handle=handle,
+            _headers=headers,
+        )
+        assert projection.items == []
 
 
 def _plan_delivery(slack_provider_fake_url: str) -> dict[str, object] | None:
@@ -824,6 +998,14 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert validated.capabilities.thread_history is True
 
     callback_url = f"{azents_public_server_url}/external-channel/v1/slack/events"
+    chat_api = ChatV1Api(public_api_client)
+    baseline_session_ids = {
+        session.id
+        for session in chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        ).items
+    }
     challenge_body = json.dumps(
         {
             "type": "url_verification",
@@ -891,6 +1073,14 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert approval.agent_id == agent_id
     assert approval.principal_provider_user_id
     assert approval.resource_label
+    _assert_no_pending_slack_participation_lifecycle(
+        chat_api=chat_api,
+        external_api=external_api,
+        agent_id=agent_id,
+        handle=handle,
+        headers=headers,
+        baseline_session_ids=baseline_session_ids,
+    )
 
     decision = ExternalChannelDecisionInput(
         decision="allow_agent",
@@ -902,22 +1092,57 @@ def test_http_admission_unknown_participant_and_approval_journey(
         _headers=headers,
     )
     assert decided.status is ExternalChannelAccessRequestStatus.ALLOWED
-    assert decided.agent_session_id
-    approved_session_id = decided.agent_session_id
+    assert decided.agent_session_id is None
+    _assert_no_pending_slack_participation_lifecycle(
+        chat_api=chat_api,
+        external_api=external_api,
+        agent_id=agent_id,
+        handle=handle,
+        headers=headers,
+        baseline_session_ids=baseline_session_ids,
+    )
+    _open_slack_setup_modal(
+        callback_url=callback_url,
+        app_id=_APP_ID,
+        team_id=_TEAM_ID,
+        channel_id=_CHANNEL_ID,
+        user_id="U-EXTERNAL",
+    )
+    setup_view = cast(
+        dict[str, object],
+        wait_until(
+            lambda: _latest_setup_view(slack_provider_fake_url),
+            timeout=15,
+            interval=0.2,
+            message="Approved Slack setup did not open a location modal",
+        ),
+    )
+    _submit_slack_setup_location(
+        callback_url=callback_url,
+        app_id=_APP_ID,
+        team_id=_TEAM_ID,
+        user_id="U-EXTERNAL",
+        setup_view=setup_view,
+    )
 
-    def binding_projection() -> object | None:
-        projection = external_api.external_channel_v1_list_session_channels(
+    def binding_projection() -> tuple[str, Any] | None:
+        sessions = chat_api.chat_v1_list_agent_sessions(
             agent_id=agent_id,
-            session_id=approved_session_id,
-            handle=handle,
             _headers=headers,
         )
-        if len(projection.items) == 1:
-            return projection
+        for session in sessions.items:
+            projection = external_api.external_channel_v1_list_session_channels(
+                agent_id=agent_id,
+                session_id=session.id,
+                handle=handle,
+                _headers=headers,
+            )
+            if len(projection.items) == 1:
+                return session.id, projection
         return None
 
-    bindings = cast(
-        Any,
+    approved_session_id, bindings = cast(
+        tuple[str, Any],
         wait_until(
             binding_projection,
             timeout=10,
@@ -927,7 +1152,6 @@ def test_http_admission_unknown_participant_and_approval_journey(
     )
     assert len(bindings.items) == 1
     assert bindings.grants == []
-    chat_api = ChatV1Api(public_api_client)
     sessions = chat_api.chat_v1_list_agent_sessions(
         agent_id=agent_id,
         _headers=headers,
@@ -985,7 +1209,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
         if not isinstance(counts, dict):
             return None
         typed = cast(dict[str, Any], counts)
-        if typed.get("chat.postMessage") == 3 and typed.get("chat.delete") == 1:
+        if typed.get("chat.postMessage") == 4 and typed.get("chat.delete") == 1:
             return state
         return None
 
@@ -1007,13 +1231,23 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert typed_counts["conversations.history"] == 3
     assert typed_counts["chat.getPermalink"] == 3
     # One access-review control is deleted after approval. Durable acceptance then
-    # delivers joined presence followed by the initial provider-native work progress.
-    assert typed_counts["chat.postMessage"] == 3
+    # delivers joined presence, initial progress, and the versioned settings control.
+    assert typed_counts["chat.postMessage"] == 4
     assert typed_counts["chat.delete"] == 1
     assert _successful_session_paths(provider_state) == [
-        f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}"
+        f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
+        f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
     ]
     assert _successful_session_presence_states(provider_state) == ["joined"]
+    deliveries = cast(list[dict[str, object]], provider_state["deliveries"])
+    assert any(
+        delivery.get("session_path")
+        == f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}"
+        and delivery.get("safe_category") is None
+        and delivery.get("action_ids")
+        == ["view_azents_session", "azents_conversation_settings_open"]
+        for delivery in deliveries
+    )
     rendered_state = str(provider_state)
     assert _BOT_TOKEN not in rendered_state
     assert _SIGNING_SECRET not in rendered_state
@@ -1033,10 +1267,14 @@ def test_http_admission_unknown_participant_and_approval_journey(
         wait_until(
             lambda: (
                 state
-                if _successful_session_presence_states(
-                    state := _provider_state(slack_provider_fake_url)
+                if (
+                    _successful_session_presence_states(
+                        state := _provider_state(slack_provider_fake_url)
+                    )
+                    == ["joined", "left"]
+                    and cast(dict[str, Any], state["request_counts"]).get("chat.delete")
+                    == 2
                 )
-                == ["joined", "left"]
                 else None
             ),
             timeout=10,
@@ -1045,8 +1283,10 @@ def test_http_admission_unknown_participant_and_approval_journey(
         ),
     )
     disconnected_counts = cast(dict[str, Any], disconnected_state["request_counts"])
-    assert disconnected_counts["chat.postMessage"] == 4
+    assert disconnected_counts["chat.postMessage"] == 5
+    assert disconnected_counts["chat.delete"] == 2
     assert _successful_session_paths(disconnected_state) == [
+        f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
         f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
         f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
     ]
@@ -1255,6 +1495,14 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
         _headers=headers,
     )
     callback_url = f"{azents_public_server_url}/external-channel/v1/slack/events"
+    chat_api = ChatV1Api(public_api_client)
+    baseline_session_ids = {
+        session.id
+        for session in chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        ).items
+    }
 
     def send_event(event: dict[str, object]) -> None:
         body = json.dumps(
@@ -1286,7 +1534,37 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
             "ts": root_timestamp,
         }
     )
-    chat_api = ChatV1Api(public_api_client)
+    _assert_no_pending_slack_participation_lifecycle(
+        chat_api=chat_api,
+        external_api=external_api,
+        agent_id=agent_id,
+        handle=handle,
+        headers=headers,
+        baseline_session_ids=baseline_session_ids,
+    )
+    _open_slack_setup_modal(
+        callback_url=callback_url,
+        app_id=_APP_ID,
+        team_id=_TEAM_ID,
+        channel_id=_CHANNEL_ID,
+        user_id="U-MODE",
+    )
+    setup_view = cast(
+        dict[str, object],
+        wait_until(
+            lambda: _latest_setup_view(slack_provider_fake_url),
+            timeout=15,
+            interval=0.2,
+            message="Slack response-mode setup did not open a location modal",
+        ),
+    )
+    _submit_slack_setup_location(
+        callback_url=callback_url,
+        app_id=_APP_ID,
+        team_id=_TEAM_ID,
+        user_id="U-MODE",
+        setup_view=setup_view,
+    )
 
     def find_binding() -> tuple[Any, Any] | None:
         sessions = chat_api.chat_v1_list_agent_sessions(
@@ -1608,6 +1886,12 @@ def test_multi_app_workspace_management_default_and_disconnect_journey(
         ),
         _headers=manager_headers,
     )
+    validation = external_api.external_channel_v1_validate_multi_slack_connection(
+        connection_id=setup.connection.id,
+        handle=handle,
+        _headers=manager_headers,
+    )
+    assert validation.status is ExternalChannelConnectionStatus.ACTIVE
     connection = setup.connection
     assert connection.app_mode is ExternalChannelAppMode.MULTI
     assert connection.status is ExternalChannelConnectionStatus.ACTIVE
@@ -1897,6 +2181,17 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
         == []
     )
 
+    chat_api = ChatV1Api(public_api_client)
+    baseline_session_ids_by_agent = {
+        agent_id: {
+            session.id
+            for session in chat_api.chat_v1_list_agent_sessions(
+                agent_id=agent_id,
+                _headers=headers,
+            ).items
+        }
+        for agent_id in agent_ids
+    }
     callback_url = f"{azents_public_server_url}/external-channel/v1/slack/events"
     event_body = json.dumps(
         {
@@ -1974,7 +2269,6 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
         ),
     )
     assert selector_view["route_ids"] == [route.id for route in routes]
-    assert selector_view["has_submit"] is True
     metadata = selector_view.get("private_metadata")
     assert isinstance(metadata, str)
     assert metadata
@@ -1984,6 +2278,7 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
         "api_app_id": app_id,
         "team": {"id": team_id},
         "user": {"id": "U-SELECTOR"},
+        "trigger_id": "trigger-selector-submission-e2e",
         "view": {
             "id": selector_view["view_id"],
             "hash": selector_view["view_hash"],
@@ -2003,19 +2298,42 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
     submission_body = urlencode(
         {"payload": json.dumps(submission_payload, separators=(",", ":"))}
     ).encode()
-    for _ in range(2):
-        response = requests.post(
-            callback_url,
-            data=submission_body,
-            headers=_signed_headers(
-                submission_body,
-                content_type="application/x-www-form-urlencoded",
-            ),
-            timeout=5,
-        )
-        assert response.status_code == 200
+    response = requests.post(
+        callback_url,
+        data=submission_body,
+        headers=_signed_headers(
+            submission_body,
+            content_type="application/x-www-form-urlencoded",
+        ),
+        timeout=5,
+    )
+    assert response.status_code == 200
 
-    chat_api = ChatV1Api(public_api_client)
+    for selected_agent_id in agent_ids:
+        _assert_no_pending_slack_participation_lifecycle(
+            chat_api=chat_api,
+            external_api=external_api,
+            agent_id=selected_agent_id,
+            handle=handle,
+            headers=headers,
+            baseline_session_ids=baseline_session_ids_by_agent[selected_agent_id],
+        )
+    setup_view = cast(
+        dict[str, object],
+        wait_until(
+            lambda: _latest_setup_view(slack_provider_fake_url),
+            timeout=15,
+            interval=0.2,
+            message="Selected Multi App route did not open a location modal",
+        ),
+    )
+    _submit_slack_setup_location(
+        callback_url=callback_url,
+        app_id=app_id,
+        team_id=team_id,
+        user_id="U-SELECTOR",
+        setup_view=setup_view,
+    )
 
     def find_selected_binding() -> tuple[Any, Any] | None:
         sessions = chat_api.chat_v1_list_agent_sessions(
@@ -2044,11 +2362,52 @@ def test_multi_app_mention_selector_deduplicates_and_binds_open_access_route(
     )
     assert selected_session.agent_id == agent_ids[1]
     assert selected_binding.provider.value == "slack"
+    input_evidence = cast(
+        list[dict[str, object]],
+        wait_until(
+            lambda: (
+                evidence
+                if len(
+                    evidence := _external_channel_input_evidence(
+                        public_server_url=azents_public_server_url,
+                        token=owner_token,
+                        session_id=selected_session.id,
+                        include_pending=False,
+                    )
+                )
+                == 1
+                else None
+            ),
+            timeout=15,
+            interval=0.2,
+            message="Slack Multi selector did not preserve its source invocation",
+        ),
+    )
+    assert input_evidence[0]["provider"] == "slack"
+    assert input_evidence[0]["external_message_id"]
+    assert input_evidence[0]["authorization"] == "authorized_invocation"
+    assert input_evidence[0]["body"] == source_text
+    assert input_evidence[0]["original_url"] == (
+        f"https://example.slack.com/archives/{_CHANNEL_ID}/p"
+        f"{root_timestamp.replace('.', '')}"
+    )
     assert _approval_request_id(slack_provider_fake_url) == ""
     provider_state = _provider_state(slack_provider_fake_url)
     request_counts = cast(dict[str, int], provider_state["request_counts"])
-    assert request_counts["views.open"] == 1
-    assert provider_state["views"] == [selector_view]
+    views = cast(list[dict[str, object]], provider_state["views"])
+    assert request_counts["views.open"] == len(views)
+    assert 1 <= sum(view["control_scope"] == "selector" for view in views) <= 2
+    assert sum(view["control_scope"] == "setup" for view in views) == 1
+    assert all(
+        view["operation"] == "views.open" and view["outcome"] == "delivered"
+        for view in views
+    )
+    assert any(
+        view["control_scope"] == "selector"
+        and view["route_count"] == len(routes)
+        and view["has_submit"] is True
+        for view in views
+    )
     assert _BOT_TOKEN not in str(provider_state)
     assert _SIGNING_SECRET not in str(provider_state)
 
@@ -2148,6 +2507,14 @@ def test_provider_native_channel_work_progress_journey(
     assert validated.status is ExternalChannelConnectionStatus.ACTIVE
 
     callback_url = f"{azents_public_server_url}/external-channel/v1/slack/events"
+    chat_api = ChatV1Api(public_api_client)
+    baseline_session_ids = {
+        session.id
+        for session in chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        ).items
+    }
     event_body = json.dumps(
         {
             "type": "event_callback",
@@ -2180,6 +2547,14 @@ def test_provider_native_channel_work_progress_journey(
         interval=0.2,
         message="Channel Work approval control message was not delivered",
     )
+    _assert_no_pending_slack_participation_lifecycle(
+        chat_api=chat_api,
+        external_api=external_api,
+        agent_id=agent_id,
+        handle=handle,
+        headers=headers,
+        baseline_session_ids=baseline_session_ids,
+    )
     decided = external_api.external_channel_v1_decide_approval_request(
         access_request_id=request_id,
         external_channel_decision_input=ExternalChannelDecisionInput(
@@ -2188,8 +2563,63 @@ def test_provider_native_channel_work_progress_journey(
         ),
         _headers=headers,
     )
-    assert decided.agent_session_id is not None
-    session_id = decided.agent_session_id
+    assert decided.agent_session_id is None
+    _assert_no_pending_slack_participation_lifecycle(
+        chat_api=chat_api,
+        external_api=external_api,
+        agent_id=agent_id,
+        handle=handle,
+        headers=headers,
+        baseline_session_ids=baseline_session_ids,
+    )
+    _open_slack_setup_modal(
+        callback_url=callback_url,
+        app_id=_APP_ID,
+        team_id=_TEAM_ID,
+        channel_id=_CHANNEL_ID,
+        user_id="U-EXTERNAL",
+    )
+    setup_view = cast(
+        dict[str, object],
+        wait_until(
+            lambda: _latest_setup_view(slack_provider_fake_url),
+            timeout=15,
+            interval=0.2,
+            message="Approved Channel Work setup did not open a location modal",
+        ),
+    )
+    _submit_slack_setup_location(
+        callback_url=callback_url,
+        app_id=_APP_ID,
+        team_id=_TEAM_ID,
+        user_id="U-EXTERNAL",
+        setup_view=setup_view,
+    )
+
+    def selected_session_id() -> str | None:
+        sessions = chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        )
+        for session in sessions.items:
+            projection = external_api.external_channel_v1_list_session_channels(
+                agent_id=agent_id,
+                session_id=session.id,
+                handle=handle,
+                _headers=headers,
+            )
+            if len(projection.items) == 1:
+                return session.id
+        return None
+
+    selected_session = wait_until(
+        selected_session_id,
+        timeout=15,
+        interval=0.2,
+        message="Selected Channel Work setup did not create one Session",
+    )
+    assert isinstance(selected_session, str)
+    session_id = selected_session
 
     def management_projection() -> object | None:
         projection = external_api.external_channel_v1_list_session_channels(
@@ -2525,6 +2955,15 @@ def test_external_channel_file_transfer_journey(
     assert validated.capabilities.download_files is True
     assert validated.capabilities.upload_files is True
 
+    callback_url = f"{azents_public_server_url}/external-channel/v1/slack/events"
+    chat_api = ChatV1Api(public_api_client)
+    baseline_session_ids = {
+        session.id
+        for session in chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        ).items
+    }
     event_body = json.dumps(
         {
             "type": "event_callback",
@@ -2545,7 +2984,7 @@ def test_external_channel_file_transfer_journey(
         separators=(",", ":"),
     ).encode()
     response = requests.post(
-        f"{azents_public_server_url}/external-channel/v1/slack/events",
+        callback_url,
         data=event_body,
         headers=_signed_headers(event_body),
         timeout=5,
@@ -2558,6 +2997,14 @@ def test_external_channel_file_transfer_journey(
         interval=0.2,
         message="File-transfer approval control message was not delivered",
     )
+    _assert_no_pending_slack_participation_lifecycle(
+        chat_api=chat_api,
+        external_api=external_api,
+        agent_id=agent_id,
+        handle=handle,
+        headers=headers,
+        baseline_session_ids=baseline_session_ids,
+    )
     decided = external_api.external_channel_v1_decide_approval_request(
         access_request_id=request_id,
         external_channel_decision_input=ExternalChannelDecisionInput(
@@ -2566,8 +3013,63 @@ def test_external_channel_file_transfer_journey(
         ),
         _headers=headers,
     )
-    assert decided.agent_session_id is not None
-    session_id = decided.agent_session_id
+    assert decided.agent_session_id is None
+    _assert_no_pending_slack_participation_lifecycle(
+        chat_api=chat_api,
+        external_api=external_api,
+        agent_id=agent_id,
+        handle=handle,
+        headers=headers,
+        baseline_session_ids=baseline_session_ids,
+    )
+    _open_slack_setup_modal(
+        callback_url=callback_url,
+        app_id=_APP_ID,
+        team_id=_TEAM_ID,
+        channel_id=_CHANNEL_ID,
+        user_id="U-FILES",
+    )
+    setup_view = cast(
+        dict[str, object],
+        wait_until(
+            lambda: _latest_setup_view(slack_provider_fake_url),
+            timeout=15,
+            interval=0.2,
+            message="Approved file-transfer setup did not open a location modal",
+        ),
+    )
+    _submit_slack_setup_location(
+        callback_url=callback_url,
+        app_id=_APP_ID,
+        team_id=_TEAM_ID,
+        user_id="U-FILES",
+        setup_view=setup_view,
+    )
+
+    def selected_session_id() -> str | None:
+        sessions = chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        )
+        for session in sessions.items:
+            projection = external_api.external_channel_v1_list_session_channels(
+                agent_id=agent_id,
+                session_id=session.id,
+                handle=handle,
+                _headers=headers,
+            )
+            if len(projection.items) == 1:
+                return session.id
+        return None
+
+    selected_session = wait_until(
+        selected_session_id,
+        timeout=20,
+        interval=0.2,
+        message="Selected file-transfer setup did not create one Session",
+    )
+    assert isinstance(selected_session, str)
+    session_id = selected_session
 
     def binding_id_projection() -> str:
         projection = external_api.external_channel_v1_list_session_channels(
@@ -2885,6 +3387,13 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
         _headers=headers,
     )
     chat_api = ChatV1Api(public_api_client)
+    baseline_session_ids = {
+        session.id
+        for session in chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        ).items
+    }
 
     def socket_binding() -> tuple[Any, Any] | None:
         sessions = chat_api.chat_v1_list_agent_sessions(
@@ -2925,51 +3434,14 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
             interval=0.2,
             message="Socket Mode envelope was not acknowledged after admission",
         )
-        socket_session, socket_channel = cast(
-            tuple[Any, Any],
-            wait_until(
-                socket_binding,
-                timeout=15,
-                interval=0.2,
-                message="Socket Mode invocation did not retain one Session binding",
-            ),
-        )
-        assert socket_session.agent_id == agent_id
-        assert socket_channel.provider.value == "slack"
-        detail = chat_api.chat_v1_get_agent_session(
+        _assert_no_pending_slack_participation_lifecycle(
+            chat_api=chat_api,
+            external_api=external_api,
             agent_id=agent_id,
-            session_id=socket_session.id,
-            _headers=headers,
+            handle=handle,
+            headers=headers,
+            baseline_session_ids=baseline_session_ids,
         )
-        assert detail.id == socket_session.id
-        input_evidence = _external_channel_input_evidence(
-            public_server_url=azents_public_server_url,
-            token=token,
-            session_id=socket_session.id,
-        )
-        assert len(input_evidence) == 1
-        assert input_evidence[0]["provider"] == "slack"
-        expected_session_path = (
-            f"/w/{handle}/agents/{agent_id}/sessions/{socket_session.id}"
-        )
-        presence_state = cast(
-            dict[str, object],
-            wait_until(
-                lambda: (
-                    state
-                    if _successful_session_paths(
-                        state := _provider_state(slack_provider_fake_url)
-                    )
-                    == [expected_session_path]
-                    and _successful_session_presence_states(state) == ["joined"]
-                    else None
-                ),
-                timeout=10,
-                interval=0.2,
-                message="Socket Mode joined presence was not delivered",
-            ),
-        )
-        assert _successful_session_paths(presence_state) == [expected_session_path]
 
         def reconnect_required_connection() -> object | None:
             connections = external_api.external_channel_v1_list_connections(
@@ -2999,6 +3471,94 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
         assert socket_state["connections"] == 2
         assert socket_state["configured_sessions"] == 2
         assert "xapp-e2e-private" not in str(provider_state)
+
+    recovered = external_api.external_channel_v1_update_slack_connection(
+        agent_id=agent_id,
+        connection_id=setup.connection.id,
+        handle=handle,
+        slack_connection_setup_request=SlackConnectionSetupRequest(
+            app_id=socket_app_id,
+            transport=ExternalChannelTransport.HTTP,
+            credentials=SlackConnectionCredentials(
+                bot_token=_BOT_TOKEN,
+                signing_secret=_SIGNING_SECRET,
+                app_token=None,
+            ),
+        ),
+        _headers=headers,
+    )
+    assert recovered.status is ExternalChannelConnectionStatus.ACTIVE
+    callback_url = f"{azents_public_server_url}/external-channel/v1/slack/events"
+    _open_slack_setup_modal(
+        callback_url=callback_url,
+        app_id=socket_app_id,
+        team_id=socket_team_id,
+        channel_id=_CHANNEL_ID,
+        user_id="U-SOCKET",
+    )
+    setup_view = cast(
+        dict[str, object],
+        wait_until(
+            lambda: _latest_setup_view(slack_provider_fake_url),
+            timeout=15,
+            interval=0.2,
+            message="Recovered Socket Mode setup did not open a location modal",
+        ),
+    )
+    _submit_slack_setup_location(
+        callback_url=callback_url,
+        app_id=socket_app_id,
+        team_id=socket_team_id,
+        user_id="U-SOCKET",
+        setup_view=setup_view,
+    )
+    socket_session, socket_channel = cast(
+        tuple[Any, Any],
+        wait_until(
+            socket_binding,
+            timeout=15,
+            interval=0.2,
+            message=(
+                "Recovered Socket Mode invocation did not retain one Session binding"
+            ),
+        ),
+    )
+    assert socket_session.agent_id == agent_id
+    assert socket_channel.provider.value == "slack"
+    detail = chat_api.chat_v1_get_agent_session(
+        agent_id=agent_id,
+        session_id=socket_session.id,
+        _headers=headers,
+    )
+    assert detail.id == socket_session.id
+    input_evidence = _external_channel_input_evidence(
+        public_server_url=azents_public_server_url,
+        token=token,
+        session_id=socket_session.id,
+    )
+    assert len(input_evidence) == 1
+    assert input_evidence[0]["provider"] == "slack"
+    expected_session_path = (
+        f"/w/{handle}/agents/{agent_id}/sessions/{socket_session.id}"
+    )
+    presence_state = cast(
+        dict[str, object],
+        wait_until(
+            lambda: (
+                state
+                if expected_session_path
+                in _successful_session_paths(
+                    state := _provider_state(slack_provider_fake_url)
+                )
+                and "joined" in _successful_session_presence_states(state)
+                else None
+            ),
+            timeout=10,
+            interval=0.2,
+            message="Recovered Socket Mode joined presence was not delivered",
+        ),
+    )
+    assert expected_session_path in _successful_session_paths(presence_state)
 
 
 @pytest.mark.web_surface
@@ -3289,7 +3849,7 @@ def test_discord_single_activation_and_interaction_journey(
     assert all(command_id not in rendered_state for command_id in command_ids.values())
 
 
-def test_discord_gateway_message_create_provisions_and_binds_synchronously(
+def test_discord_gateway_message_waits_for_location_then_binds(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
@@ -3299,7 +3859,7 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
         [], AbstractContextManager[Container]
     ],
 ) -> None:
-    """Accept one Gateway message before independent provider-control delivery."""
+    """Gate one Gateway mention until a signed Discord location selection."""
     del azents_engine_worker_container
     application_id = "100000000000000004"
     guild_id = "200000000000000004"
@@ -3441,6 +4001,13 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
         _headers=headers,
     )
     chat_api = ChatV1Api(public_api_client)
+    baseline_session_ids = {
+        session.id
+        for session in chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        ).items
+    }
 
     def gateway_binding() -> tuple[Any, Any] | None:
         sessions = chat_api.chat_v1_list_agent_sessions(
@@ -3479,13 +4046,71 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
                 "External Channel Gateway did not resume Discord with the provider fake"
             ),
         )
+        wait_until(
+            lambda: (
+                cast(
+                    dict[str, int],
+                    _discord_provider_state(discord_provider_fake_url)[
+                        "request_counts"
+                    ],
+                ).get("get_message", 0)
+                >= 1
+            ),
+            timeout=30,
+            interval=0.2,
+            message="Discord Gateway mention did not reach setup admission",
+        )
+        _assert_no_pending_slack_participation_lifecycle(
+            chat_api=chat_api,
+            external_api=external_api,
+            agent_id=agent_id,
+            handle=handle,
+            headers=headers,
+            baseline_session_ids=baseline_session_ids,
+        )
+        setup_gate_state = _discord_provider_state(discord_provider_fake_url)
+        setup_gate_counts = cast(
+            dict[str, int],
+            setup_gate_state["request_counts"],
+        )
+        assert setup_gate_counts.get("create_thread", 0) == 0
+        assert setup_gate_counts.get("create_message", 0) == 0
+        _open_discord_settings(
+            discord_provider_fake_url=discord_provider_fake_url,
+            interaction_id="700000000000000004",
+            application_id=application_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            user_id=participant_id,
+        )
+        setup_threads_custom_id = cast(
+            str,
+            wait_until(
+                lambda: _discord_settings_component_id(
+                    discord_provider_fake_url,
+                    action_code="st",
+                ),
+                timeout=30,
+                interval=0.2,
+                message="Discord Gateway setup control was not delivered",
+            ),
+        )
+        _select_discord_setup_location(
+            discord_provider_fake_url=discord_provider_fake_url,
+            interaction_id="700000000000000005",
+            application_id=application_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            user_id=participant_id,
+            custom_id=setup_threads_custom_id,
+        )
         session, binding = cast(
             tuple[Any, Any],
             wait_until(
                 gateway_binding,
                 timeout=30,
                 interval=0.2,
-                message="Discord Gateway create did not activate one Session binding",
+                message="Discord setup selection did not activate one Session binding",
             ),
         )
         expected_session_path = f"/w/{handle}/agents/{agent_id}/sessions/{session.id}"
@@ -3541,7 +4166,10 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
         f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
     )
     state = _discord_provider_state(discord_provider_fake_url)
-    assert _successful_session_paths(state) == [expected_session_path]
+    assert _successful_session_paths(state) == [
+        expected_session_path,
+        expected_session_path,
+    ]
     assert _successful_session_presence_states(state) == ["joined"]
     request_counts = cast(dict[str, int], state["request_counts"])
     assert request_counts["create_thread"] >= 1
@@ -3558,6 +4186,7 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
     rendered = str(state)
     assert source_text not in rendered
     assert _DISCORD_BOT_TOKEN not in rendered
+    assert setup_threads_custom_id not in rendered
 
     disconnected = external_api.external_channel_v1_disconnect_connection(
         agent_id=agent_id,
@@ -3586,6 +4215,7 @@ def test_discord_gateway_message_create_provisions_and_binds_synchronously(
         ),
     )
     assert _successful_session_paths(terminal_state) == [
+        expected_session_path,
         expected_session_path,
         expected_session_path,
     ]
@@ -3682,6 +4312,17 @@ def test_discord_message_command_selector_and_component_journey(
         )
         for agent_id in agent_ids
     ]
+    chat_api = ChatV1Api(public_api_client)
+    baseline_session_ids_by_agent = {
+        agent_id: {
+            session.id
+            for session in chat_api.chat_v1_list_agent_sessions(
+                agent_id=agent_id,
+                _headers=headers,
+            ).items
+        }
+        for agent_id in agent_ids
+    }
     message_command_id = cast(
         str,
         wait_until(
@@ -3771,6 +4412,51 @@ def test_discord_message_command_selector_and_component_journey(
     )
     component.raise_for_status()
     assert component.json() == {"status": 200, "response_type": 7}
+    for selected_agent_id in agent_ids:
+        _assert_no_pending_slack_participation_lifecycle(
+            chat_api=chat_api,
+            external_api=external_api,
+            agent_id=selected_agent_id,
+            handle=handle,
+            headers=headers,
+            baseline_session_ids=baseline_session_ids_by_agent[selected_agent_id],
+        )
+    pending_location_state = _discord_provider_state(discord_provider_fake_url)
+    pending_location_counts = cast(
+        dict[str, int],
+        pending_location_state["request_counts"],
+    )
+    assert pending_location_counts.get("create_thread", 0) == before_thread_count
+    assert pending_location_counts.get("create_message", 0) == before_message_count
+    _open_discord_settings(
+        discord_provider_fake_url=discord_provider_fake_url,
+        interaction_id="700000000000000005",
+        application_id=_DISCORD_SELECTOR_APPLICATION_ID,
+        guild_id=_DISCORD_GUILD_ID,
+        channel_id=_DISCORD_CHANNEL_ID,
+        user_id="600000000000000002",
+    )
+    setup_threads_custom_id = cast(
+        str,
+        wait_until(
+            lambda: _discord_settings_component_id(
+                discord_provider_fake_url,
+                action_code="st",
+            ),
+            timeout=15,
+            interval=0.2,
+            message="Selected Discord route did not expose location controls",
+        ),
+    )
+    _select_discord_setup_location(
+        discord_provider_fake_url=discord_provider_fake_url,
+        interaction_id="700000000000000006",
+        application_id=_DISCORD_SELECTOR_APPLICATION_ID,
+        guild_id=_DISCORD_GUILD_ID,
+        channel_id=_DISCORD_CHANNEL_ID,
+        user_id="600000000000000002",
+        custom_id=setup_threads_custom_id,
+    )
     state = cast(
         dict[str, object],
         wait_until(
@@ -3799,14 +4485,14 @@ def test_discord_message_command_selector_and_component_journey(
             timeout=15,
             interval=0.2,
             message=(
-                "Discord selector replay did not provision its thread and deliver "
-                "the access control"
+                "Discord location selection did not provision its thread and "
+                "continue the source"
             ),
         ),
     )
     rendered = str(state)
     interactions = cast(list[dict[str, object]], state["interactions"])
-    assert [item["response_type"] for item in interactions] == [4, 7]
+    assert [item["response_type"] for item in interactions] == [4, 7, 4, 7]
     operations = cast(list[dict[str, object]], state["operations"])[
         before_operation_count:
     ]
@@ -3825,7 +4511,6 @@ def test_discord_message_command_selector_and_component_journey(
         and delivery.get("channel_id") == thread_channel_id
         for delivery in deliveries
     )
-    chat_api = ChatV1Api(public_api_client)
 
     def selected_binding() -> tuple[Any, Any] | None:
         sessions = chat_api.chat_v1_list_agent_sessions(
@@ -3904,11 +4589,15 @@ def test_discord_message_command_selector_and_component_journey(
             message="Discord HTTP selector replay did not deliver joined presence",
         ),
     )
-    assert _successful_session_paths(activation_state) == [expected_session_path]
+    assert _successful_session_paths(activation_state) == [
+        expected_session_path,
+        expected_session_path,
+    ]
     assert _successful_session_presence_states(activation_state) == ["joined"]
     assert source_content not in rendered
     assert _DISCORD_BOT_TOKEN not in rendered
     assert selector not in rendered
+    assert setup_threads_custom_id not in rendered
     assert message_command_id not in rendered
 
 
@@ -3949,6 +4638,12 @@ def test_discord_multi_management_and_lifecycle_journey(
         ),
         _headers=headers,
     )
+    validation = external_api.external_channel_v1_validate_multi_discord_connection(
+        connection_id=setup.connection.id,
+        handle=handle,
+        _headers=headers,
+    )
+    assert validation.status is ExternalChannelConnectionStatus.ACTIVE
     connection = setup.connection
     assert connection.app_mode is ExternalChannelAppMode.MULTI
     assert connection.status is ExternalChannelConnectionStatus.ACTIVE
