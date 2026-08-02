@@ -74,6 +74,31 @@ class _SelectorInteractionHandler(_SignedInteractionHandler):
         self.wfile.write(response)
 
 
+class _SettingsInteractionHandler(_SignedInteractionHandler):
+    """Return settings-shaped controls while keeping signed IDs request-local."""
+
+    def do_POST(self) -> None:
+        """Verify the signed request and return bounded settings components."""
+        length = int(self.headers["Content-Length"])
+        body = self.rfile.read(length)
+        signature = bytes.fromhex(self.headers["X-Signature-Ed25519"])
+        timestamp = self.headers["X-Signature-Timestamp"].encode()
+        Ed25519PublicKey.from_public_bytes(bytes.fromhex(_DISCORD_VERIFY_KEY)).verify(
+            signature, timestamp + body
+        )
+        self.received_bodies.append(body)
+        response = (
+            b'{"type":4,"data":{"flags":64,"content":"Choose a location.",'
+            b'"components":[{"type":1,"components":[{"type":2,'
+            b'"custom_id":"a:sc:claim:1:1:signature"}]}]}}'
+        )
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+
 @pytest.fixture
 def discord_fake_urls() -> Generator[tuple[str, str], None, None]:
     """Run isolated fake HTTP and Gateway endpoints with fresh global state."""
@@ -161,6 +186,268 @@ def test_discord_fake_redacts_rest_secrets_and_visible_provider_bodies(
     assert "Private Discord message body" not in rendered
     assert "Different private body" not in rendered
     assert "private.example" not in rendered
+
+
+def test_discord_fake_reconciles_guild_commands_without_body_evidence(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Provide deterministic command CRUD while retaining only operation evidence."""
+    discord_fake_url, _ = discord_fake_urls
+    commands_url = (
+        f"{discord_fake_url}/api/v10/applications/100000000000000001/"
+        "guilds/200000000000000001/commands"
+    )
+    unrelated = requests.post(
+        commands_url,
+        json={
+            "name": "Private unrelated command",
+            "type": 2,
+        },
+        timeout=5,
+    )
+    unrelated.raise_for_status()
+    settings = requests.post(
+        commands_url,
+        json={
+            "name": "Private Azents settings command",
+            "type": 2,
+        },
+        timeout=5,
+    )
+    settings.raise_for_status()
+    assert unrelated.json()["id"] == "500000000000000001"
+    assert settings.json()["id"] == "500000000000000002"
+    message_action = requests.post(
+        commands_url,
+        json={
+            "name": "Ask an Azents Agent",
+            "type": 3,
+        },
+        timeout=5,
+    )
+    message_action.raise_for_status()
+    assert message_action.json()["id"] == "500000000000000003"
+    command_id = requests.get(
+        f"{discord_fake_url}/__testenv/command-id",
+        params={"role": "message_action"},
+        timeout=5,
+    )
+    command_id.raise_for_status()
+    assert command_id.json() == {"command_id": message_action.json()["id"]}
+
+    listed = requests.get(commands_url, timeout=5)
+    listed.raise_for_status()
+    assert listed.json() == [
+        unrelated.json(),
+        settings.json(),
+        message_action.json(),
+    ]
+
+    updated = requests.patch(
+        f"{commands_url}/{settings.json()['id']}",
+        json={
+            "name": "Private updated settings command",
+            "type": 2,
+        },
+        timeout=5,
+    )
+    updated.raise_for_status()
+    assert updated.json()["id"] == settings.json()["id"]
+    assert updated.json()["name"] == "Private updated settings command"
+
+    deleted = requests.delete(
+        f"{commands_url}/{settings.json()['id']}",
+        timeout=5,
+    )
+    assert deleted.status_code == 204
+    remaining = requests.get(commands_url, timeout=5)
+    remaining.raise_for_status()
+    assert remaining.json() == [unrelated.json(), message_action.json()]
+
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert [
+        (request["method"], request["operation"]) for request in evidence["requests"]
+    ] == [
+        ("POST", "create_guild_command"),
+        ("POST", "create_guild_command"),
+        ("POST", "create_guild_command"),
+        ("GET", "list_guild_commands"),
+        ("PATCH", "update_guild_command"),
+        ("DELETE", "delete_guild_command"),
+        ("GET", "list_guild_commands"),
+    ]
+    rendered = str(evidence)
+    assert "Private unrelated command" not in rendered
+    assert "Private Azents settings command" not in rendered
+    assert "Private updated settings command" not in rendered
+    assert evidence["guild_commands"] == [
+        {"role": "message_action", "type": 3},
+        {"role": "unrelated", "type": 2},
+    ]
+
+    requests.post(f"{discord_fake_url}/__testenv/reset", timeout=5).raise_for_status()
+    reset_commands = requests.get(commands_url, timeout=5)
+    reset_commands.raise_for_status()
+    assert reset_commands.json() == []
+
+
+def test_discord_fake_configures_bounded_command_reconciliation_state(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Seed duplicate, stale, and unrelated commands without evidence leakage."""
+    discord_fake_url, _ = discord_fake_urls
+    configured_names = [
+        "Ask an Azents Agent",
+        "Ask an Azents Agent",
+        "Azents settings",
+        "Private customer command",
+    ]
+    requests.post(
+        f"{discord_fake_url}/__testenv/configure",
+        json={
+            "guild_commands": [
+                {
+                    "id": "500000000000000101",
+                    "name": configured_names[0],
+                    "type": 3,
+                },
+                {
+                    "id": "500000000000000102",
+                    "name": configured_names[1],
+                    "type": 3,
+                },
+                {
+                    "id": "500000000000000103",
+                    "name": configured_names[2],
+                    "type": 1,
+                    "description": "Stale description.",
+                },
+                {
+                    "id": "500000000000000104",
+                    "name": configured_names[3],
+                    "type": 2,
+                },
+            ]
+        },
+        timeout=5,
+    ).raise_for_status()
+
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert evidence["guild_commands"] == [
+        {"role": "azents_settings", "type": 1},
+        {"role": "message_action", "type": 3},
+        {"role": "message_action", "type": 3},
+        {"role": "unrelated", "type": 2},
+    ]
+    assert all(name not in str(evidence) for name in configured_names)
+
+
+@pytest.mark.parametrize(
+    ("handler", "scope", "expected_custom_id"),
+    [
+        (
+            _SelectorInteractionHandler,
+            "selector",
+            "azents-selector:select:admission:0:signature",
+        ),
+        (
+            _SettingsInteractionHandler,
+            "settings",
+            "a:sc:claim:1:1:signature",
+        ),
+    ],
+)
+def test_discord_fake_keeps_component_ids_outside_persistent_evidence(
+    discord_fake_urls: tuple[str, str],
+    handler: type[_SignedInteractionHandler],
+    scope: str,
+    expected_custom_id: str,
+) -> None:
+    """Keep selector and settings control IDs in transient handoff state only."""
+    discord_fake_url, _ = discord_fake_urls
+    callback = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    callback_thread = threading.Thread(target=callback.serve_forever, daemon=True)
+    callback_thread.start()
+    try:
+        callback_host, callback_port = callback.server_address
+        requests.patch(
+            f"{discord_fake_url}/api/v10/applications/100000000000000001",
+            json={
+                "interactions_endpoint_url": (
+                    f"http://{callback_host}:{callback_port}/interaction"
+                )
+            },
+            timeout=5,
+        ).raise_for_status()
+        delivered = requests.post(
+            f"{discord_fake_url}/__testenv/interactions",
+            json={"id": "700000000000000099", "type": 2},
+            timeout=5,
+        )
+        delivered.raise_for_status()
+        assert delivered.json() == {"status": 200, "response_type": 4}
+        transient = requests.get(
+            f"{discord_fake_url}/__testenv/transient-component",
+            params={"scope": scope},
+            timeout=5,
+        )
+        transient.raise_for_status()
+        assert transient.json() == {"custom_id": expected_custom_id}
+        evidence = requests.get(
+            f"{discord_fake_url}/__testenv/state",
+            timeout=5,
+        ).json()
+        assert expected_custom_id not in str(evidence)
+    finally:
+        callback.shutdown()
+        callback.server_close()
+        callback_thread.join(timeout=5)
+
+
+def test_discord_fake_hands_off_delivered_message_components_transiently(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Expose a delivered settings control once without retaining its signed ID."""
+    discord_fake_url, _ = discord_fake_urls
+    custom_id = "a:st:interaction:claim:1:1:signature"
+    response = requests.post(
+        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages",
+        json={
+            "content": "Private setup guidance.",
+            "components": [
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 2,
+                            "label": "Answer in threads",
+                            "custom_id": custom_id,
+                        }
+                    ],
+                }
+            ],
+        },
+        timeout=5,
+    )
+    response.raise_for_status()
+
+    transient = requests.get(
+        f"{discord_fake_url}/__testenv/transient-component",
+        params={"scope": "settings"},
+        timeout=5,
+    )
+    transient.raise_for_status()
+    assert transient.json() == {"custom_id": custom_id}
+    consumed = requests.get(
+        f"{discord_fake_url}/__testenv/transient-component",
+        params={"scope": "settings"},
+        timeout=5,
+    )
+    consumed.raise_for_status()
+    assert consumed.json() == {"custom_id": None}
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert custom_id not in str(evidence)
+    assert "Private setup guidance." not in str(evidence)
 
 
 def test_discord_fake_serves_bounded_history_and_thread_ordering_evidence(
