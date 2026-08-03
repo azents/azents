@@ -34,8 +34,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
-last_verified_at: 2026-07-31
-spec_version: 45
+last_verified_at: 2026-08-03
+spec_version: 46
 ---
 
 # Agent Runtime Control
@@ -192,6 +192,14 @@ while it still matches. Provider restart, configuration change, workload deletio
 removes that trust and reports `starting` until a command verifies the current policy again. An
 unverified watch report must not race a verified command report and leave a Ready Runtime
 indefinitely preparing.
+
+The Kubernetes Provider owns each Runtime-specific NetworkPolicy as one complete resource. Creation
+uses POST, while reconciliation of an existing policy uses resourceVersion-fenced PUT replacement
+so labels, annotations, selectors, and rules removed from the desired representation do not survive
+as merge-patch residue. A replacement conflict re-reads the latest resource and retries once without
+deleting the policy. Pods retain explicit delete-and-recreate lifecycle semantics because their
+mutable surface is limited by Kubernetes immutability, PVCs retain data-preserving merge updates,
+and the leader Lease retains concurrency-sensitive merge updates.
 
 Control periodically dispatches idempotent Provider `start` commands for running Runtimes and read-only Provider `observe` commands for stopped-desired Runtimes whose Provider state has not yet converged to `stopped`. Periodic `start` revalidates the desired Runner image and Provider-managed workload configuration, reuses an equivalent workload, and replaces only a drifted workload while preserving Agent Workspace storage. The live Provider connection registry, rather than a cached per-Runtime connection flag, gates dispatch; periodic attempts are durably throttled while a Provider is unavailable, and a successful dispatch refreshes the cached connection flag. Start timeout evaluation happens only after the current reconciliation pass has checked that live registry and only for a desired generation already dispatched to its Provider, so a Control rollout cannot convert a stale durable `connected` flag into a false `START_TIMEOUT`. This converges Runner image/configuration drift after deployment and closes gaps when a backend deletion event is missed during Provider reconnect or leader handoff. A current-generation Provider `stopped` report also converges durable Runner state to `disconnected`; the stopped backend is authoritative that no Runner remains available. Kubernetes Pod replacement treats deletion as asynchronous: the Provider must not apply the replacement under the same name until the old Pod is no longer observable, avoiding immutable-field PATCH failures during restart.
 
