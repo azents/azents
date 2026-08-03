@@ -2841,12 +2841,26 @@ def test_provider_native_channel_work_progress_journey(
         "Pending: Summarize the incident"
     )
     blocks = cast(list[dict[str, object]], plan_delivery["blocks"])
-    assert len(blocks) == 1
+    assert len(blocks) == 2
     assert plan_delivery["text"] == expected_fallback
+    assert plan_delivery["safe_category"] == "activity_tracker"
+    assert plan_delivery["session_path"] == (
+        f"/w/{handle}/agents/{agent_id}/sessions/{session_id}"
+    )
     plan = blocks[0]
     assert plan["type"] == "plan"
     assert plan["title"] == "Investigating error logs…"
     assert "plan_id" not in plan
+    actions = blocks[1]
+    assert actions["type"] == "actions"
+    action_elements = cast(list[dict[str, object]], actions["elements"])
+    assert len(action_elements) == 1
+    assert action_elements[0]["type"] == "button"
+    assert action_elements[0]["action_id"] == "view_azents_session"
+    assert action_elements[0]["text"] == {
+        "type": "plain_text",
+        "text": "View session",
+    }
     tasks = cast(list[dict[str, object]], plan["tasks"])
     assert [task["task_id"] for task in tasks] == [
         "inspect",
