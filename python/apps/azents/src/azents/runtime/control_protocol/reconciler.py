@@ -193,7 +193,11 @@ class RuntimeLifecycleReconciler:
             )
         command_type = (
             RuntimeProviderCommandType.START
-            if runtime.desired_state is RuntimeDesiredState.RUNNING
+            if (
+                runtime.desired_state is RuntimeDesiredState.RUNNING
+                and runtime.provider_observed_state
+                is not RuntimeProviderObservedState.RUNNING
+            )
             else RuntimeProviderCommandType.OBSERVE
         )
         return await self._dispatch_runtime_command(
