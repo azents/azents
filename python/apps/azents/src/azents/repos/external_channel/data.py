@@ -28,7 +28,6 @@ from azents.core.enums import (
     ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
     ExternalChannelWorkProjectionStatus,
-    ExternalChannelWorkStatus,
 )
 from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
@@ -593,37 +592,6 @@ class ExternalChannelBlockCreate(_Record):
     removed_at: datetime.datetime | None
 
 
-class ExternalChannelWork(_Record):
-    """Binding-scoped task state and desired progress projection."""
-
-    id: str
-    binding_id: str
-    status: ExternalChannelWorkStatus
-    schema_version: int
-    title: str | None
-    tasks: list[dict[str, Any]]
-    state_revision: int
-    desired_progress_revision: int
-    desired_progress_payload: dict[str, Any] | None
-    finished_at: datetime.datetime | None
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-
-
-class ExternalChannelWorkCreate(_Record):
-    """Channel Work creation payload."""
-
-    binding_id: str
-    status: ExternalChannelWorkStatus
-    schema_version: int
-    title: str | None
-    tasks: list[dict[str, Any]]
-    state_revision: int
-    desired_progress_revision: int
-    desired_progress_payload: dict[str, Any] | None
-    finished_at: datetime.datetime | None
-
-
 class ExternalChannelAppClaim(_Record):
     """Current provider App claim independent from disconnected history."""
 
@@ -657,19 +625,6 @@ class ExternalChannelIngressLeaseClaim(_Record):
     """One successful fenced ingress-lease claim."""
 
     lease: ExternalChannelIngressLease
-
-
-class ExternalChannelWorkProjectionPart(_Record):
-    """Current provider projection for an ordered canonical Work part."""
-
-    id: str
-    work_id: str
-    part_ordinal: int
-    desired_progress_revision: int
-    status: ExternalChannelWorkProjectionStatus
-    provider_message_key: str | None
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
 
 
 class ExternalChannelArchiveTermination(_Record):

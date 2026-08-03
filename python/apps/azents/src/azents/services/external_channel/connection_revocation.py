@@ -28,7 +28,7 @@ class ExternalChannelConnectionRevocationService:
     ]
     repository: Annotated[
         ExternalChannelRepository,
-        Depends(ExternalChannelRepository),
+        Depends(ExternalChannelRepository.create),
     ]
     action_service: Annotated[
         ExternalChannelActionService,

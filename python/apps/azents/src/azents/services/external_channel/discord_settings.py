@@ -65,7 +65,7 @@ class DiscordSettingsResponseService:
     ]
     repository: Annotated[
         ExternalChannelRepository,
-        Depends(ExternalChannelRepository),
+        Depends(ExternalChannelRepository.create),
     ]
     participation_service: Annotated[
         ExternalChannelParticipationService,

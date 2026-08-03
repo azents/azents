@@ -153,7 +153,7 @@ class ExternalChannelInteractionProcessor:
     ]
     repository: Annotated[
         ExternalChannelRepository,
-        Depends(ExternalChannelRepository),
+        Depends(ExternalChannelRepository.create),
     ]
     selector_service: Annotated[
         ExternalChannelSelectorService,

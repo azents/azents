@@ -71,7 +71,7 @@ class ExternalChannelShortcutSourceService:
     ]
     repository: Annotated[
         ExternalChannelRepository,
-        Depends(ExternalChannelRepository),
+        Depends(ExternalChannelRepository.create),
     ]
 
     async def ensure(

@@ -251,7 +251,7 @@ def get_worker_external_channel_file_transfer_service(
     ],
     repository: Annotated[
         ExternalChannelWorkRepository,
-        Depends(ExternalChannelWorkRepository),
+        Depends(ExternalChannelWorkRepository.create),
     ],
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,

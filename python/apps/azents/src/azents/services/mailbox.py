@@ -269,7 +269,7 @@ class MailboxService:
     ]
     external_channel_repository: Annotated[
         ExternalChannelRepository,
-        Depends(ExternalChannelRepository),
+        Depends(ExternalChannelRepository.create),
     ]
 
     async def enqueue(

@@ -218,10 +218,6 @@ def test_external_channel_participant_declares_session_owned_foundation_state() 
             "external_channel_access_grants",
             SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
         ),
-        (
-            "external_channel_works",
-            SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
-        ),
     }
 
 

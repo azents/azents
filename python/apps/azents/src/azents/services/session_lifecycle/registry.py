@@ -77,11 +77,6 @@ def get_session_lifecycle_registry() -> SessionLifecycleRegistry:
                         SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
                         "test_session_lifecycle_external_channel",
                     ),
-                    _database_resource(
-                        "external_channel_works",
-                        SessionLifecycleResourceClassification.LIFECYCLE_ROOT,
-                        "test_session_lifecycle_external_channel",
-                    ),
                 ),
                 archive_policy=SessionLifecycleTransitionPolicy.TERMINATE,
                 restore_policy=SessionLifecycleTransitionPolicy.PRESERVE,

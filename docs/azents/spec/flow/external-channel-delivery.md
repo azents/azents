@@ -32,10 +32,11 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/management_data.py
   - python/apps/azents/src/azents/repos/external_channel/work.py
   - python/apps/azents/src/azents/repos/external_channel/work_data.py
+  - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-03
-spec_version: 34
+spec_version: 35
 ---
 
 # External Channel Delivery and Channel Work
@@ -85,6 +86,12 @@ literal output, and ordered labeled HTTP or HTTPS sources. The complete serializ
 desired snapshot must fit 64 KiB; an oversized update is rejected before canonical
 state changes so accepted continuation context is never silently truncated. Each
 binding has independent work state even when several bindings share one AgentSession.
+The canonical value is one Session-bound Toolkit State identity composed from the
+Agent, Session, namespace `external_channel`, and state name
+`channel_work:{binding_id}`. Its schema-version-1 payload stores the stable
+`work_cycle_id`, current or latest work lifecycle, desired progress, and ordered
+provider projection parts. Whole-state optimistic-lock retries are isolated per
+binding.
 The ordinary Session Todo toolkit is not the Channel Work source of truth.
 
 ## Agent Presentation
@@ -127,8 +134,9 @@ Agent-requested execution history. No Channel Action, delivery attempt, pending
 provider work item, retry, replay, recovery, or compensation record is created.
 
 Progress effect results compare-and-set only the current Work-owned projection part
-for the expected desired revision. A stale result cannot overwrite a newer desired
-snapshot. Reply results have no separate durable projection. Confirmed Slack API
+inside the binding's Toolkit State for the expected work cycle and desired revision.
+A stale result cannot overwrite a newer cycle or desired snapshot. Reply results have
+no separate durable projection. Confirmed Slack API
 rejection is `failed`; transport or server ambiguity is `unknown`.
 
 Discord Create Message uses a bounded operation key derived from the current Tool call
@@ -377,6 +385,9 @@ lifecycle transition and creates no recovery work.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 35) — Made binding-specific Session-bound Toolkit
+  State the sole Channel Work and current provider-projection authority while
+  preserving commit-before-I/O delivery and cycle/revision settlement fences.
 - **2026-08-03** (spec_version 34) — Added the Run-local adjacent-turn verbosity
   guard for repeated `channel_action` calls with the same binding and mode.
 - **2026-08-03** (spec_version 33) — Added canonical `View session` controls to

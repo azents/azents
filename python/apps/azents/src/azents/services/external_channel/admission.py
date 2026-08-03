@@ -54,7 +54,7 @@ class ExternalChannelAdmissionService:
     ]
     repository: Annotated[
         ExternalChannelRepository,
-        Depends(ExternalChannelRepository),
+        Depends(ExternalChannelRepository.create),
     ]
     provider_mutation_timeout: datetime.timedelta = (
         _INTERACTION_PROVIDER_MUTATION_TIMEOUT

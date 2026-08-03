@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from typing import Literal, assert_never
 
 import sqlalchemy as sa
+from azcommon.uuid import uuid7
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -36,8 +37,6 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelConnection,
     RDBExternalChannelResource,
     RDBExternalChannelSetupClaim,
-    RDBExternalChannelWork,
-    RDBExternalChannelWorkProjectionPart,
 )
 from azents.rdb.models.workspace import RDBWorkspace
 from azents.repos.external_channel.work_data import (
@@ -46,6 +45,12 @@ from azents.repos.external_channel.work_data import (
     ChannelWorkSnapshot,
     ChannelWorkTask,
     ExternalChannelFileAccessTarget,
+)
+from azents.repos.external_channel.work_state import (
+    ChannelWorkProjectionPartState,
+    ChannelWorkState,
+    ChannelWorkStateMutation,
+    ExternalChannelWorkStateStore,
 )
 from azents.services.external_channel.discord_delivery import (
     DISCORD_CREATE_MESSAGE_MAX_REQUEST_BYTES,
@@ -68,6 +73,18 @@ from azents.services.external_channel.slack_events import (
 
 class ExternalChannelWorkRepository:
     """Own canonical Channel Work and current provider projection state."""
+
+    @classmethod
+    def create(cls) -> "ExternalChannelWorkRepository":
+        """Create a Work repository for application dependency injection."""
+        return cls()
+
+    def __init__(
+        self,
+        work_state_store: ExternalChannelWorkStateStore | None = None,
+    ) -> None:
+        """Create the Work repository."""
+        self.work_state_store = work_state_store or ExternalChannelWorkStateStore()
 
     async def prepare_access_control_create(
         self,
@@ -325,21 +342,19 @@ class ExternalChannelWorkRepository:
         self,
         session: AsyncSession,
         *,
-        work_id: str,
+        agent_id: str,
+        session_id: str,
+        binding_id: str,
+        work_cycle_id: str,
     ) -> ProviderEffectPlan | None:
         """Plan the first current progress projection after canonical admission."""
         row = (
             await session.execute(
                 sa.select(
-                    RDBExternalChannelWork,
                     RDBExternalChannelBinding,
                     RDBExternalChannelResource,
                     RDBExternalChannelAgentRoute,
                     RDBExternalChannelConnection,
-                )
-                .join(
-                    RDBExternalChannelBinding,
-                    RDBExternalChannelBinding.id == RDBExternalChannelWork.binding_id,
                 )
                 .join(
                     RDBExternalChannelResource,
@@ -357,32 +372,34 @@ class ExternalChannelWorkRepository:
                     == RDBExternalChannelAgentRoute.connection_id,
                 )
                 .where(
-                    RDBExternalChannelWork.id == work_id,
-                    RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
+                    RDBExternalChannelBinding.id == binding_id,
+                    RDBExternalChannelBinding.agent_session_id == session_id,
                     RDBExternalChannelBinding.disconnected_at.is_(None),
+                    RDBExternalChannelAgentRoute.agent_id == agent_id,
                 )
-                .with_for_update(of=RDBExternalChannelWork)
             )
         ).one_or_none()
         if row is None:
             return None
-        work, binding, resource, route, connection = row
-        if work.desired_progress_payload is None:
-            return None
-        existing_part = await session.scalar(
-            sa.select(RDBExternalChannelWorkProjectionPart)
-            .where(
-                RDBExternalChannelWorkProjectionPart.work_id == work.id,
-                RDBExternalChannelWorkProjectionPart.part_ordinal == 0,
-            )
-            .with_for_update()
+        binding, resource, route, connection = row
+        work = await self.work_state_store.load(
+            session,
+            agent_id=agent_id,
+            session_id=session_id,
+            binding_id=binding_id,
         )
-        if existing_part is not None:
+        if (
+            work is None
+            or work.status is not ExternalChannelWorkStatus.ACTIVE
+            or work.work_cycle_id != work_cycle_id
+            or work.desired_progress is None
+            or any(part.part_ordinal == 0 for part in work.projection_parts)
+        ):
             return None
         if connection.provider is ExternalChannelProvider.SLACK:
             rendered = render_slack_persisted_progress(
-                work.desired_progress_payload,
-                work_id=work.id,
+                work.desired_progress,
+                work_id=work.work_cycle_id,
                 desired_progress_revision=work.desired_progress_revision,
             )
             payload = _provider_payload(
@@ -394,8 +411,8 @@ class ExternalChannelWorkRepository:
             )
         else:
             rendered_discord = render_discord_persisted_progress(
-                work.desired_progress_payload,
-                work_id=work.id,
+                work.desired_progress,
+                work_id=work.work_cycle_id,
                 desired_progress_revision=work.desired_progress_revision,
             )
             if not rendered_discord.pages:
@@ -408,7 +425,7 @@ class ExternalChannelWorkRepository:
                 desired_progress_revision=work.desired_progress_revision,
             )
             payload["embeds"] = page.embeds
-        payload["work_id"] = work.id
+        payload["work_id"] = work.work_cycle_id
         payload["part_ordinal"] = 0
         plan = await self.prepare_direct_control(
             session,
@@ -419,22 +436,47 @@ class ExternalChannelWorkRepository:
             operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
             request_payload=payload,
             operation_seed=(
-                f"initial-progress:{work.id}:{work.desired_progress_revision}"
+                f"initial-progress:{work.work_cycle_id}:"
+                f"{work.desired_progress_revision}"
             ),
         )
         if plan is None:
             return None
-        session.add(
-            RDBExternalChannelWorkProjectionPart(
-                work_id=work.id,
-                part_ordinal=0,
-                desired_progress_revision=work.desired_progress_revision,
-                status=ExternalChannelWorkProjectionStatus.UNKNOWN,
-                provider_message_key=None,
+
+        def claim(
+            current: ChannelWorkState,
+        ) -> ChannelWorkStateMutation[bool]:
+            if (
+                current.status is not ExternalChannelWorkStatus.ACTIVE
+                or current.work_cycle_id != work.work_cycle_id
+                or current.desired_progress_revision != work.desired_progress_revision
+                or current.desired_progress is None
+                or any(part.part_ordinal == 0 for part in current.projection_parts)
+            ):
+                return ChannelWorkStateMutation(
+                    state=current,
+                    result=False,
+                    changed=False,
+                )
+            updated = current.model_copy(deep=True)
+            updated.projection_parts.append(
+                ChannelWorkProjectionPartState(
+                    part_ordinal=0,
+                    desired_progress_revision=current.desired_progress_revision,
+                    status=ExternalChannelWorkProjectionStatus.UNKNOWN,
+                    provider_message_key=None,
+                )
             )
+            return ChannelWorkStateMutation(state=updated, result=True)
+
+        claimed = await self.work_state_store.update_existing(
+            session,
+            agent_id=agent_id,
+            session_id=session_id,
+            binding_id=binding_id,
+            mutator=claim,
         )
-        await session.flush()
-        return plan
+        return plan if claimed is not None and claimed.result else None
 
     async def prepare_access_control_delete(
         self,
@@ -562,31 +604,51 @@ class ExternalChannelWorkRepository:
         self,
         session: AsyncSession,
         *,
+        agent_id: str,
+        session_id: str,
         binding_id: str,
-    ) -> None:
-        """Create the one active Channel Work row for a newly invoked binding."""
-        existing = await session.scalar(
-            sa.select(RDBExternalChannelWork.id).where(
-                RDBExternalChannelWork.binding_id == binding_id,
-                RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
-            )
-        )
-        if existing is not None:
-            return
-        session.add(
-            RDBExternalChannelWork(
+        desired_progress: ExternalChannelDesiredProgress,
+    ) -> ChannelWorkState:
+        """Create or reuse the one active Work cycle for an invoked binding."""
+
+        def new_state() -> ChannelWorkState:
+            return ChannelWorkState(
                 binding_id=binding_id,
+                work_cycle_id=uuid7().hex,
                 status=ExternalChannelWorkStatus.ACTIVE,
-                schema_version=2,
-                title=None,
-                tasks=[],
+                title=desired_progress.title,
+                tasks=list(desired_progress.tasks),
                 state_revision=1,
-                desired_progress_revision=0,
-                desired_progress_payload=None,
+                desired_progress_revision=1,
+                desired_progress=desired_progress,
                 finished_at=None,
+                projection_parts=[],
             )
+
+        def activate(
+            current: ChannelWorkState,
+        ) -> ChannelWorkStateMutation[ChannelWorkState]:
+            if current.status is ExternalChannelWorkStatus.ACTIVE:
+                return ChannelWorkStateMutation(
+                    state=current,
+                    result=current,
+                    changed=False,
+                )
+            replacement = new_state()
+            return ChannelWorkStateMutation(
+                state=replacement,
+                result=replacement,
+            )
+
+        mutation = await self.work_state_store.update(
+            session,
+            agent_id=agent_id,
+            session_id=session_id,
+            binding_id=binding_id,
+            default_factory=new_state,
+            mutator=activate,
         )
-        await session.flush()
+        return mutation.result
 
     async def has_active_binding(
         self,
@@ -698,7 +760,6 @@ class ExternalChannelWorkRepository:
                     RDBExternalChannelBinding,
                     RDBExternalChannelResource,
                     RDBExternalChannelConnection,
-                    RDBExternalChannelWork,
                 )
                 .join(
                     RDBAgentSession,
@@ -720,15 +781,6 @@ class ExternalChannelWorkRepository:
                     RDBExternalChannelConnection.id
                     == RDBExternalChannelAgentRoute.connection_id,
                 )
-                .join(
-                    RDBExternalChannelWork,
-                    sa.and_(
-                        RDBExternalChannelWork.binding_id
-                        == RDBExternalChannelBinding.id,
-                        RDBExternalChannelWork.status
-                        == ExternalChannelWorkStatus.ACTIVE,
-                    ),
-                )
                 .where(
                     RDBExternalChannelBinding.agent_session_id == session_id,
                     RDBExternalChannelBinding.disconnected_at.is_(None),
@@ -740,15 +792,24 @@ class ExternalChannelWorkRepository:
                 .order_by(RDBExternalChannelBinding.id)
             )
         ).all()
+        work_by_binding = await self.work_state_store.list_for_session(
+            session,
+            agent_id=agent_id,
+            session_id=session_id,
+        )
         return [
             ChannelWorkSnapshot(
                 binding_id=binding.id,
                 provider=connection.provider,
                 resource_label=_resource_label(resource.labels, binding.id),
                 title=work.title,
-                tasks=[ChannelWorkTask.model_validate(task) for task in work.tasks],
+                tasks=list(work.tasks),
             )
-            for binding, resource, connection, work in rows
+            for binding, resource, connection in rows
+            if (
+                (work := work_by_binding.get(binding.id)) is not None
+                and work.status is ExternalChannelWorkStatus.ACTIVE
+            )
         ]
 
     async def commit_direct_action(
@@ -769,11 +830,7 @@ class ExternalChannelWorkRepository:
     ) -> ChannelActionTransition:
         """Commit canonical Work and return process-local provider effects."""
         del run_id
-        requested_tasks = (
-            [task.model_dump(mode="json") for task in tasks]
-            if tasks is not None
-            else None
-        )
+        requested_tasks = list(tasks) if tasks is not None else None
         if mode is ExternalChannelActionMode.FINISH and message is None:
             raise ValueError("Finish requires a final External Channel reply.")
         if files and message is None:
@@ -837,211 +894,238 @@ class ExternalChannelWorkRepository:
             raise ValueError("External Channel resource is unavailable.")
         workspace = await session.get(RDBWorkspace, agent.workspace_id)
 
-        work = await session.scalar(
-            sa.select(RDBExternalChannelWork)
-            .where(
-                RDBExternalChannelWork.binding_id == binding.id,
-                RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
-            )
-            .with_for_update()
-        )
-        if work is None:
-            work = RDBExternalChannelWork(
+        def default_work() -> ChannelWorkState:
+            return ChannelWorkState(
                 binding_id=binding.id,
+                work_cycle_id=uuid7().hex,
                 status=ExternalChannelWorkStatus.ACTIVE,
-                schema_version=2,
                 title=None,
                 tasks=[],
                 state_revision=1,
                 desired_progress_revision=0,
-                desired_progress_payload=None,
+                desired_progress=None,
                 finished_at=None,
-            )
-            session.add(work)
-            await session.flush()
-
-        effects: list[ChannelActionEffectPlan] = []
-
-        def append_effect(
-            operation: ExternalChannelDeliveryOperation,
-            payload: dict[str, object],
-            *,
-            part: int,
-            expected_desired_progress_revision: int | None,
-        ) -> None:
-            target = ProviderTarget(
-                operation=operation,
-                binding_id=binding.id,
-                resource_id=resource.id,
-                connection_id=connection.id,
-                provider=connection.provider,
-                app_mode=connection.app_mode,
-                encrypted_credentials=connection.encrypted_credentials,
-                provider_tenant_id=connection.provider_tenant_id,
-                capabilities=connection.capabilities,
-                workspace_handle=None if workspace is None else workspace.handle,
-                agent_id=agent.id,
-                agent_session_id=session_id,
-                agent_name=agent.name,
-                agent_avatar=agent.avatar,
-                request_payload=payload,
-            )
-            effects.append(
-                ChannelActionEffectPlan(
-                    provider=ProviderEffectPlan(
-                        target=target,
-                        operation_key=ProviderOperationKey.from_seed(
-                            f"{client_tool_call_id}:{len(effects)}:"
-                            f"{operation.value}:{part}"
-                        ),
-                    ),
-                    part=part,
-                    work_id=work.id,
-                    expected_desired_progress_revision=(
-                        expected_desired_progress_revision
-                    ),
-                )
+                projection_parts=[],
             )
 
-        if message is not None:
-            for part, payload in enumerate(
-                _reply_parts(
+        def transition(
+            current: ChannelWorkState,
+        ) -> ChannelWorkStateMutation[ChannelActionTransition]:
+            work = (
+                default_work()
+                if current.status is ExternalChannelWorkStatus.FINISHED
+                else current.model_copy(deep=True)
+            )
+            effects: list[ChannelActionEffectPlan] = []
+
+            def append_effect(
+                operation: ExternalChannelDeliveryOperation,
+                payload: dict[str, object],
+                *,
+                part: int,
+                expected_desired_progress_revision: int | None,
+            ) -> None:
+                target = ProviderTarget(
+                    operation=operation,
+                    binding_id=binding.id,
+                    resource_id=resource.id,
+                    connection_id=connection.id,
                     provider=connection.provider,
-                    labels=resource.labels,
-                    text=message,
-                    files=files,
+                    app_mode=connection.app_mode,
+                    encrypted_credentials=connection.encrypted_credentials,
+                    provider_tenant_id=connection.provider_tenant_id,
+                    capabilities=connection.capabilities,
+                    workspace_handle=None if workspace is None else workspace.handle,
+                    agent_id=agent.id,
+                    agent_session_id=session_id,
+                    agent_name=agent.name,
+                    agent_avatar=agent.avatar,
+                    request_payload=payload,
                 )
-            ):
-                append_effect(
-                    ExternalChannelDeliveryOperation.REPLY,
-                    payload,
-                    part=part,
-                    expected_desired_progress_revision=None,
+                effects.append(
+                    ChannelActionEffectPlan(
+                        provider=ProviderEffectPlan(
+                            target=target,
+                            operation_key=ProviderOperationKey.from_seed(
+                                f"{client_tool_call_id}:{len(effects)}:"
+                                f"{operation.value}:{part}"
+                            ),
+                        ),
+                        part=part,
+                        work_cycle_id=work.work_cycle_id,
+                        expected_desired_progress_revision=(
+                            expected_desired_progress_revision
+                        ),
+                    )
                 )
 
-        projection_parts = {
-            part.part_ordinal: part
-            for part in await session.scalars(
-                sa.select(RDBExternalChannelWorkProjectionPart)
-                .where(RDBExternalChannelWorkProjectionPart.work_id == work.id)
-                .with_for_update()
-            )
-        }
-        if mode is ExternalChannelActionMode.CONTINUE:
-            progress_changed = title is not None or requested_tasks is not None
-            if requested_tasks is not None and title is None:
-                raise ValueError("A Channel Work task update requires a work title.")
-            if title is not None and not title.endswith(("…", "...")):
-                raise ValueError("Channel Work titles must end with an ellipsis.")
-            if title is not None and requested_tasks is None and not work.tasks:
-                raise ValueError("A title-only update requires existing Channel Work.")
-            if progress_changed:
-                next_tasks = (
-                    requested_tasks if requested_tasks is not None else list(work.tasks)
-                )
-                validated_tasks = [
-                    ChannelWorkTask.model_validate(task) for task in next_tasks
-                ]
-                if not validated_tasks:
-                    raise ValueError("Working Channel Work requires at least one task.")
-                if not any(
-                    task.status
-                    not in {
-                        ExternalChannelWorkTaskStatus.COMPLETED,
-                        ExternalChannelWorkTaskStatus.FAILED,
-                    }
-                    for task in validated_tasks
+            if message is not None:
+                for part, payload in enumerate(
+                    _reply_parts(
+                        provider=connection.provider,
+                        labels=resource.labels,
+                        text=message,
+                        files=files,
+                    )
                 ):
-                    raise ValueError(
-                        "Continue must leave at least one unfinished Channel Work task."
-                    )
-                next_title = title if title is not None else work.title
-                if next_title is None:
-                    raise ValueError("Working Channel Work requires a title.")
-                progress = ExternalChannelDesiredProgress(
-                    schema_version=2,
-                    state="working",
-                    title=next_title,
-                    tasks=validated_tasks,
-                )
-                work.title = next_title
-                work.tasks = [task.model_dump(mode="json") for task in validated_tasks]
-                work.state_revision += 1
-                work.desired_progress_revision += 1
-                work.desired_progress_payload = progress.model_dump(mode="json")
-                if connection.provider is ExternalChannelProvider.SLACK:
-                    rendered = render_slack_progress(
-                        progress,
-                        work_id=work.id,
-                        desired_progress_revision=work.desired_progress_revision,
-                    )
-                    desired_pages = ((rendered.text, rendered.blocks),)
-                else:
-                    rendered_discord = render_discord_persisted_progress(
-                        work.desired_progress_payload,
-                        work_id=work.id,
-                        desired_progress_revision=work.desired_progress_revision,
-                    )
-                    desired_pages = tuple(
-                        (page.text, page.embeds) for page in rendered_discord.pages
-                    )
-                for part_ordinal, (text, presentation) in enumerate(desired_pages):
-                    part = projection_parts.pop(part_ordinal, None)
-                    operation: ExternalChannelDeliveryOperation | None = None
-                    if (
-                        part is None
-                        or part.status is ExternalChannelWorkProjectionStatus.DELETED
-                    ):
-                        operation = ExternalChannelDeliveryOperation.PROGRESS_CREATE
-                    elif part.status is ExternalChannelWorkProjectionStatus.FAILED:
-                        operation = (
-                            ExternalChannelDeliveryOperation.PROGRESS_UPDATE
-                            if part.provider_message_key is not None
-                            else ExternalChannelDeliveryOperation.PROGRESS_CREATE
-                        )
-                    elif (
-                        part.status is ExternalChannelWorkProjectionStatus.PRESENT
-                        and part.provider_message_key is not None
-                        and part.desired_progress_revision
-                        < work.desired_progress_revision
-                    ):
-                        operation = ExternalChannelDeliveryOperation.PROGRESS_UPDATE
-                    elif (
-                        part.status is ExternalChannelWorkProjectionStatus.UNKNOWN
-                        and part.desired_progress_revision
-                        < work.desired_progress_revision
-                    ):
-                        operation = (
-                            ExternalChannelDeliveryOperation.PROGRESS_UPDATE
-                            if part.provider_message_key is not None
-                            else ExternalChannelDeliveryOperation.PROGRESS_CREATE
-                        )
-                    if operation is None:
-                        continue
-                    payload = _provider_payload(
-                        connection.provider,
-                        resource.labels,
-                        text=text,
-                        blocks=(
-                            presentation
-                            if connection.provider is ExternalChannelProvider.SLACK
-                            else None
-                        ),
-                        provider_message_key=(
-                            None if part is None else part.provider_message_key
-                        ),
-                        desired_progress_revision=work.desired_progress_revision,
-                    )
-                    if connection.provider is ExternalChannelProvider.DISCORD:
-                        payload["embeds"] = presentation
                     append_effect(
-                        operation,
+                        ExternalChannelDeliveryOperation.REPLY,
                         payload,
-                        part=part_ordinal,
-                        expected_desired_progress_revision=(
-                            work.desired_progress_revision
-                        ),
+                        part=part,
+                        expected_desired_progress_revision=None,
                     )
+
+            projection_parts = {
+                part.part_ordinal: part for part in work.projection_parts
+            }
+            if mode is ExternalChannelActionMode.CONTINUE:
+                progress_changed = title is not None or requested_tasks is not None
+                if requested_tasks is not None and title is None:
+                    raise ValueError(
+                        "A Channel Work task update requires a work title."
+                    )
+                if title is not None and not title.endswith(("…", "...")):
+                    raise ValueError("Channel Work titles must end with an ellipsis.")
+                if title is not None and requested_tasks is None and not work.tasks:
+                    raise ValueError(
+                        "A title-only update requires existing Channel Work."
+                    )
+                if progress_changed:
+                    next_tasks = (
+                        requested_tasks
+                        if requested_tasks is not None
+                        else list(work.tasks)
+                    )
+                    if not next_tasks:
+                        raise ValueError(
+                            "Working Channel Work requires at least one task."
+                        )
+                    if not any(
+                        task.status
+                        not in {
+                            ExternalChannelWorkTaskStatus.COMPLETED,
+                            ExternalChannelWorkTaskStatus.FAILED,
+                        }
+                        for task in next_tasks
+                    ):
+                        raise ValueError(
+                            "Continue must leave at least one unfinished "
+                            "Channel Work task."
+                        )
+                    next_title = title if title is not None else work.title
+                    if next_title is None:
+                        raise ValueError("Working Channel Work requires a title.")
+                    progress = ExternalChannelDesiredProgress(
+                        schema_version=2,
+                        state="working",
+                        title=next_title,
+                        tasks=next_tasks,
+                    )
+                    work.title = next_title
+                    work.tasks = next_tasks
+                    work.state_revision += 1
+                    work.desired_progress_revision += 1
+                    work.desired_progress = progress
+                    if connection.provider is ExternalChannelProvider.SLACK:
+                        rendered = render_slack_progress(
+                            progress,
+                            work_id=work.work_cycle_id,
+                            desired_progress_revision=(work.desired_progress_revision),
+                        )
+                        desired_pages = ((rendered.text, rendered.blocks),)
+                    else:
+                        rendered_discord = render_discord_persisted_progress(
+                            progress,
+                            work_id=work.work_cycle_id,
+                            desired_progress_revision=(work.desired_progress_revision),
+                        )
+                        desired_pages = tuple(
+                            (page.text, page.embeds) for page in rendered_discord.pages
+                        )
+                    for part_ordinal, (text, presentation) in enumerate(desired_pages):
+                        part = projection_parts.pop(part_ordinal, None)
+                        operation: ExternalChannelDeliveryOperation | None = None
+                        if (
+                            part is None
+                            or part.status
+                            is ExternalChannelWorkProjectionStatus.DELETED
+                        ):
+                            operation = ExternalChannelDeliveryOperation.PROGRESS_CREATE
+                        elif part.status is ExternalChannelWorkProjectionStatus.FAILED:
+                            operation = (
+                                ExternalChannelDeliveryOperation.PROGRESS_UPDATE
+                                if part.provider_message_key is not None
+                                else ExternalChannelDeliveryOperation.PROGRESS_CREATE
+                            )
+                        elif (
+                            part.status is ExternalChannelWorkProjectionStatus.PRESENT
+                            and part.provider_message_key is not None
+                            and part.desired_progress_revision
+                            < work.desired_progress_revision
+                        ):
+                            operation = ExternalChannelDeliveryOperation.PROGRESS_UPDATE
+                        elif (
+                            part.status is ExternalChannelWorkProjectionStatus.UNKNOWN
+                            and part.desired_progress_revision
+                            < work.desired_progress_revision
+                        ):
+                            operation = (
+                                ExternalChannelDeliveryOperation.PROGRESS_UPDATE
+                                if part.provider_message_key is not None
+                                else ExternalChannelDeliveryOperation.PROGRESS_CREATE
+                            )
+                        if operation is None:
+                            continue
+                        payload = _provider_payload(
+                            connection.provider,
+                            resource.labels,
+                            text=text,
+                            blocks=(
+                                presentation
+                                if connection.provider is ExternalChannelProvider.SLACK
+                                else None
+                            ),
+                            provider_message_key=(
+                                None if part is None else part.provider_message_key
+                            ),
+                            desired_progress_revision=(work.desired_progress_revision),
+                        )
+                        if connection.provider is ExternalChannelProvider.DISCORD:
+                            payload["embeds"] = presentation
+                        append_effect(
+                            operation,
+                            payload,
+                            part=part_ordinal,
+                            expected_desired_progress_revision=(
+                                work.desired_progress_revision
+                            ),
+                        )
+                    for part_ordinal, part in sorted(projection_parts.items()):
+                        if (
+                            part.status is ExternalChannelWorkProjectionStatus.PRESENT
+                            and part.provider_message_key is not None
+                        ):
+                            append_effect(
+                                ExternalChannelDeliveryOperation.PROGRESS_DELETE,
+                                _provider_payload(
+                                    connection.provider,
+                                    resource.labels,
+                                    provider_message_key=(part.provider_message_key),
+                                    desired_progress_revision=(
+                                        work.desired_progress_revision
+                                    ),
+                                ),
+                                part=part_ordinal,
+                                expected_desired_progress_revision=(
+                                    work.desired_progress_revision
+                                ),
+                            )
+            else:
+                work.status = ExternalChannelWorkStatus.FINISHED
+                work.state_revision += 1
+                work.finished_at = now
+                work.desired_progress_revision += 1
+                work.desired_progress = None
                 for part_ordinal, part in sorted(projection_parts.items()):
                     if (
                         part.status is ExternalChannelWorkProjectionStatus.PRESENT
@@ -1062,38 +1146,24 @@ class ExternalChannelWorkRepository:
                                 work.desired_progress_revision
                             ),
                         )
-        else:
-            work.status = ExternalChannelWorkStatus.FINISHED
-            work.state_revision += 1
-            work.finished_at = now
-            work.desired_progress_revision += 1
-            work.desired_progress_payload = None
-            for part_ordinal, part in sorted(projection_parts.items()):
-                if (
-                    part.status is ExternalChannelWorkProjectionStatus.PRESENT
-                    and part.provider_message_key is not None
-                ):
-                    append_effect(
-                        ExternalChannelDeliveryOperation.PROGRESS_DELETE,
-                        _provider_payload(
-                            connection.provider,
-                            resource.labels,
-                            provider_message_key=part.provider_message_key,
-                            desired_progress_revision=work.desired_progress_revision,
-                        ),
-                        part=part_ordinal,
-                        expected_desired_progress_revision=(
-                            work.desired_progress_revision
-                        ),
-                    )
-        await session.flush()
-        return ChannelActionTransition(
+            result = ChannelActionTransition(
+                binding_id=binding.id,
+                work_id=work.work_cycle_id,
+                work_status=work.status,
+                state_revision=work.state_revision,
+                effects=tuple(effects),
+            )
+            return ChannelWorkStateMutation(state=work, result=result)
+
+        mutation = await self.work_state_store.update(
+            session,
+            agent_id=agent_id,
+            session_id=session_id,
             binding_id=binding.id,
-            work_id=work.id,
-            work_status=work.status,
-            state_revision=work.state_revision,
-            effects=tuple(effects),
+            default_factory=default_work,
+            mutator=transition,
         )
+        return mutation.result
 
     async def revalidate_direct_effect(
         self,
@@ -1115,7 +1185,6 @@ class ExternalChannelWorkRepository:
                     RDBAgentSession,
                     RDBAgent,
                     RDBWorkspace,
-                    RDBExternalChannelWork,
                 )
                 .join(
                     RDBExternalChannelResource,
@@ -1138,10 +1207,6 @@ class ExternalChannelWorkRepository:
                 )
                 .join(RDBAgent, RDBAgent.id == RDBAgentSession.agent_id)
                 .join(RDBWorkspace, RDBWorkspace.id == RDBAgent.workspace_id)
-                .join(
-                    RDBExternalChannelWork,
-                    RDBExternalChannelWork.id == effect.work_id,
-                )
                 .where(
                     RDBExternalChannelBinding.id == target.binding_id,
                     RDBExternalChannelBinding.resource_id == target.resource_id,
@@ -1153,13 +1218,20 @@ class ExternalChannelWorkRepository:
                     RDBExternalChannelConnection.id == target.connection_id,
                     RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                     RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
-                    RDBExternalChannelWork.binding_id == RDBExternalChannelBinding.id,
                 )
             )
         ).one_or_none()
         if row is None:
             return None
-        binding, resource, _route, connection, agent_session, agent, workspace, _ = row
+        binding, resource, _route, connection, agent_session, agent, workspace = row
+        work = await self.work_state_store.load(
+            session,
+            agent_id=agent.id,
+            session_id=agent_session.id,
+            binding_id=binding.id,
+        )
+        if work is None or work.work_cycle_id != effect.work_cycle_id:
+            return None
         return ProviderEffectPlan(
             target=ProviderTarget(
                 operation=target.operation,
@@ -1192,57 +1264,80 @@ class ExternalChannelWorkRepository:
         expected_revision = effect.expected_desired_progress_revision
         if expected_revision is None:
             return True
-        work = await session.scalar(
-            sa.select(RDBExternalChannelWork)
-            .where(
-                RDBExternalChannelWork.id == effect.work_id,
-                RDBExternalChannelWork.desired_progress_revision == expected_revision,
-            )
-            .with_for_update()
-        )
-        if work is None:
+        target = effect.provider.target
+        if (
+            target.agent_id is None
+            or target.agent_session_id is None
+            or target.binding_id is None
+        ):
             return False
-        part = await session.scalar(
-            sa.select(RDBExternalChannelWorkProjectionPart)
-            .where(
-                RDBExternalChannelWorkProjectionPart.work_id == effect.work_id,
-                RDBExternalChannelWorkProjectionPart.part_ordinal == effect.part,
+
+        def settle(
+            current: ChannelWorkState,
+        ) -> ChannelWorkStateMutation[bool]:
+            if (
+                current.work_cycle_id != effect.work_cycle_id
+                or current.desired_progress_revision != expected_revision
+            ):
+                return ChannelWorkStateMutation(
+                    state=current,
+                    result=False,
+                    changed=False,
+                )
+            updated = current.model_copy(deep=True)
+            part = next(
+                (
+                    item
+                    for item in updated.projection_parts
+                    if item.part_ordinal == effect.part
+                ),
+                None,
             )
-            .with_for_update()
-        )
-        if part is None:
-            part = RDBExternalChannelWorkProjectionPart(
-                work_id=effect.work_id,
-                part_ordinal=effect.part,
-                desired_progress_revision=expected_revision,
-                status=ExternalChannelWorkProjectionStatus.UNKNOWN,
-                provider_message_key=None,
-            )
-            session.add(part)
-        elif part.desired_progress_revision > expected_revision:
-            return False
-        part.desired_progress_revision = expected_revision
-        match outcome.status:
-            case "delivered":
-                if (
-                    effect.provider.target.operation
-                    is ExternalChannelDeliveryOperation.PROGRESS_DELETE
-                ):
-                    part.status = ExternalChannelWorkProjectionStatus.DELETED
-                    part.provider_message_key = None
-                elif outcome.provider_message_key is None:
+            if part is None:
+                part = ChannelWorkProjectionPartState(
+                    part_ordinal=effect.part,
+                    desired_progress_revision=expected_revision,
+                    status=ExternalChannelWorkProjectionStatus.UNKNOWN,
+                    provider_message_key=None,
+                )
+                updated.projection_parts.append(part)
+                updated.projection_parts.sort(key=lambda item: item.part_ordinal)
+            elif part.desired_progress_revision > expected_revision:
+                return ChannelWorkStateMutation(
+                    state=current,
+                    result=False,
+                    changed=False,
+                )
+            part.desired_progress_revision = expected_revision
+            match outcome.status:
+                case "delivered":
+                    if (
+                        effect.provider.target.operation
+                        is ExternalChannelDeliveryOperation.PROGRESS_DELETE
+                    ):
+                        part.status = ExternalChannelWorkProjectionStatus.DELETED
+                        part.provider_message_key = None
+                    elif outcome.provider_message_key is None:
+                        part.status = ExternalChannelWorkProjectionStatus.UNKNOWN
+                    else:
+                        part.status = ExternalChannelWorkProjectionStatus.PRESENT
+                        part.provider_message_key = outcome.provider_message_key
+                case "failed":
+                    part.status = ExternalChannelWorkProjectionStatus.FAILED
+                case "unknown":
                     part.status = ExternalChannelWorkProjectionStatus.UNKNOWN
-                else:
-                    part.status = ExternalChannelWorkProjectionStatus.PRESENT
-                    part.provider_message_key = outcome.provider_message_key
-            case "failed":
-                part.status = ExternalChannelWorkProjectionStatus.FAILED
-            case "unknown":
-                part.status = ExternalChannelWorkProjectionStatus.UNKNOWN
-            case _ as unreachable:
-                assert_never(unreachable)
-        await session.flush()
-        return True
+                case _ as unreachable:
+                    assert_never(unreachable)
+            return ChannelWorkStateMutation(state=updated, result=True)
+
+        mutation = await self.work_state_store.update_existing(
+            session,
+            agent_id=target.agent_id,
+            session_id=target.agent_session_id,
+            binding_id=target.binding_id,
+            mutator=settle,
+        )
+        return mutation is not None and mutation.result
 
     async def record_discord_delivery_channel(
         self,
@@ -1477,8 +1572,7 @@ def _resource_label(labels: dict[str, object] | None, fallback: str) -> str:
 
 
 def projection_state(
-    work: RDBExternalChannelWork,
-    projection_parts: Sequence[RDBExternalChannelWorkProjectionPart],
+    work: ChannelWorkState,
 ) -> Literal[
     "synchronized",
     "missing",
@@ -1488,12 +1582,13 @@ def projection_state(
     "none",
 ]:
     """Derive current Work projection state only from owner-local parts."""
+    projection_parts = work.projection_parts
     if any(
         part.status is ExternalChannelWorkProjectionStatus.UNKNOWN
         for part in projection_parts
     ):
         return "unknown"
-    if work.desired_progress_payload is None:
+    if work.desired_progress is None:
         if any(
             part.status is ExternalChannelWorkProjectionStatus.FAILED
             and part.provider_message_key is not None
@@ -1524,6 +1619,7 @@ async def terminate_binding_with_plans(
     *,
     binding: RDBExternalChannelBinding,
     resource: RDBExternalChannelResource,
+    work_state_store: ExternalChannelWorkStateStore,
     now: datetime.datetime,
     reason: str,
 ) -> tuple[ProviderEffectPlan, ...]:
@@ -1581,49 +1677,79 @@ async def terminate_binding_with_plans(
         ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
         session_presence_payload(resource.labels, state="left"),
     )
-    works = list(
-        await session.scalars(
-            sa.select(RDBExternalChannelWork)
-            .where(
-                RDBExternalChannelWork.binding_id == binding.id,
-                RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
+
+    def finish(
+        current: ChannelWorkState,
+    ) -> ChannelWorkStateMutation[tuple[ProviderEffectPlan, ...]]:
+        if current.status is not ExternalChannelWorkStatus.ACTIVE:
+            return ChannelWorkStateMutation(
+                state=current,
+                result=(),
+                changed=False,
             )
-            .order_by(RDBExternalChannelWork.id)
-            .with_for_update()
-        )
-    )
-    for work in works:
+        work = current.model_copy(deep=True)
         work.status = ExternalChannelWorkStatus.FINISHED
         work.finished_at = now
         work.state_revision += 1
         work.desired_progress_revision += 1
-        work.desired_progress_payload = None
-        parts = list(
-            await session.scalars(
-                sa.select(RDBExternalChannelWorkProjectionPart)
-                .where(
-                    RDBExternalChannelWorkProjectionPart.work_id == work.id,
-                    RDBExternalChannelWorkProjectionPart.status
-                    == ExternalChannelWorkProjectionStatus.PRESENT,
-                    RDBExternalChannelWorkProjectionPart.provider_message_key.is_not(
-                        None
-                    ),
-                )
-                .order_by(RDBExternalChannelWorkProjectionPart.part_ordinal)
-                .with_for_update()
-            )
-        )
-        for part in parts:
-            assert part.provider_message_key is not None
+        work.desired_progress = None
+        progress_plans: list[ProviderEffectPlan] = []
+        for part in work.projection_parts:
+            if (
+                part.status is not ExternalChannelWorkProjectionStatus.PRESENT
+                or part.provider_message_key is None
+            ):
+                continue
             payload = _provider_payload(
                 connection.provider,
                 resource.labels,
                 provider_message_key=part.provider_message_key,
                 desired_progress_revision=work.desired_progress_revision,
             )
-            payload["work_id"] = work.id
+            payload["work_id"] = work.work_cycle_id
             payload["part_ordinal"] = part.part_ordinal
-            append_plan(ExternalChannelDeliveryOperation.PROGRESS_DELETE, payload)
+            operation = ExternalChannelDeliveryOperation.PROGRESS_DELETE
+            progress_plans.append(
+                ProviderEffectPlan(
+                    target=ProviderTarget(
+                        operation=operation,
+                        binding_id=binding.id,
+                        resource_id=resource.id,
+                        connection_id=connection.id,
+                        provider=connection.provider,
+                        app_mode=connection.app_mode,
+                        encrypted_credentials=connection.encrypted_credentials,
+                        provider_tenant_id=connection.provider_tenant_id,
+                        capabilities=connection.capabilities,
+                        workspace_handle=(
+                            None if workspace is None else workspace.handle
+                        ),
+                        agent_id=agent.id,
+                        agent_session_id=agent_session.id,
+                        agent_name=agent.name,
+                        agent_avatar=agent.avatar,
+                        request_payload=payload,
+                    ),
+                    operation_key=ProviderOperationKey.from_seed(
+                        f"binding-terminal:{binding.id}:"
+                        f"{len(plans) + len(progress_plans)}:{operation.value}"
+                    ),
+                )
+            )
+        return ChannelWorkStateMutation(
+            state=work,
+            result=tuple(progress_plans),
+        )
+
+    mutation = await work_state_store.update_existing(
+        session,
+        agent_id=agent.id,
+        session_id=agent_session.id,
+        binding_id=binding.id,
+        mutator=finish,
+    )
+    if mutation is not None:
+        plans.extend(mutation.result)
     binding.disconnected_at = now
     binding.disconnect_reason = reason
     await session.flush()

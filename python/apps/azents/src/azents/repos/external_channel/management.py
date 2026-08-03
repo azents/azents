@@ -24,7 +24,6 @@ from azents.core.enums import (
     ExternalChannelTransport,
     ExternalChannelWorkProjectionStatus,
 )
-from azents.core.external_channel_progress import ExternalChannelWorkTask
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
@@ -41,8 +40,6 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelPrincipal,
     RDBExternalChannelResource,
     RDBExternalChannelSetupClaim,
-    RDBExternalChannelWork,
-    RDBExternalChannelWorkProjectionPart,
 )
 from azents.repos.external_channel.management_data import (
     ManagedApprovalRequest,
@@ -61,6 +58,10 @@ from azents.repos.external_channel.management_data import (
 from azents.repos.external_channel.work import (
     projection_state,
     terminate_binding_with_plans,
+)
+from azents.repos.external_channel.work_state import (
+    ChannelWorkState,
+    ExternalChannelWorkStateStore,
 )
 from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
@@ -89,6 +90,18 @@ class ExternalChannelBindingMutationScope:
 
 class ExternalChannelManagementRepository:
     """Own safe management projections and explicit disconnect transitions."""
+
+    @classmethod
+    def create(cls) -> "ExternalChannelManagementRepository":
+        """Create a management repository for application dependency injection."""
+        return cls()
+
+    def __init__(
+        self,
+        work_state_store: ExternalChannelWorkStateStore | None = None,
+    ) -> None:
+        """Create the management repository."""
+        self.work_state_store = work_state_store or ExternalChannelWorkStateStore()
 
     @staticmethod
     def _has_sole_route() -> sa.ColumnElement[bool]:
@@ -1222,28 +1235,14 @@ class ExternalChannelManagementRepository:
                 )
             )
         ).all()
+        work_states = await self.work_state_store.list_for_session(
+            session,
+            agent_id=agent_id,
+            session_id=agent_session_id,
+        )
         result: list[ManagedBinding] = []
         for binding, resource, connection in rows:
-            work = await session.scalar(
-                sa.select(RDBExternalChannelWork)
-                .where(RDBExternalChannelWork.binding_id == binding.id)
-                .order_by(
-                    RDBExternalChannelWork.created_at.desc(),
-                    RDBExternalChannelWork.id.desc(),
-                )
-                .limit(1)
-            )
-            projection_parts = (
-                []
-                if work is None
-                else list(
-                    await session.scalars(
-                        sa.select(RDBExternalChannelWorkProjectionPart)
-                        .where(RDBExternalChannelWorkProjectionPart.work_id == work.id)
-                        .order_by(RDBExternalChannelWorkProjectionPart.part_ordinal)
-                    )
-                )
-            )
+            work = work_states.get(binding.id)
             result.append(
                 ManagedBinding(
                     id=binding.id,
@@ -1262,11 +1261,7 @@ class ExternalChannelManagementRepository:
                     disconnected_at=binding.disconnected_at,
                     disconnect_reason=binding.disconnect_reason,
                     latest_activity_at=resource.latest_activity_at,
-                    work=(
-                        None
-                        if work is None
-                        else _work(work, projection_parts=projection_parts)
-                    ),
+                    work=(None if work is None else _work(work)),
                 )
             )
         return result
@@ -1846,6 +1841,7 @@ class ExternalChannelManagementRepository:
     ) -> tuple[ProviderEffectPlan, ...]:
         return await terminate_binding_with_plans(
             session,
+            work_state_store=self.work_state_store,
             binding=binding,
             resource=resource,
             now=now,
@@ -1963,14 +1959,9 @@ def _resource_label(labels: dict[str, object] | None, fallback: str) -> str:
     return fallback
 
 
-def _work(
-    work: RDBExternalChannelWork,
-    *,
-    projection_parts: list[RDBExternalChannelWorkProjectionPart],
-) -> ManagedWork:
-    tasks = [ExternalChannelWorkTask.model_validate(task) for task in work.tasks]
+def _work(work: ChannelWorkState) -> ManagedWork:
     return ManagedWork(
-        id=work.id,
+        id=work.work_cycle_id,
         status=work.status,
         title=work.title,
         tasks=[
@@ -1985,16 +1976,16 @@ def _work(
                     for source in task.sources
                 ],
             )
-            for task in tasks
+            for task in work.tasks
         ],
         state_revision=work.state_revision,
         desired_progress_revision=work.desired_progress_revision,
         progress_projected=any(
             part.status is ExternalChannelWorkProjectionStatus.PRESENT
             and part.provider_message_key is not None
-            for part in projection_parts
+            for part in work.projection_parts
         ),
-        projection_state=projection_state(work, projection_parts),
+        projection_state=projection_state(work),
         finished_at=work.finished_at,
     )
 

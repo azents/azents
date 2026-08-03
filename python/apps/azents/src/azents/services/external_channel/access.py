@@ -112,11 +112,11 @@ class ExternalChannelAccessService:
     ]
     repository: Annotated[
         ExternalChannelRepository,
-        Depends(ExternalChannelRepository),
+        Depends(ExternalChannelRepository.create),
     ]
     work_repository: Annotated[
         ExternalChannelWorkRepository,
-        Depends(ExternalChannelWorkRepository),
+        Depends(ExternalChannelWorkRepository.create),
     ]
     agent_repository: Annotated[
         AgentRepository,

@@ -22,7 +22,6 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelAgentRoute,
     RDBExternalChannelBinding,
     RDBExternalChannelBlock,
-    RDBExternalChannelWork,
 )
 from azents.rdb.models.memory import RDBAgentMemory
 from azents.rdb.models.model_file import RDBModelFile
@@ -153,19 +152,6 @@ class AgentDecommissionFinalizerRepository:
                 "ExternalChannelBinding",
                 sa.select(
                     sa.exists().where(
-                        RDBExternalChannelBinding.route_id
-                        == RDBExternalChannelAgentRoute.id,
-                        RDBExternalChannelAgentRoute.agent_id == agent_id,
-                    )
-                ),
-            ),
-            (
-                RDBExternalChannelWork,
-                "ExternalChannelWork",
-                sa.select(
-                    sa.exists().where(
-                        RDBExternalChannelWork.binding_id
-                        == RDBExternalChannelBinding.id,
                         RDBExternalChannelBinding.route_id
                         == RDBExternalChannelAgentRoute.id,
                         RDBExternalChannelAgentRoute.agent_id == agent_id,

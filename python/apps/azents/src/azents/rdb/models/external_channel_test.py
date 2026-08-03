@@ -19,6 +19,8 @@ _RETIRED_TABLES = {
     "external_channel_invocation_batch_items",
     "external_channel_conversation_admissions",
     "external_channel_resource_provisionings",
+    "external_channel_works",
+    "external_channel_work_projection_parts",
 }
 _RETIRED_ENUMS = {
     "external_channel_action_mode",
@@ -32,6 +34,7 @@ _RETIRED_ENUMS = {
     "external_channel_delivery_operation",
     "external_channel_delivery_origin_type",
     "external_channel_delivery_status",
+    "external_channel_work_status",
 }
 
 
@@ -63,7 +66,7 @@ def test_external_channel_explicit_identifiers_fit_postgresql_limit() -> None:
     assert all(len(identifier.encode()) <= 63 for identifier in identifiers)
 
 
-def test_external_channel_model_metadata_excludes_retired_inbound_storage() -> None:
+def test_external_channel_model_metadata_excludes_retired_storage() -> None:
     """The application model exposes only retained External Channel authority."""
     model_tables = {
         name
@@ -80,7 +83,6 @@ def test_external_channel_model_metadata_excludes_retired_inbound_storage() -> N
         "external_channel_bindings",
         "external_channel_access_requests",
         "external_channel_access_grants",
-        "external_channel_works",
     } <= model_tables
 
 
@@ -117,17 +119,6 @@ def test_external_channel_installed_schema_matches_replacement_boundary(
             "range_start_position",
             "trigger_position",
         } <= access_columns.keys()
-        work_columns = _columns_by_name(inspector, "external_channel_works")
-        assert "progress_provider_message_key" not in work_columns
-        projection_columns = _columns_by_name(
-            inspector,
-            "external_channel_work_projection_parts",
-        )
-        assert {
-            "latest_delivery_attempt_id",
-            "deleted_at",
-        }.isdisjoint(projection_columns)
-
         access_foreign_keys = inspector.get_foreign_keys(
             "external_channel_access_requests"
         )

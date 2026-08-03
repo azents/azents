@@ -38,8 +38,6 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelParticipationSetting,
     RDBExternalChannelResource,
     RDBExternalChannelSetupClaim,
-    RDBExternalChannelWork,
-    RDBExternalChannelWorkProjectionPart,
 )
 from azents.repos.external_channel.data import (
     ExternalChannelAgentDecommissionCleanup,
@@ -55,6 +53,7 @@ from azents.repos.external_channel.data import (
     ExternalChannelRestoreValidation,
 )
 from azents.repos.external_channel.work import terminate_binding_with_plans
+from azents.repos.external_channel.work_state import ExternalChannelWorkStateStore
 from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
 _NONTERMINAL_SETUP_CLAIM_STATUSES = (
@@ -79,6 +78,18 @@ class _LockedParticipationState:
 
 class ExternalChannelLifecycleRepository:
     """Own restrictive External Channel lifecycle mutations and verification."""
+
+    @classmethod
+    def create(cls) -> "ExternalChannelLifecycleRepository":
+        """Create a lifecycle repository for application dependency injection."""
+        return cls()
+
+    def __init__(
+        self,
+        work_state_store: ExternalChannelWorkStateStore | None = None,
+    ) -> None:
+        """Create the lifecycle repository."""
+        self.work_state_store = work_state_store or ExternalChannelWorkStateStore()
 
     async def terminate_session_tree(
         self,
@@ -108,21 +119,25 @@ class ExternalChannelLifecycleRepository:
         }
         plans: list[ProviderEffectPlan] = []
         finished_work_count = 0
+        work_states = {
+            state.binding_id: state
+            for state in await self.work_state_store.list_for_sessions(
+                session,
+                session_ids=session_ids,
+            )
+        }
         for binding in bindings:
             resource = resources.get(binding.resource_id)
             if resource is None:
                 continue
-            finished_work_count += await self._count(
-                session,
-                RDBExternalChannelWork,
-                sa.and_(
-                    RDBExternalChannelWork.binding_id == binding.id,
-                    RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
-                ),
+            state = work_states.get(binding.id)
+            finished_work_count += int(
+                state is not None and state.status is ExternalChannelWorkStatus.ACTIVE
             )
             plans.extend(
                 await terminate_binding_with_plans(
                     session,
+                    work_state_store=self.work_state_store,
                     binding=binding,
                     resource=resource,
                     now=now,
@@ -150,16 +165,9 @@ class ExternalChannelLifecycleRepository:
         )
         if any(binding.disconnected_at is None for binding in bindings):
             raise RuntimeError("Restored External Channel binding was reactivated")
-        binding_ids = [binding.id for binding in bindings]
-        works = list(
-            (
-                await session.scalars(
-                    sa.select(RDBExternalChannelWork)
-                    .where(RDBExternalChannelWork.binding_id.in_(binding_ids))
-                    .order_by(RDBExternalChannelWork.id)
-                    .with_for_update()
-                )
-            ).all()
+        works = await self.work_state_store.list_for_sessions(
+            session,
+            session_ids=session_ids,
         )
         if any(work.status is ExternalChannelWorkStatus.ACTIVE for work in works):
             raise RuntimeError("Restored External Channel work was reactivated")
@@ -203,18 +211,9 @@ class ExternalChannelLifecycleRepository:
             RDBExternalChannelAccessRequest,
             RDBExternalChannelAccessRequest.id.in_(access_request_ids),
         )
-        work_ids = sa.select(RDBExternalChannelWork.id).where(
-            RDBExternalChannelWork.binding_id.in_(binding_ids)
-        )
-        await self._delete(
+        deleted_work_count = await self.work_state_store.delete_for_sessions(
             session,
-            RDBExternalChannelWorkProjectionPart,
-            RDBExternalChannelWorkProjectionPart.work_id.in_(work_ids),
-        )
-        deleted_work_count = await self._delete(
-            session,
-            RDBExternalChannelWork,
-            RDBExternalChannelWork.binding_id.in_(binding_ids),
+            session_ids=session_ids,
         )
         deleted_binding_count = await self._delete(
             session,
@@ -237,8 +236,11 @@ class ExternalChannelLifecycleRepository:
         session_ids: Sequence[str],
     ) -> ExternalChannelPurgeVerification:
         """Require direct Session-owned External Channel roots to be absent."""
-        binding_ids = sa.select(RDBExternalChannelBinding.id).where(
-            RDBExternalChannelBinding.agent_session_id.in_(session_ids)
+        remaining_work_count = len(
+            await self.work_state_store.list_for_sessions(
+                session,
+                session_ids=session_ids,
+            )
         )
         verification = ExternalChannelPurgeVerification(
             remaining_binding_count=await self._count(
@@ -246,11 +248,7 @@ class ExternalChannelLifecycleRepository:
                 RDBExternalChannelBinding,
                 RDBExternalChannelBinding.agent_session_id.in_(session_ids),
             ),
-            remaining_work_count=await self._count(
-                session,
-                RDBExternalChannelWork,
-                RDBExternalChannelWork.binding_id.in_(binding_ids),
-            ),
+            remaining_work_count=remaining_work_count,
             remaining_access_request_count=await self._count(
                 session,
                 RDBExternalChannelAccessRequest,
@@ -1252,6 +1250,7 @@ class ExternalChannelLifecycleRepository:
             plans.extend(
                 await terminate_binding_with_plans(
                     session,
+                    work_state_store=self.work_state_store,
                     binding=binding,
                     resource=resource,
                     now=now,

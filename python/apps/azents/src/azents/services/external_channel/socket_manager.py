@@ -90,7 +90,7 @@ class SlackSocketManagerService:
     ]
     repository: Annotated[
         ExternalChannelRepository,
-        Depends(ExternalChannelRepository),
+        Depends(ExternalChannelRepository.create),
     ]
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,

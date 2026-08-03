@@ -27,11 +27,15 @@ class ToolkitStateRepository:
         state_name: str,
     ) -> ToolkitStateRecord | None:
         """Fetch Toolkit State by identity."""
-        stmt = sa.select(RDBToolkitState).where(
-            RDBToolkitState.agent_id == agent_id,
-            RDBToolkitState.session_id == session_id,
-            RDBToolkitState.toolkit_namespace == toolkit_namespace,
-            RDBToolkitState.state_name == state_name,
+        stmt = (
+            sa.select(RDBToolkitState)
+            .where(
+                RDBToolkitState.agent_id == agent_id,
+                RDBToolkitState.session_id == session_id,
+                RDBToolkitState.toolkit_namespace == toolkit_namespace,
+                RDBToolkitState.state_name == state_name,
+            )
+            .execution_options(populate_existing=True)
         )
         result = await session.execute(stmt)
         rdb = result.scalar_one_or_none()

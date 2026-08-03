@@ -9,6 +9,7 @@ code_paths:
   - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/session_lifecycle.py
   - python/apps/azents/src/azents/repos/external_channel/lifecycle.py
+  - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/services/external_channel/lifecycle.py
   - python/apps/azents/src/azents/services/external_channel/file_transfer.py
   - python/apps/azents/src/azents/services/external_channel/management.py
@@ -30,8 +31,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-02
-spec_version: 29
+last_verified_at: 2026-08-03
+spec_version: 30
 ---
 
 # External Channel Lifecycle
@@ -203,7 +204,7 @@ Archive uses the explicit terminal transition policy inside the caller-owned arc
 
 1. lock connected bindings in the Session subtree;
 2. set their terminal disconnect timestamps and preserve their history;
-3. end Channel Work;
+3. end each binding's Channel Work in its Session-bound Toolkit State;
 4. preserve already projected Session history and normal mailbox lifecycle state; and
 5. capture one leave-presence plan per disconnected binding plus one cleanup plan for
    each retained Activity Tracker.
@@ -226,9 +227,12 @@ AgentSession ownership still prevents finalization if Session-owned External
 Channel roots exist outside that earlier snapshot.
 
 - **Prepare** validates the terminal owner-local state without provider execution.
-- **Cleanup** deletes access decisions tied directly to the Session, Channel
-  Work/tasks/projection parts, and bindings in restrictive ownership order.
-- **Verify/finalize** rejects AgentSession tree finalization while actionable binding/work state remains.
+- **Cleanup** deletes access decisions tied directly to the Session, binding-specific
+  External Channel Work Toolkit State values, and bindings in restrictive ownership
+  order.
+- **Verify/finalize** rejects AgentSession tree finalization while actionable bindings
+  or binding-specific Work Toolkit State remain. Generic Session ownership remains
+  the final database cascade boundary for any other Toolkit State.
 
 Connection, route, resource, conversation-position, principal, interaction,
 Agent-scoped grant, and block roots are not cascade-deleted through AgentSession.
@@ -261,6 +265,9 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 30) — Moved Channel Work archive, restore, purge, and
+  verification to binding-specific Session-bound Toolkit State and removed the
+  dedicated Work table from lifecycle roots and Agent finalization.
 - **2026-08-02** (spec_version 29) — Replaced lifecycle delivery intents and
   bookkeeping with bounded process-local post-commit plans while retaining terminal
   canonical state and owner-local current projection.
