@@ -10,6 +10,7 @@
 import {
   Accordion,
   Alert,
+  Anchor,
   Button,
   Code,
   NumberInput,
@@ -99,12 +100,6 @@ export function AwsConfigFields({
       credentials,
     });
   }, [handle, toolkitConfigId, config, credentials, testConnectionMutation]);
-
-  const iamActions = [
-    "aws-mcp:InvokeMcp",
-    "aws-mcp:CallReadOnlyTool",
-    "aws-mcp:CallReadWriteTool (when write allowed)",
-  ];
 
   return (
     <Stack gap="md">
@@ -202,23 +197,33 @@ export function AwsConfigFields({
         variant="light"
         color="blue"
         icon={<IconInfoCircle size={16} />}
-        title="Required IAM Permissions"
+        title="IAM Permissions"
       >
-        <Text size="xs" mb="xs">
-          Grant these permissions to your IAM user
-          {roleArn ? " or the assumed role" : ""}:
+        <Text size="xs">
+          Grant the IAM user{roleArn ? " or assumed role" : ""} only the AWS
+          service API permissions the agent needs, such as{" "}
+          <Code>cloudwatch:GetMetricData</Code>, <Code>ce:GetCostAndUsage</Code>
+          , or <Code>ec2:DescribeInstances</Code>.
         </Text>
-        <Stack gap={2}>
-          {iamActions.map((action) => (
-            <Text key={action} size="xs">
-              <Code>{action}</Code>
-            </Text>
-          ))}
-          <Text size="xs" c="dimmed" mt="xs">
-            + actual AWS API permissions (e.g., cloudwatch:GetMetricData,
-            ce:GetCostAndUsage, ec2:DescribeInstances)
-          </Text>
-        </Stack>
+        <Text size="xs" mt="xs">
+          AWS MCP Server uses those existing service permissions. The deprecated{" "}
+          <Code>aws-mcp:InvokeMcp</Code>, <Code>aws-mcp:CallReadOnlyTool</Code>,
+          and <Code>aws-mcp:CallReadWriteTool</Code> actions are not required
+          and have no effect; remove them from existing policies.
+        </Text>
+        <Text size="xs" mt="xs">
+          To restrict requests made through managed MCP servers, use the{" "}
+          <Code>aws:ViaAWSMCPService</Code> or <Code>aws:CalledViaAWSMCP</Code>{" "}
+          IAM condition context keys. See{" "}
+          <Anchor
+            href="https://docs.aws.amazon.com/agent-toolkit/latest/userguide/security_iam_service-with-iam.html"
+            target="_blank"
+            rel="noreferrer"
+          >
+            AWS MCP Server IAM guidance
+          </Anchor>
+          .
+        </Text>
       </Alert>
 
       <Stack gap="xs">
