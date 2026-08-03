@@ -17,6 +17,7 @@ from azents.core.runtime_profile import (
     WorkspaceRuntimeProfilePolicyV1,
     classify_runtime_configuration_application,
     compose_workspace_runtime_profile,
+    parse_runtime_infrastructure_profile_spec,
 )
 
 
@@ -46,6 +47,29 @@ def _kubernetes_spec() -> KubernetesPodProfileSpecV1:
         ),
         dind=None,
     )
+
+
+def test_kubernetes_profile_preserves_absent_requests_with_limits() -> None:
+    """Profile parsing never copies limits into absent request fields."""
+    payload = _kubernetes_spec().model_dump(mode="json")
+    payload["runner_resources"] = {
+        "cpu_request_millicores": None,
+        "cpu_limit_millicores": 1000,
+        "memory_request_bytes": None,
+        "memory_limit_bytes": 2_147_483_648,
+    }
+
+    parsed = parse_runtime_infrastructure_profile_spec(payload)
+
+    assert isinstance(parsed, KubernetesPodProfileSpecV1)
+    assert parsed.runner_resources.cpu_request_millicores is None
+    assert parsed.runner_resources.memory_request_bytes is None
+    assert parsed.model_dump(mode="json")["runner_resources"] == {
+        "cpu_request_millicores": None,
+        "cpu_limit_millicores": 1000,
+        "memory_request_bytes": None,
+        "memory_limit_bytes": 2_147_483_648,
+    }
 
 
 def test_workspace_network_restriction_composes_within_platform_boundary() -> None:
