@@ -27,6 +27,7 @@ from docker.models.containers import Container
 from pydantic import TypeAdapter
 from python_on_whales import docker as pow_docker
 from selenium import webdriver
+from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options as ChromeOptions
 from selenium.webdriver.remote.webdriver import WebDriver
 from testcontainers.core.container import DockerContainer
@@ -81,6 +82,7 @@ _ADMIN_WEB_GATEWAY_URL = "https://azents-web-gateway:8444/console"
 _ADMIN_WEB_BROWSER_URL = "https://azents-web-gateway:8445"
 _JSON_OBJECT_ADAPTER = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST_ADAPTER = TypeAdapter(list[dict[str, object]])
+_BROWSER_CALL_REPORT = pytest.StashKey[pytest.TestReport]()
 
 
 class _RedactedSecret(str):
@@ -88,6 +90,18 @@ class _RedactedSecret(str):
 
     def __repr__(self) -> str:
         return "<redacted>"
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(
+    item: pytest.Item,
+    call: pytest.CallInfo[None],
+) -> Generator[None, pytest.TestReport, pytest.TestReport]:
+    """Retain the browser test call report for bounded failure evidence."""
+    report = yield
+    if report.when == "call":
+        item.stash[_BROWSER_CALL_REPORT] = report
+    return report
 
 
 def random_secret(length: int = 32) -> str:
@@ -1869,6 +1883,7 @@ def selenium_container(
 @pytest.fixture(scope="function")
 def browser_driver(
     selenium_container: DockerContainer,
+    request: pytest.FixtureRequest,
 ) -> Generator[WebDriver, None, None]:
     """Create an isolated headless Chromium session."""
     host = selenium_container.get_container_host_ip()
@@ -1884,7 +1899,64 @@ def browser_driver(
     try:
         yield driver
     finally:
+        node = cast(pytest.Item, cast(Any, request).node)
+        report = node.stash.get(_BROWSER_CALL_REPORT, None)
+        artifact_root = os.environ.get("AZENTS_E2E_ARTIFACT_DIR")
+        if report is not None and report.failed and artifact_root:
+            _capture_browser_failure(
+                driver,
+                artifact_root=Path(artifact_root),
+                node_id=node.nodeid,
+            )
         driver.quit()
+
+
+def _capture_browser_failure(
+    driver: WebDriver,
+    *,
+    artifact_root: Path,
+    node_id: str,
+) -> None:
+    """Capture screenshot and HTML evidence for one failed browser test."""
+    browser_root = artifact_root / "browser"
+    try:
+        browser_root.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        sys.stderr.write(f"Failed to create browser artifact directory: {error}\n")
+        return
+    artifact_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", node_id).strip("-")[:180]
+
+    try:
+        (browser_root / f"{artifact_name}.png").write_bytes(
+            driver.get_screenshot_as_png()
+        )
+    except (OSError, WebDriverException) as error:
+        _write_browser_capture_error(
+            browser_root / f"{artifact_name}-screenshot-error.txt",
+            error,
+        )
+
+    try:
+        (browser_root / f"{artifact_name}.html").write_text(
+            driver.page_source,
+            encoding="utf-8",
+        )
+    except (OSError, WebDriverException) as error:
+        _write_browser_capture_error(
+            browser_root / f"{artifact_name}-html-error.txt",
+            error,
+        )
+
+
+def _write_browser_capture_error(
+    path: Path,
+    error: OSError | WebDriverException,
+) -> None:
+    """Record a browser evidence failure without masking the original test failure."""
+    try:
+        path.write_text(str(error), encoding="utf-8")
+    except OSError as write_error:
+        sys.stderr.write(f"Failed to write browser capture error: {write_error}\n")
 
 
 @pytest.fixture(scope="session")

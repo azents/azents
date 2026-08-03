@@ -48,7 +48,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-26 | 11 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-24 | 25 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-03 | 19 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-03 | 20 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-01 | 3 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-08-01 | 6 |
 
@@ -790,6 +790,7 @@ Design documents are accumulated records and are not listed individually in this
 
 - [Agent Thread / Session Model Blueprint](notes/agent-thread-session-blueprint.md)
 - [Codex Goal Pursuing Research](notes/codex-goal-pursuing-research.md)
+- [E2E CI Performance and Reliability Research](notes/e2e-ci-performance-reliability-research-2026-08-03.md)
 - [Legacy DocID Migration Historical Ambiguity Manifest](notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md)
 - [Local sandbox provider daemon research](notes/local-sandbox-provider-daemon-research.md)
 - [Run Stall Reliability Design Discussion](notes/run-stall-reliability-design-discussion.md)
