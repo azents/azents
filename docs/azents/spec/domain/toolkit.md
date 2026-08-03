@@ -53,7 +53,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-08-03
-spec_version: 80
+spec_version: 81
 ---
 
 # Toolkit
@@ -212,6 +212,8 @@ azents-web provides workspace-scoped toolkit management screens.
 - `/w/[handle]/toolkit/[toolkitId]/setup` — connection status check and authorize redirect for toolkit requiring per-user OAuth/setup.
 
 `features/toolkits` form branches config fields per toolkit type for GitHub, Kubernetes, MCP, Google Analytics, Notion, Sentry, GCP, AWS, Shell, and EnvVar. `features/toolkit-setup` executes setup action returned by backend, and if account link must come first it follows `next_toolkit` handoff from [`../flow/account-linking.md`](../../design/account-260315-account-linking.md).
+
+The AWS Toolkit form describes the current AWS Managed MCP authorization model for its Access Key + SigV4 connection. It directs managers to grant only the downstream AWS service API permissions the Agent needs. It does not require the deprecated `aws-mcp:InvokeMcp`, `aws-mcp:CallReadOnlyTool`, or `aws-mcp:CallReadWriteTool` actions, which have no effect. MCP-specific restrictions use the `aws:ViaAWSMCPService` or `aws:CalledViaAWSMCP` IAM condition context keys.
 
 ### GitHub Multi-Installation Routing
 
@@ -737,6 +739,9 @@ and never becomes the Channel Work source of truth.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 81) — Replaced the AWS Toolkit setup form's
+  deprecated MCP-specific IAM action list with downstream AWS service
+  permissions and managed MCP condition-key guidance.
 - **2026-08-03** (spec_version 80) — Added the global managed `skill-creator`
   Skill for creating and repairing filesystem Skills through Runtime tools.
 - **2026-08-03** (spec_version 79) — Derived Runtime tool guidance, filesystem Skill roots, AGENTS.md, Claude rules, and `present_file` boundaries from the current Runner-reported Agent Workspace while removing fixed absolute paths from static schemas and prompts.
