@@ -135,6 +135,7 @@ def _slack_request() -> ExternalChannelIngestionRequest:
         operation=ExternalChannelIngestionOperation.CURRENT_TRIGGER,
         selected_route_id=None,
         replay_boundary=None,
+        initial_title_eligible=False,
     )
 
 

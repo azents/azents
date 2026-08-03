@@ -549,6 +549,7 @@ class ExternalChannelActionService:
                 await self._record_discord_delivery_channel(
                     resource_id=target.resource_id,
                     delivery_channel_id=resolved_thread_id,
+                    initial_thread_title=thread.created_thread_name,
                 )
         elif conversation_scope not in {None, "thread"}:
             return _discord_invalid_payload()
@@ -799,6 +800,7 @@ class ExternalChannelActionService:
         *,
         resource_id: str,
         delivery_channel_id: str,
+        initial_thread_title: str | None,
     ) -> None:
         """Persist a provisioned Discord thread outside the provider mutation."""
         async with self.session_manager() as session:
@@ -806,6 +808,7 @@ class ExternalChannelActionService:
                 session,
                 resource_id=resource_id,
                 delivery_channel_id=delivery_channel_id,
+                initial_thread_title=initial_thread_title,
             )
             await session.commit()
 

@@ -135,6 +135,7 @@ class FakeState:
             self._delivery_barrier_reached = threading.Event()
             self._delivery_barrier_release = threading.Event()
             self._root_threads: dict[tuple[str, str], str] = {}
+            self._thread_names: dict[str, str] = {}
             self._thread_reconciliation_pending: set[tuple[str, str]] = set()
             self._evidence_sequence = 0
             self.operation_evidence: list[dict[str, object]] = []
@@ -241,6 +242,7 @@ class FakeState:
             self._delivery_barrier_reached.clear()
             self._delivery_barrier_release.clear()
             self._root_threads = {}
+            self._thread_names = {}
             self._thread_reconciliation_pending = set()
             self._evidence_sequence = 0
             self.operation_evidence = []
@@ -674,7 +676,11 @@ class FakeState:
             return [dict(item) for item in page], next_cursor
 
     def ensure_root_thread(
-        self, *, parent_channel_id: str, root_message_id: str
+        self,
+        *,
+        parent_channel_id: str,
+        root_message_id: str,
+        name: str,
     ) -> str:
         """Create or reuse one deterministic numeric thread channel identity."""
         with self.lock:
@@ -684,7 +690,21 @@ class FakeState:
                 self._message_sequence += 1
                 thread_id = str(700000000000000000 + self._message_sequence)
                 self._root_threads[key] = thread_id
+                self._thread_names[thread_id] = name
             return thread_id
+
+    def thread_name(self, channel_id: str) -> str | None:
+        """Return one current thread name for provider API responses."""
+        with self.lock:
+            return self._thread_names.get(channel_id)
+
+    def update_thread_name(self, *, channel_id: str, name: str) -> bool:
+        """Replace one known thread name without exposing it in evidence."""
+        with self.lock:
+            if channel_id not in self._thread_names:
+                return False
+            self._thread_names[channel_id] = name
+            return True
 
     def gateway_start(self, opcode: int) -> tuple[list[dict[str, object]], str]:
         """Record one Identify or Resume and return its configured behavior."""
@@ -873,6 +893,58 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             if self._controlled_response(self._operation("list_guild_commands")):
                 return
             self._json_response_array(200, self.state.list_guild_commands())
+            return
+        channel_id = _channel_item_id(parsed.path)
+        if channel_id is not None:
+            scenario = self._operation(
+                "get_channel",
+                metadata={"channel_id": channel_id},
+            )
+            if self._controlled_response(scenario):
+                return
+            name = self.state.thread_name(channel_id)
+            if name is None:
+                self.state.record_operation(
+                    "thread_title",
+                    operation="get_channel",
+                    outcome="missing",
+                    safe_category="thread_not_found",
+                    metadata={"channel_id": channel_id},
+                )
+                self._json_response(404, {"message": "Not found."})
+                return
+            if scenario in {"malformed_json", "response_malformed"}:
+                self.state.record_operation(
+                    "thread_title",
+                    operation="get_channel",
+                    outcome="unknown",
+                    safe_category="response_malformed",
+                    metadata={"channel_id": channel_id},
+                )
+                self._raw_response(200, b"{malformed")
+                return
+            channel_payload: dict[str, object] = {
+                "id": channel_id,
+                "guild_id": self.state.guild_id,
+                "name": name,
+            }
+            if scenario == "response_shape_invalid":
+                channel_payload.pop("name")
+            elif scenario == "response_channel_mismatch":
+                channel_payload["id"] = "0"
+            self.state.record_operation(
+                "thread_title",
+                operation="get_channel",
+                outcome="delivered",
+                safe_category=(
+                    scenario
+                    if scenario
+                    in {"response_shape_invalid", "response_channel_mismatch"}
+                    else None
+                ),
+                metadata={"channel_id": channel_id},
+            )
+            self._json_response(200, channel_payload)
             return
         if parsed.path.startswith(f"{_API_PREFIX}/channels/") and parsed.path.endswith(
             "/messages"
@@ -1135,6 +1207,11 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             thread_parent_path = parsed.path.removesuffix("/threads")
             channel_id, message_id = _channel_message_ids(thread_parent_path)
             if channel_id is not None and message_id is not None:
+                body = self._json_body()
+                name = body.get("name")
+                if not isinstance(name, str) or not name or len(name) > 100:
+                    self._json_response(400, {"message": "Invalid thread name."})
+                    return
                 scenario = self._operation(
                     "create_thread",
                     metadata={"channel_id": channel_id, "message_id": message_id},
@@ -1143,6 +1220,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                     thread_id = self.state.ensure_root_thread(
                         parent_channel_id=channel_id,
                         root_message_id=message_id,
+                        name=name,
                     )
                     self.state.mark_thread_reconciliation(
                         parent_channel_id=channel_id,
@@ -1186,6 +1264,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 thread_id = self.state.ensure_root_thread(
                     parent_channel_id=channel_id,
                     root_message_id=message_id,
+                    name=name,
                 )
                 if scenario == "thread_response_invalid":
                     self.state.mark_thread_reconciliation(
@@ -1216,7 +1295,12 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 )
                 self._json_response(
                     201,
-                    {"id": thread_id, "parent_id": channel_id},
+                    {
+                        "id": thread_id,
+                        "parent_id": channel_id,
+                        "guild_id": self.state.guild_id,
+                        "name": name,
+                    },
                 )
                 return
         if parsed.path.startswith(f"{_API_PREFIX}/channels/") and parsed.path.endswith(
@@ -1337,6 +1421,75 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
     def do_PATCH(self) -> None:
         """Configure callback authority or update a message without retaining bodies."""
         parsed = urlparse(self.path)
+        channel_id = _channel_item_id(parsed.path)
+        if channel_id is not None:
+            body = self._json_body()
+            name = body.get("name")
+            if not isinstance(name, str) or not name or len(name) > 100:
+                self._json_response(400, {"message": "Invalid thread name."})
+                return
+            scenario = self._operation(
+                "update_channel",
+                metadata={"channel_id": channel_id},
+            )
+            safe_category = _safe_category(scenario)
+            if self._controlled_response(scenario):
+                self.state.record_operation(
+                    "thread_title",
+                    operation="update_channel",
+                    outcome=(
+                        "unknown"
+                        if safe_category
+                        in {"transport_unknown", "provider_5xx_unknown"}
+                        else "failed"
+                    ),
+                    safe_category=safe_category,
+                    metadata={"channel_id": channel_id},
+                )
+                return
+            if scenario in {"malformed_json", "response_malformed"}:
+                self.state.record_operation(
+                    "thread_title",
+                    operation="update_channel",
+                    outcome="unknown",
+                    safe_category="response_malformed",
+                    metadata={"channel_id": channel_id},
+                )
+                self._raw_response(200, b"{malformed")
+                return
+            if not self.state.update_thread_name(channel_id=channel_id, name=name):
+                self.state.record_operation(
+                    "thread_title",
+                    operation="update_channel",
+                    outcome="failed",
+                    safe_category="thread_not_found",
+                    metadata={"channel_id": channel_id},
+                )
+                self._json_response(404, {"message": "Not found."})
+                return
+            payload: dict[str, object] = {
+                "id": channel_id,
+                "guild_id": self.state.guild_id,
+                "name": name,
+            }
+            if scenario == "response_shape_invalid":
+                payload.pop("name")
+            elif scenario == "response_channel_mismatch":
+                payload["id"] = "0"
+            self.state.record_operation(
+                "thread_title",
+                operation="update_channel",
+                outcome="delivered",
+                safe_category=(
+                    scenario
+                    if scenario
+                    in {"response_shape_invalid", "response_channel_mismatch"}
+                    else None
+                ),
+                metadata={"channel_id": channel_id},
+            )
+            self._json_response(200, payload)
+            return
         command_id = _guild_command_item(parsed.path)
         if command_id is not None:
             if self._controlled_response(self._operation("update_guild_command")):
@@ -2100,6 +2253,14 @@ def _channel_message_ids(path: str) -> tuple[str | None, str | None]:
     if len(parts) <= message_index + 1 or channel_index + 1 >= len(parts):
         return None, None
     return parts[channel_index + 1], parts[message_index + 1]
+
+
+def _channel_item_id(path: str) -> str | None:
+    """Return the ID from one exact Discord channel-item path."""
+    parts = path.strip("/").split("/")
+    if len(parts) != 4 or parts[:3] != ["api", "v10", "channels"]:
+        return None
+    return parts[3] or None
 
 
 def _read_http_headers(connection: socket.socket) -> dict[str, str]:

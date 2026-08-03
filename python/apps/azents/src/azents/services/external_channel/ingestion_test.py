@@ -345,6 +345,7 @@ def _request(
                 trigger_position="00000000000000000002",
             )
         ),
+        initial_title_eligible=False,
     )
 
 
@@ -402,6 +403,7 @@ def _setup_request() -> ExternalChannelIngestionRequest:
             range_start_position=None,
             trigger_position=locator.trigger_position,
         ),
+        initial_title_eligible=False,
     )
 
 
@@ -739,4 +741,5 @@ def test_current_trigger_rejects_replay_boundary() -> None:
             operation=ExternalChannelIngestionOperation.CURRENT_TRIGGER,
             selected_route_id=None,
             replay_boundary=request.replay_boundary,
+            initial_title_eligible=False,
         )

@@ -39,6 +39,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/transport_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/connection_revocation.py
   - python/apps/azents/src/azents/services/external_channel/provider_control.py
+  - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/src/azents/services/root_agent_session_creation/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/services/external_channel/provider.py
@@ -50,8 +51,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-02
-spec_version: 31
+last_verified_at: 2026-08-03
+spec_version: 32
 ---
 
 # External Channel Provider Ingress
@@ -282,13 +283,17 @@ the canonical message source nor a durable queue item.
    input, and versioned joined-presence and progress state. The same transaction
    marks the Session running, initializes thread position, and compare-and-set advances
    the conversation position, then returns any joined-presence and progress plans to
-   the transport caller.
+   the transport caller. Only when this transaction creates the root Session does the
+   canonical mailbox carry one transient initial-title eligibility marker.
    PostgreSQL conversation position is the sole duplicate-prevention and ordering
    authority; a mismatch restarts provider-history preparation.
 5. After commit, the service claims the pending mailbox item and sends routing-only
    `SessionWakeUp(session_id)`. A crash or broker failure leaves that item recoverable,
    so duplicate transport delivery can complete the same logical wake without creating
-   another Session input.
+   another Session input. Promotion may consume the creation marker only for the exact
+   human `authorized_invocation` event and stores the existing deterministic initial
+   Session title without delaying wake or execution. Context-only messages, nonhuman
+   authors, later invocations, continuation, and duplicate admission cannot re-arm it.
 6. After the HTTP response, Socket acknowledgement, or Gateway admission boundary,
    the transport caller attempts every returned control plan once. Failure, ambiguity,
    cancellation, or process termination is recorded only through safe logs and metrics;
@@ -391,6 +396,9 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 32) — Added creation-only mailbox title eligibility
+  consumed by the exact authorized human trigger during promotion without gating
+  admission, wake, or execution.
 - **2026-08-02** (spec_version 31) — Replaced committed provider-control intents and
   Worker delivery with process-local plans attempted once after the transport
   acknowledgement boundary, independently from canonical mailbox execution.

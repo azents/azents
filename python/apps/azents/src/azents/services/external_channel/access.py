@@ -218,6 +218,7 @@ class ExternalChannelAccessService:
                 await self._replay_allowed_request(
                     access_request_id=request.id,
                     now=now,
+                    initial_title_eligible=False,
                 )
                 return ExternalChannelAllowedAccess(
                     request=request,
@@ -333,6 +334,7 @@ class ExternalChannelAccessService:
             await self._replay_allowed_request(
                 access_request_id=decided.id,
                 now=now,
+                initial_title_eligible=created_provider_event_type is not None,
             )
             return ExternalChannelAllowedAccess(
                 request=decided,
@@ -491,11 +493,13 @@ class ExternalChannelAccessService:
         *,
         access_request_id: str,
         now: datetime.datetime,
+        initial_title_eligible: bool,
     ) -> None:
         """Resume one committed typed Allow without reverting its decision."""
         outcome = await self.ingestion_replay_service.replay_access_allow(
             access_request_id=access_request_id,
             deadline=external_channel_replay_deadline(now=now),
+            initial_title_eligible=initial_title_eligible,
         )
         match outcome.kind:
             case (

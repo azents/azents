@@ -530,6 +530,48 @@ def test_discord_fake_serves_bounded_history_and_thread_ordering_evidence(
     assert "Private oldest" not in rendered
 
 
+def test_discord_fake_reads_and_updates_thread_titles_without_name_evidence(
+    discord_fake_urls: tuple[str, str],
+) -> None:
+    """Serve thread title GET/PATCH while keeping both names out of evidence."""
+    discord_fake_url, _ = discord_fake_urls
+    thread = requests.post(
+        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/"
+        "500000000000000001/threads",
+        json={"name": "Private provisional title"},
+        timeout=5,
+    )
+    thread.raise_for_status()
+    channel_url = f"{discord_fake_url}/api/v10/channels/{thread.json()['id']}"
+    initial = requests.get(channel_url, timeout=5)
+    initial.raise_for_status()
+    assert initial.json()["name"] == "Private provisional title"
+
+    updated = requests.patch(
+        channel_url,
+        json={"name": "Private final title"},
+        timeout=5,
+    )
+    updated.raise_for_status()
+    assert updated.json()["name"] == "Private final title"
+    current = requests.get(channel_url, timeout=5)
+    current.raise_for_status()
+    assert current.json()["name"] == "Private final title"
+
+    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
+    assert [event["operation"] for event in evidence["operations"]] == [
+        "create_thread",
+        "get_channel",
+        "update_channel",
+        "get_channel",
+    ]
+    assert evidence["request_counts"]["get_channel"] == 2
+    assert evidence["request_counts"]["update_channel"] == 1
+    rendered = str(evidence)
+    assert "Private provisional title" not in rendered
+    assert "Private final title" not in rendered
+
+
 def test_discord_fake_preserves_state_for_one_shot_scenarios(
     discord_fake_urls: tuple[str, str],
 ) -> None:

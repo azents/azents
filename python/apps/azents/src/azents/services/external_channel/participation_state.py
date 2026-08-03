@@ -148,4 +148,5 @@ def build_setup_continuation_request(
             range_start_position=source.range_start_position,
             trigger_position=source.trigger_position,
         ),
+        initial_title_eligible=False,
     )

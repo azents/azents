@@ -22,6 +22,7 @@ from azents.core.enums import (
 from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
 from azents.core.external_channel_progress import ExternalChannelDesiredProgress
 from azents.core.external_channel_session_presence import session_presence_payload
+from azents.core.external_channel_title import DISCORD_INITIAL_THREAD_TITLE_LABEL
 from azents.core.slack_external_channel_progress import (
     render_slack_persisted_progress,
     render_slack_progress,
@@ -1225,8 +1226,9 @@ class ExternalChannelWorkRepository:
         *,
         resource_id: str,
         delivery_channel_id: str,
+        initial_thread_title: str | None,
     ) -> str | None:
-        """Retain one provisioned Discord thread for all later provider intents."""
+        """Retain one provisioned Discord thread for all later provider effects."""
         resource = await session.get(
             RDBExternalChannelResource,
             resource_id,
@@ -1243,6 +1245,8 @@ class ExternalChannelWorkRepository:
         labels["thread_channel_id"] = delivery_channel_id
         labels["delivery_channel_id"] = delivery_channel_id
         labels["thread_id"] = delivery_channel_id
+        if initial_thread_title is not None:
+            labels[DISCORD_INITIAL_THREAD_TITLE_LABEL] = initial_thread_title
         resource.labels = labels
         await session.flush()
         return delivery_channel_id

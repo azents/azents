@@ -54,6 +54,7 @@ code_paths:
   - python/apps/azents/src/azents/services/agent_session_input.py
   - python/apps/azents/src/azents/services/chat_write.py
   - python/apps/azents/src/azents/services/mailbox.py
+  - python/apps/azents/src/azents/services/session_title.py
   - python/apps/azents/src/azents/services/session_resource_authority.py
   - python/apps/azents/src/azents/services/agent_mailbox.py
   - python/apps/azents/src/azents/services/subagent_terminal_result.py
@@ -108,8 +109,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-08-01
-spec_version: 137
+last_verified_at: 2026-08-03
+spec_version: 138
 ---
 
 # Conversation & Events
@@ -275,14 +276,19 @@ string | null }`: non-null titles are trimmed and must be non-empty and at most 
 explicit `null` clears the title and title source so automatic title generation may run again. Manual
 titles set `title_source = manual` and automatic generation must never overwrite them.
 
-Automatic title generation has two phases. When the first user message is promoted into the durable
+Automatic title generation has two phases. When the first eligible input is promoted into the durable
 transcript and the session has no title source, the server stores a deterministic `auto_initial` title
-from the beginning of that message. The worker then immediately schedules best-effort lightweight
-model title generation from that initial user prompt without waiting for the first run to complete.
-The resulting concise `auto_generated` title only replaces the deterministic title while
-`title_source = auto_initial` and `title_generation_event_id` still points at the same initial prompt
-event. Manual title updates or clears therefore remain authoritative, while long-running first turns
-do not delay automatic title generation. Title generation failures must not affect run execution.
+from the beginning of that input. Ordinary Sessions use the first `user_message`. A newly created
+External Channel root Session may instead use only the creation-marked human
+`authorized_invocation` event; surrounding context, later invocations, Bots, Agent output, and tool
+results are ineligible. Its title text is limited to the authorized body and bounded safe attachment
+names and media types without reading attachment contents. The worker then immediately schedules
+best-effort lightweight model title generation from that exact initial prompt without waiting for the
+first run to complete. The resulting concise `auto_generated` title only replaces the deterministic
+title while `title_source = auto_initial` and `title_generation_event_id` still points at the same
+initial prompt event. Manual title updates or clears therefore remain authoritative, while
+long-running first turns do not delay automatic title generation. Title generation and any
+post-commit External Channel title projection failures must not affect run execution.
 Clients display `title` when present and otherwise fall back to a contextual label such as "Team
 primary" or "Session". Concrete session route top bars show this session title while preserving the
 Agent avatar/icon affordance, and expose an inline title edit action that calls the manual title update
@@ -1077,6 +1083,10 @@ participant.
 
 ## 12. Changelog
 
+- **2026-08-03** — v138. Allowed only the creation-marked authorized human External
+  Channel trigger for a new root Session to enter the existing two-phase automatic
+  title lifecycle, with safe attachment metadata and non-blocking post-commit provider
+  projection.
 - **2026-08-01** — v137. Removed the External Channel activation promotion gate;
   accepted invocation mailboxes now follow the ordinary FIFO contract, with the
   conversation position as the sole duplicate-prevention authority.

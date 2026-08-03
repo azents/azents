@@ -13,13 +13,19 @@ from litellm.exceptions import OpenAIError as LiteLLMOpenAIError
 from openai import OpenAIError as OpenAIBaseError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentSessionTitleSource, EventKind, LLMProvider
+from azents.core.enums import (
+    AgentSessionTitleSource,
+    EventKind,
+    ExternalChannelPrincipalAuthorType,
+    LLMProvider,
+)
 from azents.core.llm_mapping import build_credential_kwargs, to_runtime_model
 from azents.engine.events.litellm_responses import map_litellm_provider_error
 from azents.engine.events.openai_responses import call_openai_responses_text
 from azents.engine.events.types import (
     AssistantMessagePayload,
     Event,
+    ExternalChannelMessagePayload,
     FileOutputPart,
     InputTextPart,
     OutputTextPart,
@@ -56,6 +62,9 @@ from azents.repos.llm_provider_integration.deps import (
     get_llm_provider_integration_repository,
 )
 from azents.services.chatgpt_oauth.runtime import ensure_runtime_tokens
+from azents.services.external_channel.thread_title import (
+    ExternalChannelThreadTitleService,
+)
 
 logger = logging.getLogger(__name__)
 _TITLE_MAX_CHARS = 50
@@ -126,11 +135,24 @@ def initial_title_from_event(event: Event) -> str | None:
     return initial_title_from_user_text(_user_payload_text(event.payload))
 
 
+def initial_title_from_external_channel_event(event: Event) -> str | None:
+    """Create a title from one eligible authorized External Channel Event."""
+    if event.kind is not EventKind.EXTERNAL_CHANNEL_MESSAGE:
+        return None
+    return initial_title_from_user_text(
+        _external_channel_authorized_invocation_text(event.payload)
+    )
+
+
 def title_context_from_initial_prompt(event: Event) -> str:
     """Render the initial user prompt for title generation."""
-    if event.kind is not EventKind.USER_MESSAGE:
-        return ""
-    return _user_payload_text(event.payload)[:_TITLE_CONTEXT_CHAR_LIMIT]
+    if event.kind is EventKind.USER_MESSAGE:
+        return _user_payload_text(event.payload)[:_TITLE_CONTEXT_CHAR_LIMIT]
+    if event.kind is EventKind.EXTERNAL_CHANNEL_MESSAGE:
+        return _external_channel_authorized_invocation_text(event.payload)[
+            :_TITLE_CONTEXT_CHAR_LIMIT
+        ]
+    return ""
 
 
 def title_context_from_events(events: Sequence[Event]) -> str:
@@ -186,6 +208,10 @@ class SessionTitleService:
         FailedRunRetryPolicy,
         Depends(get_failed_run_retry_policy),
     ]
+    external_channel_thread_title_service: Annotated[
+        ExternalChannelThreadTitleService,
+        Depends(ExternalChannelThreadTitleService),
+    ]
 
     async def generate_from_initial_prompt(
         self,
@@ -224,7 +250,13 @@ class SessionTitleService:
                 event_id=event.id,
             )
             await session.commit()
-            return updated
+        if updated is not None:
+            await self.external_channel_thread_title_service.project_generated_title(
+                session_id=session_id,
+                event=event,
+                title=generated,
+            )
+        return updated
 
     async def _generate_title(
         self,
@@ -432,6 +464,47 @@ def _assistant_payload_text(payload: object) -> str:
     if not isinstance(payload, AssistantMessagePayload):
         return ""
     return _content_text(payload.content)
+
+
+def _external_channel_authorized_invocation_text(payload: object) -> str:
+    """Render only safe title input from one authorized human invocation."""
+    if (
+        not isinstance(payload, ExternalChannelMessagePayload)
+        or payload.authorization != "authorized_invocation"
+        or payload.author_type is not ExternalChannelPrincipalAuthorType.HUMAN
+    ):
+        return ""
+    parts: list[str] = []
+    body = _normalize_space(payload.body or "")
+    if body:
+        parts.append(body)
+    files = payload.attachment_metadata.get("files")
+    if isinstance(files, list):
+        attachment_parts: list[str] = []
+        for item in files[:20]:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            media_type = item.get("media_type")
+            safe_name = (
+                _normalize_space(name[:255])
+                if isinstance(name, str) and name.strip()
+                else ""
+            )
+            safe_media_type = (
+                _normalize_space(media_type[:255])
+                if isinstance(media_type, str) and media_type.strip()
+                else ""
+            )
+            if safe_name and safe_media_type:
+                attachment_parts.append(f"{safe_name} ({safe_media_type})")
+            elif safe_name:
+                attachment_parts.append(safe_name)
+            elif safe_media_type:
+                attachment_parts.append(safe_media_type)
+        if attachment_parts:
+            parts.append("Attachments: " + ", ".join(attachment_parts))
+    return _normalize_space("\n".join(parts))
 
 
 def _content_text(content: object) -> str:

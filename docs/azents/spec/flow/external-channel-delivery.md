@@ -9,6 +9,7 @@ code_paths:
   - python/apps/azents/src/azents/core/external_channel_progress.py
   - python/apps/azents/src/azents/core/external_channel_file.py
   - python/apps/azents/src/azents/core/external_channel_session_presence.py
+  - python/apps/azents/src/azents/core/external_channel_title.py
   - python/apps/azents/src/azents/core/slack_external_channel_progress.py
   - python/apps/azents/src/azents/engine/tools/external_channel.py
   - python/apps/azents/src/azents/engine/tools/deps.py
@@ -23,6 +24,8 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/slack_events.py
   - python/apps/azents/src/azents/services/external_channel/discord_delivery.py
   - python/apps/azents/src/azents/services/external_channel/discord_presentation.py
+  - python/apps/azents/src/azents/services/external_channel/thread_title.py
+  - python/apps/azents/src/azents/services/session_title.py
   - python/apps/azents/src/azents/services/exchange_file/**
   - python/apps/azents/src/azents/services/session_resource_authority.py
   - python/apps/azents/src/azents/repos/external_channel/management.py
@@ -31,8 +34,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_data.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-02
-spec_version: 31
+last_verified_at: 2026-08-03
+spec_version: 32
 ---
 
 # External Channel Delivery and Channel Work
@@ -213,7 +216,10 @@ For a Discord root-message thread Resource, the first route-resolved outbound ef
 one provider thread and records its returned channel ID on the resource under a lock.
 New thread creation uses the current routed Agent name after trimming and provider
 length bounding, with the safe product fallback only for a blank name. Existing
-threads are reused without rename, and later Agent renames do not rename them.
+threads are reused without rename, and later Agent renames do not rename them. Only a
+direct successful thread create records the exact normalized provisional name beside
+the delivery channel ID. A thread observed before create or recovered after an
+ambiguous create outcome receives no automatic-title evidence.
 Parent-channel Resources deliver directly to the provider parent channel. Slack omits
 `thread_ts`; Discord never provisions a thread. Thread Resources retain the existing
 target behavior: Slack uses the bound root and Discord reuses an existing thread or
@@ -222,6 +228,17 @@ minimum supported 60-minute automatic archive duration instead of inheriting the
 parent channel default. All later approval, Session navigation, reply, file, progress,
 and cleanup effects use the Resource's explicit target. A failed or ambiguous thread
 creation returns that immediate outcome and does not cause automatic replay.
+
+After the matching External Channel Session title is successfully committed as
+`auto_generated`, one separate system-owned best-effort operation may revalidate the
+exact active Discord Session, Binding, Resource, route, Agent, connection, Guild,
+credentials, and retained thread target. It performs one GET. If the current title
+already equals the final title, it ends without PATCH; if the current title no longer
+equals the retained provisional title, it preserves provider ownership and ends. Only
+the remaining match sends one adjacent name-only PATCH. Missing state, provider
+failure, cancellation, ambiguity, or process interruption ends the operation without
+retry, reconciliation, backfill, durable attempt state, or impact on the committed
+Session title and Agent execution.
 
 ## Activity Tracker Lifecycle
 
@@ -352,6 +369,9 @@ lifecycle transition and creates no recovery work.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 32) — Retained exact provisional-title evidence only
+  for direct Discord thread creation and added one post-title-commit GET plus
+  conditional name-only PATCH with no retry or delivery-attempt ledger.
 - **2026-08-02** (spec_version 31) — Replaced durable Channel Action, delivery
   attempt, Worker recovery, and lifecycle intent authority with ordinary Tool
   call/result history, immediate ordered effects, owner-local current projection, and

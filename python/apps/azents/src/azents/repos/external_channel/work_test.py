@@ -21,6 +21,7 @@ from azents.core.enums import (
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
 )
+from azents.core.external_channel_title import DISCORD_INITIAL_THREAD_TITLE_LABEL
 from azents.rdb.models.external_channel import (
     RDBExternalChannelConnection,
     RDBExternalChannelWork,
@@ -363,3 +364,33 @@ async def test_access_control_create_is_claimed_once_before_provider_io() -> Non
     )
     session.flush.assert_awaited_once()
     repository.prepare_direct_control.assert_awaited_once()
+
+
+async def test_discord_delivery_channel_records_direct_create_title_once() -> None:
+    """Direct-create evidence is retained once and never manufactured later."""
+    resource = SimpleNamespace(
+        labels={"provider": "discord", "guild_id": "111"},
+    )
+    session = MagicMock()
+    session.get = AsyncMock(return_value=resource)
+    session.flush = AsyncMock()
+    repository = ExternalChannelWorkRepository()
+
+    first = await repository.record_discord_delivery_channel(
+        cast(AsyncSession, session),
+        resource_id="resource-1",
+        delivery_channel_id="444",
+        initial_thread_title="Test agent",
+    )
+    second = await repository.record_discord_delivery_channel(
+        cast(AsyncSession, session),
+        resource_id="resource-1",
+        delivery_channel_id="555",
+        initial_thread_title="Another title",
+    )
+
+    assert first == "444"
+    assert second == "444"
+    assert resource.labels["delivery_channel_id"] == "444"
+    assert resource.labels[DISCORD_INITIAL_THREAD_TITLE_LABEL] == "Test agent"
+    session.flush.assert_awaited_once()

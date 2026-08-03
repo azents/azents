@@ -3,11 +3,12 @@
 import json
 import secrets
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 import httpx
 
+from azents.core.external_channel_title import normalize_discord_thread_title
 from azents.services.external_channel.discord_endpoint import discord_api_base_url
 from azents.services.external_channel.provider_effect import ProviderOperationKey
 
@@ -24,6 +25,16 @@ class DiscordDeliveryResult:
     provider_message_key: str | None
     error_kind: str | None
     error_summary: str | None
+    created_thread_name: str | None = None
+
+
+@dataclass(frozen=True)
+class DiscordThreadTitleReadResult:
+    """Sanitized result of one Discord thread-title read."""
+
+    status: Literal["present", "missing", "failed", "unknown"]
+    name: str | None
+    error_kind: str | None
 
 
 class DiscordOutboundFileContentError(Exception):
@@ -62,12 +73,13 @@ class DiscordDeliveryClient:
         )
         if existing is not None:
             return existing
+        thread_name = _discord_thread_name(name)
         response = await self._request(
             "POST",
             f"/channels/{parent_channel_id}/messages/{root_message_id}/threads",
             bot_token=bot_token,
             json_body={
-                "name": _discord_thread_name(name),
+                "name": thread_name,
                 "auto_archive_duration": _DISCORD_MIN_AUTO_ARCHIVE_MINUTES,
             },
         )
@@ -80,7 +92,7 @@ class DiscordDeliveryClient:
                 root_message_id=root_message_id,
             )
         if result.status == "delivered":
-            return result
+            return replace(result, created_thread_name=thread_name)
         reconciled = await self._read_root_thread(
             bot_token=bot_token,
             parent_channel_id=parent_channel_id,
@@ -89,6 +101,117 @@ class DiscordDeliveryClient:
         if reconciled is not None:
             return reconciled
         return result
+
+    async def read_thread_title(
+        self,
+        *,
+        bot_token: str,
+        guild_id: str,
+        channel_id: str,
+    ) -> DiscordThreadTitleReadResult:
+        """Read one exact Discord thread title without retry."""
+        try:
+            response = await self.http_client.get(
+                f"{discord_api_base_url()}/channels/{channel_id}",
+                headers={"Authorization": f"Bot {bot_token}"},
+            )
+        except httpx.RequestError:
+            return DiscordThreadTitleReadResult(
+                status="unknown",
+                name=None,
+                error_kind="transport_unknown",
+            )
+        if response.status_code == 404:
+            return DiscordThreadTitleReadResult(
+                status="missing",
+                name=None,
+                error_kind="thread_not_found",
+            )
+        failure = _response_failure(response)
+        if failure is not None:
+            return DiscordThreadTitleReadResult(
+                status=("failed" if failure.status == "failed" else "unknown"),
+                name=None,
+                error_kind=failure.error_kind,
+            )
+        try:
+            payload: object = response.json()
+        except ValueError:
+            return DiscordThreadTitleReadResult(
+                status="unknown",
+                name=None,
+                error_kind="response_malformed",
+            )
+        if not isinstance(payload, dict):
+            return DiscordThreadTitleReadResult(
+                status="unknown",
+                name=None,
+                error_kind="response_shape_invalid",
+            )
+        name = payload.get("name")
+        if (
+            payload.get("id") != channel_id
+            or payload.get("guild_id") != guild_id
+            or not isinstance(name, str)
+            or not name.strip()
+        ):
+            return DiscordThreadTitleReadResult(
+                status="unknown",
+                name=None,
+                error_kind="response_shape_invalid",
+            )
+        return DiscordThreadTitleReadResult(
+            status="present",
+            name=name,
+            error_kind=None,
+        )
+
+    async def update_thread_title(
+        self,
+        *,
+        bot_token: str,
+        guild_id: str,
+        channel_id: str,
+        name: str,
+    ) -> DiscordDeliveryResult:
+        """Apply one name-only Discord thread update without retry."""
+        normalized = normalize_discord_thread_title(name)
+        if normalized is None:
+            return _rejected_result()
+        response = await self._request(
+            "PATCH",
+            f"/channels/{channel_id}",
+            bot_token=bot_token,
+            json_body={"name": normalized},
+        )
+        if isinstance(response, DiscordDeliveryResult):
+            return response
+        failure = _response_failure(response)
+        if failure is not None:
+            return failure
+        try:
+            payload: object = response.json()
+        except ValueError:
+            return _unknown_result(
+                error_kind="response_malformed",
+                error_summary="Discord thread update response was malformed.",
+            )
+        if (
+            not isinstance(payload, dict)
+            or payload.get("id") != channel_id
+            or payload.get("guild_id") != guild_id
+            or payload.get("name") != normalized
+        ):
+            return _unknown_result(
+                error_kind="response_shape_invalid",
+                error_summary="Discord thread update response was invalid.",
+            )
+        return DiscordDeliveryResult(
+            status="delivered",
+            provider_message_key=f"discord-thread:{channel_id}",
+            error_kind=None,
+            error_summary=None,
+        )
 
     async def _read_root_thread(
         self,

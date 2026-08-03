@@ -115,6 +115,7 @@ class ExternalChannelIngestionReplayService:
         *,
         access_request_id: str,
         deadline: ExternalChannelOperationDeadline,
+        initial_title_eligible: bool,
     ) -> ExternalChannelIngestionOutcome:
         """Replay one committed Allow through its retained original boundary."""
         async with self.session_manager() as session:
@@ -148,6 +149,7 @@ class ExternalChannelIngestionReplayService:
             operation=ExternalChannelIngestionOperation.ACCESS_ALLOW,
             deadline=deadline,
             provider_user_id=source.principal.provider_user_id,
+            initial_title_eligible=initial_title_eligible,
         )
 
     async def replay_selected_interaction(
@@ -197,6 +199,7 @@ class ExternalChannelIngestionReplayService:
             operation=ExternalChannelIngestionOperation.SELECTOR_CONTINUATION,
             deadline=deadline,
             provider_user_id=None,
+            initial_title_eligible=False,
         )
 
     async def replay_setup_claim(
@@ -323,6 +326,7 @@ class ExternalChannelIngestionReplayService:
         operation: ExternalChannelIngestionOperation,
         deadline: ExternalChannelOperationDeadline,
         provider_user_id: str | None,
+        initial_title_eligible: bool,
     ) -> ExternalChannelIngestionOutcome:
         delivery_thread_key = await self._resolve_delivery_thread_key(
             source,
@@ -340,6 +344,7 @@ class ExternalChannelIngestionReplayService:
                 deadline=deadline,
                 provider_user_id=provider_user_id,
                 delivery_thread_key=delivery_thread_key,
+                initial_title_eligible=initial_title_eligible,
             )
         )
 
@@ -450,6 +455,7 @@ def _build_request(
     deadline: ExternalChannelOperationDeadline,
     provider_user_id: str | None,
     delivery_thread_key: str | None,
+    initial_title_eligible: bool,
 ) -> ExternalChannelIngestionRequest:
     configuration = source.configuration
     tenant_id = configuration.provider_tenant_id
@@ -511,6 +517,7 @@ def _build_request(
             range_start_position=source.range_start_position,
             trigger_position=source.trigger_position,
         ),
+        initial_title_eligible=initial_title_eligible,
     )
 
 

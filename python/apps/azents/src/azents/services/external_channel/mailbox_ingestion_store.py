@@ -564,7 +564,12 @@ class ExternalChannelMailboxIngestionStore:
                     attachments=[],
                     file_parts=[],
                     action=None,
-                    payload=build_external_channel_mailbox_payload(projection),
+                    payload=build_external_channel_mailbox_payload(
+                        projection,
+                        initial_title_eligible=(
+                            session_created or request.initial_title_eligible
+                        ),
+                    ),
                 ),
             )
             await self.agent_session_repository.mark_running_for_input_wakeup(

@@ -65,6 +65,7 @@ class ExternalChannelInvocationMailboxPayload(MailboxPayloadBase):
     """Typed immutable External Channel invocation snapshot."""
 
     type: Literal["external_channel_invocation"]
+    initial_title_eligible: bool = False
 
     @model_validator(mode="after")
     def validate_item_sequence(self) -> "ExternalChannelInvocationMailboxPayload":

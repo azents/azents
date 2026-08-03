@@ -136,6 +136,7 @@ async def test_access_allow_rebuilds_slack_replay_without_content() -> None:
 
     outcome = await service.replay_access_allow(
         access_request_id="access-1",
+        initial_title_eligible=True,
         deadline=ExternalChannelOperationDeadline(
             datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
         ),
@@ -144,6 +145,7 @@ async def test_access_allow_rebuilds_slack_replay_without_content() -> None:
     assert outcome is expected
     replay = ingestion.ingest.await_args.args[0]
     assert replay.operation is ExternalChannelIngestionOperation.ACCESS_ALLOW
+    assert replay.initial_title_eligible
     assert replay.authority.kind is ExternalChannelIngressAuthorityKind.DURABLE_REPLAY
     assert replay.authority.lease_owner is None
     assert replay.locator.trigger_provider_message_id == "2.000000"
@@ -237,6 +239,7 @@ async def test_access_allow_rebuilds_discord_replay_from_legacy_thread_label() -
 
     await service.replay_access_allow(
         access_request_id="access-1",
+        initial_title_eligible=False,
         deadline=ExternalChannelOperationDeadline(
             datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
         ),
@@ -338,6 +341,7 @@ async def test_access_allow_retains_unresolved_discord_root_for_durable_ingestio
 
     outcome = await service.replay_access_allow(
         access_request_id="access-1",
+        initial_title_eligible=False,
         deadline=ExternalChannelOperationDeadline(
             datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
         ),
@@ -446,6 +450,7 @@ async def test_access_allow_replay_uses_durable_connection_authority(
     if replay_available:
         outcome = await service.replay_access_allow(
             access_request_id="access-1",
+            initial_title_eligible=False,
             deadline=ExternalChannelOperationDeadline(
                 datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
             ),
@@ -456,6 +461,7 @@ async def test_access_allow_replay_uses_durable_connection_authority(
         with pytest.raises(ExternalChannelIngestionReplayUnavailable):
             await service.replay_access_allow(
                 access_request_id="access-1",
+                initial_title_eligible=False,
                 deadline=ExternalChannelOperationDeadline(
                     datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=30)
                 ),

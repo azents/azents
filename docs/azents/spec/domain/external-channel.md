@@ -12,12 +12,14 @@ code_paths:
   - python/apps/azents/src/azents/core/external_channel_file.py
   - python/apps/azents/src/azents/core/external_channel_progress.py
   - python/apps/azents/src/azents/core/external_channel_session_presence.py
+  - python/apps/azents/src/azents/core/external_channel_title.py
   - python/apps/azents/src/azents/core/slack_external_channel_progress.py
   - python/apps/azents/src/azents/core/enums.py
   - python/apps/azents/src/azents/engine/events/external_channel_rendering.py
   - python/apps/azents/src/azents/rdb/models/external_channel.py
   - python/apps/azents/src/azents/repos/external_channel/**
   - python/apps/azents/src/azents/services/external_channel/**
+  - python/apps/azents/src/azents/services/session_title.py
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/worker/session/**
   - python/apps/azents/src/azents/services/root_agent_session_creation/**
@@ -56,8 +58,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-08-02
-spec_version: 41
+last_verified_at: 2026-08-03
+spec_version: 42
 ---
 
 # External Channel
@@ -112,11 +114,11 @@ contain multiple independent bindings.
 | Participation setting | One active `channel` or `threads` location and concrete response-mode default for the connection and provider parent channel's selected route. The setting has a generation, exactly one User-or-principal latest actor, and terminal invalidation evidence. It is never inferred from an existing binding. |
 | Setup claim | One bounded nonterminal channel-setup authority retaining the latest eligible explicit mention's content-free source Resource, principal, position/replay boundary, source revision, selected route/location state, and expiry. It creates no Binding, Session, mailbox input, or AgentRun before location selection. |
 | Interaction | Idempotent signed Slack or Discord shortcut, command, component/action, navigation, or submission claim. An interaction may bind to a setup claim, setting generation, or connected Binding while provider trigger IDs, Discord interaction tokens, callback URLs, signatures, and raw bodies remain transient. |
-| Resource | One provider conversation. `parent_channel` uses the stable provider parent-channel identity and delivers directly there. Thread Resources use a Slack root message or Discord root/existing thread and may retain a provisioned Discord delivery-thread identity. Scope is explicit in type and labels and is never inferred from a missing thread field. |
+| Resource | One provider conversation. `parent_channel` uses the stable provider parent-channel identity and delivers directly there. Thread Resources use a Slack root message or Discord root/existing thread and may retain a provisioned Discord delivery-thread identity. A directly and unambiguously created Discord delivery thread additionally retains its exact normalized provisional name as optional one-shot initial-title evidence. Scope is explicit in type and labels and is never inferred from a missing thread field. |
 | Conversation position | Durable read-through position for one connection-scoped parent channel or thread. PostgreSQL position compare-and-set is the ordering authority across retries and replicas. |
 | Principal | Provider tenant/user identity and author category. It is not an Azents User or WorkspaceUser. |
 | Binding | Persistent link from one route/resource to one AgentSession with one required concrete `mention_only` or `all_messages` response mode. `disconnected_at IS NULL` identifies the current connected relationship; a non-null timestamp is its terminal boundary. Configured parent/thread creation copies the active participation setting; legacy isolated-thread access replay without a setup claim copies the Agent default. Binding, real Session, and first canonical mailbox input commit together only after setup selection or for an already configured conversation. |
-| Mailbox item and Session events | One deterministic mailbox item contains the ordered immutable provider-history projection. The conversation position compare-and-set is the sole duplicate-prevention and ordering authority. Mailbox identity owns input idempotency and pending wake recovery. Promotion creates the canonical External Channel Session events; no parallel provider-message, revision, invocation-batch, activation, or wake-dispatch record exists. |
+| Mailbox item and Session events | One deterministic mailbox item contains the ordered immutable provider-history projection. The conversation position compare-and-set is the sole duplicate-prevention and ordering authority. Mailbox identity owns input idempotency and pending wake recovery. Only a mailbox whose admission created the root Session may transiently authorize its exact human `authorized_invocation` event as the initial automatic-title input; promotion and mailbox deletion consume that eligibility. Promotion creates the canonical External Channel Session events; no parallel provider-message, revision, invocation-batch, activation, title-attempt, or wake-dispatch record exists. |
 | Access request/grant/block | Opaque approval request with a content-free provider locator and conversation-position replay boundary, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
 | Channel Work and provider projection | Binding-scoped durable current-work title and ordered provider-neutral tasks with stable identities, status, optional details, optional output, and labeled URL sources. Work-owned projection parts retain only the current desired revision, current provider identity, and current projection status required for later update or deletion. Agent-requested publication executes through the ordinary Tool call/result history with process-local effect plans and no separate Action or delivery history. |
 
@@ -231,6 +233,17 @@ contain multiple independent bindings.
   replies, files, progress, and cleanup to that thread. A delivered final answer
   permits active-progress deletion, and separate work cycles never share provider
   identities.
+- A newly created External Channel root Session uses only the creating mailbox's exact
+  human `authorized_invocation` event for the existing two-phase automatic title
+  lifecycle. Session admission, wake, AgentRun creation, and ordinary provider effects
+  do not wait for title generation. After the matching `auto_initial` to
+  `auto_generated` title commit, Discord performs one best-effort operation only for a
+  directly created eligible thread: revalidate current lifecycle authority, read the
+  thread once, and send at most one name-only update when the current name still equals
+  the retained provisional name. Existing, ambiguously recovered, human-renamed,
+  disconnected, unavailable, or otherwise invalid targets are not mutated. Slack has no
+  provider-title projection. Failure or interruption creates no retry, reconciliation,
+  backfill, attempt record, or execution gate.
 - The Tracker uses one native read-only Slack task card before Channel Work is
   declared. Once tasks exist, one native Slack plan carries the Agent-authored
   current-work title and up to 49 ordered tasks. Canonical task states are
@@ -382,6 +395,10 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-03** (spec_version 42) — Added creation-bound one-shot automatic Session
+  title eligibility and direct-created Discord provisional-title evidence, followed
+  by one non-blocking post-title-commit GET and conditional PATCH with no recovery
+  state.
 - **2026-08-02** (spec_version 41) — Made normal Session Tool history the sole
   Agent-requested publication history, replaced non-Tool delivery work with
   process-local direct controls, and retained only owner-local current provider

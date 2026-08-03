@@ -77,8 +77,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-02
-spec_version: 141
+last_verified_at: 2026-08-03
+spec_version: 142
 ---
 
 # Agent Execution Loop
@@ -911,7 +911,11 @@ Automatic Session title generation follows the same provider routing, typed fail
 retry policy, and standard helper dialect in an operation-scoped best-effort loop.
 OpenAI-compatible title calls omit `max_output_tokens`; retries revalidate that the original initial
 prompt still owns automatic title generation. Timeout or exhaustion preserves the deterministic
-initial title and does not fail an otherwise completed Agent Run.
+initial title and does not fail an otherwise completed Agent Run. The initial prompt may be either
+the ordinary first user message or the exact creation-authorized External Channel human invocation.
+Only a successful matching `auto_initial` to `auto_generated` commit can trigger the separate
+one-shot Discord thread-title projection, and that provider operation begins after the title
+transaction commits without gating or changing the Agent Run.
 
 ## 7. Entrypoints And Projection
 
@@ -1198,6 +1202,9 @@ icon.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 142) — Extended the existing automatic-title input
+  boundary to creation-authorized External Channel human invocations and kept the
+  post-commit one-shot Discord projection outside AgentRun success.
 - **2026-08-02** (spec_version 141) — Replaced External Channel provider-control and
   Tool delivery intents with process-local immediate effect plans while keeping
   mailbox admission, wake, and AgentRun creation independent from provider success.

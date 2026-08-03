@@ -18,6 +18,7 @@ from azents.core.enums import (
     AgentRunStatus,
     AgentSessionStatus,
     EventKind,
+    ExternalChannelPrincipalAuthorType,
     MailboxItemKind,
     MailboxSchedulingMode,
 )
@@ -79,7 +80,10 @@ from azents.repos.mailbox.data import (
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.model_file import ModelFileService
 from azents.services.session_resource_authority import SessionResourceAuthority
-from azents.services.session_title import initial_title_from_event
+from azents.services.session_title import (
+    initial_title_from_event,
+    initial_title_from_external_channel_event,
+)
 from azents.services.vfs import VfsFileResolutionError, VfsProjectionService
 
 logger = logging.getLogger(__name__)
@@ -194,6 +198,7 @@ class _PromotedMailboxItem:
     payload: dict[str, JSONValue]
     external_id: str
     item_key: str | None = None
+    initial_title_eligible: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -609,6 +614,18 @@ class MailboxService:
                     events_by_external_id[item.external_id] = existing
             if missing:
                 raise RuntimeError("Conflicted input buffer event was not found")
+            for item in promoted:
+                if not item.initial_title_eligible:
+                    continue
+                event = events_by_external_id[item.external_id]
+                title = initial_title_from_external_channel_event(event)
+                if title is not None:
+                    await self.agent_session_repository.set_initial_auto_title_if_unset(
+                        session,
+                        session_id=session_id,
+                        title=title,
+                        event_id=event.id,
+                    )
 
             promoted_event_ids = list(
                 dict.fromkeys(
@@ -1328,6 +1345,8 @@ class _AgentMessageMailboxProcessor:
 
 def build_external_channel_mailbox_payload(
     items: Sequence[ExternalChannelMailboxProjectionItem],
+    *,
+    initial_title_eligible: bool = False,
 ) -> ExternalChannelInvocationMailboxPayload:
     """Materialize immutable External Channel message snapshots at admission."""
     if not items:
@@ -1399,6 +1418,7 @@ def build_external_channel_mailbox_payload(
     return ExternalChannelInvocationMailboxPayload(
         type=MailboxItemKind.EXTERNAL_CHANNEL_INVOCATION.value,
         items=embedded,
+        initial_title_eligible=initial_title_eligible,
     )
 
 
@@ -1453,6 +1473,12 @@ class ExternalChannelInvocationMailboxProcessor:
                     ),
                     external_id=external_id,
                     item_key=embedded.item_key,
+                    initial_title_eligible=(
+                        buffer.payload.initial_title_eligible
+                        and payload.authorization == "authorized_invocation"
+                        and payload.author_type
+                        is ExternalChannelPrincipalAuthorType.HUMAN
+                    ),
                 )
             )
         return _preparation_outcome(promoted, TurnEffect.ELIGIBLE)
