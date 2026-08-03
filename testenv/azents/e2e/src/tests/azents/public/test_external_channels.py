@@ -1301,6 +1301,92 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert _BOT_TOKEN not in rendered_state
     assert _SIGNING_SECRET not in rendered_state
 
+    follow_up_timestamp = f"{int(root_timestamp.partition('.')[0]) + 1}.000100"
+    follow_up_body = "Continue investigating the same active work"
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/configure",
+        json={
+            "history_pages": [
+                [
+                    {
+                        "user": "U-EXTERNAL",
+                        "ts": follow_up_timestamp,
+                        "thread_ts": root_timestamp,
+                        "text": follow_up_body,
+                    },
+                    {
+                        "user": "U-EXTERNAL",
+                        "ts": root_timestamp,
+                        "text": "Please investigate the deterministic incident.",
+                    },
+                ]
+            ],
+        },
+        timeout=5,
+    ).raise_for_status()
+    follow_up_event_body = json.dumps(
+        {
+            "type": "event_callback",
+            "event_id": f"Ev-{unique()}",
+            "event_time": int(time.time()),
+            "api_app_id": _APP_ID,
+            "team_id": _TEAM_ID,
+            "event": {
+                "type": "message",
+                "channel": _CHANNEL_ID,
+                "channel_type": "channel",
+                "user": "U-EXTERNAL",
+                "text": follow_up_body,
+                "ts": follow_up_timestamp,
+                "thread_ts": root_timestamp,
+            },
+        },
+        separators=(",", ":"),
+    ).encode()
+    follow_up = requests.post(
+        callback_url,
+        data=follow_up_event_body,
+        headers=_signed_headers(follow_up_event_body),
+        timeout=5,
+    )
+    assert follow_up.status_code == 200
+    follow_up_evidence = cast(
+        list[dict[str, object]],
+        wait_until(
+            lambda: (
+                evidence
+                if len(
+                    evidence := _external_channel_input_evidence(
+                        public_server_url=azents_public_server_url,
+                        token=token,
+                        session_id=approved_session_id,
+                        include_pending=False,
+                    )
+                )
+                == 2
+                else None
+            ),
+            timeout=30,
+            interval=0.2,
+            message="Slack follow-up input was not promoted",
+        ),
+    )
+    assert follow_up_body in {item["body"] for item in follow_up_evidence}
+    follow_up_provider_state = _provider_state(slack_provider_fake_url)
+    assert (
+        _successful_session_navigation_categories(follow_up_provider_state).count(
+            "activity_tracker"
+        )
+        == 1
+    )
+    assert (
+        cast(
+            dict[str, int],
+            follow_up_provider_state["request_counts"],
+        )["chat.postMessage"]
+        == 3
+    )
+
     disconnected = external_api.external_channel_v1_disconnect_session_channel(
         agent_id=agent_id,
         session_id=approved_session_id,
@@ -1873,10 +1959,6 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
         ),
     )
     assert continuation_body in {item["body"] for item in continuation_evidence}
-    navigation_categories = _successful_session_navigation_categories(
-        _provider_state(slack_provider_fake_url)
-    )
-    assert navigation_categories.count("activity_tracker") == 1
 
     disconnected = external_api.external_channel_v1_disconnect_session_channel(
         agent_id=agent_id,
