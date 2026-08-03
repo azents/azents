@@ -6,13 +6,16 @@ from contextlib import asynccontextmanager
 from typing import cast
 from unittest.mock import patch
 
+import sqlalchemy as sa
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
+    AgentSessionKind,
     AgentSessionRunState,
+    AgentSessionStatus,
     LLMProvider,
     MailboxItemKind,
     MailboxSchedulingMode,
@@ -28,6 +31,7 @@ from azents.engine.events.types import (
 )
 from azents.engine.run.failure import FailedRunAttempt, FailedRunRetryState
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
@@ -71,7 +75,7 @@ from azents.testing.model_selection import (
 )
 
 from . import ChatSessionService
-from .data import SessionAccessDenied
+from .data import SessionAccessDenied, SessionNotFound, SubagentSessionReadOnly
 from .live_events import LiveEventStore
 
 
@@ -613,3 +617,127 @@ class TestChatSessionMailboxItem:
 
         assert isinstance(result, Failure)
         assert isinstance(result.error, SessionAccessDenied)
+
+    async def test_prepare_session_working_folder_enqueues_pathless_retry_idempotently(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Explicit folder retries enqueue one server-authoritative action."""
+        async with rdb_session_manager() as session:
+            session_id, user_id, _ = await _create_session_with_buffer(
+                session,
+                handle="chat-folder-prepare",
+                slug="chat-folder-prepare",
+            )
+            agent_session = await AgentSessionRepository().get_by_id(
+                session,
+                session_id,
+            )
+            assert agent_session is not None
+            agent_id = agent_session.agent_id
+            other_user_id = await _create_user(
+                session,
+                "chat-folder-prepare-other@example.com",
+            )
+
+        service = _service(rdb_session_manager)
+        first = await service.prepare_session_working_folder(
+            agent_id=agent_id,
+            session_id=session_id,
+            user_id=user_id,
+            client_request_id="retry-1",
+        )
+        second = await service.prepare_session_working_folder(
+            agent_id=agent_id,
+            session_id=session_id,
+            user_id=user_id,
+            client_request_id="retry-1",
+        )
+        denied = await service.prepare_session_working_folder(
+            agent_id=agent_id,
+            session_id=session_id,
+            user_id=other_user_id,
+            client_request_id="retry-2",
+        )
+        wrong_agent = await service.prepare_session_working_folder(
+            agent_id="f" * 32,
+            session_id=session_id,
+            user_id=user_id,
+            client_request_id="retry-3",
+        )
+
+        assert isinstance(first, Success)
+        assert first.value.created is True
+        item = first.value.mailbox_item
+        assert item.kind is MailboxItemKind.ACTION_MESSAGE
+        assert item.scheduling_mode is MailboxSchedulingMode.WAKE_SESSION
+        assert item.sender_user_id is None
+        assert item.content == ""
+        assert item.action == {"type": "create_session_working_folder"}
+        assert item.idempotency_key == (
+            f"session-working-folder:prepare:{session_id}:retry-1"
+        )
+        assert isinstance(second, Success)
+        assert second.value.created is False
+        assert second.value.mailbox_item.id == item.id
+        live_result = await service.list_live_events(session_id, user_id=user_id)
+        assert isinstance(live_result, Success)
+        assert all(
+            mailbox_item.mailbox_item_id != item.id
+            for mailbox_item in live_result.value.mailbox_items
+        )
+        assert isinstance(denied, Failure)
+        assert isinstance(denied.error, SessionAccessDenied)
+        assert isinstance(wrong_agent, Failure)
+        assert isinstance(wrong_agent.error, SessionNotFound)
+
+    async def test_prepare_session_working_folder_rejects_invalid_sessions(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Only active root Sessions accept explicit folder preparation retries."""
+        async with rdb_session_manager() as session:
+            inactive_id, inactive_user_id, _ = await _create_session_with_buffer(
+                session,
+                handle="chat-folder-prepare-inactive",
+                slug="chat-folder-prepare-inactive",
+            )
+            inactive = await AgentSessionRepository().get_by_id(session, inactive_id)
+            assert inactive is not None
+            await session.execute(
+                sa.update(RDBAgentSession)
+                .where(RDBAgentSession.id == inactive_id)
+                .values(status=AgentSessionStatus.ARCHIVED)
+            )
+
+            subagent_id, subagent_user_id, _ = await _create_session_with_buffer(
+                session,
+                handle="chat-folder-prepare-subagent",
+                slug="chat-folder-prepare-subagent",
+            )
+            subagent = await AgentSessionRepository().get_by_id(session, subagent_id)
+            assert subagent is not None
+            await session.execute(
+                sa.update(RDBAgentSession)
+                .where(RDBAgentSession.id == subagent_id)
+                .values(session_kind=AgentSessionKind.SUBAGENT)
+            )
+
+        service = _service(rdb_session_manager)
+        inactive_result = await service.prepare_session_working_folder(
+            agent_id=inactive.agent_id,
+            session_id=inactive_id,
+            user_id=inactive_user_id,
+            client_request_id="retry-inactive",
+        )
+        subagent_result = await service.prepare_session_working_folder(
+            agent_id=subagent.agent_id,
+            session_id=subagent_id,
+            user_id=subagent_user_id,
+            client_request_id="retry-subagent",
+        )
+
+        assert isinstance(inactive_result, Failure)
+        assert isinstance(inactive_result.error, SessionNotFound)
+        assert isinstance(subagent_result, Failure)
+        assert isinstance(subagent_result.error, SubagentSessionReadOnly)

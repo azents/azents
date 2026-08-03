@@ -110,6 +110,7 @@ from azents.services.chat.data import (
 from azents.services.chat.live_events import (
     LiveEventStore,
     get_live_event_store,
+    mailbox_item_is_publicly_presentable,
     mailbox_item_to_pending_projection,
 )
 from azents.services.chat.workspace import (
@@ -232,6 +233,7 @@ from .data import (
     InputActionMessagePolicyResponse,
     LiveEventListResponse,
     PartialHistoryResponse,
+    PrepareSessionWorkingFolderRequest,
     ProjectBrowserManifestPreviewRequest,
     ProjectBrowserManifestResponse,
     SessionContextResponse,
@@ -666,6 +668,54 @@ async def _write_message_via_rest(
     )
 
 
+async def _prepare_session_working_folder_via_rest(
+    chat_service: ChatSessionService,
+    broker: SessionBroker,
+    broadcast: WebSocketBroadcast,
+    live_event_store: LiveEventStore,
+    request: PrepareSessionWorkingFolderRequest,
+    *,
+    agent_id: str,
+    session_id: str,
+    user_id: str,
+) -> ChatWriteResponse:
+    """Accept an explicit Session-folder preparation retry."""
+    result = await chat_service.prepare_session_working_folder(
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=user_id,
+        client_request_id=request.client_request_id,
+    )
+    match result:
+        case Success(admission):
+            return await _finalize_message_write_response(
+                chat_service,
+                broker,
+                broadcast,
+                live_event_store,
+                agent_id=agent_id,
+                session_id=session_id,
+                user_id=user_id,
+                client_request_id=request.client_request_id,
+                accepted_mailbox_item_id=admission.mailbox_item.id,
+                mailbox_item=admission.mailbox_item,
+                created=admission.created,
+            )
+        case Failure(error):
+            match error:
+                case SessionNotFound() | SessionAccessDenied():
+                    raise HTTPException(status_code=404, detail="Session not found.")
+                case SubagentSessionReadOnly():
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Subagent sessions are read-only.",
+                    )
+                case _:
+                    assert_never(error)
+        case _:
+            assert_never(result)
+
+
 def _create_chat_input_message(
     *,
     text: str,
@@ -705,6 +755,7 @@ async def _finalize_message_write_response(
     pending_projection = (
         mailbox_item_to_pending_projection(mailbox_item)
         if mailbox_item is not None
+        and mailbox_item_is_publicly_presentable(mailbox_item)
         else None
     )
     if mailbox_item is not None:
@@ -1078,6 +1129,34 @@ async def create_team_agent_session_message(
         agent_id=agent_id,
         user_id=current_user.user_id,
         tz=_parse_timezone(timezone),
+    )
+
+
+@router.post(
+    "/agents/{agent_id}/sessions/{session_id}/workspace/session-folder/prepare"
+)
+async def prepare_session_working_folder(
+    agent_id: str,
+    session_id: str,
+    request: PrepareSessionWorkingFolderRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+    broker: Annotated[SessionBroker, Depends(get_broker)],
+    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
+    live_event_store: Annotated[LiveEventStore, Depends(get_live_event_store)],
+) -> ChatWriteResponse:
+    """Request a manual retry of canonical Session-folder preparation."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    _validate_session_id(session_id)
+    return await _prepare_session_working_folder_via_rest(
+        chat_service,
+        broker,
+        broadcast,
+        live_event_store,
+        request,
+        agent_id=agent_id,
+        session_id=session_id,
+        user_id=current_user.user_id,
     )
 
 

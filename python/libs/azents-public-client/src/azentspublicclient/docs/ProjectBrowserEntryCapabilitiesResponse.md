@@ -12,6 +12,7 @@ Name | Type | Description | Notes
 **filesystem_delete** | **bool** | Whether filesystem delete is allowed for this entry | 
 **filesystem_move** | **bool** | Whether filesystem move is allowed for this entry | 
 **filesystem_rename** | **bool** | Whether filesystem rename is allowed for this entry | 
+**prepare_session_folder** | **bool** | Whether Session folder setup can be requested | 
 
 ## Example
 

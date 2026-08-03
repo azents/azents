@@ -201,11 +201,20 @@ class TestProjectBrowserManifestService:
         )
 
         assert isinstance(result, Success)
-        assert result.value.refresh_paths == []
         manifest = result.value.manifest
         assert manifest.active_mode == "projects"
-        assert [entry.path for entry in manifest.entries] == ["/workspace/agent/app"]
-        entry = manifest.entries[0]
+        session_entry, entry = manifest.entries
+        assert session_entry.path.startswith("/workspace/agent/.azents/sessions/")
+        assert entry.path == "/workspace/agent/app"
+        assert session_entry.name == "Session files"
+        assert result.value.refresh_paths == [session_entry.path]
+        assert session_entry.source.type == "session_folder"
+        assert session_entry.source.project_id is None
+        assert session_entry.capabilities.prepare_session_folder is True
+        assert session_entry.capabilities.remove_project is False
+        assert session_entry.capabilities.filesystem_delete is False
+        assert session_entry.capabilities.filesystem_move is False
+        assert session_entry.capabilities.filesystem_rename is False
         assert entry.name == "app"
         assert entry.repository_type is None
         assert entry.source.type == "session_project"
@@ -254,7 +263,7 @@ class TestProjectBrowserManifestService:
         )
 
         assert isinstance(result, Success)
-        entry = result.value.manifest.entries[0]
+        entry = result.value.manifest.entries[1]
         assert entry.repository_type == "git"
         assert entry.capabilities.delete_worktree is True
 
@@ -272,8 +281,11 @@ class TestProjectBrowserManifestService:
         )
 
         assert isinstance(result, Success)
-        assert result.value.manifest.entries == []
-        assert result.value.manifest.empty_state is not None
+        entries = result.value.manifest.entries
+        assert len(entries) == 1
+        assert entries[0].source.type == "session_folder"
+        assert entries[0].capabilities.prepare_session_folder is True
+        assert result.value.manifest.empty_state is None
         assert result.value.manifest.root == "/workspace/agent"
         assert [mode.id for mode in result.value.manifest.modes] == [
             "projects",

@@ -78,6 +78,7 @@ from azents.engine.tools.testing import FakeSharedStorage
 from azents.engine.tools.write import make_write_tool
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import MemorySummary
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
@@ -696,6 +697,12 @@ def _make_toolkit(
     )
     project_repo = AsyncMock(spec=SessionWorkspaceProjectRepository)
     project_repo.list_projects.return_value = projects or []
+    agent_session_repository = AsyncMock(spec=AgentSessionRepository)
+    agent_session_repository.get_working_folder_context_by_session_id.return_value = (
+        SimpleNamespace(
+            working_folder_path="/workspace/agent/.azents/sessions/session-1"
+        )
+    )
     if agents_store is None:
         agents_store = _FakeAgentsAppendixDedupeStateStore()
     if server_to_runtime_transfer_service is None:
@@ -725,6 +732,7 @@ def _make_toolkit(
         session_manager=session_manager,
         agent_runtime_repo=agent_runtime_repo,
         agent_runtime_service=agent_runtime_service,
+        agent_session_repository=agent_session_repository,
         project_repo=project_repo,
         agents_store=cast(Any, agents_store),
         server_to_runtime_transfer_service=server_to_runtime_transfer_service,
@@ -808,6 +816,7 @@ class TestBuiltinToolkitProviderResolve:
             memory_repo=_make_mock_memory_repo(),
             agent_runtime_repo=agent_runtime_repo,
             agent_runtime_service=AsyncMock(),
+            agent_session_repository=AsyncMock(spec=AgentSessionRepository),
             runner_operations=cast(
                 Any,
                 _FakeRunnerOperations(
@@ -1203,7 +1212,14 @@ class TestRuntimeToolkitUpdateContext:
         runtime_repo.get_by_agent_id.return_value.workspace_path = "/runtime/home"
         ctx = _make_context()
         await toolkit.update_context(ctx)
-        assert "/runtime/home/" in (await toolkit.get_static_prompt(_make_context()))
+        prompt = await toolkit.get_static_prompt(_make_context())
+        assert "/runtime/home/" in prompt
+        assert "/workspace/agent/" in prompt
+        assert "/workspace/agent/.azents/sessions/session-1" in prompt
+        assert "Project directories" in prompt
+        assert "Temporary scratch space" in prompt
+        assert "mkdir -p /workspace/agent/.azents/sessions/session-1" in prompt
+        assert "workdir` set explicitly to `/runtime/home`" in prompt
 
     @pytest.mark.asyncio
     async def test_prompt_does_not_advertise_withheld_resource_tools(self) -> None:
@@ -1820,7 +1836,7 @@ class TestProcessToolHandler:
         assert runner_operations.process_start_calls == [
             {
                 "command": "echo hello",
-                "workdir": None,
+                "workdir": "/workspace/agent/.azents/sessions/session-1",
                 "yield_time_ms": 10000,
                 "max_output_bytes": 65536,
                 "env": None,
@@ -1851,6 +1867,30 @@ class TestProcessToolHandler:
         )
         assert isinstance(
             publish_event.await_args_list[-1].args[0], RuntimeProcessOutputDeltaEvent
+        )
+
+    @pytest.mark.asyncio
+    async def test_exec_command_preserves_explicit_workdir(self) -> None:
+        """exec_command does not replace an explicitly supplied workdir."""
+        toolkit = _make_toolkit()
+        runner_operations = cast(
+            _FakeRunnerOperations,
+            cast(Any, toolkit)._test_runner_operations,
+        )
+        state = await toolkit.update_context(_make_context())
+        tool = _find_tool(state.tools, "exec_command")
+
+        await tool.handler(
+            json.dumps(
+                {
+                    "command": "pwd",
+                    "workdir": "/workspace/agent/explicit-project",
+                }
+            )
+        )
+
+        assert runner_operations.process_start_calls[0]["workdir"] == (
+            "/workspace/agent/explicit-project"
         )
 
     @pytest.mark.asyncio

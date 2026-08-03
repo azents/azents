@@ -32,7 +32,11 @@ from azents.services.session_workspace_project import (
 )
 
 ProjectBrowserModeId = Literal["projects", "all_files"]
-ProjectBrowserEntrySourceType = Literal["session_project", "preview_project"]
+ProjectBrowserEntrySourceType = Literal[
+    "session_folder",
+    "session_project",
+    "preview_project",
+]
 ProjectBrowserEntryRepositoryType = Literal["git"]
 
 
@@ -97,6 +101,7 @@ class ProjectBrowserEntryCapabilities:
     filesystem_delete: bool
     filesystem_move: bool
     filesystem_rename: bool
+    prepare_session_folder: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -206,6 +211,13 @@ class ProjectBrowserManifestService:
             )
             if workspace_user is None:
                 return Failure(ProjectBrowserAccessDenied())
+            repository = self.agent_session_repository
+            context = await repository.get_working_folder_context_by_session_id(
+                session,
+                session_id=session_id,
+            )
+            if context is None:
+                raise RuntimeError("Active Session is missing working-folder context")
             projects = await self.project_repository.list_projects(
                 session,
                 session_id=session_id,
@@ -214,7 +226,10 @@ class ProjectBrowserManifestService:
                 session,
                 session_id=session_id,
             )
-            paths = [project.path for project in projects]
+            paths = [
+                context.working_folder_path,
+                *(project.path for project in projects),
+            ]
             catalog_entries = await self.catalog_repository.list_entries_by_paths(
                 session,
                 agent_id=agent_id,
@@ -247,24 +262,41 @@ class ProjectBrowserManifestService:
             and worktree.status is not SessionGitWorktreeStatus.CLEANED
         }
         git_project_paths = {worktree.worktree_path for worktree in worktrees}
+        session_folder_entry = ProjectBrowserEntry(
+            name="Session files",
+            path=context.working_folder_path,
+            kind="directory",
+            repository_type=None,
+            source=ProjectBrowserEntrySource(
+                type="session_folder",
+                project_id=None,
+            ),
+            status=_status_from_catalog(
+                catalog_by_path.get(context.working_folder_path)
+            ),
+            capabilities=_SESSION_FOLDER_CAPABILITIES,
+        )
         entries = [
-            _entry_from_path(
-                path=project.path,
-                source=ProjectBrowserEntrySource(
-                    type="session_project",
-                    project_id=project.id,
-                ),
-                catalog_entry=catalog_by_path.get(project.path),
-                remove_project=True,
-                delete_worktree=project.id in deletable_worktree_project_ids,
-                repository_type=_repository_type_for_project(
-                    project_id=project.id,
-                    project_path=project.path,
-                    git_project_ids=git_project_ids,
-                    git_project_paths=git_project_paths,
-                ),
-            )
-            for project in projects
+            session_folder_entry,
+            *[
+                _entry_from_path(
+                    path=project.path,
+                    source=ProjectBrowserEntrySource(
+                        type="session_project",
+                        project_id=project.id,
+                    ),
+                    catalog_entry=catalog_by_path.get(project.path),
+                    remove_project=True,
+                    delete_worktree=project.id in deletable_worktree_project_ids,
+                    repository_type=_repository_type_for_project(
+                        project_id=project.id,
+                        project_path=project.path,
+                        git_project_ids=git_project_ids,
+                        git_project_paths=git_project_paths,
+                    ),
+                )
+                for project in projects
+            ],
         ]
         return Success(
             ProjectBrowserManifestBuildResult(
@@ -365,6 +397,7 @@ _PROJECT_ROOT_CAPABILITIES = ProjectBrowserEntryCapabilities(
     filesystem_delete=False,
     filesystem_move=False,
     filesystem_rename=False,
+    prepare_session_folder=False,
 )
 
 
@@ -375,6 +408,18 @@ _PREVIEW_PROJECT_ROOT_CAPABILITIES = ProjectBrowserEntryCapabilities(
     filesystem_delete=False,
     filesystem_move=False,
     filesystem_rename=False,
+    prepare_session_folder=False,
+)
+
+
+_SESSION_FOLDER_CAPABILITIES = ProjectBrowserEntryCapabilities(
+    open=True,
+    remove_project=False,
+    delete_worktree=False,
+    filesystem_delete=False,
+    filesystem_move=False,
+    filesystem_rename=False,
+    prepare_session_folder=True,
 )
 
 

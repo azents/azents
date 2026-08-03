@@ -2568,6 +2568,73 @@
         }
       }
     },
+    "/chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/session-folder/prepare": {
+      "post": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Prepare Session Working Folder",
+        "description": "Request a manual retry of canonical Session-folder preparation.",
+        "operationId": "chat_v1_prepare_session_working_folder",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrepareSessionWorkingFolderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatWriteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/sessions/{session_id}/retry-failed-run": {
       "post": {
         "tags": [
@@ -22945,6 +23012,23 @@
         "title": "PlatformGitHubAppAuthorizationReason",
         "description": "Stable Public reason for a Platform Toolkit reconnect requirement."
       },
+      "PrepareSessionWorkingFolderRequest": {
+        "properties": {
+          "client_request_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Client Request Id",
+            "description": "Client-generated idempotency key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "client_request_id"
+        ],
+        "title": "PrepareSessionWorkingFolderRequest",
+        "description": "Request an explicit retry of canonical Session-folder preparation."
+      },
       "PreviewPasswordResetTokenRequest": {
         "properties": {
           "token": {
@@ -23111,6 +23195,11 @@
             "type": "boolean",
             "title": "Filesystem Rename",
             "description": "Whether filesystem rename is allowed for this entry"
+          },
+          "prepare_session_folder": {
+            "type": "boolean",
+            "title": "Prepare Session Folder",
+            "description": "Whether Session folder setup can be requested"
           }
         },
         "type": "object",
@@ -23120,7 +23209,8 @@
           "delete_worktree",
           "filesystem_delete",
           "filesystem_move",
-          "filesystem_rename"
+          "filesystem_rename",
+          "prepare_session_folder"
         ],
         "title": "ProjectBrowserEntryCapabilitiesResponse",
         "description": "Backend-provided Project root action policy response."
@@ -23187,6 +23277,7 @@
           "type": {
             "type": "string",
             "enum": [
+              "session_folder",
               "session_project",
               "preview_project"
             ],

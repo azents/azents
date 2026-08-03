@@ -40,7 +40,8 @@ class TestProjectBrowserEntryCapabilitiesResponse(unittest.TestCase):
                 delete_worktree = True,
                 filesystem_delete = True,
                 filesystem_move = True,
-                filesystem_rename = True
+                filesystem_rename = True,
+                prepare_session_folder = True
             )
         else:
             return ProjectBrowserEntryCapabilitiesResponse(
@@ -50,6 +51,7 @@ class TestProjectBrowserEntryCapabilitiesResponse(unittest.TestCase):
                 filesystem_delete = True,
                 filesystem_move = True,
                 filesystem_rename = True,
+                prepare_session_folder = True,
         )
         """
 

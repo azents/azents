@@ -146,6 +146,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_list_live_events**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_live_events) | **GET** /chat/v1/sessions/{session_id}/live | List Live Events
 *ChatV1Api* | [**chat_v1_list_sessions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_sessions) | **GET** /chat/v1/workspaces/{handle}/sessions | List Sessions
 *ChatV1Api* | [**chat_v1_move_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_move_agent_workspace_path) | **POST** /chat/v1/agents/{agent_id}/workspace/move | Move Agent Workspace Path
+*ChatV1Api* | [**chat_v1_prepare_session_working_folder**](azentspublicclient/docs/ChatV1Api.md#chat_v1_prepare_session_working_folder) | **POST** /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/session-folder/prepare | Prepare Session Working Folder
 *ChatV1Api* | [**chat_v1_preview_agent_git_refs**](azentspublicclient/docs/ChatV1Api.md#chat_v1_preview_agent_git_refs) | **GET** /chat/v1/agents/{agent_id}/git-refs | Preview Agent Git Refs
 *ChatV1Api* | [**chat_v1_preview_project_browser_manifest**](azentspublicclient/docs/ChatV1Api.md#chat_v1_preview_project_browser_manifest) | **POST** /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview | Preview Project Browser Manifest
 *ChatV1Api* | [**chat_v1_read_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_read_agent_workspace_path) | **GET** /chat/v1/agents/{agent_id}/workspace/files | Read Agent Workspace Path
@@ -569,6 +570,7 @@ Class | Method | HTTP request | Description
  - [PendingMailboxItem](azentspublicclient/docs/PendingMailboxItem.md)
  - [PendingMailboxUserMessagePresentation](azentspublicclient/docs/PendingMailboxUserMessagePresentation.md)
  - [PlatformGitHubAppAuthorizationReason](azentspublicclient/docs/PlatformGitHubAppAuthorizationReason.md)
+ - [PrepareSessionWorkingFolderRequest](azentspublicclient/docs/PrepareSessionWorkingFolderRequest.md)
  - [Presentation](azentspublicclient/docs/Presentation.md)
  - [PreviewPasswordResetTokenRequest](azentspublicclient/docs/PreviewPasswordResetTokenRequest.md)
  - [PreviewPasswordResetTokenResponse](azentspublicclient/docs/PreviewPasswordResetTokenResponse.md)

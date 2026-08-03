@@ -35,12 +35,12 @@ class TestProjectBrowserEntrySourceResponse(unittest.TestCase):
         model = ProjectBrowserEntrySourceResponse()
         if include_optional:
             return ProjectBrowserEntrySourceResponse(
-                type = 'session_project',
+                type = 'session_folder',
                 project_id = ''
             )
         else:
             return ProjectBrowserEntrySourceResponse(
-                type = 'session_project',
+                type = 'session_folder',
         )
         """
 

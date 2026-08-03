@@ -373,6 +373,9 @@ class InvalidSessionTitle:
 EnsureSessionError = AgentNotFound | NotWorkspaceMember | SessionAccessDenied
 SessionAccessError = SessionNotFound | SessionAccessDenied
 DeleteMailboxItemError = SessionNotFound | SessionAccessDenied | SubagentSessionReadOnly
+PrepareSessionWorkingFolderError = (
+    SessionNotFound | SessionAccessDenied | SubagentSessionReadOnly
+)
 AcknowledgeUnreadTerminalRunError = SessionNotFound | UnreadTerminalRunNotTerminal
 UpdateGoalError = (
     SessionNotFound

@@ -257,6 +257,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_prepare_session_working_folder(self) -> None:
+        """Test case for chat_v1_prepare_session_working_folder
+
+        Prepare Session Working Folder
+        """
+        pass
+
     def test_chat_v1_preview_agent_git_refs(self) -> None:
         """Test case for chat_v1_preview_agent_git_refs
 

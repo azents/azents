@@ -17,24 +17,19 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List
+from typing_extensions import Annotated
 from typing import Optional, Set
 from typing_extensions import Self
 
-class ProjectBrowserEntryCapabilitiesResponse(BaseModel):
+class PrepareSessionWorkingFolderRequest(BaseModel):
     """
-    Backend-provided Project root action policy response.
+    Request an explicit retry of canonical Session-folder preparation.
     """ # noqa: E501
-    open: StrictBool = Field(description="Whether the entry can be opened in the browser")
-    remove_project: StrictBool = Field(description="Whether the registry Project row can be removed")
-    delete_worktree: StrictBool = Field(description="Whether an Azents-owned worktree cleanup can be requested")
-    filesystem_delete: StrictBool = Field(description="Whether filesystem delete is allowed for this entry")
-    filesystem_move: StrictBool = Field(description="Whether filesystem move is allowed for this entry")
-    filesystem_rename: StrictBool = Field(description="Whether filesystem rename is allowed for this entry")
-    prepare_session_folder: StrictBool = Field(description="Whether Session folder setup can be requested")
+    client_request_id: Annotated[str, Field(min_length=1, strict=True, max_length=64)] = Field(description="Client-generated idempotency key")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["open", "remove_project", "delete_worktree", "filesystem_delete", "filesystem_move", "filesystem_rename", "prepare_session_folder"]
+    __properties: ClassVar[List[str]] = ["client_request_id"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -54,7 +49,7 @@ class ProjectBrowserEntryCapabilitiesResponse(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of ProjectBrowserEntryCapabilitiesResponse from a JSON string"""
+        """Create an instance of PrepareSessionWorkingFolderRequest from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -86,7 +81,7 @@ class ProjectBrowserEntryCapabilitiesResponse(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of ProjectBrowserEntryCapabilitiesResponse from a dict"""
+        """Create an instance of PrepareSessionWorkingFolderRequest from a dict"""
         if obj is None:
             return None
 
@@ -94,13 +89,7 @@ class ProjectBrowserEntryCapabilitiesResponse(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "open": obj.get("open"),
-            "remove_project": obj.get("remove_project"),
-            "delete_worktree": obj.get("delete_worktree"),
-            "filesystem_delete": obj.get("filesystem_delete"),
-            "filesystem_move": obj.get("filesystem_move"),
-            "filesystem_rename": obj.get("filesystem_rename"),
-            "prepare_session_folder": obj.get("prepare_session_folder")
+            "client_request_id": obj.get("client_request_id")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

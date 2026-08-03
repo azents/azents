@@ -345,6 +345,16 @@ class CleanupSessionGitWorktreeRequest(BaseModel):
     )
 
 
+class PrepareSessionWorkingFolderRequest(BaseModel):
+    """Request an explicit retry of canonical Session-folder preparation."""
+
+    client_request_id: str = Field(
+        min_length=1,
+        max_length=64,
+        description="Client-generated idempotency key",
+    )
+
+
 class ChatFailedRunRetryRequest(BaseModel):
     """REST failed-run retry request."""
 
@@ -885,7 +895,7 @@ class ProjectBrowserModeResponse(BaseModel):
 class ProjectBrowserEntrySourceResponse(BaseModel):
     """Project browser entry source metadata response."""
 
-    type: Literal["session_project", "preview_project"] = Field(
+    type: Literal["session_folder", "session_project", "preview_project"] = Field(
         description="Entry source type",
     )
     project_id: str | None = Field(
@@ -945,6 +955,9 @@ class ProjectBrowserEntryCapabilitiesResponse(BaseModel):
     filesystem_rename: bool = Field(
         description="Whether filesystem rename is allowed for this entry",
     )
+    prepare_session_folder: bool = Field(
+        description="Whether Session folder setup can be requested",
+    )
 
     @classmethod
     def from_domain(cls, capabilities: ProjectBrowserEntryCapabilities) -> Self:
@@ -956,6 +969,7 @@ class ProjectBrowserEntryCapabilitiesResponse(BaseModel):
             filesystem_delete=capabilities.filesystem_delete,
             filesystem_move=capabilities.filesystem_move,
             filesystem_rename=capabilities.filesystem_rename,
+            prepare_session_folder=capabilities.prepare_session_folder,
         )
 
 
