@@ -8,6 +8,7 @@ import logging
 from collections.abc import AsyncIterable, AsyncIterator, Sequence
 from typing import Any, Protocol, runtime_checkable
 
+from litellm import ProviderConfigManager
 from litellm.exceptions import OpenAIError as LiteLLMOpenAIError
 from litellm.responses.main import aresponses
 from litellm.types.llms.openai import ResponseAPIUsage, ResponsesAPIResponse
@@ -228,7 +229,9 @@ class LiteLLMResponsesModelAdapter:
 
     def _plan(self, request: NativeModelRequest) -> ResponsesContinuationPlan:
         """Plan the physical request while retaining the full logical request."""
-        if self.continuation_planner is None:
+        if self.continuation_planner is None or not _supports_previous_response_id(
+            request
+        ):
             return ResponsesContinuationPlan(
                 input_items=request.input,
                 previous_response_id=None,
@@ -243,7 +246,9 @@ class LiteLLMResponsesModelAdapter:
         completed_output_items: list[dict[str, object]],
     ) -> None:
         """Record a successful terminal response for the next request."""
-        if self.continuation_planner is None:
+        if self.continuation_planner is None or not _supports_previous_response_id(
+            request
+        ):
             return
         response_id = completed_response.get("id")
         if not isinstance(response_id, str) or not response_id:
@@ -299,6 +304,20 @@ def _is_previous_response_not_found(exc: Exception) -> bool:
     error = body.get("error")
     return isinstance(error, dict) and error.get("code") == (
         "previous_response_not_found"
+    )
+
+
+def _supports_previous_response_id(request: NativeModelRequest) -> bool:
+    """Return the provider-declared Responses continuation capability."""
+    provider = request.kwargs.get("custom_llm_provider")
+    if not isinstance(provider, str):
+        return False
+    config = ProviderConfigManager.get_provider_responses_api_config(
+        provider=provider,
+        model=request.model,
+    )
+    return config is not None and (
+        "previous_response_id" in config.get_supported_openai_params(request.model)
     )
 
 

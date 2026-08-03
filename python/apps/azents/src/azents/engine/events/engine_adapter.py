@@ -960,7 +960,7 @@ class AgentEngineAdapter:
                 integration=integration_id,
             )
         else:
-            model_adapter = LiteLLMResponsesModelAdapter(None)
+            model_adapter = LiteLLMResponsesModelAdapter(ResponsesContinuationPlanner())
             output_normalizer = LiteLLMResponsesOutputNormalizer(
                 provider=provider,
                 model=request.model,

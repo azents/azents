@@ -2665,9 +2665,9 @@ class TestLiteLLMResponsesModelAdapter:
         )
         adapter = _TestLiteLLMResponsesModelAdapter(ResponsesContinuationPlanner())
         first = NativeModelRequest(
-            model="gpt-5.1",
+            model="xai/grok-4.5",
             input=[{"role": "user", "content": "read"}],
-            kwargs={"store": True},
+            kwargs={"store": True, "custom_llm_provider": "xai"},
         )
         tool_output = {
             "type": "function_call_output",
@@ -2690,6 +2690,44 @@ class TestLiteLLMResponsesModelAdapter:
             for record in caplog.records
             if record.message == "Dispatching OpenAI Responses request"
         ] == [False, True]
+
+    async def test_stream_keeps_full_input_without_continuation_capability(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Keep full input when the Responses provider omits the capability."""
+        calls: list[dict[str, object]] = []
+
+        async def streaming_call(**kwargs: object) -> object:
+            calls.append(kwargs)
+
+            async def response_iter() -> AsyncIterator[object]:
+                yield _response_stream_event(
+                    "ResponseCompletedEvent",
+                    {"response": {"id": f"resp-{len(calls)}", "output": []}},
+                )
+
+            return response_iter()
+
+        monkeypatch.setattr(
+            "azents.engine.events.litellm_responses.aresponses",
+            streaming_call,
+        )
+        adapter = _TestLiteLLMResponsesModelAdapter(ResponsesContinuationPlanner())
+        first = NativeModelRequest(
+            model="unsupported/model",
+            input=[{"role": "user", "content": "first"}],
+            kwargs={"store": True, "custom_llm_provider": "unsupported"},
+        )
+        second = first.model_copy(
+            update={"input": [*first.input, {"role": "user", "content": "second"}]}
+        )
+
+        _ = [event async for event in adapter.stream(first)]
+        _ = [event async for event in adapter.stream(second)]
+
+        assert calls[1]["input"] == second.input
+        assert calls[1]["previous_response_id"] is None
 
     async def test_stream_does_not_continue_without_successful_terminal_response(
         self,
@@ -2766,7 +2804,7 @@ class TestLiteLLMResponsesModelAdapter:
         first = NativeModelRequest(
             model="gpt-5.1",
             input=[{"role": "user", "content": "read"}],
-            kwargs={"store": True},
+            kwargs={"store": True, "custom_llm_provider": "openai"},
         )
         tool_output = {
             "type": "function_call_output",
@@ -2843,7 +2881,7 @@ class TestLiteLLMResponsesModelAdapter:
         first = NativeModelRequest(
             model="gpt-5.1",
             input=[{"role": "user", "content": "read"}],
-            kwargs={"store": True},
+            kwargs={"store": True, "custom_llm_provider": "openai"},
         )
         tool_output = {
             "type": "function_call_output",
