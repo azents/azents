@@ -168,6 +168,90 @@ async def test_direct_control_ignores_connection_health_status() -> None:
     assert "external_channel_connections.disconnected_at IS NULL" in where_sql
 
 
+@pytest.mark.parametrize(
+    "existing_status",
+    list(ExternalChannelWorkProjectionStatus),
+)
+async def test_initial_progress_is_claimed_once_per_active_work(
+    existing_status: ExternalChannelWorkProjectionStatus,
+) -> None:
+    """Repeated admissions cannot create another Tracker for the same active Work."""
+    work = SimpleNamespace(
+        id="work-1",
+        desired_progress_revision=1,
+        desired_progress_payload={
+            "schema_version": 2,
+            "state": "checking",
+            "title": None,
+            "tasks": [],
+        },
+    )
+    binding = SimpleNamespace(id="binding-1")
+    resource = SimpleNamespace(
+        id="resource-1",
+        labels={
+            "provider": "slack",
+            "tenant_id": "tenant-1",
+            "channel_id": "channel-1",
+            "thread_ts": "1.000001",
+        },
+    )
+    route = SimpleNamespace(id="route-1")
+    connection = SimpleNamespace(
+        id="connection-1",
+        provider=ExternalChannelProvider.SLACK,
+    )
+    result = MagicMock()
+    result.one_or_none.return_value = (
+        work,
+        binding,
+        resource,
+        route,
+        connection,
+    )
+    claimed_parts: list[RDBExternalChannelWorkProjectionPart] = []
+
+    async def current_part(_statement: object) -> object | None:
+        return claimed_parts[0] if claimed_parts else None
+
+    session = MagicMock(spec=AsyncSession)
+    session.execute = AsyncMock(return_value=result)
+    session.scalar = AsyncMock(side_effect=current_part)
+    session.add.side_effect = claimed_parts.append
+    session.flush = AsyncMock()
+    repository = ExternalChannelWorkRepository()
+    plan = make_provider_effect_plan("initial-progress")
+    repository.prepare_direct_control = AsyncMock(return_value=plan)
+
+    first = await repository.prepare_initial_progress(
+        cast(AsyncSession, session),
+        work_id=work.id,
+    )
+    assert first == plan
+    assert len(claimed_parts) == 1
+    claimed = claimed_parts[0]
+    assert claimed.work_id == work.id
+    assert claimed.part_ordinal == 0
+    assert claimed.desired_progress_revision == work.desired_progress_revision
+    assert claimed.status is ExternalChannelWorkProjectionStatus.UNKNOWN
+    assert claimed.provider_message_key is None
+
+    claimed.status = existing_status
+    claimed.provider_message_key = (
+        "provider-key"
+        if existing_status is ExternalChannelWorkProjectionStatus.PRESENT
+        else None
+    )
+    repeated = await repository.prepare_initial_progress(
+        cast(AsyncSession, session),
+        work_id=work.id,
+    )
+
+    assert repeated is None
+    repository.prepare_direct_control.assert_awaited_once()
+    session.flush.assert_awaited_once()
+
+
 async def test_direct_control_rejects_terminal_connection_before_credential_purge(
     rdb_session: AsyncSession,
 ) -> None:

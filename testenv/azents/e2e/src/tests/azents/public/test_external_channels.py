@@ -1873,6 +1873,10 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
         ),
     )
     assert continuation_body in {item["body"] for item in continuation_evidence}
+    navigation_categories = _successful_session_navigation_categories(
+        _provider_state(slack_provider_fake_url)
+    )
+    assert navigation_categories.count("activity_tracker") == 1
 
     disconnected = external_api.external_channel_v1_disconnect_session_channel(
         agent_id=agent_id,
