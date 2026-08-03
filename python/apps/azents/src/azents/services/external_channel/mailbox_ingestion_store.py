@@ -512,10 +512,14 @@ class ExternalChannelMailboxIngestionStore:
                 binding_id=binding.id,
                 desired_progress_payload=checking_progress().model_dump(mode="json"),
             )
-            session_presence_id = await self._create_session_presence_intent(
-                session,
-                resource=conversation.resource,
-                binding=binding,
+            session_presence_id = (
+                None
+                if existing_binding
+                else await self._create_session_presence_intent(
+                    session,
+                    resource=conversation.resource,
+                    binding=binding,
+                )
             )
             settings_control_id = (
                 await self._create_binding_settings_on_demand_intent(

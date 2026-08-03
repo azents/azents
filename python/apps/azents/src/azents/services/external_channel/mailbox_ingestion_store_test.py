@@ -2,6 +2,8 @@
 
 import dataclasses
 import datetime
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
@@ -47,7 +49,9 @@ from azents.services.external_channel.conversation import (
 )
 from azents.services.external_channel.ingestion import (
     ExternalChannelCanonicalHistoryMessage,
+    ExternalChannelIngestionAcceptance,
     ExternalChannelIngestionOperation,
+    ExternalChannelIngestionPreparation,
     ExternalChannelIngestionReason,
     ExternalChannelIngestionRequest,
     ExternalChannelIngressAuthority,
@@ -281,6 +285,162 @@ def _history(
         scanned_message_count=1,
         elapsed_seconds=0,
     )
+
+
+async def _accepted_control_plan_case(
+    *,
+    existing_binding: bool,
+) -> SimpleNamespace:
+    session = cast(
+        AsyncSession,
+        SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock()),
+    )
+
+    @asynccontextmanager
+    async def session_context() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    repository = MagicMock()
+    work_repository = MagicMock()
+    mailbox_service = MagicMock()
+    mailbox_service.enqueue = AsyncMock(
+        return_value=SimpleNamespace(
+            created=True,
+            mailbox_item=SimpleNamespace(id="mailbox-1"),
+        )
+    )
+    store = _store(repository=repository, work_repository=work_repository)
+    store.session_manager = MagicMock(return_value=session_context())
+    store.mailbox_service = mailbox_service
+    store.agent_session_repository = MagicMock()
+    store.agent_session_repository.mark_running_for_input_wakeup = AsyncMock()
+
+    request = _slack_request()
+    connection = ExternalChannelConnection.model_construct(id="connection-1")
+    position = ExternalChannelConversationPosition.model_construct(
+        id="position-1",
+        connection_id=connection.id,
+        read_through_position=None,
+    )
+    route = ExternalChannelAgentRoute.model_construct(
+        id="route-1",
+        agent_id="agent-1",
+    )
+    resource = ExternalChannelResource.model_construct(
+        id="resource-1",
+        connection_id=connection.id,
+        resource_type=ExternalChannelResourceType.THREAD,
+        provider_resource_key=request.locator.provider_resource_key,
+        labels={
+            "provider": "slack",
+            "tenant_id": "tenant-1",
+            "channel_id": "channel-1",
+            "thread_ts": "thread-1",
+        },
+        status=ExternalChannelResourceStatus.ACTIVE,
+    )
+    binding = ExternalChannelBinding.model_construct(
+        id="binding-1",
+        resource_id=resource.id,
+        route_id=route.id,
+        agent_session_id="session-1",
+        response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+        disconnected_at=None,
+    )
+    conversation = _Conversation(
+        source_resource=resource,
+        resource=resource,
+        route=route,
+        setting=None,
+        binding=binding if existing_binding else None,
+        principal_id="principal-1",
+        selector=None,
+        setup_claim=None,
+        setup_required=False,
+    )
+    work = SimpleNamespace(id="work-1")
+    presence_plan = make_provider_effect_plan("joined-presence")
+    settings_plan = make_provider_effect_plan("binding-settings")
+    progress_plan = make_provider_effect_plan("initial-progress")
+    presence_intent = AsyncMock(return_value=presence_plan)
+    settings_intent = AsyncMock(return_value=settings_plan)
+
+    store._lock_authority = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=connection
+    )
+    repository.lock_conversation_position = AsyncMock(return_value=position)
+    repository.get_resource_by_provider_key = AsyncMock(return_value=resource)
+    store._replay_source_matches = MagicMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=True
+    )
+    store._resolve_conversation = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=conversation
+    )
+    repository.get_active_block = AsyncMock(return_value=None)
+    repository.get_active_access_grant = AsyncMock(return_value=object())
+    store._create_binding = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=SimpleNamespace(binding=binding, session_created=True)
+    )
+    repository.ensure_active_work = AsyncMock(return_value=work)
+    store._create_session_presence_intent = (  # pyright: ignore[reportPrivateUsage]
+        presence_intent
+    )
+    store._create_binding_settings_on_demand_intent = (  # pyright: ignore[reportPrivateUsage]
+        settings_intent
+    )
+    store._create_initial_progress_intent = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=progress_plan
+    )
+    repository.advance_conversation_position_if_current = AsyncMock(return_value=True)
+    store._initialize_thread_position = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+    )
+    store._complete_setup_replay = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+    )
+
+    acceptance: ExternalChannelIngestionAcceptance = await store.accept(
+        request=request,
+        preparation=ExternalChannelIngestionPreparation(
+            position_id=position.id,
+            exclusive_start_position=None,
+            immediate_outcome=None,
+            wake_mailbox_item_id=None,
+            wake_session_id=None,
+            priority_request=None,
+        ),
+        history=_history(),
+    )
+    return SimpleNamespace(
+        acceptance=acceptance,
+        presence_intent=presence_intent,
+        settings_intent=settings_intent,
+        presence_plan=presence_plan,
+        settings_plan=settings_plan,
+        progress_plan=progress_plan,
+    )
+
+
+async def test_new_binding_admission_includes_joined_presence() -> None:
+    """A new Binding admission returns joined presence with initial progress."""
+    case = await _accepted_control_plan_case(existing_binding=False)
+
+    assert case.acceptance.control_plans == (
+        case.presence_plan,
+        case.progress_plan,
+    )
+    case.presence_intent.assert_awaited_once()
+    case.settings_intent.assert_not_awaited()
+
+
+async def test_existing_binding_admission_excludes_joined_presence() -> None:
+    """An existing Binding mention returns settings and progress without joined."""
+    case = await _accepted_control_plan_case(existing_binding=True)
+
+    assert case.acceptance.control_plans == (
+        case.settings_plan,
+        case.progress_plan,
+    )
+    case.presence_intent.assert_not_awaited()
+    case.settings_intent.assert_awaited_once()
 
 
 async def test_session_presence_intent_replaces_open_session_control() -> None:
