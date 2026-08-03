@@ -75,6 +75,34 @@ def _wait_until(
     raise TimeoutError(message)
 
 
+def _wait_for_idle_run_boundary(
+    *,
+    public_url: str,
+    token: str,
+    session_id: str,
+    timeout: float = 15,
+) -> None:
+    """Wait until the prior Run has crossed the authoritative idle boundary."""
+    observed: dict[str, object] | None = None
+
+    def run_is_idle() -> bool:
+        nonlocal observed
+        observed = list_live(
+            server_url=public_url,
+            token=token,
+            session_id=session_id,
+        )
+        return (
+            observed.get("run") is None and observed.get("session_run_state") == "idle"
+        )
+
+    _wait_until(
+        run_is_idle,
+        timeout=timeout,
+        message=f"session did not reach idle Run boundary: {observed!r}",
+    )
+
+
 def _live_partial_contents(payload: dict[str, object]) -> list[str]:
     """Return content strings from the REST live partial-history projection."""
     partial_history = json_object_payload(
@@ -766,6 +794,11 @@ class TestModelStreamWatchdog:
             token=workspace.token,
             session_id=result.session_id,
             expected=[_PROVIDER_COMPACTION_SEED_RESPONSE],
+        )
+        _wait_for_idle_run_boundary(
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
         )
         _post_compact(
             public_url=azents_public_server_url,

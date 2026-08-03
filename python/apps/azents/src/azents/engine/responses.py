@@ -37,6 +37,16 @@ _PROVIDER_IDS_WITH_INPUT_MESSAGE_INSTRUCTIONS = {
     LLMProvider.XAI,
     LLMProvider.XAI_OAUTH,
 }
+_OUTPUT_TEXT_DELTA_EVENT_TYPES = {
+    "response.output_text.delta",
+    "OutputTextDeltaEvent",
+    "ResponseTextDeltaEvent",
+}
+_OUTPUT_TEXT_DONE_EVENT_TYPES = {
+    "response.output_text.done",
+    "OutputTextDoneEvent",
+    "ResponseTextDoneEvent",
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -317,7 +327,11 @@ def _stream_error(event: dict[str, object]) -> ResponsesOutputError | None:
 
 def _text_delta(event: dict[str, object]) -> str:
     """Extract assistant output-text delta from a Responses stream event."""
-    if _event_type(event) != "response.output_text.delta":
+    raw_event_type = event.get("type")
+    if (
+        raw_event_type is not None
+        and _event_type(event) not in _OUTPUT_TEXT_DELTA_EVENT_TYPES
+    ):
         return ""
     delta = event.get("delta")
     if isinstance(delta, str) and delta:
@@ -331,7 +345,11 @@ def _text_delta(event: dict[str, object]) -> str:
 
 def _event_text(event: dict[str, object]) -> str:
     """Extract completed assistant output text from a Responses done event."""
-    if _event_type(event) != "response.output_text.done":
+    raw_event_type = event.get("type")
+    if (
+        raw_event_type is not None
+        and _event_type(event) not in _OUTPUT_TEXT_DONE_EVENT_TYPES
+    ):
         return ""
     text = event.get("text")
     if isinstance(text, str) and text:

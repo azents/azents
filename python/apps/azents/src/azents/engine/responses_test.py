@@ -247,6 +247,10 @@ async def test_extract_response_text_ignores_reasoning_summary(
 
     async def stream() -> object:
         yield {
+            "type": "ResponseReasoningSummaryTextDeltaEvent",
+            "item": {"delta": "Class-name reasoning summary."},
+        }
+        yield {
             "type": "response.reasoning_summary_text.delta",
             "delta": "The user asks a short conversational question.",
         }
@@ -269,3 +273,27 @@ async def test_extract_response_text_ignores_reasoning_summary(
         }
 
     assert await extract_response_text(stream()) == output_text
+
+
+@pytest.mark.parametrize(
+    "events",
+    [
+        [{"delta": "sum"}, {"delta": "mary"}],
+        [
+            {"type": "OutputTextDeltaEvent", "item": {"delta": "sum"}},
+            {"type": "ResponseTextDeltaEvent", "item": {"delta": "mary"}},
+        ],
+        [{"text": "summary"}],
+        [{"type": "ResponseTextDoneEvent", "item": {"text": "summary"}}],
+    ],
+)
+async def test_extract_response_text_supports_compatible_output_event_shapes(
+    events: list[dict[str, object]],
+) -> None:
+    """Legacy and SDK class-name output events remain extractable."""
+
+    async def stream() -> object:
+        for event in events:
+            yield event
+
+    assert await extract_response_text(stream()) == "summary"
