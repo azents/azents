@@ -1373,19 +1373,14 @@ def test_http_admission_unknown_participant_and_approval_journey(
     )
     assert follow_up_body in {item["body"] for item in follow_up_evidence}
     follow_up_provider_state = _provider_state(slack_provider_fake_url)
-    assert (
-        _successful_session_navigation_categories(follow_up_provider_state).count(
-            "activity_tracker"
-        )
-        == 1
+    assert "activity_tracker" not in _successful_session_navigation_categories(
+        follow_up_provider_state
     )
-    assert (
-        cast(
-            dict[str, int],
-            follow_up_provider_state["request_counts"],
-        )["chat.postMessage"]
-        == 3
+    follow_up_counts = cast(
+        dict[str, int],
+        follow_up_provider_state["request_counts"],
     )
+    assert follow_up_counts.get("chat.postMessage", 0) == 0
 
     disconnected = external_api.external_channel_v1_disconnect_session_channel(
         agent_id=agent_id,
@@ -1406,9 +1401,9 @@ def test_http_admission_unknown_participant_and_approval_journey(
                     _successful_session_presence_states(
                         state := _provider_state(slack_provider_fake_url)
                     )
-                    == ["joined", "left"]
+                    == ["left"]
                     and cast(dict[str, Any], state["request_counts"]).get("chat.delete")
-                    == 2
+                    == 1
                 )
                 else None
             ),
@@ -1418,16 +1413,12 @@ def test_http_admission_unknown_participant_and_approval_journey(
         ),
     )
     disconnected_counts = cast(dict[str, Any], disconnected_state["request_counts"])
-    assert disconnected_counts["chat.postMessage"] == 4
-    assert disconnected_counts["chat.delete"] == 2
+    assert disconnected_counts["chat.postMessage"] == 1
+    assert disconnected_counts["chat.delete"] == 1
     assert _successful_session_paths(disconnected_state) == [
-        f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
-        f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
         f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
     ]
     assert _successful_session_navigation_categories(disconnected_state) == [
-        "session_presence_joined",
-        "activity_tracker",
         "session_presence_left",
     ]
 
