@@ -20,6 +20,7 @@ from azents.core.enums import (
     RuntimeDesiredState,
     RuntimeLifecycleCommandType,
     RuntimeProviderConnectionState,
+    RuntimeProviderObservedState,
 )
 from azents.core.runtime_profile import (
     RuntimeConfigurationApplicationImpact,
@@ -129,13 +130,12 @@ class RuntimeLifecycleReconciler:
             if await self._dispatch_runtime(runtime):
                 dispatched += 1
         lifecycle_runtime_ids = {runtime.id for runtime in runtimes}
-        configuration_runtime_ids: set[str] = set()
+        configuration_runtime_ids = {runtime.id for runtime in configuration_runtimes}
         for runtime in configuration_runtimes:
             if runtime.id in lifecycle_runtime_ids:
                 continue
             if await self._dispatch_configuration_adoption(runtime):
                 dispatched += 1
-                configuration_runtime_ids.add(runtime.id)
         for runtime in reconcile_runtimes:
             if (
                 runtime.id in lifecycle_runtime_ids
@@ -178,6 +178,14 @@ class RuntimeLifecycleReconciler:
         )
 
     async def _dispatch_periodic_reconcile(self, runtime: AgentRuntime) -> bool:
+        if (
+            runtime.desired_state is RuntimeDesiredState.RUNNING
+            and runtime.provider_observed_state is RuntimeProviderObservedState.RUNNING
+            and runtime.applied_runtime_configuration_revision_id is not None
+            and runtime.desired_runtime_configuration_revision_id
+            != runtime.applied_runtime_configuration_revision_id
+        ):
+            return False
         async with self._session_manager() as session:
             await self._runtime_repository.mark_provider_observe_requested(
                 session,
@@ -185,14 +193,7 @@ class RuntimeLifecycleReconciler:
             )
         command_type = (
             RuntimeProviderCommandType.START
-            if (
-                runtime.desired_state is RuntimeDesiredState.RUNNING
-                and (
-                    runtime.applied_runtime_configuration_revision_id is None
-                    or runtime.desired_runtime_configuration_revision_id
-                    == runtime.applied_runtime_configuration_revision_id
-                )
-            )
+            if runtime.desired_state is RuntimeDesiredState.RUNNING
             else RuntimeProviderCommandType.OBSERVE
         )
         return await self._dispatch_runtime_command(

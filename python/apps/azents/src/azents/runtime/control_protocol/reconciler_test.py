@@ -194,7 +194,6 @@ async def test_reconciler_dispatches_periodic_provider_start_for_running_runtime
                 provider_observe_requested_at=old_observe_at,
             )
         )
-
     store = InMemoryRuntimeCoordinationStore()
     control_protocol = RuntimeControlProtocolService(
         store,
@@ -245,6 +244,153 @@ async def test_reconciler_dispatches_periodic_provider_start_for_running_runtime
     assert "control_token" not in auth
     assert updated is not None
     assert updated.provider_observe_requested_at is not None
+
+
+async def test_reconciler_fences_adoption_then_finishes_restart_replacement(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Configuration adoption and restart convergence never compete."""
+    runtime_repository = AgentRuntimeRepository()
+    async with rdb_session_manager() as session:
+        workspace_id = await _create_workspace(session, "reconciler-restart-ws")
+        agent_id = await _create_agent(
+            session,
+            workspace_id,
+            "reconciler-restart-agent",
+        )
+        runtime = await runtime_repository.ensure_for_agent(session, agent_id)
+        await _bind_runtime_provider(session, runtime.id)
+        initial = await runtime_repository.set_desired_state(
+            session,
+            runtime.id,
+            RuntimeLifecycleCommandType.START,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert initial is not None
+        initial_revision = await _attach_runtime_configuration(
+            session,
+            runtime_id=runtime.id,
+            target_desired_generation=initial.desired_generation,
+        )
+        await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(applied_runtime_configuration_revision_id=initial_revision.id)
+        )
+        restart = await runtime_repository.set_desired_state_if_ready(
+            session,
+            runtime.id,
+            RuntimeLifecycleCommandType.RESTART,
+            RuntimeDesiredState.RUNNING,
+            expected_configuration_revision_id=initial_revision.id,
+        )
+        assert restart is not None
+        desired_revision_id = restart.runtime.desired_runtime_configuration_revision_id
+        assert desired_revision_id is not None
+        await session.execute(
+            sa.update(RDBRuntimeConfigurationRevision)
+            .where(RDBRuntimeConfigurationRevision.id == desired_revision_id)
+            .values(
+                provider_reported_digest="d" * 64,
+                provider_acknowledged_at=datetime.datetime.now(datetime.UTC),
+            )
+        )
+        dispatched = await runtime_repository.mark_lifecycle_dispatched(
+            session,
+            runtime.id,
+            restart.desired_generation,
+        )
+        assert dispatched is not None
+        running = await runtime_repository.record_provider_observed_state(
+            session,
+            runtime.id,
+            RuntimeProviderObservedState.RUNNING,
+            1,
+            restart.desired_generation,
+        )
+        assert running is not None
+        old_observe_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
+            minutes=10
+        )
+        await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(
+                provider_observed_at=old_observe_at,
+                provider_observe_requested_at=old_observe_at,
+            )
+        )
+
+    store = InMemoryRuntimeCoordinationStore()
+    control_protocol = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: "request-restart-replacement",
+    )
+    accepted = await control_protocol.register_provider(
+        _provider_registration(),
+        registered_at=datetime.datetime.now(datetime.UTC),
+    )
+    reconciler = RuntimeLifecycleReconciler(
+        runtime_repository=runtime_repository,
+        profile_repository=RuntimeProfileRepository(),
+        session_manager=rdb_session_manager,
+        coordination_store=store,
+        control_protocol=control_protocol,
+        config=RuntimeLifecycleDispatchConfig(
+            runner_image="runner:test",
+            runner_control_endpoint="runtime-control:9090",
+            runner_transfer_endpoint="runtime-transfer:9091",
+            runner_credential_identifier=_runner_credential_verifier(),
+            runner_control_tls_ca_pem=None,
+            allow_insecure_runner_control=True,
+            observe_interval=datetime.timedelta(minutes=1),
+        ),
+    )
+
+    guarded = await reconciler._dispatch_periodic_reconcile(running)
+    fenced = await reconciler.reconcile_once(limit=10)
+    competing = await control_protocol.claim_next_provider_request(
+        provider_id="provider-1",
+        generation=accepted.generation,
+        consumer_id="provider-worker",
+        block_ms=0,
+    )
+    async with rdb_session_manager() as session:
+        observed = await runtime_repository.record_provider_observed_state(
+            session,
+            runtime.id,
+            RuntimeProviderObservedState.STARTING,
+            1,
+            restart.desired_generation,
+        )
+        assert observed is not None
+        await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(
+                provider_observed_at=old_observe_at,
+                provider_observe_requested_at=old_observe_at,
+            )
+        )
+
+    reconciled = await reconciler.reconcile_once(limit=10)
+    claimed = await control_protocol.claim_next_provider_request(
+        provider_id="provider-1",
+        generation=accepted.generation,
+        consumer_id="provider-worker",
+        block_ms=0,
+    )
+
+    assert not guarded
+    assert fenced == 0
+    assert competing is None
+    assert reconciled == 1
+    assert claimed is not None
+    assert claimed.operation_type == "provider.start"
+    assert claimed.payload["command_type"] == "start"
+    runtime_configuration = claimed.payload["runtime_configuration"]
+    assert isinstance(runtime_configuration, dict)
+    assert runtime_configuration["desired_generation"] == restart.desired_generation
 
 
 async def test_reconciler_rejects_mismatched_resolved_provider_reference(
