@@ -1264,8 +1264,8 @@ def _container_resources(
     if not requests and not limits:
         return None
     return ContainerResources(
-        requests=requests,
-        limits=limits,
+        requests=requests or None,
+        limits=limits or None,
         claims=None,
     )
 
@@ -1585,10 +1585,27 @@ def _container_resources_equal(
     if actual is None or expected is None:
         return actual is expected
     return (
-        _resource_quantity_maps_equal(actual.requests, expected.requests)
+        _resource_requests_equal(
+            actual=actual.requests,
+            expected=expected.requests,
+            expected_limits=expected.limits,
+        )
         and _resource_quantity_maps_equal(actual.limits, expected.limits)
         and tuple(actual.claims or ()) == tuple(expected.claims or ())
     )
+
+
+def _resource_requests_equal(
+    *,
+    actual: Mapping[str, KubernetesResourceQuantity] | None,
+    expected: Mapping[str, KubernetesResourceQuantity] | None,
+    expected_limits: Mapping[str, KubernetesResourceQuantity] | None,
+) -> bool:
+    if expected is not None:
+        return _resource_quantity_maps_equal(actual, expected)
+    if actual is None or not actual:
+        return True
+    return _resource_quantity_maps_equal(actual, expected_limits)
 
 
 def _resource_quantity_maps_equal(

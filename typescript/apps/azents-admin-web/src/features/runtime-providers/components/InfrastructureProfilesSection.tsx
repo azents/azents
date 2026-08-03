@@ -22,7 +22,15 @@ import {
   TextInput,
 } from "@mantine/core";
 import { useForm } from "@mantine/form";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import {
+  baseResourceValue,
+  byteUnits,
+  cpuUnits,
+  resourceUnitByValue,
+  resourceUnitForValue,
+  resourceUnitValue,
+} from "../resourceUnits";
 import type { InfrastructureProfilesSectionProps } from "../containers/InfrastructureProfilesSectionContainer";
 import type { InfrastructureProfileKind } from "../runtimeProviderPresentation";
 import type {
@@ -58,6 +66,24 @@ interface InfrastructureProfileFormValues {
   dockerMemoryReservation: number | null;
   dockerMemoryLimit: number | null;
   dockerNetworkName: string;
+}
+
+interface InfrastructureProfileFormUnits {
+  runnerCpuRequest: string;
+  runnerCpuLimit: string;
+  runnerMemoryRequest: string;
+  runnerMemoryLimit: string;
+  storageRequestBytes: string;
+  dindCpuRequest: string;
+  dindCpuLimit: string;
+  dindMemoryRequest: string;
+  dindMemoryLimit: string;
+  dockerStorageBytes: string;
+  sharedTemporaryStorageBytes: string;
+  dockerCpuReservation: string;
+  dockerCpuLimit: string;
+  dockerMemoryReservation: string;
+  dockerMemoryLimit: string;
 }
 
 const gibibyte = 1024 * 1024 * 1024;
@@ -123,6 +149,55 @@ function blankValues(): InfrastructureProfileFormValues {
     dockerMemoryReservation: null,
     dockerMemoryLimit: null,
     dockerNetworkName: "",
+  };
+}
+
+function resourceUnitsForValues(
+  values: InfrastructureProfileFormValues,
+): InfrastructureProfileFormUnits {
+  return {
+    runnerCpuRequest: resourceUnitForValue(values.runnerCpuRequest, cpuUnits),
+    runnerCpuLimit: resourceUnitForValue(values.runnerCpuLimit, cpuUnits),
+    runnerMemoryRequest: resourceUnitForValue(
+      values.runnerMemoryRequest,
+      byteUnits,
+    ),
+    runnerMemoryLimit: resourceUnitForValue(
+      values.runnerMemoryLimit,
+      byteUnits,
+    ),
+    storageRequestBytes: resourceUnitForValue(
+      values.storageRequestBytes,
+      byteUnits,
+    ),
+    dindCpuRequest: resourceUnitForValue(values.dindCpuRequest, cpuUnits),
+    dindCpuLimit: resourceUnitForValue(values.dindCpuLimit, cpuUnits),
+    dindMemoryRequest: resourceUnitForValue(
+      values.dindMemoryRequest,
+      byteUnits,
+    ),
+    dindMemoryLimit: resourceUnitForValue(values.dindMemoryLimit, byteUnits),
+    dockerStorageBytes: resourceUnitForValue(
+      values.dockerStorageBytes,
+      byteUnits,
+    ),
+    sharedTemporaryStorageBytes: resourceUnitForValue(
+      values.sharedTemporaryStorageBytes,
+      byteUnits,
+    ),
+    dockerCpuReservation: resourceUnitForValue(
+      values.dockerCpuReservation,
+      cpuUnits,
+    ),
+    dockerCpuLimit: resourceUnitForValue(values.dockerCpuLimit, cpuUnits),
+    dockerMemoryReservation: resourceUnitForValue(
+      values.dockerMemoryReservation,
+      byteUnits,
+    ),
+    dockerMemoryLimit: resourceUnitForValue(
+      values.dockerMemoryLimit,
+      byteUnits,
+    ),
   };
 }
 
@@ -289,16 +364,103 @@ function buildSpec(
   };
 }
 
+function QuantityInput({
+  label,
+  value,
+  unit,
+  units,
+  minBaseValue,
+  allowDecimal,
+  decimalScale,
+  step,
+  onChange,
+  onUnitChange,
+}: {
+  label: string;
+  value: number | null;
+  unit: string;
+  units: readonly {
+    value: string;
+    label: string;
+    multiplier: number;
+  }[];
+  minBaseValue: number;
+  allowDecimal: boolean;
+  decimalScale?: number;
+  step: number;
+  onChange: (value: number | null) => void;
+  onUnitChange: (unit: string) => void;
+}): React.ReactElement {
+  const selectedUnit = resourceUnitByValue(unit, units);
+  if (selectedUnit === null) {
+    throw new Error("The selected resource unit must be configured.");
+  }
+  const acceptsDecimal = allowDecimal && selectedUnit.multiplier > 1;
+
+  return (
+    <Group align="flex-end" gap="xs" wrap="nowrap">
+      <NumberInput
+        label={label}
+        value={resourceUnitValue(value, selectedUnit) ?? ""}
+        min={0}
+        allowDecimal={acceptsDecimal}
+        decimalScale={acceptsDecimal ? decimalScale : 0}
+        step={step}
+        style={{ flex: 1 }}
+        onChange={(nextValue) => {
+          if (nextValue === "") {
+            onChange(null);
+            return;
+          }
+          if (typeof nextValue !== "number") {
+            return;
+          }
+
+          const nextBaseValue = baseResourceValue(nextValue, selectedUnit);
+          onChange(
+            nextBaseValue !== null && nextBaseValue >= minBaseValue
+              ? nextBaseValue
+              : null,
+          );
+        }}
+      />
+      <Select
+        label="Unit"
+        data={units.map((item) => ({
+          value: item.value,
+          label: item.label,
+        }))}
+        value={unit}
+        allowDeselect={false}
+        w={rem(140)}
+        onChange={(nextUnit) => {
+          const configuredUnit = resourceUnitByValue(nextUnit, units);
+          if (configuredUnit !== null) {
+            onUnitChange(configuredUnit.value);
+          }
+        }}
+      />
+    </Group>
+  );
+}
+
 function ResourceFields({
   prefix,
   values,
+  units,
   onChange,
+  onUnitChange,
 }: {
   prefix: "runner" | "dind";
   values: InfrastructureProfileFormValues;
+  units: InfrastructureProfileFormUnits;
   onChange: (
     field: keyof InfrastructureProfileFormValues,
     value: number | null,
+  ) => void;
+  onUnitChange: (
+    field: keyof InfrastructureProfileFormUnits,
+    unit: string,
   ) => void;
 }): React.ReactElement {
   const cpuRequest =
@@ -314,51 +476,79 @@ function ResourceFields({
     dind: keyof InfrastructureProfileFormValues,
   ): keyof InfrastructureProfileFormValues =>
     prefix === "runner" ? runner : dind;
+  const unitField = (
+    runner: keyof InfrastructureProfileFormUnits,
+    dind: keyof InfrastructureProfileFormUnits,
+  ): keyof InfrastructureProfileFormUnits =>
+    prefix === "runner" ? runner : dind;
 
   return (
     <SimpleGrid cols={{ base: 1, sm: 2 }}>
-      <NumberInput
-        label="CPU request (millicores)"
-        value={cpuRequest ?? ""}
-        min={0}
+      <QuantityInput
+        label="CPU request"
+        value={cpuRequest}
+        unit={units[unitField("runnerCpuRequest", "dindCpuRequest")]}
+        units={cpuUnits}
+        minBaseValue={0}
+        allowDecimal
+        decimalScale={3}
+        step={0.1}
         onChange={(value) =>
-          onChange(
-            field("runnerCpuRequest", "dindCpuRequest"),
-            typeof value === "number" ? value : null,
+          onChange(field("runnerCpuRequest", "dindCpuRequest"), value)
+        }
+        onUnitChange={(unit) =>
+          onUnitChange(unitField("runnerCpuRequest", "dindCpuRequest"), unit)
+        }
+      />
+      <QuantityInput
+        label="CPU limit"
+        value={cpuLimit}
+        unit={units[unitField("runnerCpuLimit", "dindCpuLimit")]}
+        units={cpuUnits}
+        minBaseValue={0}
+        allowDecimal
+        decimalScale={3}
+        step={0.1}
+        onChange={(value) =>
+          onChange(field("runnerCpuLimit", "dindCpuLimit"), value)
+        }
+        onUnitChange={(unit) =>
+          onUnitChange(unitField("runnerCpuLimit", "dindCpuLimit"), unit)
+        }
+      />
+      <QuantityInput
+        label="Memory request"
+        value={memoryRequest}
+        unit={units[unitField("runnerMemoryRequest", "dindMemoryRequest")]}
+        units={byteUnits}
+        minBaseValue={0}
+        allowDecimal
+        decimalScale={10}
+        step={1}
+        onChange={(value) =>
+          onChange(field("runnerMemoryRequest", "dindMemoryRequest"), value)
+        }
+        onUnitChange={(unit) =>
+          onUnitChange(
+            unitField("runnerMemoryRequest", "dindMemoryRequest"),
+            unit,
           )
         }
       />
-      <NumberInput
-        label="CPU limit (millicores)"
-        value={cpuLimit ?? ""}
-        min={0}
+      <QuantityInput
+        label="Memory limit"
+        value={memoryLimit}
+        unit={units[unitField("runnerMemoryLimit", "dindMemoryLimit")]}
+        units={byteUnits}
+        minBaseValue={0}
+        allowDecimal
+        decimalScale={10}
+        step={1}
         onChange={(value) =>
-          onChange(
-            field("runnerCpuLimit", "dindCpuLimit"),
-            typeof value === "number" ? value : null,
-          )
+          onChange(field("runnerMemoryLimit", "dindMemoryLimit"), value)
         }
-      />
-      <NumberInput
-        label="Memory request (bytes)"
-        value={memoryRequest ?? ""}
-        min={0}
-        onChange={(value) =>
-          onChange(
-            field("runnerMemoryRequest", "dindMemoryRequest"),
-            typeof value === "number" ? value : null,
-          )
-        }
-      />
-      <NumberInput
-        label="Memory limit (bytes)"
-        value={memoryLimit ?? ""}
-        min={0}
-        onChange={(value) =>
-          onChange(
-            field("runnerMemoryLimit", "dindMemoryLimit"),
-            typeof value === "number" ? value : null,
-          )
+        onUnitChange={(unit) =>
+          onUnitChange(unitField("runnerMemoryLimit", "dindMemoryLimit"), unit)
         }
       />
     </SimpleGrid>
@@ -399,13 +589,17 @@ function InfrastructureProfileEditor({
           : null,
     },
   });
+  const [units, setUnits] = useState<InfrastructureProfileFormUnits>(() =>
+    resourceUnitsForValues(blankValues()),
+  );
 
   useEffect(() => {
-    form.setValues(
+    const nextValues =
       editorState.type === "EDIT"
         ? valuesFromProfile(editorState.profile)
-        : blankValues(),
-    );
+        : blankValues();
+    form.setValues(nextValues);
+    setUnits(resourceUnitsForValues(nextValues));
     form.resetDirty();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset when the selected editor target changes.
   }, [editorState]);
@@ -415,6 +609,12 @@ function InfrastructureProfileEditor({
     value: number | null,
   ): void => {
     form.setFieldValue(field, value);
+  };
+  const setUnit = (
+    field: keyof InfrastructureProfileFormUnits,
+    unit: string,
+  ): void => {
+    setUnits((currentUnits) => ({ ...currentUnits, [field]: unit }));
   };
 
   return (
@@ -467,7 +667,9 @@ function InfrastructureProfileEditor({
               <ResourceFields
                 prefix="runner"
                 values={form.values}
+                units={units}
                 onChange={setNumber}
+                onUnitChange={setUnit}
               />
               <Divider label="Workspace volume" />
               <SimpleGrid cols={{ base: 1, sm: 2 }}>
@@ -477,16 +679,19 @@ function InfrastructureProfileEditor({
                   key={form.key("storageClassName")}
                   {...form.getInputProps("storageClassName")}
                 />
-                <NumberInput
-                  label="Storage request (bytes)"
-                  min={1}
+                <QuantityInput
+                  label="Storage request"
                   value={form.values.storageRequestBytes}
+                  unit={units.storageRequestBytes}
+                  units={byteUnits}
+                  minBaseValue={1}
+                  allowDecimal
+                  decimalScale={10}
+                  step={1}
                   onChange={(value) =>
-                    form.setFieldValue(
-                      "storageRequestBytes",
-                      typeof value === "number" ? value : 1,
-                    )
+                    form.setFieldValue("storageRequestBytes", value ?? 1)
                   }
+                  onUnitChange={(unit) => setUnit("storageRequestBytes", unit)}
                 />
               </SimpleGrid>
               <Divider label="Network and identity" />
@@ -537,29 +742,44 @@ function InfrastructureProfileEditor({
                   <ResourceFields
                     prefix="dind"
                     values={form.values}
+                    units={units}
                     onChange={setNumber}
+                    onUnitChange={setUnit}
                   />
                   <SimpleGrid cols={{ base: 1, sm: 2 }}>
-                    <NumberInput
-                      label="Docker storage (bytes)"
-                      min={1}
+                    <QuantityInput
+                      label="Docker storage"
                       value={form.values.dockerStorageBytes}
+                      unit={units.dockerStorageBytes}
+                      units={byteUnits}
+                      minBaseValue={1}
+                      allowDecimal
+                      decimalScale={10}
+                      step={1}
                       onChange={(value) =>
-                        form.setFieldValue(
-                          "dockerStorageBytes",
-                          typeof value === "number" ? value : 1,
-                        )
+                        form.setFieldValue("dockerStorageBytes", value ?? 1)
+                      }
+                      onUnitChange={(unit) =>
+                        setUnit("dockerStorageBytes", unit)
                       }
                     />
-                    <NumberInput
-                      label="Shared temporary storage (bytes)"
-                      min={1}
+                    <QuantityInput
+                      label="Shared temporary storage"
                       value={form.values.sharedTemporaryStorageBytes}
+                      unit={units.sharedTemporaryStorageBytes}
+                      units={byteUnits}
+                      minBaseValue={1}
+                      allowDecimal
+                      decimalScale={10}
+                      step={1}
                       onChange={(value) =>
                         form.setFieldValue(
                           "sharedTemporaryStorageBytes",
-                          typeof value === "number" ? value : 1,
+                          value ?? 1,
                         )
+                      }
+                      onUnitChange={(unit) =>
+                        setUnit("sharedTemporaryStorageBytes", unit)
                       }
                     />
                   </SimpleGrid>
@@ -570,49 +790,57 @@ function InfrastructureProfileEditor({
             <>
               <Divider label="Container resources" />
               <SimpleGrid cols={{ base: 1, sm: 2 }}>
-                <NumberInput
-                  label="CPU reservation (millicores)"
-                  value={form.values.dockerCpuReservation ?? ""}
-                  min={0}
+                <QuantityInput
+                  label="CPU reservation"
+                  value={form.values.dockerCpuReservation}
+                  unit={units.dockerCpuReservation}
+                  units={cpuUnits}
+                  minBaseValue={0}
+                  allowDecimal
+                  decimalScale={3}
+                  step={0.1}
+                  onChange={(value) => setNumber("dockerCpuReservation", value)}
+                  onUnitChange={(unit) => setUnit("dockerCpuReservation", unit)}
+                />
+                <QuantityInput
+                  label="CPU limit"
+                  value={form.values.dockerCpuLimit}
+                  unit={units.dockerCpuLimit}
+                  units={cpuUnits}
+                  minBaseValue={0}
+                  allowDecimal
+                  decimalScale={3}
+                  step={0.1}
+                  onChange={(value) => setNumber("dockerCpuLimit", value)}
+                  onUnitChange={(unit) => setUnit("dockerCpuLimit", unit)}
+                />
+                <QuantityInput
+                  label="Memory reservation"
+                  value={form.values.dockerMemoryReservation}
+                  unit={units.dockerMemoryReservation}
+                  units={byteUnits}
+                  minBaseValue={0}
+                  allowDecimal
+                  decimalScale={10}
+                  step={1}
                   onChange={(value) =>
-                    setNumber(
-                      "dockerCpuReservation",
-                      typeof value === "number" ? value : null,
-                    )
+                    setNumber("dockerMemoryReservation", value)
+                  }
+                  onUnitChange={(unit) =>
+                    setUnit("dockerMemoryReservation", unit)
                   }
                 />
-                <NumberInput
-                  label="CPU limit (millicores)"
-                  value={form.values.dockerCpuLimit ?? ""}
-                  min={0}
-                  onChange={(value) =>
-                    setNumber(
-                      "dockerCpuLimit",
-                      typeof value === "number" ? value : null,
-                    )
-                  }
-                />
-                <NumberInput
-                  label="Memory reservation (bytes)"
-                  value={form.values.dockerMemoryReservation ?? ""}
-                  min={0}
-                  onChange={(value) =>
-                    setNumber(
-                      "dockerMemoryReservation",
-                      typeof value === "number" ? value : null,
-                    )
-                  }
-                />
-                <NumberInput
-                  label="Memory limit (bytes)"
-                  value={form.values.dockerMemoryLimit ?? ""}
-                  min={0}
-                  onChange={(value) =>
-                    setNumber(
-                      "dockerMemoryLimit",
-                      typeof value === "number" ? value : null,
-                    )
-                  }
+                <QuantityInput
+                  label="Memory limit"
+                  value={form.values.dockerMemoryLimit}
+                  unit={units.dockerMemoryLimit}
+                  units={byteUnits}
+                  minBaseValue={0}
+                  allowDecimal
+                  decimalScale={10}
+                  step={1}
+                  onChange={(value) => setNumber("dockerMemoryLimit", value)}
+                  onUnitChange={(unit) => setUnit("dockerMemoryLimit", unit)}
                 />
               </SimpleGrid>
               <TextInput

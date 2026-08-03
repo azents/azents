@@ -450,6 +450,77 @@ async def test_start_uses_profile_runner_resources() -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_preserves_absent_requests_when_limits_are_configured() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+
+    await provider.start(
+        _command(
+            RuntimeLifecycleCommandType.START,
+            runtime_configuration=_runtime_configuration(
+                docker_enabled=True,
+                runner_cpu_request_millicores=None,
+                runner_memory_request_bytes=None,
+            ),
+        )
+    )
+
+    pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
+    runner, engine = pod.spec.containers
+    assert runner.resources == ContainerResources(
+        requests=None,
+        limits={"cpu": "1500m", "memory": "2147483648"},
+        claims=None,
+    )
+    assert engine.resources == ContainerResources(
+        requests=None,
+        limits={"cpu": "1", "memory": "2147483648"},
+        claims=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_start_reuses_pod_with_kubernetes_defaulted_absent_requests() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    configuration = _runtime_configuration(
+        runner_cpu_request_millicores=None,
+        runner_memory_request_bytes=None,
+    )
+    command = _command(
+        RuntimeLifecycleCommandType.START,
+        runtime_configuration=configuration,
+    )
+
+    await provider.start(command)
+
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pod = api.pods[pod_key]
+    runner = pod.spec.containers[0]
+    assert runner.resources is not None
+    assert runner.resources.limits is not None
+    api.pods[pod_key] = dataclasses.replace(
+        pod,
+        spec=dataclasses.replace(
+            pod.spec,
+            containers=(
+                dataclasses.replace(
+                    runner,
+                    resources=dataclasses.replace(
+                        runner.resources,
+                        requests=runner.resources.limits,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    await provider.start(command)
+
+    assert api.deleted_pods == []
+
+
+@pytest.mark.asyncio
 async def test_start_reuses_pod_with_kubernetes_default_tolerations() -> None:
     """Admission-added tolerations do not make an existing Runtime Pod stale."""
     api = FakeKubernetesApi()
@@ -1712,6 +1783,10 @@ def _runtime_configuration(
     omit_runner_resources: bool = False,
     configured_scheduling: bool = False,
     isolated_scheduling: bool = False,
+    runner_cpu_request_millicores: int | None = 500,
+    runner_cpu_limit_millicores: int | None = 1500,
+    runner_memory_request_bytes: int | None = 1_073_741_824,
+    runner_memory_limit_bytes: int | None = 2_147_483_648,
     cpu_request_millicores: int | None = None,
     cpu_limit_millicores: int = 1000,
     memory_request_bytes: int | None = None,
@@ -1737,10 +1812,18 @@ def _runtime_configuration(
         "contract_family": "kubernetes.pod-profile",
         "schema_version": 1,
         "runner_resources": {
-            "cpu_request_millicores": None if omit_runner_resources else 500,
-            "cpu_limit_millicores": None if omit_runner_resources else 1500,
-            "memory_request_bytes": (None if omit_runner_resources else 1_073_741_824),
-            "memory_limit_bytes": (None if omit_runner_resources else 2_147_483_648),
+            "cpu_request_millicores": (
+                None if omit_runner_resources else runner_cpu_request_millicores
+            ),
+            "cpu_limit_millicores": (
+                None if omit_runner_resources else runner_cpu_limit_millicores
+            ),
+            "memory_request_bytes": (
+                None if omit_runner_resources else runner_memory_request_bytes
+            ),
+            "memory_limit_bytes": (
+                None if omit_runner_resources else runner_memory_limit_bytes
+            ),
         },
         "workspace_volume": {
             "storage_class_name": "gp3",
