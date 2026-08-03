@@ -132,10 +132,10 @@ def test_pod_manifest_preserves_generic_resource_requirements() -> None:
     }
 
 
-def test_pod_manifest_omits_absent_resource_requests() -> None:
+def test_pod_manifest_preserves_zero_resource_requests() -> None:
     pod = _pod(
         resources=ContainerResources(
-            requests=None,
+            requests={"cpu": "0", "memory": "0"},
             limits={"cpu": "1", "memory": "2Gi"},
             claims=None,
         )
@@ -144,6 +144,7 @@ def test_pod_manifest_omits_absent_resource_requests() -> None:
     manifest = pod_manifest(pod)
 
     assert manifest["spec"]["containers"][0]["resources"] == {
+        "requests": {"cpu": "0", "memory": "0"},
         "limits": {"cpu": "1", "memory": "2Gi"},
     }
 

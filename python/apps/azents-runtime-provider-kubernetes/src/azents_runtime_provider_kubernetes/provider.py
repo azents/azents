@@ -1253,9 +1253,11 @@ def _immutable_image_reference(value: str, name: str) -> str:
 def _container_resources(
     resources: ResolvedKubernetesContainerResources,
 ) -> ContainerResources | None:
-    requests = _kubernetes_resource_values(
-        cpu_millicores=resources.cpu_request_millicores,
-        memory_bytes=resources.memory_request_bytes,
+    requests = _kubernetes_resource_requests(
+        cpu_request_millicores=resources.cpu_request_millicores,
+        cpu_limit_millicores=resources.cpu_limit_millicores,
+        memory_request_bytes=resources.memory_request_bytes,
+        memory_limit_bytes=resources.memory_limit_bytes,
     )
     limits = _kubernetes_resource_values(
         cpu_millicores=resources.cpu_limit_millicores,
@@ -1268,6 +1270,24 @@ def _container_resources(
         limits=limits or None,
         claims=None,
     )
+
+
+def _kubernetes_resource_requests(
+    *,
+    cpu_request_millicores: int | None,
+    cpu_limit_millicores: int | None,
+    memory_request_bytes: int | None,
+    memory_limit_bytes: int | None,
+) -> dict[str, str]:
+    requests = _kubernetes_resource_values(
+        cpu_millicores=cpu_request_millicores,
+        memory_bytes=memory_request_bytes,
+    )
+    if cpu_request_millicores is None and cpu_limit_millicores is not None:
+        requests["cpu"] = "0"
+    if memory_request_bytes is None and memory_limit_bytes is not None:
+        requests["memory"] = "0"
+    return requests
 
 
 def _kubernetes_resource_values(
@@ -1585,27 +1605,10 @@ def _container_resources_equal(
     if actual is None or expected is None:
         return actual is expected
     return (
-        _resource_requests_equal(
-            actual=actual.requests,
-            expected=expected.requests,
-            expected_limits=expected.limits,
-        )
+        _resource_quantity_maps_equal(actual.requests, expected.requests)
         and _resource_quantity_maps_equal(actual.limits, expected.limits)
         and tuple(actual.claims or ()) == tuple(expected.claims or ())
     )
-
-
-def _resource_requests_equal(
-    *,
-    actual: Mapping[str, KubernetesResourceQuantity] | None,
-    expected: Mapping[str, KubernetesResourceQuantity] | None,
-    expected_limits: Mapping[str, KubernetesResourceQuantity] | None,
-) -> bool:
-    if expected is not None:
-        return _resource_quantity_maps_equal(actual, expected)
-    if actual is None or not actual:
-        return True
-    return _resource_quantity_maps_equal(actual, expected_limits)
 
 
 def _resource_quantity_maps_equal(

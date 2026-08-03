@@ -450,7 +450,7 @@ async def test_start_uses_profile_runner_resources() -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_preserves_absent_requests_when_limits_are_configured() -> None:
+async def test_start_renders_zero_requests_when_only_limits_are_configured() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
 
@@ -468,19 +468,19 @@ async def test_start_preserves_absent_requests_when_limits_are_configured() -> N
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
     runner, engine = pod.spec.containers
     assert runner.resources == ContainerResources(
-        requests=None,
+        requests={"cpu": "0", "memory": "0"},
         limits={"cpu": "1500m", "memory": "2147483648"},
         claims=None,
     )
     assert engine.resources == ContainerResources(
-        requests=None,
+        requests={"cpu": "0", "memory": "0"},
         limits={"cpu": "1", "memory": "2147483648"},
         claims=None,
     )
 
 
 @pytest.mark.asyncio
-async def test_start_reuses_pod_with_kubernetes_defaulted_absent_requests() -> None:
+async def test_start_replaces_pod_with_requests_defaulted_to_limits() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
     configuration = _runtime_configuration(
@@ -517,7 +517,10 @@ async def test_start_reuses_pod_with_kubernetes_defaulted_absent_requests() -> N
 
     await provider.start(command)
 
-    assert api.deleted_pods == []
+    assert api.deleted_pods == ["azents-runtime-runtime-1"]
+    replaced = api.pods[pod_key].spec.containers[0]
+    assert replaced.resources is not None
+    assert replaced.resources.requests == {"cpu": "0", "memory": "0"}
 
 
 @pytest.mark.asyncio
