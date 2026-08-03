@@ -11,6 +11,7 @@ from azents.core.slack_external_channel_progress import (
     SLACK_FALLBACK_TEXT_MAX_LENGTH,
     render_slack_persisted_progress,
     render_slack_progress,
+    render_slack_session_navigation_actions,
     render_slack_session_presence,
 )
 
@@ -246,4 +247,21 @@ def test_session_presence_contains_copy_and_navigation() -> None:
     assert left.blocks[0]["text"] == {
         "type": "mrkdwn",
         "text": "*Research Agent* left this conversation.",
+    }
+
+
+def test_session_navigation_actions_use_the_canonical_tracker_control() -> None:
+    assert render_slack_session_navigation_actions(_SESSION_URL) == {
+        "type": "actions",
+        "elements": [
+            {
+                "type": "button",
+                "action_id": "view_azents_session",
+                "text": {
+                    "type": "plain_text",
+                    "text": "View session",
+                },
+                "url": _SESSION_URL,
+            }
+        ],
     }

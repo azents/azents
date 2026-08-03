@@ -450,6 +450,46 @@ def _successful_session_paths(provider_state: dict[str, object]) -> list[str]:
     return paths
 
 
+def _successful_session_navigation_categories(
+    provider_state: dict[str, object],
+) -> list[str]:
+    """Return sanitized categories for successful Session navigation controls."""
+    deliveries = provider_state.get("deliveries")
+    if not isinstance(deliveries, list):
+        return []
+    categories: list[str] = []
+    for raw_delivery in cast(list[object], deliveries):
+        if not isinstance(raw_delivery, dict):
+            continue
+        delivery = cast(dict[str, object], raw_delivery)
+        category = delivery.get("safe_category")
+        if (
+            delivery.get("outcome") in {"delivered", "created", "duplicate"}
+            and isinstance(delivery.get("session_path"), str)
+            and isinstance(category, str)
+        ):
+            categories.append(category)
+    return categories
+
+
+def _completed_session_navigation_state(
+    provider_state: dict[str, object],
+    expected_session_path: str,
+) -> dict[str, object] | None:
+    """Return state after joined presence and Tracker navigation both arrive."""
+    if _successful_session_paths(provider_state) != [
+        expected_session_path,
+        expected_session_path,
+    ]:
+        return None
+    if _successful_session_navigation_categories(provider_state) != [
+        "session_presence_joined",
+        "activity_tracker",
+    ]:
+        return None
+    return provider_state
+
+
 def _successful_session_presence_states(
     provider_state: dict[str, object],
 ) -> list[str]:
@@ -1241,6 +1281,11 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert typed_counts["chat.delete"] == 1
     assert _successful_session_paths(provider_state) == [
         f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
+        f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
+    ]
+    assert _successful_session_navigation_categories(provider_state) == [
+        "session_presence_joined",
+        "activity_tracker",
     ]
     assert _successful_session_presence_states(provider_state) == ["joined"]
     deliveries = cast(list[dict[str, object]], provider_state["deliveries"])
@@ -1292,6 +1337,12 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert _successful_session_paths(disconnected_state) == [
         f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
         f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
+        f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
+    ]
+    assert _successful_session_navigation_categories(disconnected_state) == [
+        "session_presence_joined",
+        "activity_tracker",
+        "session_presence_left",
     ]
 
     revocation_body = json.dumps(
@@ -2790,12 +2841,26 @@ def test_provider_native_channel_work_progress_journey(
         "Pending: Summarize the incident"
     )
     blocks = cast(list[dict[str, object]], plan_delivery["blocks"])
-    assert len(blocks) == 1
+    assert len(blocks) == 2
     assert plan_delivery["text"] == expected_fallback
+    assert plan_delivery["safe_category"] == "activity_tracker"
+    assert plan_delivery["session_path"] == (
+        f"/w/{handle}/agents/{agent_id}/sessions/{session_id}"
+    )
     plan = blocks[0]
     assert plan["type"] == "plan"
     assert plan["title"] == "Investigating error logs…"
     assert "plan_id" not in plan
+    actions = blocks[1]
+    assert actions["type"] == "actions"
+    action_elements = cast(list[dict[str, object]], actions["elements"])
+    assert len(action_elements) == 1
+    assert action_elements[0]["type"] == "button"
+    assert action_elements[0]["action_id"] == "view_azents_session"
+    assert action_elements[0]["text"] == {
+        "type": "plain_text",
+        "text": "View session",
+    }
     tasks = cast(list[dict[str, object]], plan["tasks"])
     assert [task["task_id"] for task in tasks] == [
         "inspect",
@@ -4682,19 +4747,16 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         state = cast(
             dict[str, object],
             wait_until(
-                lambda: (
-                    provider_state
-                    if expected_session_path
-                    in _successful_session_paths(
-                        provider_state := _discord_provider_state(
-                            discord_provider_fake_url
-                        )
-                    )
-                    else None
+                lambda: _completed_session_navigation_state(
+                    _discord_provider_state(discord_provider_fake_url),
+                    expected_session_path,
                 ),
                 timeout=30,
                 interval=0.2,
-                message="Discord joined-presence provider control was not delivered",
+                message=(
+                    "Discord joined-presence and Activity Tracker controls were not "
+                    "delivered"
+                ),
             ),
         )
 
@@ -4743,7 +4805,14 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     assert generated_detail.id == session.id
     assert generated_detail.title
     assert generated_detail.title_source is AgentSessionTitleSource.AUTO_GENERATED
-    assert _successful_session_paths(state) == [expected_session_path]
+    assert _successful_session_paths(state) == [
+        expected_session_path,
+        expected_session_path,
+    ]
+    assert _successful_session_navigation_categories(state) == [
+        "session_presence_joined",
+        "activity_tracker",
+    ]
     assert _successful_session_presence_states(state) == ["joined"]
     request_counts = cast(dict[str, int], state["request_counts"])
     assert request_counts["create_thread"] >= 1
@@ -4803,6 +4872,12 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     assert _successful_session_paths(terminal_state) == [
         expected_session_path,
         expected_session_path,
+        expected_session_path,
+    ]
+    assert _successful_session_navigation_categories(terminal_state) == [
+        "session_presence_joined",
+        "activity_tracker",
+        "session_presence_left",
     ]
     assert _DISCORD_BOT_TOKEN not in str(terminal_state)
 
@@ -5161,20 +5236,26 @@ def test_discord_message_command_selector_and_component_journey(
     activation_state = cast(
         dict[str, object],
         wait_until(
-            lambda: (
-                provider_state
-                if expected_session_path
-                in _successful_session_paths(
-                    provider_state := _discord_provider_state(discord_provider_fake_url)
-                )
-                else None
+            lambda: _completed_session_navigation_state(
+                _discord_provider_state(discord_provider_fake_url),
+                expected_session_path,
             ),
             timeout=15,
             interval=0.2,
-            message="Discord HTTP selector replay did not deliver joined presence",
+            message=(
+                "Discord HTTP selector replay did not deliver joined presence and "
+                "Activity Tracker controls"
+            ),
         ),
     )
-    assert _successful_session_paths(activation_state) == [expected_session_path]
+    assert _successful_session_paths(activation_state) == [
+        expected_session_path,
+        expected_session_path,
+    ]
+    assert _successful_session_navigation_categories(activation_state) == [
+        "session_presence_joined",
+        "activity_tracker",
+    ]
     assert _successful_session_presence_states(activation_state) == ["joined"]
     assert source_content not in rendered
     assert _DISCORD_BOT_TOKEN not in rendered

@@ -34,6 +34,7 @@ from azents.core.external_channel_session_presence import (
 )
 from azents.core.slack_external_channel_progress import (
     render_slack_binding_settings_on_demand,
+    render_slack_session_navigation_actions,
     render_slack_session_presence,
     render_slack_setup_required,
 )
@@ -66,6 +67,7 @@ from azents.services.external_channel.discord_delivery import (
 )
 from azents.services.external_channel.discord_presentation import (
     render_discord_binding_settings_on_demand,
+    render_discord_session_navigation_components,
     render_discord_session_presence,
     render_discord_setup_required,
 )
@@ -684,6 +686,16 @@ class ExternalChannelActionService:
                 embeds = _discord_embeds(payload.get("embeds"))
                 if payload.get("embeds") is not None and embeds is None:
                     return _discord_invalid_payload()
+                if target.operation is ExternalChannelDeliveryOperation.PROGRESS_CREATE:
+                    context = _session_navigation_context(
+                        target,
+                        web_url=self.config.web_url,
+                    )
+                    if context is None or components is not None:
+                        return _discord_invalid_payload()
+                    components = render_discord_session_navigation_components(
+                        context.session_url
+                    )
                 if files:
                     if components is not None or embeds is not None:
                         return _discord_invalid_payload()
@@ -766,11 +778,20 @@ class ExternalChannelActionService:
             case ExternalChannelDeliveryOperation.PROGRESS_UPDATE:
                 text = payload.get("text")
                 embeds = _discord_embeds(payload.get("embeds"))
+                context = _session_navigation_context(
+                    target,
+                    web_url=self.config.web_url,
+                )
                 message_id = _discord_provider_message_id(
                     payload.get("provider_message_key"),
                     guild_id=guild_id,
                 )
-                if not isinstance(text, str) or embeds is None or message_id is None:
+                if (
+                    not isinstance(text, str)
+                    or embeds is None
+                    or context is None
+                    or message_id is None
+                ):
                     return _discord_invalid_payload()
                 return await self.discord_client.update_message(
                     bot_token=bot_token,
@@ -778,6 +799,9 @@ class ExternalChannelActionService:
                     channel_id=delivery_channel_id,
                     message_id=message_id,
                     content=_discord_agent_content(target, text),
+                    components=render_discord_session_navigation_components(
+                        context.session_url
+                    ),
                     embeds=embeds,
                 )
             case ExternalChannelDeliveryOperation.PROGRESS_DELETE:
@@ -880,8 +904,15 @@ class ExternalChannelActionService:
             case ExternalChannelDeliveryOperation.PROGRESS_CREATE:
                 text = payload.get("text")
                 blocks = _blocks(payload.get("blocks"))
-                if not isinstance(text, str) or blocks is None:
+                context = _session_navigation_context(
+                    target,
+                    web_url=self.config.web_url,
+                )
+                if not isinstance(text, str) or blocks is None or context is None:
                     return _invalid_payload()
+                blocks.append(
+                    render_slack_session_navigation_actions(context.session_url)
+                )
                 return await self.slack_client.post_blocks(
                     bot_token=bot_token,
                     tenant_id=tenant_id,
@@ -894,9 +925,21 @@ class ExternalChannelActionService:
             case ExternalChannelDeliveryOperation.PROGRESS_UPDATE:
                 text = payload.get("text")
                 blocks = _blocks(payload.get("blocks"))
+                context = _session_navigation_context(
+                    target,
+                    web_url=self.config.web_url,
+                )
                 message_ts = _provider_message_ts(payload.get("provider_message_key"))
-                if not isinstance(text, str) or blocks is None or message_ts is None:
+                if (
+                    not isinstance(text, str)
+                    or blocks is None
+                    or context is None
+                    or message_ts is None
+                ):
                     return _invalid_payload()
+                blocks.append(
+                    render_slack_session_navigation_actions(context.session_url)
+                )
                 return await self.slack_client.update_message(
                     bot_token=bot_token,
                     tenant_id=tenant_id,

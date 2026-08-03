@@ -66,14 +66,7 @@ def render_discord_session_presence(
     )
     verb = "joined" if state == "joined" else "left"
     description = f"**{escaped_name}** {verb} this conversation."
-    components: list[dict[str, object]] = [
-        {
-            "type": 2,
-            "style": 5,
-            "label": "View session",
-            "url": session_url,
-        }
-    ]
+    components: list[dict[str, object]] = [_session_navigation_button(session_url)]
     if state == "joined" and settings_custom_id is not None:
         components.append(
             {
@@ -100,6 +93,28 @@ def render_discord_session_presence(
             }
         ],
     )
+
+
+def render_discord_session_navigation_components(
+    session_url: str,
+) -> list[dict[str, object]]:
+    """Render one reusable Discord Session navigation action row."""
+    return [
+        {
+            "type": 1,
+            "components": [_session_navigation_button(session_url)],
+        }
+    ]
+
+
+def _session_navigation_button(session_url: str) -> dict[str, object]:
+    """Render the canonical Discord Session navigation button."""
+    return {
+        "type": 2,
+        "style": 5,
+        "label": "View session",
+        "url": session_url,
+    }
 
 
 def render_discord_setup_required(

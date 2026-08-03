@@ -9,6 +9,7 @@ from azents.repos.external_channel.work_data import ChannelWorkTask
 from azents.services.external_channel.discord_presentation import (
     DISCORD_DELIVERY_TEXT_LIMIT,
     render_discord_progress,
+    render_discord_session_navigation_components,
     render_discord_session_presence,
     split_discord_markdown,
 )
@@ -61,6 +62,24 @@ def test_session_presence_uses_titleless_embed_navigation_and_settings() -> None
         }
     ]
     assert left.components == [
+        {
+            "type": 1,
+            "components": [
+                {
+                    "type": 2,
+                    "style": 5,
+                    "label": "View session",
+                    "url": "https://azents.example/session",
+                }
+            ],
+        }
+    ]
+
+
+def test_session_navigation_components_use_the_canonical_tracker_control() -> None:
+    assert render_discord_session_navigation_components(
+        "https://azents.example/session"
+    ) == [
         {
             "type": 1,
             "components": [

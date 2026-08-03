@@ -74,6 +74,10 @@ class TerminalRunFinalizationCoordinator:
                 run_id=run_id,
                 disposition=TerminalDeliveryDisposition.INELIGIBLE,
             )
+        user_stop_requested = await self.agent_session_repository.has_stop_request(
+            session,
+            candidate.session_id,
+        )
         source = await self.agent_session_repository.get_session_agent_by_session_id(
             session,
             candidate.session_id,
@@ -98,6 +102,18 @@ class TerminalRunFinalizationCoordinator:
                 run_id=run_id,
                 disposition=TerminalDeliveryDisposition.INELIGIBLE,
             )
+        if user_stop_requested and run.status is AgentRunStatus.INTERRUPTED:
+            stopped = await self.agent_run_repository.mark_stopped_for_user_stop(
+                session,
+                run_id,
+                ended_at=datetime.datetime.now(datetime.UTC),
+            )
+            if stopped is None:
+                return TerminalFinalizationOutcome(
+                    run_id=run_id,
+                    disposition=TerminalDeliveryDisposition.INELIGIBLE,
+                )
+            run = stopped
         if run.parent_result_delivery_state is not None:
             return TerminalFinalizationOutcome(
                 run_id=run_id,

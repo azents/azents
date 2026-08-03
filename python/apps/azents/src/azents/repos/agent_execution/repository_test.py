@@ -1560,6 +1560,87 @@ class TestEventExecutionRepositories:
         assert after_fallback is not None
         assert after_fallback.status == AgentRunStatus.INTERRUPTED
 
+    async def test_mark_stopped_for_user_stop_converges_interrupted_run(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """User Stop wins when engine interruption reaches the Run row first."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = AgentRunRepository()
+        run = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=event_session.id,
+                parent_agent_run_id=None,
+            ),
+        )
+        await repo.mark_terminal(
+            rdb_session,
+            run.id,
+            AgentRunStatus.INTERRUPTED,
+            ended_at=datetime.datetime.now(datetime.UTC),
+            terminal_result_event_id="11111111111111111111111111111111",
+            terminal_result_message="partial output",
+        )
+
+        stopped = await repo.mark_stopped_for_user_stop(
+            rdb_session,
+            run.id,
+            ended_at=datetime.datetime.now(datetime.UTC),
+        )
+
+        assert stopped is not None
+        assert stopped.status == AgentRunStatus.STOPPED
+        assert stopped.terminal_result_event_id is None
+        assert stopped.terminal_result_message is None
+
+    async def test_mark_stopped_for_user_stop_preserves_other_terminal_run(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """User Stop convergence does not replace a completed Run outcome."""
+        workspace_id, agent_id, __runtime_id = await _create_agent_runtime(rdb_session)
+        event_session = await _agent_session_repository().create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        repo = AgentRunRepository()
+        run = await repo.create(
+            rdb_session,
+            AgentRunCreate(
+                session_id=event_session.id,
+                parent_agent_run_id=None,
+            ),
+        )
+        completed = await repo.mark_terminal(
+            rdb_session,
+            run.id,
+            AgentRunStatus.COMPLETED,
+            ended_at=datetime.datetime.now(datetime.UTC),
+            terminal_result_event_id="22222222222222222222222222222222",
+            terminal_result_message="completed output",
+        )
+
+        after_stop = await repo.mark_stopped_for_user_stop(
+            rdb_session,
+            run.id,
+            ended_at=datetime.datetime.now(datetime.UTC),
+        )
+
+        assert after_stop == completed
+
     async def test_terminal_transition_records_and_idempotently_acknowledges_unread_run(
         self,
         rdb_session: AsyncSession,

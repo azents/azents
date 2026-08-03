@@ -105,17 +105,7 @@ def render_slack_session_presence(
         agent_name.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     )
     verb = "joined" if state == "joined" else "left"
-    elements: list[dict[str, object]] = [
-        {
-            "type": "button",
-            "action_id": "view_azents_session",
-            "text": {
-                "type": "plain_text",
-                "text": "View session",
-            },
-            "url": session_url,
-        }
-    ]
+    elements: list[dict[str, object]] = [_session_navigation_button(session_url)]
     if settings_action_value is not None:
         elements.append(
             {
@@ -144,6 +134,29 @@ def render_slack_session_presence(
             },
         ],
     )
+
+
+def render_slack_session_navigation_actions(
+    session_url: str,
+) -> dict[str, object]:
+    """Render one reusable Slack Session navigation action row."""
+    return {
+        "type": "actions",
+        "elements": [_session_navigation_button(session_url)],
+    }
+
+
+def _session_navigation_button(session_url: str) -> dict[str, object]:
+    """Render the canonical Slack Session navigation button."""
+    return {
+        "type": "button",
+        "action_id": "view_azents_session",
+        "text": {
+            "type": "plain_text",
+            "text": "View session",
+        },
+        "url": session_url,
+    }
 
 
 def render_slack_setup_required(

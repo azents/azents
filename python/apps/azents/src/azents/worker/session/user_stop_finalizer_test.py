@@ -149,6 +149,20 @@ class _AgentRunRepository:
         self.terminal_runs.append((run_id, status))
         return object()
 
+    async def mark_stopped_for_user_stop(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        *,
+        ended_at: datetime,
+    ) -> object:
+        """Record User Stop terminal convergence."""
+        del session, ended_at
+        if self.fail_terminal:
+            raise RuntimeError("terminal persistence unavailable")
+        self.terminal_runs.append((run_id, AgentRunStatus.STOPPED))
+        return object()
+
 
 class _EventTranscriptRepository:
     """EventTranscriptRepository test double."""
@@ -278,6 +292,27 @@ class _SessionLifecycle:
             cast(AsyncSession, object()),
             run_id,
             status,
+            ended_at=datetime.now(UTC),
+        )
+
+    async def mark_agent_run_stopped_for_user_stop(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+        run_id: str,
+    ) -> None:
+        """Delegate User Stop convergence through the lifecycle boundary."""
+        self._assert_owner_generation(owner_generation)
+        run = await self.run_repository.get_by_id(
+            cast(AsyncSession, object()),
+            run_id,
+        )
+        if run is not None and run.session_id != session_id:
+            raise ValueError("AgentRun session mismatch")
+        await self.run_repository.mark_stopped_for_user_stop(
+            cast(AsyncSession, object()),
+            run_id,
             ended_at=datetime.now(UTC),
         )
 

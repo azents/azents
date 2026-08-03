@@ -107,11 +107,10 @@ class UserStopFinalizer:
                     transitioned_run_id
                 )
         else:
-            await self._mark_agent_run_terminal_if_running(
+            await self._mark_agent_run_stopped_for_user_stop(
                 session_id,
                 owner_generation=owner_generation,
                 run_id=effective_run_id,
-                status=AgentRunStatus.STOPPED,
             )
             await self.session_lifecycle.notify_parent_result_activity(effective_run_id)
             durable_events = await self._append_user_stop_events(
@@ -144,11 +143,10 @@ class UserStopFinalizer:
         run_id: str,
     ) -> None:
         """Record and publish durable User stop history after terminal state."""
-        await self._mark_agent_run_terminal_if_running(
+        await self._mark_agent_run_stopped_for_user_stop(
             session_id,
             owner_generation=owner_generation,
             run_id=run_id,
-            status=AgentRunStatus.STOPPED,
         )
         durable_events = await self._append_user_stop_events(
             session_id,
@@ -390,20 +388,18 @@ class UserStopFinalizer:
             status=status,
         )
 
-    async def _mark_agent_run_terminal_if_running(
+    async def _mark_agent_run_stopped_for_user_stop(
         self,
         session_id: str,
         *,
         owner_generation: int,
         run_id: str,
-        status: AgentRunStatus,
     ) -> None:
-        """Close one Run through the terminal coordinator."""
-        await self.session_lifecycle.mark_agent_run_terminal_if_running(
+        """Converge one Run through the User Stop terminal coordinator."""
+        await self.session_lifecycle.mark_agent_run_stopped_for_user_stop(
             session_id,
             owner_generation=owner_generation,
             run_id=run_id,
-            status=status,
         )
 
     async def _run_short_db(
