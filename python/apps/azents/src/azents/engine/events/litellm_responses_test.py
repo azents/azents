@@ -1114,6 +1114,22 @@ class TestLiteLLMResponsesLowerer:
                 item.attrib["name"]: item.text for item in data.findall("item")
             } == expected_data
 
+    def test_compaction_reminder_resumes_from_current_execution_stage(self) -> None:
+        """Compaction reminder combines current signals into the next action."""
+        root = ElementTree.fromstring(
+            format_compaction_summary_reminder("## Active Objective\n- Ship it")
+        )
+
+        instruction = root.findtext("instruction")
+        assert instruction is not None
+        assert "latest user messages" in instruction
+        assert "Goal Snapshot" in instruction
+        assert "repository and tool observations" in instruction
+        assert "Todo Snapshot" in instruction
+        assert "synthesized previous state" in instruction
+        assert "furthest completed and verified progress" in instruction
+        assert "execute the next unfinished action" in instruction
+
     def test_lowers_plain_system_reminder_with_hyphenated_envelope(self) -> None:
         """Lower a plain system reminder to the model-facing envelope."""
         lowerer = LiteLLMResponsesLowerer(provider="openai", model="gpt-5.1")

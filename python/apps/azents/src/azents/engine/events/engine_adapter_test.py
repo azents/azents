@@ -2208,10 +2208,12 @@ async def test_manual_compact_runs_append_only_event_compactor() -> None:
     assert transcript_repo.head_event_id == "1" * 32
     assert compactor.reason == "manual_command"
     assert compactor.summary == "summary::[User]: old request"
-    assert "durable handoff checkpoint" in captured_prompts["system_prompt"]
-    assert "Do not answer the user" in captured_prompts["system_prompt"]
-    assert "## Relevant Files and Symbols" in captured_prompts["user_prompt"]
-    assert "existing checkpoints" in captured_prompts["user_prompt"]
+    assert "execution-ready handoff checkpoint" in captured_prompts["system_prompt"]
+    assert "This is an internal handoff" in captured_prompts["system_prompt"]
+    assert "## Relevant Files and Identifiers" in captured_prompts["user_prompt"]
+    assert (
+        "existing checkpoint as the previous state" in captured_prompts["user_prompt"]
+    )
     assert (await store.load("agent-1", "session-1")).tool_names == []
 
 

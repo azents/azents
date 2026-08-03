@@ -18,8 +18,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_session.py
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
-last_verified_at: 2026-07-22
-spec_version: 31
+last_verified_at: 2026-08-03
+spec_version: 32
 ---
 
 # Context Compaction
@@ -93,12 +93,12 @@ The runtime char guard allows a 10% tolerance over `limit_chars`. It computes
 runtime performs a simple deterministic truncate and appends `[Truncated by Azents compaction guard.]`.
 The runtime does not perform section-aware truncation or retry-based re-summarization.
 
-The summary prompt asks for a Codex-like durable handoff checkpoint, not a narrative conversation
-summary. It requires structured sections for goal, durable instructions, current state, completed
-work, pending work, decisions, relevant files/symbols, verification, external references, and notes
-for the next agent. The prompt also tells the model not to answer the user, not to continue the task,
-not to fill the budget unnecessarily, not to invent details, and to mark uncertain items as
-`Needs verification`.
+The summary prompt asks for an execution-ready handoff checkpoint. It applies the transcript
+chronologically as task-state transitions, identifies the active objective and current execution
+state, preserves the furthest verified progress, and produces ordered next actions. Its structured
+sections cover the active objective, current execution state, completed work, next actions, active
+constraints and decisions, relevant files and identifiers, verification, and references. It uses
+`Needs verification` only for uncertainty that materially affects a next action.
 
 Auto and manual compaction include the full selected transcript in the summary request. The summary
 prompt asks for durable state from the whole compacted transcript and warns that no raw event should
@@ -106,9 +106,10 @@ be assumed to remain available outside the checkpoint. After the model returns t
 runtime renders bounded continuity history separately, dispatches compaction summary enrichment hooks,
 and then appends the continuity history to the stored summary content.
 
-Previous compaction summaries are rendered as existing checkpoints and are integrated into one updated
-checkpoint. The prompt tells the model not to copy previous checkpoints verbatim, to drop obsolete
-details unless needed to continue, and to prefer the latest transcript evidence on conflict.
+Previous compaction summaries are rendered as existing checkpoints and treated as the previous state
+to update. Later user direction updates the active objective, completed actions update the execution
+state, and later tool or repository observations update earlier assumptions. Replaced approaches
+remain only when they explain an active constraint or prevent duplicated investigation.
 
 Manual compaction uses the same prompt, budget policy, continuity event policy, and summary
 enrichment pipeline as automatic compaction. Manual compaction runs inside a `RunContext`, dispatches
@@ -154,6 +155,12 @@ Todo Toolkit uses this hook to append a readable `Todo Snapshot` section when th
 non-empty; it does not render a Todo section for empty state. Goal Toolkit uses the same hook to
 append a readable `Goal Snapshot` section when the session Goal is unfinished and non-empty; it does
 not render a Goal section for empty or completed state.
+
+When the completed summary is lowered for the next model turn, its compaction reminder directs the
+agent to combine the latest user messages and Goal Snapshot into the current objective, and current
+repository/tool observations, recent tool results, and Todo Snapshot into the execution stage. The
+agent starts from the furthest completed and verified progress and continues with the next unfinished
+action.
 
 ## Continuity Events
 

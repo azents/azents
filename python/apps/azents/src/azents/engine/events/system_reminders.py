@@ -22,11 +22,13 @@ class SystemReminderDataItem(NamedTuple):
 
 
 _COMPACTION_SUMMARY_REMINDER = (
-    "Another agent started this task and produced a summary of its work. You also "
-    "have access to the current tool and repository state. Use this to build on "
-    "the work that has already been done and avoid duplicating work. Here is the "
-    "summary produced by the other agent; use the information in this summary to "
-    "assist with your own analysis:"
+    "Continue the active work from this compaction handoff. Use the latest user "
+    "messages and any Goal Snapshot to identify the current objective. Use current "
+    "repository and tool observations, recent tool results, and any Todo Snapshot "
+    "to locate the execution stage. Treat the generated checkpoint as synthesized "
+    "previous state and update it with those current signals. Start from the "
+    "furthest completed and verified progress, then execute the next unfinished "
+    "action:"
 )
 _USER_INTERRUPTED_REMINDER = "The previous assistant run was interrupted by the user."
 

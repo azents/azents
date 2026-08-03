@@ -73,11 +73,13 @@ from azents.engine.events.protocols import (
     ReasoningDeltaProjection,
 )
 from azents.engine.events.responses_continuation import ResponsesContinuationPlanner
+from azents.engine.events.system_reminders import format_compaction_summary_reminder
 from azents.engine.events.types import (
     AgentMessagePayload,
     AssistantMessagePayload,
     ClientToolCallPayload,
     ClientToolResultPayload,
+    CompactionSummaryPayload,
     Event,
     ExternalChannelMessagePayload,
     FileOutputPart,
@@ -395,6 +397,36 @@ def test_openai_lowerer_omits_endpoint_credentials_and_store() -> None:
     assert "base_url" not in request.options
     assert request.options.get("instructions") == "You are a helpful assistant."
     assert request.options.get("prompt_cache_key") != "session-1"
+
+
+def test_openai_lowerer_resumes_from_compaction_handoff() -> None:
+    """Official SDK lowering uses the shared compaction continuation reminder."""
+    lowerer = OpenAIResponsesLowerer(
+        provider="openai",
+        model="gpt-5.1-codex",
+        provider_id=LLMProvider.OPENAI,
+        credential_kwargs={},
+    )
+    content = "## Active Objective\n- Ship the validated change"
+    event = Event(
+        id="2" * 32,
+        session_id="session-1",
+        kind=EventKind.COMPACTION_SUMMARY,
+        payload=CompactionSummaryPayload(
+            compaction_id="compaction-1",
+            content=content,
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
+
+    request = lowerer.lower([event], model="gpt-5.1-codex")
+
+    assert request.input == [
+        {
+            "role": "user",
+            "content": format_compaction_summary_reminder(content),
+        }
+    ]
 
 
 def test_openai_lowerer_renders_agent_result_terminal_envelope() -> None:

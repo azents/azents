@@ -29,17 +29,17 @@ _SEMANTIC_CROSS_NATIVE_RESPONSE = "PROVIDER_SEMANTIC_CROSS_NATIVE_COMPLETED"
 _SEMANTIC_POST_COMPACTION_RESPONSE = "PROVIDER_SEMANTIC_POST_COMPACTION_COMPLETED"
 _SEMANTIC_ITEM_ID = "search_provider_semantic"
 _COMPACTION_SYSTEM_PREFIX = (
-    "You are a context compaction engine for a long-running coding agent."
+    "You are a context compaction engine for a long-running agent."
 )
-_COMPACTION_SUMMARY = f"""## Goal
+_COMPACTION_SUMMARY = f"""## Active Objective
 Preserve provider-hosted tool semantics across compaction.
 
-## Current State
+## Current Execution State
 - Web search query: {_SEMANTIC_QUERY}
 - Source: {_SEMANTIC_SOURCE_URL}
 - Assistant answer: {_SEMANTIC_RESPONSE}
 
-## Pending Work
+## Next Actions
 - Continue the deterministic provider semantic transcript verification.
 """
 _SEMANTIC_FOLLOW_UP_RESPONSES = {

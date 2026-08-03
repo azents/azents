@@ -31,7 +31,7 @@ _POST_COMPACTION_RESPONSE = "PROVIDER_SEMANTIC_POST_COMPACTION_COMPLETED"
 _NATIVE_ITEM_ID = "search_provider_semantic"
 _PROXY_JOURNAL_PATH = "/v1/_image_generation_requests"
 _COMPACTION_SYSTEM_PREFIX = (
-    "You are a context compaction engine for a long-running coding agent."
+    "You are a context compaction engine for a long-running agent."
 )
 
 
