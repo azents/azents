@@ -489,7 +489,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "systemMessage": "You are a context compaction engine for a long-running coding agent.",
+        "systemMessage": "You are a context compaction engine for a long-running agent.",
         "userMessage": "Event durable compact seed"
       },
       "response": {
@@ -2061,7 +2061,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "systemMessage": "You are a context compaction engine for a long-running coding agent.",
+        "systemMessage": "You are a context compaction engine for a long-running agent.",
         "userMessage": "Provider compaction failure seed",
         "sequenceIndex": 0
       },
@@ -2077,7 +2077,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "systemMessage": "You are a context compaction engine for a long-running coding agent.",
+        "systemMessage": "You are a context compaction engine for a long-running agent.",
         "userMessage": "Provider compaction failure seed",
         "sequenceIndex": 1
       },
@@ -2093,7 +2093,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "systemMessage": "You are a context compaction engine for a long-running coding agent.",
+        "systemMessage": "You are a context compaction engine for a long-running agent.",
         "userMessage": "Provider compaction failure seed",
         "sequenceIndex": 2
       },
@@ -2109,7 +2109,7 @@
     {
       "match": {
         "endpoint": "chat",
-        "systemMessage": "You are a context compaction engine for a long-running coding agent.",
+        "systemMessage": "You are a context compaction engine for a long-running agent.",
         "userMessage": "Provider compaction failure seed",
         "sequenceIndex": 3
       },
