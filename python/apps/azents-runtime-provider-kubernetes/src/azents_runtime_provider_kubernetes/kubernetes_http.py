@@ -127,7 +127,7 @@ class KubernetesHttpApi(KubernetesApi):
         return None if data is None else pod_resource(data)
 
     async def apply_pod(self, pod: PodResource) -> None:
-        await self._create_or_patch(
+        await self._create_or_merge_patch(
             f"/api/v1/namespaces/{pod.metadata.namespace}/pods/{pod.metadata.name}",
             f"/api/v1/namespaces/{pod.metadata.namespace}/pods",
             pod_manifest(pod),
@@ -224,7 +224,7 @@ class KubernetesHttpApi(KubernetesApi):
         return None if data is None else _pvc_resource(data)
 
     async def apply_pvc(self, pvc: PersistentVolumeClaimResource) -> None:
-        await self._create_or_patch(
+        await self._create_or_merge_patch(
             (
                 f"/api/v1/namespaces/{pvc.metadata.namespace}"
                 f"/persistentvolumeclaims/{pvc.metadata.name}"
@@ -273,7 +273,7 @@ class KubernetesHttpApi(KubernetesApi):
     ) -> None:
         namespace = network_policy.metadata.namespace
         name = network_policy.metadata.name
-        await self._create_or_patch(
+        await self._create_or_replace(
             (
                 f"/apis/networking.k8s.io/v1/namespaces/{namespace}"
                 f"/networkpolicies/{name}"
@@ -301,7 +301,7 @@ class KubernetesHttpApi(KubernetesApi):
         return None if data is None else _lease_resource(data)
 
     async def apply_lease(self, lease: LeaseResource) -> None:
-        await self._create_or_patch(
+        await self._create_or_merge_patch(
             (
                 f"/apis/coordination.k8s.io/v1/namespaces/"
                 f"{lease.metadata.namespace}/leases/{lease.metadata.name}"
@@ -313,7 +313,7 @@ class KubernetesHttpApi(KubernetesApi):
             _lease_manifest(lease),
         )
 
-    async def _create_or_patch(
+    async def _create_or_merge_patch(
         self,
         resource_path: str,
         collection_path: str,
@@ -333,6 +333,33 @@ class KubernetesHttpApi(KubernetesApi):
             json=manifest,
             headers={"Content-Type": "application/merge-patch+json"},
         )
+
+    async def _create_or_replace(
+        self,
+        resource_path: str,
+        collection_path: str,
+        manifest: JsonObject,
+    ) -> None:
+        for attempt in range(2):
+            existing = await self._request_json(
+                "GET",
+                resource_path,
+                allow_not_found=True,
+            )
+            try:
+                if existing is None:
+                    await self._request_json("POST", collection_path, json=manifest)
+                else:
+                    await self._request_json(
+                        "PUT",
+                        resource_path,
+                        json=_replacement_manifest(manifest, existing),
+                    )
+                return
+            except KubernetesApiRequestError as error:
+                if error.status != 409 or attempt == 1:
+                    raise
+        raise AssertionError("Kubernetes resource replacement retry exhausted")
 
     async def _request_json(
         self,
@@ -402,6 +429,26 @@ def _metadata(metadata: ObjectMeta) -> JsonObject:
         "namespace": metadata.namespace,
         "labels": dict(metadata.labels),
         "annotations": dict(metadata.annotations),
+    }
+
+
+def _replacement_manifest(manifest: JsonObject, existing: JsonObject) -> JsonObject:
+    existing_metadata = existing.get("metadata")
+    if not isinstance(existing_metadata, dict):
+        raise RuntimeError("existing Kubernetes resource metadata is missing")
+    resource_version = existing_metadata.get("resourceVersion")
+    if not isinstance(resource_version, str) or not resource_version:
+        raise RuntimeError("existing Kubernetes resourceVersion is missing")
+
+    desired_metadata = manifest.get("metadata")
+    if not isinstance(desired_metadata, dict):
+        raise RuntimeError("desired Kubernetes resource metadata is missing")
+    return {
+        **manifest,
+        "metadata": {
+            **desired_metadata,
+            "resourceVersion": resource_version,
+        },
     }
 
 

@@ -24,7 +24,7 @@ from azents.engine.tools.kubernetes import (
     K8sExecInput,
     KubernetesToolkit,
     KubernetesToolkitProvider,
-    _MethodAwareWsApiClient,  # pyright: ignore[reportPrivateUsage] — test the transport workaround directly
+    _ConfiguredWsApiClient,  # pyright: ignore[reportPrivateUsage] — verify transport settings
     check_access,
     resolve_namespace,
 )
@@ -1167,23 +1167,23 @@ def _find_tool(tools: list[FunctionTool], name: str) -> FunctionTool:
 # ---------------------------------------------------------------------------
 
 
-class TestMethodAwareWsApiClient:
-    """Verify Kubernetes exec preserves transport and authentication settings."""
+class TestConfiguredWsApiClient:
+    """Verify Kubernetes exec uses GET with configured connection settings."""
 
     @pytest.mark.asyncio
-    async def test_request_preserves_post_method_and_proxy(self) -> None:
-        """POST exec uses a POST WebSocket handshake through the configured proxy."""
+    async def test_request_uses_get_handshake_and_preserves_proxy(self) -> None:
+        """WebSocket exec omits a method override and preserves proxy settings."""
         configuration = Configuration()
         configuration.host = "https://cluster.example.com"
         configuration.proxy = "http://proxy.example.com:8080"
         configuration.proxy_headers = {"X-Proxy-Header": "value"}
-        client = _MethodAwareWsApiClient(configuration=configuration)
+        client = _ConfiguredWsApiClient(configuration=configuration)
         websocket = MagicMock()
         client.rest_client.pool_manager.ws_connect = MagicMock(return_value=websocket)
 
         try:
             response = await client.request(
-                "POST",
+                "GET",
                 "https://cluster.example.com/api/v1/namespaces/default/"
                 "pods/example/exec",
                 query_params=[
@@ -1200,7 +1200,6 @@ class TestMethodAwareWsApiClient:
         client.rest_client.pool_manager.ws_connect.assert_called_once_with(
             "wss://cluster.example.com/api/v1/namespaces/default/"
             "pods/example/exec?command=sh&command=-c&command=id&stdout=True",
-            method="POST",
             headers={
                 "Authorization": "Bearer token",
                 "sec-websocket-protocol": "v4.channel.k8s.io",
@@ -1418,25 +1417,25 @@ class TestKubernetesToolHandlers:
         assert "log line 1" in result
 
     @pytest.mark.asyncio
-    async def test_k8s_exec_handler_uses_post_exec_subresource(
+    async def test_k8s_exec_handler_uses_get_exec_subresource(
         self,
         k8s_toolkit: KubernetesToolkit,
     ) -> None:
-        """k8s_exec uses POST because pods/exec RBAC grants create, not get."""
+        """k8s_exec uses the GET operation required for WebSocket upgrade."""
         context = _make_context()
         state = await k8s_toolkit.update_context(context)
         tool = _find_tool(state.tools, "k8s_exec")
         ws_client = MagicMock()
         ws_client.close = AsyncMock()
         core_v1 = MagicMock()
-        core_v1.connect_post_namespaced_pod_exec = AsyncMock(return_value="exec output")
-        core_v1.connect_get_namespaced_pod_exec = AsyncMock(
-            side_effect=AssertionError("GET exec must not be used"),
+        core_v1.connect_get_namespaced_pod_exec = AsyncMock(return_value="exec output")
+        core_v1.connect_post_namespaced_pod_exec = AsyncMock(
+            side_effect=AssertionError("POST exec must not be used"),
         )
 
         with (
             patch(
-                "azents.engine.tools.kubernetes._MethodAwareWsApiClient",
+                "azents.engine.tools.kubernetes._ConfiguredWsApiClient",
                 MagicMock(return_value=ws_client),
             ),
             patch(
@@ -1457,7 +1456,7 @@ class TestKubernetesToolHandlers:
             )
 
         assert result == "exec output"
-        core_v1.connect_post_namespaced_pod_exec.assert_awaited_once_with(
+        core_v1.connect_get_namespaced_pod_exec.assert_awaited_once_with(
             name="my-pod",
             namespace="default",
             command=["id"],
@@ -1467,7 +1466,7 @@ class TestKubernetesToolHandlers:
             tty=False,
             container="app",
         )
-        core_v1.connect_get_namespaced_pod_exec.assert_not_called()
+        core_v1.connect_post_namespaced_pod_exec.assert_not_called()
         ws_client.close.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -1482,7 +1481,7 @@ class TestKubernetesToolHandlers:
         ws_client = MagicMock()
         ws_client.close = AsyncMock()
         core_v1 = MagicMock()
-        core_v1.connect_post_namespaced_pod_exec = AsyncMock(
+        core_v1.connect_get_namespaced_pod_exec = AsyncMock(
             side_effect=aiohttp.WSServerHandshakeError(
                 MagicMock(),
                 (),
@@ -1493,7 +1492,7 @@ class TestKubernetesToolHandlers:
 
         with (
             patch(
-                "azents.engine.tools.kubernetes._MethodAwareWsApiClient",
+                "azents.engine.tools.kubernetes._ConfiguredWsApiClient",
                 MagicMock(return_value=ws_client),
             ),
             patch(
