@@ -104,38 +104,41 @@ class TestSummaryBudget:
 
 
 class TestSummaryPrompt:
-    def test_prompt_is_handoff_checkpoint_oriented(self) -> None:
-        """Compaction prompt requires handoff checkpoint."""
-        assert "durable handoff checkpoint" in SUMMARY_SYSTEM_PROMPT
-        assert "not a narrative conversation summary" in SUMMARY_SYSTEM_PROMPT
-        assert "Do not answer the user" in SUMMARY_SYSTEM_PROMPT
-        assert "Do not continue the task" in SUMMARY_SYSTEM_PROMPT
-        assert "Do not fill the budget unnecessarily" in SUMMARY_SYSTEM_PROMPT
-        assert "Needs verification" in SUMMARY_SYSTEM_PROMPT
-        assert "Do not include full logs" in SUMMARY_SYSTEM_PROMPT
+    def test_prompt_builds_execution_ready_current_state(self) -> None:
+        """Compaction prompt reconstructs an actionable current state."""
+        prompt = " ".join(SUMMARY_SYSTEM_PROMPT.split())
+
+        assert "execution-ready handoff checkpoint" in prompt
+        assert "applying the transcript chronologically" in prompt
+        assert "state transitions that update the working direction" in prompt
+        assert "most advanced validated state" in prompt
+        assert "furthest verified progress" in prompt
+        assert "order next actions by execution priority" in prompt
+        assert "Needs verification" in prompt
+        assert "Output only the checkpoint" in prompt
 
     def test_prompt_requires_checkpoint_sections(self) -> None:
         """Checkpoint prompt fixes sections required for handoff."""
+        template = " ".join(SUMMARY_USER_TEMPLATE.split())
+
         for section in [
-            "## Goal",
-            "## Durable Instructions",
-            "## Current State",
+            "## Active Objective",
+            "## Current Execution State",
             "## Completed Work",
-            "## Pending Work",
-            "## Decisions and Rationale",
-            "## Relevant Files and Symbols",
+            "## Next Actions",
+            "## Active Constraints and Decisions",
+            "## Relevant Files and Identifiers",
             "## Verification",
-            "## External References",
-            "## Notes for Next Agent",
+            "## References",
         ]:
             assert section in SUMMARY_USER_TEMPLATE
-        assert "existing checkpoints" in SUMMARY_USER_TEMPLATE
-        assert "Do not copy previous checkpoints verbatim" in SUMMARY_USER_TEMPLATE
-        assert "full compacted transcript" in SUMMARY_USER_TEMPLATE
-        assert (
-            "bounded recent user-message and transcript excerpts"
-            in SUMMARY_USER_TEMPLATE
-        )
+        assert "Process the transcript in chronological order" in template
+        assert "Later user direction updates the active objective" in template
+        assert "Completed actions update the execution state" in template
+        assert "previous state to update" in template
+        assert "furthest completed and verified progress" in template
+        assert "concrete, ordered" in template
+        assert "bounded recent user-message and transcript excerpts" in template
 
 
 class TestSummarizeTextWithModel:
