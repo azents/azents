@@ -35,7 +35,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-03
-spec_version: 33
+spec_version: 34
 ---
 
 # External Channel Delivery and Channel Work
@@ -62,6 +62,10 @@ A tool call must identify a binding owned by the current Agent and Session. The 
 - `continue`: optionally send one conversational reply, replace the current
   provider-neutral work title, and replace the ordered Channel Work task list.
 - `finish`: send one required final reply and finish Channel Work.
+
+Within one Run, `channel_action` rejects the same `(binding, mode)` when it
+completed in the immediately preceding model turn. Rejected and failed calls do
+not count, and the guard uses only process-local Toolkit state.
 
 Either mode may attach up to 20 absolute Runtime paths or authorized `exchange://`
 file-location URIs to its conversational reply. Relative paths, `artifact://`,
@@ -373,6 +377,8 @@ lifecycle transition and creates no recovery work.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 34) — Added the Run-local adjacent-turn verbosity
+  guard for repeated `channel_action` calls with the same binding and mode.
 - **2026-08-03** (spec_version 33) — Added canonical `View session` controls to
   initial and updated Slack and Discord Activity Trackers.
 - **2026-08-03** (spec_version 32) — Retained exact provisional-title evidence only
