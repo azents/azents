@@ -70,6 +70,8 @@ SKILL_TOOLKIT_STATE_NAME = "projection"
 SKILL_STATE_SCHEMA_VERSION = 1
 AGENT_WORKSPACE_ROOT = "/workspace/agent"
 AGENT_SKILL_ROOT = f"{AGENT_WORKSPACE_ROOT}/.azents/skills"
+AGENT_AGENTS_SKILL_ROOT = f"{AGENT_WORKSPACE_ROOT}/.agents/skills"
+AGENT_CLAUDE_SKILL_ROOT = f"{AGENT_WORKSPACE_ROOT}/.claude/skills"
 SKILL_MARKDOWN_FILENAME = "SKILL.md"
 _SKILL_READ_MAX_BYTES = 512 * 1024
 _RUNNER_FILE_OPERATION_TIMEOUT_SECONDS = 10
@@ -985,7 +987,19 @@ def _skill_source_roots(
             root_path=AGENT_SKILL_ROOT,
             source_label="Agent",
             relative_prefix=".azents/skills",
-        )
+        ),
+        SkillSourceRoot(
+            source_kind="agent",
+            root_path=AGENT_AGENTS_SKILL_ROOT,
+            source_label="Agent",
+            relative_prefix=".agents/skills",
+        ),
+        SkillSourceRoot(
+            source_kind="agent",
+            root_path=AGENT_CLAUDE_SKILL_ROOT,
+            source_label="Agent",
+            relative_prefix=".claude/skills",
+        ),
     ]
     for project in sorted(projects, key=lambda item: item.path):
         source_label = (
