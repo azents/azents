@@ -24,7 +24,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-08-03
-spec_version: 19
+spec_version: 20
 ---
 
 # E2E Primary Test Strategy
@@ -151,6 +151,16 @@ Always-on required CI does not depend on external credentials.
 - Web Surface E2E runs in a separate parallel lane with `uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src`.
 - Web Surface journeys use a pinned remote Chromium container. Web images are built from the tested worktree, and TLS gateways reproduce production secure-cookie and path-routing behavior without external credentials.
 - The stable `ci-python-e2e` required gate aggregates the deterministic, focused Runtime Provider, and Web Surface lane results for the scopes selected by path filtering.
+- Each executed required E2E lane uploads bounded observability artifacts even when
+  pytest fails. The artifact contains JUnit XML, the complete pytest output, the
+  slow-test report, and Docker process/storage diagnostics. Failed browser calls also
+  capture a screenshot and page HTML when the WebDriver remains available.
+- Same-repository pull requests receive one sticky E2E observability comment. The
+  comment is updated in place and contains only bounded JUnit-derived counts, failed
+  node IDs, slow-test timing, lane job results, and a link to the workflow artifacts.
+  Test execution jobs retain read-only permissions; only the dedicated comment job
+  receives `pull-requests: write`. Fork pull requests remain read-only and skip comment
+  publication.
 - Web Surface path filtering includes backend/E2E dependencies, both web Dockerfiles, and the TypeScript workspace.
 - testenv fixture/prerequisite unit, contract lint.
 
@@ -194,6 +204,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-08-03** — v20. Added required-lane JUnit, pytest output, slow-test,
+  Docker diagnostic, and browser failure artifacts plus the same-repository sticky PR
+  observability summary.
 - **2026-08-03** — v19. Updated Runtime Provider live evidence to verify the
   current Runner-reported Agent Workspace path rather than Provider metadata.
 - **2026-08-02** — v18. Added deterministic public-boundary verification for
