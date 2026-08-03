@@ -12,7 +12,6 @@ from azents.core.enums import (
     AgentSessionStatus,
     ExternalChannelAccessRequestStatus,
     ExternalChannelActionMode,
-    ExternalChannelConnectionStatus,
     ExternalChannelDeliveryOperation,
     ExternalChannelProvider,
     ExternalChannelResourceStatus,
@@ -126,8 +125,7 @@ class ExternalChannelWorkRepository:
         connection = await session.scalar(
             sa.select(RDBExternalChannelConnection).where(
                 RDBExternalChannelConnection.id == connection_id,
-                RDBExternalChannelConnection.status
-                == ExternalChannelConnectionStatus.ACTIVE,
+                RDBExternalChannelConnection.disconnected_at.is_(None),
             )
         )
         if connection is None:
@@ -797,12 +795,10 @@ class ExternalChannelWorkRepository:
         connection = await session.scalar(
             sa.select(RDBExternalChannelConnection).where(
                 RDBExternalChannelConnection.id == route.connection_id,
-                RDBExternalChannelConnection.status
-                == ExternalChannelConnectionStatus.ACTIVE,
             )
         )
         if connection is None:
-            raise ValueError("External Channel connection is not active.")
+            raise ValueError("External Channel connection is unavailable.")
         _validate_message_length(connection.provider, message)
         resource = await session.scalar(
             sa.select(RDBExternalChannelResource).where(
@@ -1130,8 +1126,6 @@ class ExternalChannelWorkRepository:
                     RDBExternalChannelResource.connection_id
                     == RDBExternalChannelConnection.id,
                     RDBExternalChannelConnection.id == target.connection_id,
-                    RDBExternalChannelConnection.status
-                    == ExternalChannelConnectionStatus.ACTIVE,
                     RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                     RDBAgent.lifecycle_status == AgentLifecycleStatus.ACTIVE,
                     RDBExternalChannelWork.binding_id == RDBExternalChannelBinding.id,
