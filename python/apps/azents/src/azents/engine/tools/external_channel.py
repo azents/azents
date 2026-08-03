@@ -1,9 +1,10 @@
 """Root-only External Channel Action toolkit."""
 
 import json
+from dataclasses import dataclass
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from azents.core.enums import (
     ExternalChannelActionMode,
@@ -31,12 +32,18 @@ from azents.core.tools import (
     TurnContext,
 )
 from azents.engine.hooks.types import (
+    AfterToolCallHookContext,
+    BeforeToolCallHookContext,
     CompactionSummaryHookContext,
     CompactionSummaryReplace,
     ExternalChannelSessionContinuationInput,
+    RunStartHookContext,
     RuntimeHooks,
     SessionIdleHookContext,
     SessionIdleResult,
+    ToolCallDeny,
+    TurnEndHookContext,
+    TurnStartHookContext,
 )
 from azents.engine.run.types import FunctionTool, FunctionToolError
 from azents.engine.tooling.execution_context import (
@@ -71,21 +78,29 @@ _STATIC_PROMPT = (
     "channel. Invoke `channel_action` before completing that request."
 )
 _CHANNEL_ACTION_DESCRIPTION = (
-    "Publish replies and progress to one active External Channel binding. Invoke "
-    "this tool only for the current External Channel turn or continuation, or when "
-    "an ordinary user explicitly requests external publication. An active binding "
-    "or prior External Channel history alone does not make the current ordinary "
-    "user input an External Channel request. Otherwise, answer the user normally "
-    "without invoking this tool. Use `finish` when the request can be answered "
-    "completely now. Use `continue` when additional work remains; it may send an "
-    "intermediate reply and replace the complete ordered Channel Work task list. "
-    "After the remaining work is complete, use `finish` with the final reply."
+    "Publish to an active External Channel binding. Use only for the current "
+    "External Channel turn or continuation, or when an ordinary user explicitly "
+    "requests external publication. An active binding or prior External Channel "
+    "history alone does not make ordinary input external; otherwise, answer the "
+    "user normally. Use `finish` for the final reply. Use `continue` while work "
+    "remains; it may send progress and replace the complete ordered Channel Work "
+    "task list. Then use `finish`."
 )
 _DOWNLOAD_EXTERNAL_FILE_DESCRIPTION = (
-    "Materialize one selected External Channel file into the Runtime. External "
-    "Channel file entries contain metadata and an opaque locator, not locally "
-    "readable file content."
+    "Materialize one External Channel file into the Runtime. File entries contain "
+    "metadata and an opaque locator, not local content."
 )
+_CONSECUTIVE_CHANNEL_ACTION_ERROR = (
+    "Blocked as too verbose: same binding and mode in consecutive turns."
+)
+
+
+@dataclass(frozen=True)
+class _ChannelActionTurnKey:
+    """One channel publication category tracked across adjacent model turns."""
+
+    binding: str
+    mode: ExternalChannelActionMode
 
 
 class ChannelActionSourceInput(BaseModel):
@@ -127,41 +142,34 @@ class ChannelActionInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     mode: Literal["finish", "continue"] = Field(
-        description=(
-            "Use finish for the final reply, or continue when additional work remains."
-        )
+        description="`finish`: final reply. `continue`: work remains."
     )
     binding: str = Field(
         min_length=1,
         max_length=80,
-        description=(
-            "Binding handle provided by the External Channel turn or continuation "
-            "context. Pass it unchanged."
-        ),
+        description="Binding handle from context. Pass it unchanged.",
     )
     message: str | None = Field(
         default=None,
         min_length=1,
         max_length=SLACK_MARKDOWN_TEXT_MAX_LENGTH,
-        description="Required for finish and whenever files are published.",
+        description="Required for `finish` and file publication.",
     )
     title: str | None = Field(
         default=None,
         min_length=1,
         max_length=MAX_EXTERNAL_CHANNEL_WORK_TITLE_LENGTH,
         description=(
-            "Concise concrete activity currently in progress. Follow the "
-            "participant's language, use progressive wording, and end with an "
-            "ellipsis, for example 'Investigating error logs…' or "
-            "'마케팅 자료 조사하는중…'."
+            "Current activity in the participant's language; use progressive "
+            "wording ending in an ellipsis."
         ),
     )
     todo_update: list[ChannelActionTaskInput] | None = Field(
         default=None,
         max_length=MAX_EXTERNAL_CHANNEL_WORK_TASKS,
         description=(
-            "Complete ordered Channel Work task list for this external binding. "
-            "Channel Work is independent from the session-scoped update_todo list."
+            "Complete ordered task list. Channel Work is independent from the "
+            "session-scoped update_todo list."
         ),
     )
     files: list[str] | None = Field(
@@ -169,8 +177,8 @@ class ChannelActionInput(BaseModel):
         min_length=1,
         max_length=MAX_EXTERNAL_CHANNEL_FILES,
         description=(
-            "One or more absolute Runtime file paths or authorized exchange:// file "
-            "URIs. Relative paths and artifact:// or azents:// URIs are unsupported."
+            "Absolute Runtime paths or authorized `exchange://` URIs. Relative, "
+            "`artifact://`, and `azents://` values are unsupported."
         ),
     )
 
@@ -220,20 +228,13 @@ class DownloadExternalFileInput(BaseModel):
     file: str = Field(
         min_length=1,
         max_length=2_048,
-        description=(
-            "Complete opaque file locator shown in an External Channel Files section. "
-            "Pass it unchanged."
-        ),
+        description="Opaque locator from External Channel Files. Pass it unchanged.",
     )
     expected_size_bytes: int = Field(
         ge=0,
         le=MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES,
         strict=True,
-        description=(
-            "Exact Declared size in bytes shown for the selected External Channel "
-            "file. Download fails if the current provider metadata, HTTP "
-            "Content-Length, or received body size differs."
-        ),
+        description="Pass the exact declared byte size; any mismatch fails.",
     )
     path: str = Field(
         min_length=1,
@@ -242,9 +243,7 @@ class DownloadExternalFileInput(BaseModel):
     )
     overwrite: bool = Field(
         default=False,
-        description=(
-            "Set to true to replace an existing Runtime file at the destination."
-        ),
+        description="Replace an existing destination file.",
     )
 
 
@@ -272,6 +271,9 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
         self.run_id = run_id
         self.runtime_context_store: RuntimeInstructionContextStore | None = None
         self.resource_authority: SessionResourceAuthority | None = None
+        self._guard_run_id: str | None = None
+        self._previous_turn_actions: set[_ChannelActionTurnKey] = set()
+        self._current_turn_actions: set[_ChannelActionTurnKey] = set()
 
     def set_runtime_context_store(
         self,
@@ -312,9 +314,57 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
     def hooks(self) -> RuntimeHooks:
         """Return compaction enrichment and generic idle continuation hooks."""
         return {
+            "on_run_start": self._on_run_start,
+            "on_turn_start": self._on_turn_start,
+            "on_before_tool_call": self._on_before_tool_call,
+            "on_after_tool_call": self._on_after_tool_call,
+            "on_turn_end": self._on_turn_end,
             "on_compaction_summary": self._on_compaction_summary,
             "on_session_idle": self._on_session_idle,
         }
+
+    async def _on_run_start(self, context: RunStartHookContext) -> None:
+        """Reset adjacent-turn publication state when a new Run begins."""
+        self._ensure_guard_run(context.run_id)
+
+    async def _on_turn_start(self, context: TurnStartHookContext) -> None:
+        """Start collecting completed publications for the current model turn."""
+        self._ensure_guard_run(context.run_id)
+        self._current_turn_actions.clear()
+
+    async def _on_before_tool_call(
+        self,
+        context: BeforeToolCallHookContext,
+    ) -> ToolCallDeny | None:
+        """Block one publication category repeated from the preceding turn."""
+        self._ensure_guard_run(context.run_id)
+        key = _channel_action_turn_key(context)
+        if key is None or key not in self._previous_turn_actions:
+            return None
+        return ToolCallDeny(message=_CONSECUTIVE_CHANNEL_ACTION_ERROR)
+
+    async def _on_after_tool_call(self, context: AfterToolCallHookContext) -> None:
+        """Remember only completed publications for the current model turn."""
+        self._ensure_guard_run(context.run_id)
+        if context.error_message is not None:
+            return
+        key = _channel_action_turn_key(context)
+        if key is not None:
+            self._current_turn_actions.add(key)
+
+    async def _on_turn_end(self, context: TurnEndHookContext) -> None:
+        """Rotate completed publication categories into the adjacent-turn guard."""
+        self._ensure_guard_run(context.run_id)
+        self._previous_turn_actions = set(self._current_turn_actions)
+        self._current_turn_actions.clear()
+
+    def _ensure_guard_run(self, run_id: str) -> None:
+        """Keep the in-memory publication guard scoped to exactly one Run."""
+        if self._guard_run_id == run_id:
+            return
+        self._guard_run_id = run_id
+        self._previous_turn_actions.clear()
+        self._current_turn_actions.clear()
 
     async def _on_compaction_summary(
         self,
@@ -581,3 +631,19 @@ def _result_payload(result: ChannelActionResult) -> dict[str, object]:
             for outcome in result.outcomes
         ],
     }
+
+
+def _channel_action_turn_key(
+    context: BeforeToolCallHookContext | AfterToolCallHookContext,
+) -> _ChannelActionTurnKey | None:
+    """Return the binding and mode for one valid Channel Action invocation."""
+    if context.tool_name != "channel_action":
+        return None
+    try:
+        action = ChannelActionInput.model_validate_json(context.args_json)
+    except ValidationError:
+        return None
+    return _ChannelActionTurnKey(
+        binding=action.binding,
+        mode=ExternalChannelActionMode(action.mode),
+    )
