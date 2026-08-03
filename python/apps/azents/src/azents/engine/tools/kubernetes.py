@@ -62,8 +62,8 @@ KubernetesClusterClients = tuple[AsyncClient, ApiClient, ResourceDiscoveryCache]
 KubernetesClientResolver = Callable[[str], Awaitable[KubernetesClusterClients]]
 
 
-class _MethodAwareWsApiClient(WsApiClient):
-    """Preserve the generated Kubernetes exec HTTP method for WebSocket upgrade."""
+class _ConfiguredWsApiClient(WsApiClient):
+    """Open standard WebSocket upgrades with configured connection settings."""
 
     async def request(
         self,
@@ -76,15 +76,13 @@ class _MethodAwareWsApiClient(WsApiClient):
         _preload_content: bool = True,
         _request_timeout: object | None = None,
     ) -> object:
-        """Open the Kubernetes streaming WebSocket with the requested HTTP method.
+        """Open a GET WebSocket handshake while preserving proxy and TLS settings.
 
-        ``WsApiClient`` drops ``method`` and always performs a GET handshake. Kubernetes
-        authorizes POST pod exec requests as ``create`` on ``pods/exec``, so a service
-        account with the standard create-only permission receives a 403 before the
-        command starts. aiohttp supports a method-aware WebSocket handshake, allowing
-        this client to preserve the generated POST request.
+        Kubernetes WebSocket upgrades use GET regardless of the generated API method.
+        The upstream ``WsApiClient`` already enforces GET but omits configured proxy,
+        proxy header, and TLS server-name settings when opening the connection.
         """
-        del post_params, body, _request_timeout
+        del method, post_params, body, _request_timeout
 
         expanded_query_params: list[tuple[str, Any]] = []
         for key, value in query_params or []:
@@ -98,18 +96,14 @@ class _MethodAwareWsApiClient(WsApiClient):
         if expanded_query_params:
             url = f"{url}?{urlencode(expanded_query_params)}"
         websocket_url = get_websocket_url(url)
-        websocket_kwargs: dict[str, Any] = {
-            "method": method,
-            "headers": request_headers,
-            "heartbeat": self.heartbeat,
-            "proxy": self.configuration.proxy,
-            "proxy_headers": self.configuration.proxy_headers,
-            "server_hostname": self.configuration.tls_server_name,
-        }
 
         websocket = self.rest_client.pool_manager.ws_connect(
             websocket_url,
-            **websocket_kwargs,
+            headers=request_headers,
+            heartbeat=self.heartbeat,
+            proxy=self.configuration.proxy,
+            proxy_headers=self.configuration.proxy_headers,
+            server_hostname=self.configuration.tls_server_name,
         )
         if not _preload_content:
             return websocket
@@ -760,7 +754,7 @@ def _make_exec_tool(
         check_access(config, "Pod", ns)
 
         try:
-            ws_client = _MethodAwareWsApiClient(configuration=api_client.configuration)
+            ws_client = _ConfiguredWsApiClient(configuration=api_client.configuration)
             try:
                 core_v1 = CoreV1Api(ws_client)
                 kwargs: dict[str, Any] = {
@@ -775,7 +769,7 @@ def _make_exec_tool(
                 if args.container:
                     kwargs["container"] = args.container
 
-                response = await core_v1.connect_post_namespaced_pod_exec(
+                response = await core_v1.connect_get_namespaced_pod_exec(
                     **kwargs,
                 )
                 if isinstance(response, str):
