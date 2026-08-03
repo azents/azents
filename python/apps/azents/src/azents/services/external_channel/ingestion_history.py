@@ -11,6 +11,7 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExternalChannelProvider
+from azents.core.external_channel_reference import provider_reference_mappings_size
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.repository import ExternalChannelRepository
@@ -369,7 +370,8 @@ def _canonical_slack(
         normalized_body=message.normalized_body,
         attachment_metadata=message.attachment_metadata,
         reference_mappings=reference_mappings or None,
-        normalized_size=message.normalized_size,
+        normalized_size=message.normalized_size
+        + provider_reference_mappings_size(users=users, channels=channels),
         provider_created_at=message.provider_created_at,
         provider_updated_at=message.provider_updated_at,
         original_url=None,

@@ -1,6 +1,5 @@
 """Shared model-visible rendering for External Channel messages."""
 
-import re
 from collections.abc import Sequence
 
 from azents.core.external_channel_file import (
@@ -9,14 +8,10 @@ from azents.core.external_channel_file import (
     ExternalChannelFileLocator,
     external_channel_file_metadata_items,
 )
-from azents.engine.events.types import ExternalChannelMessagePayload
-
-_VISIBLE_PROVIDER_REFERENCE = re.compile(
-    r"<@!?(?P<user_angle>[A-Z0-9]+)(?:\|[^>]+)?>"
-    r"|(?<![A-Za-z0-9])@(?P<user_raw>[UW][A-Z0-9]+)\b"
-    r"|<#(?P<channel_angle>[A-Z0-9]+)(?:\|[^>]+)?>"
-    r"|(?<![A-Za-z0-9])#(?P<channel_raw>[CG][A-Z0-9]+)\b"
+from azents.core.external_channel_reference import (
+    render_provider_reference_mappings,
 )
+from azents.engine.events.types import ExternalChannelMessagePayload
 
 
 def external_channel_message_visible_value(
@@ -79,7 +74,6 @@ def render_external_channel_message(
     ]
     if timestamp is not None:
         lines.append(f"Timestamp: {timestamp.isoformat()}")
-    lines.extend(_identity_mapping_lines((payload,)))
     if payload.truncated_context_message_count or payload.truncated_context_size:
         lines.append(
             "Truncated context: "
@@ -89,6 +83,9 @@ def render_external_channel_message(
     lines.extend(["Body:", _body(payload)])
     lines.extend(_render_file_lines(payload.attachment_metadata))
     lines.extend(_render_embed_lines(payload.attachment_metadata))
+    mappings = _identity_mapping_lines((payload,))
+    if mappings:
+        lines.extend(["", *mappings])
     body = "\n".join(lines)
     return f"External Channel Message:\n{body}" if include_label else body
 
@@ -112,7 +109,6 @@ def render_external_channel_turn(
             f"{first.truncated_context_message_count} messages, "
             f"{first.truncated_context_size} bytes"
         )
-    lines.extend(_identity_mapping_lines(payloads))
     lines.append("")
     for index, payload in enumerate(payloads, start=1):
         sender = payload.sender_display_name or payload.provider_user_id or "unknown"
@@ -129,6 +125,9 @@ def render_external_channel_turn(
         lines.append(f"   Body: {_body(payload)}")
         lines.extend(_render_file_lines(payload.attachment_metadata, indent="   "))
         lines.extend(_render_embed_lines(payload.attachment_metadata, indent="   "))
+    mappings = _identity_mapping_lines(payloads)
+    if mappings:
+        lines.extend(["", *mappings])
     return "\n".join(lines)
 
 
@@ -136,13 +135,13 @@ def _body(payload: ExternalChannelMessagePayload) -> str:
     """Return explicit bounded body text for one accepted history snapshot."""
     if payload.body is None or not payload.body.strip():
         return "[Message has no text content.]"
-    return _display_body(payload.body, payload.reference_mappings)
+    return payload.body
 
 
 def _identity_mapping_lines(
     payloads: Sequence[ExternalChannelMessagePayload],
 ) -> list[str]:
-    """Render bounded provider identities and display names together."""
+    """Render bounded provider identities as one concise XML appendix."""
     users: dict[str, str] = {}
     channels: dict[str, str] = {}
     for payload in payloads:
@@ -155,42 +154,12 @@ def _identity_mapping_lines(
             users[payload.provider_user_id] = payload.sender_display_name
     if not users and not channels:
         return []
-    lines = ["Identity Mappings:"]
-    lines.extend(
-        f"- User {identifier}: {display_name}"
-        for identifier, display_name in sorted(users.items())
+    return list(
+        render_provider_reference_mappings(
+            users=users,
+            channels=channels,
+        )
     )
-    lines.extend(
-        f"- Channel {identifier}: {display_name}"
-        for identifier, display_name in sorted(channels.items())
-    )
-    return lines
-
-
-def _display_body(
-    body: str,
-    mappings: dict[str, dict[str, str]],
-) -> str:
-    """Resolve provider references only in the visible body projection."""
-    user_mappings = mappings.get("users", {})
-    channel_mappings = mappings.get("channels", {})
-
-    def replace(match: re.Match[str]) -> str:
-        user_id = match.group("user_angle") or match.group("user_raw")
-        if user_id is not None:
-            display_name = user_mappings.get(user_id)
-            if display_name is None:
-                return match.group(0)
-            return display_name if display_name.startswith("@") else f"@{display_name}"
-        channel_id = match.group("channel_angle") or match.group("channel_raw")
-        if channel_id is None:
-            return match.group(0)
-        display_name = channel_mappings.get(channel_id)
-        if display_name is None:
-            return match.group(0)
-        return display_name if display_name.startswith("#") else f"#{display_name}"
-
-    return _VISIBLE_PROVIDER_REFERENCE.sub(replace, body)
 
 
 def _visible_attachment_metadata(

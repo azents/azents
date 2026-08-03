@@ -11,6 +11,7 @@ code_paths:
   - python/apps/azents/src/azents/core/external_channel.py
   - python/apps/azents/src/azents/core/external_channel_file.py
   - python/apps/azents/src/azents/core/external_channel_progress.py
+  - python/apps/azents/src/azents/core/external_channel_reference.py
   - python/apps/azents/src/azents/core/external_channel_session_presence.py
   - python/apps/azents/src/azents/core/external_channel_title.py
   - python/apps/azents/src/azents/core/slack_external_channel_progress.py
@@ -59,7 +60,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-08-03
-spec_version: 44
+spec_version: 45
 ---
 
 # External Channel
@@ -90,6 +91,10 @@ contain multiple independent bindings.
 - Provider history is the inbound content authority. One accepted history range becomes
   one canonical mailbox item and then contiguous Session events with provider, resource,
   sender, author type, authorization, and message identity attribution.
+- Slack and Discord model input preserves provider-native user and channel reference
+  tokens in the source body. Resolved display names appear separately after the message
+  batch in one XML provider-reference mapping block, so readability enrichment does not
+  remove tokens that an explicit Channel action can reuse.
 - An ExternalChannelPrincipal is provider provenance and admission authority only. It is never an
   Azents execution User. After a binding releases durable work, the linked Team Session executes
   through canonical Session/Run authority without inferring a User from the principal, approver,
@@ -403,6 +408,8 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-03** (spec_version 45) — Preserved raw Slack and Discord user/channel
+  references in model input and moved resolved names into a shared XML mapping appendix.
 - **2026-08-03** (spec_version 44) — Added canonical `View session` navigation to
   every initial and updated Slack and Discord Activity Tracker without persisting
   URLs or changing Work projection ownership.
