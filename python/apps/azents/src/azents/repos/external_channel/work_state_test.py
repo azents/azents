@@ -322,6 +322,76 @@ async def test_work_state_rejects_non_owner_identity(
         await _cleanup_binding(rdb_engine, seeded)
 
 
+async def test_update_persists_absent_default_without_rewriting_existing_noop(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """A no-op mutator creates its absent default but preserves an existing row."""
+    del latest_db_schema
+    seeded = await _seed_binding(rdb_engine, suffix="default-noop")
+    store = ExternalChannelWorkStateStore()
+    try:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+            created = await store.update(
+                session,
+                agent_id=seeded.owner_agent_id,
+                session_id=seeded.owner_session_id,
+                binding_id=seeded.binding_id,
+                default_factory=lambda: _work(seeded.binding_id),
+                mutator=lambda current: ChannelWorkStateMutation(
+                    state=current,
+                    result=current,
+                    changed=False,
+                ),
+            )
+            await session.commit()
+
+        assert created.result.work_cycle_id == f"cycle-{seeded.binding_id}"
+        async with rdb_engine.connect() as connection:
+            initial_version = await connection.scalar(
+                sa.text(
+                    """
+                    SELECT version
+                    FROM toolkit_states
+                    WHERE state_name = :state_name
+                    """
+                ),
+                {"state_name": f"channel_work:{seeded.binding_id}"},
+            )
+        assert initial_version == 1
+
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+            repeated = await store.update(
+                session,
+                agent_id=seeded.owner_agent_id,
+                session_id=seeded.owner_session_id,
+                binding_id=seeded.binding_id,
+                default_factory=lambda: _work(seeded.binding_id),
+                mutator=lambda current: ChannelWorkStateMutation(
+                    state=current,
+                    result=current,
+                    changed=False,
+                ),
+            )
+            await session.commit()
+
+        assert repeated.result.work_cycle_id == f"cycle-{seeded.binding_id}"
+        async with rdb_engine.connect() as connection:
+            repeated_version = await connection.scalar(
+                sa.text(
+                    """
+                    SELECT version
+                    FROM toolkit_states
+                    WHERE state_name = :state_name
+                    """
+                ),
+                {"state_name": f"channel_work:{seeded.binding_id}"},
+            )
+        assert repeated_version == 1
+    finally:
+        await _cleanup_binding(rdb_engine, seeded)
+
+
 async def test_work_state_cas_retry_refreshes_after_concurrent_writer(
     rdb_engine: AsyncEngine,
     latest_db_schema: None,

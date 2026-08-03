@@ -181,7 +181,7 @@ class ExternalChannelWorkStateStore:
             mutation = mutator(current)
             if mutation.state.binding_id != binding_id:
                 raise ValueError("Channel Work state binding identity changed.")
-            if not mutation.changed:
+            if not mutation.changed and record is not None:
                 return mutation
             try:
                 await self.repository.save(
