@@ -1,6 +1,7 @@
 """Deterministic Discord REST and Gateway boundary for E2E tests."""
 
 import base64
+import datetime
 import hashlib
 import json
 import os
@@ -818,7 +819,9 @@ class FakeState:
                     "name": requested_name or "Azents",
                     "flags": 0,
                     "thread_metadata": {
-                        "create_timestamp": "2026-08-02T00:00:00.000000+00:00"
+                        "create_timestamp": datetime.datetime.now(
+                            datetime.UTC
+                        ).isoformat()
                     },
                 }
             return thread_id

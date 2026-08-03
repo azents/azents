@@ -25,7 +25,11 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from azentspublicclient.exceptions import ApiException
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
+from azentspublicclient.models.agent_session_title_update_request import (
+    AgentSessionTitleUpdateRequest,
+)
 from azentspublicclient.models.agent_type import AgentType
+from azentspublicclient.models.agent_update_request import AgentUpdateRequest
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.connection_access_policy_request import (
     ConnectionAccessPolicyRequest,
@@ -114,6 +118,12 @@ _DISCORD_GUILD_ID = "200000000000000001"
 _DISCORD_BOT_USER_ID = "300000000000000001"
 _DISCORD_CHANNEL_ID = "400000000000000001"
 _DISCORD_BOT_TOKEN = "discord-e2e-private"
+_DISCORD_P0_GENERATED_TITLE = "Discord Gateway deterministic title"
+_SLACK_P0_GENERATED_TITLE = "Slack Access-Allow deterministic title"
+_SLACK_CONTEXT_GENERATED_TITLE = "Slack context deterministic title"
+_SLACK_ATTACHMENT_GENERATED_TITLE = "Slack attachment deterministic title"
+_DISCORD_P0_SYSTEM_MARKER = "E2E_P0_DISCORD_GATEWAY_AGENT_MARKER"
+_SLACK_P0_SYSTEM_MARKER = "E2E_P0_SLACK_ACCESS_ALLOW_AGENT_MARKER"
 _DISCORD_COMMAND_CONTRACTS = {
     "message_action": ("Ask an Azents Agent", 3),
     "azents_settings": ("Azents settings", 1),
@@ -129,6 +139,7 @@ def _create_agent(
     *,
     runtime_profile_provider_id: str | None,
     shell_enabled: bool,
+    system_prompt: str | None = None,
 ) -> tuple[str, str, str, str]:
     """Create an authenticated workspace administrator and one active Agent."""
     token, email, handle, agent_ids = _create_workspace_agents(
@@ -138,6 +149,7 @@ def _create_agent(
         agent_count=1,
         runtime_profile_provider_id=runtime_profile_provider_id,
         shell_enabled=shell_enabled,
+        system_prompt=system_prompt,
     )
     return token, email, handle, agent_ids[0]
 
@@ -180,6 +192,7 @@ def _create_workspace_agents(
     agent_count: int,
     runtime_profile_provider_id: str | None,
     shell_enabled: bool,
+    system_prompt: str | None = None,
 ) -> tuple[str, str, str, list[str]]:
     """Create one Workspace owner and a deterministic active Agent catalog."""
     suffix = unique()
@@ -238,6 +251,7 @@ def _create_workspace_agents(
                 type=AgentType.PUBLIC,
                 runtime_profile_id=runtime_profile_id,
                 shell_enabled=shell_enabled,
+                system_prompt=system_prompt,
             ),
             _headers=headers,
         ).id
@@ -313,6 +327,55 @@ def _discord_provider_state(discord_provider_fake_url: str) -> dict[str, object]
     )
     response.raise_for_status()
     return cast(dict[str, object], response.json())
+
+
+def _discord_thread_evidence(
+    provider_state: dict[str, object],
+) -> list[dict[str, object]]:
+    """Return bounded, sanitized fake thread evidence."""
+    evidence = provider_state.get("thread_evidence")
+    if not isinstance(evidence, list):
+        return []
+    return [
+        cast(dict[str, object], item)
+        for item in cast(list[object], evidence)
+        if isinstance(item, dict)
+    ]
+
+
+def _discord_successful_message_delivery_count(
+    provider_state: dict[str, object],
+) -> int:
+    """Count sanitized successful Discord message deliveries."""
+    deliveries = provider_state.get("deliveries")
+    if not isinstance(deliveries, list):
+        return 0
+    return sum(
+        1
+        for raw_delivery in cast(list[object], deliveries)
+        if isinstance(raw_delivery, dict)
+        and cast(dict[str, object], raw_delivery).get("operation") == "create_message"
+        and cast(dict[str, object], raw_delivery).get("outcome")
+        in {"created", "duplicate", "delivered"}
+    )
+
+
+def _discord_successful_operation_count(
+    provider_state: dict[str, object],
+    *,
+    operation: str,
+) -> int:
+    """Count delivered operations without exposing provider request bodies."""
+    operations = provider_state.get("operations")
+    if not isinstance(operations, list):
+        return 0
+    return sum(
+        1
+        for raw_operation in cast(list[object], operations)
+        if isinstance(raw_operation, dict)
+        and cast(dict[str, object], raw_operation).get("operation") == operation
+        and cast(dict[str, object], raw_operation).get("outcome") == "delivered"
+    )
 
 
 def _discord_command_id(
@@ -545,9 +608,40 @@ def _external_channel_input_evidence(
             "provider": provider,
             "external_message_id": external_message_id,
             "authorization": candidate.get("authorization"),
+            "author_type": candidate.get("author_type"),
             "body": candidate.get("body"),
             "original_url": candidate.get("original_url"),
         }
+        attachment_metadata = candidate.get("attachment_metadata")
+        if isinstance(attachment_metadata, dict):
+            raw_files = cast(dict[str, object], attachment_metadata).get("files")
+            if isinstance(raw_files, list):
+                safe_files: list[dict[str, object]] = []
+                for raw_file in cast(list[object], raw_files):
+                    if not isinstance(raw_file, dict):
+                        continue
+                    file_item = cast(dict[str, object], raw_file)
+                    safe_files.append(
+                        {
+                            key: file_item.get(key)
+                            for key in (
+                                "provider",
+                                "provider_file_id",
+                                "name",
+                                "title",
+                                "media_type",
+                                "declared_size",
+                                "mode",
+                                "external",
+                                "file_access",
+                                "supported",
+                                "unsupported_reason",
+                            )
+                            if key in file_item
+                        }
+                    )
+                if safe_files:
+                    evidence["attachment_metadata"] = {"files": safe_files}
         previous = logical_items.get(key)
         if previous is not None and previous != evidence:
             raise AssertionError(
@@ -556,6 +650,49 @@ def _external_channel_input_evidence(
             )
         logical_items[key] = evidence
     return list(logical_items.values())
+
+
+def _session_history_events(
+    *,
+    public_server_url: str,
+    token: str,
+    session_id: str,
+) -> list[dict[str, object]]:
+    """Read bounded public Session history events for terminal-run evidence."""
+    response = requests.get(
+        f"{public_server_url}/chat/v1/sessions/{session_id}/history?limit=100",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        return []
+    raw_items = cast(dict[str, object], payload).get("items")
+    if not isinstance(raw_items, list):
+        return []
+    return [
+        cast(dict[str, object], item)
+        for item in cast(list[object], raw_items)
+        if isinstance(item, dict)
+    ]
+
+
+def _session_has_assistant_message(
+    *,
+    public_server_url: str,
+    token: str,
+    session_id: str,
+) -> bool:
+    """Return whether public history contains a completed assistant message."""
+    return any(
+        event.get("kind") == "assistant_message"
+        for event in _session_history_events(
+            public_server_url=public_server_url,
+            token=token,
+            session_id=session_id,
+        )
+    )
 
 
 def _approval_request_id(slack_provider_fake_url: str) -> str:
@@ -785,6 +922,27 @@ def _file_request_evidence(openai_proxy_url: str) -> list[dict[str, object]]:
     ]
 
 
+def _aimock_title_requests(mock_openai_url: str) -> list[str]:
+    """Return serialized title-model requests for exact input assertions."""
+    response = requests.get(f"{mock_openai_url}/v1/_requests", timeout=10)
+    response.raise_for_status()
+    payload: object = response.json()
+    if not isinstance(payload, list):
+        return []
+    requests_with_title_prompt: list[str] = []
+    for raw_item in cast(list[object], payload):
+        if not isinstance(raw_item, dict):
+            continue
+        serialized_item = json.dumps(
+            cast(dict[str, object], raw_item),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        if "You are a session title generator" in serialized_item:
+            requests_with_title_prompt.append(serialized_item)
+    return requests_with_title_prompt
+
+
 def _channel_action_tool_evidence(
     public_server_url: str,
     token: str,
@@ -908,11 +1066,16 @@ def test_http_admission_unknown_participant_and_approval_journey(
     azents_public_server_url: str,
     azents_engine_worker_container: Container,
     slack_provider_fake_url: str,
+    discord_provider_fake_url: str,
 ) -> None:
     """Exercise connection setup, signed admission, dedupe, and idempotent approval."""
     del azents_engine_worker_container
     requests.post(
         f"{slack_provider_fake_url}/__testenv/reset",
+        timeout=5,
+    ).raise_for_status()
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/reset",
         timeout=5,
     ).raise_for_status()
     root_timestamp = f"{int(time.time()) - 60}.000100"
@@ -937,6 +1100,7 @@ def test_http_admission_unknown_participant_and_approval_journey(
         azents_public_server_url,
         runtime_profile_provider_id=None,
         shell_enabled=False,
+        system_prompt=_SLACK_P0_SYSTEM_MARKER,
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)
@@ -1163,6 +1327,32 @@ def test_http_admission_unknown_participant_and_approval_journey(
         _headers=headers,
     )
     assert detail.id == approved_session_id
+
+    def generated_title_session() -> Any | None:
+        current = chat_api.chat_v1_get_agent_session(
+            agent_id=agent_id,
+            session_id=approved_session_id,
+            _headers=headers,
+        )
+        return (
+            current
+            if current.title == _SLACK_P0_GENERATED_TITLE
+            and current.title_source is not None
+            and current.title_source.value == "auto_generated"
+            else None
+        )
+
+    generated_title = cast(
+        Any,
+        wait_until(
+            generated_title_session,
+            timeout=30,
+            interval=0.2,
+            message="Slack Access-Allow Session title did not reach auto_generated",
+        ),
+    )
+    assert generated_title.title == _SLACK_P0_GENERATED_TITLE
+    assert generated_title.title_source.value == "auto_generated"
     agent_access = external_api.external_channel_v1_list_agent_access(
         agent_id=agent_id,
         handle=handle,
@@ -1203,21 +1393,41 @@ def test_http_admission_unknown_participant_and_approval_journey(
         f"{root_timestamp.replace('.', '')}"
     )
 
+    def initial_execution_complete() -> bool:
+        current = chat_api.chat_v1_get_agent_session(
+            agent_id=agent_id,
+            session_id=approved_session_id,
+            _headers=headers,
+        )
+        run_state = getattr(current.run_state, "value", current.run_state)
+        return run_state == "idle" and _session_has_assistant_message(
+            public_server_url=azents_public_server_url,
+            token=token,
+            session_id=approved_session_id,
+        )
+
+    assert wait_until(
+        initial_execution_complete,
+        timeout=45,
+        interval=0.2,
+        message="Approved Slack AgentRun did not reach terminal assistant output",
+    )
+
     def settled_provider_controls() -> dict[str, object] | None:
         state = _provider_state(slack_provider_fake_url)
         counts = state.get("request_counts")
         if not isinstance(counts, dict):
             return None
         typed = cast(dict[str, Any], counts)
-        if typed.get("chat.postMessage") == 3 and typed.get("chat.delete") == 1:
+        if typed.get("chat.postMessage") == 4 and typed.get("chat.delete") == 2:
             return state
-        return None
+        raise AssertionError(f"Slack provider counts not settled: {typed}")
 
     provider_state = cast(
         dict[str, object],
         wait_until(
             settled_provider_controls,
-            timeout=10,
+            timeout=30,
             interval=0.2,
             message="Slack approval and initial progress controls did not settle",
         ),
@@ -1231,9 +1441,10 @@ def test_http_admission_unknown_participant_and_approval_journey(
     assert typed_counts["conversations.history"] == 3
     assert typed_counts["chat.getPermalink"] == 3
     # One access-review control is deleted after approval. Setup selection then
-    # delivers the claim-scoped setup control, joined presence, and initial progress.
-    assert typed_counts["chat.postMessage"] == 3
-    assert typed_counts["chat.delete"] == 1
+    # delivers joined presence and initial progress; deterministic finish deletes
+    # that progress message and publishes the final response.
+    assert typed_counts["chat.postMessage"] == 4
+    assert typed_counts["chat.delete"] == 2
     assert _successful_session_paths(provider_state) == [
         f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
     ]
@@ -1250,6 +1461,11 @@ def test_http_admission_unknown_participant_and_approval_journey(
     rendered_state = str(provider_state)
     assert _BOT_TOKEN not in rendered_state
     assert _SIGNING_SECRET not in rendered_state
+    discord_state = _discord_provider_state(discord_provider_fake_url)
+    discord_counts = cast(dict[str, int], discord_state["request_counts"])
+    assert discord_counts.get("create_thread", 0) == 0
+    assert discord_counts.get("update_thread", 0) == 0
+    assert _discord_thread_evidence(discord_state) == []
 
     disconnected = external_api.external_channel_v1_disconnect_session_channel(
         agent_id=agent_id,
@@ -1276,13 +1492,13 @@ def test_http_admission_unknown_participant_and_approval_journey(
                 )
                 else None
             ),
-            timeout=10,
+            timeout=30,
             interval=0.2,
             message="Manual Slack binding disconnect did not deliver leave presence",
         ),
     )
     disconnected_counts = cast(dict[str, Any], disconnected_state["request_counts"])
-    assert disconnected_counts["chat.postMessage"] == 4
+    assert disconnected_counts["chat.postMessage"] == 5
     assert disconnected_counts["chat.delete"] == 2
     assert _successful_session_paths(disconnected_state) == [
         f"/w/{handle}/agents/{agent_id}/sessions/{approved_session_id}",
@@ -1412,6 +1628,7 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
     slack_provider_fake_url: str,
+    mock_openai_url: str,
     azents_engine_worker_container: Container,
 ) -> None:
     """Exercise creation-time copy, mention gating, context, and mode updates."""
@@ -1609,6 +1826,33 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
         message="Initial Slack response-mode input was not promoted",
     )
 
+    def context_title() -> Any | None:
+        current = chat_api.chat_v1_get_agent_session(
+            agent_id=agent_id,
+            session_id=session.id,
+            _headers=headers,
+        )
+        return (
+            current
+            if current.title == _SLACK_CONTEXT_GENERATED_TITLE
+            and current.title_source is not None
+            and current.title_source.value == "auto_generated"
+            else None
+        )
+
+    context_session = cast(
+        Any,
+        wait_until(
+            context_title,
+            timeout=30,
+            interval=0.2,
+            message="Slack context Session title did not reach auto_generated",
+        ),
+    )
+    assert context_session.title == _SLACK_CONTEXT_GENERATED_TITLE
+    assert root_body not in context_session.title
+    assert "<@B-E2E>" not in context_session.title
+
     before_counts = cast(
         dict[str, int],
         _provider_state(slack_provider_fake_url)["request_counts"],
@@ -1618,6 +1862,8 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
     ) + before_counts.get("conversations.replies", 0)
     ordinary_timestamp = f"{root_seconds + 1}.000210"
     ordinary_body = "Context retained without an invocation"
+    bot_timestamp = f"{root_seconds + 1}.000211"
+    bot_body = "Deployment Bot context must not title the Session"
     send_event(
         {
             "type": "message",
@@ -1670,6 +1916,14 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
                         "text": ordinary_body,
                     },
                     {
+                        "subtype": "bot_message",
+                        "bot_id": "B-CONTEXT",
+                        "username": "Deployment Bot",
+                        "ts": bot_timestamp,
+                        "thread_ts": root_timestamp,
+                        "text": bot_body,
+                    },
+                    {
                         "user": "U-MODE",
                         "ts": root_timestamp,
                         "text": root_body,
@@ -1703,7 +1957,7 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
                         include_pending=False,
                     )
                 )
-                == 3
+                == 4
                 else None
             ),
             timeout=30,
@@ -1712,6 +1966,9 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
         ),
     )
     assert ordinary_body in {item["body"] for item in mention_evidence}
+    bot_evidence = [item for item in mention_evidence if item["body"] == bot_body]
+    assert len(bot_evidence) == 1
+    assert bot_evidence[0]["author_type"] == "bot"
 
     updated = external_api.external_channel_v1_update_session_channel_response_mode(
         agent_id=agent_id,
@@ -1750,6 +2007,14 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
                         "text": ordinary_body,
                     },
                     {
+                        "subtype": "bot_message",
+                        "bot_id": "B-CONTEXT",
+                        "username": "Deployment Bot",
+                        "ts": bot_timestamp,
+                        "thread_ts": root_timestamp,
+                        "text": bot_body,
+                    },
+                    {
                         "user": "U-MODE",
                         "ts": root_timestamp,
                         "text": root_body,
@@ -1783,7 +2048,7 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
                         include_pending=False,
                     )
                 )
-                == 4
+                == 5
                 else None
             ),
             timeout=30,
@@ -1792,6 +2057,358 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
         ),
     )
     assert continuation_body in {item["body"] for item in continuation_evidence}
+    later_sessions = chat_api.chat_v1_list_agent_sessions(
+        agent_id=agent_id,
+        _headers=headers,
+    ).items
+    assert {item.id for item in later_sessions} == baseline_session_ids | {session.id}
+    later_title = chat_api.chat_v1_get_agent_session(
+        agent_id=agent_id,
+        session_id=session.id,
+        _headers=headers,
+    )
+    assert later_title.title == _SLACK_CONTEXT_GENERATED_TITLE
+    assert later_title.title_source is not None
+    assert later_title.title_source.value == "auto_generated"
+    title_requests = [
+        title_request
+        for title_request in _aimock_title_requests(mock_openai_url)
+        if root_body in title_request
+    ]
+    assert title_requests
+    assert all(
+        excluded not in title_request
+        for title_request in title_requests
+        for excluded in (bot_body, ordinary_body, mention_body, continuation_body)
+    )
+
+    untitled_root_timestamp = f"{root_seconds + 10}.000210"
+    untitled_root_body = ""
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/configure",
+        json={
+            "history_pages": [
+                [
+                    {
+                        "user": "U-UNTITLED",
+                        "ts": untitled_root_timestamp,
+                        "text": untitled_root_body,
+                    }
+                ]
+            ],
+        },
+        timeout=5,
+    ).raise_for_status()
+    send_event(
+        {
+            "type": "app_mention",
+            "channel": _CHANNEL_ID,
+            "channel_type": "channel",
+            "user": "U-UNTITLED",
+            "text": untitled_root_body,
+            "ts": untitled_root_timestamp,
+        }
+    )
+    existing_session_ids = baseline_session_ids | {session.id}
+
+    def untitled_bound_session() -> Any | None:
+        sessions = chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        ).items
+        candidates = [item for item in sessions if item.id not in existing_session_ids]
+        if len(candidates) != 1:
+            return None
+        candidate = candidates[0]
+        projection = external_api.external_channel_v1_list_session_channels(
+            agent_id=agent_id,
+            session_id=candidate.id,
+            handle=handle,
+            _headers=headers,
+        )
+        return candidate if len(projection.items) == 1 else None
+
+    preexisting_session = cast(
+        Any,
+        wait_until(
+            untitled_bound_session,
+            timeout=30,
+            interval=0.2,
+            message="Empty human invocation did not create an untitled bound Session",
+        ),
+    )
+
+    def untitled_session_settled() -> Any | None:
+        current = chat_api.chat_v1_get_agent_session(
+            agent_id=agent_id,
+            session_id=preexisting_session.id,
+            _headers=headers,
+        )
+        evidence = _external_channel_input_evidence(
+            public_server_url=azents_public_server_url,
+            token=token,
+            session_id=preexisting_session.id,
+            include_pending=False,
+        )
+        run_state = getattr(current.run_state, "value", current.run_state)
+        return (
+            current
+            if len(evidence) == 1
+            and evidence[0]["body"] == untitled_root_body
+            and evidence[0]["author_type"] == "human"
+            and run_state == "idle"
+            else None
+        )
+
+    settled_untitled_session = cast(
+        Any,
+        wait_until(
+            untitled_session_settled,
+            timeout=45,
+            interval=0.2,
+            message="Untitled Session did not settle through public history",
+        ),
+    )
+    assert settled_untitled_session.title is None
+    assert settled_untitled_session.title_source is None
+
+    later_invocation_timestamp = f"{root_seconds + 11}.000210"
+    later_invocation_body = "<@B-E2E> Later human invocation must not rearm title"
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/configure",
+        json={
+            "history_pages": [
+                [
+                    {
+                        "user": "U-MODE",
+                        "ts": later_invocation_timestamp,
+                        "thread_ts": untitled_root_timestamp,
+                        "text": later_invocation_body,
+                    },
+                    {
+                        "user": "U-UNTITLED",
+                        "ts": untitled_root_timestamp,
+                        "text": untitled_root_body,
+                    },
+                ]
+            ],
+        },
+        timeout=5,
+    ).raise_for_status()
+    send_event(
+        {
+            "type": "app_mention",
+            "channel": _CHANNEL_ID,
+            "channel_type": "channel",
+            "user": "U-MODE",
+            "text": later_invocation_body,
+            "ts": later_invocation_timestamp,
+            "thread_ts": untitled_root_timestamp,
+        }
+    )
+
+    def later_invocation_settled() -> Any | None:
+        current = chat_api.chat_v1_get_agent_session(
+            agent_id=agent_id,
+            session_id=preexisting_session.id,
+            _headers=headers,
+        )
+        evidence = _external_channel_input_evidence(
+            public_server_url=azents_public_server_url,
+            token=token,
+            session_id=preexisting_session.id,
+            include_pending=False,
+        )
+        run_state = getattr(current.run_state, "value", current.run_state)
+        return (
+            current
+            if len(evidence) == 2
+            and {item["body"] for item in evidence}
+            == {untitled_root_body, later_invocation_body}
+            and run_state == "idle"
+            else None
+        )
+
+    settled_later_session = cast(
+        Any,
+        wait_until(
+            later_invocation_settled,
+            timeout=45,
+            interval=0.2,
+            message="Later invocation did not settle in the existing bound Session",
+        ),
+    )
+    assert settled_later_session.title is None
+    assert settled_later_session.title_source is None
+    final_sessions = chat_api.chat_v1_list_agent_sessions(
+        agent_id=agent_id,
+        _headers=headers,
+    ).items
+    assert {item.id for item in final_sessions} == existing_session_ids | {
+        preexisting_session.id
+    }
+    assert all(
+        later_invocation_body not in title_request
+        for title_request in _aimock_title_requests(mock_openai_url)
+    )
+
+    attachment_root_timestamp = f"{root_seconds + 20}.000210"
+    attachment_title_body = (
+        f"<@B-E2E> External Channel file transfer E2E title {unique()}"
+    )
+    selected_title_content = b"selected-title-content-must-not-leak"
+    ignored_title_content = b"ignored-title-content-must-not-leak"
+    title_event_files = [
+        {
+            "id": "F-TITLE-SELECTED",
+            "name": "selected-input.txt",
+            "title": "Selected input",
+            "mimetype": "text/plain",
+            "size": len(selected_title_content),
+            "mode": "hosted",
+            "is_external": False,
+            "file_access": "visible",
+        },
+        {
+            "id": "F-TITLE-IGNORED",
+            "name": "ignored-input.txt",
+            "title": "Ignored input",
+            "mimetype": "text/plain",
+            "size": len(ignored_title_content),
+            "mode": "hosted",
+            "is_external": False,
+            "file_access": "visible",
+        },
+    ]
+    requests.post(
+        f"{slack_provider_fake_url}/__testenv/configure",
+        json={
+            "files": [
+                {
+                    **title_event_files[0],
+                    "content_base64": base64.b64encode(selected_title_content).decode(),
+                },
+                {
+                    **title_event_files[1],
+                    "content_base64": base64.b64encode(ignored_title_content).decode(),
+                },
+            ],
+            "history_pages": [
+                [
+                    {
+                        "user": "U-MODE",
+                        "ts": attachment_root_timestamp,
+                        "text": attachment_title_body,
+                        "files": title_event_files,
+                    }
+                ]
+            ],
+        },
+        timeout=5,
+    ).raise_for_status()
+    send_event(
+        {
+            "type": "app_mention",
+            "channel": _CHANNEL_ID,
+            "channel_type": "channel",
+            "user": "U-MODE",
+            "text": attachment_title_body,
+            "ts": attachment_root_timestamp,
+            "files": title_event_files,
+        }
+    )
+    sessions_before_attachment = existing_session_ids | {preexisting_session.id}
+
+    def attachment_bound_session() -> Any | None:
+        sessions = chat_api.chat_v1_list_agent_sessions(
+            agent_id=agent_id,
+            _headers=headers,
+        ).items
+        candidates = [
+            item for item in sessions if item.id not in sessions_before_attachment
+        ]
+        if len(candidates) != 1:
+            return None
+        candidate = candidates[0]
+        projection = external_api.external_channel_v1_list_session_channels(
+            agent_id=agent_id,
+            session_id=candidate.id,
+            handle=handle,
+            _headers=headers,
+        )
+        return candidate if len(projection.items) == 1 else None
+
+    attachment_session = cast(
+        Any,
+        wait_until(
+            attachment_bound_session,
+            timeout=30,
+            interval=0.2,
+            message="Attachment root did not create one bound Session",
+        ),
+    )
+
+    def attachment_title_settled() -> Any | None:
+        current = chat_api.chat_v1_get_agent_session(
+            agent_id=agent_id,
+            session_id=attachment_session.id,
+            _headers=headers,
+        )
+        evidence = _external_channel_input_evidence(
+            public_server_url=azents_public_server_url,
+            token=token,
+            session_id=attachment_session.id,
+            include_pending=False,
+        )
+        return (
+            current
+            if len(evidence) == 1
+            and current.title == _SLACK_ATTACHMENT_GENERATED_TITLE
+            and current.title_source is not None
+            and current.title_source.value == "auto_generated"
+            else None
+        )
+
+    settled_attachment_session = cast(
+        Any,
+        wait_until(
+            attachment_title_settled,
+            timeout=45,
+            interval=0.2,
+            message="Attachment Session title did not reach auto_generated",
+        ),
+    )
+    assert settled_attachment_session.title == _SLACK_ATTACHMENT_GENERATED_TITLE
+    attachment_title_requests = [
+        title_request
+        for title_request in _aimock_title_requests(mock_openai_url)
+        if attachment_title_body in title_request
+    ]
+    assert attachment_title_requests
+    assert all(
+        marker in title_request
+        for title_request in attachment_title_requests
+        for marker in ("selected-input.txt", "ignored-input.txt", "text/plain")
+    )
+    assert all(
+        forbidden not in title_request
+        for title_request in attachment_title_requests
+        for forbidden in (
+            selected_title_content.decode(),
+            ignored_title_content.decode(),
+            "F-TITLE-SELECTED",
+            "F-TITLE-IGNORED",
+            _BOT_TOKEN,
+            _SIGNING_SECRET,
+        )
+    )
+    sessions_after_attachment = chat_api.chat_v1_list_agent_sessions(
+        agent_id=agent_id,
+        _headers=headers,
+    ).items
+    assert {item.id for item in sessions_after_attachment} == (
+        sessions_before_attachment | {attachment_session.id}
+    )
 
     disconnected = external_api.external_channel_v1_disconnect_session_channel(
         agent_id=agent_id,
@@ -3087,6 +3704,68 @@ def test_external_channel_file_transfer_journey(
         message="Approved file-transfer binding was not available",
     )
 
+    def file_input_evidence() -> list[dict[str, object]]:
+        evidence = _external_channel_input_evidence(
+            public_server_url=azents_public_server_url,
+            token=token,
+            session_id=session_id,
+            include_pending=False,
+        )
+        return evidence if len(evidence) == 1 else []
+
+    input_evidence = wait_until(
+        file_input_evidence,
+        timeout=30,
+        interval=0.2,
+        message="Slack file input was not promoted into Session history",
+    )
+    attachment_metadata = input_evidence[0].get("attachment_metadata")
+    assert isinstance(attachment_metadata, dict)
+    files = cast(dict[str, object], attachment_metadata).get("files")
+    assert isinstance(files, list)
+    assert [
+        cast(dict[str, object], item).get("provider_file_id")
+        for item in cast(list[object], files)
+        if isinstance(item, dict)
+    ] == [
+        "F-IN-SELECTED",
+        "F-IN-IGNORED",
+    ]
+    assert all(
+        isinstance(item, dict)
+        and "content_base64" not in cast(dict[str, object], item)
+        and "content" not in cast(dict[str, object], item)
+        for item in cast(list[object], files)
+    )
+
+    def attachment_title() -> Any | None:
+        current = chat_api.chat_v1_get_agent_session(
+            agent_id=agent_id,
+            session_id=session_id,
+            _headers=headers,
+        )
+        return (
+            current
+            if current.title == _SLACK_ATTACHMENT_GENERATED_TITLE
+            and current.title_source is not None
+            and current.title_source.value == "auto_generated"
+            else None
+        )
+
+    attachment_session = cast(
+        Any,
+        wait_until(
+            attachment_title,
+            timeout=30,
+            interval=0.2,
+            message="Slack attachment Session title did not reach auto_generated",
+        ),
+    )
+    assert attachment_session.title == _SLACK_ATTACHMENT_GENERATED_TITLE
+    assert selected_content_pattern.decode().strip() not in attachment_session.title
+    assert _BOT_TOKEN not in attachment_session.title
+    assert _SIGNING_SECRET not in attachment_session.title
+
     def initial_file_model_request() -> list[dict[str, object]]:
         evidence = _file_request_evidence(openai_proxy_url)
         assert any(
@@ -3847,7 +4526,486 @@ def test_discord_single_activation_and_interaction_journey(
     assert all(command_id not in rendered_state for command_id in command_ids.values())
 
 
+@pytest.mark.parametrize(
+    "discord_title_case",
+    [
+        pytest.param("pre_existing", id="pre-existing-thread"),
+        pytest.param("already_desired", id="already-desired"),
+        pytest.param("human_takeover", id="human-takeover"),
+        pytest.param("lifecycle_revoked", id="lifecycle-revoked"),
+        pytest.param("mixed_version", id="mixed-version-adoption"),
+        pytest.param("recoverable", id="recoverable-patch"),
+    ],
+)
+def test_discord_gateway_title_p1_matrix(
+    request: pytest.FixtureRequest,
+    public_api_client: azentspublicclient.ApiClient,
+    admin_api_client: azentsadminclient.ApiClient,
+    azents_public_server_url: str,
+    discord_provider_fake_url: str,
+    azents_engine_worker_container: Container,
+    azents_external_channel_gateway_factory: Callable[
+        [], AbstractContextManager[Container]
+    ],
+    discord_title_case: str,
+) -> None:
+    """Exercise user-facing Discord zero-PATCH and recoverable convergence cases."""
+    del azents_engine_worker_container
+    case_index = {
+        "pre_existing": 10,
+        "already_desired": 11,
+        "human_takeover": 12,
+        "lifecycle_revoked": 13,
+        "mixed_version": 14,
+        "recoverable": 15,
+    }[discord_title_case]
+    application_id = str(100000000000000000 + case_index)
+    guild_id = str(200000000000000000 + case_index)
+    bot_user_id = str(300000000000000000 + case_index)
+    bot_role_id = str(350000000000000000 + case_index)
+    channel_id = str(400000000000000000 + case_index)
+    message_id = str(500000000000000000 + case_index)
+    participant_id = str(600000000000000000 + case_index)
+    source_text = f"<@&{bot_role_id}> Private Discord Gateway invocation"
+    timestamp = "2026-08-02T00:00:00.000000+00:00"
+    thread_id = str(700000000000000000 + case_index)
+    interaction_id = str(800000000000000000 + case_index)
+    provider_message: dict[str, object] = {
+        "id": message_id,
+        "channel_id": channel_id,
+        "guild_id": guild_id,
+        "content": source_text,
+        "timestamp": timestamp,
+        "edited_timestamp": None,
+        "flags": 32 if discord_title_case in {"pre_existing", "mixed_version"} else 0,
+        "author": {
+            "id": participant_id,
+            "username": "participant",
+            "discriminator": "0",
+            "avatar": None,
+            "bot": False,
+        },
+        "mentions": [],
+        "mention_roles": [bot_role_id],
+        "attachments": [],
+        "embeds": [],
+        "components": [],
+        "type": 0,
+        "pinned": False,
+        "mention_everyone": False,
+        "tts": False,
+    }
+    if discord_title_case in {"pre_existing", "mixed_version"}:
+        provider_message["thread"] = {
+            "id": thread_id,
+            "type": 11,
+            "guild_id": guild_id
+            if discord_title_case == "pre_existing"
+            else str(int(guild_id) + 1000),
+            "parent_id": channel_id,
+            "root_message_id": message_id,
+            "owner_id": bot_user_id
+            if discord_title_case == "pre_existing"
+            else str(int(bot_user_id) + 1000),
+            "name": _DISCORD_P0_GENERATED_TITLE,
+            "flags": 0,
+            "thread_metadata": {
+                "create_timestamp": timestamp,
+                "archived": False,
+                "auto_archive_duration": 1440,
+                "archive_timestamp": timestamp,
+                "locked": False,
+                "invitable": True,
+            },
+            "message_count": 0,
+            "member_count": 0,
+            "total_message_sent": 0,
+            "last_message_id": None,
+            "rate_limit_per_user": 0,
+            "newly_created": False,
+            "applied_tags": [],
+        }
+    guild_create: dict[str, object] = {
+        "id": guild_id,
+        "name": "Gateway P1",
+        "unavailable": False,
+        "owner_id": participant_id,
+        "roles": [
+            {
+                "id": bot_role_id,
+                "name": "Azents",
+                "color": 0,
+                "hoist": False,
+                "position": 1,
+                "permissions": "0",
+                "managed": True,
+                "mentionable": True,
+                "flags": 0,
+                "tags": {"bot_id": bot_user_id},
+            }
+        ],
+        "emojis": [],
+        "stickers": [],
+        "features": [],
+        "channels": [
+            {
+                "id": channel_id,
+                "guild_id": guild_id,
+                "type": 0,
+                "name": "gateway-p1",
+                "position": 0,
+                "permission_overwrites": [],
+            }
+        ],
+        "threads": [],
+        "members": [
+            {
+                "user": {
+                    "id": bot_user_id,
+                    "username": "Azents",
+                    "discriminator": "0",
+                    "avatar": None,
+                    "bot": True,
+                },
+                "roles": [bot_role_id],
+                "joined_at": timestamp,
+                "deaf": False,
+                "mute": False,
+                "flags": 0,
+            }
+        ],
+        "presences": [],
+        "voice_states": [],
+        "stage_instances": [],
+        "guild_scheduled_events": [],
+        "member_count": 0,
+    }
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/reset", timeout=5
+    ).raise_for_status()
+    configure: dict[str, object] = {
+        "application_id": application_id,
+        "guild_id": guild_id,
+        "bot_user_id": bot_user_id,
+        "root_messages": [provider_message],
+        "gateway_dispatches": [
+            {"sequence": 2, "event_type": "GUILD_CREATE", "payload": guild_create},
+            {
+                "sequence": 3,
+                "event_type": "MESSAGE_CREATE",
+                "payload": provider_message,
+            },
+        ],
+        "gateway_scenarios": ["reconnect", "open"],
+    }
+    if discord_title_case == "recoverable":
+        configure["api_scenario_sequences"] = {"update_thread": ["ambiguous"]}
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/configure",
+        json=configure,
+        timeout=5,
+    ).raise_for_status()
+    if discord_title_case in {"human_takeover", "lifecycle_revoked"}:
+        requests.post(
+            f"{discord_provider_fake_url}/__testenv/barrier",
+            json={"operation": "get_thread", "occurrence": 1},
+            timeout=5,
+        ).raise_for_status()
+        request.addfinalizer(
+            lambda: requests.post(
+                f"{discord_provider_fake_url}/__testenv/barrier/release",
+                timeout=5,
+            ).raise_for_status()
+        )
+    token, _, handle, agent_id = _create_agent(
+        public_api_client,
+        admin_api_client,
+        azents_public_server_url,
+        runtime_profile_provider_id=None,
+        shell_enabled=False,
+        system_prompt=_DISCORD_P0_SYSTEM_MARKER,
+    )
+    headers = {"Authorization": f"Bearer {token}"}
+    if discord_title_case == "already_desired":
+        AgentV1Api(public_api_client).agent_v1_update_agent(
+            agent_id=agent_id,
+            handle=handle,
+            agent_update_request=AgentUpdateRequest(name=_DISCORD_P0_GENERATED_TITLE),
+            _headers=headers,
+        )
+    agent = AgentV1Api(public_api_client).agent_v1_get_agent(
+        agent_id=agent_id,
+        handle=handle,
+        _headers=headers,
+    )
+    external_api = ExternalChannelV1Api(public_api_client)
+    setup = external_api.external_channel_v1_setup_discord_connection(
+        agent_id=agent_id,
+        handle=handle,
+        discord_connection_setup_request=DiscordConnectionSetupRequest(
+            app_id=application_id,
+            configuration=DiscordConnectionConfiguration(target_guild_id=guild_id),
+            credentials=DiscordConnectionCredentials(bot_token=_DISCORD_BOT_TOKEN),
+        ),
+        _headers=headers,
+    )
+    external_api.external_channel_v1_update_connection_access_policy(
+        agent_id=agent_id,
+        connection_id=setup.connection.id,
+        handle=handle,
+        connection_access_policy_request=ConnectionAccessPolicyRequest(
+            open_access_enabled=True
+        ),
+        _headers=headers,
+    )
+    chat_api = ChatV1Api(public_api_client)
+    with azents_external_channel_gateway_factory():
+        wait_until(
+            lambda: (
+                6
+                in cast(
+                    list[object],
+                    cast(
+                        dict[str, object],
+                        _discord_provider_state(discord_provider_fake_url)["gateway"],
+                    )["initial_opcodes"],
+                )
+            ),
+            timeout=45,
+            interval=0.2,
+            message="Discord P1 Gateway did not resume",
+        )
+
+        def setup_control() -> str | None:
+            custom_id = _discord_settings_component_id(
+                discord_provider_fake_url,
+                action_code="st",
+            )
+            if custom_id is not None:
+                return custom_id
+            state = _discord_provider_state(discord_provider_fake_url)
+            raise AssertionError(
+                "Discord P1 provider did not expose setup control: "
+                f"counts={state.get('request_counts')!r}, "
+                f"deliveries={state.get('deliveries')!r}, "
+                f"gateway={state.get('gateway')!r}"
+            )
+
+        setup_custom_id = cast(
+            str,
+            wait_until(
+                setup_control,
+                timeout=30,
+                interval=0.2,
+                message="Discord P1 setup control was not delivered",
+            ),
+        )
+        _select_discord_setup_location(
+            discord_provider_fake_url=discord_provider_fake_url,
+            interaction_id=interaction_id,
+            application_id=application_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+            user_id=participant_id,
+            custom_id=setup_custom_id,
+        )
+
+        def bound_session() -> Any | None:
+            for session in chat_api.chat_v1_list_agent_sessions(
+                agent_id=agent_id, _headers=headers
+            ).items:
+                projection = external_api.external_channel_v1_list_session_channels(
+                    agent_id=agent_id,
+                    session_id=session.id,
+                    handle=handle,
+                    _headers=headers,
+                )
+                if len(projection.items) == 1:
+                    return session
+            return None
+
+        session = cast(
+            Any,
+            wait_until(
+                bound_session,
+                timeout=30,
+                interval=0.2,
+                message="Discord P1 setup did not bind a Session",
+            ),
+        )
+        if discord_title_case in {"human_takeover", "lifecycle_revoked"}:
+            barrier_state = cast(
+                dict[str, object],
+                wait_until(
+                    lambda: (
+                        _discord_provider_state(discord_provider_fake_url)
+                        if requests.get(
+                            f"{discord_provider_fake_url}/__testenv/barrier",
+                            timeout=5,
+                        )
+                        .json()
+                        .get("reached")
+                        else None
+                    ),
+                    timeout=30,
+                    interval=0.2,
+                    message="Discord P1 title GET did not reach takeover barrier",
+                ),
+            )
+            if discord_title_case == "human_takeover":
+                barrier_evidence = _discord_thread_evidence(barrier_state)
+                assert len(barrier_evidence) == 1
+                actual_thread_id = barrier_evidence[0]["thread_channel_id"]
+                assert isinstance(actual_thread_id, str)
+                requests.post(
+                    f"{discord_provider_fake_url}/__testenv/thread-mutate",
+                    json={
+                        "thread_channel_id": actual_thread_id,
+                        "name": "Human takeover title",
+                    },
+                    timeout=5,
+                ).raise_for_status()
+            else:
+                external_api.external_channel_v1_disconnect_connection(
+                    agent_id=agent_id,
+                    connection_id=setup.connection.id,
+                    handle=handle,
+                    _headers=headers,
+                )
+            requests.post(
+                f"{discord_provider_fake_url}/__testenv/barrier/release",
+                timeout=5,
+            ).raise_for_status()
+
+    def title_and_execution_complete() -> Any | None:
+        current = chat_api.chat_v1_get_agent_session(
+            agent_id=agent_id,
+            session_id=session.id,
+            _headers=headers,
+        )
+        return (
+            current
+            if current.title == _DISCORD_P0_GENERATED_TITLE
+            and current.title_source is not None
+            and current.title_source.value == "auto_generated"
+            and _session_has_assistant_message(
+                public_server_url=azents_public_server_url,
+                token=token,
+                session_id=session.id,
+            )
+            else None
+        )
+
+    wait_until(
+        title_and_execution_complete,
+        timeout=45,
+        interval=0.2,
+        message="Discord P1 Session title and ordinary execution did not complete",
+    )
+    expected_updates = 1 if discord_title_case == "recoverable" else 0
+
+    def provider_title_converged() -> dict[str, object] | None:
+        current = _discord_provider_state(discord_provider_fake_url)
+        current_counts = cast(dict[str, int], current["request_counts"])
+        update_count = current_counts.get("update_thread", 0)
+        if update_count < expected_updates:
+            return None
+        assert update_count == expected_updates, (
+            f"counts={current_counts!r}, "
+            f"operations={current.get('operations')!r}, "
+            f"evidence={current.get('thread_evidence')!r}"
+        )
+        if discord_title_case == "recoverable":
+            if (
+                _discord_successful_operation_count(
+                    current,
+                    operation="get_thread",
+                )
+                < 2
+            ):
+                return None
+            return current
+        if discord_title_case in {"pre_existing", "mixed_version"}:
+            assert current_counts.get("get_message", 0) >= 1, (
+                f"counts={current_counts!r}, operations={current.get('operations')!r}"
+            )
+            return current
+        assert current_counts.get("get_thread", 0) >= 1, (
+            f"counts={current_counts!r}, operations={current.get('operations')!r}"
+        )
+        return current
+
+    state = cast(
+        dict[str, object],
+        wait_until(
+            provider_title_converged,
+            timeout=30,
+            interval=0.2,
+            message="Discord P1 provider title state did not converge",
+        ),
+    )
+    counts = cast(dict[str, int], state["request_counts"])
+    assert counts.get("update_thread", 0) == expected_updates
+    if discord_title_case == "recoverable":
+        operations = state.get("operations")
+        assert isinstance(operations, list)
+        title_operations = [
+            cast(dict[str, object], operation)
+            for operation in cast(list[object], operations)
+            if isinstance(operation, dict)
+            and cast(dict[str, object], operation).get("operation")
+            in {"get_thread", "update_thread"}
+        ]
+        update_positions = [
+            index
+            for index, operation in enumerate(title_operations)
+            if operation.get("operation") == "update_thread"
+        ]
+        assert len(update_positions) == 1, title_operations
+        update_position = update_positions[0]
+        assert update_position > 0, title_operations
+        assert update_position + 1 < len(title_operations), title_operations
+        assert (
+            title_operations[update_position - 1].get("event"),
+            title_operations[update_position - 1].get("outcome"),
+        ) == ("thread_read", "delivered")
+        assert (
+            title_operations[update_position].get("event"),
+            title_operations[update_position].get("outcome"),
+            title_operations[update_position].get("safe_category"),
+        ) == ("thread_update", "unknown", "provider_5xx_unknown")
+        assert (
+            title_operations[update_position + 1].get("event"),
+            title_operations[update_position + 1].get("outcome"),
+        ) == ("thread_read", "delivered")
+        assert (
+            _discord_successful_operation_count(state, operation="update_thread") == 0
+        )
+    else:
+        assert (
+            _discord_successful_operation_count(state, operation="update_thread") == 0
+        )
+    if discord_title_case in {"pre_existing", "mixed_version"}:
+        assert counts.get("create_thread", 0) == 0
+    else:
+        assert counts.get("create_thread", 0) == 1
+    evidence = _discord_thread_evidence(state)
+    assert len(evidence) == 1
+    expected_name = (
+        "Human takeover title"
+        if discord_title_case == "human_takeover"
+        else agent.name
+        if discord_title_case == "lifecycle_revoked"
+        else _DISCORD_P0_GENERATED_TITLE
+    )
+    assert evidence[0]["name_length"] == len(expected_name)
+    assert (
+        evidence[0]["name_sha256"] == hashlib.sha256(expected_name.encode()).hexdigest()
+    )
+
+
 def test_discord_gateway_message_waits_for_location_then_binds(
+    request: pytest.FixtureRequest,
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
@@ -3888,6 +5046,7 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         "content": source_text,
         "timestamp": timestamp,
         "edited_timestamp": None,
+        "flags": 0,
         "author": author,
         "mentions": [],
         "mention_roles": [bot_role_id],
@@ -3975,15 +5134,32 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         },
         timeout=5,
     ).raise_for_status()
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/barrier",
+        json={"operation": "update_thread", "occurrence": 1},
+        timeout=5,
+    ).raise_for_status()
+    request.addfinalizer(
+        lambda: requests.post(
+            f"{discord_provider_fake_url}/__testenv/barrier/release",
+            timeout=5,
+        ).raise_for_status()
+    )
     token, _, handle, agent_id = _create_agent(
         public_api_client,
         admin_api_client,
         azents_public_server_url,
         runtime_profile_provider_id=None,
         shell_enabled=False,
+        system_prompt=_DISCORD_P0_SYSTEM_MARKER,
     )
     headers = {"Authorization": f"Bearer {token}"}
     external_api = ExternalChannelV1Api(public_api_client)
+    agent = AgentV1Api(public_api_client).agent_v1_get_agent(
+        agent_id=agent_id,
+        handle=handle,
+        _headers=headers,
+    )
     saved_default = external_api.external_channel_v1_update_default_response_mode(
         agent_id=agent_id,
         handle=handle,
@@ -4169,7 +5345,164 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     assert logical_input["original_url"] == (
         f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
     )
-    state = _discord_provider_state(discord_provider_fake_url)
+
+    def title_patch_waiting() -> dict[str, object] | None:
+        barrier_response = requests.get(
+            f"{discord_provider_fake_url}/__testenv/barrier",
+            timeout=5,
+        )
+        barrier_response.raise_for_status()
+        barrier = cast(dict[str, object], barrier_response.json())
+        return (
+            _discord_provider_state(discord_provider_fake_url)
+            if barrier.get("reached") is True
+            else None
+        )
+
+    blocked_state = cast(
+        dict[str, object],
+        wait_until(
+            title_patch_waiting,
+            timeout=30,
+            interval=0.2,
+            message="Discord title PATCH did not reach the deterministic barrier",
+        ),
+    )
+    provisional_evidence = _discord_thread_evidence(blocked_state)
+    assert len(provisional_evidence) == 1
+    assert provisional_evidence[0]["name_length"] == len(agent.name)
+    assert (
+        provisional_evidence[0]["name_sha256"]
+        == hashlib.sha256(agent.name.encode()).hexdigest()
+    )
+    assert (
+        _discord_successful_operation_count(
+            blocked_state,
+            operation="update_thread",
+        )
+        == 0
+    )
+    assert _discord_successful_message_delivery_count(blocked_state) >= 1
+
+    def terminal_execution_before_patch() -> bool:
+        current = chat_api.chat_v1_get_agent_session(
+            agent_id=agent_id,
+            session_id=session.id,
+            _headers=headers,
+        )
+        run_state = getattr(current.run_state, "value", current.run_state)
+        return run_state == "idle" and _session_has_assistant_message(
+            public_server_url=azents_public_server_url,
+            token=token,
+            session_id=session.id,
+        )
+
+    assert wait_until(
+        terminal_execution_before_patch,
+        timeout=30,
+        interval=0.2,
+        message=(
+            "Discord AgentRun did not finish ordinary delivery while title PATCH "
+            "was blocked"
+        ),
+    )
+
+    def generated_title_session() -> Any | None:
+        current = chat_api.chat_v1_get_agent_session(
+            agent_id=agent_id,
+            session_id=session.id,
+            _headers=headers,
+        )
+        return (
+            current
+            if current.title == _DISCORD_P0_GENERATED_TITLE
+            and current.title_source is not None
+            and current.title_source.value == "auto_generated"
+            else None
+        )
+
+    generated_title = cast(
+        Any,
+        wait_until(
+            generated_title_session,
+            timeout=30,
+            interval=0.2,
+            message="Discord Gateway Session title did not reach auto_generated",
+        ),
+    )
+    assert generated_title.title == _DISCORD_P0_GENERATED_TITLE
+    assert generated_title.title_source.value == "auto_generated"
+    manual_title = "Manual Discord title must win"
+    manual = chat_api.chat_v1_update_agent_session_title(
+        session_id=session.id,
+        agent_session_title_update_request=AgentSessionTitleUpdateRequest(
+            title=manual_title,
+        ),
+        _headers=headers,
+    )
+    assert manual.title == manual_title
+    assert manual.title_source is not None
+    assert manual.title_source.value == "manual"
+    assert manual_title not in str(blocked_state)
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/barrier/release",
+        timeout=5,
+    ).raise_for_status()
+
+    def settled_title_patch() -> dict[str, object] | None:
+        current = _discord_provider_state(discord_provider_fake_url)
+        if (
+            _discord_successful_operation_count(
+                current,
+                operation="update_thread",
+            )
+            == 1
+        ):
+            return current
+        return None
+
+    state = cast(
+        dict[str, object],
+        wait_until(
+            settled_title_patch,
+            timeout=30,
+            interval=0.2,
+            message="Discord title PATCH did not settle successfully",
+        ),
+    )
+    final_evidence = _discord_thread_evidence(state)
+    assert len(final_evidence) == 1
+    assert final_evidence[0]["name_length"] == len(_DISCORD_P0_GENERATED_TITLE)
+    assert (
+        final_evidence[0]["name_sha256"]
+        == hashlib.sha256(_DISCORD_P0_GENERATED_TITLE.encode()).hexdigest()
+    )
+    assert cast(dict[str, int], state["request_counts"])["update_thread"] == 1
+    observed_thread_id = final_evidence[0]["thread_channel_id"]
+    assert isinstance(observed_thread_id, str) and observed_thread_id
+    requests.get(
+        f"{discord_provider_fake_url}/api/v10/channels/{observed_thread_id}",
+        timeout=5,
+    ).raise_for_status()
+    later_state = _discord_provider_state(discord_provider_fake_url)
+    assert cast(dict[str, int], later_state["request_counts"])["update_thread"] == 1
+    assert (
+        _discord_successful_operation_count(
+            later_state,
+            operation="update_thread",
+        )
+        == 1
+    )
+    state = later_state
+    final_session = chat_api.chat_v1_get_agent_session(
+        agent_id=agent_id,
+        session_id=session.id,
+        _headers=headers,
+    )
+    assert final_session.title == manual_title
+    assert final_session.title_source is not None
+    assert final_session.title_source.value == "manual"
+    assert manual_title not in str(state)
     assert _successful_session_paths(state) == [expected_session_path]
     assert _successful_session_presence_states(state) == ["joined"]
     request_counts = cast(dict[str, int], state["request_counts"])

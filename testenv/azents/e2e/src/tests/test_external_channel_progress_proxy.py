@@ -154,3 +154,89 @@ def test_progress_proxy_records_unresolved_provider_references() -> None:
         "search_tool_available": True,
         "progress_tool_available": False,
     }
+
+
+def test_p0_continuation_proxy_stage_a_uses_rendered_active_binding() -> None:
+    """Rendered continuation reminder produces the first dynamic tool call."""
+    request: dict[str, object] = {
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "E2E_P0_DISCORD_GATEWAY_AGENT_MARKER\n"
+                    '<system_reminder type="external_channel_continuation">'
+                    '<data>\n<item name="active_bindings">binding-discord-123'
+                    "</item>\n</data>"
+                ),
+            },
+            {"role": "assistant", "content": None},
+        ],
+        "tools": [
+            {
+                "type": "function",
+                "function": {"name": "channel_action"},
+            }
+        ],
+    }
+    assert proxy.external_channel_p0_continuation(request) == (
+        "discord",
+        "binding-discord-123",
+        "DISCORD_GATEWAY_P0_AGENT_RESPONSE",
+    )
+
+
+def test_p0_continuation_proxy_stage_b_requires_our_tool_call_output() -> None:
+    """Captured Chat tool-result shape completes only after our exact call ID."""
+    request: dict[str, object] = {
+        "messages": [
+            {"role": "system", "content": "E2E_P0_SLACK_ACCESS_ALLOW_AGENT_MARKER"},
+            {"role": "assistant", "content": None},
+            {
+                "role": "tool",
+                "tool_call_id": "call_external_channel_p0_slack_finish",
+                "content": '{"binding":"binding-slack-456"}',
+            },
+        ],
+        "tools": [
+            {
+                "type": "function",
+                "function": {"name": "channel_action"},
+            }
+        ],
+    }
+    assert proxy.external_channel_p0_continuation(request) == (
+        "slack",
+        "binding-slack-456",
+        "SLACK_ACCESS_ALLOW_P0_AGENT_RESPONSE",
+    )
+    request["messages"] = [
+        {"role": "system", "content": "E2E_P0_SLACK_ACCESS_ALLOW_AGENT_MARKER"},
+        {
+            "role": "tool",
+            "tool_call_id": "call_unrelated",
+            "content": '{"binding":"binding-wrong"}',
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_external_channel_p0_slack_finish",
+            "content": '{"status":"completed"}',
+        },
+    ]
+    assert proxy.external_channel_p0_continuation(request) is None
+
+
+def test_p0_continuation_proxy_excludes_initial_request_without_stage_inputs() -> None:
+    """The initial Agent request has neither a continuation nor tool result."""
+    request: dict[str, object] = {
+        "messages": [
+            {"role": "system", "content": "E2E_P0_DISCORD_GATEWAY_AGENT_MARKER"},
+            {"role": "user", "content": "Private Discord Gateway invocation"},
+        ],
+        "tools": [
+            {
+                "type": "function",
+                "function": {"name": "channel_action"},
+            }
+        ],
+    }
+    assert proxy.external_channel_p0_continuation(request) is None

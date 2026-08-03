@@ -108,12 +108,22 @@ _EXTERNAL_CHANNEL_PROGRESS_CALL_ID = "call_external_channel_progress"
 _EXTERNAL_CHANNEL_FINISH_CALL_ID = "call_external_channel_finish"
 _EXTERNAL_CHANNEL_TURN_BINDING = re.compile(r"Binding: ([A-Za-z0-9_-]+)")
 _EXTERNAL_CHANNEL_COMPACTION_BINDING = re.compile(r"### Binding `([^`]+)`")
+_EXTERNAL_CHANNEL_CONTINUATION_MARKER = "external_channel_continuation"
+_EXTERNAL_CHANNEL_ACTIVE_BINDING = re.compile(
+    r'<item\s+name="active_bindings">(?P<binding>[A-Za-z0-9_-]{1,80})</item>'
+)
 _EXTERNAL_CHANNEL_FILE_MARKER = "External Channel file transfer E2E"
 _EXTERNAL_CHANNEL_FILE_LOCATOR = re.compile(r"File: (external-file:v1:[^\\\s\"']+)")
 _EXTERNAL_CHANNEL_FILE_SEARCH_CALL_ID = "call_external_channel_file_tool_search"
 _EXTERNAL_CHANNEL_FILE_DOWNLOAD_CALL_ID = "call_external_channel_file_download"
 _EXTERNAL_CHANNEL_FILE_PROCESS_CALL_ID = "call_external_channel_file_process"
 _EXTERNAL_CHANNEL_FILE_FINISH_CALL_ID = "call_external_channel_file_finish"
+_EXTERNAL_CHANNEL_P0_DISCORD_CALL_ID = "call_external_channel_p0_discord_finish"
+_EXTERNAL_CHANNEL_P0_SLACK_CALL_ID = "call_external_channel_p0_slack_finish"
+_EXTERNAL_CHANNEL_P0_DISCORD_SYSTEM_MARKER = "E2E_P0_DISCORD_GATEWAY_AGENT_MARKER"
+_EXTERNAL_CHANNEL_P0_SLACK_SYSTEM_MARKER = "E2E_P0_SLACK_ACCESS_ALLOW_AGENT_MARKER"
+_EXTERNAL_CHANNEL_P0_DISCORD_RESPONSE = "DISCORD_GATEWAY_P0_AGENT_RESPONSE"
+_EXTERNAL_CHANNEL_P0_SLACK_RESPONSE = "SLACK_ACCESS_ALLOW_P0_AGENT_RESPONSE"
 _EXTERNAL_CHANNEL_FILE_INPUT_PATH = "/workspace/agent/external-input.txt"
 _EXTERNAL_CHANNEL_FILE_INPUT_BYTES = 6 * 1024 * 1024
 _EXTERNAL_CHANNEL_FILE_OUTPUT_PATHS = (
@@ -209,7 +219,10 @@ def _request_has_named_tool(request: dict[str, object], name: str) -> bool:
         if not isinstance(raw_tool, dict):
             continue
         tool = cast(dict[str, object], raw_tool)
-        if tool.get("name") == name:
+        tool_name = tool.get("name")
+        if tool_name is None and isinstance(tool.get("function"), dict):
+            tool_name = cast(dict[str, object], tool["function"]).get("name")
+        if tool_name == name:
             return True
     return False
 
@@ -228,7 +241,10 @@ def _request_has_named_tool_type(
         if not isinstance(raw_tool, dict):
             continue
         tool = cast(dict[str, object], raw_tool)
-        if tool.get("name") == name and tool.get("type") == tool_type:
+        tool_name = tool.get("name")
+        if tool_name is None and isinstance(tool.get("function"), dict):
+            tool_name = cast(dict[str, object], tool["function"]).get("name")
+        if tool_name == name and tool.get("type") == tool_type:
             return True
     return False
 
@@ -253,6 +269,52 @@ def request_has_tool_output(value: object, call_id: str) -> bool:
             for child in cast(list[object], value)
         )
     return False
+
+
+def _tool_output_binding(value: object, *, call_id: str) -> str | None:
+    """Extract one bounded binding only from decoded tool-result payloads."""
+    if not isinstance(value, dict):
+        return None
+    item = cast(dict[str, object], value)
+    item_type = item.get("type")
+    role = item.get("role")
+    if (
+        item_type in {"function_call_output", "custom_tool_call_output"}
+        and item.get("call_id") == call_id
+    ):
+        payload = item.get("output")
+    elif role == "tool" and item.get("tool_call_id") == call_id:
+        payload = item.get("content")
+    else:
+        return None
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(payload, dict):
+        return None
+    binding = cast(dict[str, object], payload).get("binding")
+    if isinstance(binding, str) and 0 < len(binding) <= 80:
+        return binding
+    return None
+
+
+def external_channel_tool_output_binding(
+    request: dict[str, object],
+    *,
+    call_id: str,
+) -> str | None:
+    """Return a binding from the exact Responses or Chat tool-result item."""
+    for field in ("input", "messages"):
+        items = request.get(field)
+        if not isinstance(items, list):
+            continue
+        for raw_item in reversed(cast(list[object], items)):
+            binding = _tool_output_binding(raw_item, call_id=call_id)
+            if binding is not None:
+                return binding
+    return None
 
 
 def apply_patch_scenario(request: dict[str, object]) -> str | None:
@@ -389,6 +451,54 @@ def is_external_channel_progress_request(request: dict[str, object]) -> bool:
             or _request_has_named_tool(request, "channel_action")
         )
     )
+
+
+def _external_channel_active_binding(request: dict[str, object]) -> str | None:
+    """Extract one bounded active binding from rendered reminder content."""
+    for field in ("input", "messages"):
+        items = request.get(field)
+        if not isinstance(items, list):
+            continue
+        for raw_item in cast(list[object], items):
+            if not isinstance(raw_item, dict):
+                continue
+            content = cast(dict[str, object], raw_item).get("content")
+            if isinstance(content, str):
+                match = _EXTERNAL_CHANNEL_ACTIVE_BINDING.search(content)
+                if match is not None:
+                    return match.group("binding")
+    return None
+
+
+def external_channel_p0_continuation(
+    request: dict[str, object],
+) -> tuple[str, str, str] | None:
+    """Return the P0 channel, binding, and deterministic completion marker."""
+    serialized = json.dumps(request, ensure_ascii=False)
+    if not _request_has_named_tool(request, "channel_action"):
+        return None
+    if _EXTERNAL_CHANNEL_P0_DISCORD_SYSTEM_MARKER in serialized:
+        channel = "discord"
+        completion = _EXTERNAL_CHANNEL_P0_DISCORD_RESPONSE
+    elif _EXTERNAL_CHANNEL_P0_SLACK_SYSTEM_MARKER in serialized:
+        channel = "slack"
+        completion = _EXTERNAL_CHANNEL_P0_SLACK_RESPONSE
+    else:
+        return None
+    call_id = (
+        _EXTERNAL_CHANNEL_P0_DISCORD_CALL_ID
+        if channel == "discord"
+        else _EXTERNAL_CHANNEL_P0_SLACK_CALL_ID
+    )
+    binding = external_channel_tool_output_binding(request, call_id=call_id)
+    if binding is not None:
+        return (channel, binding, completion)
+    if _EXTERNAL_CHANNEL_CONTINUATION_MARKER not in serialized:
+        return None
+    active_binding = _external_channel_active_binding(request)
+    if active_binding is None:
+        return None
+    return (channel, active_binding, completion)
 
 
 def external_channel_progress_evidence(
@@ -631,6 +741,32 @@ class _Handler(BaseHTTPRequestHandler):
                 )
                 return
         serialized = json.dumps(request, ensure_ascii=False)
+        p0_continuation = external_channel_p0_continuation(request)
+        if self.path == "/v1/responses" and p0_continuation is not None:
+            channel, binding, completion = p0_continuation
+            call_id = (
+                _EXTERNAL_CHANNEL_P0_DISCORD_CALL_ID
+                if channel == "discord"
+                else _EXTERNAL_CHANNEL_P0_SLACK_CALL_ID
+            )
+            if request_has_tool_output(request, call_id):
+                self._write_text_response(
+                    request,
+                    completion,
+                    response_id=f"resp_external_channel_p0_{channel}_completed",
+                )
+            else:
+                self._write_function_call_response(
+                    request,
+                    call_id=call_id,
+                    name="channel_action",
+                    arguments={
+                        "mode": "finish",
+                        "binding": binding,
+                        "message": completion,
+                    },
+                )
+            return
         if _EXTERNAL_CHANNEL_FILE_MARKER in serialized or bool(
             external_channel_file_locators(request)
         ):

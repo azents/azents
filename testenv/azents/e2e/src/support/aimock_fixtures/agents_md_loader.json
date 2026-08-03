@@ -45,6 +45,66 @@
     {
       "match": {
         "endpoint": "chat",
+        "userMessage": "Private Discord Gateway invocation",
+        "systemMessage": "You are a session title generator"
+      },
+      "response": {
+        "content": "Discord Gateway deterministic title"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Initial response-mode invocation",
+        "systemMessage": "You are a session title generator"
+      },
+      "response": {
+        "content": "Slack context deterministic title"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "External Channel file transfer E2E",
+        "systemMessage": "You are a session title generator"
+      },
+      "response": {
+        "content": "Slack attachment deterministic title"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Please investigate the deterministic incident.",
+        "systemMessage": "You are a session title generator"
+      },
+      "response": {
+        "content": "Slack Access-Allow deterministic title"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Private Discord Gateway invocation",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "DISCORD_GATEWAY_P0_AGENT_RESPONSE"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Please investigate the deterministic incident.",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "SLACK_ACCESS_ALLOW_P0_AGENT_RESPONSE"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
         "systemMessage": "You are a session title generator"
       },
       "response": {
