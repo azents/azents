@@ -95,7 +95,7 @@ class AgentRuntime(BaseModel):
     )
     runner_generation: int = Field(default=0, description="Runner state generation")
     workspace_path: str | None = Field(
-        default=None, description="Workspace path reported by Provider"
+        default=None, description="Agent Workspace path reported by Runner"
     )
     failure_generation: int | None = Field(
         default=None, description="Generation containing failure"

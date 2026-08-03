@@ -580,7 +580,6 @@ class RuntimeProviderControlGrpcServicer(
         }
         if completion.report.runtime_id:
             payload["provider_observed_state"] = completion.report.observed_state
-            payload["workspace_path"] = completion.report.workspace_path
         await self._control_protocol.append_operation_reply_event(
             RuntimeReplyEvent(
                 request_id=completion.request_id,

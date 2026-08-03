@@ -110,7 +110,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-08-03
-spec_version: 139
+spec_version: 140
 ---
 
 # Conversation & Events
@@ -216,8 +216,9 @@ worktree as a session Project. Legacy `workspace_items`, `workspace_mode`, and `
 fields are not part of the current contract.
 
 Every root creation call selects exactly one workspace intent. Explicit intent uses
-the caller's normalized `existing_project_paths`, including an explicitly empty
-list, and never merges the Agent policy. Agent-default intent reads the current
+the caller's `existing_project_paths` normalized under the current Runner-reported
+Agent Workspace root, including an explicitly empty list, and never merges the
+Agent policy. Agent-default intent reads the current
 ordered automatic Project policy and snapshots it into the new
 `SessionAgentContext`. Root creation writes the AgentSession, root SessionAgent,
 context, and context Projects in the caller-owned transaction without Runtime I/O.
@@ -472,7 +473,9 @@ TurnAction. Worktree creation uses typed Runner Git operations, registers exactl
 `session_agent_context_projects`, and upserts the Agent Project catalog entry without updating
 last-created-session defaults. Existing Project selections still refresh presets/defaults directly;
 worktree actions refresh source-path presets and register only the created worktree path as prompt
-context. The ownership row, not reserved-root membership or `session_agent_context_projects`, is required
+context. Generated paths are allocated under
+`<current-agent-workspace>/.azents/worktrees/<session-handle>/`. The ownership row,
+not reserved-root membership or `session_agent_context_projects`, is required
 before destructive cleanup can remove a path or branch.
 
 ## 3. AgentRun
@@ -1094,6 +1097,7 @@ participant.
 
 ## 12. Changelog
 
+- **2026-08-03** — v140. Normalized session Project inputs against the current Runner-reported Agent Workspace and derived generated worktree allocation and cleanup ownership from that Runtime-specific root.
 - **2026-08-03** — v139. Added saved-capability-directed Structured Output and plain-text automatic
   title envelopes, one bounded unknown-capability compatibility transition, and prompt-only
   invocation-markup guidance without changing title authority.

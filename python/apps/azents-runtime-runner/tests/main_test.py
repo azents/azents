@@ -12,6 +12,7 @@ from azents_runtime_runner.main import (
     RunnerLimitConfig,
     StructuredLogFormatter,
     _runtime_configuration_evidence_from_env,
+    resolve_workspace_path,
     run_runtime_runner,
     runner_limit_config_from_env,
 )
@@ -26,7 +27,7 @@ async def test_runner_requires_auth_credential_id(
     monkeypatch.setenv("AZ_RUNTIME_TRANSFER_ENDPOINT", "runtime-transfer:8031")
     monkeypatch.setenv("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
     monkeypatch.setenv("AZ_RUNTIME_ID", "runtime-1")
-    monkeypatch.setenv("AZ_AGENT_WORKSPACE_PATH", "/workspace/agent")
+    monkeypatch.setenv("HOME", "/runtime/home")
     monkeypatch.delenv("AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID", raising=False)
 
     with pytest.raises(SystemExit, match="AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"):
@@ -42,12 +43,47 @@ async def test_runner_requires_auth_token(
     monkeypatch.setenv("AZ_RUNTIME_TRANSFER_ENDPOINT", "runtime-transfer:8031")
     monkeypatch.setenv("AZ_RUNTIME_CONTROL_ALLOW_INSECURE", "true")
     monkeypatch.setenv("AZ_RUNTIME_ID", "runtime-1")
-    monkeypatch.setenv("AZ_AGENT_WORKSPACE_PATH", "/workspace/agent")
+    monkeypatch.setenv("HOME", "/runtime/home")
     monkeypatch.setenv("AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID", "credential-1")
     monkeypatch.delenv("AZ_RUNTIME_RUNNER_AUTH_TOKEN", raising=False)
 
     with pytest.raises(SystemExit, match="AZ_RUNTIME_RUNNER_AUTH_TOKEN"):
         await run_runtime_runner()
+
+
+def test_resolve_workspace_path_prefers_explicit_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit Runner input overrides HOME."""
+    monkeypatch.setenv("HOME", "/runtime/home")
+
+    assert resolve_workspace_path("/runtime/custom/../workspace") == (
+        "/runtime/workspace"
+    )
+
+
+def test_resolve_workspace_path_uses_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Runner uses HOME when explicit input is absent."""
+    monkeypatch.setenv("HOME", "/runtime/home/../workspace")
+
+    assert resolve_workspace_path(None) == "/runtime/workspace"
+
+
+@pytest.mark.parametrize("path", ["", "relative/path"])
+def test_resolve_workspace_path_rejects_invalid_input(path: str) -> None:
+    """Runner rejects missing and relative workspace paths."""
+    with pytest.raises(SystemExit):
+        resolve_workspace_path(path)
+
+
+def test_resolve_workspace_path_requires_home_when_input_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runner rejects startup without explicit input or HOME."""
+    monkeypatch.delenv("HOME", raising=False)
+
+    with pytest.raises(SystemExit):
+        resolve_workspace_path(None)
 
 
 def test_runner_reads_provider_injected_configuration_evidence(

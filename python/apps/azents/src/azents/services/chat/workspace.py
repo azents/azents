@@ -64,7 +64,6 @@ from .data import (
     SessionNotFound,
 )
 
-AGENT_WORKSPACE_ROOT = PurePosixPath("/workspace/agent")
 _DEFAULT_TEXT_PREVIEW_LIMIT = 64 * 1024
 _DEFAULT_MEDIA_TYPE = "application/octet-stream"
 _CONFIG_DEP = Depends(get_config)
@@ -366,7 +365,7 @@ class AgentWorkspaceInvalidOperation:
 
 
 class AgentWorkspacePathUnavailable(RuntimeError):
-    """Provider has not reported Agent Workspace path yet."""
+    """Runner has not reported Agent Workspace path yet."""
 
 
 AgentWorkspaceError = (
@@ -385,7 +384,7 @@ AgentWorkspaceError = (
 
 
 def agent_workspace_root(workspace_path: str | None) -> PurePosixPath:
-    """Return Agent Workspace root reported by Provider.
+    """Return Agent Workspace root reported by Runner.
 
     :param workspace_path: Agent Workspace absolute path in Runtime metadata
     :return: Normalized Agent Workspace root
@@ -401,12 +400,12 @@ def agent_workspace_root(workspace_path: str | None) -> PurePosixPath:
 def normalize_agent_workspace_path(
     raw_path: str | None,
     *,
-    workspace_root: PurePosixPath = AGENT_WORKSPACE_ROOT,
+    workspace_root: PurePosixPath,
 ) -> PurePosixPath:
     """Normalize request path as absolute path under Agent Workspace root.
 
     :param raw_path: Request path
-    :param workspace_root: Agent Workspace root reported by Provider
+    :param workspace_root: Agent Workspace root reported by Runner
     :return: Normalized Agent Workspace path
     :raises AgentWorkspacePathDenied: When path is outside Agent Workspace root
     """

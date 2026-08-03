@@ -1,6 +1,8 @@
 """Durable Agent Runtime state sinks for Control gRPC bridges."""
 
 import dataclasses
+import posixpath
+from pathlib import PurePosixPath
 from typing import Annotated
 
 from azents_runtime_control.provider import (
@@ -35,7 +37,7 @@ from azents.runtime.control_protocol.data import RuntimeRunnerRegistration
 
 @dataclasses.dataclass
 class RuntimeProviderReportRepositorySink:
-    """Persist Provider reports as authoritative Runtime metadata."""
+    """Persist Provider lifecycle and configuration reports."""
 
     runtime_repository: Annotated[
         AgentRuntimeRepository, Depends(AgentRuntimeRepository)
@@ -49,7 +51,7 @@ class RuntimeProviderReportRepositorySink:
     ]
 
     async def record_provider_report(self, report: SharedRuntimeProviderReport) -> None:
-        """Persist one Provider report and its workspace metadata."""
+        """Persist one Provider report."""
         async with self.session_manager() as session:
             runtime = await self.runtime_repository.get_by_id(
                 session, report.runtime_id
@@ -96,21 +98,17 @@ class RuntimeProviderReportRepositorySink:
                 runtime=runtime,
                 report=report,
             )
-            failure = configuration_failure or _provider_workspace_failure(
-                workspace_path=report.workspace_path,
-                desired_generation=runtime.desired_generation,
-            )
             persisted = await self.runtime_repository.record_provider_observed_state(
                 session,
                 report.runtime_id,
                 _provider_observed_state(report.observed_state),
                 report.provider_generation,
                 report.observed_desired_generation,
-                workspace_path=report.workspace_path or None,
-                failure=failure,
+                failure=configuration_failure,
                 clear_failure=_provider_report_clears_failure(
                     report=report,
                     desired_generation=runtime.desired_generation,
+                    failure_code=runtime.failure_code,
                 ),
             )
             if persisted is None:
@@ -160,7 +158,7 @@ class RuntimeProviderReportRepositorySink:
 
 @dataclasses.dataclass
 class RuntimeRunnerStateRepositorySink:
-    """Persist Runner reports without accepting Runner-owned workspace paths."""
+    """Persist Runner state and authoritative Agent Workspace paths."""
 
     runtime_repository: Annotated[
         AgentRuntimeRepository, Depends(AgentRuntimeRepository)
@@ -246,7 +244,7 @@ class RuntimeRunnerStateRepositorySink:
             return evidence
 
     async def record_runner_state(self, report: SharedRunnerStateReport) -> None:
-        """Persist one Runner report, validating it against Provider metadata."""
+        """Persist one Runner report and validate its workspace path."""
         async with self.session_manager() as session:
             runtime = await self.runtime_repository.get_by_id(
                 session, report.runtime_id
@@ -265,6 +263,7 @@ class RuntimeRunnerStateRepositorySink:
                     expected_desired_generation=(
                         report.runtime_configuration.desired_generation
                     ),
+                    workspace_path=None,
                     failure=None,
                 )
                 return
@@ -273,11 +272,20 @@ class RuntimeRunnerStateRepositorySink:
                 != runtime.desired_generation
             ):
                 return
-            failure = _workspace_failure(
-                provider_workspace_path=runtime.workspace_path,
-                runner_workspace_path=report.workspace_path,
-                desired_generation=runtime.desired_generation,
-            )
+            try:
+                workspace_path = _normalize_runner_workspace_path(report.workspace_path)
+                failure = None
+            except ValueError as exc:
+                workspace_path = None
+                failure = AgentRuntimeFailurePatch(
+                    generation=runtime.desired_generation,
+                    code=(
+                        "RUNNER_WORKSPACE_PATH_MISSING"
+                        if not report.workspace_path.strip()
+                        else "RUNNER_WORKSPACE_PATH_INVALID"
+                    ),
+                    message=str(exc),
+                )
             runner_state = _runner_state(report)
             if failure is None:
                 failure = _runner_state_failure(
@@ -289,12 +297,12 @@ class RuntimeRunnerStateRepositorySink:
                 runtime=runtime,
                 report=report,
             )
-            if configuration_failure is not None:
+            if failure is None and configuration_failure is not None:
                 failure = configuration_failure
             if failure is not None:
                 runner_state = RuntimeRunnerState.FAILED
 
-            await self.runtime_repository.record_runner_state(
+            persisted = await self.runtime_repository.record_runner_state(
                 session,
                 report.runtime_id,
                 runner_state,
@@ -302,8 +310,18 @@ class RuntimeRunnerStateRepositorySink:
                 expected_desired_generation=(
                     report.runtime_configuration.desired_generation
                 ),
+                workspace_path=workspace_path,
                 failure=failure,
             )
+            if (
+                persisted is not None
+                and failure is None
+                and _runner_report_clears_failure(runtime.failure_code)
+            ):
+                await self.runtime_repository.clear_current_generation_failure(
+                    session,
+                    report.runtime_id,
+                )
 
     async def _record_runner_configuration_evidence(
         self,
@@ -357,32 +375,14 @@ class RuntimeRunnerStateRepositorySink:
         )
 
 
-def _workspace_failure(
-    *,
-    provider_workspace_path: str | None,
-    runner_workspace_path: str,
-    desired_generation: int,
-) -> AgentRuntimeFailurePatch | None:
-    if provider_workspace_path is None:
-        return AgentRuntimeFailurePatch(
-            generation=desired_generation,
-            code="PROVIDER_WORKSPACE_PATH_MISSING",
-            message=(
-                "Runtime Provider has not reported an Agent Workspace path. "
-                "Runner operations are unavailable until Provider metadata is "
-                "available."
-            ),
-        )
-    if provider_workspace_path != runner_workspace_path:
-        return AgentRuntimeFailurePatch(
-            generation=desired_generation,
-            code="RUNNER_WORKSPACE_PATH_MISMATCH",
-            message=(
-                "Runtime Runner workspace path does not match Provider metadata: "
-                f"provider={provider_workspace_path}, runner={runner_workspace_path}"
-            ),
-        )
-    return None
+def _normalize_runner_workspace_path(workspace_path: str) -> str:
+    """Normalize one Runner-reported Agent Workspace path."""
+    if not workspace_path.strip():
+        raise ValueError("Runtime Runner did not report an Agent Workspace path.")
+    normalized = PurePosixPath(posixpath.normpath(workspace_path.strip()))
+    if not normalized.is_absolute():
+        raise ValueError("Runtime Runner Agent Workspace path must be absolute.")
+    return normalized.as_posix()
 
 
 def _configuration_failure(
@@ -396,32 +396,29 @@ def _configuration_failure(
     )
 
 
-def _provider_workspace_failure(
-    *,
-    workspace_path: str,
-    desired_generation: int,
-) -> AgentRuntimeFailurePatch | None:
-    if workspace_path:
-        return None
-    return AgentRuntimeFailurePatch(
-        generation=desired_generation,
-        code="PROVIDER_WORKSPACE_PATH_MISSING",
-        message=(
-            "Runtime Provider did not report an Agent Workspace path. Runtime "
-            "operations are unavailable until Provider metadata is available."
-        ),
-    )
-
-
 def _provider_report_clears_failure(
     *,
     report: SharedRuntimeProviderReport,
     desired_generation: int,
+    failure_code: str | None,
 ) -> bool:
     return (
         report.observed_state == SharedProviderObservedState.RUNNING
         and report.observed_desired_generation >= desired_generation
-        and bool(report.workspace_path)
+        and (
+            failure_code is None
+            or failure_code == "START_TIMEOUT"
+            or failure_code.startswith("PROVIDER_")
+            or failure_code.startswith("RUNTIME_CONFIGURATION_PROVIDER_")
+        )
+    )
+
+
+def _runner_report_clears_failure(failure_code: str | None) -> bool:
+    return (
+        failure_code is None
+        or failure_code.startswith("RUNNER_")
+        or failure_code.startswith("RUNTIME_CONFIGURATION_RUNNER_")
     )
 
 

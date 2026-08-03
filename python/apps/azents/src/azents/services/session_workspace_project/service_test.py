@@ -170,7 +170,16 @@ async def _create_runtime_fixture(
     session.add(agent)
     await session.flush()
 
-    runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent.id)
+    runtime_repository = AgentRuntimeRepository()
+    runtime = await runtime_repository.ensure_for_agent(session, agent.id)
+    await runtime_repository.record_runner_state(
+        session,
+        runtime.id,
+        RuntimeRunnerState.UNKNOWN,
+        1,
+        expected_desired_generation=runtime.desired_generation,
+        workspace_path="/workspace/agent",
+    )
     agent_session = (
         await AgentSessionRepository().ensure_team_primary_for_agent(
             session,
@@ -236,7 +245,10 @@ class TestSessionWorkspaceProjectService:
     def test_normalize_rejects_workspace_root(self) -> None:
         """Session Workspace root itself cannot become Project."""
         try:
-            normalize_session_workspace_path("/workspace/agent")
+            normalize_session_workspace_path(
+                "/runtime/home",
+                workspace_root="/runtime/home",
+            )
         except ValueError as exc:
             assert "root" in str(exc)
         else:

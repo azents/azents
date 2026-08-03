@@ -17,7 +17,7 @@ _MAX_BRACE_EXPANSIONS = 256
 class FakeSharedStorage:
     """Storage for tests. Simulates absolute path based file access.
 
-    Files are stored by runtime absolute path key, e.g. ``/workspace/agent/file.txt``.
+    Files are stored by runtime absolute path key, e.g. ``/runtime/home/file.txt``.
     """
 
     def __init__(

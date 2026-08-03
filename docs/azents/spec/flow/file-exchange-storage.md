@@ -52,7 +52,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-08-03
-spec_version: 37
+spec_version: 38
 ---
 
 # File Exchange Storage
@@ -210,7 +210,7 @@ database cascade erase the last cleanup reference before external deletion succe
 
 ### Agent presents sandbox file
 
-`present_file` publishes only files under the Provider-reported Agent Workspace as a
+`present_file` publishes only files under the current Runner-reported Agent Workspace as a
 public Exchange attachment. Files outside the allowed path are rejected. It uses one
 Runtime-to-server upload transfer, then publishes the verified immutable transfer
 object through a native object-store copy. Product metadata is committed only after
@@ -269,6 +269,7 @@ lifetime. Object existence alone never creates Exchange publication authority.
 
 ## Changelog
 
+- **2026-08-03** — v38. Bound `present_file` publication to the current Runner-reported Agent Workspace root instead of Provider metadata or a fixed path.
 - **2026-08-02** — v37. Removed the obsolete durable External Channel
   Action/Delivery manifest claim and documented request-local file publication with
   sanitized ordinary Tool results.

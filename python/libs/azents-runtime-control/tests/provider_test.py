@@ -223,7 +223,6 @@ async def test_process_next_command_dispatches_and_completes_success() -> None:
     assert completion.success
     assert completion.report is not None
     assert completion.report.provider_generation == 11
-    assert completion.report.workspace_path == "/workspace/agent"
     assert lifecycle.commands == [command]
     assert client.completions == [completion]
     assert client.reports[-1].observed_state is RuntimeProviderObservedState.RUNNING
@@ -320,7 +319,7 @@ def _loop(
             protocol_version="agent-runtime-provider.v1",
             capabilities=("lifecycle", "observe"),
             config_schema_version="v1",
-            metadata={"workspace_path_source": "provider"},
+            metadata={"region": "test"},
             capability_contract={"schema_version": 1},
         ),
         connection_id="connection-1",
@@ -363,7 +362,6 @@ def _report(command: RuntimeLifecycleCommand) -> RuntimeProviderReport:
         observed_state=RuntimeProviderObservedState.RUNNING,
         observed_desired_generation=command.desired_generation,
         provider_runtime_id="runtime-provider-id",
-        workspace_path="/workspace/agent",
         reason=f"{command.command_type.value}_ok",
         diagnostic=diagnostic,
         reported_at=datetime(2026, 5, 25, tzinfo=UTC),

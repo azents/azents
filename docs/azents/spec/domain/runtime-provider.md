@@ -48,8 +48,8 @@ code_paths:
   - typescript/apps/azents-admin-web/src/features/runtime-providers/**
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
   - typescript/apps/azents-web/src/features/runtime-profiles/**
-last_verified_at: 2026-07-31
-spec_version: 14
+last_verified_at: 2026-08-03
+spec_version: 15
 ---
 
 # Runtime Provider
@@ -104,6 +104,11 @@ Runtime Profile, desired configuration revision, and applied configuration revis
 configuration revision stores the Provider capability revision and complete source identity.
 Provider/Profile changes create a new authoritative desired revision; they do not silently move the
 Agent to another Profile or Provider.
+
+Provider infrastructure chooses and mounts durable storage for Runner workloads. Bundled Providers
+set Runner `HOME` and working directory to the configured mount path, but Provider registration and
+lifecycle reports do not advertise an Agent Workspace path. The Runner's current-generation report
+is the metadata authority for the effective absolute path.
 
 When the exact selection is missing or unavailable, Public Runtime creation/start/restart/reset/
 recreate returns a bounded `409` conflict instead of persisting a substitute target. Stop and
@@ -179,6 +184,7 @@ Authentication rollout does not render, own, select, delete, rename, or recreate
 
 ## Version history
 
+- **15 (2026-08-03):** Removed Agent Workspace metadata from Provider capability and lifecycle reports; bundled Providers now configure Runner `HOME` and working directory while Runner reports the effective path.
 - **14 (2026-07-31):** Replaced accepted-contract and hierarchical execution-policy authority with
   the authenticated current valid capability, Provider-owned typed infrastructure Profiles,
   Workspace-owned exact Runtime Profiles, desired/applied configuration evidence, and scoped

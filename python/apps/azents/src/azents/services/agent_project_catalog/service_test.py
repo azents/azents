@@ -106,6 +106,16 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
     )
     session.add(agent)
     await session.flush()
+    runtime_repository = AgentRuntimeRepository()
+    runtime = await runtime_repository.ensure_for_agent(session, agent.id)
+    await runtime_repository.record_runner_state(
+        session,
+        runtime.id,
+        RuntimeRunnerState.UNKNOWN,
+        1,
+        expected_desired_generation=runtime.desired_generation,
+        workspace_path="/workspace/agent",
+    )
     return agent.id
 
 

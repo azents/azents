@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from azents.core.enums import LLMProvider
+from azents.core.enums import LLMProvider, RuntimeRunnerState
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_item import (
     RDBAgentAutomaticProjectItem,
@@ -21,6 +21,7 @@ from azents.repos.agent_automatic_project import AgentAutomaticProjectRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
+from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import AgentSessionCreate
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
@@ -52,6 +53,7 @@ async def _create_agent(
     slug: str,
     policy_paths: list[str],
     revision: int,
+    workspace_path: str | None = "/workspace/agent",
 ) -> str:
     """Create an Agent and its persisted automatic Project policy."""
     integration = RDBLLMProviderIntegration(
@@ -92,6 +94,17 @@ async def _create_agent(
         ]
     )
     await session.flush()
+    runtime_repository = AgentRuntimeRepository()
+    runtime = await runtime_repository.ensure_for_agent(session, agent.id)
+    if workspace_path is not None:
+        await runtime_repository.record_runner_state(
+            session,
+            runtime.id,
+            RuntimeRunnerState.UNKNOWN,
+            1,
+            expected_desired_generation=runtime.desired_generation,
+            workspace_path=workspace_path,
+        )
     return agent.id
 
 
@@ -100,12 +113,41 @@ def _service() -> RootAgentSessionCreationService:
     return RootAgentSessionCreationService(
         agent_session_repository=AgentSessionRepository(),
         automatic_project_repository=AgentAutomaticProjectRepository(),
+        agent_runtime_repository=AgentRuntimeRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
     )
 
 
 class TestRootAgentSessionCreationService:
     """Root Session Project initialization behavior."""
+
+    async def test_empty_explicit_intent_does_not_require_workspace_path(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Creating a Project-free root Session does not inspect Runtime paths."""
+        workspace_id = await _create_workspace(rdb_session, "root-empty-no-runtime")
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            slug="root-empty-no-runtime",
+            policy_paths=[],
+            revision=1,
+            workspace_path=None,
+        )
+
+        result = await _service().create_root_session(
+            rdb_session,
+            create=AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+                primary_kind=None,
+            ),
+            workspace_intent=ExplicitRootWorkspaceIntent(existing_project_paths=[]),
+        )
+
+        assert result.initial_project_paths == ()
 
     async def test_explicit_paths_are_normalized_and_never_merge_policy(
         self,

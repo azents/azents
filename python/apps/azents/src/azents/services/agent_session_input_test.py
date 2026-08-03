@@ -22,6 +22,7 @@ from azents.core.enums import (
     AgentSessionStatus,
     LLMProvider,
     MailboxSchedulingMode,
+    RuntimeRunnerState,
     WorkspaceUserRole,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
@@ -301,6 +302,7 @@ def _root_agent_session_creation_service() -> RootAgentSessionCreationService:
     return RootAgentSessionCreationService(
         agent_session_repository=AgentSessionRepository(),
         automatic_project_repository=AgentAutomaticProjectRepository(),
+        agent_runtime_repository=AgentRuntimeRepository(),
         session_workspace_project_repository=SessionWorkspaceProjectRepository(),
     )
 
@@ -335,7 +337,13 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
     return workspace_id
 
 
-async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> str:
+async def _create_agent(
+    session: AsyncSession,
+    workspace_id: str,
+    slug: str,
+    *,
+    workspace_path: str | None = "/workspace/agent",
+) -> str:
     """Create Agent for tests."""
 
     integration = RDBLLMProviderIntegration(
@@ -366,6 +374,17 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
     await session.flush()
     session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
     await session.flush()
+    runtime_repository = AgentRuntimeRepository()
+    runtime = await runtime_repository.ensure_for_agent(session, agent.id)
+    if workspace_path is not None:
+        await runtime_repository.record_runner_state(
+            session,
+            runtime.id,
+            RuntimeRunnerState.UNKNOWN,
+            1,
+            expected_desired_generation=runtime.desired_generation,
+            workspace_path=workspace_path,
+        )
     return agent.id
 
 
@@ -731,6 +750,7 @@ class TestAgentSessionInputService:
                 session,
                 workspace_id,
                 "draft-session-idempotent",
+                workspace_path=None,
             )
 
         service = AgentSessionInputService(

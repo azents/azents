@@ -14,7 +14,10 @@ from azents.core.enums import (
 )
 from azents.engine.run.types import FunctionTool, FunctionToolError, FunctionToolResult
 from azents.engine.tooling.execution_context import client_tool_execution_context
-from azents.engine.tools.present_file import make_present_file_tool
+from azents.engine.tools.present_file import (
+    _is_presentable_path,  # pyright: ignore[reportPrivateUsage]  # Exercise root containment directly.
+    make_present_file_tool,
+)
 from azents.engine.tools.runtime_instruction_context import (
     RuntimeToServerPublicationCapability,
 )
@@ -31,6 +34,11 @@ from azents.services.session_resource_authority import SessionResourceAuthority
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
 _TARGET = ServerToRuntimeTarget(runtime_id="runtime-1", desired_generation=3)
+
+
+def test_presentable_path_supports_filesystem_root_workspace() -> None:
+    """Filesystem root can be the Runner-reported Agent Workspace."""
+    assert _is_presentable_path("/result.png", "/")
 
 
 class _NoBodyReadStorage(FakeSharedStorage):
@@ -141,6 +149,7 @@ def _tool(
         session_storage=storage,
         publication_capability=capability,
         authority=_authority(),
+        workspace_root="/runtime/home",
     )
 
 
@@ -175,7 +184,7 @@ def _output_text(result: FunctionToolResult) -> str:
 @pytest.mark.asyncio
 async def test_present_file_publishes_large_file_without_body_relay() -> None:
     """Use only metadata for a file larger than the old complete-body relay path."""
-    path = "/workspace/agent/large.bin"
+    path = "/runtime/home/large.bin"
     storage = _NoBodyReadStorage({path: b"x" * (5 * 1024 * 1024)})
     service = _PublicationService()
 
@@ -201,7 +210,7 @@ async def test_present_file_publishes_large_file_without_body_relay() -> None:
 @pytest.mark.asyncio
 async def test_present_file_fails_closed_without_publication_capability() -> None:
     """Never fall back to FileStorage.get when managed transfer is unavailable."""
-    path = "/workspace/agent/result.txt"
+    path = "/runtime/home/result.txt"
     storage = _NoBodyReadStorage({path: b"hello"})
 
     with pytest.raises(FunctionToolError, match="transfer is unavailable"):
@@ -213,8 +222,8 @@ async def test_present_file_fails_closed_without_publication_capability() -> Non
 @pytest.mark.asyncio
 async def test_present_file_preserves_partial_multi_path_results() -> None:
     """Continue after a missing path and return the successfully published file."""
-    good_path = "/workspace/agent/result.txt"
-    missing_path = "/workspace/agent/missing.txt"
+    good_path = "/runtime/home/result.txt"
+    missing_path = "/runtime/home/missing.txt"
     storage = _NoBodyReadStorage({good_path: b"hello"})
     service = _PublicationService()
 
@@ -238,8 +247,8 @@ async def test_present_file_preserves_partial_multi_path_results() -> None:
 @pytest.mark.asyncio
 async def test_present_file_reports_authority_failure_and_continues() -> None:
     """Keep authority denial as a controlled per-path tool observation."""
-    denied_path = "/workspace/agent/denied.txt"
-    good_path = "/workspace/agent/result.txt"
+    denied_path = "/runtime/home/denied.txt"
+    good_path = "/runtime/home/result.txt"
     storage = _NoBodyReadStorage({denied_path: b"denied", good_path: b"hello"})
     service = _PublicationService(
         failures={
@@ -266,8 +275,8 @@ async def test_present_file_reports_authority_failure_and_continues() -> None:
 @pytest.mark.asyncio
 async def test_present_file_reports_terminal_upload_failure_and_continues() -> None:
     """Return success only for paths whose upload publication settles successfully."""
-    failed_path = "/workspace/agent/failed.txt"
-    good_path = "/workspace/agent/result.txt"
+    failed_path = "/runtime/home/failed.txt"
+    good_path = "/runtime/home/result.txt"
     storage = _NoBodyReadStorage({failed_path: b"failed", good_path: b"hello"})
     service = _PublicationService(
         failures={
@@ -291,7 +300,7 @@ async def test_present_file_logs_bounded_publication_failure_context(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Log safe correlation fields without storage paths or object identities."""
-    failed_path = "/workspace/agent/private-output.txt"
+    failed_path = "/runtime/home/private-output.txt"
     storage = _NoBodyReadStorage({failed_path: b"failed"})
     service = _PublicationService(
         failures={
@@ -338,7 +347,9 @@ async def test_present_file_rejects_disallowed_path_without_publication() -> Non
     result = await _invoke(tool, paths=["/tmp/output.txt"])
 
     assert isinstance(result, FunctionToolResult)
-    assert "Only files under /workspace/agent can be presented" in _output_text(result)
+    assert "Only files under the Agent Workspace can be presented" in _output_text(
+        result
+    )
     assert service.requests == []
 
 
@@ -350,7 +361,7 @@ async def test_present_file_propagates_runtime_stat_failure() -> None:
     with pytest.raises(FunctionToolError, match="Failed to access file"):
         await _invoke(
             _tool(_UnavailableStatStorage(), _capability(service)),
-            paths=["/workspace/agent/result.txt"],
+            paths=["/runtime/home/result.txt"],
         )
 
     assert service.requests == []
@@ -359,7 +370,7 @@ async def test_present_file_propagates_runtime_stat_failure() -> None:
 @pytest.mark.asyncio
 async def test_present_file_reuses_publication_id_for_a_retried_tool_call() -> None:
     """Make a repeated durable tool call converge on one verified publication."""
-    path = "/workspace/agent/result.txt"
+    path = "/runtime/home/result.txt"
     storage = _NoBodyReadStorage({path: b"hello"})
     service = _PublicationService()
     tool = _tool(storage, _capability(service))
@@ -375,8 +386,8 @@ async def test_present_file_reuses_publication_id_for_a_retried_tool_call() -> N
 @pytest.mark.asyncio
 async def test_present_file_scopes_publication_id_to_runtime_path() -> None:
     """Avoid merging different files from one multi-path tool call."""
-    first_path = "/workspace/agent/first.txt"
-    second_path = "/workspace/agent/second.txt"
+    first_path = "/runtime/home/first.txt"
+    second_path = "/runtime/home/second.txt"
     storage = _NoBodyReadStorage({first_path: b"first", second_path: b"second"})
     service = _PublicationService()
 

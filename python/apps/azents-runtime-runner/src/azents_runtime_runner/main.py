@@ -1,5 +1,6 @@
 """Runtime Runner process entrypoint."""
 
+import argparse
 import asyncio
 import dataclasses
 import json
@@ -7,6 +8,7 @@ import logging
 import os
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 import grpc
 from azents_runtime_control.grpc_runner_client import (
@@ -110,14 +112,20 @@ def main() -> None:
         level=os.environ.get("AZ_LOG_LEVEL", "INFO").upper(),
         handlers=[handler],
     )
-    asyncio.run(run_runtime_runner())
+    parser = argparse.ArgumentParser(description="Run the Azents Runtime Runner")
+    parser.add_argument(
+        "--workspace-path",
+        help="Agent Workspace absolute path; defaults to HOME",
+    )
+    args = parser.parse_args()
+    asyncio.run(run_runtime_runner(workspace_path=args.workspace_path))
 
 
-async def run_runtime_runner() -> None:
+async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
     endpoint = _required_env("AZ_RUNTIME_CONTROL_ENDPOINT")
     transfer_endpoint = _required_env("AZ_RUNTIME_TRANSFER_ENDPOINT")
     runtime_id = _required_env("AZ_RUNTIME_ID")
-    workspace_path = _required_env("AZ_AGENT_WORKSPACE_PATH")
+    workspace_path = resolve_workspace_path(workspace_path)
     runner_id = os.environ.get("AZ_RUNTIME_RUNNER_ID") or f"runner-{uuid.uuid4()}"
     credential_id = _required_env("AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID")
     runner_auth_token = _required_env("AZ_RUNTIME_RUNNER_AUTH_TOKEN")
@@ -345,6 +353,17 @@ def _required_env(name: str) -> str:
     if not value:
         raise SystemExit(f"{name} is required")
     return value
+
+
+def resolve_workspace_path(explicit_path: str | None) -> str:
+    """Resolve and validate the Agent Workspace path."""
+    raw_path = explicit_path if explicit_path is not None else os.environ.get("HOME")
+    if raw_path is None or not raw_path.strip():
+        raise SystemExit("--workspace-path or HOME is required")
+    path = Path(raw_path.strip())
+    if not path.is_absolute():
+        raise SystemExit("Agent Workspace path must be absolute")
+    return str(path.resolve(strict=False))
 
 
 def _required_bool_env(name: str) -> bool:

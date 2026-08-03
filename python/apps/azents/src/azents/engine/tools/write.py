@@ -21,9 +21,7 @@ class WriteInput(BaseModel):
     """write tool input."""
 
     path: str = Field(
-        description=(
-            "Absolute path to write (e.g. /workspace/agent/output.csv, /tmp/notes.txt)"
-        ),
+        description=("Absolute runtime path to write"),
     )
     content: str = Field(
         description="Text content to write",
@@ -108,7 +106,7 @@ def make_write_tool(
         name="write",
         description=(
             "Write a text file to storage. "
-            "Provide an absolute path like /workspace/agent/output.csv. "
+            "Provide an absolute runtime path. "
             f"{RUNTIME_ACCESSIBLE_PATHS_MSG}"
         ),
     )

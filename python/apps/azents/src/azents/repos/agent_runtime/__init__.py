@@ -356,6 +356,7 @@ class AgentRuntimeRepository:
                 desired_generation=RDBAgentRuntime.desired_generation + 1,
                 last_lifecycle_command=command_type,
                 reset_final_desired_state=reset_final_desired_state,
+                workspace_path=None,
                 last_state_change_at=sa.func.now(),
             )
             .returning(RDBAgentRuntime)
@@ -444,6 +445,7 @@ class AgentRuntimeRepository:
         rdb.desired_runtime_configuration_revision_id = next_revision.id
         rdb.last_lifecycle_command = command_type
         rdb.reset_final_desired_state = reset_final_desired_state
+        rdb.workspace_path = None
         rdb.last_state_change_at = datetime.datetime.now(datetime.UTC)
         await session.flush()
         await session.refresh(rdb)
@@ -471,6 +473,7 @@ class AgentRuntimeRepository:
                 desired_generation=RDBAgentRuntime.desired_generation + 1,
                 last_lifecycle_command=RuntimeLifecycleCommandType.STOP,
                 reset_final_desired_state=None,
+                workspace_path=None,
                 terminal_delete_requested_generation=(
                     RDBAgentRuntime.desired_generation + 1
                 ),
@@ -555,7 +558,6 @@ class AgentRuntimeRepository:
         provider_generation: int,
         observed_generation: int,
         *,
-        workspace_path: str | None = None,
         failure: AgentRuntimeFailurePatch | None = None,
         clear_failure: bool = False,
     ) -> AgentRuntime | None:
@@ -569,11 +571,6 @@ class AgentRuntimeRepository:
             changed = sa.or_(
                 changed,
                 RDBAgentRuntime.runner_state != RuntimeRunnerState.DISCONNECTED,
-            )
-        if workspace_path is not None:
-            changed = sa.or_(
-                changed,
-                RDBAgentRuntime.workspace_path.is_distinct_from(workspace_path),
             )
         if failure is not None:
             changed = sa.or_(
@@ -601,8 +598,6 @@ class AgentRuntimeRepository:
         }
         if observed_state == RuntimeProviderObservedState.STOPPED:
             values["runner_state"] = RuntimeRunnerState.DISCONNECTED
-        if workspace_path is not None:
-            values["workspace_path"] = workspace_path
         if failure is not None:
             values["failure_generation"] = failure.generation
             values["failure_code"] = failure.code
@@ -873,12 +868,14 @@ class AgentRuntimeRepository:
         runner_generation: int,
         *,
         expected_desired_generation: int,
+        workspace_path: str | None,
         failure: AgentRuntimeFailurePatch | None = None,
     ) -> AgentRuntime | None:
         """Store Runner state only for the expected desired generation."""
         changed = sa.or_(
             RDBAgentRuntime.runner_state != runner_state,
             RDBAgentRuntime.runner_generation != runner_generation,
+            RDBAgentRuntime.workspace_path.is_distinct_from(workspace_path),
         )
         if failure is not None:
             changed = sa.or_(
@@ -890,6 +887,7 @@ class AgentRuntimeRepository:
         values: dict[str, object | None] = {
             "runner_state": runner_state,
             "runner_generation": runner_generation,
+            "workspace_path": workspace_path,
             "last_state_change_at": sa.case(
                 (changed, sa.func.now()),
                 else_=RDBAgentRuntime.last_state_change_at,

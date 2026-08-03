@@ -6,6 +6,7 @@ import logging
 import posixpath
 import time
 from collections.abc import Callable, Sequence
+from pathlib import PurePosixPath
 from typing import NamedTuple, Protocol
 
 from pydantic import Field
@@ -32,9 +33,7 @@ from azents.services.file_storage import FileStorage
 
 logger = logging.getLogger(__name__)
 
-SESSION_WORKSPACE_ROOT = "/workspace/agent"
 AGENTS_FILENAME = "AGENTS.md"
-ROOT_AGENTS_PATH = f"{SESSION_WORKSPACE_ROOT}/{AGENTS_FILENAME}"
 MAX_AGENTS_BYTES = 64 * 1024
 AGENTS_TOOLKIT_NAMESPACE = "builtin"
 AGENTS_APPENDIX_DEDUPE_TOOLKIT_STATE_NAME = "agents_md_appendix_dedupe"
@@ -299,10 +298,11 @@ class AgentsAppendixMixin:
         if not refs:
             return None
         target_path = refs[0].path
-        if not _is_under_workspace_root(target_path):
-            return None
         instruction_context = self._agents_context
-        if instruction_context is None:
+        if instruction_context is None or not _is_under_workspace_root(
+            target_path,
+            instruction_context.workspace_root,
+        ):
             return None
 
         async with self._agents_appendix_lock:
@@ -328,6 +328,7 @@ class AgentsAppendixMixin:
         candidates = _agents_appendix_candidates_for_path(
             target_path,
             instruction_context.projects,
+            workspace_root=instruction_context.workspace_root,
             directory=directory,
         )
         dedupe_skipped_count = sum(1 for path in candidates if path in already_appended)
@@ -505,13 +506,16 @@ def _agents_appendix_candidates_for_path(
     path: str,
     projects: Sequence[SessionWorkspaceProject],
     *,
+    workspace_root: str | None,
     directory: bool = False,
 ) -> list[str]:
     """Return root/project AGENTS.md candidates applicable to target path."""
-    normalized = _normalize_runtime_path(path)
-    if normalized is None or not _is_under_workspace_root(normalized):
+    if workspace_root is None:
         return []
-    candidates = [ROOT_AGENTS_PATH]
+    normalized = _normalize_runtime_path(path)
+    if normalized is None or not _is_under_workspace_root(normalized, workspace_root):
+        return []
+    candidates = [posixpath.join(workspace_root, AGENTS_FILENAME)]
     candidates.extend(
         agents_candidates_for_path(normalized, projects, directory=directory)
     )
@@ -532,12 +536,13 @@ def _base_tool_name(tool_name: str) -> str:
     return tool_name.split("__", 1)[1]
 
 
-def _is_under_workspace_root(path: str) -> bool:
+def _is_under_workspace_root(path: str, workspace_root: str | None) -> bool:
     """Return whether path is inside the agent workspace root."""
-    normalized = posixpath.normpath(path)
-    return normalized == SESSION_WORKSPACE_ROOT or normalized.startswith(
-        f"{SESSION_WORKSPACE_ROOT}/"
-    )
+    if workspace_root is None:
+        return False
+    normalized = PurePosixPath(posixpath.normpath(path))
+    normalized_root = PurePosixPath(posixpath.normpath(workspace_root))
+    return normalized.is_relative_to(normalized_root)
 
 
 def _normalize_runtime_path(path: str) -> str | None:

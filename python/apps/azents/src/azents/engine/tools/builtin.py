@@ -267,7 +267,7 @@ class ExecCommandInput(BaseModel):
     command: str = Field(description="Shell command to execute")
     workdir: str | None = Field(
         default=None,
-        description="Working directory. Defaults to /workspace/agent/.",
+        description="Working directory. Defaults to the Agent Workspace.",
     )
     yield_time_ms: int = Field(
         default=_DEFAULT_PROCESS_YIELD_TIME_MS,
@@ -682,6 +682,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         :return: Current state (tools + prompt)
         """
         runtime_agent_id = self._runtime_agent_id
+        workspace_root = await self._load_workspace_root()
 
         file_ss = RuntimeRunnerFileStorage(
             runner_operations=self.runner_operations,
@@ -784,6 +785,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                         session_storage=file_ss,
                         publication_capability=publication_capability,
                         authority=authority,
+                        workspace_root=workspace_root,
                     ),
                     make_read_image_tool(
                         session_storage=file_ss,
@@ -836,6 +838,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
 
         instruction_context = await self._make_instruction_context(
             file_ss,
+            workspace_root=workspace_root,
             transfer_capability=transfer_capability,
             publication_capability=publication_capability,
             provider_delivery_capability=provider_delivery_capability,
@@ -851,15 +854,18 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             await self._load_projects(session_id=self._session_id),
             key=lambda project: project.path,
         )
+        workspace_root = await self._load_workspace_root()
         del context
         return self._render_config_prompt(
             projects=projects,
+            workspace_root=workspace_root,
         )
 
     async def _make_instruction_context(
         self,
         file_storage: FileStorage,
         *,
+        workspace_root: str | None,
         transfer_capability: RuntimeTransferCapability | None,
         publication_capability: RuntimeToServerPublicationCapability | None,
         provider_delivery_capability: RuntimeToProviderDeliveryCapability | None,
@@ -871,6 +877,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         )
         return RuntimeInstructionContext(
             file_storage=file_storage,
+            workspace_root=workspace_root,
             projects=tuple(projects),
             transfer_capability=transfer_capability,
             publication_capability=publication_capability,
@@ -971,10 +978,20 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 session_id=session_id,
             )
 
+    async def _load_workspace_root(self) -> str | None:
+        """Fetch the current Runner-reported Agent Workspace root."""
+        async with self.session_manager() as session:
+            runtime = await self.agent_runtime_repo.get_by_agent_id(
+                session,
+                self._runtime_agent_id,
+            )
+        return runtime.workspace_path if runtime is not None else None
+
     def _render_config_prompt(
         self,
         *,
         projects: list[SessionWorkspaceProject],
+        workspace_root: str | None,
     ) -> str:
         """Return domain allow/block settings and accessible scope prompt."""
         parts: list[str] = []
@@ -987,7 +1004,11 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             "appropriate. Use `exec_command` for command execution and "
             "`write_stdin` to interact with a running process.",
             "Recommended locations:",
-            "- `/workspace/agent/` — Durable working files for this agent runtime",
+            (
+                f"- `{workspace_root}/` — Durable working files for this agent runtime"
+                if workspace_root is not None
+                else "- The Agent Workspace — Durable working files for this runtime"
+            ),
             "- `/tmp/` — Temporary scratch space for the current runtime instance",
         ]
         if projects:
@@ -997,8 +1018,9 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                     "Registered Projects:",
                     *[f"- `{project.path}`" for project in projects],
                     "",
-                    "`/workspace/agent` itself is not a Project. Project-scoped "
-                    "instructions only apply inside registered Projects.",
+                    "The Agent Workspace root itself is not a Project. "
+                    "Project-scoped instructions only apply inside registered "
+                    "Projects.",
                 ]
             )
         parts.append("\n".join(scope_lines))
@@ -1030,14 +1052,11 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
 
         ### Runtime Workspace
 
-        Your runtime working directory is `/workspace/agent/`. It persists across turns for this agent runtime and is the default place for files you create or edit. `/tmp/` is temporary scratch space.
+        The Agent Workspace persists across turns and is the default place for files you create or edit. `/tmp/` is temporary scratch space.
 
         Prefer dedicated file tools for filesystem operations: use `read`, `write`, `delete`, `glob`, `grep`, `edit`, or `apply_patch` as appropriate. Use `exec_command` for command execution, package installation, and cases where no dedicated tool fits. Use `write_stdin` with empty chars to poll a running process.
 
-        | Path | Persistence | Usage |
-        |------|-------------|-------|
-        | `/workspace/agent/` | Durable for this agent runtime | Working files and outputs |
-        | `/tmp/` | Ephemeral | Temporary files |""")  # noqa: E501
+        Use the dynamic Runtime Workspace prompt for the current Agent Workspace path.""")  # noqa: E501
     config_model = ShellToolkitConfig
 
     def __init__(

@@ -97,7 +97,6 @@ class RuntimeProviderReport:
     observed_state: RuntimeProviderObservedState
     observed_desired_generation: int
     provider_runtime_id: str | None
-    workspace_path: str
     reason: str
     diagnostic: Mapping[str, str]
     reported_at: datetime

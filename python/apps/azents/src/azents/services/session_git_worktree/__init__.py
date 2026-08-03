@@ -75,10 +75,10 @@ from azents.runtime.runner_operation_adapter import adapt_runtime_runner_operati
 from azents.services.agent_project_catalog import AgentProjectCatalogService
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
+    normalize_agent_workspace_root,
     normalize_session_workspace_path,
 )
 
-_WORKTREE_ROOT = PurePosixPath("/workspace/agent/.azents/worktrees")
 _GIT_OPERATION_TIMEOUT_SECONDS = 300
 _MAX_COLLISION_ATTEMPTS = 20
 logger = logging.getLogger(__name__)
@@ -266,14 +266,6 @@ class SessionGitWorktreeService:
         source_project_path: str,
     ) -> Result[GitRefPreview, GitRefPreviewError]:
         """List Git refs for a source Project after access validation."""
-        try:
-            normalized_source_path = normalize_session_workspace_path(
-                source_project_path
-            )
-        except ValueError as exc:
-            return Failure(
-                InvalidProjectPath(path=source_project_path, reason=str(exc))
-            )
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, agent_id)
             if agent is None:
@@ -300,6 +292,18 @@ class SessionGitWorktreeService:
                 GitRefPreviewRuntimeUnavailable(
                     reason="Runtime runner operations are unavailable."
                 )
+            )
+        try:
+            workspace_root = normalize_agent_workspace_root(
+                runtime.workspace_path
+            ).as_posix()
+            normalized_source_path = normalize_session_workspace_path(
+                source_project_path,
+                workspace_root=workspace_root,
+            )
+        except ValueError as exc:
+            return Failure(
+                InvalidProjectPath(path=source_project_path, reason=str(exc))
             )
         try:
             result = await self.runner_operations.list_git_refs(
@@ -1178,23 +1182,6 @@ class SessionGitWorktreeService:
             on_projection_updated=on_projection_updated,
         )
 
-        try:
-            normalized_source_path = normalize_session_workspace_path(
-                action.source_project_path
-            )
-        except ValueError as exc:
-            await self._mark_action_execution_failed(
-                execution=execution,
-                allocation=None,
-                reason=str(exc),
-                on_projection_updated=on_projection_updated,
-                on_history_event_appended=on_history_event_appended,
-            )
-            return GitWorktreeActionExecutionResult(
-                completed=True,
-                context_invalidated=False,
-            )
-
         async with self.session_manager() as session:
             agent_session = await self.agent_session_repository.get_by_id(
                 session,
@@ -1205,6 +1192,27 @@ class SessionGitWorktreeService:
                 execution=execution,
                 allocation=None,
                 reason="Session not found.",
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
+        runtime = await self._get_runtime(agent_id=agent_id)
+        try:
+            workspace_root = normalize_agent_workspace_root(
+                runtime.workspace_path if runtime is not None else None
+            ).as_posix()
+            normalized_source_path = normalize_session_workspace_path(
+                action.source_project_path,
+                workspace_root=workspace_root,
+            )
+        except ValueError as exc:
+            await self._mark_action_execution_failed(
+                execution=execution,
+                allocation=None,
+                reason=str(exc),
                 on_projection_updated=on_projection_updated,
                 on_history_event_appended=on_history_event_appended,
             )
@@ -1225,6 +1233,7 @@ class SessionGitWorktreeService:
                 session_handle=agent_session.handle,
                 source_project_path=normalized_source_path,
                 starting_ref=action.starting_ref.strip(),
+                workspace_root=workspace_root,
             )
         await self._publish_action_execution_projection(
             execution=execution,
@@ -1240,7 +1249,6 @@ class SessionGitWorktreeService:
             on_projection_updated=on_projection_updated,
         )
 
-        runtime = await self._get_runtime(agent_id=agent_id)
         if runtime is None or runtime.runner_state != RuntimeRunnerState.READY:
             await self._mark_action_execution_failed(
                 execution=execution,
@@ -1368,6 +1376,7 @@ class SessionGitWorktreeService:
         session_handle: str,
         source_project_path: str,
         starting_ref: str,
+        workspace_root: str,
     ) -> SessionGitWorktree:
         """Create or fetch the worktree allocation for an action execution."""
         existing = (
@@ -1383,6 +1392,7 @@ class SessionGitWorktreeService:
             source_project_path=source_project_path,
             path_suffix=1,
             branch_suffix=1,
+            workspace_root=workspace_root,
         )
         return await self.session_git_worktree_repository.create(
             session,
@@ -1422,6 +1432,9 @@ class SessionGitWorktreeService:
                 runtime_id=runtime.id,
                 path_suffix=path_suffix,
                 branch_suffix=branch_suffix,
+                workspace_root=normalize_agent_workspace_root(
+                    runtime.workspace_path
+                ).as_posix(),
             )
             command_argv = [
                 "git",
@@ -2201,6 +2214,9 @@ class SessionGitWorktreeService:
                 ownership_error = _cleanup_ownership_error(
                     allocation=allocation,
                     session_id=creator_session_id,
+                    workspace_root=normalize_agent_workspace_root(
+                        runtime.workspace_path
+                    ).as_posix(),
                 )
                 if ownership_error is not None:
                     _log_archive_cleanup_failure(
@@ -2270,6 +2286,9 @@ class SessionGitWorktreeService:
         ownership_error = _cleanup_ownership_error(
             allocation=allocation,
             session_id=session_id,
+            workspace_root=normalize_agent_workspace_root(
+                runtime.workspace_path
+            ).as_posix(),
         )
         if ownership_error is not None:
             await self._mark_cleanup_failed(
@@ -2386,7 +2405,12 @@ class SessionGitWorktreeService:
         runner_operations = self.runner_operations
         if runner_operations is None:
             raise RuntimeError("Runtime runner operations are unavailable")
-        parent_path = _session_worktree_parent_path(allocation.worktree_path)
+        parent_path = _session_worktree_parent_path(
+            allocation.worktree_path,
+            workspace_root=normalize_agent_workspace_root(
+                runtime.workspace_path
+            ).as_posix(),
+        )
         if parent_path is None:
             return
         try:
@@ -2466,16 +2490,21 @@ class SessionGitWorktreeService:
         runtime_id: str,
         path_suffix: int,
         branch_suffix: int,
+        workspace_root: str,
     ) -> SessionGitWorktree:
         """Apply DB-visible target suffixing before a runner attempt."""
         current_path_suffix = path_suffix
         current_branch_suffix = branch_suffix
         for _ in range(_MAX_COLLISION_ATTEMPTS):
             worktree_path, branch_name = _target_names(
-                session_handle=_handle_from_worktree_path(allocation.worktree_path),
+                session_handle=_handle_from_worktree_path(
+                    allocation.worktree_path,
+                    workspace_root=workspace_root,
+                ),
                 source_project_path=allocation.source_project_path,
                 path_suffix=current_path_suffix,
                 branch_suffix=current_branch_suffix,
+                workspace_root=workspace_root,
             )
             async with self.session_manager() as session:
                 project_repository = self.session_workspace_project_repository
@@ -2541,6 +2570,7 @@ def _target_names(
     source_project_path: str,
     path_suffix: int,
     branch_suffix: int,
+    workspace_root: str,
 ) -> tuple[str, str]:
     repo_leaf = _repo_leaf(source_project_path)
     path_leaf = repo_leaf if path_suffix == 1 else f"{repo_leaf}-{path_suffix}"
@@ -2548,8 +2578,9 @@ def _target_names(
     branch_name = (
         branch_base if branch_suffix == 1 else f"{branch_base}-{branch_suffix}"
     )
+    worktree_root = PurePosixPath(workspace_root) / ".azents" / "worktrees"
     return (
-        (_WORKTREE_ROOT / session_handle / path_leaf).as_posix(),
+        (worktree_root / session_handle / path_leaf).as_posix(),
         branch_name,
     )
 
@@ -2561,33 +2592,45 @@ def _repo_leaf(source_project_path: str) -> str:
     return sanitized or "repo"
 
 
-def _handle_from_worktree_path(worktree_path: str) -> str:
+def _handle_from_worktree_path(
+    worktree_path: str,
+    *,
+    workspace_root: str,
+) -> str:
     """Recover the session handle from an allocated worktree path."""
-    relative = PurePosixPath(worktree_path).relative_to(_WORKTREE_ROOT)
+    worktree_root = PurePosixPath(workspace_root) / ".azents" / "worktrees"
+    relative = PurePosixPath(worktree_path).relative_to(worktree_root)
     return relative.parts[0]
 
 
-def _session_worktree_parent_path(worktree_path: str) -> str | None:
+def _session_worktree_parent_path(
+    worktree_path: str,
+    *,
+    workspace_root: str,
+) -> str | None:
     """Return the session-scoped worktree parent directory for an allocated path."""
+    worktree_root = PurePosixPath(workspace_root) / ".azents" / "worktrees"
     try:
-        relative = PurePosixPath(worktree_path).relative_to(_WORKTREE_ROOT)
+        relative = PurePosixPath(worktree_path).relative_to(worktree_root)
     except ValueError:
         return None
     if len(relative.parts) < 2:
         return None
-    return (_WORKTREE_ROOT / relative.parts[0]).as_posix()
+    return (worktree_root / relative.parts[0]).as_posix()
 
 
 def _cleanup_ownership_error(
     *,
     allocation: SessionGitWorktree,
     session_id: str,
+    workspace_root: str,
 ) -> str | None:
     """Return a cleanup safety error when ownership validation fails."""
     if allocation.session_id != session_id:
         return "Cleanup request does not match the owning session."
+    worktree_root = PurePosixPath(workspace_root) / ".azents" / "worktrees"
     try:
-        PurePosixPath(allocation.worktree_path).relative_to(_WORKTREE_ROOT)
+        PurePosixPath(allocation.worktree_path).relative_to(worktree_root)
     except ValueError:
         return "Recorded worktree path is outside the Azents worktree root."
     if not allocation.branch_name:

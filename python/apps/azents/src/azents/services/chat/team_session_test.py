@@ -16,6 +16,7 @@ from azents.core.enums import (
     AgentSessionTitleSource,
     EventKind,
     LLMProvider,
+    RuntimeRunnerState,
     WorkspaceUserRole,
 )
 from azents.rdb.models.agent import RDBAgent
@@ -33,6 +34,7 @@ from azents.repos.agent_execution.data import EventCreate
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
+from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository
@@ -112,7 +114,13 @@ async def _add_workspace_user(
     assert isinstance(result, Success)
 
 
-async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> str:
+async def _create_agent(
+    session: AsyncSession,
+    workspace_id: str,
+    slug: str,
+    *,
+    workspace_path: str | None = "/workspace/agent",
+) -> str:
     """Create Agent for tests."""
     integration = RDBLLMProviderIntegration(
         workspace_id=workspace_id,
@@ -141,6 +149,17 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
     session.add(agent)
     await session.flush()
     session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id))
+    runtime_repository = AgentRuntimeRepository()
+    runtime = await runtime_repository.ensure_for_agent(session, agent.id)
+    if workspace_path is not None:
+        await runtime_repository.record_runner_state(
+            session,
+            runtime.id,
+            RuntimeRunnerState.UNKNOWN,
+            1,
+            expected_desired_generation=runtime.desired_generation,
+            workspace_path=workspace_path,
+        )
     return agent.id
 
 
@@ -164,9 +183,11 @@ def _service(
         action_execution_repository=ActionExecutionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_session_repository=AgentSessionRepository(),
+        agent_runtime_repository=AgentRuntimeRepository(),
         root_agent_session_creation_service=RootAgentSessionCreationService(
             agent_session_repository=AgentSessionRepository(),
             automatic_project_repository=AgentAutomaticProjectRepository(),
+            agent_runtime_repository=AgentRuntimeRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         ),
         archived_session_retention_repository=ArchivedSessionRetentionRepository(),
@@ -271,6 +292,39 @@ class _ArchiveCleanupService:
 
 class TestChatSessionTeamSessions:
     """Team session service behavior."""
+
+    async def test_create_empty_team_session_without_workspace_path(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Project-free Session creation does not inspect Runtime paths."""
+        workspace_id = await _create_workspace(rdb_session, "team-empty-no-runtime")
+        user_id = await _create_user(
+            rdb_session,
+            "team-empty-no-runtime@example.com",
+        )
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "team-empty-no-runtime",
+            workspace_path=None,
+        )
+        await rdb_session.commit()
+
+        result = await _service(rdb_session_manager).create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+        )
+
+        assert isinstance(result, Success)
 
     async def test_create_team_session_uses_explicit_projects(
         self,

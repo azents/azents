@@ -47,9 +47,7 @@ class ReadImageInput(BaseModel):
     """read_image tool input."""
 
     path: str = Field(
-        description=(
-            "Absolute path to read (e.g. /workspace/agent/photo.png, /tmp/chart.png)"
-        ),
+        description=("Absolute runtime image path to read"),
     )
 
 
@@ -176,7 +174,7 @@ def make_read_image_tool(
         name="read_image",
         description=(
             "Read an image file from storage. "
-            "Provide an absolute path like /workspace/agent/photo.png. "
+            "Provide an absolute runtime path. "
             f"{RUNTIME_ACCESSIBLE_PATHS_MSG} "
             "Supported formats: PNG, JPEG, GIF, WebP."
         ),

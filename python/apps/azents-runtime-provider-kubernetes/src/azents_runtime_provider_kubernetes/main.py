@@ -172,11 +172,10 @@ async def _run_control_loop(
         capabilities=(
             "lifecycle",
             "observe",
-            "workspace_path",
             "pvc_persistence",
         ),
         config_schema_version=_CONFIG_SCHEMA_VERSION,
-        metadata={"workspace_path": settings.workspace_path},
+        metadata={},
         capability_contract=_CAPABILITY_CONTRACT,
     )
     while not stop.is_set():

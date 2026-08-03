@@ -32,6 +32,7 @@ from azents.services.runtime_directory_validation import (
 )
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
+    normalize_agent_workspace_root,
     normalize_session_workspace_path,
 )
 
@@ -146,9 +147,26 @@ class AgentAutomaticProjectService:
                 assert_never(authorization)
         normalized_paths: list[str] = []
         seen_paths: set[str] = set()
-        for path in project_paths:
+        workspace_root: str | None = None
+        if project_paths:
+            async with self.session_manager() as session:
+                runtime = await self.runtime_repository.get_by_agent_id(
+                    session,
+                    agent_id,
+                )
             try:
-                normalized_path = normalize_session_workspace_path(path)
+                workspace_root = normalize_agent_workspace_root(
+                    runtime.workspace_path if runtime is not None else None
+                ).as_posix()
+            except ValueError as error:
+                return Failure(InvalidProjectPath(path="", reason=str(error)))
+        for path in project_paths:
+            assert workspace_root is not None
+            try:
+                normalized_path = normalize_session_workspace_path(
+                    path,
+                    workspace_root=workspace_root,
+                )
             except ValueError as error:
                 return Failure(InvalidProjectPath(path=path, reason=str(error)))
             if normalized_path in seen_paths:

@@ -29,7 +29,7 @@ class EditInput(BaseModel):
     """edit tool input."""
 
     path: str = Field(
-        description="Absolute path to edit (e.g. /workspace/agent/config.json)",
+        description="Absolute runtime path to edit",
     )
     old_string: str = Field(
         description="The exact text to find and replace",
@@ -142,7 +142,7 @@ def make_edit_tool(
         name="edit",
         description=(
             "Edit a text file by replacing exact string matches. "
-            "Provide an absolute path like /workspace/agent/config.json, "
+            "Provide an absolute runtime path, "
             "the old_string to find, and new_string to replace it with. "
             f"{RUNTIME_ACCESSIBLE_PATHS_MSG}"
         ),

@@ -167,6 +167,7 @@ class _TestableSkillProjectionService(SkillProjectionService):
             runner_generation=runner_generation,
             owner_session_id=owner_session_id,
             projects=projects,
+            workspace_root="/runtime/home",
         )
 
 

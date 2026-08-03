@@ -50,7 +50,6 @@ _LABEL_AGENT_ID = "azents/agent-id"
 _LABEL_WORKSPACE_ID = "azents/workspace-id"
 _LABEL_DESIRED_GENERATION = "azents/desired-generation"
 _LABEL_PROVIDER_GENERATION = "azents/provider-generation"
-_LABEL_WORKSPACE_PATH = "azents/workspace-path"
 _LABEL_IMAGE_GENERATION = "azents/image-generation"
 _LABEL_CONFIGURATION_REVISION_ID = "azents/runtime-configuration-revision-id"
 _LABEL_CONFIGURATION_DIGEST = "azents/runtime-configuration-digest"
@@ -67,7 +66,7 @@ _ENV_PROVIDER_GENERATION = "AZ_RUNTIME_PROVIDER_GENERATION"
 _ENV_DESIRED_GENERATION = "AZ_RUNTIME_DESIRED_GENERATION"
 _ENV_RUNNER_AUTH_TOKEN = "AZ_RUNTIME_RUNNER_AUTH_TOKEN"
 _ENV_RUNNER_AUTH_CREDENTIAL_ID = "AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"
-_ENV_WORKSPACE_PATH = "AZ_AGENT_WORKSPACE_PATH"
+_ENV_HOME = "HOME"
 _ENV_CONFIGURATION_REVISION_ID = "AZ_RUNTIME_CONFIGURATION_REVISION_ID"
 _ENV_CONFIGURATION_DIGEST = "AZ_RUNTIME_CONFIGURATION_DIGEST"
 _ENV_CONFIGURATION_DESIRED_GENERATION = "AZ_RUNTIME_CONFIGURATION_DESIRED_GENERATION"
@@ -108,7 +107,7 @@ class DockerRuntimeProviderConfig:
     provider_id: str
     host_data_root: Path
     runner_env: Mapping[str, str]
-    workspace_mount_path: str = "/workspace/agent"
+    workspace_mount_path: str
     tmp_mount_path: str = "/tmp/agent"
 
 
@@ -228,7 +227,6 @@ class DockerRuntimeProvider:
                     reason="terminal_resources_absent",
                     provider_runtime_id=None,
                 ),
-                workspace_path="",
                 terminal_delete_acknowledged=True,
             ),
         )
@@ -399,7 +397,6 @@ class DockerRuntimeProvider:
             _LABEL_RUNTIME_ID: identity.runtime_id,
             _LABEL_AGENT_ID: identity.agent_id,
             _LABEL_WORKSPACE_ID: identity.workspace_id,
-            _LABEL_WORKSPACE_PATH: self._workspace_mount_path,
         }
 
     def _env(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
@@ -427,7 +424,7 @@ class DockerRuntimeProvider:
             _ENV_AGENT_ID: identity.agent_id,
             _ENV_WORKSPACE_ID: identity.workspace_id,
             _ENV_PROVIDER_ID: self._config.provider_id,
-            _ENV_WORKSPACE_PATH: self._workspace_mount_path,
+            _ENV_HOME: self._workspace_mount_path,
         }
         if command.auth.control_tls_ca_pem is not None:
             env[_ENV_CONTROL_TLS_CA_PEM] = command.auth.control_tls_ca_pem
@@ -484,7 +481,6 @@ class DockerRuntimeProvider:
             observed_state=observed_state,
             observed_desired_generation=command.desired_generation,
             provider_runtime_id=provider_runtime_id,
-            workspace_path=self._workspace_mount_path,
             reason=reason,
             diagnostic={},
             reported_at=datetime.now(UTC),
@@ -506,10 +502,6 @@ class DockerRuntimeProvider:
                 container, _LABEL_DESIRED_GENERATION
             ),
             provider_runtime_id=container.name,
-            workspace_path=container.labels.get(
-                _LABEL_WORKSPACE_PATH,
-                self._workspace_mount_path,
-            ),
             reason=reason,
             diagnostic={"source": "docker_container"},
             reported_at=datetime.now(UTC),

@@ -19,6 +19,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_catalog.data import AgentProjectCatalogEntry
+from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
@@ -26,10 +27,10 @@ from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.agent_project_catalog import AgentProjectCatalogService
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
+    normalize_agent_workspace_root,
     normalize_session_workspace_project_paths,
 )
 
-_PROJECT_BROWSER_ROOT = "/workspace/agent"
 ProjectBrowserModeId = Literal["projects", "all_files"]
 ProjectBrowserEntrySourceType = Literal["session_project", "preview_project"]
 ProjectBrowserEntryRepositoryType = Literal["git"]
@@ -161,6 +162,10 @@ class ProjectBrowserManifestService:
         AgentProjectCatalogRepository,
         Depends(AgentProjectCatalogRepository),
     ]
+    agent_runtime_repository: Annotated[
+        AgentRuntimeRepository,
+        Depends(AgentRuntimeRepository),
+    ]
     workspace_user_repository: Annotated[
         WorkspaceUserRepository,
         Depends(WorkspaceUserRepository),
@@ -215,6 +220,20 @@ class ProjectBrowserManifestService:
                 agent_id=agent_id,
                 paths=paths,
             )
+            runtime = await self.agent_runtime_repository.get_by_agent_id(
+                session,
+                agent_id,
+            )
+        try:
+            workspace_root = normalize_agent_workspace_root(
+                runtime.workspace_path if runtime is not None else None
+            ).as_posix()
+            normalize_session_workspace_project_paths(
+                paths,
+                workspace_root=workspace_root,
+            )
+        except ValueError as exc:
+            return Failure(InvalidProjectPath(path="", reason=str(exc)))
         catalog_by_path = {entry.path: entry for entry in catalog_entries}
         git_project_ids = {
             worktree.session_workspace_project_id
@@ -253,6 +272,7 @@ class ProjectBrowserManifestService:
                     agent_id=agent_id,
                     session_id=session_id,
                     entries=entries,
+                    workspace_root=workspace_root,
                 ),
                 refresh_paths=_refresh_paths(entries),
             )
@@ -266,10 +286,6 @@ class ProjectBrowserManifestService:
         project_paths: list[str],
     ) -> Result[ProjectBrowserManifestBuildResult, ProjectBrowserManifestError]:
         """Build a Project browser manifest from explicit pre-session paths."""
-        try:
-            normalized_paths = normalize_session_workspace_project_paths(project_paths)
-        except ValueError as exc:
-            return Failure(InvalidProjectPath(path="", reason=str(exc)))
         async with self.session_manager() as session:
             agent = await self.agent_repository.get_by_id(session, agent_id)
             if agent is None:
@@ -283,6 +299,20 @@ class ProjectBrowserManifestService:
             )
             if workspace_user is None:
                 return Failure(ProjectBrowserAccessDenied())
+            runtime = await self.agent_runtime_repository.get_by_agent_id(
+                session,
+                agent_id,
+            )
+            try:
+                workspace_root = normalize_agent_workspace_root(
+                    runtime.workspace_path if runtime is not None else None
+                ).as_posix()
+                normalized_paths = normalize_session_workspace_project_paths(
+                    project_paths,
+                    workspace_root=workspace_root,
+                )
+            except ValueError as exc:
+                return Failure(InvalidProjectPath(path="", reason=str(exc)))
             catalog_entries = await self.catalog_repository.list_entries_by_paths(
                 session,
                 agent_id=agent_id,
@@ -305,7 +335,12 @@ class ProjectBrowserManifestService:
         ]
         return Success(
             ProjectBrowserManifestBuildResult(
-                manifest=_manifest(agent_id=agent_id, session_id=None, entries=entries),
+                manifest=_manifest(
+                    agent_id=agent_id,
+                    session_id=None,
+                    entries=entries,
+                    workspace_root=workspace_root,
+                ),
                 refresh_paths=_refresh_paths(entries),
             )
         )
@@ -321,22 +356,6 @@ class ProjectBrowserManifestService:
             agent_id=agent_id,
             paths=paths,
         )
-
-
-_PROJECT_MODES = [
-    ProjectBrowserMode(
-        id="projects",
-        label="Projects",
-        default=True,
-        root_path=None,
-    ),
-    ProjectBrowserMode(
-        id="all_files",
-        label="All files",
-        default=False,
-        root_path=_PROJECT_BROWSER_ROOT,
-    ),
-]
 
 
 _PROJECT_ROOT_CAPABILITIES = ProjectBrowserEntryCapabilities(
@@ -373,14 +392,28 @@ def _manifest(
     agent_id: str,
     session_id: str | None,
     entries: list[ProjectBrowserEntry],
+    workspace_root: str,
 ) -> ProjectBrowserManifest:
     """Create manifest wrapper for Project-mode entries."""
     return ProjectBrowserManifest(
         agent_id=agent_id,
         session_id=session_id,
-        root=_PROJECT_BROWSER_ROOT,
+        root=workspace_root,
         active_mode="projects",
-        modes=_PROJECT_MODES,
+        modes=[
+            ProjectBrowserMode(
+                id="projects",
+                label="Projects",
+                default=True,
+                root_path=None,
+            ),
+            ProjectBrowserMode(
+                id="all_files",
+                label="All files",
+                default=False,
+                root_path=workspace_root,
+            ),
+        ],
         entries=entries,
         empty_state=_EMPTY_STATE if not entries else None,
     )

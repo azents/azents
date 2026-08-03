@@ -68,10 +68,6 @@ logger = logging.getLogger(__name__)
 SKILL_TOOLKIT_NAMESPACE = "skill"
 SKILL_TOOLKIT_STATE_NAME = "projection"
 SKILL_STATE_SCHEMA_VERSION = 1
-AGENT_WORKSPACE_ROOT = "/workspace/agent"
-AGENT_SKILL_ROOT = f"{AGENT_WORKSPACE_ROOT}/.azents/skills"
-AGENT_AGENTS_SKILL_ROOT = f"{AGENT_WORKSPACE_ROOT}/.agents/skills"
-AGENT_CLAUDE_SKILL_ROOT = f"{AGENT_WORKSPACE_ROOT}/.claude/skills"
 SKILL_MARKDOWN_FILENAME = "SKILL.md"
 _SKILL_READ_MAX_BYTES = 512 * 1024
 _RUNNER_FILE_OPERATION_TIMEOUT_SECONDS = 10
@@ -328,7 +324,11 @@ class SkillProjectionService:
                 session,
                 session_id=session_id,
             )
-        if runtime is None or runtime.runner_state != RuntimeRunnerState.READY:
+        if (
+            runtime is None
+            or runtime.runner_state != RuntimeRunnerState.READY
+            or not runtime.workspace_path
+        ):
             return await self.store.load(agent_id, session_id)
         items = await self._scan_runtime(
             runner_operations=runner_operations,
@@ -336,6 +336,7 @@ class SkillProjectionService:
             runner_generation=runtime.runner_generation,
             owner_session_id=session_id,
             projects=projects,
+            workspace_root=runtime.workspace_path,
         )
         snapshot = _make_snapshot(items, reason=reason)
         current = await self.store.load(agent_id, session_id)
@@ -368,9 +369,10 @@ class SkillProjectionService:
         runner_generation: int,
         owner_session_id: str,
         projects: Sequence[SessionWorkspaceProject],
+        workspace_root: str,
     ) -> list[SkillProjectionItem]:
         """Scan all Skill source roots through Runtime Runner file operations."""
-        roots = _skill_source_roots(projects)
+        roots = _skill_source_roots(projects, workspace_root=workspace_root)
         candidates: list[_SkillPathCandidate] = []
         for root in roots:
             paths = await self._skill_paths_in_root(
@@ -980,23 +982,25 @@ def _path_is_within(path: str, root_path: str) -> bool:
 
 def _skill_source_roots(
     projects: Sequence[SessionWorkspaceProject],
+    *,
+    workspace_root: str,
 ) -> list[SkillSourceRoot]:
     roots = [
         SkillSourceRoot(
             source_kind="agent",
-            root_path=AGENT_SKILL_ROOT,
+            root_path=posixpath.join(workspace_root, ".azents", "skills"),
             source_label="Agent",
             relative_prefix=".azents/skills",
         ),
         SkillSourceRoot(
             source_kind="agent",
-            root_path=AGENT_AGENTS_SKILL_ROOT,
+            root_path=posixpath.join(workspace_root, ".agents", "skills"),
             source_label="Agent",
             relative_prefix=".agents/skills",
         ),
         SkillSourceRoot(
             source_kind="agent",
-            root_path=AGENT_CLAUDE_SKILL_ROOT,
+            root_path=posixpath.join(workspace_root, ".claude", "skills"),
             source_label="Agent",
             relative_prefix=".claude/skills",
         ),
@@ -1130,10 +1134,11 @@ def _metadata_string(metadata: dict[str, Any], key: str) -> str:
 def _relative_hint(source: SkillSourceRoot, skill_dir_path: str) -> str:
     if source.project_path and skill_dir_path.startswith(f"{source.project_path}/"):
         return skill_dir_path[len(source.project_path) + 1 :]
+    workspace_root = posixpath.dirname(posixpath.dirname(source.root_path))
     if source.source_kind == "agent" and skill_dir_path.startswith(
-        f"{AGENT_WORKSPACE_ROOT}/"
+        f"{workspace_root}/"
     ):
-        return skill_dir_path[len(AGENT_WORKSPACE_ROOT) + 1 :]
+        return skill_dir_path[len(workspace_root) + 1 :]
     return posixpath.join(source.relative_prefix, posixpath.basename(skill_dir_path))
 
 

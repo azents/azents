@@ -47,6 +47,7 @@ from azents.repos.agent_project_default.data import (
 )
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_project_preset.data import AgentProjectPreset
+from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.agent_session.data import (
     AgentSession,
@@ -82,6 +83,7 @@ from azents.services.session_lifecycle.registry import (
 )
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
+    normalize_agent_workspace_root,
     normalize_session_workspace_path,
     normalize_session_workspace_project_paths,
 )
@@ -326,6 +328,10 @@ class ChatSessionService:
     ]
     agent_session_repository: Annotated[
         AgentSessionRepository, Depends(AgentSessionRepository)
+    ]
+    agent_runtime_repository: Annotated[
+        AgentRuntimeRepository,
+        Depends(AgentRuntimeRepository),
     ]
     root_agent_session_creation_service: Annotated[
         RootAgentSessionCreationService,
@@ -713,10 +719,24 @@ class ChatSessionService:
                 workspace_id=agent.workspace_id,
                 agent_id=agent_id,
             )
-            workspace_items_result = _workspace_items_from_request(
-                existing_project_paths=existing_project_paths,
-                setup_actions=setup_actions,
-            )
+            if existing_project_paths or setup_actions:
+                runtime = await self.agent_runtime_repository.get_by_agent_id(
+                    session,
+                    agent_id,
+                )
+                try:
+                    workspace_root = normalize_agent_workspace_root(
+                        runtime.workspace_path if runtime is not None else None
+                    ).as_posix()
+                except ValueError as exc:
+                    return Failure(InvalidProjectPath(path="", reason=str(exc)))
+                workspace_items_result = _workspace_items_from_request(
+                    existing_project_paths=existing_project_paths,
+                    setup_actions=setup_actions,
+                    workspace_root=workspace_root,
+                )
+            else:
+                workspace_items_result = Success([])
             match workspace_items_result:
                 case Success(workspace_items):
                     pass
@@ -1821,11 +1841,13 @@ def _workspace_items_from_request(
     *,
     existing_project_paths: list[str],
     setup_actions: list[CreateGitWorktreeAction],
+    workspace_root: str,
 ) -> Result[list[NewSessionWorkspaceItem], InvalidProjectPath]:
     """Normalize direct Project paths and setup actions for session creation."""
     try:
         normalized_project_paths = normalize_session_workspace_project_paths(
-            existing_project_paths
+            existing_project_paths,
+            workspace_root=workspace_root,
         )
     except ValueError as exc:
         return Failure(InvalidProjectPath(path="", reason=str(exc)))
@@ -1835,7 +1857,8 @@ def _workspace_items_from_request(
     for action in setup_actions:
         try:
             normalized_source_path = normalize_session_workspace_path(
-                action.source_project_path
+                action.source_project_path,
+                workspace_root=workspace_root,
             )
         except ValueError as exc:
             return Failure(

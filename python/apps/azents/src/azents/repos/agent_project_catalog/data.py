@@ -13,7 +13,7 @@ class AgentProjectCatalogEntry(BaseModel):
 
     id: str = Field(description="Project catalog entry ID")
     agent_id: str = Field(description="Agent ID")
-    path: str = Field(description="Absolute path under /workspace/agent")
+    path: str = Field(description="Absolute path under the Agent Workspace")
     status: AgentProjectCatalogStatus = Field(
         description="Filesystem status projection",
     )

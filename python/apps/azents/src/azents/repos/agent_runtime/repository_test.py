@@ -315,6 +315,15 @@ class TestAgentRuntimeRepository:
         )
         repo = AgentRuntimeRepository()
         runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+        runtime_with_workspace = await repo.record_runner_state(
+            rdb_session,
+            runtime.id,
+            RuntimeRunnerState.READY,
+            runner_generation=1,
+            expected_desired_generation=runtime.desired_generation,
+            workspace_path="/runtime/old-home",
+        )
+        assert runtime_with_workspace is not None
 
         command = await repo.set_desired_state(
             rdb_session,
@@ -329,6 +338,7 @@ class TestAgentRuntimeRepository:
         assert (
             command.runtime.last_lifecycle_command == RuntimeLifecycleCommandType.START
         )
+        assert command.runtime.workspace_path is None
 
     async def test_terminal_delete_acknowledgement_fences_finalization(
         self, rdb_session: AsyncSession
@@ -342,9 +352,19 @@ class TestAgentRuntimeRepository:
         )
         repo = AgentRuntimeRepository()
         runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+        runtime_with_workspace = await repo.record_runner_state(
+            rdb_session,
+            runtime.id,
+            RuntimeRunnerState.READY,
+            runner_generation=1,
+            expected_desired_generation=runtime.desired_generation,
+            workspace_path="/runtime/old-home",
+        )
+        assert runtime_with_workspace is not None
         requested = await repo.request_terminal_delete(rdb_session, runtime.id)
 
         assert requested is not None
+        assert requested.workspace_path is None
         assert (
             requested.terminal_delete_requested_generation
             == requested.desired_generation
@@ -375,6 +395,7 @@ class TestAgentRuntimeRepository:
             RuntimeRunnerState.READY,
             runner_generation=1,
             expected_desired_generation=requested.desired_generation,
+            workspace_path="/runtime/home",
         )
         late_provider = await repo.record_provider_observed_state(
             rdb_session,
@@ -382,7 +403,6 @@ class TestAgentRuntimeRepository:
             RuntimeProviderObservedState.RUNNING,
             provider_generation=2,
             observed_generation=requested.desired_generation,
-            workspace_path="/workspace/agent",
         )
         blocked_lifecycle_command = await repo.set_desired_state(
             rdb_session,
@@ -417,7 +437,7 @@ class TestAgentRuntimeRepository:
     async def test_record_provider_and_runner_state(
         self, rdb_session: AsyncSession
     ) -> None:
-        """Store Provider/Runner observed state and workspace path."""
+        """Store Provider state and Runner-owned workspace path."""
         workspace_id = await _create_workspace(rdb_session, "agent-runtime-observed-ws")
         agent_id = await _create_agent(
             rdb_session, workspace_id, "agent-runtime-observed"
@@ -431,7 +451,6 @@ class TestAgentRuntimeRepository:
             RuntimeProviderObservedState.RUNNING,
             1,
             3,
-            workspace_path="/workspace/agent",
         )
         runner_runtime = await repo.record_runner_state(
             rdb_session,
@@ -439,6 +458,7 @@ class TestAgentRuntimeRepository:
             RuntimeRunnerState.READY,
             4,
             expected_desired_generation=runtime.desired_generation,
+            workspace_path="/runtime/home",
             failure=AgentRuntimeFailurePatch(
                 generation=4, code="runner_failed", message="Runner failed"
             ),
@@ -449,10 +469,11 @@ class TestAgentRuntimeRepository:
             RuntimeProviderObservedState.RUNNING
         )
         assert provider_runtime.provider_observed_generation == 3
-        assert provider_runtime.workspace_path == "/workspace/agent"
+        assert provider_runtime.workspace_path is None
         assert runner_runtime is not None
         assert runner_runtime.runner_state == RuntimeRunnerState.READY
         assert runner_runtime.runner_generation == 4
+        assert runner_runtime.workspace_path == "/runtime/home"
         assert runner_runtime.failure_code == "runner_failed"
 
     async def test_stale_provider_report_is_ignored(
@@ -480,7 +501,6 @@ class TestAgentRuntimeRepository:
             RuntimeProviderObservedState.RUNNING,
             2,
             command.desired_generation,
-            workspace_path="/workspace/current",
         )
         assert current is not None
 
@@ -490,7 +510,6 @@ class TestAgentRuntimeRepository:
             RuntimeProviderObservedState.FAILED,
             1,
             command.desired_generation - 1,
-            workspace_path="/workspace/stale",
             failure=AgentRuntimeFailurePatch(
                 generation=command.desired_generation,
                 code="STALE_PROVIDER_FAILURE",
@@ -504,7 +523,7 @@ class TestAgentRuntimeRepository:
         assert reloaded.provider_generation == 2
         assert reloaded.provider_observed_generation == command.desired_generation
         assert reloaded.provider_observed_state == RuntimeProviderObservedState.RUNNING
-        assert reloaded.workspace_path == "/workspace/current"
+        assert reloaded.workspace_path is None
         assert reloaded.failure_code is None
 
     async def test_current_provider_report_is_accepted(
@@ -533,14 +552,13 @@ class TestAgentRuntimeRepository:
             RuntimeProviderObservedState.RUNNING,
             1,
             command.desired_generation,
-            workspace_path="/workspace/current",
         )
 
         assert updated is not None
         assert updated.provider_generation == 1
         assert updated.provider_observed_generation == command.desired_generation
         assert updated.provider_observed_state == RuntimeProviderObservedState.RUNNING
-        assert updated.workspace_path == "/workspace/current"
+        assert updated.workspace_path is None
 
     async def test_stale_runner_report_is_ignored(
         self, rdb_session: AsyncSession
@@ -560,6 +578,7 @@ class TestAgentRuntimeRepository:
             RuntimeRunnerState.READY,
             2,
             expected_desired_generation=runtime.desired_generation,
+            workspace_path="/runtime/current",
         )
         assert current is not None
 
@@ -569,6 +588,7 @@ class TestAgentRuntimeRepository:
             RuntimeRunnerState.DISCONNECTED,
             1,
             expected_desired_generation=runtime.desired_generation,
+            workspace_path="/runtime/stale",
             failure=AgentRuntimeFailurePatch(
                 generation=runtime.desired_generation,
                 code="STALE_RUNNER_FAILURE",
@@ -601,6 +621,7 @@ class TestAgentRuntimeRepository:
             RuntimeRunnerState.READY,
             2,
             expected_desired_generation=runtime.desired_generation,
+            workspace_path="/runtime/home",
         )
         assert current is not None
 
@@ -610,11 +631,13 @@ class TestAgentRuntimeRepository:
             RuntimeRunnerState.DISCONNECTED,
             2,
             expected_desired_generation=runtime.desired_generation,
+            workspace_path=None,
         )
 
         assert disconnected is not None
         assert disconnected.runner_generation == 2
         assert disconnected.runner_state == RuntimeRunnerState.DISCONNECTED
+        assert disconnected.workspace_path is None
 
     async def test_lifecycle_dispatch_candidates_track_generation(
         self, rdb_session: AsyncSession

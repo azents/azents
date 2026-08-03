@@ -15130,7 +15130,7 @@
               }
             ],
             "title": "Workspace Path",
-            "description": "Agent Workspace path reported by the provider"
+            "description": "Agent Workspace path reported by the Runner"
           },
           "detail": {
             "anyOf": [
@@ -25087,7 +25087,7 @@
           "path": {
             "type": "string",
             "title": "Path",
-            "description": "Existing directory path under /workspace/agent"
+            "description": "Existing directory path under the Agent Workspace"
           }
         },
         "type": "object",

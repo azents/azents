@@ -87,7 +87,7 @@ def provider_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
         "AZ_RUNTIME_PROVIDER_LEASE_NAME",
         "azents-runtime-provider-kubernetes",
     )
-    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_WORKSPACE_PATH", "/workspace/agent")
+    monkeypatch.setenv("AZ_RUNTIME_PROVIDER_WORKSPACE_PATH", "/runtime/home")
     monkeypatch.setenv("AZ_RUNTIME_PROVIDER_ENGINE_IMAGE", "engine@sha256:test")
     monkeypatch.setenv(
         "AZ_RUNTIME_PROVIDER_RUNTIME_CONTROL_NAMESPACE",

@@ -40,7 +40,7 @@ class GlobInput(BaseModel):
         description=(
             "Glob pattern with absolute path prefix. Supports shell-style *, ?, [], "
             "recursive **, and comma-separated brace alternatives such as "
-            "/workspace/agent/**/*.{jpg,png}. Shell quoting and backslash escaping "
+            "an absolute Runtime path. Shell quoting and backslash escaping "
             "are not interpreted."
         ),
     )
@@ -76,7 +76,7 @@ def make_glob_tool(
         if raw_pattern.startswith("~"):
             raise FunctionToolError(
                 "Tilde expansion is not supported. Use an absolute runtime path such "
-                "as /workspace/agent or /tmp."
+                "inside the Agent Workspace or /tmp."
             )
         try:
             attachments = await session_storage.glob(

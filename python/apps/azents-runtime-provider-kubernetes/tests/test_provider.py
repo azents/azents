@@ -219,6 +219,7 @@ def _provider_with_runner_env(
         KubernetesRuntimeProviderConfig(
             provider_id="provider-k8s",
             namespace="azents-runtime",
+            workspace_mount_path="/runtime/home",
             runner_env=runner_env,
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
@@ -281,7 +282,6 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     result = await provider.start(_command(RuntimeLifecycleCommandType.START))
 
     assert result.report.observed_state is RuntimeProviderObservedState.STARTING
-    assert result.report.workspace_path == "/workspace/agent"
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
     pvc = api.pvcs[("azents-runtime", "azents-runtime-runtime-1-workspace")]
     container = pod.spec.containers[0]
@@ -289,16 +289,16 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     assert container.image == _RUNNER_IMAGE
     assert env["AZ_RUNTIME_TRANSFER_ENDPOINT"] == "runtime-transfer:8030"
     assert "AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY" not in env
-    assert container.working_dir == "/workspace/agent"
+    assert container.working_dir == "/runtime/home"
     assert container.resources == ContainerResources(
         requests={"cpu": "500m", "memory": "1073741824"},
         limits={"cpu": "1500m", "memory": "2147483648"},
         claims=None,
     )
-    assert env["AZ_AGENT_WORKSPACE_PATH"] == "/workspace/agent"
+    assert env["HOME"] == "/runtime/home"
     assert env["AZ_RUNTIME_RUNNER_AUTH_TOKEN"] == "runner-token-1"
     assert env["AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"] == "runner-credential-1"
-    assert pod.metadata.annotations["azents/workspace-path"] == "/workspace/agent"
+    assert "azents/workspace-path" not in pod.metadata.annotations
     assert (
         pod.metadata.annotations["azents/runtime-configuration-revision-id"]
         == "revision-1"
@@ -318,7 +318,7 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     assert [volume.name for volume in pod.spec.volumes] == ["agent-workspace"]
     assert len(container.volume_mounts) == 1
     assert container.volume_mounts[0].name == "agent-workspace"
-    assert container.volume_mounts[0].mount_path == "/workspace/agent"
+    assert container.volume_mounts[0].mount_path == "/runtime/home"
     assert container.volume_mounts[0].read_only is False
     assert container.security_context.run_as_non_root is True
     assert container.security_context.run_as_user == 1000
@@ -329,8 +329,8 @@ async def test_start_creates_pvc_and_pod_with_workspace_mount() -> None:
     assert pvc.spec.storage_request == "21474836480"
     assert "azents/workspace-path" not in pod.metadata.labels
     assert "azents/workspace-path" not in pvc.metadata.labels
-    assert pod.metadata.annotations["azents/workspace-path"] == "/workspace/agent"
-    assert pvc.metadata.annotations["azents/workspace-path"] == "/workspace/agent"
+    assert "azents/workspace-path" not in pod.metadata.annotations
+    assert "azents/workspace-path" not in pvc.metadata.annotations
 
 
 @pytest.mark.asyncio
@@ -857,6 +857,7 @@ async def test_start_applies_configured_pod_annotations() -> None:
         KubernetesRuntimeProviderConfig(
             provider_id="system-kubernetes",
             namespace="azents-runtime",
+            workspace_mount_path="/runtime/home",
             runner_env={},
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
@@ -879,7 +880,7 @@ async def test_start_applies_configured_pod_annotations() -> None:
 
     pod = api.pods[("azents-runtime", "azents-runtime-runtime-1")]
     assert pod.metadata.annotations["descheduler/no-evict"] == "true"
-    assert pod.metadata.annotations["azents/workspace-path"] == "/workspace/agent"
+    assert "azents/workspace-path" not in pod.metadata.annotations
     assert (
         pod.metadata.annotations["azents/runtime-configuration-revision-id"]
         == "revision-1"
@@ -918,6 +919,7 @@ async def test_start_applies_configured_runtime_pod_image_pull_secrets() -> None
         KubernetesRuntimeProviderConfig(
             provider_id="system-kubernetes",
             namespace="azents-runtime",
+            workspace_mount_path="/runtime/home",
             runner_env={},
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
@@ -952,6 +954,7 @@ async def test_start_replaces_pod_when_image_pull_secrets_change() -> None:
         KubernetesRuntimeProviderConfig(
             provider_id="system-kubernetes",
             namespace="azents-runtime",
+            workspace_mount_path="/runtime/home",
             runner_env={},
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
@@ -966,6 +969,7 @@ async def test_start_replaces_pod_when_image_pull_secrets_change() -> None:
         KubernetesRuntimeProviderConfig(
             provider_id="system-kubernetes",
             namespace="azents-runtime",
+            workspace_mount_path="/runtime/home",
             runner_env={},
             engine_image=_ENGINE_IMAGE,
             runtime_control_namespace="azents",
@@ -1094,7 +1098,6 @@ async def test_terminal_delete_removes_pod_and_pvc_idempotently() -> None:
     )
 
     assert first.report.terminal_delete_acknowledged is True
-    assert first.report.workspace_path == ""
     assert second.report.terminal_delete_acknowledged is True
     assert ("azents-runtime", "azents-runtime-runtime-1") not in api.pods
     assert ("azents-runtime", "azents-runtime-runtime-1-workspace") not in api.pvcs
@@ -1378,9 +1381,9 @@ async def test_dind_profile_exposes_private_engine_socket_directly() -> None:
     }
     runner_mounts = {mount.mount_path: mount for mount in runner.volume_mounts}
     engine_mounts = {mount.name: mount for mount in engine.volume_mounts}
-    assert runner_mounts["/workspace/agent"].name == "agent-workspace"
-    assert engine_mounts["agent-workspace"].mount_path == "/workspace/agent"
-    assert runner_mounts["/workspace/agent"].read_only is False
+    assert runner_mounts["/runtime/home"].name == "agent-workspace"
+    assert engine_mounts["agent-workspace"].mount_path == "/runtime/home"
+    assert runner_mounts["/runtime/home"].read_only is False
     assert engine_mounts["agent-workspace"].read_only is False
     assert runner_mounts["/tmp"].name == "runtime-shared-tmp"
     assert engine_mounts["runtime-shared-tmp"].mount_path == "/tmp"
@@ -1526,6 +1529,7 @@ def test_provider_rejects_mutable_engine_image() -> None:
                 namespace="azents-runtime",
                 runner_env={},
                 engine_image="repo/engine:latest",
+                workspace_mount_path="/runtime/home",
                 runtime_control_namespace="azents",
                 runtime_control_labels={
                     "app.kubernetes.io/component": "runtime-control",

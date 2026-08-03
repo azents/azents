@@ -21,7 +21,7 @@ class DeleteFileInput(BaseModel):
     """delete_file tool input."""
 
     path: str = Field(
-        description="Absolute path to delete (e.g. /workspace/agent/old-report.csv)",
+        description="Absolute runtime path to delete",
     )
 
 
@@ -98,7 +98,7 @@ def make_delete_file_tool(
         name="delete",
         description=(
             "Delete a file from storage. "
-            "Provide an absolute path like /workspace/agent/old-report.csv. "
+            "Provide an absolute runtime path. "
             f"{RUNTIME_ACCESSIBLE_PATHS_MSG}"
         ),
     )

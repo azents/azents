@@ -55,6 +55,7 @@ from azents.services.session_git_worktree import (
 )
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
+    normalize_agent_workspace_root,
     normalize_session_workspace_path,
     normalize_session_workspace_project_paths,
 )
@@ -490,10 +491,16 @@ class AgentSessionInputService:
                 workspace_id=agent.workspace_id,
                 agent_id=agent_id,
             )
-            workspace_items_result = self._workspace_items_from_request(
-                existing_project_paths=existing_project_paths,
-                setup_actions=setup_actions,
-            )
+            if existing_project_paths or setup_actions:
+                workspace_items_result = self._workspace_items_from_request(
+                    existing_project_paths=existing_project_paths,
+                    setup_actions=setup_actions,
+                    workspace_root=normalize_agent_workspace_root(
+                        runtime.workspace_path
+                    ).as_posix(),
+                )
+            else:
+                workspace_items_result = Success([])
             match workspace_items_result:
                 case Success(workspace_items):
                     pass
@@ -692,11 +699,13 @@ class AgentSessionInputService:
         *,
         existing_project_paths: list[str],
         setup_actions: list[CreateGitWorktreeAction],
+        workspace_root: str,
     ) -> Result[list[NewSessionWorkspaceItem], InvalidProjectPath]:
         """Normalize direct Project paths and ordered setup actions."""
         try:
             normalized_project_paths = normalize_session_workspace_project_paths(
-                existing_project_paths
+                existing_project_paths,
+                workspace_root=workspace_root,
             )
         except ValueError as exc:
             return Failure(InvalidProjectPath(path="", reason=str(exc)))
@@ -707,7 +716,8 @@ class AgentSessionInputService:
         for action in setup_actions:
             try:
                 normalized_source_path = normalize_session_workspace_path(
-                    action.source_project_path
+                    action.source_project_path,
+                    workspace_root=workspace_root,
                 )
             except ValueError as exc:
                 return Failure(

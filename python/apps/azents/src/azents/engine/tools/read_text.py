@@ -23,7 +23,7 @@ class ReadTextInput(BaseModel):
     """read_text tool input."""
 
     path: str = Field(
-        description="Absolute path to read (e.g. /workspace/agent/notes.txt)",
+        description="Absolute runtime text path to read",
     )
     offset: int = Field(
         default=0,
@@ -106,7 +106,7 @@ def make_read_text_tool(
         name="read",
         description=(
             "Read a text file from storage. "
-            "Provide an absolute path like /workspace/agent/notes.txt. "
+            "Provide an absolute runtime path. "
             f"{RUNTIME_ACCESSIBLE_PATHS_MSG} "
             "Supports byte offset, character limit, and explicit text encoding "
             "(default utf-8) for reading large files in chunks."

@@ -14,6 +14,7 @@ _REQUIRED_ENV = {
     "AZ_RUNTIME_CONTROL_ALLOW_INSECURE": "true",
     "AZ_RUNTIME_PROVIDER_ID": "provider-docker",
     "AZ_RUNTIME_PROVIDER_HOST_DATA_ROOT": "/tmp/azents",
+    "AZ_RUNTIME_PROVIDER_WORKSPACE_PATH": "/runtime/home",
     "AZ_RUNTIME_PROVIDER_CREDENTIAL": "test-provider-credential",
 }
 

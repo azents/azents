@@ -393,8 +393,8 @@ async def test_provider_grpc_relays_commands_and_records_completion() -> None:
     )
 
     assert replies[0].event.event_type is RuntimeReplyEventType.FINAL_SUCCESS
-    assert replies[0].event.payload["workspace_path"] == "/workspace/agent"
-    assert sink.reports[0].workspace_path == "/workspace/agent"
+    assert "workspace_path" not in replies[0].event.payload
+    assert not hasattr(sink.reports[0], "workspace_path")
     await stream.aclose()
 
 
@@ -571,7 +571,6 @@ def _report_message() -> runtime_provider_control_pb2.RuntimeProviderReport:
         observed_state="running",
         observed_desired_generation=5,
         provider_runtime_id="provider-runtime-1",
-        workspace_path="/workspace/agent",
         reason="container_running",
         reported_at=_timestamp(_now()),
         runtime_configuration=_runtime_configuration_evidence_message(),
