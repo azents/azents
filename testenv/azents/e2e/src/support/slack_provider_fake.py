@@ -810,6 +810,8 @@ class SlackHTTPHandler(BaseHTTPRequestHandler):
         presence_state = _session_presence_state(body)
         if presence_state is not None:
             delivery["safe_category"] = f"session_presence_{presence_state}"
+        elif session_path is not None:
+            delivery["safe_category"] = "activity_tracker"
         if action_ids:
             delivery["action_ids"] = action_ids
         if selector_admission_id is not None:

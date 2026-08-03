@@ -1398,7 +1398,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 outcome=nonce_outcome,
                 file_count=file_count,
                 file_bytes=file_bytes,
-                safe_category=_session_presence_category(body),
+                safe_category=_session_navigation_category(body),
                 session_path=_session_path(body),
             )
             self.state.record_operation(
@@ -1529,6 +1529,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             return
         channel_id, message_id = _channel_message_ids(parsed.path)
         if channel_id is not None and message_id is not None:
+            body = self._json_body()
             scenario = self._operation(
                 "update_message",
                 metadata={"channel_id": channel_id, "message_id": message_id},
@@ -1596,8 +1597,9 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 safe_category=(
                     "response_channel_mismatch"
                     if scenario == "response_channel_mismatch"
-                    else None
+                    else _session_navigation_category(body)
                 ),
+                session_path=_session_path(body),
             )
             self.state.record_operation(
                 "message",
@@ -2130,6 +2132,14 @@ def _session_presence_category(body: dict[str, object]) -> str | None:
         if color == 0x99AAB5:
             return "session_presence_left"
     return None
+
+
+def _session_navigation_category(body: dict[str, object]) -> str | None:
+    """Classify Session navigation without retaining provider-visible content."""
+    presence_category = _session_presence_category(body)
+    if presence_category is not None:
+        return presence_category
+    return "activity_tracker" if _session_path(body) is not None else None
 
 
 def _multipart_file_evidence(raw_body: bytes) -> tuple[int, int]:
