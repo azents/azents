@@ -21,6 +21,8 @@ from azents.engine.io.attachments import RuntimeAttachment
 from azents.engine.io.user_input import RunUserMessage
 from azents.engine.run.client_tool_compatibility import ClientToolModelProfile
 
+TOOL_RESULT_END_TURN_METADATA_KEY = "end_turn"
+
 # ---------------------------------------------------------------------------
 # Internal helper: raw passthrough dict fields.
 # ---------------------------------------------------------------------------

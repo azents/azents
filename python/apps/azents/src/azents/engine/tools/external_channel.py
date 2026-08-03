@@ -38,7 +38,12 @@ from azents.engine.hooks.types import (
     SessionIdleHookContext,
     SessionIdleResult,
 )
-from azents.engine.run.types import FunctionTool, FunctionToolError
+from azents.engine.run.types import (
+    TOOL_RESULT_END_TURN_METADATA_KEY,
+    FunctionTool,
+    FunctionToolError,
+    FunctionToolResult,
+)
 from azents.engine.tooling.execution_context import (
     get_client_tool_execution_context,
 )
@@ -355,7 +360,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
         )
 
     def _make_channel_action_tool(self) -> FunctionTool:
-        async def channel_action(args: ChannelActionInput) -> str:
+        async def channel_action(args: ChannelActionInput) -> FunctionToolResult:
             """Commit Channel Work and explicitly publish to one external binding."""
             execution = get_client_tool_execution_context()
             value = args
@@ -425,10 +430,17 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                 )
             except ValueError as error:
                 raise FunctionToolError(str(error)) from None
-            return json.dumps(
-                _result_payload(result),
-                ensure_ascii=False,
-                sort_keys=True,
+            return FunctionToolResult(
+                output=json.dumps(
+                    _result_payload(result),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+                metadata=(
+                    {TOOL_RESULT_END_TURN_METADATA_KEY: True}
+                    if value.mode == "finish"
+                    else {}
+                ),
             )
 
         return make_tool(

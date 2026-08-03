@@ -50,7 +50,10 @@ from azents.engine.run.contracts import ToolAdmissionBarrier
 from azents.engine.run.errors import (
     UserVisibleRuntimeError,
 )
-from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
+from azents.engine.run.types import (
+    TOOL_RESULT_END_TURN_METADATA_KEY,
+    USER_STOP_CANCEL_MESSAGE,
+)
 from azents.rdb.session import SessionManager
 from azents.repos.agent_execution import (
     AgentRunRepository,
@@ -273,6 +276,17 @@ class _ToolExecutionOutcome:
 
     call: ClientToolCallPayload
     result: ClientToolResultPayload
+
+
+def _completed_tool_result_ends_turn(
+    outcomes: Sequence[_ToolExecutionOutcome],
+) -> bool:
+    """Return whether any successful tool result requests turn completion."""
+    return any(
+        outcome.result.status == "completed"
+        and outcome.result.metadata.get(TOOL_RESULT_END_TURN_METADATA_KEY) is True
+        for outcome in outcomes
+    )
 
 
 class AgentRunExecution[
@@ -664,7 +678,7 @@ class AgentRunExecution[
                         await finish_turn("completed")
                         continue
                     try:
-                        await self._execute_tools(
+                        tool_outcomes = await self._execute_tools(
                             request.run_id,
                             request.session_id,
                             client_tool_calls,
@@ -702,7 +716,9 @@ class AgentRunExecution[
                             )
                         await finish_turn("cancelled")
                         return AgentRunStatus.INTERRUPTED
-                    if not needs_follow_up:
+                    if not needs_follow_up or _completed_tool_result_ends_turn(
+                        tool_outcomes
+                    ):
                         async with self.session_manager() as session:
                             run_marker = await self._append_run_marker(
                                 session,
@@ -898,9 +914,10 @@ class AgentRunExecution[
         tool_calls: Sequence[ClientToolCallPayload],
         *,
         tool_executor: ClientToolExecutor,
-    ) -> None:
+    ) -> list[_ToolExecutionOutcome]:
         """Run foreground calls in parallel and durably complete each one."""
         completed_call_ids: set[str] = set()
+        outcomes: list[_ToolExecutionOutcome] = []
         tasks_by_call_id = {
             call.call_id: asyncio.create_task(
                 self._execute_tool_with_call(call, tool_executor=tool_executor)
@@ -911,12 +928,18 @@ class AgentRunExecution[
         try:
             for completed in asyncio.as_completed(tasks):
                 outcome = await completed
-                await self._finalize_tool_result(
+                result_event = await self._finalize_tool_result(
                     run_id=run_id,
                     session_id=session_id,
                     call=outcome.call,
                     result=outcome.result,
                 )
+                result = result_event.payload
+                if not isinstance(result, ClientToolResultPayload):
+                    raise AssertionError(
+                        "Finalized client tool result has invalid payload"
+                    )
+                outcomes.append(_ToolExecutionOutcome(call=outcome.call, result=result))
                 completed_call_ids.add(outcome.call.call_id)
         except asyncio.CancelledError as exc:
             unresolved = [
@@ -972,6 +995,7 @@ class AgentRunExecution[
                     )
                 raise _ToolExecutionUserInterrupted from exc
             raise
+        return outcomes
 
     async def _execute_tool_with_call(
         self,

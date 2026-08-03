@@ -78,7 +78,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-08-03
-spec_version: 144
+spec_version: 145
 ---
 
 # Agent Execution Loop
@@ -184,10 +184,13 @@ required: `false` requests follow-up and `true` completes after any admitted cli
 the extension is absent or malformed, canonical foreground client calls use the standard follow-up
 fallback while tool-less output completes. Tool execution and model continuation are independent:
 every admitted client call executes even when `needs_follow_up` is false, and only the later model
-dispatch is skipped. Durable assistant text, reasoning, provider-tool events, and other model output
-do not independently control termination. Incomplete tool calls are never admitted. A user stop
-remains a separate interruption path and may durably preserve assistant text received before
-completion.
+dispatch is skipped. After execution, any successfully completed client tool may request the same
+provider-neutral boundary by returning exact boolean `end_turn: true` in its result metadata; failed
+results cannot terminate the turn through this signal. Tool implementations, rather than the
+execution loop, decide when their domain operation has reached that boundary. Durable assistant text,
+reasoning, provider-tool events, and other model output do not independently control termination.
+Incomplete tool calls are never admitted. A user stop remains a separate interruption path and may
+durably preserve assistant text received before completion.
 
 ### OpenAI Responses physical transport and incremental continuation
 
@@ -1205,6 +1208,9 @@ icon.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 145) — Added a provider-neutral successful tool-result `end_turn`
+  signal so tool implementations can complete a Run without engine knowledge of tool names or
+  argument schemas when provider response metadata omits the lifecycle boundary.
 - **2026-08-03** (spec_version 144) — Separated client-tool execution from post-tool model
   continuation so exact `end_turn=true` final tool turns execute their tools and then complete across
   OpenAI and LiteLLM Responses adapters.

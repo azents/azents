@@ -52,7 +52,10 @@ from azents.engine.events.types import (
     build_native_compat_key,
 )
 from azents.engine.run.errors import ModelCallError
-from azents.engine.run.types import USER_STOP_CANCEL_MESSAGE
+from azents.engine.run.types import (
+    TOOL_RESULT_END_TURN_METADATA_KEY,
+    USER_STOP_CANCEL_MESSAGE,
+)
 from azents.repos.agent_execution.data import EventCreate
 from azents.testing.model_selection import (
     make_test_model_selection,
@@ -878,6 +881,38 @@ class _GeneratedFileToolExecutor(_ToolExecutor):
                     body=b"generated-image",
                 )
             ],
+            wire_dialect="json_function",
+        )
+
+
+class _EndingToolExecutor(_ToolExecutor):
+    """Return a successful generic result that requests turn completion."""
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Return one completed result with the generic end-turn signal."""
+        self.executed_calls.append(call)
+        return ClientToolResultPayload(
+            call_id=call.call_id,
+            name=call.name,
+            status="completed",
+            output=[OutputTextPart(text="tool output")],
+            metadata={TOOL_RESULT_END_TURN_METADATA_KEY: True},
+            wire_dialect="json_function",
+        )
+
+
+class _FailedEndingToolExecutor(_ToolExecutor):
+    """Return a failed result carrying a non-authoritative end-turn signal."""
+
+    async def execute(self, call: ClientToolCallPayload) -> ClientToolResultPayload:
+        """Return one failed result with the generic end-turn metadata."""
+        self.executed_calls.append(call)
+        return ClientToolResultPayload(
+            call_id=call.call_id,
+            name=call.name,
+            status="failed",
+            output=[OutputTextPart(text="tool failed")],
+            metadata={TOOL_RESULT_END_TURN_METADATA_KEY: True},
             wire_dialect="json_function",
         )
 
@@ -2186,6 +2221,121 @@ async def test_final_tool_turn_executes_tool_then_completes() -> None:
         EventKind.CLIENT_TOOL_RESULT,
         EventKind.RUN_MARKER,
     ]
+
+
+async def test_completed_tool_result_end_turn_overrides_dialect_follow_up() -> None:
+    """Honor a successful generic tool-result end-turn signal."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    tool_executor = _EndingToolExecutor()
+    normalizer = _OutputSequenceNormalizer(
+        [
+            NormalizedAdapterOutput(
+                needs_follow_up=True,
+                events=[_tool_call_event()],
+                usage=_usage(),
+            ),
+            NormalizedAdapterOutput(
+                needs_follow_up=False,
+                events=[_assistant_event()],
+                usage=_usage(),
+            ),
+        ]
+    )
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=normalizer,
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(),
+            tool_executor=tool_executor,
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="grok-4.5",
+            max_turns=None,
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert normalizer.call_count == 1
+    assert [call.call_id for call in tool_executor.executed_calls] == ["call-1"]
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.CLIENT_TOOL_CALL,
+        EventKind.TURN_MARKER,
+        EventKind.CLIENT_TOOL_RESULT,
+        EventKind.RUN_MARKER,
+    ]
+
+
+async def test_failed_tool_result_end_turn_keeps_dialect_follow_up() -> None:
+    """Ignore a generic end-turn signal on a failed tool result."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    tool_executor = _FailedEndingToolExecutor()
+    normalizer = _OutputSequenceNormalizer(
+        [
+            NormalizedAdapterOutput(
+                needs_follow_up=True,
+                events=[_tool_call_event()],
+                usage=_usage(),
+            ),
+            NormalizedAdapterOutput(
+                needs_follow_up=False,
+                events=[_assistant_event()],
+                usage=_usage(),
+            ),
+        ]
+    )
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=normalizer,
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(),
+            tool_executor=tool_executor,
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="grok-4.5",
+            max_turns=None,
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert normalizer.call_count == 2
+    result = next(
+        event.payload
+        for event in transcript_repo.events
+        if isinstance(event.payload, ClientToolResultPayload)
+    )
+    assert result.status == "failed"
 
 
 async def test_client_tool_source_snapshot_is_shared_by_durable_and_active() -> None:

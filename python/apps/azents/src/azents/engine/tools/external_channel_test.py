@@ -18,7 +18,11 @@ from azents.engine.hooks.types import (
     SessionIdleHookContext,
 )
 from azents.engine.run.emit import PublishedEvent
-from azents.engine.run.types import FunctionToolError
+from azents.engine.run.types import (
+    TOOL_RESULT_END_TURN_METADATA_KEY,
+    FunctionToolError,
+    FunctionToolResult,
+)
 from azents.engine.tooling.execution_context import client_tool_execution_context
 from azents.engine.tools.external_channel import (
     ChannelActionInput,
@@ -203,8 +207,9 @@ async def test_channel_action_uses_durable_client_call_identity() -> None:
             )
         )
 
-    assert isinstance(output, str)
-    payload = json.loads(output)
+    assert isinstance(output, FunctionToolResult)
+    assert output.metadata == {}
+    payload = json.loads(cast(str, output.output))
     assert payload["state"] == "active"
     assert payload["outcomes"] == [
         {
@@ -218,6 +223,28 @@ async def test_channel_action_uses_durable_client_call_identity() -> None:
     assert service.calls[0]["client_tool_call_id"] == "call-42"
     assert service.calls[0]["run_id"] == "run-current"
     assert service.calls[0]["authority"] is None
+
+
+@pytest.mark.asyncio
+async def test_channel_action_finish_returns_generic_end_turn_signal() -> None:
+    """A completed finish uses the generic FunctionToolResult lifecycle signal."""
+    service = _ActionService([_snapshot()])
+    toolkit = _toolkit(service)
+    state = await toolkit.update_context(_turn_context())
+
+    with client_tool_execution_context(call_id="call-finish", name="channel_action"):
+        output = await state.tools[0].handler(
+            json.dumps(
+                {
+                    "mode": "finish",
+                    "binding": "binding-1",
+                    "message": "Done.",
+                }
+            )
+        )
+
+    assert isinstance(output, FunctionToolResult)
+    assert output.metadata == {TOOL_RESULT_END_TURN_METADATA_KEY: True}
 
 
 @pytest.mark.asyncio
