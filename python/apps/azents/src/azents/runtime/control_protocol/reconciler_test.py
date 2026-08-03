@@ -146,10 +146,18 @@ async def test_reconciler_refreshes_stale_provider_connection_before_start_timeo
     assert updated.failure_code is None
 
 
-async def test_reconciler_observes_running_runtime_without_restarting_it(
+@pytest.mark.parametrize(
+    "provider_observed_state",
+    [
+        RuntimeProviderObservedState.STARTING,
+        RuntimeProviderObservedState.RUNNING,
+    ],
+)
+async def test_reconciler_observes_active_runtime_without_restarting_it(
     rdb_session_manager: SessionManager[AsyncSession],
+    provider_observed_state: RuntimeProviderObservedState,
 ) -> None:
-    """Control observes a running Runtime without reconciling its Pod spec."""
+    """Control observes a starting/running Runtime without repeating START."""
     runtime_repository = AgentRuntimeRepository()
     async with rdb_session_manager() as session:
         workspace_id = await _create_workspace(session, "reconciler-observe-ws")
@@ -191,7 +199,7 @@ async def test_reconciler_observes_running_runtime_without_restarting_it(
         observed = await runtime_repository.record_provider_observed_state(
             session,
             runtime.id,
-            RuntimeProviderObservedState.RUNNING,
+            provider_observed_state,
             1,
             command.desired_generation,
         )
@@ -399,8 +407,8 @@ async def test_reconciler_fences_adoption_then_finishes_restart_replacement(
     assert competing is None
     assert reconciled == 1
     assert claimed is not None
-    assert claimed.operation_type == "provider.start"
-    assert claimed.payload["command_type"] == "start"
+    assert claimed.operation_type == "provider.observe"
+    assert claimed.payload["command_type"] == "observe"
     runtime_configuration = claimed.payload["runtime_configuration"]
     assert isinstance(runtime_configuration, dict)
     assert runtime_configuration["desired_generation"] == restart.desired_generation
