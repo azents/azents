@@ -114,11 +114,11 @@ class ExternalChannelParticipationService:
     ]
     repository: Annotated[
         ExternalChannelRepository,
-        Depends(ExternalChannelRepository),
+        Depends(ExternalChannelRepository.create),
     ]
     management_repository: Annotated[
         ExternalChannelManagementRepository,
-        Depends(ExternalChannelManagementRepository),
+        Depends(ExternalChannelManagementRepository.create),
     ]
     agent_repository: Annotated[
         AgentRepository,

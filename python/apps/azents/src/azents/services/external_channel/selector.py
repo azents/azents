@@ -81,7 +81,7 @@ class ExternalChannelSelectorService:
     ]
     repository: Annotated[
         ExternalChannelRepository,
-        Depends(ExternalChannelRepository),
+        Depends(ExternalChannelRepository.create),
     ]
 
     async def project_catalog(

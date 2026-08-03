@@ -28,6 +28,7 @@ from azents.core.enums import (
     ExternalChannelRouteMode,
     ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
+    ExternalChannelWorkStatus,
 )
 from azents.core.external_channel_session_presence import (
     build_external_channel_session_url,
@@ -42,6 +43,7 @@ from azents.repos.external_channel.data import (
     ExternalChannelSetupClaim,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.work_state import ChannelWorkState
 from azents.services.external_channel.conversation import (
     ExternalChannelConversationScope,
     ExternalChannelHistoryRange,
@@ -359,7 +361,7 @@ async def _accepted_control_plan_case(
         setup_claim=None,
         setup_required=False,
     )
-    work = SimpleNamespace(id="work-1")
+    work = SimpleNamespace(work_cycle_id="work-1")
     presence_plan = make_provider_effect_plan("joined-presence")
     settings_plan = make_provider_effect_plan("binding-settings")
     progress_plan = make_provider_effect_plan("initial-progress")
@@ -382,7 +384,7 @@ async def _accepted_control_plan_case(
     store._create_binding = AsyncMock(  # pyright: ignore[reportPrivateUsage]
         return_value=SimpleNamespace(binding=binding, session_created=True)
     )
-    repository.ensure_active_work = AsyncMock(return_value=work)
+    work_repository.ensure_active_work = AsyncMock(return_value=work)
     store._create_session_presence_intent = (  # pyright: ignore[reportPrivateUsage]
         presence_intent
     )
@@ -412,6 +414,7 @@ async def _accepted_control_plan_case(
     )
     return SimpleNamespace(
         acceptance=acceptance,
+        work_repository=work_repository,
         presence_intent=presence_intent,
         settings_intent=settings_intent,
         presence_plan=presence_plan,
@@ -428,6 +431,11 @@ async def test_new_binding_admission_includes_joined_presence() -> None:
         case.presence_plan,
         case.progress_plan,
     )
+    call = case.work_repository.ensure_active_work.await_args.kwargs
+    assert call["agent_id"] == "agent-1"
+    assert call["session_id"] == "session-1"
+    assert call["binding_id"] == "binding-1"
+    assert call["desired_progress"].state == "checking"
     case.presence_intent.assert_awaited_once()
     case.settings_intent.assert_not_awaited()
 
@@ -442,6 +450,47 @@ async def test_existing_binding_admission_excludes_joined_presence() -> None:
     )
     case.presence_intent.assert_not_awaited()
     case.settings_intent.assert_awaited_once()
+
+
+async def test_initial_progress_intent_uses_binding_toolkit_state_identity() -> None:
+    """Initial progress plans retain the binding-specific Work cycle identity."""
+    work_repository = MagicMock()
+    plan = make_provider_effect_plan("initial-progress")
+    work_repository.prepare_initial_progress = AsyncMock(return_value=plan)
+    store = _store(repository=MagicMock(), work_repository=work_repository)
+    binding = ExternalChannelBinding.model_construct(
+        id="binding-1",
+        agent_session_id="session-1",
+    )
+    work = ChannelWorkState(
+        binding_id=binding.id,
+        work_cycle_id="work-cycle-1",
+        status=ExternalChannelWorkStatus.ACTIVE,
+        title=None,
+        tasks=[],
+        state_revision=1,
+        desired_progress_revision=1,
+        desired_progress=None,
+        finished_at=None,
+        projection_parts=[],
+    )
+    session = cast(AsyncSession, MagicMock())
+
+    result = await store._create_initial_progress_intent(  # pyright: ignore[reportPrivateUsage]
+        session,
+        agent_id="agent-1",
+        binding=binding,
+        work=work,
+    )
+
+    assert result == plan
+    work_repository.prepare_initial_progress.assert_awaited_once_with(
+        session,
+        agent_id="agent-1",
+        session_id="session-1",
+        binding_id="binding-1",
+        work_cycle_id="work-cycle-1",
+    )
 
 
 async def test_session_presence_intent_replaces_open_session_control() -> None:

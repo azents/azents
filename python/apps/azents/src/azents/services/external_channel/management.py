@@ -163,15 +163,15 @@ class ExternalChannelManagementService:
     ]
     repository: Annotated[
         ExternalChannelManagementRepository,
-        Depends(ExternalChannelManagementRepository),
+        Depends(ExternalChannelManagementRepository.create),
     ]
     domain_repository: Annotated[
         ExternalChannelRepository,
-        Depends(ExternalChannelRepository),
+        Depends(ExternalChannelRepository.create),
     ]
     lifecycle_repository: Annotated[
         ExternalChannelLifecycleRepository,
-        Depends(ExternalChannelLifecycleRepository),
+        Depends(ExternalChannelLifecycleRepository.create),
     ]
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     agent_admin_repository: Annotated[

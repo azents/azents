@@ -1,6 +1,7 @@
 """Focused current-projection tests for direct External Channel Work."""
 
 import datetime
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
@@ -21,12 +22,9 @@ from azents.core.enums import (
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
 )
+from azents.core.external_channel_progress import checking_progress
 from azents.core.external_channel_title import DISCORD_INITIAL_THREAD_TITLE_LABEL
-from azents.rdb.models.external_channel import (
-    RDBExternalChannelConnection,
-    RDBExternalChannelWork,
-    RDBExternalChannelWorkProjectionPart,
-)
+from azents.rdb.models.external_channel import RDBExternalChannelConnection
 from azents.repos.external_channel.data import ExternalChannelConnectionCreate
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.work import (
@@ -34,22 +32,33 @@ from azents.repos.external_channel.work import (
     projection_state,
 )
 from azents.repos.external_channel.work_data import ChannelActionEffectPlan
+from azents.repos.external_channel.work_state import (
+    ChannelWorkProjectionPartState,
+    ChannelWorkState,
+    ChannelWorkStateMutation,
+    ExternalChannelWorkStateStore,
+)
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.external_channel import make_provider_effect_plan
 
 
-def _work(*, desired: bool) -> RDBExternalChannelWork:
-    return RDBExternalChannelWork(
+def _work(
+    *,
+    desired: bool,
+    projection_parts: list[ChannelWorkProjectionPartState] | None = None,
+) -> ChannelWorkState:
+    return ChannelWorkState(
         binding_id="binding-1",
+        work_cycle_id="work-1",
         status=ExternalChannelWorkStatus.ACTIVE,
-        schema_version=2,
         title="Working…" if desired else None,
         tasks=[],
         state_revision=2,
         desired_progress_revision=3,
-        desired_progress_payload={"state": "working"} if desired else None,
+        desired_progress=checking_progress() if desired else None,
         finished_at=None,
+        projection_parts=projection_parts or [],
     )
 
 
@@ -58,9 +67,8 @@ def _part(
     status: ExternalChannelWorkProjectionStatus,
     provider_message_key: str | None,
     revision: int = 3,
-) -> RDBExternalChannelWorkProjectionPart:
-    return RDBExternalChannelWorkProjectionPart(
-        work_id="work-1",
+) -> ChannelWorkProjectionPartState:
+    return ChannelWorkProjectionPartState(
         part_ordinal=0,
         desired_progress_revision=revision,
         status=status,
@@ -69,19 +77,21 @@ def _part(
 
 
 def test_projection_state_is_missing_without_owned_parts() -> None:
-    assert projection_state(_work(desired=True), []) == "missing"
+    assert projection_state(_work(desired=True)) == "missing"
 
 
 def test_projection_state_is_synchronized_for_current_present_part() -> None:
     assert (
         projection_state(
-            _work(desired=True),
-            [
-                _part(
-                    status=ExternalChannelWorkProjectionStatus.PRESENT,
-                    provider_message_key="provider-key",
-                )
-            ],
+            _work(
+                desired=True,
+                projection_parts=[
+                    _part(
+                        status=ExternalChannelWorkProjectionStatus.PRESENT,
+                        provider_message_key="provider-key",
+                    )
+                ],
+            ),
         )
         == "synchronized"
     )
@@ -90,43 +100,50 @@ def test_projection_state_is_synchronized_for_current_present_part() -> None:
 def test_projection_state_preserves_unknown_without_retry_authority() -> None:
     assert (
         projection_state(
-            _work(desired=True),
-            [
-                _part(
-                    status=ExternalChannelWorkProjectionStatus.UNKNOWN,
-                    provider_message_key=None,
-                )
-            ],
+            _work(
+                desired=True,
+                projection_parts=[
+                    _part(
+                        status=ExternalChannelWorkProjectionStatus.UNKNOWN,
+                        provider_message_key=None,
+                    )
+                ],
+            ),
         )
         == "unknown"
     )
 
 
 def test_projection_state_reports_failed_terminal_delete() -> None:
-    finished = _work(desired=False)
+    finished = _work(
+        desired=False,
+        projection_parts=[
+            _part(
+                status=ExternalChannelWorkProjectionStatus.FAILED,
+                provider_message_key="provider-key",
+            )
+        ],
+    )
     finished.status = ExternalChannelWorkStatus.FINISHED
+    finished.finished_at = datetime.datetime(2026, 8, 3, tzinfo=datetime.UTC)
+    assert projection_state(finished) == "delete_failed"
+
+
+def test_projection_state_accepts_typed_projection_parts() -> None:
     assert (
         projection_state(
-            finished,
-            [
-                _part(
-                    status=ExternalChannelWorkProjectionStatus.FAILED,
-                    provider_message_key="provider-key",
-                )
-            ],
+            _work(
+                desired=False,
+                projection_parts=[
+                    _part(
+                        status=ExternalChannelWorkProjectionStatus.DELETED,
+                        provider_message_key=None,
+                    )
+                ],
+            )
         )
-        == "delete_failed"
+        == "none"
     )
-
-
-def test_projection_state_accepts_orm_sequence_contract() -> None:
-    parts = [
-        _part(
-            status=ExternalChannelWorkProjectionStatus.DELETED,
-            provider_message_key=None,
-        )
-    ]
-    assert projection_state(_work(desired=False), parts) == "none"
 
 
 def _where_sql(statement: object) -> str:
@@ -176,15 +193,17 @@ async def test_initial_progress_is_claimed_once_per_active_work(
     existing_status: ExternalChannelWorkProjectionStatus,
 ) -> None:
     """Repeated admissions cannot create another Tracker for the same active Work."""
-    work = SimpleNamespace(
-        id="work-1",
+    work = ChannelWorkState(
+        binding_id="binding-1",
+        work_cycle_id="work-1",
+        status=ExternalChannelWorkStatus.ACTIVE,
+        title=None,
+        tasks=[],
+        state_revision=1,
         desired_progress_revision=1,
-        desired_progress_payload={
-            "schema_version": 2,
-            "state": "checking",
-            "title": None,
-            "tasks": [],
-        },
+        desired_progress=checking_progress(),
+        finished_at=None,
+        projection_parts=[],
     )
     binding = SimpleNamespace(id="binding-1")
     resource = SimpleNamespace(
@@ -203,34 +222,54 @@ async def test_initial_progress_is_claimed_once_per_active_work(
     )
     result = MagicMock()
     result.one_or_none.return_value = (
-        work,
         binding,
         resource,
         route,
         connection,
     )
-    claimed_parts: list[RDBExternalChannelWorkProjectionPart] = []
+    current_work = work
+    state_store = MagicMock(spec=ExternalChannelWorkStateStore)
 
-    async def current_part(_statement: object) -> object | None:
-        return claimed_parts[0] if claimed_parts else None
+    async def load_state(*args: object, **kwargs: object) -> ChannelWorkState:
+        del args, kwargs
+        return current_work
 
+    async def update_existing(
+        _session: AsyncSession,
+        *,
+        agent_id: str,
+        session_id: str,
+        binding_id: str,
+        mutator: Callable[
+            [ChannelWorkState],
+            ChannelWorkStateMutation[bool],
+        ],
+        max_retries: int = 3,
+    ) -> ChannelWorkStateMutation[bool]:
+        nonlocal current_work
+        del _session, agent_id, session_id, binding_id, max_retries
+        mutation = mutator(current_work)
+        current_work = mutation.state
+        return mutation
+
+    state_store.load = AsyncMock(side_effect=load_state)
+    state_store.update_existing = AsyncMock(side_effect=update_existing)
     session = MagicMock(spec=AsyncSession)
     session.execute = AsyncMock(return_value=result)
-    session.scalar = AsyncMock(side_effect=current_part)
-    session.add.side_effect = claimed_parts.append
-    session.flush = AsyncMock()
-    repository = ExternalChannelWorkRepository()
+    repository = ExternalChannelWorkRepository(work_state_store=state_store)
     plan = make_provider_effect_plan("initial-progress")
     repository.prepare_direct_control = AsyncMock(return_value=plan)
 
     first = await repository.prepare_initial_progress(
         cast(AsyncSession, session),
-        work_id=work.id,
+        agent_id="agent-1",
+        session_id="session-1",
+        binding_id=binding.id,
+        work_cycle_id=work.work_cycle_id,
     )
     assert first == plan
-    assert len(claimed_parts) == 1
-    claimed = claimed_parts[0]
-    assert claimed.work_id == work.id
+    assert len(current_work.projection_parts) == 1
+    claimed = current_work.projection_parts[0]
     assert claimed.part_ordinal == 0
     assert claimed.desired_progress_revision == work.desired_progress_revision
     assert claimed.status is ExternalChannelWorkProjectionStatus.UNKNOWN
@@ -244,12 +283,14 @@ async def test_initial_progress_is_claimed_once_per_active_work(
     )
     repeated = await repository.prepare_initial_progress(
         cast(AsyncSession, session),
-        work_id=work.id,
+        agent_id="agent-1",
+        session_id="session-1",
+        binding_id=binding.id,
+        work_cycle_id=work.work_cycle_id,
     )
 
     assert repeated is None
     repository.prepare_direct_control.assert_awaited_once()
-    session.flush.assert_awaited_once()
 
 
 async def test_direct_control_rejects_terminal_connection_before_credential_purge(
@@ -385,7 +426,7 @@ async def test_direct_effect_revalidation_ignores_connection_health_status() -> 
     effect = cast(
         ChannelActionEffectPlan,
         SimpleNamespace(
-            work_id="work-1",
+            work_cycle_id="work-1",
             provider=SimpleNamespace(
                 target=SimpleNamespace(
                     binding_id="binding-1",

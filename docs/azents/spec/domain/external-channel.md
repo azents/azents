@@ -60,7 +60,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-08-03
-spec_version: 45
+spec_version: 46
 ---
 
 # External Channel
@@ -85,8 +85,9 @@ contain multiple independent bindings.
 - Connection and route records are Workspace/Agent administration state.
 - Provider resources, principals, conversation positions, access requests, and
   selector interactions retain only routing, authorization, and replay identity.
-- Bindings, Channel Work, and Work-owned provider projection parts are Session
-  lifecycle resources.
+- Bindings are Session lifecycle resources. Each binding's current or latest Channel
+  Work cycle and Work-owned provider projection parts are one Session-bound Toolkit
+  State value under `external_channel/channel_work:{binding_id}`.
 - Credentials are encrypted at rest and decrypted only inside provider adapters. Public APIs, generated clients, prompts, events, logs, UI state, and test evidence expose only redacted credential status.
 - Provider history is the inbound content authority. One accepted history range becomes
   one canonical mailbox item and then contiguous Session events with provider, resource,
@@ -125,7 +126,7 @@ contain multiple independent bindings.
 | Binding | Persistent link from one route/resource to one AgentSession with one required concrete `mention_only` or `all_messages` response mode. `disconnected_at IS NULL` identifies the current connected relationship; a non-null timestamp is its terminal boundary. Configured parent/thread creation copies the active participation setting; legacy isolated-thread access replay without a setup claim copies the Agent default. Binding, real Session, and first canonical mailbox input commit together only after setup selection or for an already configured conversation. |
 | Mailbox item and Session events | One deterministic mailbox item contains the ordered immutable provider-history projection. The conversation position compare-and-set is the sole duplicate-prevention and ordering authority. Mailbox identity owns input idempotency and pending wake recovery. Only a mailbox whose admission created the root Session may transiently authorize its exact human `authorized_invocation` event as the initial automatic-title input; promotion and mailbox deletion consume that eligibility. Promotion creates the canonical External Channel Session events; no parallel provider-message, revision, invocation-batch, activation, title-attempt, or wake-dispatch record exists. |
 | Access request/grant/block | Opaque approval request with a content-free provider locator and conversation-position replay boundary, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
-| Channel Work and provider projection | Binding-scoped durable current-work title and ordered provider-neutral tasks with stable identities, status, optional details, optional output, and labeled URL sources. Work-owned projection parts retain only the current desired revision, current provider identity, and current projection status required for later update or deletion. Agent-requested publication executes through the ordinary Tool call/result history with process-local effect plans and no separate Action or delivery history. |
+| Channel Work and provider projection | One binding-specific Session-bound Toolkit State value contains the current or latest work-cycle identity, status, title, ordered provider-neutral tasks with stable identities, desired snapshot and revisions, finish timestamp, and ordered current provider projection parts. Projection parts retain only the desired revision, provider identity, and projection status required for later update or deletion. Whole-state optimistic concurrency is independent per binding. Agent-requested publication executes through the ordinary Tool call/result history with process-local effect plans and no separate Action or delivery history. |
 
 ## State Invariants
 
@@ -265,6 +266,9 @@ contain multiple independent bindings.
   standalone block `type` and may contain literal rich-text details/output and
   labeled HTTP or HTTPS sources. The payload sends no Slack `plan_id`.
 - Channel Work desired state is a versioned provider-neutral complete snapshot.
+  The canonical payload is schema version `1` Toolkit State at
+  `external_channel/channel_work:{binding_id}` and retains a stable
+  `work_cycle_id` across progress rendering and provider-effect settlement.
   A serialized desired snapshot is limited to 64 KiB and is rejected atomically
   before canonical state changes when it exceeds that bound.
   Slack-specific blocks and revision-derived `block_id` values are created only
@@ -408,6 +412,10 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-03** (spec_version 46) — Moved binding-specific Channel Work and its
+  ordered current provider projection parts into one Session-bound Toolkit State
+  payload with independent whole-state optimistic concurrency and a stable work-cycle
+  identity.
 - **2026-08-03** (spec_version 45) — Preserved raw Slack and Discord user/channel
   references in model input and moved resolved names into a shared XML mapping appendix.
 - **2026-08-03** (spec_version 44) — Added canonical `View session` navigation to

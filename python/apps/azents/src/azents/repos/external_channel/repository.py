@@ -56,9 +56,13 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelPrincipal,
     RDBExternalChannelResource,
     RDBExternalChannelSetupClaim,
-    RDBExternalChannelWork,
 )
 from azents.repos.external_channel.work import terminate_binding_with_plans
+from azents.repos.external_channel.work_state import (
+    ChannelWorkState,
+    ChannelWorkStateMutation,
+    ExternalChannelWorkStateStore,
+)
 from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
 from .data import (
@@ -93,8 +97,6 @@ from .data import (
     ExternalChannelResourceCreate,
     ExternalChannelSetupClaim,
     ExternalChannelSetupClaimCreate,
-    ExternalChannelWork,
-    ExternalChannelWorkCreate,
 )
 
 _RecordT = TypeVar("_RecordT", bound=BaseModel)
@@ -130,6 +132,18 @@ _INTERACTION_OPAQUE_VALUE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/=@+-]
 
 class ExternalChannelRepository:
     """Provider-generic SQLAlchemy repository for External Channel state."""
+
+    @classmethod
+    def create(cls) -> "ExternalChannelRepository":
+        """Create a repository for application dependency injection."""
+        return cls()
+
+    def __init__(
+        self,
+        work_state_store: ExternalChannelWorkStateStore | None = None,
+    ) -> None:
+        """Create the repository."""
+        self.work_state_store = work_state_store or ExternalChannelWorkStateStore()
 
     async def create_conversation_position_idempotent(
         self,
@@ -1258,6 +1272,7 @@ class ExternalChannelRepository:
             plans.extend(
                 await terminate_binding_with_plans(
                     session,
+                    work_state_store=self.work_state_store,
                     binding=binding,
                     resource=resource,
                     now=now,
@@ -2328,31 +2343,52 @@ class ExternalChannelRepository:
         )
         if resource is None:
             return False
-        binding_ids = sa.select(RDBExternalChannelBinding.id).where(
-            RDBExternalChannelBinding.resource_id == resource_id
-        )
-        await session.execute(
-            sa.update(RDBExternalChannelWork)
-            .where(
-                RDBExternalChannelWork.binding_id.in_(binding_ids),
-                RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
-            )
-            .values(
-                status=ExternalChannelWorkStatus.FINISHED,
-                finished_at=now,
+        bindings = list(
+            await session.scalars(
+                sa.select(RDBExternalChannelBinding)
+                .where(
+                    RDBExternalChannelBinding.resource_id == resource_id,
+                    RDBExternalChannelBinding.disconnected_at.is_(None),
+                )
+                .order_by(RDBExternalChannelBinding.id)
+                .with_for_update()
             )
         )
-        await session.execute(
-            sa.update(RDBExternalChannelBinding)
-            .where(
-                RDBExternalChannelBinding.resource_id == resource_id,
-                RDBExternalChannelBinding.disconnected_at.is_(None),
+        for binding in bindings:
+            agent_session = await session.get(
+                RDBAgentSession,
+                binding.agent_session_id,
             )
-            .values(
-                disconnected_at=now,
-                disconnect_reason=reason,
+            if agent_session is None:
+                raise RuntimeError("External Channel binding Session disappeared.")
+
+            def finish_work(state: ChannelWorkState) -> ChannelWorkStateMutation[None]:
+                if state.status is ExternalChannelWorkStatus.FINISHED:
+                    return ChannelWorkStateMutation(state=state, result=None)
+                return ChannelWorkStateMutation(
+                    state=state.model_copy(
+                        update={
+                            "status": ExternalChannelWorkStatus.FINISHED,
+                            "state_revision": state.state_revision + 1,
+                            "desired_progress_revision": (
+                                state.desired_progress_revision + 1
+                            ),
+                            "desired_progress": None,
+                            "finished_at": now,
+                        }
+                    ),
+                    result=None,
+                )
+
+            await self.work_state_store.update_existing(
+                session,
+                agent_id=agent_session.agent_id,
+                session_id=agent_session.id,
+                binding_id=binding.id,
+                mutator=finish_work,
             )
-        )
+            binding.disconnected_at = now
+            binding.disconnect_reason = reason
         await session.execute(
             sa.update(RDBExternalChannelAccessRequest)
             .where(
@@ -3338,65 +3374,6 @@ class ExternalChannelRepository:
             await session.flush()
         await session.refresh(rdb, attribute_names=["updated_at"])
         return ExternalChannelBlock.model_validate(rdb)
-
-    async def create_work_idempotent(
-        self,
-        session: AsyncSession,
-        create: ExternalChannelWorkCreate,
-    ) -> ExternalChannelWork:
-        """Create or return active Channel Work for one binding."""
-        rdb = await self._insert_or_lookup(
-            session,
-            RDBExternalChannelWork,
-            create,
-            lambda: session.scalar(
-                sa.select(RDBExternalChannelWork).where(
-                    RDBExternalChannelWork.binding_id == create.binding_id,
-                    RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
-                )
-            ),
-        )
-        return ExternalChannelWork.model_validate(rdb)
-
-    async def ensure_active_work(
-        self,
-        session: AsyncSession,
-        *,
-        binding_id: str,
-        desired_progress_payload: dict[str, object],
-    ) -> ExternalChannelWork:
-        """Create or return the active Channel Work for an invoked binding."""
-        return await self.create_work_idempotent(
-            session,
-            ExternalChannelWorkCreate(
-                binding_id=binding_id,
-                status=ExternalChannelWorkStatus.ACTIVE,
-                schema_version=2,
-                title=None,
-                tasks=[],
-                state_revision=1,
-                desired_progress_revision=1,
-                desired_progress_payload=desired_progress_payload,
-                finished_at=None,
-            ),
-        )
-
-    async def lock_work_by_binding_id(
-        self,
-        session: AsyncSession,
-        *,
-        binding_id: str,
-    ) -> ExternalChannelWork | None:
-        """Lock the active Channel Work for one binding."""
-        rdb = await session.scalar(
-            sa.select(RDBExternalChannelWork)
-            .where(
-                RDBExternalChannelWork.binding_id == binding_id,
-                RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
-            )
-            .with_for_update()
-        )
-        return self._as(ExternalChannelWork, rdb)
 
     async def _create(
         self,

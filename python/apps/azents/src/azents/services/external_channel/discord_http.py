@@ -71,7 +71,7 @@ class DiscordHTTPAdmissionService:
     ]
     repository: Annotated[
         ExternalChannelRepository,
-        Depends(ExternalChannelRepository),
+        Depends(ExternalChannelRepository.create),
     ]
     admission_service: Annotated[
         ExternalChannelAdmissionService,

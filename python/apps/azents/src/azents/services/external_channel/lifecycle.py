@@ -40,7 +40,7 @@ class ExternalChannelLifecycleService:
 
     repository: Annotated[
         ExternalChannelLifecycleRepository,
-        Depends(ExternalChannelLifecycleRepository),
+        Depends(ExternalChannelLifecycleRepository.create),
     ]
     action_service: Annotated[
         ExternalChannelActionService,

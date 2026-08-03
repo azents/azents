@@ -69,7 +69,7 @@ class ExternalChannelTransportIngestionService:
     ]
     repository: Annotated[
         ExternalChannelRepository,
-        Depends(ExternalChannelRepository),
+        Depends(ExternalChannelRepository.create),
     ]
     ingestion_service: Annotated[
         ExternalChannelConversationIngestionService,

@@ -184,7 +184,7 @@ class ExternalChannelActionService:
     ]
     repository: Annotated[
         ExternalChannelWorkRepository,
-        Depends(ExternalChannelWorkRepository),
+        Depends(ExternalChannelWorkRepository.create),
     ]
     credentials_codec: Annotated[
         ExternalChannelCredentialsCodec,
@@ -386,7 +386,7 @@ class ExternalChannelActionService:
                     effect=ChannelActionEffectPlan(
                         provider=current,
                         part=part,
-                        work_id=work_id,
+                        work_cycle_id=work_id,
                         expected_desired_progress_revision=desired_revision,
                     ),
                     outcome=outcome,
@@ -440,7 +440,7 @@ class ExternalChannelActionService:
                     effect=ChannelActionEffectPlan(
                         provider=current,
                         part=part,
-                        work_id=work_id,
+                        work_cycle_id=work_id,
                         expected_desired_progress_revision=desired_revision,
                     ),
                     outcome=outcome,

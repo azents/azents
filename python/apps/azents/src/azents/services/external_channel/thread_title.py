@@ -59,7 +59,7 @@ class ExternalChannelThreadTitleService:
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
     external_channel_repository: Annotated[
-        ExternalChannelRepository, Depends(ExternalChannelRepository)
+        ExternalChannelRepository, Depends(ExternalChannelRepository.create)
     ]
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     agent_session_repository: Annotated[

@@ -60,10 +60,10 @@ from azents.repos.external_channel.data import (
     ExternalChannelResourceCreate,
     ExternalChannelSetupClaim,
     ExternalChannelSetupClaimCreate,
-    ExternalChannelWork,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.external_channel.work import ExternalChannelWorkRepository
+from azents.repos.external_channel.work_state import ChannelWorkState
 from azents.services.external_channel.conversation import ExternalChannelHistoryRange
 from azents.services.external_channel.discord_selector_scope import (
     build_discord_selector_custom_id,
@@ -140,11 +140,11 @@ class ExternalChannelMailboxIngestionStore:
     ]
     repository: Annotated[
         ExternalChannelRepository,
-        Depends(ExternalChannelRepository),
+        Depends(ExternalChannelRepository.create),
     ]
     work_repository: Annotated[
         ExternalChannelWorkRepository,
-        Depends(ExternalChannelWorkRepository),
+        Depends(ExternalChannelWorkRepository.create),
     ]
     agent_repository: Annotated[AgentRepository, Depends(AgentRepository)]
     agent_session_repository: Annotated[
@@ -507,10 +507,15 @@ class ExternalChannelMailboxIngestionStore:
                 )
                 binding = creation.binding
                 session_created = creation.session_created
-            work = await self.repository.ensure_active_work(
+            agent_id = conversation.route.agent_id
+            if agent_id is None:
+                raise RuntimeError("External Channel route has no active Agent.")
+            work = await self.work_repository.ensure_active_work(
                 session,
+                agent_id=agent_id,
+                session_id=binding.agent_session_id,
                 binding_id=binding.id,
-                desired_progress_payload=checking_progress().model_dump(mode="json"),
+                desired_progress=checking_progress(),
             )
             session_presence_id = (
                 None
@@ -532,8 +537,7 @@ class ExternalChannelMailboxIngestionStore:
             )
             progress_id = await self._create_initial_progress_intent(
                 session,
-                request=request,
-                resource=conversation.resource,
+                agent_id=agent_id,
                 binding=binding,
                 work=work,
             )
@@ -1731,15 +1735,16 @@ class ExternalChannelMailboxIngestionStore:
         self,
         session: AsyncSession,
         *,
-        request: ExternalChannelIngestionRequest,
-        resource: ExternalChannelResource,
+        agent_id: str,
         binding: ExternalChannelBinding,
-        work: ExternalChannelWork,
+        work: ChannelWorkState,
     ) -> ProviderEffectPlan | None:
-        del request, resource, binding
         return await self.work_repository.prepare_initial_progress(
             session,
-            work_id=work.id,
+            agent_id=agent_id,
+            session_id=binding.agent_session_id,
+            binding_id=binding.id,
+            work_cycle_id=work.work_cycle_id,
         )
 
     async def _lock_authority(

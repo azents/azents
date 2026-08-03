@@ -31,7 +31,6 @@ from azents.core.enums import (
     ExternalChannelSetupClaimStatus,
     ExternalChannelTransport,
     ExternalChannelWorkProjectionStatus,
-    ExternalChannelWorkStatus,
 )
 from azents.rdb.models.base import RDBModel
 from azents.rdb.types.datetime import TimeZoneDateTime
@@ -159,12 +158,6 @@ external_channel_access_request_status_enum = ENUM(
 external_channel_access_grant_scope_enum = ENUM(
     ExternalChannelAccessGrantScope,
     name="external_channel_access_grant_scope",
-    create_type=False,
-    values_callable=_enum_values,
-)
-external_channel_work_status_enum = ENUM(
-    ExternalChannelWorkStatus,
-    name="external_channel_work_status",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -1790,138 +1783,3 @@ class RDBExternalChannelBlock(RDBModel):
     )
 
     __table_args__ = (UQ_AGENT_PRINCIPAL,)
-
-
-class RDBExternalChannelWork(RDBModel):
-    """Durable binding-scoped task state and desired progress projection."""
-
-    __tablename__ = "external_channel_works"
-
-    IX_BINDING_ID_STATUS = sa.Index(
-        "ix_external_channel_works_binding_id_status",
-        "binding_id",
-        "status",
-    )
-    UQ_ACTIVE_BINDING = sa.Index(
-        "uq_external_channel_works_active_binding",
-        "binding_id",
-        unique=True,
-        postgresql_where=sa.text("status = 'active'"),
-    )
-
-    id: Mapped[str] = mapped_column(
-        sa.String(32),
-        primary_key=True,
-        init=False,
-        default_factory=lambda: uuid7().hex,
-    )
-    binding_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("external_channel_bindings.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    status: Mapped[ExternalChannelWorkStatus] = mapped_column(
-        external_channel_work_status_enum,
-        nullable=False,
-        server_default=ExternalChannelWorkStatus.ACTIVE.value,
-    )
-    schema_version: Mapped[int] = mapped_column(
-        sa.Integer,
-        nullable=False,
-        server_default="2",
-    )
-    title: Mapped[str | None] = mapped_column(
-        sa.Text,
-        nullable=True,
-    )
-    tasks: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
-    state_revision: Mapped[int] = mapped_column(
-        sa.Integer,
-        nullable=False,
-        server_default="1",
-    )
-    desired_progress_revision: Mapped[int] = mapped_column(
-        sa.Integer,
-        nullable=False,
-        server_default="0",
-    )
-    desired_progress_payload: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB,
-        nullable=True,
-        default=None,
-    )
-    finished_at: Mapped[datetime.datetime | None] = mapped_column(
-        TimeZoneDateTime,
-        nullable=True,
-        default=None,
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=False,
-        server_default=sa.func.now(),
-    )
-    updated_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=False,
-        server_default=sa.func.now(),
-        onupdate=sa.func.now(),
-    )
-
-    __table_args__ = (IX_BINDING_ID_STATUS, UQ_ACTIVE_BINDING)
-
-
-class RDBExternalChannelWorkProjectionPart(RDBModel):
-    """Current provider projection state for one ordered Channel Work part."""
-
-    __tablename__ = "external_channel_work_projection_parts"
-
-    UQ_WORK_PART_ORDINAL = sa.UniqueConstraint(
-        "work_id",
-        "part_ordinal",
-        name="uq_external_channel_work_projection_parts_work_part_ordinal",
-    )
-    IX_STATUS_UPDATED_AT = sa.Index(
-        "ix_external_channel_work_projection_parts_status_updated_at",
-        "status",
-        "updated_at",
-    )
-
-    id: Mapped[str] = mapped_column(
-        sa.String(32),
-        primary_key=True,
-        init=False,
-        default_factory=lambda: uuid7().hex,
-    )
-    work_id: Mapped[str] = mapped_column(
-        sa.String(32),
-        sa.ForeignKey("external_channel_works.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    part_ordinal: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    desired_progress_revision: Mapped[int] = mapped_column(sa.Integer, nullable=False)
-    status: Mapped[ExternalChannelWorkProjectionStatus] = mapped_column(
-        external_channel_work_projection_status_enum,
-        nullable=False,
-    )
-    provider_message_key: Mapped[str | None] = mapped_column(
-        sa.String(255),
-        nullable=True,
-        default=None,
-    )
-    created_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=False,
-        server_default=sa.func.now(),
-    )
-    updated_at: Mapped[datetime.datetime] = mapped_column(
-        TimeZoneDateTime,
-        init=False,
-        nullable=False,
-        server_default=sa.func.now(),
-        onupdate=sa.func.now(),
-    )
-
-    __table_args__ = (UQ_WORK_PART_ORDINAL, IX_STATUS_UPDATED_AT)

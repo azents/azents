@@ -111,9 +111,6 @@ def test_external_channel_manifest_excludes_canonical_provider_state() -> None:
         "external_channel_access_grants": (
             SessionLifecycleResourceClassification.LIFECYCLE_ROOT
         ),
-        "external_channel_works": (
-            SessionLifecycleResourceClassification.LIFECYCLE_ROOT
-        ),
     }
 
 

@@ -36,6 +36,7 @@ code_paths:
   - python/apps/azents/src/azents/engine/tooling/execution_context.py
   - python/apps/azents/src/azents/services/external_channel/channel_action.py
   - python/apps/azents/src/azents/repos/external_channel/work.py
+  - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/repos/toolkit_state/**
   - python/apps/azents/src/azents/worker/deps.py
   - python/apps/azents/src/azents/worker/session/toolkit_scope.py
@@ -53,7 +54,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-08-03
-spec_version: 81
+spec_version: 82
 ---
 
 # Toolkit
@@ -621,6 +622,13 @@ Identity is always session-bound and is the combination of `agent_id`, `session_
 
 Runtime abstraction is `ToolkitStateStore` and typed `ToolkitStateHandle`. `load(default_factory)` returns default if row is missing. `save(state)` performs whole-state replace. `update(default_factory, mutator)` reads latest state, applies the mutator, and retries on optimistic lock conflict.
 
+External Channel uses the same storage model through a domain-specific typed store.
+Each binding owns exactly one identity in namespace `external_channel` with state name
+`channel_work:{binding_id}`. The payload contains the current or latest Channel Work
+cycle and ordered current provider projection parts. It preserves a stable
+`work_cycle_id`, validates the binding-derived identity, and uses independent
+whole-state optimistic concurrency per binding.
+
 ### Session Todo State
 
 TodoToolkit stores todo list as session-scope Toolkit State.
@@ -739,6 +747,9 @@ and never becomes the Channel Work source of truth.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 82) — Added binding-specific External Channel Work as
+  typed Session-bound Toolkit State with one independently versioned whole-state
+  identity per binding.
 - **2026-08-03** (spec_version 81) — Replaced the AWS Toolkit setup form's
   deprecated MCP-specific IAM action list with downstream AWS service
   permissions and managed MCP condition-key guidance.

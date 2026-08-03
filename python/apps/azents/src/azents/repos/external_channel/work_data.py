@@ -40,7 +40,7 @@ class ChannelActionEffectPlan:
 
     provider: ProviderEffectPlan
     part: int
-    work_id: str
+    work_cycle_id: str
     expected_desired_progress_revision: int | None
 
 

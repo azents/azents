@@ -17,13 +17,13 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-03 | 63 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-03 | 140 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-03 | 45 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-03 | 46 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-01 | 18 |
 | [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-03 | 15 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
-| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-03 | 81 |
+| [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-03 | 82 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
 | [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-03 | 56 |
 
@@ -38,8 +38,8 @@ Design documents are accumulated records and are not listed individually in this
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-03 | 32 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-03 | 21 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-03 | 34 |
-| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-02 | 29 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-03 | 35 |
+| [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-03 | 30 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-03 | 32 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-08-03 | 38 |
 | [Kimi OAuth Flow](spec/flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
@@ -92,6 +92,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Reliable External Channel Provider Connections Requirements](requirements/channel-260731-reliable-provider-connections.md) | channel-260731 | 2026-07-31 | 2026-07-31 |
 | [External Channel Binding Response Modes Requirements](requirements/channel-260801-binding-response-modes.md) | channel-260801 | 2026-08-01 | 2026-08-01 |
 | [Immediate External Channel Provider Delivery Requirements](requirements/channel-260802-immediate-provider-delivery.md) | channel-260802 | 2026-08-02 | 2026-08-02 |
+| [Selective External Channel Response Requirements](requirements/channel-260803-selective-response.md) | channel-260803 | 2026-08-03 | - |
 | [Split Chat Input Buffer into Separate RDB Table Historical Requirements Reconstruction](requirements/chat-260519-chat-input-buffer.md) | chat-260519 | 2026-05-19 | - |
 | [Chat Protocol Uses Canonical Event History/Live API Historical Requirements Reconstruction](requirements/chat-260604-chat-protocol-history-live.md) | chat-260604 | 2026-06-04 | 2026-06-04 |
 | [Chat Session Resync Converges to History/Live State After Subscribe Ack Historical Requirements Reconstruction](requirements/chat-260609-chat-resync-scroll.md) | chat-260609 | 2026-06-09 | - |
@@ -455,6 +456,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Reliable External Channel Provider Connections](adr/channel-260731-reliable-provider-connections.md)
 - [External Channel Binding Response Modes](adr/channel-260801-binding-response-modes.md)
 - [Immediate External Channel Provider Delivery](adr/channel-260802-immediate-provider-delivery.md)
+- [Selective External Channel Response](adr/channel-260803-selective-response.md)
 - [Split Chat Input Buffer into Separate RDB Table](adr/chat-260519-chat-input-buffer.md)
 - [Chat Protocol Uses Canonical Event History/Live API](adr/chat-260604-chat-protocol-history-live.md)
 - [Chat Session Resync Converges to History/Live State After Subscribe Ack](adr/chat-260609-chat-resync-scroll.md)
