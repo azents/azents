@@ -3833,6 +3833,53 @@ class TestLiteLLMResponsesOutputNormalizer:
 
         assert output.needs_follow_up is False
 
+    @pytest.mark.parametrize(
+        ("end_turn", "expected_follow_up"),
+        [
+            (False, True),
+            (True, False),
+            (None, True),
+            ("true", True),
+        ],
+    )
+    def test_tool_call_uses_end_turn_before_standard_fallback(
+        self,
+        end_turn: object,
+        expected_follow_up: bool,
+    ) -> None:
+        """Let an exact dialect signal override the standard tool continuation."""
+        normalizer = LiteLLMResponsesOutputNormalizer(
+            provider="xai_oauth",
+            model="xai/grok-4.5",
+            operation="sampling",
+            integration=None,
+        )
+
+        output = normalizer.normalize(
+            "session-1",
+            [
+                NativeEvent(
+                    type="ResponseCompletedEvent",
+                    item={
+                        "response": {
+                            "end_turn": end_turn,
+                            "output": [
+                                {
+                                    "type": "function_call",
+                                    "call_id": "call-final",
+                                    "name": "channel_action",
+                                    "arguments": '{"mode":"finish"}',
+                                }
+                            ],
+                        }
+                    },
+                )
+            ],
+        )
+
+        assert output.needs_follow_up is expected_follow_up
+        assert [event.kind for event in output.events] == [EventKind.CLIENT_TOOL_CALL]
+
     def test_normalizes_completed_output_items(self) -> None:
         """Convert completed response output item to event."""
         normalizer = LiteLLMResponsesOutputNormalizer(

@@ -19,6 +19,7 @@ from openai.types.responses import (
     ResponseErrorEvent,
     ResponseFailedEvent,
     ResponseFileSearchToolCall,
+    ResponseFunctionToolCall,
     ResponseFunctionWebSearch,
     ResponseOutputItemAddedEvent,
     ResponseOutputItemDoneEvent,
@@ -2003,6 +2004,32 @@ def test_typed_normalizer_maps_end_turn_false_to_follow_up() -> None:
 
     assert completed.needs_follow_up is True
     assert completed.events == []
+
+
+def test_typed_normalizer_allows_end_turn_true_with_function_call() -> None:
+    """Keep a final client tool call while suppressing model follow-up."""
+    function_call = ResponseFunctionToolCall(
+        arguments='{"mode":"finish"}',
+        call_id="call-final",
+        name="channel_action",
+        status="completed",
+        type="function_call",
+    )
+    response = _response().model_copy(
+        update={"end_turn": True, "output": [function_call]}
+    )
+    output = OpenAIResponsesOutputNormalizer(
+        provider="openai",
+        model="gpt-5.1-codex",
+        operation="sampling",
+        integration=None,
+    ).start("session-1")
+
+    output.process_event(_completed_event(response))
+    completed = output.complete()
+
+    assert completed.needs_follow_up is False
+    assert [event.kind for event in completed.events] == [EventKind.CLIENT_TOOL_CALL]
 
 
 def test_typed_normalizer_rejects_inconsistent_custom_tool_input() -> None:

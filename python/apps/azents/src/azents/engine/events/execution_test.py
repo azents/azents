@@ -2134,6 +2134,60 @@ async def test_tool_run_completes_after_empty_terminal_model_turn() -> None:
     ]
 
 
+async def test_final_tool_turn_executes_tool_then_completes() -> None:
+    """Execute a final-turn client tool without dispatching another model step."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    tool_executor = _ToolExecutor()
+    normalizer = _OutputSequenceNormalizer(
+        [
+            NormalizedAdapterOutput(
+                needs_follow_up=False,
+                events=[_tool_call_event()],
+                usage=_usage(),
+            ),
+        ]
+    )
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=normalizer,
+        model_call_preparer=_model_call_preparer(
+            lowerer=_Lowerer(),
+            tool_executor=tool_executor,
+        ),
+        run_repo=run_repo,
+        transcript_repo=transcript_repo,
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="grok-4.5",
+            max_turns=None,
+        ),
+    )
+
+    assert status == AgentRunStatus.COMPLETED
+    assert normalizer.call_count == 1
+    assert [call.call_id for call in tool_executor.executed_calls] == ["call-1"]
+    assert run_repo.terminal == AgentRunStatus.COMPLETED
+    assert [event.kind for event in transcript_repo.events] == [
+        EventKind.CLIENT_TOOL_CALL,
+        EventKind.TURN_MARKER,
+        EventKind.CLIENT_TOOL_RESULT,
+        EventKind.RUN_MARKER,
+    ]
+
+
 async def test_client_tool_source_snapshot_is_shared_by_durable_and_active() -> None:
     """Enrich the call before durable append and active-call projection."""
     source = ToolkitSourceSnapshot(
