@@ -385,6 +385,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Adopt testenv QA Fixture-First Architecture Historical Requirements Reconstruction](requirements/testenv-260512-testenv-qa-fixtures.md) | testenv-260512 | 2026-05-12 | - |
 | [Resolve Prompt Model Targets at Run Time Historical Requirements Reconstruction](requirements/time-260710-time-target-resolution.md) | time-260710 | 2026-07-10 | - |
 | [External Channel Session and Discord Thread Automatic Title Requirements](requirements/title-260802-external-channel-automatic-title.md) | title-260802 | 2026-08-02 | 2026-08-03 |
+| [Reliable Automatic Session Title Requirements](requirements/title-260803-reliable-automatic-title.md) | title-260803 | 2026-08-03 | - |
 | [Expose Session Todo State through Toolkit State and Chat Live State Historical Requirements Reconstruction](requirements/todo-260613-todo-toolkit-ui.md) | todo-260613 | 2026-06-13 | - |
 | [Token Usage Storage Historical Requirements Reconstruction](requirements/token-260305-token-usage.md) | token-260305 | 2026-03-05 | 2026-04-21 |
 | [Toolkit Assignment Historical Requirements Reconstruction](requirements/toolkit-260225-toolkit-assignment.md) | toolkit-260225 | 2026-02-25 | 2026-03-23 |
@@ -745,6 +746,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Adopt testenv QA Fixture-First Architecture](adr/testenv-260512-testenv-qa-fixtures.md)
 - [Resolve Prompt Model Targets at Run Time](adr/time-260710-time-target-resolution.md)
 - [External Channel Session and Discord Thread Automatic Titles](adr/title-260802-external-channel-automatic-title.md)
+- [Reliable Automatic Session Titles](adr/title-260803-reliable-automatic-title.md)
 - [Expose Session Todo State through Toolkit State and Chat Live State](adr/todo-260613-todo-toolkit-ui.md)
 - [Token Usage Storage Historical Decision Reconstruction](adr/token-260305-token-usage.md)
 - [Toolkit Assignment Historical Decision Reconstruction](adr/toolkit-260225-toolkit-assignment.md)
