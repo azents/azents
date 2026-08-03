@@ -1,16 +1,41 @@
 """Project browser manifest public API E2E tests."""
 
+import time
 from dataclasses import dataclass
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 import requests
+from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
+from azentspublicclient.api.agent_v1_api import AgentV1Api
+from azentspublicclient.api.llm_provider_integration_v1_api import (
+    LLMProviderIntegrationV1Api,
+)
+from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
+from azentspublicclient.models.agent_create_request import AgentCreateRequest
+from azentspublicclient.models.agent_type import AgentType
+from azentspublicclient.models.api_key_secrets import ApiKeySecrets
+from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest
+from azentspublicclient.models.llm_provider import LLMProvider
+from azentspublicclient.models.llm_provider_integration_create_request import (
+    LLMProviderIntegrationCreateRequest,
+)
+from azentspublicclient.models.secrets import Secrets
 from pydantic import TypeAdapter, ValidationError
 
-from support.utils import create_chat_session_with_agent, unique
+from support.runtime_profiles import create_workspace_runtime_profile
+from support.utils import (
+    authenticate_user,
+    model_selection_from_first_candidate,
+    unique,
+)
+
+pytestmark = pytest.mark.usefixtures("azents_runtime_provider_docker_container")
 
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
+_RUNTIME_PROVIDER_ID = "system-docker"
 
 
 @dataclass(frozen=True)
@@ -89,15 +114,95 @@ def _setup_project_browser(
     public_url: str,
 ) -> _ProjectBrowserSetup:
     """Create an Agent with a primary session for Project browser tests."""
-    token, primary_session_id, agent_id = create_chat_session_with_agent(
+    suffix = unique()
+    token, _, _ = authenticate_user(
         public_api_client,
         admin_api_client,
-        public_url,
+        email=f"project-browser-{suffix}@example.com",
     )
+    workspace_handle = f"project-browser-{suffix}"
+    headers = _headers(token)
+    WorkspaceV1Api(public_api_client).workspace_v1_create_workspace(
+        CreateWorkspaceRequest(
+            workspace_name=f"Project Browser {suffix}",
+            workspace_handle=workspace_handle,
+            owner_name=f"Owner {suffix}",
+        ),
+        _headers=headers,
+    )
+    integration = LLMProviderIntegrationV1Api(
+        public_api_client
+    ).llm_provider_integration_v1_create_integration(
+        handle=workspace_handle,
+        llm_provider_integration_create_request=LLMProviderIntegrationCreateRequest(
+            provider=LLMProvider.OPENAI,
+            name="__testenv_model_listing:deterministic-success",
+            secrets=Secrets(ApiKeySecrets(api_key="sk-project-browser")),
+        ),
+        _headers=headers,
+    )
+    model_selection = model_selection_from_first_candidate(
+        public_url,
+        token,
+        workspace_handle,
+        integration.id,
+    )
+    runtime_profile_id = create_workspace_runtime_profile(
+        public_api_client,
+        token=token,
+        workspace_handle=workspace_handle,
+        provider_id=_RUNTIME_PROVIDER_ID,
+    )
+    agent = AgentV1Api(public_api_client).agent_v1_create_agent(
+        handle=workspace_handle,
+        agent_create_request=AgentCreateRequest(
+            name=f"Project Browser Agent {suffix}",
+            model_selection=model_selection,
+            lightweight_model_selection=model_selection,
+            type=AgentType.PUBLIC,
+            runtime_profile_id=runtime_profile_id,
+        ),
+        _headers=headers,
+    )
+    primary_session_response = requests.get(
+        f"{public_url}/chat/v1/agents/{agent.id}/team-primary-session",
+        headers=headers,
+        timeout=10,
+    )
+    primary_session_response.raise_for_status()
+    primary_session_id = _response_object(
+        primary_session_response,
+        label="Team primary session response",
+    ).get("id")
+    if not isinstance(primary_session_id, str):
+        raise AssertionError(
+            "Team primary session response did not include id: "
+            f"{primary_session_response.text!r}"
+        )
+    runtime_api = AgentRuntimeV1Api(public_api_client)
+    runtime_api.agent_runtime_v1_start_agent_runtime(
+        agent_id=agent.id,
+        handle=workspace_handle,
+        _headers=headers,
+    )
+    deadline = time.monotonic() + 120
+    last_state: object | None = None
+    while time.monotonic() < deadline:
+        state = runtime_api.agent_runtime_v1_observe_agent_runtime(
+            agent_id=agent.id,
+            handle=workspace_handle,
+            _headers=headers,
+        )
+        last_state = state
+        if state.state.actions.use_runner:
+            break
+        time.sleep(1)
+    else:
+        raise AssertionError(f"Runtime Runner did not become ready: {last_state!r}")
     return _ProjectBrowserSetup(
         token=token,
         primary_session_id=primary_session_id,
-        agent_id=agent_id,
+        agent_id=agent.id,
     )
 
 
@@ -235,6 +340,7 @@ def test_session_project_manifest_uses_registry_capabilities_and_removal(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
+    runtime_workspace_path: str,
 ) -> None:
     """Session manifest entries are Project roots with registry-scoped removal."""
     setup = _setup_project_browser(
@@ -242,7 +348,7 @@ def test_session_project_manifest_uses_registry_capabilities_and_removal(
         admin_api_client=admin_api_client,
         public_url=azents_public_server_url,
     )
-    prefix = f"/workspace/agent/project-browser-{unique()}"
+    prefix = f"{runtime_workspace_path}/project-browser-{unique()}"
     paths = [f"{prefix}-alpha", f"{prefix}-beta"]
     session_id = _create_session(
         server_url=azents_public_server_url,
@@ -302,6 +408,7 @@ def test_pre_session_preview_uses_project_manifest_entry_model(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
+    runtime_workspace_path: str,
 ) -> None:
     """Pre-session preview returns the same Project browser entry model."""
     setup = _setup_project_browser(
@@ -309,7 +416,7 @@ def test_pre_session_preview_uses_project_manifest_entry_model(
         admin_api_client=admin_api_client,
         public_url=azents_public_server_url,
     )
-    preview_path = f"/workspace/agent/project-preview-{unique()}"
+    preview_path = f"{runtime_workspace_path}/project-preview-{unique()}"
 
     manifest = _preview_manifest(
         server_url=azents_public_server_url,

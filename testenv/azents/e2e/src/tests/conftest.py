@@ -64,6 +64,7 @@ _DISCORD_PROVIDER_INTERNAL_API_URL = "http://discord-fake:8085/api/v10"
 _DISCORD_PROVIDER_INTERNAL_GATEWAY_URL = "ws://discord-fake:8086"
 _DOCKER_CLIENT_TIMEOUT_SECONDS = 300
 _RUNTIME_PROVIDER_ID = "system-docker"
+_RUNTIME_WORKSPACE_PATH = "/workspace/agent"
 _RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_KEY = "e2e/system-docker"
 _RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_CONTAINER_PATH = (
     "/var/run/azents/runtime-provider-bootstrap/providers.yaml"
@@ -138,6 +139,12 @@ providers:
         encoding="utf-8",
     )
     return source_path
+
+
+@pytest.fixture(scope="session")
+def runtime_workspace_path() -> str:
+    """Return the explicitly configured E2E Runtime workspace mount path."""
+    return _RUNTIME_WORKSPACE_PATH
 
 
 # =============================================================================
@@ -1136,6 +1143,7 @@ def azents_runtime_provider_docker_container(
     azents_runtime_control_container: DockerContainer,
     azents_runtime_provider_docker_image: str,
     runtime_provider_credential: str,
+    runtime_workspace_path: str,
     azents_admin_server_url: str,
     system_bootstrap_evidence: SystemBootstrapEvidence,
 ) -> Generator[DockerContainer, None, None]:
@@ -1164,6 +1172,10 @@ def azents_runtime_provider_docker_container(
             .with_env("AZ_RUNTIME_PROVIDER_ID", _RUNTIME_PROVIDER_ID)
             .with_env("AZ_RUNTIME_PROVIDER_DOCKER_NETWORK", container_network.name)
             .with_env("AZ_RUNTIME_PROVIDER_HOST_DATA_ROOT", data_root)
+            .with_env(
+                "AZ_RUNTIME_PROVIDER_WORKSPACE_PATH",
+                runtime_workspace_path,
+            )
             .with_env(
                 "AZ_RUNTIME_PROVIDER_DOCKER_HOST",
                 "unix:///var/run/docker.sock",
@@ -1200,6 +1212,7 @@ def azents_runtime_provider_docker_container(
                     secret_values=(runtime_provider_credential,),
                 )
         finally:
+            _remove_agent_runtime_containers(container_network.name)
             _remove_runtime_provider_data_root(
                 data_root,
                 image=azents_runtime_provider_docker_image,
