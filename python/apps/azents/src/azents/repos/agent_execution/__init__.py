@@ -1161,6 +1161,37 @@ class AgentRunRepository:
         await session.refresh(rdb)
         return self._build(rdb)
 
+    async def mark_stopped_for_user_stop(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        *,
+        ended_at: datetime.datetime,
+    ) -> AgentRunState | None:
+        """Converge a running or engine-interrupted Run to User Stop."""
+        rdb = await session.scalar(
+            sa.select(RDBAgentRun).where(RDBAgentRun.id == run_id).with_for_update()
+        )
+        if rdb is None:
+            return None
+        if rdb.status not in {
+            AgentRunStatus.RUNNING,
+            AgentRunStatus.INTERRUPTED,
+        }:
+            return self._build(rdb)
+        self._apply_terminal_values(
+            rdb,
+            status=AgentRunStatus.STOPPED,
+            ended_at=ended_at,
+            last_completed_event_id=None,
+            terminal_result_event_id=None,
+            terminal_result_message=None,
+        )
+        await session.flush()
+        await self._upsert_unread_terminal_run(session, rdb)
+        await session.refresh(rdb)
+        return self._build(rdb)
+
     async def acknowledge_unread_terminal_run(
         self,
         session: AsyncSession,

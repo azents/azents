@@ -635,6 +635,36 @@ class SessionLifecycleService:
 
         await self.run_short_db(mark_terminal)
 
+    async def mark_agent_run_stopped_for_user_stop(
+        self,
+        session_id: str,
+        *,
+        owner_generation: int,
+        run_id: str,
+    ) -> None:
+        """Converge engine interruption to User Stop and finalize parent delivery."""
+
+        async def mark_stopped(db_session: AsyncSession) -> None:
+            await self._lock_owned_session(
+                db_session,
+                session_id=session_id,
+                owner_generation=owner_generation,
+            )
+            run = await self.agent_run_repository.get_by_id(db_session, run_id)
+            if run is not None and run.session_id != session_id:
+                raise ValueError("AgentRun session mismatch")
+            await self.agent_run_repository.mark_stopped_for_user_stop(
+                db_session,
+                run_id,
+                ended_at=datetime.datetime.now(datetime.UTC),
+            )
+            await self.terminal_finalization_coordinator.finalize_run_in_session(
+                db_session,
+                run_id=run_id,
+            )
+
+        await self.run_short_db(mark_stopped)
+
     async def update_agent_run_retry_state(
         self,
         session_id: str,

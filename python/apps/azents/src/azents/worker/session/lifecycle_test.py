@@ -235,6 +235,20 @@ class _AgentRunRepository:
         self.terminal_run_ids.append(run_id)
         return self.running_run
 
+    async def mark_stopped_for_user_stop(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        *,
+        ended_at: datetime,
+    ) -> AgentRunState | None:
+        """Record User Stop terminal convergence."""
+        del session, ended_at
+        self.terminal_run_ids.append(run_id)
+        if self.running_run is None:
+            return None
+        return self.running_run.model_copy(update={"status": AgentRunStatus.STOPPED})
+
     async def activate_pending(
         self,
         session: AsyncSession,
