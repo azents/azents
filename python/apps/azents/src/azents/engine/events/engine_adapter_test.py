@@ -2030,7 +2030,12 @@ async def test_model_kwargs_keep_openrouter_on_litellm_responses() -> None:
     assert native_request.kwargs["extra_headers"] == {
         "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
     }
-    assert isinstance(captured["model_adapter"], LiteLLMResponsesModelAdapter)
+    model_adapter = captured["model_adapter"]
+    assert isinstance(model_adapter, LiteLLMResponsesModelAdapter)
+    assert isinstance(
+        model_adapter.continuation_planner,
+        ResponsesContinuationPlanner,
+    )
 
 
 async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
