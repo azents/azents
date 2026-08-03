@@ -2428,6 +2428,7 @@ export function useChatSessionContainer(
 
       if ("type" in event && event.type === "live_run_cleared") {
         markRunInactive(event.run_id);
+        void utils.chat.listInputActions.invalidate({ sessionId });
         return;
       }
 
