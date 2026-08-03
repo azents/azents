@@ -9,6 +9,7 @@ code_paths:
   - python/apps/azents/src/azents/broker/types.py
   - python/apps/azents/src/azents/broker/redis.py
   - python/apps/azents/src/azents/core/vfs.py
+  - python/apps/azents/src/azents/core/external_channel_reference.py
   - python/apps/azents/src/azents/engine/client_tools.py
   - python/apps/azents/src/azents/engine/run/contracts.py
   - python/apps/azents/src/azents/engine/run/builtin_tools.py
@@ -78,7 +79,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-08-03
-spec_version: 144
+spec_version: 145
 ---
 
 # Agent Execution Loop
@@ -1180,9 +1181,12 @@ FIFO preparation resolves the mailbox payload into contiguous source-attributed
 dispatch. The first event is a deterministic `system_reminder` when the provider
 history collector omitted earlier eligible context. Lowering uses an explicit
 external-source envelope; it never presents the content as undifferentiated input from
-the current Web user. It preserves raw provider IDs in each message and appends one
-deterministic user/channel ID-to-display-name mapping table for the contiguous batch
-when the history adapter resolved mappings.
+the current Web user. Slack and Discord message bodies preserve provider-native user
+and channel reference tokens verbatim so the model can reuse them in an explicit
+`channel_action`. When the history adapter resolved display names, lowering appends one
+concise `<provider_reference_mappings>` XML block after the contiguous batch. Its
+`user` and `channel` elements carry the provider ID and prefixed display name without
+rewriting the source body.
 
 When an active binding exists, runtime adds the direct `channel_action` tool and
 the current binding/work snapshot. Normal assistant text is retained only in
@@ -1205,6 +1209,9 @@ icon.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 145) — Restored raw Slack and Discord reference tokens
+  in model-visible bodies and moved display-name enrichment into a concise XML mapping
+  appendix.
 - **2026-08-03** (spec_version 144) — Separated client-tool execution from post-tool model
   continuation so exact `end_turn=true` final tool turns execute their tools and then complete across
   OpenAI and LiteLLM Responses adapters.

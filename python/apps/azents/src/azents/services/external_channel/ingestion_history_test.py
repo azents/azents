@@ -15,6 +15,7 @@ from azents.core.enums import (
     ExternalChannelPrincipalAuthorType,
     ExternalChannelProvider,
 )
+from azents.core.external_channel_reference import provider_reference_mappings_size
 from azents.services.external_channel.conversation import (
     ExternalChannelHistoryRange,
     ExternalChannelOperationDeadline,
@@ -197,6 +198,15 @@ async def test_slack_history_uses_native_trigger_and_returns_canonical_messages(
         "channels": {"CRELATED": "#related"},
     }
     assert history.trigger.sender_display_name == "Participant"
+    assert history.trigger.normalized_size == message.normalized_size + (
+        provider_reference_mappings_size(
+            users={
+                "UREVIEWER": "Reviewer",
+                "participant-1": "Participant",
+            },
+            channels={"CRELATED": "#related"},
+        )
+    )
     assert history.messages[0].reference_mappings == history.trigger.reference_mappings
     assert history.messages[0].sender_display_name == "Participant"
     assert (

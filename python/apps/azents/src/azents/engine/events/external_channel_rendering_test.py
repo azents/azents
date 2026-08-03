@@ -1,6 +1,7 @@
 """Tests for shared External Channel model rendering."""
 
 import datetime
+import xml.etree.ElementTree as ElementTree
 
 from azents.core.enums import (
     ExternalChannelPrincipalAuthorType,
@@ -90,8 +91,8 @@ def test_turn_renderer_aggregates_payloads_without_losing_order() -> None:
     assert rendered.index("Body: hello") < rendered.index("Body: second")
 
 
-def test_turn_renderer_resolves_visible_references_but_retains_raw_payload() -> None:
-    """Visible text uses names while canonical payload identity stays unchanged."""
+def test_slack_turn_preserves_raw_references_and_appends_xml_mappings() -> None:
+    """Slack references stay reusable while the appendix supplies display names."""
     payload = _payload(
         body="<@U1> asked <#C1> to investigate.",
         reference_mappings={
@@ -101,15 +102,45 @@ def test_turn_renderer_resolves_visible_references_but_retains_raw_payload() -> 
     )
     rendered = render_external_channel_turn([payload])
 
-    assert "Body: @Alice asked #incidents to investigate." in rendered
-    assert "- User U1: Alice" in rendered
-    assert "- Channel C1: #incidents" in rendered
+    assert "Body: <@U1> asked <#C1> to investigate." in rendered
+    mapping = _mapping_element(rendered)
+    assert _mapping_child(mapping, "user", "U1").attrib == {
+        "provider_id": "U1",
+        "display_name": "@Alice",
+    }
+    assert _mapping_child(mapping, "channel", "C1").attrib == {
+        "provider_id": "C1",
+        "display_name": "#incidents",
+    }
+    assert rendered.index("Body: <@U1>") < rendered.index(
+        "<provider_reference_mappings>"
+    )
     assert payload.body == "<@U1> asked <#C1> to investigate."
     assert payload.reference_mappings["users"]["U1"] == "Alice"
 
 
-def test_discord_nickname_mention_uses_visible_identity_mapping() -> None:
-    """Discord nickname mention syntax resolves without changing stored text."""
+def test_slack_message_preserves_raw_references_and_appends_xml_mappings() -> None:
+    """The single-message lowering path preserves the same Slack references."""
+    payload = _payload(
+        body="<@U1> asked <#C1> to investigate.",
+        reference_mappings={
+            "users": {"U1": "Alice"},
+            "channels": {"C1": "incidents"},
+        },
+    )
+
+    rendered = render_external_channel_message(payload)
+
+    assert "Body:\n<@U1> asked <#C1> to investigate." in rendered
+    mapping = _mapping_element(rendered)
+    assert _mapping_child(mapping, "user", "U1").attrib["display_name"] == "@Alice"
+    assert (
+        _mapping_child(mapping, "channel", "C1").attrib["display_name"] == "#incidents"
+    )
+
+
+def test_discord_message_preserves_raw_mention_and_appends_xml_mapping() -> None:
+    """Discord mention syntax remains directly reusable by channel_action."""
     payload = _payload(
         provider=ExternalChannelProvider.DISCORD,
         body="<@!123456789> asked for help.",
@@ -119,23 +150,57 @@ def test_discord_nickname_mention_uses_visible_identity_mapping() -> None:
     )
 
     rendered = render_external_channel_message(payload)
+    value = external_channel_message_visible_value(payload)
 
-    assert "@Alice asked for help." in rendered
+    assert "Body:\n<@!123456789> asked for help." in rendered
+    assert value["body"] == "<@!123456789> asked for help."
+    mapping = _mapping_element(rendered)
+    assert _mapping_child(mapping, "user", "123456789").attrib == {
+        "provider_id": "123456789",
+        "display_name": "@Alice",
+    }
+    assert rendered.index("<@!123456789>") < rendered.index(
+        "<provider_reference_mappings>"
+    )
     assert payload.body == "<@!123456789> asked for help."
 
 
-def test_visible_reference_resolution_does_not_reprocess_display_names() -> None:
+def test_reference_mapping_xml_escapes_display_names() -> None:
     payload = _payload(
-        body="<@U1> and <@U2> discussed <#C1> with <#C2>.",
+        body="<@U2> asked <#C1>.",
         reference_mappings={
-            "users": {"U1": "U2", "U2": "Alice"},
-            "channels": {"C1": "C2", "C2": "incidents"},
+            "users": {"U2": 'R&D "Ops"'},
+            "channels": {"C1": "alerts <prod>"},
         },
     )
 
     rendered = render_external_channel_turn([payload])
 
-    assert "Body: @U2 and @Alice discussed #C2 with #incidents." in rendered
+    mapping = _mapping_element(rendered)
+    assert _mapping_child(mapping, "user", "U2").attrib["display_name"] == '@R&D "Ops"'
+    assert (
+        _mapping_child(mapping, "channel", "C1").attrib["display_name"]
+        == "#alerts <prod>"
+    )
+
+
+def _mapping_element(rendered: str) -> ElementTree.Element:
+    start = rendered.index("<provider_reference_mappings>")
+    end = rendered.index("</provider_reference_mappings>") + len(
+        "</provider_reference_mappings>"
+    )
+    return ElementTree.fromstring(rendered[start:end])
+
+
+def _mapping_child(
+    mapping: ElementTree.Element,
+    tag: str,
+    provider_id: str,
+) -> ElementTree.Element:
+    for child in mapping.findall(tag):
+        if child.attrib.get("provider_id") == provider_id:
+            return child
+    raise AssertionError(f"Missing {tag} mapping for {provider_id}.")
 
 
 def test_file_metadata_is_identical_and_safe_across_visible_renderers() -> None:

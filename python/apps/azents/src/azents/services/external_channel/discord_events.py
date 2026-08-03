@@ -18,6 +18,9 @@ from azents.core.external_channel_file import (
     ExternalChannelFileMetadata,
     ExternalChannelFileUnsupportedReason,
 )
+from azents.core.external_channel_reference import (
+    provider_reference_mappings_size,
+)
 from azents.repos.external_channel.data import ExternalChannelTrigger
 from azents.services.external_channel.discord_gateway import DiscordGatewayMessageEvent
 
@@ -787,21 +790,9 @@ def _normalized_size(
         if attachment_metadata is None
         else len(json.dumps(attachment_metadata, separators=(",", ":")).encode())
     )
-    mapping_lines = ["Identity Mappings:"]
-    mapping_lines.extend(
-        f"- User {identifier}: {display_name}"
-        for identifier, display_name in sorted(
-            reference_mappings.get("users", {}).items()
-        )
-    )
-    mapping_lines.extend(
-        f"- Channel {identifier}: {display_name}"
-        for identifier, display_name in sorted(
-            reference_mappings.get("channels", {}).items()
-        )
-    )
-    mapping_size = (
-        0 if len(mapping_lines) == 1 else len("\n".join(mapping_lines).encode())
+    mapping_size = provider_reference_mappings_size(
+        users=reference_mappings.get("users", {}),
+        channels=reference_mappings.get("channels", {}),
     )
     return body_size + attachment_size + mapping_size
 
