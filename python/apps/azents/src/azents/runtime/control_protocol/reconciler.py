@@ -429,8 +429,8 @@ class RuntimeLifecycleReconciler:
             runtime.desired_runtime_configuration_revision_id
             if require_ready
             else (
-                runtime.applied_runtime_configuration_revision_id
-                or runtime.desired_runtime_configuration_revision_id
+                runtime.desired_runtime_configuration_revision_id
+                or runtime.applied_runtime_configuration_revision_id
             )
         )
         if revision_id is None:
