@@ -316,7 +316,9 @@ def _stream_error(event: dict[str, object]) -> ResponsesOutputError | None:
 
 
 def _text_delta(event: dict[str, object]) -> str:
-    """Extract text delta from a Responses stream event."""
+    """Extract assistant output-text delta from a Responses stream event."""
+    if _event_type(event) != "response.output_text.delta":
+        return ""
     delta = event.get("delta")
     if isinstance(delta, str) and delta:
         return delta
@@ -328,7 +330,9 @@ def _text_delta(event: dict[str, object]) -> str:
 
 
 def _event_text(event: dict[str, object]) -> str:
-    """Extract completed text field from a Responses done event."""
+    """Extract completed assistant output text from a Responses done event."""
+    if _event_type(event) != "response.output_text.done":
+        return ""
     text = event.get("text")
     if isinstance(text, str) and text:
         return text
