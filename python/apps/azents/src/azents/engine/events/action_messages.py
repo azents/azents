@@ -64,6 +64,14 @@ class CleanupOrphanGitWorktreesAction(BaseModel):
     type: Literal["cleanup_orphan_git_worktrees"] = "cleanup_orphan_git_worktrees"
 
 
+class CreateSessionWorkingFolderAction(BaseModel):
+    """Materialize the current Session context's owned working folder."""
+
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal["create_session_working_folder"] = "create_session_working_folder"
+
+
 ChatAction = Annotated[
     CommandAction
     | GoalAction
@@ -72,11 +80,21 @@ ChatAction = Annotated[
     | CleanupOrphanGitWorktreesAction,
     Field(discriminator="type"),
 ]
+PersistedChatAction = Annotated[
+    CommandAction
+    | GoalAction
+    | SkillAction
+    | CreateGitWorktreeAction
+    | CleanupOrphanGitWorktreesAction
+    | CreateSessionWorkingFolderAction,
+    Field(discriminator="type"),
+]
 TurnAction = Annotated[
     GoalAction
     | SkillAction
     | CreateGitWorktreeAction
-    | CleanupOrphanGitWorktreesAction,
+    | CleanupOrphanGitWorktreesAction
+    | CreateSessionWorkingFolderAction,
     Field(discriminator="type"),
 ]
 
@@ -89,7 +107,7 @@ class ActionMessagePayload(BaseModel):
     sender_user_id: str | None = Field(
         description="Human sender User ID, or null when provenance is unavailable",
     )
-    action: ChatAction = Field(description="Selected action")
+    action: PersistedChatAction = Field(description="Selected action")
     message: str = Field(description="User-authored action input")
     requested_inference_profile: RequestedInferenceProfile | None = Field(
         default=None,

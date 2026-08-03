@@ -161,6 +161,7 @@ __all__ = [
     "CreateGitWorktreeAction",
     "CreateInvitationRequest",
     "CreateJoinRequestRequest",
+    "CreateSessionWorkingFolderAction",
     "CreateWorkspaceRequest",
     "CreateWorkspaceResponse",
     "CurrentMemberResponse",
@@ -600,6 +601,7 @@ from azentspublicclient.models.connection_access_policy_request import Connectio
 from azentspublicclient.models.create_git_worktree_action import CreateGitWorktreeAction as CreateGitWorktreeAction
 from azentspublicclient.models.create_invitation_request import CreateInvitationRequest as CreateInvitationRequest
 from azentspublicclient.models.create_join_request_request import CreateJoinRequestRequest as CreateJoinRequestRequest
+from azentspublicclient.models.create_session_working_folder_action import CreateSessionWorkingFolderAction as CreateSessionWorkingFolderAction
 from azentspublicclient.models.create_workspace_request import CreateWorkspaceRequest as CreateWorkspaceRequest
 from azentspublicclient.models.create_workspace_response import CreateWorkspaceResponse as CreateWorkspaceResponse
 from azentspublicclient.models.current_member_response import CurrentMemberResponse as CurrentMemberResponse

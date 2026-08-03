@@ -12602,6 +12602,9 @@
               },
               {
                 "$ref": "#/components/schemas/CleanupOrphanGitWorktreesAction"
+              },
+              {
+                "$ref": "#/components/schemas/CreateSessionWorkingFolderAction"
               }
             ],
             "title": "Action",
@@ -12612,6 +12615,7 @@
                 "cleanup_orphan_git_worktrees": "#/components/schemas/CleanupOrphanGitWorktreesAction",
                 "command": "#/components/schemas/CommandAction",
                 "create_git_worktree": "#/components/schemas/CreateGitWorktreeAction",
+                "create_session_working_folder": "#/components/schemas/CreateSessionWorkingFolderAction",
                 "goal": "#/components/schemas/GoalAction",
                 "skill": "#/components/schemas/SkillAction"
               }
@@ -16997,6 +17001,19 @@
         "type": "object",
         "title": "CreateJoinRequestRequest",
         "description": "Join request creation request."
+      },
+      "CreateSessionWorkingFolderAction": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "create_session_working_folder",
+            "title": "Type",
+            "default": "create_session_working_folder"
+          }
+        },
+        "type": "object",
+        "title": "CreateSessionWorkingFolderAction",
+        "description": "Materialize the current Session context's owned working folder."
       },
       "CreateWorkspaceRequest": {
         "properties": {

@@ -30,10 +30,11 @@ from azents.core.inference_profile import (
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.engine.events.action_messages import (
-    ChatAction,
     CleanupOrphanGitWorktreesAction,
     CreateGitWorktreeAction,
+    CreateSessionWorkingFolderAction,
     GoalAction,
+    PersistedChatAction,
     SkillAction,
 )
 from azents.engine.events.types import (
@@ -88,7 +89,7 @@ from azents.services.vfs import VfsFileResolutionError, VfsProjectionService
 
 logger = logging.getLogger(__name__)
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
-_CHAT_ACTION_ADAPTER = TypeAdapter(ChatAction)
+_PERSISTED_CHAT_ACTION_ADAPTER = TypeAdapter(PersistedChatAction)
 _AGENT_MESSAGE_ADAPTER = TypeAdapter(AgentMessagePayload)
 _EXTERNAL_CHANNEL_CONTEXT_OMITTED_REMINDER = (
     "Earlier messages from this external conversation were omitted. "
@@ -167,7 +168,11 @@ class OperationActionInput:
     """Durably claimed buffer-only operation action awaiting external execution."""
 
     buffer: MailboxItem
-    action: CreateGitWorktreeAction | CleanupOrphanGitWorktreesAction
+    action: (
+        CreateGitWorktreeAction
+        | CleanupOrphanGitWorktreesAction
+        | CreateSessionWorkingFolderAction
+    )
     execution: ActionExecution | None
 
 
@@ -384,6 +389,38 @@ class MailboxService:
             session_id=session_id,
             kind=kind,
             idempotency_key=idempotency_key,
+        )
+
+    async def has_seen_action_type(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        action_type: str,
+    ) -> bool:
+        """Return whether an action type is pending, live, or terminally recorded."""
+        pending = await self.mailbox_item_repository.list_by_session_id(
+            session,
+            session_id,
+        )
+        if any(
+            item.kind is MailboxItemKind.ACTION_MESSAGE
+            and item.presentation.action is not None
+            and item.presentation.action.get("type") == action_type
+            for item in pending
+        ):
+            return True
+        if await self.action_execution_repository.has_action_type_by_session_id(
+            session,
+            session_id=session_id,
+            action_type=action_type,
+        ):
+            return True
+        repository = self.event_transcript_repository
+        return await repository.has_action_execution_result_with_type(
+            session,
+            session_id=session_id,
+            action_type=action_type,
         )
 
     async def delete_by_session_and_id(
@@ -970,7 +1007,7 @@ class MailboxService:
                     raise ValueError(
                         "Action message input buffer requires action payload"
                     )
-                action = _CHAT_ACTION_ADAPTER.validate_python(
+                action = _PERSISTED_CHAT_ACTION_ADAPTER.validate_python(
                     buffer.presentation.action
                 )
                 match action:
@@ -978,7 +1015,11 @@ class MailboxService:
                         return _GoalActionMailboxProcessor(self)
                     case SkillAction():
                         return _SkillActionMailboxProcessor(self, action)
-                    case CreateGitWorktreeAction() | CleanupOrphanGitWorktreesAction():
+                    case (
+                        CreateGitWorktreeAction()
+                        | CleanupOrphanGitWorktreesAction()
+                        | CreateSessionWorkingFolderAction()
+                    ):
                         return _OperationActionMailboxProcessor(action)
                     case _:
                         assert_never(action)
@@ -1539,7 +1580,11 @@ class _SkillActionMailboxProcessor:
 class _OperationActionMailboxProcessor:
     """Preserve an operation action boundary until durable claims replace it."""
 
-    action: CreateGitWorktreeAction | CleanupOrphanGitWorktreesAction
+    action: (
+        CreateGitWorktreeAction
+        | CleanupOrphanGitWorktreesAction
+        | CreateSessionWorkingFolderAction
+    )
 
     async def process(
         self,
@@ -1680,7 +1725,9 @@ def _buffer_requires_inference(buffer: MailboxItem) -> bool:
         case MailboxItemKind.ACTION_MESSAGE:
             if buffer.presentation.action is None:
                 raise ValueError("Action message input buffer requires action payload")
-            action = _CHAT_ACTION_ADAPTER.validate_python(buffer.presentation.action)
+            action = _PERSISTED_CHAT_ACTION_ADAPTER.validate_python(
+                buffer.presentation.action
+            )
             return isinstance(action, GoalAction | SkillAction)
         case _:
             assert_never(buffer.kind)

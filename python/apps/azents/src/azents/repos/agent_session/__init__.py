@@ -23,9 +23,11 @@ from azents.core.enums import (
     AgentSessionStatus,
     AgentSessionTitleSource,
     SessionAgentKind,
+    SessionWorkingFolderCleanupStatus,
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.session_handle import generate_session_handle
+from azents.core.session_working_folder import build_session_working_folder_path
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -41,6 +43,7 @@ from .data import (
     AgentSessionUnreadTerminalRunProjection,
     PendingSessionCommand,
     SessionAgent,
+    SessionWorkingFolderContext,
 )
 
 SESSION_HANDLE_INSERT_ATTEMPTS = 10
@@ -111,6 +114,7 @@ class AgentSessionRepository:
                     await self._create_root_session_agent_tree(
                         session,
                         agent_session_id=rdb.id,
+                        root_session_handle=rdb.handle,
                         workspace_id=rdb.workspace_id,
                         agent_id=rdb.agent_id,
                     )
@@ -159,6 +163,32 @@ class AgentSessionRepository:
         if rdb is None:
             return None
         return self._build_session_agent(rdb)
+
+    async def get_working_folder_context_by_session_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> SessionWorkingFolderContext | None:
+        """Load stored working-folder ownership for one SessionAgent."""
+        result = await session.execute(
+            sa.select(RDBSessionAgentContext)
+            .join(
+                RDBSessionAgent,
+                RDBSessionAgent.context_id == RDBSessionAgentContext.id,
+            )
+            .where(RDBSessionAgent.agent_session_id == session_id)
+        )
+        context = result.scalar_one_or_none()
+        if context is None:
+            return None
+        return SessionWorkingFolderContext(
+            id=context.id,
+            agent_id=context.agent_id,
+            agent_runtime_id=context.agent_runtime_id,
+            working_folder_path=context.working_folder_path,
+            cleanup_status=context.working_folder_cleanup_status,
+        )
 
     async def get_root_session_agent_by_session_id(
         self,
@@ -941,6 +971,7 @@ class AgentSessionRepository:
                 await self._create_root_session_agent_tree(
                     session,
                     agent_session_id=rdb.id,
+                    root_session_handle=rdb.handle,
                     workspace_id=rdb.workspace_id,
                     agent_id=rdb.agent_id,
                 )
@@ -1612,6 +1643,7 @@ class AgentSessionRepository:
         session: AsyncSession,
         *,
         agent_session_id: str,
+        root_session_handle: str,
         workspace_id: str,
         agent_id: str,
     ) -> None:
@@ -1623,6 +1655,12 @@ class AgentSessionRepository:
             agent_id=agent_id,
             workspace_id=workspace_id,
             agent_runtime_id=runtime_id,
+            working_folder_path=build_session_working_folder_path(root_session_handle),
+            working_folder_cleanup_status=(
+                SessionWorkingFolderCleanupStatus.NOT_ATTEMPTED
+            ),
+            working_folder_cleanup_summary=None,
+            working_folder_cleanup_completed_at=None,
         )
         context.id = context_id
         session.add(context)

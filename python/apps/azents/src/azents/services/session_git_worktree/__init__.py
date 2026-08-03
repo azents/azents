@@ -27,9 +27,11 @@ from azents.core.enums import (
     SessionGitWorktreeBranchCreatedBy,
     SessionGitWorktreeStatus,
 )
+from azents.core.session_working_folder import validate_session_working_folder_path
 from azents.engine.events.action_messages import (
     CleanupOrphanGitWorktreesAction,
     CreateGitWorktreeAction,
+    CreateSessionWorkingFolderAction,
 )
 from azents.engine.events.types import Event
 from azents.engine.run.types import SHUTDOWN_CANCEL_MESSAGE, USER_STOP_CANCEL_MESSAGE
@@ -428,6 +430,278 @@ class SessionGitWorktreeService:
                 )
             )
             raise
+
+    async def run_create_session_working_folder_action(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        execution: ActionExecution,
+        action: CreateSessionWorkingFolderAction,
+        owner_generation: int,
+        on_projection_updated: ActionExecutionProjectionCallback | None = None,
+        on_history_event_appended: ActionExecutionHistoryEventCallback | None = None,
+    ) -> GitWorktreeActionExecutionResult:
+        """Materialize the stored Session working folder through the Runner."""
+        del action
+        try:
+            return await self._execute_create_session_working_folder_action(
+                agent_id=agent_id,
+                session_id=session_id,
+                execution=execution,
+                owner_generation=owner_generation,
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+        except asyncio.CancelledError as exc:
+            await asyncio.shield(
+                self.cancel_action_execution(
+                    execution=execution,
+                    reason=_action_cancellation_reason(exc),
+                    on_history_event_appended=on_history_event_appended,
+                )
+            )
+            raise
+
+    async def _execute_create_session_working_folder_action(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        execution: ActionExecution,
+        owner_generation: int,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
+        on_history_event_appended: ActionExecutionHistoryEventCallback | None,
+    ) -> GitWorktreeActionExecutionResult:
+        """Run one stored-path folder setup action."""
+        if execution.session_id != session_id:
+            raise ValueError("ActionExecution belongs to another session")
+        if execution.owner_generation != owner_generation:
+            raise RuntimeError("ActionExecution belongs to another Session owner")
+        if execution.status is not ActionExecutionStatus.PENDING:
+            raise RuntimeError("Only newly admitted pending operations may execute")
+
+        async with self.session_manager() as session:
+            session_repository = self.agent_session_repository
+            agent_session = await session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            context = await session_repository.get_working_folder_context_by_session_id(
+                session,
+                session_id=session_id,
+            )
+        if agent_session is None or agent_session.agent_id != agent_id:
+            await self._mark_session_working_folder_action_failed(
+                execution=execution,
+                reason_code="session_not_found",
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
+        if context is None or context.agent_id != agent_id:
+            await self._mark_session_working_folder_action_failed(
+                execution=execution,
+                reason_code="context_not_found",
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
+        try:
+            working_folder_path = validate_session_working_folder_path(
+                context.working_folder_path
+            )
+        except ValueError:
+            await self._mark_session_working_folder_action_failed(
+                execution=execution,
+                reason_code="invalid_stored_path",
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
+
+        async with self.session_manager() as session:
+            execution = await self.action_execution_repository.mark_running(
+                session,
+                action_execution_id=execution.id,
+                started_at=datetime.now(UTC),
+            )
+        await self._publish_action_execution_projection(
+            execution=execution,
+            on_projection_updated=on_projection_updated,
+        )
+        await self._append_action_execution_event(
+            execution=execution,
+            kind=ActionExecutionEventKind.STEP_STARTED,
+            step_key="create_session_working_folder",
+            command_argv=None,
+            content="Preparing Session working folder.",
+            exit_code=None,
+            on_projection_updated=on_projection_updated,
+        )
+        runtime = await self._get_runtime(agent_id=agent_id)
+        if runtime is None or runtime.runner_state is not RuntimeRunnerState.READY:
+            await self._mark_session_working_folder_action_failed(
+                execution=execution,
+                reason_code="runtime_unavailable",
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
+        if self.runner_operations is None:
+            await self._mark_session_working_folder_action_failed(
+                execution=execution,
+                reason_code="runner_operations_unavailable",
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
+        try:
+            await self.runner_operations.mkdir_file(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                owner_session_id=session_id,
+                path=working_folder_path,
+                parents=True,
+                deadline_at=_git_operation_deadline(),
+            )
+        except (
+            RuntimeRunnerOperationUnavailable,
+            RuntimeRunnerOperationGenerationError,
+        ):
+            await self._mark_session_working_folder_action_failed(
+                execution=execution,
+                reason_code="runtime_unavailable",
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
+        except RuntimeRunnerOperationCanceledError:
+            await self._mark_session_working_folder_action_failed(
+                execution=execution,
+                reason_code="runner_operation_canceled",
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
+        except RuntimeRunnerOperationFailedError as exc:
+            await self._mark_session_working_folder_action_failed(
+                execution=execution,
+                reason_code=exc.code or "runner_operation_failed",
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
+
+        execution = await self._update_session_working_folder_result(
+            execution=execution,
+            result={
+                "phase": "completed",
+                "outcome": "ready",
+                "reason_code": None,
+            },
+            on_projection_updated=on_projection_updated,
+        )
+        await self._append_action_execution_event(
+            execution=execution,
+            kind=ActionExecutionEventKind.COMPLETED,
+            step_key="create_session_working_folder",
+            command_argv=None,
+            content="Session working folder is ready.",
+            exit_code=0,
+            on_projection_updated=on_projection_updated,
+        )
+        await self._commit_action_execution_history_event(
+            execution=execution,
+            status=ActionExecutionStatus.COMPLETED,
+            failure_summary=None,
+            cancellation_summary=None,
+            on_history_event_appended=on_history_event_appended,
+        )
+        return GitWorktreeActionExecutionResult(
+            completed=True,
+            context_invalidated=False,
+        )
+
+    async def _update_session_working_folder_result(
+        self,
+        *,
+        execution: ActionExecution,
+        result: dict[str, JSONValue],
+        on_projection_updated: ActionExecutionProjectionCallback | None,
+    ) -> ActionExecution:
+        """Persist and project one bounded Session-folder setup result."""
+        async with self.session_manager() as session:
+            updated = await self.action_execution_repository.update_result(
+                session,
+                action_execution_id=execution.id,
+                result=result,
+            )
+        await self._publish_action_execution_projection(
+            execution=updated,
+            on_projection_updated=on_projection_updated,
+        )
+        return updated
+
+    async def _mark_session_working_folder_action_failed(
+        self,
+        *,
+        execution: ActionExecution,
+        reason_code: str,
+        on_projection_updated: ActionExecutionProjectionCallback | None,
+        on_history_event_appended: ActionExecutionHistoryEventCallback | None,
+    ) -> None:
+        """Record bounded failure evidence and terminalize folder setup."""
+        execution = await self._update_session_working_folder_result(
+            execution=execution,
+            result={
+                "phase": "failed",
+                "outcome": "failed",
+                "reason_code": reason_code,
+            },
+            on_projection_updated=on_projection_updated,
+        )
+        reason = "Session working-folder setup failed."
+        await self._append_action_execution_event(
+            execution=execution,
+            kind=ActionExecutionEventKind.FAILED,
+            step_key="create_session_working_folder",
+            command_argv=None,
+            content=reason,
+            exit_code=None,
+            on_projection_updated=on_projection_updated,
+        )
+        await self._commit_action_execution_history_event(
+            execution=execution,
+            status=ActionExecutionStatus.FAILED,
+            failure_summary=reason,
+            cancellation_summary=None,
+            on_history_event_appended=on_history_event_appended,
+        )
 
     async def _execute_cleanup_orphan_git_worktrees_action(
         self,

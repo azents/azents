@@ -4,11 +4,13 @@ import datetime
 
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
+from sqlalchemy.dialects.postgresql import ENUM
 from sqlalchemy.orm import Mapped, mapped_column
 
 from azents.core.enums import (
     SessionGitWorktreeBranchCreatedBy,
     SessionGitWorktreeStatus,
+    SessionWorkingFolderCleanupStatus,
 )
 from azents.rdb.models.base import RDBModel
 from azents.rdb.models.session_git_worktree import (
@@ -16,6 +18,21 @@ from azents.rdb.models.session_git_worktree import (
     session_git_worktree_status_enum,
 )
 from azents.rdb.types.datetime import TimeZoneDateTime
+
+
+def _session_working_folder_cleanup_status_values(
+    enum_cls: type[SessionWorkingFolderCleanupStatus],
+) -> list[str]:
+    """Return Session working-folder cleanup values stored in the DB."""
+    return [value.value for value in enum_cls]
+
+
+session_working_folder_cleanup_status_enum = ENUM(
+    SessionWorkingFolderCleanupStatus,
+    name="session_working_folder_cleanup_status",
+    create_type=False,
+    values_callable=_session_working_folder_cleanup_status_values,
+)
 
 
 class RDBSessionAgentContext(RDBModel):
@@ -36,6 +53,10 @@ class RDBSessionAgentContext(RDBModel):
         "ix_session_agent_contexts_agent_runtime_id",
         "agent_runtime_id",
     )
+    UQ_WORKING_FOLDER_PATH = sa.UniqueConstraint(
+        "working_folder_path",
+        name="uq_session_agent_contexts_working_folder_path",
+    )
 
     agent_id: Mapped[str] = mapped_column(
         sa.String(32),
@@ -46,6 +67,26 @@ class RDBSessionAgentContext(RDBModel):
         sa.String(32),
         sa.ForeignKey("workspaces.id", ondelete="CASCADE"),
         nullable=False,
+    )
+    working_folder_path: Mapped[str] = mapped_column(
+        sa.Text,
+        nullable=False,
+    )
+    working_folder_cleanup_status: Mapped[SessionWorkingFolderCleanupStatus] = (
+        mapped_column(
+            session_working_folder_cleanup_status_enum,
+            nullable=False,
+        )
+    )
+    working_folder_cleanup_summary: Mapped[str | None] = mapped_column(
+        sa.Text,
+        nullable=True,
+    )
+    working_folder_cleanup_completed_at: Mapped[datetime.datetime | None] = (
+        mapped_column(
+            TimeZoneDateTime,
+            nullable=True,
+        )
     )
     root_session_agent_id: Mapped[str | None] = mapped_column(
         sa.String(32),
@@ -88,6 +129,7 @@ class RDBSessionAgentContext(RDBModel):
         IX_AGENT_ID,
         IX_WORKSPACE_ID,
         IX_AGENT_RUNTIME_ID,
+        UQ_WORKING_FOLDER_PATH,
     )
 
 

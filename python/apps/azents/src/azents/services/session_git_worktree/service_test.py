@@ -28,6 +28,7 @@ from azents.core.inference_profile import RequestedInferenceProfile
 from azents.engine.events.action_messages import (
     CleanupOrphanGitWorktreesAction,
     CreateGitWorktreeAction,
+    CreateSessionWorkingFolderAction,
 )
 from azents.engine.events.types import ActionExecutionResultPayload
 from azents.engine.run.input import InputMessage
@@ -37,7 +38,10 @@ from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
-from azents.rdb.models.session_agent_context import RDBSessionAgentContextGitWorktree
+from azents.rdb.models.session_agent_context import (
+    RDBSessionAgentContext,
+    RDBSessionAgentContextGitWorktree,
+)
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.action_execution.data import ActionExecutionCreate
@@ -70,6 +74,7 @@ from azents.runtime.control_protocol.runner_operations import (
     RuntimeDiscoverManagedGitWorktreesResult,
     RuntimeFileDeleteResult,
     RuntimeFileListResult,
+    RuntimeFileMkdirResult,
     RuntimeGitCreateWorktreeResult,
     RuntimeGitDeleteBranchResult,
     RuntimeGitInspectWorktreeResult,
@@ -225,6 +230,8 @@ class _RunnerOperations:
         cleanup_failures: list[str] | None = None,
         unexpected_cleanup_failures: list[Exception] | None = None,
         cleanup_failure_code: str | None = None,
+        folder_setup_failures: list[str] | None = None,
+        folder_setup_canceled: bool = False,
         parent_delete_canceled: bool = False,
         discovered_entries: tuple[RuntimeDiscoveredGitWorktree, ...] = (),
     ) -> None:
@@ -232,9 +239,12 @@ class _RunnerOperations:
         self.cleanup_failures = list(cleanup_failures or [])
         self.unexpected_cleanup_failures = list(unexpected_cleanup_failures or [])
         self.cleanup_failure_code = cleanup_failure_code
+        self.folder_setup_failures = list(folder_setup_failures or [])
+        self.folder_setup_canceled = folder_setup_canceled
         self.parent_delete_canceled = parent_delete_canceled
         self.discovered_entries = discovered_entries
         self.calls: list[dict[str, object]] = []
+        self.mkdir_calls: list[dict[str, object]] = []
         self.inspect_result: RuntimeGitInspectWorktreeResult | None = None
         self.remove_outcome: Literal["removed", "already_absent"] = "removed"
 
@@ -488,6 +498,36 @@ class _RunnerOperations:
         )
         return RuntimeFileListResult(entries=(), final_cursor="cursor-list")
 
+    async def mkdir_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        parents: bool,
+        deadline_at: datetime.datetime,
+    ) -> RuntimeFileMkdirResult:
+        """Record Session-folder setup and optionally fail it."""
+        del deadline_at
+        self.mkdir_calls.append(
+            {
+                "runtime_id": runtime_id,
+                "runner_generation": runner_generation,
+                "owner_session_id": owner_session_id,
+                "path": path,
+                "parents": parents,
+            }
+        )
+        if self.folder_setup_canceled:
+            raise RuntimeRunnerOperationCanceledError("folder setup canceled")
+        if self.folder_setup_failures:
+            raise RuntimeRunnerOperationFailedError(
+                self.folder_setup_failures.pop(0),
+                code="mkdir_failed",
+            )
+        return RuntimeFileMkdirResult(path=path, final_cursor="cursor-mkdir")
+
     async def delete_file(
         self,
         *,
@@ -693,7 +733,49 @@ async def _execute_first_setup_action(
     agent_id: str,
     session_id: str,
 ) -> str:
-    """Promote and execute the first pending setup action."""
+    """Execute the folder setup before the requested Git worktree setup."""
+    async with rdb_session_manager() as session:
+        pending = await MailboxRepository().list_for_flush(
+            session,
+            session_id,
+            limit=1,
+        )
+    expected_buffer_id = pending[0].id
+    promoted = await MailboxService(
+        session_manager=rdb_session_manager,
+        mailbox_item_repository=MailboxRepository(),
+        exchange_file_service=_ExchangeFileService(),
+        model_file_service=cast(ModelFileService, object()),
+        agent_session_repository=AgentSessionRepository(),
+        event_transcript_repository=EventTranscriptRepository(),
+        agent_run_repository=AgentRunRepository(),
+        action_execution_repository=ActionExecutionRepository(),
+        vfs_projection_service=None,
+        external_channel_repository=ExternalChannelRepository(),
+    ).flush_session_mailbox_items(
+        session_id=session_id,
+        owner_generation=0,
+        model=None,
+        required_inference_profile=None,
+        expected_buffer_id=expected_buffer_id,
+        prepared_inference_state=None,
+        profile_resolution_failure=None,
+        active_run_id=None,
+        limit=1,
+        include_action_messages=True,
+    )
+    folder_action = promoted.operation_action
+    assert folder_action is not None
+    assert folder_action.execution is not None
+    assert isinstance(folder_action.action, CreateSessionWorkingFolderAction)
+    await worktree_service.run_create_session_working_folder_action(
+        agent_id=agent_id,
+        session_id=session_id,
+        execution=folder_action.execution,
+        action=folder_action.action,
+        owner_generation=folder_action.execution.owner_generation,
+    )
+
     async with rdb_session_manager() as session:
         pending = await MailboxRepository().list_for_flush(
             session,
@@ -785,6 +867,290 @@ async def _create_ready_worktree_session(
 
 class TestSessionGitWorktreeService:
     """Session Git worktree service tests."""
+
+    async def test_create_session_working_folder_uses_stored_path(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Setup materializes the exact path stored on the Session context."""
+        async with rdb_session_manager() as session:
+            workspace_id, _, agent_id = await _create_agent_context(
+                session,
+                "folder-setup",
+            )
+            agent_session = await AgentSessionRepository().create(
+                session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            action = CreateSessionWorkingFolderAction()
+            execution = await ActionExecutionRepository().create(
+                session,
+                ActionExecutionCreate(
+                    sender_user_id=None,
+                    id=None,
+                    session_id=agent_session.id,
+                    mailbox_item_id="01900000000070008000000000000011",
+                    action_type=action.type,
+                    action=action.model_dump(mode="json"),
+                    status=ActionExecutionStatus.PENDING,
+                    owner_generation=1,
+                ),
+            )
+        runner = _RunnerOperations()
+        service = _service(rdb_session_manager, runner)
+
+        result = await service.run_create_session_working_folder_action(
+            agent_id=agent_id,
+            session_id=agent_session.id,
+            execution=execution,
+            action=action,
+            owner_generation=execution.owner_generation,
+        )
+
+        assert result.completed is True
+        assert result.context_invalidated is False
+        assert runner.mkdir_calls == [
+            {
+                "runtime_id": runner.mkdir_calls[0]["runtime_id"],
+                "runner_generation": 7,
+                "owner_session_id": agent_session.id,
+                "path": (f"/workspace/agent/.azents/sessions/{agent_session.handle}"),
+                "parents": True,
+            }
+        ]
+        async with rdb_session_manager() as session:
+            events = await EventTranscriptRepository().list_recent_by_session_id(
+                session,
+                agent_session.id,
+                limit=20,
+            )
+        terminal_events = [
+            event for event in events if event.kind is EventKind.ACTION_EXECUTION_RESULT
+        ]
+        assert len(terminal_events) == 1
+        payload = terminal_events[0].payload
+        assert isinstance(payload, ActionExecutionResultPayload)
+        execution_value = payload.action_execution["execution"]
+        assert isinstance(execution_value, dict)
+        assert execution_value["action_type"] == action.type
+        assert execution_value["status"] == "completed"
+        assert execution_value["result"] == {
+            "phase": "completed",
+            "outcome": "ready",
+            "reason_code": None,
+        }
+
+    async def test_create_session_working_folder_failure_is_terminal_and_nonblocking(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Runner failure records bounded evidence without invalidating context."""
+        async with rdb_session_manager() as session:
+            workspace_id, _, agent_id = await _create_agent_context(
+                session,
+                "folder-failure",
+            )
+            agent_session = await AgentSessionRepository().create(
+                session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            action = CreateSessionWorkingFolderAction()
+            execution = await ActionExecutionRepository().create(
+                session,
+                ActionExecutionCreate(
+                    sender_user_id=None,
+                    id=None,
+                    session_id=agent_session.id,
+                    mailbox_item_id="01900000000070008000000000000012",
+                    action_type=action.type,
+                    action=action.model_dump(mode="json"),
+                    status=ActionExecutionStatus.PENDING,
+                    owner_generation=1,
+                ),
+            )
+        runner = _RunnerOperations(folder_setup_failures=["mkdir failed"])
+        service = _service(rdb_session_manager, runner)
+
+        result = await service.run_create_session_working_folder_action(
+            agent_id=agent_id,
+            session_id=agent_session.id,
+            execution=execution,
+            action=action,
+            owner_generation=execution.owner_generation,
+        )
+
+        assert result.completed is True
+        assert result.context_invalidated is False
+        assert len(runner.mkdir_calls) == 1
+        async with rdb_session_manager() as session:
+            events = await EventTranscriptRepository().list_recent_by_session_id(
+                session,
+                agent_session.id,
+                limit=20,
+            )
+        terminal_events = [
+            event for event in events if event.kind is EventKind.ACTION_EXECUTION_RESULT
+        ]
+        assert len(terminal_events) == 1
+        payload = terminal_events[0].payload
+        assert isinstance(payload, ActionExecutionResultPayload)
+        execution_value = payload.action_execution["execution"]
+        assert isinstance(execution_value, dict)
+        assert execution_value["status"] == "failed"
+        assert execution_value["result"] == {
+            "phase": "failed",
+            "outcome": "failed",
+            "reason_code": "mkdir_failed",
+        }
+
+    async def test_create_session_working_folder_cancellation_is_nonblocking(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Runner cancellation becomes bounded terminal setup failure."""
+        async with rdb_session_manager() as session:
+            workspace_id, _, agent_id = await _create_agent_context(
+                session,
+                "folder-canceled",
+            )
+            agent_session = await AgentSessionRepository().create(
+                session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            action = CreateSessionWorkingFolderAction()
+            execution = await ActionExecutionRepository().create(
+                session,
+                ActionExecutionCreate(
+                    sender_user_id=None,
+                    id=None,
+                    session_id=agent_session.id,
+                    mailbox_item_id="01900000000070008000000000000014",
+                    action_type=action.type,
+                    action=action.model_dump(mode="json"),
+                    status=ActionExecutionStatus.PENDING,
+                    owner_generation=1,
+                ),
+            )
+        runner = _RunnerOperations(folder_setup_canceled=True)
+        service = _service(rdb_session_manager, runner)
+
+        result = await service.run_create_session_working_folder_action(
+            agent_id=agent_id,
+            session_id=agent_session.id,
+            execution=execution,
+            action=action,
+            owner_generation=execution.owner_generation,
+        )
+
+        assert result.completed is True
+        assert result.context_invalidated is False
+        async with rdb_session_manager() as session:
+            events = await EventTranscriptRepository().list_recent_by_session_id(
+                session,
+                agent_session.id,
+                limit=20,
+            )
+        terminal_events = [
+            event for event in events if event.kind is EventKind.ACTION_EXECUTION_RESULT
+        ]
+        assert len(terminal_events) == 1
+        payload = terminal_events[0].payload
+        assert isinstance(payload, ActionExecutionResultPayload)
+        execution_value = payload.action_execution["execution"]
+        assert isinstance(execution_value, dict)
+        assert execution_value["status"] == "failed"
+        assert execution_value["result"] == {
+            "phase": "failed",
+            "outcome": "failed",
+            "reason_code": "runner_operation_canceled",
+        }
+
+    async def test_create_session_working_folder_rejects_invalid_stored_path(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Stored path validation prevents an out-of-root Runner operation."""
+        async with rdb_session_manager() as session:
+            workspace_id, _, agent_id = await _create_agent_context(
+                session,
+                "folder-invalid-path",
+            )
+            agent_session = await AgentSessionRepository().create(
+                session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            root_agent = await AgentSessionRepository().get_session_agent_by_session_id(
+                session,
+                agent_session.id,
+            )
+            assert root_agent is not None
+            context = await session.get(RDBSessionAgentContext, root_agent.context_id)
+            assert context is not None
+            context.working_folder_path = "/workspace/agent/not-managed"
+            action = CreateSessionWorkingFolderAction()
+            execution = await ActionExecutionRepository().create(
+                session,
+                ActionExecutionCreate(
+                    sender_user_id=None,
+                    id=None,
+                    session_id=agent_session.id,
+                    mailbox_item_id="01900000000070008000000000000013",
+                    action_type=action.type,
+                    action=action.model_dump(mode="json"),
+                    status=ActionExecutionStatus.PENDING,
+                    owner_generation=1,
+                ),
+            )
+        runner = _RunnerOperations()
+        service = _service(rdb_session_manager, runner)
+
+        result = await service.run_create_session_working_folder_action(
+            agent_id=agent_id,
+            session_id=agent_session.id,
+            execution=execution,
+            action=action,
+            owner_generation=execution.owner_generation,
+        )
+
+        assert result.completed is True
+        assert result.context_invalidated is False
+        assert runner.mkdir_calls == []
+        async with rdb_session_manager() as session:
+            events = await EventTranscriptRepository().list_recent_by_session_id(
+                session,
+                agent_session.id,
+                limit=20,
+            )
+        terminal_events = [
+            event for event in events if event.kind is EventKind.ACTION_EXECUTION_RESULT
+        ]
+        assert len(terminal_events) == 1
+        payload = terminal_events[0].payload
+        assert isinstance(payload, ActionExecutionResultPayload)
+        execution_value = payload.action_execution["execution"]
+        assert isinstance(execution_value, dict)
+        assert execution_value["status"] == "failed"
+        assert execution_value["result"] == {
+            "phase": "failed",
+            "outcome": "failed",
+            "reason_code": "invalid_stored_path",
+        }
 
     async def test_manual_cleanup_rejects_subagent_session(self) -> None:
         """Do not allow direct worktree cleanup mutations for child subagents."""
@@ -1349,8 +1715,8 @@ class TestSessionGitWorktreeService:
         terminal_events = [
             event for event in events if event.kind is EventKind.ACTION_EXECUTION_RESULT
         ]
-        assert len(terminal_events) == 1
-        terminal_payload = terminal_events[0].payload
+        assert len(terminal_events) == 2
+        terminal_payload = terminal_events[-1].payload
         assert isinstance(terminal_payload, ActionExecutionResultPayload)
         terminal_projection = terminal_payload.action_execution
         terminal_execution = terminal_projection["execution"]
@@ -1508,8 +1874,8 @@ class TestSessionGitWorktreeService:
         terminal_events = [
             event for event in events if event.kind is EventKind.ACTION_EXECUTION_RESULT
         ]
-        assert len(terminal_events) == 1
-        payload = terminal_events[0].payload
+        assert len(terminal_events) == 2
+        payload = terminal_events[-1].payload
         assert isinstance(payload, ActionExecutionResultPayload)
         execution_value = payload.action_execution["execution"]
         assert isinstance(execution_value, dict)
@@ -1574,8 +1940,8 @@ class TestSessionGitWorktreeService:
         terminal_events = [
             event for event in events if event.kind is EventKind.ACTION_EXECUTION_RESULT
         ]
-        assert len(terminal_events) == 1
-        payload = terminal_events[0].payload
+        assert len(terminal_events) == 2
+        payload = terminal_events[-1].payload
         assert isinstance(payload, ActionExecutionResultPayload)
         execution_value = payload.action_execution["execution"]
         event_values = payload.action_execution["events"]

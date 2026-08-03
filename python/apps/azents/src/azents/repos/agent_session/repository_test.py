@@ -27,6 +27,7 @@ from azents.core.enums import (
     ExternalChannelTransport,
     LLMProvider,
     SessionAgentKind,
+    SessionWorkingFolderCleanupStatus,
 )
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
@@ -38,6 +39,7 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelResource,
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.repos.session_lifecycle_finalizer import (
     SessionLifecycleFinalizerRepository,
 )
@@ -357,6 +359,58 @@ class TestAgentSessionRepository:
 
         assert first.handle == "abandon-ability-able"
         assert second.handle == "about-above-absent"
+
+    async def test_create_assigns_root_context_working_folder(
+        self,
+        rdb_session: AsyncSession,
+        monkeypatch: MonkeyPatch,
+    ) -> None:
+        """Persist one exact working folder with the root context."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "working-folder-context-ws",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "working-folder-context",
+        )
+        monkeypatch.setattr(
+            agent_session_repo,
+            "generate_session_handle",
+            lambda: "cactus-river-window",
+        )
+        repo = AgentSessionRepository()
+
+        created = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        root_agent = await repo.get_session_agent_by_session_id(
+            rdb_session,
+            created.id,
+        )
+        assert root_agent is not None
+        context = await rdb_session.get(
+            RDBSessionAgentContext,
+            root_agent.context_id,
+        )
+
+        assert context is not None
+        assert (
+            context.working_folder_path
+            == "/workspace/agent/.azents/sessions/cactus-river-window"
+        )
+        assert (
+            context.working_folder_cleanup_status
+            is SessionWorkingFolderCleanupStatus.NOT_ATTEMPTED
+        )
+        assert context.working_folder_cleanup_summary is None
+        assert context.working_folder_cleanup_completed_at is None
 
     async def test_update_title_round_trips_custom_title(
         self, rdb_session: AsyncSession

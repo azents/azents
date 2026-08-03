@@ -142,6 +142,7 @@ azentspublicclient/docs/ConnectionAccessPolicyRequest.md
 azentspublicclient/docs/CreateGitWorktreeAction.md
 azentspublicclient/docs/CreateInvitationRequest.md
 azentspublicclient/docs/CreateJoinRequestRequest.md
+azentspublicclient/docs/CreateSessionWorkingFolderAction.md
 azentspublicclient/docs/CreateWorkspaceRequest.md
 azentspublicclient/docs/CreateWorkspaceResponse.md
 azentspublicclient/docs/CurrentMemberResponse.md
@@ -562,6 +563,7 @@ azentspublicclient/models/connection_access_policy_request.py
 azentspublicclient/models/create_git_worktree_action.py
 azentspublicclient/models/create_invitation_request.py
 azentspublicclient/models/create_join_request_request.py
+azentspublicclient/models/create_session_working_folder_action.py
 azentspublicclient/models/create_workspace_request.py
 azentspublicclient/models/create_workspace_response.py
 azentspublicclient/models/current_member_response.py
@@ -970,6 +972,7 @@ azentspublicclient/test/test_connection_access_policy_request.py
 azentspublicclient/test/test_create_git_worktree_action.py
 azentspublicclient/test/test_create_invitation_request.py
 azentspublicclient/test/test_create_join_request_request.py
+azentspublicclient/test/test_create_session_working_folder_action.py
 azentspublicclient/test/test_create_workspace_request.py
 azentspublicclient/test/test_create_workspace_response.py
 azentspublicclient/test/test_current_member_response.py
