@@ -19,7 +19,7 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_run.py
   - python/apps/azents/src/azents/rdb/models/agent.py
 last_verified_at: 2026-08-03
-spec_version: 32
+spec_version: 33
 ---
 
 # Context Compaction
@@ -82,9 +82,9 @@ standard backoff schedule.
 The summary budget is based on the model context window:
 
 - target summary chars: 3% of context window tokens, converted with 1 token ≈ 4 chars;
-- limit summary chars: 5% of context window tokens, converted with 1 token ≈ 4 chars;
+- limit summary chars: 8% of context window tokens, converted with 1 token ≈ 4 chars;
 - target chars are nearest-rounded to 1000 chars and clamped to 12k–24k chars;
-- limit chars are nearest-rounded to 1000 chars and clamped to 16k–32k chars;
+- limit chars are nearest-rounded to 1000 chars and clamped to 16k–50k chars;
 - `max_output_tokens = limit_chars // 4`;
 - unknown context windows use a 128k token fallback.
 
@@ -99,6 +99,12 @@ state, preserves the furthest verified progress, and produces ordered next actio
 sections cover the active objective, current execution state, completed work, next actions, active
 constraints and decisions, relevant files and identifiers, verification, and references. It uses
 `Needs verification` only for uncertainty that materially affects a next action.
+
+Checkpoint detail scales with task complexity rather than a fixed target length. Concise structure
+removes repetition and conversational narration while retaining continuation-relevant state and
+evidence. Complex or multi-stage work preserves the details needed to continue directly from the
+checkpoint, including evidence of completed work and conclusions from resolved questions. Simple
+work remains brief, and task complexity determines checkpoint length.
 
 Auto and manual compaction include the full selected transcript in the summary request. The summary
 prompt asks for durable state from the whole compacted transcript and warns that no raw event should
@@ -248,6 +254,8 @@ authorized batch appends the corresponding revision event.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 33) — Increased dynamic summary output headroom to 8% with a 50k-character limit and made checkpoint detail scale with task complexity without imposing a fixed target length.
+- **2026-08-03** (spec_version 32) — Reframed compaction output as an execution-ready general-agent checkpoint that reconstructs the current objective and furthest verified execution state.
 - **2026-07-22** (spec_version 31) — Added source-attributed External Channel compaction input, token estimation, continuity rendering, and immutable revision semantics.
 
 - **2026-07-21** (spec_version 30) — Omitted plaintext-custom client-tool input from compaction accounting and continuity while retaining bounded result continuity.
