@@ -1,5 +1,7 @@
 """Shared LiteLLM Responses helper tests."""
 
+import enum
+
 import httpx
 import pytest
 from pytest import MonkeyPatch
@@ -222,3 +224,48 @@ async def test_extract_response_text_reads_response_output_text() -> None:
     }
 
     assert await extract_response_text(response) == "Insurance option comparison"
+
+
+class _ResponseStreamEventType(enum.Enum):
+    """Enum-like event types emitted by LiteLLM Responses streams."""
+
+    OUTPUT_TEXT_DELTA = "response.output_text.delta"
+    OUTPUT_TEXT_DONE = "response.output_text.done"
+
+
+@pytest.mark.parametrize(
+    "output_text",
+    [
+        '{"title":"Quick question"}',
+        "Quick question",
+    ],
+)
+async def test_extract_response_text_ignores_reasoning_summary(
+    output_text: str,
+) -> None:
+    """Reasoning summary fields cannot contaminate assistant output text."""
+
+    async def stream() -> object:
+        yield {
+            "type": "response.reasoning_summary_text.delta",
+            "delta": "The user asks a short conversational question.",
+        }
+        yield {
+            "type": "response.reasoning_summary_text.done",
+            "text": "The user asks a short conversational question.",
+        }
+        midpoint = len(output_text) // 2
+        yield {
+            "type": _ResponseStreamEventType.OUTPUT_TEXT_DELTA,
+            "delta": output_text[:midpoint],
+        }
+        yield {
+            "type": _ResponseStreamEventType.OUTPUT_TEXT_DELTA,
+            "delta": output_text[midpoint:],
+        }
+        yield {
+            "type": _ResponseStreamEventType.OUTPUT_TEXT_DONE,
+            "text": output_text,
+        }
+
+    assert await extract_response_text(stream()) == output_text
