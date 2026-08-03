@@ -53,7 +53,7 @@ api_routes:
   - /toolkit/v1
   - /shell-environment/v1
 last_verified_at: 2026-08-03
-spec_version: 79
+spec_version: 80
 ---
 
 # Toolkit
@@ -193,6 +193,8 @@ The `azents` namespace is reserved for approved global release-bundled packages.
 Every AgentRun stores one self-contained immutable VFS projection in `agent_runs.vfs_projection`. The projection records schema and revision identity, deterministic source records, canonical entries, content hashes, media types, decoded sizes, and Base64 bodies. Release sources are scanned from local Python package resources. A process-local catalog may retain the last successful source slice, but recovery authority is the projection persisted on the AgentRun. Once set, retries, worker takeover, and resume never replace it with current package bytes.
 
 The Skill Toolkit combines managed entrypoints with the existing filesystem Skill snapshot. Filesystem Skills keep absolute `SKILL.md` paths and the session-scoped `latest`/`active` adoption lifecycle. Managed Skills use their exact `azents://` URI as `skill_path`; equal slugs remain separate when their locators differ. `load_skill` dispatches absolute paths only to the active filesystem projection and canonical managed URIs only to the current run VFS projection, with no cross-source fallback.
+
+The currently approved global release bundle contains `azents://skills/azents/skill-creator/SKILL.md`. It guides Agents to create or repair filesystem Skills through the Shell Runtime tools. It requires the standard `name` and non-empty `description` frontmatter fields, treats `summary` as non-discoverable metadata, validates the saved file before reporting success, and explains that runtime Skill projection refresh completes after the current run.
 
 Composer actions use a fresh non-persisted VFS preview while the Session is idle and the active AgentRun projection while it is running. A selected managed SkillAction stores only its exact URI. Run input preparation validates that URI against the projection ensured for the active run before emitting the durable `skill_loaded` event. Eligibility drift between an idle preview and run creation therefore produces the normal unavailable-Skill error rather than reading stale preview content.
 
@@ -735,6 +737,8 @@ and never becomes the Channel Work source of truth.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 80) — Added the global managed `skill-creator`
+  Skill for creating and repairing filesystem Skills through Runtime tools.
 - **2026-08-03** (spec_version 79) — Derived Runtime tool guidance, filesystem Skill roots, AGENTS.md, Claude rules, and `present_file` boundaries from the current Runner-reported Agent Workspace while removing fixed absolute paths from static schemas and prompts.
 - **2026-08-02** (spec_version 78) — Replaced durable External Channel Action and
   Delivery execution records with normal Tool call/result history and ordered
