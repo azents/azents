@@ -2754,7 +2754,10 @@ async def test_external_invocation_projection() -> None:
         content="",
         idempotency_key="external-channel-invocation:batch-1",
         metadata={},
-        payload=build_external_channel_mailbox_payload(projection_items),
+        payload=build_external_channel_mailbox_payload(
+            projection_items,
+            initial_title_eligible=True,
+        ),
         action=None,
         attachments=[],
         file_parts=[],
@@ -2787,6 +2790,11 @@ async def test_external_invocation_projection() -> None:
         "external-channel:buffer-1:context-omitted",
         "external-channel:binding-1:C123:1.0:1",
         "external-channel:binding-1:C123:1.0:2",
+    ]
+    assert [item.initial_title_eligible for item in outcome.promoted] == [
+        False,
+        False,
+        True,
     ]
     assert [item.event_kind for item in outcome.promoted] == [
         EventKind.SYSTEM_REMINDER,

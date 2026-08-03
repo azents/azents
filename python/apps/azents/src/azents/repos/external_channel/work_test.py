@@ -36,6 +36,7 @@ from azents.core.enums import (
     RuntimeRunnerState,
 )
 from azents.core.external_channel_file import ExternalChannelOutboundFileManifest
+from azents.core.external_channel_title import DISCORD_INITIAL_THREAD_TITLE_LABEL
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
@@ -337,6 +338,39 @@ async def _as_discord_binding(
         "channel_name": "incident",
     }
     await session.flush()
+
+
+async def test_discord_delivery_channel_records_direct_create_title_once(
+    rdb_session: AsyncSession,
+) -> None:
+    """Direct-create evidence is retained once and never manufactured later."""
+    _, binding_id = await _setup_binding(rdb_session)
+    binding = await rdb_session.get(RDBExternalChannelBinding, binding_id)
+    assert binding is not None
+    resource = await rdb_session.get(RDBExternalChannelResource, binding.resource_id)
+    assert resource is not None
+    resource.labels = {"provider": "discord", "guild_id": "111"}
+    repository = ExternalChannelWorkRepository()
+
+    first = await repository.record_discord_delivery_channel(
+        rdb_session,
+        resource_id=resource.id,
+        delivery_channel_id="444",
+        initial_thread_title="Test agent",
+    )
+    second = await repository.record_discord_delivery_channel(
+        rdb_session,
+        resource_id=resource.id,
+        delivery_channel_id="555",
+        initial_thread_title="Another title",
+    )
+
+    assert first == "444"
+    assert second == "444"
+    labels = resource.labels
+    assert labels is not None
+    assert labels["delivery_channel_id"] == "444"
+    assert labels[DISCORD_INITIAL_THREAD_TITLE_LABEL] == "Test agent"
 
 
 async def test_channel_action_commits_work_and_delivery_intents_idempotently(

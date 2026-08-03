@@ -128,6 +128,7 @@ async def test_ensure_thread_creates_a_missing_root_message_thread() -> None:
 
     assert result.status == "delivered"
     assert result.provider_message_key == "discord-thread:333"
+    assert result.created_thread_name == "Azents"
     assert [request.url.path for request in calls] == [
         "/api/v10/channels/222/messages/333",
         "/api/v10/channels/222/messages/333/threads",
@@ -166,6 +167,7 @@ async def test_ensure_thread_reuses_a_thread_returned_by_the_root_message() -> N
 
     assert result.status == "delivered"
     assert result.provider_message_key == "discord-thread:444"
+    assert result.created_thread_name is None
     assert [request.url.path for request in calls] == [
         "/api/v10/channels/222/messages/333"
     ]
@@ -217,7 +219,125 @@ async def test_ensure_thread_reconciles_ambiguous_create_without_replay() -> Non
 
     assert result.status == "delivered"
     assert result.provider_message_key == "discord-thread:444"
+    assert result.created_thread_name is None
     assert [request.method for request in calls] == ["GET", "POST", "GET"]
+
+
+@pytest.mark.asyncio
+async def test_thread_title_read_and_update_are_one_get_and_name_only_patch() -> None:
+    """Thread title projection uses one exact read and one name-only update."""
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={"id": "444", "guild_id": "111", "name": "Test agent"},
+            )
+        return httpx.Response(
+            200,
+            json={"id": "444", "guild_id": "111", "name": "Incident response"},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        discord = DiscordDeliveryClient(client)
+        read = await discord.read_thread_title(
+            bot_token="discord-secret",
+            guild_id="111",
+            channel_id="444",
+        )
+        updated = await discord.update_thread_title(
+            bot_token="discord-secret",
+            guild_id="111",
+            channel_id="444",
+            name=" Incident   response ",
+        )
+
+    assert read.status == "present"
+    assert read.name == "Test agent"
+    assert updated.status == "delivered"
+    assert [request.method for request in calls] == ["GET", "PATCH"]
+    assert json.loads(calls[1].content) == {"name": "Incident response"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("response", "expected_status", "expected_kind"),
+    [
+        (httpx.Response(404), "missing", "thread_not_found"),
+        (
+            httpx.Response(200, content=b"{malformed"),
+            "unknown",
+            "response_malformed",
+        ),
+        (
+            httpx.Response(200, json={"id": "444", "guild_id": "111"}),
+            "unknown",
+            "response_shape_invalid",
+        ),
+        (httpx.Response(429), "failed", "rate_limited"),
+    ],
+)
+async def test_thread_title_read_failure_is_single_and_sanitized(
+    response: httpx.Response,
+    expected_status: str,
+    expected_kind: str,
+) -> None:
+    """Missing, malformed, and rejected title reads return without retry."""
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return response
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await DiscordDeliveryClient(client).read_thread_title(
+            bot_token="discord-secret",
+            guild_id="111",
+            channel_id="444",
+        )
+
+    assert result.status == expected_status
+    assert result.error_kind == expected_kind
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("response", "expected_status", "expected_kind"),
+    [
+        (httpx.Response(403), "failed", "permission_denied"),
+        (
+            httpx.Response(200, content=b"{malformed"),
+            "unknown",
+            "response_malformed",
+        ),
+    ],
+)
+async def test_thread_title_update_failure_is_single_and_sanitized(
+    response: httpx.Response,
+    expected_status: str,
+    expected_kind: str,
+) -> None:
+    """Rejected and malformed title updates return without retry."""
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return response
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        result = await DiscordDeliveryClient(client).update_thread_title(
+            bot_token="discord-secret",
+            guild_id="111",
+            channel_id="444",
+            name="Incident response",
+        )
+
+    assert result.status == expected_status
+    assert result.error_kind == expected_kind
+    assert len(calls) == 1
 
 
 @pytest.mark.asyncio

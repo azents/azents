@@ -95,7 +95,7 @@ class _RepositoryDouble:
         self.finished: list[
             tuple[ExternalChannelDeliveryStatus, str | None, str | None]
         ] = []
-        self.recorded_delivery_channels: list[tuple[str, str]] = []
+        self.recorded_delivery_channels: list[tuple[str, str, str | None]] = []
         self.runtime_provider_states: list[tuple[str, dict[str, object]]] = []
         self.started_runtime_targets: list[object | None] = []
         self.settlement_accepted = True
@@ -309,8 +309,11 @@ class _RepositoryDouble:
         *,
         resource_id: str,
         delivery_channel_id: str,
+        initial_thread_title: str | None,
     ) -> str:
-        self.recorded_delivery_channels.append((resource_id, delivery_channel_id))
+        self.recorded_delivery_channels.append(
+            (resource_id, delivery_channel_id, initial_thread_title)
+        )
         return delivery_channel_id
 
     async def recover_archive_cleanup(
@@ -476,6 +479,7 @@ class _DiscordClient:
             provider_message_key="discord-thread:444",
             error_kind=None,
             error_summary=None,
+            created_thread_name="Research * Agent",
         )
 
     async def create_message(self, **kwargs: object) -> DiscordDeliveryResult:
@@ -1011,7 +1015,9 @@ async def test_discord_reply_agent_prefix_follows_app_mode(
             },
         ),
     ]
-    assert repository.recorded_delivery_channels == [("resource-1", "444")]
+    assert repository.recorded_delivery_channels == [
+        ("resource-1", "444", "Research * Agent")
+    ]
 
 
 @pytest.mark.asyncio

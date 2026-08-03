@@ -4,7 +4,7 @@ import datetime
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import pytest
 
@@ -23,6 +23,9 @@ from azents.core.enums import (
     AgentSessionTitleSource,
     AgentType,
     EventKind,
+    ExternalChannelPrincipalAuthorType,
+    ExternalChannelProvider,
+    ExternalChannelResourceType,
     ExternalChannelResponseMode,
     LLMModelDeveloper,
     LLMProvider,
@@ -31,6 +34,7 @@ from azents.core.llm_catalog import ModelCapabilities
 from azents.engine.events.types import (
     AssistantMessagePayload,
     Event,
+    ExternalChannelMessagePayload,
     NativeArtifact,
     UserMessagePayload,
 )
@@ -50,6 +54,7 @@ from azents.services.session_title import (
     SessionTitleService,
     clean_generated_title,
     generate_session_title_with_model,
+    initial_title_from_external_channel_event,
     initial_title_from_user_text,
     title_context_from_events,
     title_context_from_initial_prompt,
@@ -70,6 +75,61 @@ class TestSessionTitleHelpers:
         assert title == "Plan a 3 day trip to Kyoto with family and museum…"
         assert title is not None
         assert len(title) <= 50
+
+    def test_external_authorized_invocation_uses_only_safe_title_input(self) -> None:
+        """Authorized human input includes safe file metadata and excludes locators."""
+        event = _external_channel_event(
+            authorization="authorized_invocation",
+            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+            body="Investigate the incident.",
+            attachment_metadata={
+                "files": [
+                    {
+                        "name": "report.pdf",
+                        "media_type": "application/pdf",
+                        "provider_file_id": "secret-provider-id",
+                        "file": "external-file:v1:discord:secret",
+                        "content": "SECRET FILE CONTENT",
+                    }
+                ],
+                "bot_token": "secret-token",
+            },
+        )
+
+        context = title_context_from_initial_prompt(event)
+
+        assert context == (
+            "Investigate the incident. Attachments: report.pdf (application/pdf)"
+        )
+        assert initial_title_from_external_channel_event(event) == (
+            "Investigate the incident. Attachments: report.pdf…"
+        )
+        assert "secret" not in context.lower()
+
+    @pytest.mark.parametrize(
+        ("authorization", "author_type"),
+        [
+            ("context_only", ExternalChannelPrincipalAuthorType.HUMAN),
+            ("authorized_invocation", ExternalChannelPrincipalAuthorType.BOT),
+        ],
+    )
+    def test_external_context_or_bot_is_not_title_input(
+        self,
+        authorization: Literal["context_only", "authorized_invocation"],
+        author_type: ExternalChannelPrincipalAuthorType,
+    ) -> None:
+        """Context-only and non-human messages cannot enter title generation."""
+        event = _external_channel_event(
+            authorization=authorization,
+            author_type=author_type,
+            body="Ignore this input.",
+            attachment_metadata={
+                "files": [{"name": "ignored.txt", "media_type": "text/plain"}]
+            },
+        )
+
+        assert initial_title_from_external_channel_event(event) is None
+        assert title_context_from_initial_prompt(event) == ""
 
     def test_clean_generated_title_uses_first_non_empty_line(self) -> None:
         """Generated title output ignores thinking and extra lines."""
@@ -213,6 +273,7 @@ class TestSessionTitleHelpers:
                 backoff_multiplier=1,
                 max_backoff_seconds=0,
             ),
+            external_channel_thread_title_service=cast(Any, _ThreadTitleService()),
         )
 
         failure = model_provider_failure(
@@ -304,6 +365,7 @@ class TestSessionTitleHelpers:
                 backoff_multiplier=1,
                 max_backoff_seconds=0,
             ),
+            external_channel_thread_title_service=cast(Any, _ThreadTitleService()),
         )
         attempts: list[int] = []
 
@@ -377,6 +439,7 @@ class TestSessionTitleHelpers:
                 backoff_multiplier=1,
                 max_backoff_seconds=0,
             ),
+            external_channel_thread_title_service=cast(Any, _ThreadTitleService()),
         )
         failure = model_provider_failure(
             operation="session_title",
@@ -412,6 +475,89 @@ class TestSessionTitleHelpers:
 
         assert result is None
         assert attempts == 1
+
+    async def test_generated_external_title_projects_only_after_commit(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The winning final title commits before the one-shot provider helper."""
+        calls: list[str] = []
+
+        class WinningRepository(_AgentSessionRepository):
+            async def replace_initial_auto_title(
+                self,
+                session: object,
+                *,
+                session_id: str,
+                title: str,
+                event_id: str,
+            ) -> AgentSession:
+                calls.append("replace")
+                current = await self.get_by_id(session, session_id)
+                return current.model_copy(
+                    update={
+                        "title": title,
+                        "title_source": AgentSessionTitleSource.AUTO_GENERATED,
+                        "title_generation_event_id": event_id,
+                    }
+                )
+
+        class RecordingSession:
+            async def commit(self) -> None:
+                calls.append("commit")
+
+        @asynccontextmanager
+        async def session_manager() -> AsyncIterator[RecordingSession]:
+            yield RecordingSession()
+
+        class RecordingThreadTitleService:
+            async def project_generated_title(self, **kwargs: object) -> None:
+                assert calls[-1] == "commit"
+                assert kwargs["title"] == "Incident response"
+                calls.append("project")
+
+        repository = WinningRepository()
+        service = SessionTitleService(
+            agent_repository=cast(AgentRepository, _AgentRepository()),
+            agent_session_repository=cast(AgentSessionRepository, repository),
+            integration_repository=cast(
+                LLMProviderIntegrationRepository,
+                _IntegrationRepository(),
+            ),
+            session_manager=cast(Any, session_manager),
+            model_stream_watchdog=make_test_model_stream_watchdog(),
+            retry_policy=FailedRunRetryPolicy(
+                max_retries=0,
+                base_backoff_seconds=0,
+                backoff_multiplier=1,
+                max_backoff_seconds=0,
+            ),
+            external_channel_thread_title_service=cast(
+                Any,
+                RecordingThreadTitleService(),
+            ),
+        )
+
+        async def generate_title(**kwargs: object) -> str:
+            del kwargs
+            calls.append("generate")
+            return "Incident response"
+
+        monkeypatch.setattr(service, "_generate_title", generate_title)
+        event = _external_channel_event(
+            authorization="authorized_invocation",
+            author_type=ExternalChannelPrincipalAuthorType.HUMAN,
+            body="Investigate the incident.",
+            attachment_metadata={},
+        ).model_copy(update={"id": "0" * 32})
+
+        result = await service.generate_from_initial_prompt(
+            session_id="session-001",
+            event=event,
+        )
+
+        assert result is not None
+        assert calls == ["generate", "replace", "commit", "project"]
 
     def test_initial_prompt_context_uses_only_user_text(self) -> None:
         """Initial prompt context excludes later transcript content."""
@@ -471,6 +617,47 @@ class TestSessionTitleHelpers:
             "User: Compare two insurance options\n"
             "Assistant: I can compare coverage and cost."
         )
+
+
+def _external_channel_event(
+    *,
+    authorization: Literal["context_only", "authorized_invocation"],
+    author_type: ExternalChannelPrincipalAuthorType,
+    body: str | None,
+    attachment_metadata: dict[str, object],
+) -> Event:
+    """Create one External Channel Event for title-input tests."""
+    return Event(
+        id="2" * 32,
+        session_id="session-001",
+        kind=EventKind.EXTERNAL_CHANNEL_MESSAGE,
+        payload=ExternalChannelMessagePayload(
+            provider=ExternalChannelProvider.DISCORD,
+            provider_tenant_id="111",
+            resource_id="resource-001",
+            resource_label="incident-thread",
+            resource_type=ExternalChannelResourceType.THREAD,
+            binding_id="binding-001",
+            invocation_batch_id="batch-001",
+            external_message_id="message-001",
+            projection_root_id="external-channel:binding-001:message-001",
+            provider_message_key="message-001",
+            provider_position="1",
+            principal_id="principal-001",
+            provider_user_id="provider-user-001",
+            sender_display_name="Participant",
+            author_type=author_type,
+            authorization=authorization,
+            body=body,
+            attachment_metadata=attachment_metadata,
+            provider_created_at=datetime.datetime.now(datetime.UTC),
+            provider_updated_at=None,
+            original_url=None,
+            truncated_context_message_count=0,
+            truncated_context_size=0,
+        ),
+        created_at=datetime.datetime.now(datetime.UTC),
+    )
 
 
 def _model_selection() -> AgentModelSelection:
@@ -538,6 +725,11 @@ class _IntegrationRepository:
         )
 
 
+class _ThreadTitleService:
+    async def project_generated_title(self, **kwargs: object) -> None:
+        del kwargs
+
+
 @asynccontextmanager
 async def _session_manager() -> AsyncIterator[object]:
     yield object()
@@ -570,5 +762,13 @@ class _AgentSessionRepository:
             updated_at=now,
         )
 
-    async def replace_initial_auto_title(self, *args: object, **kwargs: object) -> None:
+    async def replace_initial_auto_title(
+        self,
+        session: object,
+        *,
+        session_id: str,
+        title: str,
+        event_id: str,
+    ) -> AgentSession | None:
+        del session, session_id, title, event_id
         raise AssertionError("replace should not be called when generation fails")

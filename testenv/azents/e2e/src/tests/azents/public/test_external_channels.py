@@ -25,6 +25,9 @@ from azentspublicclient.api.llm_provider_integration_v1_api import (
 from azentspublicclient.api.workspace_v1_api import WorkspaceV1Api
 from azentspublicclient.exceptions import ApiException
 from azentspublicclient.models.agent_create_request import AgentCreateRequest
+from azentspublicclient.models.agent_session_title_source import (
+    AgentSessionTitleSource,
+)
 from azentspublicclient.models.agent_type import AgentType
 from azentspublicclient.models.api_key_secrets import ApiKeySecrets
 from azentspublicclient.models.connection_access_policy_request import (
@@ -1608,6 +1611,31 @@ def test_slack_binding_response_modes_gate_and_preserve_context(
         interval=0.2,
         message="Initial Slack response-mode input was not promoted",
     )
+    generated_detail = cast(
+        Any,
+        wait_until(
+            lambda: (
+                detail
+                if (
+                    (
+                        detail := chat_api.chat_v1_get_agent_session(
+                            agent_id=agent_id,
+                            session_id=session.id,
+                            _headers=headers,
+                        )
+                    ).title
+                    and detail.title_source is AgentSessionTitleSource.AUTO_GENERATED
+                )
+                else None
+            ),
+            timeout=30,
+            interval=0.2,
+            message="Slack Session automatic title generation did not complete",
+        ),
+    )
+    assert generated_detail.id == session.id
+    assert generated_detail.title
+    assert generated_detail.title_source is AgentSessionTitleSource.AUTO_GENERATED
 
     before_counts = cast(
         dict[str, int],
@@ -3848,6 +3876,7 @@ def test_discord_single_activation_and_interaction_journey(
 
 
 def test_discord_gateway_message_waits_for_location_then_binds(
+    request: pytest.FixtureRequest,
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
@@ -3975,6 +4004,17 @@ def test_discord_gateway_message_waits_for_location_then_binds(
         },
         timeout=5,
     ).raise_for_status()
+    requests.post(
+        f"{discord_provider_fake_url}/__testenv/barrier",
+        json={"operation": "create_message", "occurrence": 2},
+        timeout=5,
+    ).raise_for_status()
+    request.addfinalizer(
+        lambda: requests.post(
+            f"{discord_provider_fake_url}/__testenv/barrier/release",
+            timeout=5,
+        ).raise_for_status()
+    )
     token, _, handle, agent_id = _create_agent(
         public_api_client,
         admin_api_client,
@@ -4118,17 +4158,90 @@ def test_discord_gateway_message_waits_for_location_then_binds(
             ),
         )
         expected_session_path = f"/w/{handle}/agents/{agent_id}/sessions/{session.id}"
-        wait_until(
-            lambda: (
-                expected_session_path
-                in _successful_session_paths(
-                    _discord_provider_state(discord_provider_fake_url)
-                )
+
+        barrier_state = cast(
+            dict[str, object],
+            wait_until(
+                lambda: (
+                    state
+                    if (
+                        state := requests.get(
+                            f"{discord_provider_fake_url}/__testenv/barrier",
+                            timeout=5,
+                        ).json()
+                    ).get("reached")
+                    is True
+                    else None
+                ),
+                timeout=30,
+                interval=0.2,
+                message=(
+                    "Discord direct-created thread evidence was not committed before "
+                    "title generation"
+                ),
             ),
-            timeout=30,
-            interval=0.2,
-            message="Discord joined-presence provider control was not delivered",
         )
+        assert barrier_state["operation"] == "create_message"
+        assert barrier_state["occurrence"] == 2
+        assert barrier_state["request_count"] == 2
+
+        def generated_title_projection() -> Any | None:
+            generated_detail = chat_api.chat_v1_get_agent_session(
+                agent_id=agent_id,
+                session_id=session.id,
+                _headers=headers,
+            )
+            counts = cast(
+                dict[str, int],
+                _discord_provider_state(discord_provider_fake_url)["request_counts"],
+            )
+            if (
+                generated_detail.title
+                and generated_detail.title_source
+                is AgentSessionTitleSource.AUTO_GENERATED
+                and counts.get("get_channel", 0) == 1
+                and counts.get("update_channel", 0) == 1
+            ):
+                return generated_detail
+            return None
+
+        generated_detail = cast(
+            Any,
+            wait_until(
+                generated_title_projection,
+                timeout=30,
+                interval=0.2,
+                message=(
+                    "Discord Session title generation and one-shot thread rename "
+                    "did not complete"
+                ),
+            ),
+        )
+        requests.post(
+            f"{discord_provider_fake_url}/__testenv/barrier/release",
+            timeout=5,
+        ).raise_for_status()
+        state = cast(
+            dict[str, object],
+            wait_until(
+                lambda: (
+                    provider_state
+                    if expected_session_path
+                    in _successful_session_paths(
+                        provider_state := _discord_provider_state(
+                            discord_provider_fake_url
+                        )
+                    )
+                    else None
+                ),
+                timeout=30,
+                interval=0.2,
+                message="Discord joined-presence provider control was not delivered",
+            ),
+        )
+
+        # Keep current Gateway route authority through the adjacent title projection.
+        assert generated_detail.id == session.id
 
     assert session.agent_id == agent_id
     assert binding.provider.value == "discord"
@@ -4169,13 +4282,27 @@ def test_discord_gateway_message_waits_for_location_then_binds(
     assert logical_input["original_url"] == (
         f"https://discord.com/channels/{guild_id}/{channel_id}/{message_id}"
     )
-    state = _discord_provider_state(discord_provider_fake_url)
+    assert generated_detail.id == session.id
+    assert generated_detail.title
+    assert generated_detail.title_source is AgentSessionTitleSource.AUTO_GENERATED
     assert _successful_session_paths(state) == [expected_session_path]
     assert _successful_session_presence_states(state) == ["joined"]
     request_counts = cast(dict[str, int], state["request_counts"])
     assert request_counts["create_thread"] >= 1
+    assert request_counts["get_channel"] == 1
+    assert request_counts["update_channel"] == 1
     # Thread reconciliation runs before create; canonical history runs after create.
     assert request_counts["get_message"] >= 2
+    title_operations = [
+        operation["operation"]
+        for operation in cast(list[dict[str, object]], state["operations"])
+        if operation["operation"] in {"create_thread", "get_channel", "update_channel"}
+    ]
+    assert title_operations[-3:] == [
+        "create_thread",
+        "get_channel",
+        "update_channel",
+    ]
     gateway = cast(dict[str, object], state["gateway"])
     assert cast(int, gateway["connections"]) >= 2
     initial_opcodes = cast(list[object], gateway["initial_opcodes"])

@@ -34,8 +34,8 @@ api_routes:
   - /external-channel/v1/approval-requests/{access_request_id}
   - /external-channel/v1/approval-requests/{access_request_id}/decision
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channel-access
-last_verified_at: 2026-08-02
-spec_version: 19
+last_verified_at: 2026-08-03
+spec_version: 20
 ---
 
 # External Channel Authorization
@@ -156,6 +156,10 @@ boundary. It then reuses the committed binding and atomically commits the determ
 canonical mailbox item, conversation-position advance, Session running transition, and
 deterministic joined-presence and initial-progress delivery intents. Both position
 cases converge on one mailbox item and logical wake.
+When that decision transaction created the root Session and Binding, only the first
+post-decision replay may mark the canonical mailbox as eligible for initial automatic
+title generation from its exact human `authorized_invocation`. A repeated compatible
+decision, an existing Binding, or a replay recovery does not re-arm eligibility.
 Repeating a compatible Allow may perform the same provider-history replay to recover a
 post-commit failure, but mailbox identity prevents another Session input or execution.
 Replay failure never reverts the already committed access decision or binding, and it
@@ -205,6 +209,9 @@ Binding and connection disconnect remain separate lifecycle operations.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 20) — Allowed only the root-Session-creating legacy
+  Allow path to pass one-time automatic-title eligibility into canonical replay;
+  compatible repeats and existing Bindings remain ineligible.
 - **2026-08-02** (spec_version 19) — Added setup-linked authorization that resumes
   location selection without Binding replay, provider-principal channel-default and
   settings authority, exact scope proof, and the no-synthetic-User boundary.

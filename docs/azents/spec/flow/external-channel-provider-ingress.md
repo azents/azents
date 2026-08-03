@@ -39,6 +39,7 @@ code_paths:
   - python/apps/azents/src/azents/services/external_channel/transport_ingestion.py
   - python/apps/azents/src/azents/services/external_channel/connection_revocation.py
   - python/apps/azents/src/azents/services/external_channel/provider_control.py
+  - python/apps/azents/src/azents/services/mailbox.py
   - python/apps/azents/src/azents/services/root_agent_session_creation/**
   - python/apps/azents/src/azents/repos/agent_automatic_project/**
   - python/apps/azents/src/azents/services/external_channel/provider.py
@@ -50,8 +51,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-02
-spec_version: 30
+last_verified_at: 2026-08-03
+spec_version: 31
 ---
 
 # External Channel Provider Ingress
@@ -280,13 +281,17 @@ the canonical message source nor a durable queue item.
    Binding, real root Session, initial Channel Work, deterministic canonical mailbox
    input, and versioned joined-presence and progress delivery intents. The same transaction
    marks the Session running, initializes thread position, and compare-and-set advances
-   the conversation position.
+   the conversation position. Only when this transaction creates the root Session does
+   the canonical mailbox carry one transient initial-title eligibility marker.
    PostgreSQL conversation position is the sole duplicate-prevention and ordering
    authority; a mismatch restarts provider-history preparation.
 5. After commit, the service claims the pending mailbox item and sends routing-only
    `SessionWakeUp(session_id)`. A crash or broker failure leaves that item recoverable,
    so duplicate transport delivery can complete the same logical wake without creating
-   another Session input.
+   another Session input. Promotion may consume the creation marker only for the exact
+   human `authorized_invocation` event and stores the existing deterministic initial
+   Session title without delaying wake or execution. Context-only messages, nonhuman
+   authors, later invocations, continuation, and duplicate admission cannot re-arm it.
 6. The Agent Worker attempts committed joined-presence and progress controls through
    the shared one-attempt delivery fence. Delivered, failed, unknown, not-attempted,
    and cancelled outcomes remain provider-delivery evidence only; none gates mailbox
@@ -387,6 +392,9 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 31) — Added creation-only mailbox title eligibility
+  consumed by the exact authorized human trigger during promotion without gating
+  admission, wake, or execution.
 - **2026-08-02** (spec_version 30) — Accepted the connected Discord Bot's
   provider-managed role mention as an explicit invocation while rejecting arbitrary,
   manually created, and other-Bot roles.
