@@ -19,3 +19,16 @@ def test_external_channel_gateway_replaces_discord_specific_role() -> None:
     assert 'value: "8013"' in rendered
     assert "name: discord-gateway" not in rendered
     assert "./bin/discordgatewayworker.sh" not in rendered
+
+
+def test_external_channel_gateway_inherits_global_image_pull_secrets() -> None:
+    """The gateway can pull the same private server image as other deployments."""
+    rendered = _helm_template(
+        "global.imagePullSecrets[0].name=ghcr-pull-secret",
+    )
+    start = rendered.index(
+        "kind: Deployment\nmetadata:\n  name: external-channel-gateway"
+    )
+    gateway = rendered[start : rendered.index("\n---\n", start)]
+
+    assert "imagePullSecrets:\n        - name: ghcr-pull-secret" in gateway

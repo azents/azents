@@ -42,9 +42,14 @@ from azents.services.external_channel.discord_gateway import (
     DiscordGatewayTerminalError,
 )
 from azents.services.external_channel.ingestion import (
+    ExternalChannelIngestionOutcome,
     ExternalChannelIngestionReason,
     ExternalChannelIngressAuthority,
     ExternalChannelIngressAuthorityKind,
+)
+from azents.services.external_channel.provider_control import (
+    ExternalChannelProviderControlService,
+    get_external_channel_provider_control_service,
 )
 from azents.services.external_channel.transport_ingestion import (
     ExternalChannelTransportIngestionService,
@@ -88,6 +93,15 @@ class DiscordGatewayManagerService:
         ExternalChannelTransportIngestionService,
         Depends(ExternalChannelTransportIngestionService),
     ]
+    provider_control: Annotated[
+        ExternalChannelProviderControlService,
+        Depends(get_external_channel_provider_control_service),
+    ]
+    control_tasks: set[asyncio.Task[object]] = dataclasses.field(
+        default_factory=set,
+        init=False,
+        repr=False,
+    )
     manager_id: str = dataclasses.field(default_factory=lambda: uuid4().hex)
     gateway_client: Annotated[
         DiscordGatewayRunner,
@@ -437,7 +451,10 @@ class DiscordGatewayManagerService:
                 authority=authority,
                 deadline=deadline,
             )
-            if outcome is None or transport_outcome_acknowledgeable(outcome):
+            if outcome is None:
+                return
+            if transport_outcome_acknowledgeable(outcome):
+                self._schedule_control_plans(outcome)
                 return
             if outcome.reason is ExternalChannelIngestionReason.INGRESS_AUTHORITY_STALE:
                 raise DiscordGatewayLeaseLost(
@@ -449,6 +466,17 @@ class DiscordGatewayManagerService:
                     "Discord message ingestion remained unavailable."
                 )
             await asyncio.sleep(min(_EVENT_RETRY_DELAY_SECONDS, remaining_seconds))
+
+    def _schedule_control_plans(
+        self,
+        outcome: ExternalChannelIngestionOutcome,
+    ) -> None:
+        """Run direct controls after canonical Gateway admission."""
+        for plan in outcome.control_plans:
+            task = asyncio.create_task(self.provider_control.attempt(plan))
+            self.control_tasks.add(task)
+            task.add_done_callback(self.control_tasks.discard)
+            task.add_done_callback(_log_provider_control_task_failure)
 
     async def _handle_gateway_lifecycle(
         self,
@@ -490,3 +518,15 @@ class DiscordGatewayManagerService:
 
 def _utc_now() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC)
+
+
+def _log_provider_control_task_failure(
+    task: asyncio.Task[object],
+) -> None:
+    """Observe one direct control task without exposing provider payloads."""
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        logger.exception("Discord provider control task failed")

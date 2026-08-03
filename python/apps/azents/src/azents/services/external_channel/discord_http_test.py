@@ -185,7 +185,7 @@ class _SelectorResponseDouble:
                     "components": [],
                 },
             },
-            control_delivery_attempt_id="delivery-1",
+            control_plan="delivery-1",
             connection_id="connection-1",
         )
 
@@ -193,24 +193,24 @@ class _SelectorResponseDouble:
 class _SettingsResponseDouble:
     """Provide deterministic settings rendering without provider I/O."""
 
-    def __init__(self, *, cleanup_delivery_ids: tuple[str, ...] = ()) -> None:
+    def __init__(self, *, cleanup_plans: tuple[str, ...] = ()) -> None:
         self.config = SimpleNamespace(
             auth=SimpleNamespace(jwt=SimpleNamespace(secret_key="settings-secret"))
         )
-        self.cleanup_delivery_ids = cleanup_delivery_ids
+        self.cleanup_plans = cleanup_plans
         self.component_calls: list[dict[str, object]] = []
 
     async def initial_response(self, **_: object) -> object:
         return SimpleNamespace(
             response={"type": 4, "data": {"flags": 64, "content": "Settings."}},
-            cleanup_delivery_ids=(),
+            cleanup_plans=(),
         )
 
     async def component_response(self, **kwargs: object) -> object:
         self.component_calls.append(kwargs)
         return SimpleNamespace(
             response={"type": 7, "data": {"content": "Saved.", "components": []}},
-            cleanup_delivery_ids=self.cleanup_delivery_ids,
+            cleanup_plans=self.cleanup_plans,
         )
 
 
@@ -262,7 +262,7 @@ def _service(
     *,
     configuration: ExternalChannelConnectionConfiguration,
     admission: _AdmissionDouble,
-    cleanup_delivery_ids: tuple[str, ...] = (),
+    cleanup_plans: tuple[str, ...] = (),
 ) -> tuple[DiscordHTTPAdmissionService, _RepositoryDouble, _ShortcutSourceDouble]:
     @asynccontextmanager
     async def session_manager() -> AsyncGenerator[AsyncSession, None]:
@@ -271,9 +271,7 @@ def _service(
     repository = _RepositoryDouble(configuration)
     shortcut_source = _ShortcutSourceDouble()
     selector_response = _SelectorResponseDouble()
-    settings_response = _SettingsResponseDouble(
-        cleanup_delivery_ids=cleanup_delivery_ids
-    )
+    settings_response = _SettingsResponseDouble(cleanup_plans=cleanup_plans)
     return (
         DiscordHTTPAdmissionService(
             session_manager=cast(SessionManager[AsyncSession], session_manager),
@@ -562,7 +560,7 @@ async def test_settings_component_preserves_every_committed_cleanup_intent() -> 
     service, _, _ = _service(
         configuration=_configuration(private_key.public_key().public_bytes_raw().hex()),
         admission=admission,
-        cleanup_delivery_ids=("presence-delete-1", "progress-delete-1"),
+        cleanup_plans=("presence-delete-1", "progress-delete-1"),
     )
     body = _settings_component_body()
     timestamp, signature = _signature(private_key, body)
@@ -579,7 +577,7 @@ async def test_settings_component_preserves_every_committed_cleanup_intent() -> 
         "type": 7,
         "data": {"content": "Saved.", "components": []},
     }
-    assert result.control_delivery_attempt_ids == (
+    assert result.control_plans == (
         "presence-delete-1",
         "progress-delete-1",
     )

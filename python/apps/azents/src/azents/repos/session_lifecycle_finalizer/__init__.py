@@ -7,7 +7,6 @@ from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAccessGrant,
     RDBExternalChannelAccessRequest,
-    RDBExternalChannelAction,
     RDBExternalChannelBinding,
 )
 from azents.rdb.models.session_agent import RDBSessionAgent
@@ -126,13 +125,4 @@ class SessionLifecycleFinalizerRepository:
         if grant_id is not None:
             raise RuntimeError(
                 "External Channel access grants remain for the purged Session tree."
-            )
-        action_id = await session.scalar(
-            sa.select(RDBExternalChannelAction.id)
-            .where(RDBExternalChannelAction.agent_session_id.in_(session_ids))
-            .limit(1)
-        )
-        if action_id is not None:
-            raise RuntimeError(
-                "External Channel actions remain for the purged Session tree."
             )

@@ -105,28 +105,6 @@ const binding: ManagedBinding = {
     projection_state: "stale",
     finished_at: null,
   },
-  deliveries: [
-    {
-      id: "delivery_01",
-      operation: "progress_update",
-      status: "unknown",
-      error_kind: "timeout",
-      error_summary: "Provider outcome could not be confirmed.",
-      attempted_at: "2026-07-22T04:55:00Z",
-      completed_at: "2026-07-22T04:56:00Z",
-      created_at: "2026-07-22T04:55:00Z",
-    },
-    {
-      id: "delivery_02",
-      operation: "reply",
-      status: "delivered",
-      error_kind: null,
-      error_summary: null,
-      attempted_at: "2026-07-22T04:45:00Z",
-      completed_at: "2026-07-22T04:45:02Z",
-      created_at: "2026-07-22T04:45:00Z",
-    },
-  ],
 };
 
 const grant: ManagedGrant = {

@@ -20,8 +20,6 @@ from azents.core.enums import (
     ExternalChannelConversationLocation,
     ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
-    ExternalChannelDeliveryOriginType,
-    ExternalChannelDeliveryStatus,
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
@@ -40,9 +38,6 @@ from azents.core.external_channel_session_presence import (
     session_presence_payload,
     setup_required_payload,
 )
-from azents.core.slack_external_channel_progress import (
-    render_slack_progress,
-)
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -56,7 +51,6 @@ from azents.repos.external_channel.data import (
     ExternalChannelConnection,
     ExternalChannelConversationPosition,
     ExternalChannelConversationPositionCreate,
-    ExternalChannelDeliveryAttemptCreate,
     ExternalChannelInteraction,
     ExternalChannelInteractionCreate,
     ExternalChannelMailboxProjectionItem,
@@ -92,6 +86,7 @@ from azents.services.external_channel.participation_state import (
     projection_with_setup_source,
     setup_source_from_projection,
 )
+from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.external_channel.selector_state import (
     ExternalChannelSelectorState,
     projection_with_selector_state,
@@ -284,7 +279,7 @@ class ExternalChannelMailboxIngestionStore:
                         kind=ExternalChannelIngestionOutcomeKind.DUPLICATE,
                         reason=ExternalChannelIngestionReason.DUPLICATE,
                         mailbox_item_id=wake_item_id,
-                        control_delivery_attempt_id=None,
+                        control_plans=(),
                         connection_id=None,
                     ),
                     wake_mailbox_item_id=wake_item_id,
@@ -421,7 +416,7 @@ class ExternalChannelMailboxIngestionStore:
                     reason=ExternalChannelIngestionReason.SELECTION_REQUIRED,
                     mailbox_item_id=None,
                     session_id=None,
-                    control_delivery_attempt_id=delivery_id,
+                    control_plans=(() if delivery_id is None else (delivery_id,)),
                     connection_id=connection.id if delivery_id is not None else None,
                 )
             agent_id = conversation.route.require_active_agent_id()
@@ -469,6 +464,8 @@ class ExternalChannelMailboxIngestionStore:
                         decision_summary=None,
                         expires_at=now + _ACCESS_REQUEST_AGE,
                         decided_at=None,
+                        control_provider_message_key=None,
+                        control_projection_status=None,
                         connection_id=connection.id,
                         conversation_position_id=position.id,
                         range_start_position=history.range_start_position,
@@ -491,7 +488,7 @@ class ExternalChannelMailboxIngestionStore:
                     reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
                     mailbox_item_id=None,
                     session_id=None,
-                    control_delivery_attempt_id=delivery_id,
+                    control_plans=(() if delivery_id is None else (delivery_id,)),
                     connection_id=connection.id if delivery_id is not None else None,
                 )
             session_created = False
@@ -515,10 +512,14 @@ class ExternalChannelMailboxIngestionStore:
                 binding_id=binding.id,
                 desired_progress_payload=checking_progress().model_dump(mode="json"),
             )
-            session_presence_id = await self._create_session_presence_intent(
-                session,
-                resource=conversation.resource,
-                binding=binding,
+            session_presence_id = (
+                None
+                if existing_binding
+                else await self._create_session_presence_intent(
+                    session,
+                    resource=conversation.resource,
+                    binding=binding,
+                )
             )
             settings_control_id = (
                 await self._create_binding_settings_on_demand_intent(
@@ -612,7 +613,19 @@ class ExternalChannelMailboxIngestionStore:
                         "provider_event_type": request.locator.provider_event_type,
                     },
                 )
-            control_id = settings_control_id or session_presence_id or progress_id
+            control_plans = (
+                ()
+                if not enqueue.created
+                else tuple(
+                    plan
+                    for plan in (
+                        settings_control_id,
+                        session_presence_id,
+                        progress_id,
+                    )
+                    if plan is not None
+                )
+            )
             return ExternalChannelIngestionAcceptance(
                 status="accepted" if enqueue.created else "duplicate",
                 reason=(
@@ -622,8 +635,8 @@ class ExternalChannelMailboxIngestionStore:
                 ),
                 mailbox_item_id=enqueue.mailbox_item.id,
                 session_id=binding.agent_session_id,
-                control_delivery_attempt_id=control_id,
-                connection_id=connection.id if control_id is not None else None,
+                control_plans=control_plans,
+                connection_id=connection.id if control_plans else None,
             )
 
     async def _get_source_resource(
@@ -1039,7 +1052,7 @@ class ExternalChannelMailboxIngestionStore:
                 reason=ExternalChannelIngestionReason.SELECTION_REQUIRED,
                 mailbox_item_id=None,
                 session_id=None,
-                control_delivery_attempt_id=delivery_id,
+                control_plans=(() if delivery_id is None else (delivery_id,)),
                 connection_id=connection.id if delivery_id is not None else None,
             )
         grant = await self.repository.get_active_access_grant(
@@ -1066,6 +1079,8 @@ class ExternalChannelMailboxIngestionStore:
                     decision_summary=None,
                     expires_at=now + _ACCESS_REQUEST_AGE,
                     decided_at=None,
+                    control_provider_message_key=None,
+                    control_projection_status=None,
                     connection_id=connection.id,
                     conversation_position_id=position.id,
                     range_start_position=history.range_start_position,
@@ -1091,7 +1106,7 @@ class ExternalChannelMailboxIngestionStore:
                 reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
                 mailbox_item_id=None,
                 session_id=None,
-                control_delivery_attempt_id=delivery_id,
+                control_plans=(() if delivery_id is None else (delivery_id,)),
                 connection_id=connection.id if delivery_id is not None else None,
             )
         delivery_id = await self._create_setup_control_intent(
@@ -1105,7 +1120,7 @@ class ExternalChannelMailboxIngestionStore:
             reason=ExternalChannelIngestionReason.SETUP_REQUIRED,
             mailbox_item_id=None,
             session_id=None,
-            control_delivery_attempt_id=delivery_id,
+            control_plans=(() if delivery_id is None else (delivery_id,)),
             connection_id=connection.id if delivery_id is not None else None,
         )
 
@@ -1525,7 +1540,7 @@ class ExternalChannelMailboxIngestionStore:
         *,
         request: ExternalChannelIngestionRequest,
         selector_id: str,
-    ) -> str | None:
+    ) -> ProviderEffectPlan | None:
         delivery_channel_id = request.locator.delivery_thread_key
         if delivery_channel_id is None:
             raise RuntimeError("External Channel selector target is unavailable.")
@@ -1573,27 +1588,15 @@ class ExternalChannelMailboxIngestionStore:
                     }
                 ],
             }
-        attempt = await self.repository.create_delivery_attempt_idempotent(
+        return await self.work_repository.prepare_direct_control(
             session,
-            ExternalChannelDeliveryAttemptCreate(
-                origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-                origin_id=selector_id,
-                channel_action_id=None,
-                binding_id=None,
-                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-                request_payload=payload,
-                status=ExternalChannelDeliveryStatus.PENDING,
-                provider_message_key=None,
-                error_kind=None,
-                error_summary=None,
-                attempted_at=None,
-                completed_at=None,
-            ),
-        )
-        return (
-            attempt.id
-            if attempt.status is ExternalChannelDeliveryStatus.PENDING
-            else None
+            connection_id=request.locator.connection_id,
+            resource_id=None,
+            route_id=None,
+            binding_id=None,
+            operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            request_payload=payload,
+            operation_seed=f"selector:{selector_id}",
         )
 
     async def _create_access_control_intent(
@@ -1606,8 +1609,11 @@ class ExternalChannelMailboxIngestionStore:
         principal_provider_user_id: str,
         participant_label: str,
         now: datetime.datetime,
-    ) -> str | None:
+    ) -> ProviderEffectPlan | None:
+        del now
         approval_url = _approval_url(self.config.web_url, request_id)
+        if approval_url is None:
+            return None
         if request.locator.provider is ExternalChannelProvider.SLACK:
             thread_ts = request.locator.delivery_thread_key
             if thread_ts is None:
@@ -1622,9 +1628,8 @@ class ExternalChannelMailboxIngestionStore:
                 "access_request_id": request_id,
                 "participant_provider_user_id": principal_provider_user_id,
                 "participant_label": participant_label,
+                "approval_url": approval_url,
             }
-            if approval_url is not None:
-                payload["approval_url"] = approval_url
         else:
             channel_id = request.locator.delivery_thread_key
             if channel_id is None:
@@ -1638,41 +1643,22 @@ class ExternalChannelMailboxIngestionStore:
                 "access_request_id": request_id,
                 "participant_provider_user_id": principal_provider_user_id,
                 "text": _render_discord_access_request_control(approval_url),
-                "embeds": _discord_access_request_embeds() if approval_url else None,
-                "components": (
-                    _discord_link_button(label="Review access", url=approval_url)
-                    if approval_url
-                    else None
+                "embeds": _discord_access_request_embeds(),
+                "components": _discord_link_button(
+                    label="Review access",
+                    url=approval_url,
                 ),
             }
             _add_discord_thread_provisioning(payload, request=request)
-        attempt = await self.repository.create_delivery_attempt_idempotent(
+        return await self.work_repository.prepare_access_control_create(
             session,
-            ExternalChannelDeliveryAttemptCreate(
-                origin_type=ExternalChannelDeliveryOriginType.ACCESS_REQUEST,
-                origin_id=request_id,
-                channel_action_id=None,
-                binding_id=None if binding is None else binding.id,
-                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-                request_payload=payload,
-                status=(
-                    ExternalChannelDeliveryStatus.PENDING
-                    if approval_url is not None
-                    else ExternalChannelDeliveryStatus.NOT_ATTEMPTED
-                ),
-                provider_message_key=None,
-                error_kind=None if approval_url else "web_url_unavailable",
-                error_summary=None
-                if approval_url
-                else "Azents Web URL is not configured.",
-                attempted_at=None,
-                completed_at=None if approval_url else now,
-            ),
-        )
-        return (
-            attempt.id
-            if attempt.status is ExternalChannelDeliveryStatus.PENDING
-            else None
+            access_request_id=request_id,
+            connection_id=request.locator.connection_id,
+            resource_id=None if binding is None else binding.resource_id,
+            route_id=None if binding is None else binding.route_id,
+            binding_id=None if binding is None else binding.id,
+            request_payload=payload,
+            operation_seed=f"access-request:{request_id}",
         )
 
     async def _create_session_presence_intent(
@@ -1681,31 +1667,19 @@ class ExternalChannelMailboxIngestionStore:
         *,
         resource: ExternalChannelResource,
         binding: ExternalChannelBinding,
-    ) -> str | None:
-        attempt = await self.repository.create_delivery_attempt_idempotent(
+    ) -> ProviderEffectPlan | None:
+        return await self.work_repository.prepare_direct_control(
             session,
-            ExternalChannelDeliveryAttemptCreate(
-                origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-                origin_id=binding.id,
-                channel_action_id=None,
-                binding_id=binding.id,
-                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-                request_payload=session_presence_payload(
-                    resource.labels,
-                    state="joined",
-                ),
-                status=ExternalChannelDeliveryStatus.PENDING,
-                provider_message_key=None,
-                error_kind=None,
-                error_summary=None,
-                attempted_at=None,
-                completed_at=None,
+            connection_id=resource.connection_id,
+            resource_id=resource.id,
+            route_id=binding.route_id,
+            binding_id=binding.id,
+            operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            request_payload=session_presence_payload(
+                resource.labels,
+                state="joined",
             ),
-        )
-        return (
-            attempt.id
-            if attempt.status is ExternalChannelDeliveryStatus.PENDING
-            else None
+            operation_seed=f"joined-presence:{binding.id}",
         )
 
     async def _create_binding_settings_on_demand_intent(
@@ -1714,32 +1688,17 @@ class ExternalChannelMailboxIngestionStore:
         *,
         resource: ExternalChannelResource,
         binding: ExternalChannelBinding,
-    ) -> str | None:
-        """Create settings access after the next eligible mention, at most once."""
-        attempt = await self.repository.create_delivery_attempt_idempotent(
+    ) -> ProviderEffectPlan | None:
+        """Plan settings access after the next eligible mention."""
+        return await self.work_repository.prepare_direct_control(
             session,
-            ExternalChannelDeliveryAttemptCreate(
-                origin_type=(
-                    ExternalChannelDeliveryOriginType.BINDING_SETTINGS_AVAILABLE
-                ),
-                origin_id=binding.id,
-                channel_action_id=None,
-                binding_id=binding.id,
-                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-                part_ordinal=3,
-                request_payload=binding_settings_on_demand_payload(resource.labels),
-                status=ExternalChannelDeliveryStatus.PENDING,
-                provider_message_key=None,
-                error_kind=None,
-                error_summary=None,
-                attempted_at=None,
-                completed_at=None,
-            ),
-        )
-        return (
-            attempt.id
-            if attempt.status is ExternalChannelDeliveryStatus.PENDING
-            else None
+            connection_id=resource.connection_id,
+            resource_id=resource.id,
+            route_id=binding.route_id,
+            binding_id=binding.id,
+            operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            request_payload=binding_settings_on_demand_payload(resource.labels),
+            operation_seed=f"binding-settings:{binding.id}",
         )
 
     async def _create_setup_control_intent(
@@ -1748,35 +1707,24 @@ class ExternalChannelMailboxIngestionStore:
         *,
         resource: ExternalChannelResource,
         claim: ExternalChannelSetupClaim,
-    ) -> str | None:
-        """Create the current first-mention setup control once per source revision."""
-        attempt = await self.repository.create_delivery_attempt_idempotent(
+    ) -> ProviderEffectPlan | None:
+        """Plan the current first-mention setup control once after commit."""
+        return await self.work_repository.prepare_direct_control(
             session,
-            ExternalChannelDeliveryAttemptCreate(
-                origin_type=ExternalChannelDeliveryOriginType.SETUP_CLAIM,
-                origin_id=claim.id,
-                channel_action_id=None,
-                binding_id=None,
-                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-                part_ordinal=claim.source_revision,
-                request_payload=setup_required_payload(
-                    resource.labels,
-                    setup_claim_id=claim.id,
-                    claim_generation=claim.claim_generation,
-                    source_revision=claim.source_revision,
-                ),
-                status=ExternalChannelDeliveryStatus.PENDING,
-                provider_message_key=None,
-                error_kind=None,
-                error_summary=None,
-                attempted_at=None,
-                completed_at=None,
+            connection_id=resource.connection_id,
+            resource_id=resource.id,
+            route_id=claim.route_id,
+            binding_id=None,
+            operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            request_payload=setup_required_payload(
+                resource.labels,
+                setup_claim_id=claim.id,
+                claim_generation=claim.claim_generation,
+                source_revision=claim.source_revision,
             ),
-        )
-        return (
-            attempt.id
-            if attempt.status is ExternalChannelDeliveryStatus.PENDING
-            else None
+            operation_seed=(
+                f"setup:{claim.id}:{claim.claim_generation}:{claim.source_revision}"
+            ),
         )
 
     async def _create_initial_progress_intent(
@@ -1787,54 +1735,11 @@ class ExternalChannelMailboxIngestionStore:
         resource: ExternalChannelResource,
         binding: ExternalChannelBinding,
         work: ExternalChannelWork,
-    ) -> str | None:
-        if request.locator.provider is ExternalChannelProvider.DISCORD:
-            delivery_attempt_ids = (
-                await self.work_repository.ensure_initial_discord_progress(
-                    session,
-                    work_id=work.id,
-                    binding_id=binding.id,
-                    labels=resource.labels,
-                )
-            )
-            return delivery_attempt_ids[0] if delivery_attempt_ids else None
-        presentation = render_slack_progress(
-            checking_progress(),
-            work_id=work.id,
-            desired_progress_revision=work.desired_progress_revision,
-        )
-        thread_key = request.locator.delivery_thread_key
-        if thread_key is None:
-            raise RuntimeError("External Channel Slack progress target is unavailable.")
-        attempt = await self.repository.create_delivery_attempt_idempotent(
+    ) -> ProviderEffectPlan | None:
+        del request, resource, binding
+        return await self.work_repository.prepare_initial_progress(
             session,
-            ExternalChannelDeliveryAttemptCreate(
-                origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-                origin_id=work.id,
-                channel_action_id=None,
-                binding_id=binding.id,
-                operation=ExternalChannelDeliveryOperation.PROGRESS_CREATE,
-                request_payload={
-                    "tenant_id": request.locator.provider_tenant_id,
-                    "channel_id": request.locator.provider_channel_id,
-                    "thread_ts": thread_key,
-                    "work_id": work.id,
-                    "text": presentation.text,
-                    "blocks": presentation.blocks,
-                    "desired_progress_revision": work.desired_progress_revision,
-                },
-                status=ExternalChannelDeliveryStatus.PENDING,
-                provider_message_key=None,
-                error_kind=None,
-                error_summary=None,
-                attempted_at=None,
-                completed_at=None,
-            ),
-        )
-        return (
-            attempt.id
-            if attempt.status is ExternalChannelDeliveryStatus.PENDING
-            else None
+            work_id=work.id,
         )
 
     async def _lock_authority(
@@ -1908,7 +1813,7 @@ class ExternalChannelMailboxIngestionStore:
             reason=reason,
             mailbox_item_id=None,
             session_id=None,
-            control_delivery_attempt_id=None,
+            control_plans=(),
             connection_id=None,
         )
 
@@ -2073,7 +1978,7 @@ def _immediate(
             kind=kind,
             reason=reason,
             mailbox_item_id=None,
-            control_delivery_attempt_id=None,
+            control_plans=(),
             connection_id=None,
         ),
         wake_mailbox_item_id=None,
@@ -2099,7 +2004,7 @@ def _rejected(
         reason=reason,
         mailbox_item_id=None,
         session_id=None,
-        control_delivery_attempt_id=None,
+        control_plans=(),
         connection_id=None,
     )
 

@@ -8,15 +8,11 @@ from pydantic import BaseModel, ConfigDict
 from azents.core.enums import (
     ExternalChannelAccessGrantScope,
     ExternalChannelAccessRequestStatus,
-    ExternalChannelActionMode,
     ExternalChannelAppMode,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
     ExternalChannelConversationLocation,
     ExternalChannelConversationScopeKind,
-    ExternalChannelDeliveryOperation,
-    ExternalChannelDeliveryOriginType,
-    ExternalChannelDeliveryStatus,
     ExternalChannelIngressProfile,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
@@ -34,6 +30,7 @@ from azents.core.enums import (
     ExternalChannelWorkProjectionStatus,
     ExternalChannelWorkStatus,
 )
+from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
 
 class _Record(BaseModel):
@@ -509,6 +506,8 @@ class ExternalChannelAccessRequest(_Record):
     decision_summary: str | None
     expires_at: datetime.datetime
     decided_at: datetime.datetime | None
+    control_provider_message_key: str | None
+    control_projection_status: ExternalChannelWorkProjectionStatus | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
     connection_id: str | None = None
@@ -532,6 +531,8 @@ class ExternalChannelAccessRequestCreate(_Record):
     decision_summary: str | None
     expires_at: datetime.datetime
     decided_at: datetime.datetime | None
+    control_provider_message_key: str | None
+    control_projection_status: ExternalChannelWorkProjectionStatus | None
     connection_id: str | None = None
     conversation_position_id: str | None = None
     range_start_position: str | None = None
@@ -604,7 +605,6 @@ class ExternalChannelWork(_Record):
     state_revision: int
     desired_progress_revision: int
     desired_progress_payload: dict[str, Any] | None
-    progress_provider_message_key: str | None
     finished_at: datetime.datetime | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -621,79 +621,7 @@ class ExternalChannelWorkCreate(_Record):
     state_revision: int
     desired_progress_revision: int
     desired_progress_payload: dict[str, Any] | None
-    progress_provider_message_key: str | None
     finished_at: datetime.datetime | None
-
-
-class ExternalChannelAction(_Record):
-    """Idempotent atomic Channel Action accepted from an Agent run."""
-
-    id: str
-    agent_session_id: str
-    agent_run_id: str | None
-    client_tool_call_id: str
-    binding_id: str
-    work_id: str | None
-    mode: ExternalChannelActionMode
-    state_revision: int
-    request_payload: dict[str, Any]
-    accepted_at: datetime.datetime
-    completed_at: datetime.datetime | None
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-
-
-class ExternalChannelActionCreate(_Record):
-    """Channel Action creation payload."""
-
-    agent_session_id: str
-    agent_run_id: str | None
-    client_tool_call_id: str
-    binding_id: str
-    work_id: str | None
-    mode: ExternalChannelActionMode
-    state_revision: int
-    request_payload: dict[str, Any]
-    completed_at: datetime.datetime | None
-
-
-class ExternalChannelDeliveryAttempt(_Record):
-    """One explicit, at-most-once provider delivery operation."""
-
-    id: str
-    origin_type: ExternalChannelDeliveryOriginType
-    origin_id: str
-    channel_action_id: str | None
-    binding_id: str | None
-    operation: ExternalChannelDeliveryOperation
-    part_ordinal: int = 0
-    request_payload: dict[str, Any]
-    status: ExternalChannelDeliveryStatus
-    provider_message_key: str | None
-    error_kind: str | None
-    error_summary: str | None
-    attempted_at: datetime.datetime | None
-    completed_at: datetime.datetime | None
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-
-
-class ExternalChannelDeliveryAttemptCreate(_Record):
-    """Delivery intent creation payload."""
-
-    origin_type: ExternalChannelDeliveryOriginType
-    origin_id: str
-    channel_action_id: str | None
-    binding_id: str | None
-    operation: ExternalChannelDeliveryOperation
-    part_ordinal: int = 0
-    request_payload: dict[str, Any]
-    status: ExternalChannelDeliveryStatus
-    provider_message_key: str | None
-    error_kind: str | None
-    error_summary: str | None
-    attempted_at: datetime.datetime | None
-    completed_at: datetime.datetime | None
 
 
 class ExternalChannelAppClaim(_Record):
@@ -740,8 +668,6 @@ class ExternalChannelWorkProjectionPart(_Record):
     desired_progress_revision: int
     status: ExternalChannelWorkProjectionStatus
     provider_message_key: str | None
-    latest_delivery_attempt_id: str | None
-    deleted_at: datetime.datetime | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
@@ -751,8 +677,8 @@ class ExternalChannelArchiveTermination(_Record):
 
     disconnected_binding_count: int
     finished_work_count: int
-    created_cleanup_intent_count: int
-    cleanup_intent_ids: tuple[str, ...]
+    direct_cleanup_count: int
+    cleanup_plans: tuple[ProviderEffectPlan, ...]
 
 
 class ExternalChannelRestoreValidation(_Record):
@@ -762,18 +688,9 @@ class ExternalChannelRestoreValidation(_Record):
     finished_work_count: int
 
 
-class ExternalChannelPurgePreparation(_Record):
-    """Summary of delivery attempts made terminal without provider execution."""
-
-    not_attempted_delivery_count: int
-    unknown_delivery_count: int
-
-
 class ExternalChannelPurgeCleanup(_Record):
     """Summary of Session-owned External Channel records removed during purge."""
 
-    deleted_delivery_attempt_count: int
-    deleted_action_count: int
     deleted_session_grant_count: int
     preserved_agent_grant_reference_count: int
     deleted_access_request_count: int
@@ -786,8 +703,6 @@ class ExternalChannelPurgeVerification(_Record):
 
     remaining_binding_count: int
     remaining_work_count: int
-    remaining_action_count: int
-    remaining_delivery_attempt_count: int
     remaining_access_request_count: int
     remaining_session_grant_count: int
 
@@ -795,11 +710,10 @@ class ExternalChannelPurgeVerification(_Record):
 class ExternalChannelAgentDecommissionCleanup(_Record):
     """Summary of direct Agent-owned External Channel state removal."""
 
-    cleanup_intent_ids: tuple[str, ...]
+    cleanup_plans: tuple[ProviderEffectPlan, ...]
     provider_state_purge_connection_ids: tuple[str, ...]
     deleted_route_count: int
     deleted_access_request_count: int
-    deleted_control_attempt_count: int
     deleted_agent_grant_count: int
     deleted_block_count: int
 
@@ -864,7 +778,7 @@ class ExternalChannelMultiRouteRemoval(_Record):
     """Committed Multi route removal result without provider execution."""
 
     impact: ExternalChannelMultiRouteImpact
-    cleanup_intent_ids: tuple[str, ...]
+    cleanup_plans: tuple[ProviderEffectPlan, ...]
 
 
 class ExternalChannelMultiConnectionDisconnect(_Record):
@@ -878,4 +792,4 @@ class ExternalChannelMultiConnectionDisconnect(_Record):
     expired_access_request_count: int
     unavailable_resource_count: int
     disconnected_binding_count: int
-    cleanup_intent_ids: tuple[str, ...]
+    cleanup_plans: tuple[ProviderEffectPlan, ...]

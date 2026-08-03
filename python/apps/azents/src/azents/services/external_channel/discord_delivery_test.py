@@ -11,12 +11,14 @@ from azents.services.external_channel.discord_delivery import (
     DiscordOutboundFile,
     discord_delivery_nonce,
 )
+from azents.services.external_channel.provider_effect import ProviderOperationKey
 
 
 @pytest.mark.asyncio
 async def test_create_message_uses_a_deterministic_nonce_and_returns_identity() -> None:
-    """A durable attempt maps to one provider nonce and canonical message key."""
+    """A live operation maps to one provider nonce and canonical message key."""
     calls: list[httpx.Request] = []
+    operation_key = ProviderOperationKey.from_seed("delivery-1")
 
     async def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
@@ -33,7 +35,7 @@ async def test_create_message_uses_a_deterministic_nonce_and_returns_identity() 
             guild_id="111",
             channel_id="333",
             content="Reply",
-            delivery_attempt_id="delivery-1",
+            operation_key=operation_key,
         )
 
     assert result.status == "delivered"
@@ -42,10 +44,10 @@ async def test_create_message_uses_a_deterministic_nonce_and_returns_identity() 
     assert calls[0].headers["Authorization"] == "Bot discord-secret"
     assert json.loads(calls[0].content) == {
         "content": "Reply",
-        "nonce": discord_delivery_nonce("delivery-1"),
+        "nonce": discord_delivery_nonce(operation_key),
         "enforce_nonce": True,
     }
-    assert len(discord_delivery_nonce("delivery-1")) == 25
+    assert len(discord_delivery_nonce(operation_key)) == 25
 
 
 @pytest.mark.asyncio
@@ -79,12 +81,13 @@ async def test_create_and_update_message_preserve_rich_embeds_and_components() -
         transport=httpx.MockTransport(handler),
     ) as http_client:
         client = DiscordDeliveryClient(http_client)
+        operation_key = ProviderOperationKey.from_seed("delivery-1")
         await client.create_message(
             bot_token="discord-secret",
             guild_id="111",
             channel_id="333",
             content="Your Azents session is ready.",
-            delivery_attempt_id="delivery-1",
+            operation_key=operation_key,
             embeds=[embed],
             components=components,
         )
@@ -370,7 +373,7 @@ async def test_delivery_maps_provider_failures_without_retry(
             guild_id="111",
             channel_id="333",
             content="Reply",
-            delivery_attempt_id="delivery-1",
+            operation_key=ProviderOperationKey.from_seed("delivery-1"),
         )
 
     assert result.status == expected_status
@@ -413,9 +416,10 @@ async def test_update_and_delete_validate_the_current_message_boundary() -> None
 
 
 @pytest.mark.asyncio
-async def test_file_message_streams_multipart_body_with_the_attempt_nonce() -> None:
-    """Files are sent as one bounded multipart request without a retained buffer."""
+async def test_file_message_streams_multipart_body_with_the_operation_nonce() -> None:
+    """Files use one live-operation nonce without retaining a request buffer."""
     calls: list[httpx.Request] = []
+    operation_key = ProviderOperationKey.from_seed("delivery-file-1")
 
     async def content() -> AsyncIterator[bytes]:
         yield b"report"
@@ -440,7 +444,7 @@ async def test_file_message_streams_multipart_body_with_the_attempt_nonce() -> N
                     content=content,
                 ),
             ),
-            delivery_attempt_id="delivery-file-1",
+            operation_key=operation_key,
         )
 
     assert result.provider_message_key == "discord:111:777"
@@ -448,7 +452,7 @@ async def test_file_message_streams_multipart_body_with_the_attempt_nonce() -> N
     assert request.headers["Content-Type"].startswith("multipart/form-data; boundary=")
     assert request.headers["Content-Length"] == str(len(request.content))
     assert b'name="payload_json"' in request.content
-    assert b'"nonce":"' + discord_delivery_nonce("delivery-file-1").encode() in (
+    assert b'"nonce":"' + discord_delivery_nonce(operation_key).encode() in (
         request.content
     )
     assert b'name="files[0]"; filename="report.txt"' in request.content

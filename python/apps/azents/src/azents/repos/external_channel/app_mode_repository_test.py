@@ -19,8 +19,6 @@ from azents.core.enums import (
     ExternalChannelConversationLocation,
     ExternalChannelConversationScopeKind,
     ExternalChannelDeliveryOperation,
-    ExternalChannelDeliveryOriginType,
-    ExternalChannelDeliveryStatus,
     ExternalChannelInteractionStatus,
     ExternalChannelInteractionType,
     ExternalChannelParticipationSettingStatus,
@@ -43,7 +41,6 @@ from azents.rdb.models.external_channel import (
     RDBExternalChannelBinding,
     RDBExternalChannelChannelDefault,
     RDBExternalChannelConnection,
-    RDBExternalChannelDeliveryAttempt,
     RDBExternalChannelInteraction,
     RDBExternalChannelParticipationSetting,
     RDBExternalChannelSetupClaim,
@@ -74,7 +71,6 @@ from .data import (
 from .lifecycle import ExternalChannelLifecycleRepository
 from .management import ExternalChannelManagementRepository
 from .repository import ExternalChannelRepository, validate_interaction_projection
-from .work import DeliverySettlement, ExternalChannelWorkRepository
 
 
 def _at(minute: int) -> datetime.datetime:
@@ -230,18 +226,6 @@ async def _cleanup_committed_workspace(
 ) -> None:
     """Remove direct-engine concurrency fixtures in restrictive FK order."""
     statements = (
-        """
-        DELETE FROM external_channel_delivery_attempts
-        WHERE binding_id IN (
-            SELECT binding.id
-            FROM external_channel_bindings AS binding
-            JOIN external_channel_agent_routes AS route
-              ON route.id = binding.route_id
-            JOIN external_channel_connections AS connection
-              ON connection.id = route.connection_id
-            WHERE connection.workspace_id = :workspace_id
-        )
-        """,
         """
         DELETE FROM external_channel_bindings
         WHERE route_id IN (
@@ -1280,154 +1264,6 @@ async def test_binding_creation_serializes_on_resource_lock(
             )
 
 
-async def test_provider_control_settlement_follows_lifecycle_lock_order(
-    rdb_engine: AsyncEngine,
-    latest_db_schema: None,
-) -> None:
-    """Session-tree purge can finish while final settlement waits on authority."""
-    del latest_db_schema
-    suffix = uuid4().hex[:8]
-    workspace_id: str | None = None
-    settlement_task: asyncio.Task[DeliverySettlement] | None = None
-    try:
-        async with AsyncSession(rdb_engine, expire_on_commit=False) as setup:
-            workspace_id = await _workspace(setup, f"settlement-lock-{suffix}")
-            agent = await _agent(setup, workspace_id, f"settlement-lock-{suffix}")
-            repository = ExternalChannelRepository()
-            connection = await repository.create_connection(
-                setup,
-                _connection_create(
-                    workspace_id,
-                    provider_app_id=f"AS{suffix}",
-                    provider_tenant_id=f"TS{suffix}",
-                ),
-            )
-            route = await repository.create_agent_route(
-                setup,
-                _route_create(
-                    connection.id,
-                    agent.id,
-                    mode=ExternalChannelAppMode.SINGLE,
-                ),
-            )
-            resource = await _resource(
-                setup,
-                repository,
-                connection_id=connection.id,
-                key=f"settlement-lock-{suffix}",
-            )
-            agent_session = await AgentSessionRepository().create(
-                setup,
-                AgentSessionCreate(
-                    workspace_id=workspace_id,
-                    agent_id=agent.id,
-                    title=None,
-                ),
-            )
-            binding = await repository.create_binding_idempotent(
-                setup,
-                ExternalChannelBindingCreate(
-                    resource_id=resource.id,
-                    route_id=route.id,
-                    agent_session_id=agent_session.id,
-                    response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
-                    disconnected_at=None,
-                    disconnect_reason=None,
-                ),
-                expected_access_request_id=None,
-            )
-            attempt = RDBExternalChannelDeliveryAttempt(
-                origin_type=ExternalChannelDeliveryOriginType.MANAGER_OPERATION,
-                origin_id="manager-operation-1",
-                operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-                request_payload={
-                    "channel_id": "C1",
-                    "thread_ts": "1.000001",
-                    "text": "Control",
-                },
-                status=ExternalChannelDeliveryStatus.PENDING,
-                channel_action_id=None,
-                binding_id=binding.id,
-                provider_message_key=None,
-                error_kind=None,
-                error_summary=None,
-                attempted_at=None,
-                completed_at=None,
-            )
-            setup.add(attempt)
-            await setup.commit()
-
-        work_repository = ExternalChannelWorkRepository()
-        lifecycle_repository = ExternalChannelLifecycleRepository()
-        async with AsyncSession(rdb_engine) as start_session:
-            assert await work_repository.start_delivery(
-                start_session,
-                delivery_attempt_id=attempt.id,
-                now=_at(1),
-            )
-            await start_session.commit()
-
-        async with AsyncSession(
-            rdb_engine,
-            expire_on_commit=False,
-        ) as lifecycle_session:
-            assert await lifecycle_session.scalar(
-                sa.select(RDBAgentSession)
-                .where(RDBAgentSession.id == agent_session.id)
-                .with_for_update()
-            )
-            assert await lifecycle_session.scalar(
-                sa.select(RDBExternalChannelBinding)
-                .where(RDBExternalChannelBinding.id == binding.id)
-                .with_for_update()
-            )
-
-            async def settle() -> DeliverySettlement:
-                async with AsyncSession(rdb_engine) as settlement_session:
-                    result = await work_repository.settle_delivery(
-                        settlement_session,
-                        delivery_attempt_id=attempt.id,
-                        status=ExternalChannelDeliveryStatus.DELIVERED,
-                        provider_message_key="slack:TS:C1:2.000001",
-                        error_kind=None,
-                        error_summary=None,
-                        now=_at(3),
-                    )
-                    await settlement_session.commit()
-                    return result
-
-            settlement_task = asyncio.create_task(settle())
-            await asyncio.sleep(0.1)
-            assert not settlement_task.done()
-            purged = await lifecycle_repository.prepare_session_tree_purge(
-                lifecycle_session,
-                session_ids=[agent_session.id],
-                now=_at(2),
-            )
-            await lifecycle_session.commit()
-            settlement = await asyncio.wait_for(settlement_task, timeout=5)
-
-        assert purged.unknown_delivery_count == 1
-        assert not settlement.accepted
-        async with AsyncSession(rdb_engine) as verification:
-            stored = await verification.get(
-                RDBExternalChannelDeliveryAttempt,
-                attempt.id,
-            )
-            assert stored is not None
-            assert stored.status is ExternalChannelDeliveryStatus.UNKNOWN
-            assert stored.error_kind == "PurgeOutcomeUnknown"
-    finally:
-        if settlement_task is not None and not settlement_task.done():
-            settlement_task.cancel()
-            await asyncio.gather(settlement_task, return_exceptions=True)
-        if workspace_id is not None:
-            await _cleanup_committed_workspace(
-                rdb_engine,
-                workspace_id=workspace_id,
-            )
-
-
 async def test_route_selection_observes_concurrent_agent_decommission(
     rdb_engine: AsyncEngine,
     latest_db_schema: None,
@@ -1598,10 +1434,10 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
     assert terminal_then_active.route_id == second_route.id
 
 
-async def test_manual_binding_disconnect_creates_one_leave_presence(
+async def test_manual_binding_disconnect_returns_one_leave_presence_plan(
     rdb_session: AsyncSession,
 ) -> None:
-    """A repeated manager disconnect retains one durable leave control."""
+    """A manager disconnect captures one leave control without durable retry."""
     workspace_id = await _workspace(rdb_session, "binding-leave-presence")
     agent = await _agent(rdb_session, workspace_id, "binding-leave-presence")
     repository = ExternalChannelRepository()
@@ -1678,24 +1514,11 @@ async def test_manual_binding_disconnect_creates_one_leave_presence(
     )
 
     assert first is not None
-    assert retry == first
+    assert retry == ()
     assert binding.disconnect_reason == "manager_disconnected"
-    attempts = list(
-        (
-            await rdb_session.scalars(
-                sa.select(RDBExternalChannelDeliveryAttempt).where(
-                    RDBExternalChannelDeliveryAttempt.origin_type
-                    == ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
-                    RDBExternalChannelDeliveryAttempt.origin_id == binding.id,
-                    RDBExternalChannelDeliveryAttempt.operation
-                    == ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-                )
-            )
-        ).all()
-    )
-    assert len(attempts) == 1
-    assert first == (attempts[0].id,)
-    assert attempts[0].request_payload == {
+    assert len(first) == 1
+    assert first[0].target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+    assert first[0].target.request_payload == {
         "control_kind": "session_presence",
         "control_version": 2,
         "presence_state": "left",
@@ -1988,7 +1811,7 @@ async def test_multi_channel_default_transition_terminalizes_only_parent_state(
     assert no_op.channel_default.id == first_default.id
     assert no_op.channel_default.route_id == first_route.id
     assert no_op.changed is False
-    assert no_op.cleanup_intent_ids == ()
+    assert no_op.cleanup_plans == ()
     assert first_parent_binding.disconnected_at is None
 
     replaced = await management.replace_multi_channel_default(
@@ -2010,7 +1833,7 @@ async def test_multi_channel_default_transition_terminalizes_only_parent_state(
     assert replaced.terminated_setup_claim_count == 1
     assert replaced.expired_interaction_count == 1
     assert replaced.disconnected_parent_binding_count == 1
-    assert len(replaced.cleanup_intent_ids) == 1
+    assert len(replaced.cleanup_plans) == 1
     first_setting_rdb = await rdb_session.get(
         RDBExternalChannelParticipationSetting,
         first_setting.id,
@@ -2143,8 +1966,11 @@ async def test_multi_channel_default_transition_terminalizes_only_parent_state(
     assert cleared.terminated_setup_claim_count == 1
     assert cleared.expired_interaction_count == 1
     assert cleared.disconnected_parent_binding_count == 1
-    assert len(cleared.cleanup_intent_ids) == 1
-    assert set(replaced.cleanup_intent_ids).isdisjoint(cleared.cleanup_intent_ids)
+    assert len(cleared.cleanup_plans) == 1
+    assert (
+        replaced.cleanup_plans[0].operation_key
+        != cleared.cleanup_plans[0].operation_key
+    )
     second_setting_rdb = await rdb_session.get(
         RDBExternalChannelParticipationSetting,
         second_setting.id,
@@ -2173,18 +1999,6 @@ async def test_multi_channel_default_transition_terminalizes_only_parent_state(
             )
         ).all()
     )
-    cleanup_attempts = list(
-        (
-            await rdb_session.scalars(
-                sa.select(RDBExternalChannelDeliveryAttempt).where(
-                    RDBExternalChannelDeliveryAttempt.origin_type
-                    == ExternalChannelDeliveryOriginType.BINDING_DISCONNECT,
-                    RDBExternalChannelDeliveryAttempt.operation
-                    == ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-                )
-            )
-        ).all()
-    )
     assert second_setting_rdb is not None
     assert (
         second_setting_rdb.status
@@ -2201,16 +2015,19 @@ async def test_multi_channel_default_transition_terminalizes_only_parent_state(
     assert thread_binding_rdb.disconnected_at is None
     assert await rdb_session.get(RDBAgentSession, second_parent_session.id) is not None
     assert active_defaults == []
-    assert {attempt.binding_id for attempt in cleanup_attempts} == {
+    assert {
+        replaced.cleanup_plans[0].target.binding_id,
+        cleared.cleanup_plans[0].target.binding_id,
+    } == {
         first_parent_binding.id,
         second_parent_binding.id,
     }
 
 
-async def test_multi_route_removal_creates_leave_presence_before_detach(
+async def test_multi_route_removal_captures_leave_presence_before_detach(
     rdb_session: AsyncSession,
 ) -> None:
-    """Route removal terminalizes participation and retains one leave control."""
+    """Route removal terminalizes participation and captures one leave control."""
     workspace_id = await _workspace(rdb_session, "route-leave-presence")
     user = await UserRepository().create(
         rdb_session,
@@ -2402,7 +2219,7 @@ async def test_multi_route_removal_creates_leave_presence_before_detach(
     assert impact.nonterminal_setup_claim_count == 1
     assert impact.active_binding_count == 1
     assert impact.connected_parent_binding_count == 1
-    assert len(removal.cleanup_intent_ids) == 1
+    assert len(removal.cleanup_plans) == 1
     persisted_route = await rdb_session.get(RDBExternalChannelAgentRoute, route.id)
     assert persisted_route is not None
     assert persisted_route.agent_id is None
@@ -2436,13 +2253,9 @@ async def test_multi_route_removal_creates_leave_presence_before_detach(
     assert persisted_claim.claim_generation == 2
     assert persisted_interaction is not None
     assert persisted_interaction.status is ExternalChannelInteractionStatus.EXPIRED
-    attempt = await rdb_session.get(
-        RDBExternalChannelDeliveryAttempt,
-        removal.cleanup_intent_ids[0],
-    )
-    assert attempt is not None
-    assert attempt.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-    assert attempt.request_payload == {
+    plan = removal.cleanup_plans[0]
+    assert plan.target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+    assert plan.target.request_payload == {
         "control_kind": "session_presence",
         "control_version": 2,
         "presence_state": "left",
@@ -2451,10 +2264,10 @@ async def test_multi_route_removal_creates_leave_presence_before_detach(
     }
 
 
-async def test_provider_uninstall_creates_one_leave_presence(
+async def test_provider_uninstall_captures_one_leave_presence(
     rdb_session: AsyncSession,
 ) -> None:
-    """A repeated provider termination retains one durable leave control."""
+    """A repeated provider termination does not recreate a leave control."""
     workspace_id = await _workspace(rdb_session, "uninstall-leave-presence")
     agent = await _agent(rdb_session, workspace_id, "uninstall-leave-presence")
     repository = ExternalChannelRepository()
@@ -2533,10 +2346,9 @@ async def test_provider_uninstall_creates_one_leave_presence(
     assert first is not None
     assert len(first) == 1
     assert repeated == ()
-    attempt = await rdb_session.get(RDBExternalChannelDeliveryAttempt, first[0])
-    assert attempt is not None
-    assert attempt.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
-    assert attempt.request_payload == {
+    plan = first[0]
+    assert plan.target.operation is ExternalChannelDeliveryOperation.CONTROL_MESSAGE
+    assert plan.target.request_payload == {
         "control_kind": "session_presence",
         "control_version": 2,
         "presence_state": "left",

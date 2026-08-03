@@ -51,8 +51,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-07-30
-spec_version: 36
+last_verified_at: 2026-08-02
+spec_version: 37
 ---
 
 # File Exchange Storage
@@ -229,8 +229,9 @@ lifetime. Object existence alone never creates Exchange publication authority.
 
 - Event store does not store file body. Event has only attachment/artifact metadata and URI reference, or FilePart `model_file_id`.
 - External Channel revisions store bounded provider metadata and opaque locators only.
-  External Channel actions and deliveries store bounded Runtime manifests and phase
-  evidence only; private provider URLs and transferred bytes are never durable.
+  A file-bearing `channel_action` keeps its bounded Runtime manifest only for the
+  current Tool execution; Session Tool call/result history retains sanitized outcomes
+  but no provider URL, transferred bytes, provider payload, or transfer-phase record.
 - Durable event, REST/WS projection, and frontend state do not store raw bytes, inline base64, data URL, or provider-specific file payload.
 - There is no implicit conversion among Attachment, Artifact, and ModelFile/FilePart. URI is storage location, not entity reference, so do not add logic extracting entity id from URI string. A `model_file_id` is single-event scoped; reusing the same source bytes later requires materializing a new ModelFile/FilePart.
 - Attachment ExchangeFile and Artifact have ordinary time-based retention/TTL lifecycle. ModelFile has context-owned lifecycle based on model-input head cursor reachability and active run pins. Archived-root durable purge may terminate any of these resources earlier after purge fencing.
@@ -268,6 +269,9 @@ lifetime. Object existence alone never creates Exchange publication authority.
 
 ## Changelog
 
+- **2026-08-02** — v37. Removed the obsolete durable External Channel
+  Action/Delivery manifest claim and documented request-local file publication with
+  sanitized ordinary Tool results.
 - **2026-07-30** — v36. Required explicit displayed-size selection and matching
   provider metadata, HTTP response declaration, and streamed body for External Channel
   ingress up to 500 MiB; Runtime delivery now waits fairly at chunk boundaries rather

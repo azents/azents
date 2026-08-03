@@ -4,6 +4,7 @@ import asyncio
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
 import discord
@@ -42,9 +43,15 @@ from azents.services.external_channel.ingestion import (
     ExternalChannelIngestionReason,
     ExternalChannelIngressAuthority,
 )
+from azents.services.external_channel.provider_control import (
+    ExternalChannelProviderControlService,
+    get_external_channel_provider_control_service,
+)
+from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.external_channel.transport_ingestion import (
     ExternalChannelTransportIngestionService,
 )
+from azents.testing.external_channel import make_provider_effect_plan
 
 
 class _SessionManager:
@@ -62,8 +69,14 @@ class _SessionManager:
 class _Repository:
     """Capture lease-fenced Discord admission and lifecycle calls."""
 
-    def __init__(self, admission: object | None = None) -> None:
+    def __init__(
+        self,
+        admission: object | None = None,
+        *,
+        control_plans: tuple[ProviderEffectPlan, ...] = (),
+    ) -> None:
         self.admission = admission
+        self.control_plans = control_plans
         self.admission_calls: list[dict[str, object]] = []
         self.reconnect_calls: list[dict[str, object]] = []
         self.gap_calls: list[dict[str, object]] = []
@@ -88,8 +101,8 @@ class _Repository:
                 else ExternalChannelIngestionReason.HISTORY_UNAVAILABLE
             ),
             mailbox_item_id="batch-1" if self.admission is not None else None,
-            control_delivery_attempt_id=None,
-            connection_id=None,
+            control_plans=self.control_plans,
+            connection_id="connection-1" if self.control_plans else None,
         )
 
     async def mark_discord_gateway_reconnect_required(
@@ -146,14 +159,14 @@ class _RetryThenAcceptRepository(_Repository):
                 kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
                 reason=ExternalChannelIngestionReason.HISTORY_UNAVAILABLE,
                 mailbox_item_id=None,
-                control_delivery_attempt_id=None,
+                control_plans=(),
                 connection_id=None,
             )
         return ExternalChannelIngestionOutcome(
             kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
             reason=ExternalChannelIngestionReason.ACCEPTED,
             mailbox_item_id="batch-1",
-            control_delivery_attempt_id=None,
+            control_plans=(),
             connection_id=None,
         )
 
@@ -170,7 +183,7 @@ class _StaleAuthorityRepository(_Repository):
             kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
             reason=ExternalChannelIngestionReason.INGRESS_AUTHORITY_STALE,
             mailbox_item_id=None,
-            control_delivery_attempt_id=None,
+            control_plans=(),
             connection_id=None,
         )
 
@@ -300,6 +313,7 @@ def _service(
     sessions: _SessionManager,
     gateway_client: object | None = None,
     credentials_codec: object | None = None,
+    provider_control: object | None = None,
     config: Config | None = None,
 ) -> DiscordGatewayManagerService:
     return DiscordGatewayManagerService(
@@ -308,7 +322,14 @@ def _service(
         credentials_codec=(
             credentials_codec if credentials_codec is not None else MagicMock()
         ),
-        transport_ingestion_service=repository,  # type: ignore[arg-type]
+        transport_ingestion_service=cast(
+            ExternalChannelTransportIngestionService,
+            repository,
+        ),
+        provider_control=cast(
+            ExternalChannelProviderControlService,
+            provider_control if provider_control is not None else MagicMock(),
+        ),
         manager_id="manager-1",
         gateway_client=(gateway_client if gateway_client is not None else MagicMock()),
         config=config,
@@ -334,6 +355,7 @@ async def test_gateway_manager_dependency_graph_is_resolvable() -> None:
         ExternalChannelRepository: _mock_dependency,
         get_external_channel_credentials_codec: _mock_dependency,
         ExternalChannelTransportIngestionService: _mock_dependency,
+        get_external_channel_provider_control_service: _mock_dependency,
     }
     async with Container(dependency_overrides=overrides) as container:
         service = await container.solve(DiscordGatewayManagerService)
@@ -369,6 +391,48 @@ async def test_admits_typed_event_under_current_lease() -> None:
     assert create.connection_id == "connection-1"
     assert create.provider_event_id == "discord:discord_message_create:300:200:100"
     sessions.session.commit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_gateway_schedules_every_control_without_waiting_for_completion() -> None:
+    """Gateway admission settles while every committed control runs in background."""
+    plans = (
+        make_provider_effect_plan("gateway-presence"),
+        make_provider_effect_plan("gateway-progress"),
+    )
+    repository = _Repository(admission=object(), control_plans=plans)
+    release = asyncio.Event()
+
+    async def attempt(_plan: object) -> None:
+        await release.wait()
+
+    provider_control = MagicMock()
+    provider_control.attempt = AsyncMock(side_effect=attempt)
+    service = _service(
+        repository=repository,
+        sessions=_SessionManager(),
+        provider_control=provider_control,
+    )
+
+    await service._admit_gateway_event(  # pyright: ignore[reportPrivateUsage]
+        connection_id="connection-1",
+        lease=_lease(),
+        provider_app_id="app-1",
+        target_guild_id="300",
+        connected_bot_user_id="900",
+        configuration_generation=2,
+        event=_event(),
+    )
+    await asyncio.sleep(0)
+
+    assert [call.args[0] for call in provider_control.attempt.await_args_list] == list(
+        plans
+    )
+    assert len(service.control_tasks) == 2
+    release.set()
+    await asyncio.gather(*tuple(service.control_tasks))
+    await asyncio.sleep(0)
+    assert service.control_tasks == set()
 
 
 @pytest.mark.asyncio

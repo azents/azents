@@ -24,7 +24,6 @@ from azentspublicclient.models.external_channel_conversation_location import Ext
 from azentspublicclient.models.external_channel_provider import ExternalChannelProvider
 from azentspublicclient.models.external_channel_resource_type import ExternalChannelResourceType
 from azentspublicclient.models.external_channel_response_mode import ExternalChannelResponseMode
-from azentspublicclient.models.managed_delivery import ManagedDelivery
 from azentspublicclient.models.managed_work import ManagedWork
 from typing import Optional, Set
 from typing_extensions import Self
@@ -45,9 +44,8 @@ class ManagedBinding(BaseModel):
     disconnect_reason: Optional[StrictStr]
     latest_activity_at: Optional[datetime]
     work: Optional[ManagedWork]
-    deliveries: List[ManagedDelivery]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "agent_session_id", "provider", "response_mode", "resource_type", "conversation_location", "resource_label", "connected_at", "disconnected_at", "disconnect_reason", "latest_activity_at", "work", "deliveries"]
+    __properties: ClassVar[List[str]] = ["id", "agent_session_id", "provider", "response_mode", "resource_type", "conversation_location", "resource_label", "connected_at", "disconnected_at", "disconnect_reason", "latest_activity_at", "work"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -93,13 +91,6 @@ class ManagedBinding(BaseModel):
         # override the default output from pydantic by calling `to_dict()` of work
         if self.work:
             _dict['work'] = self.work.to_dict()
-        # override the default output from pydantic by calling `to_dict()` of each item in deliveries (list)
-        _items = []
-        if self.deliveries:
-            for _item_deliveries in self.deliveries:
-                if _item_deliveries:
-                    _items.append(_item_deliveries.to_dict())
-            _dict['deliveries'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -148,8 +139,7 @@ class ManagedBinding(BaseModel):
             "disconnected_at": obj.get("disconnected_at"),
             "disconnect_reason": obj.get("disconnect_reason"),
             "latest_activity_at": obj.get("latest_activity_at"),
-            "work": ManagedWork.from_dict(obj["work"]) if obj.get("work") is not None else None,
-            "deliveries": [ManagedDelivery.from_dict(_item) for _item in obj["deliveries"]] if obj.get("deliveries") is not None else None
+            "work": ManagedWork.from_dict(obj["work"]) if obj.get("work") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

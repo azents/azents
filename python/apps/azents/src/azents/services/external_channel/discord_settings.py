@@ -33,6 +33,7 @@ from azents.services.external_channel.participation import (
     ExternalChannelParticipationService,
     ExternalChannelParticipationSettings,
 )
+from azents.services.external_channel.provider_effect import ProviderEffectPlan
 
 
 @dataclass(frozen=True)
@@ -40,7 +41,7 @@ class DiscordSettingsResponse:
     """One immediate Discord response and independent provider cleanup intents."""
 
     response: dict[str, object]
-    cleanup_delivery_ids: tuple[str, ...]
+    cleanup_plans: tuple[ProviderEffectPlan, ...]
 
 
 @dataclass(frozen=True)
@@ -84,7 +85,7 @@ class DiscordSettingsResponseService:
         except ExternalChannelParticipationError as error:
             return DiscordSettingsResponse(
                 response=_notice_response(str(error)),
-                cleanup_delivery_ids=(),
+                cleanup_plans=(),
             )
         return DiscordSettingsResponse(
             response=_settings_response(
@@ -92,7 +93,7 @@ class DiscordSettingsResponseService:
                 origin_interaction_id=origin_interaction_id,
                 secret=self.config.auth.jwt.secret_key,
             ),
-            cleanup_delivery_ids=(),
+            cleanup_plans=(),
         )
 
     async def component_response(
@@ -138,7 +139,7 @@ class DiscordSettingsResponseService:
                         origin_interaction_id=scope.origin_interaction_id,
                         secret=self.config.auth.jwt.secret_key,
                     ),
-                    cleanup_delivery_ids=(),
+                    cleanup_plans=(),
                 )
             if scope.action in {
                 "parent_channel",
@@ -163,7 +164,7 @@ class DiscordSettingsResponseService:
         except ExternalChannelParticipationError as error:
             return DiscordSettingsResponse(
                 response=_notice_response(str(error)),
-                cleanup_delivery_ids=(),
+                cleanup_plans=(),
             )
 
     async def _binding_open_response(
@@ -188,7 +189,7 @@ class DiscordSettingsResponseService:
                 origin_interaction_id=interaction_id,
                 secret=self.config.auth.jwt.secret_key,
             ),
-            cleanup_delivery_ids=(),
+            cleanup_plans=(),
         )
 
     async def _select_setup_location(
@@ -213,7 +214,7 @@ class DiscordSettingsResponseService:
             raise ExternalChannelParticipationError(
                 "External Channel setup changed before submission."
             )
-        await self.participation_service.select_location(
+        selection = await self.participation_service.select_location(
             setup_claim_id=claim.id,
             expected_claim_generation=claim.claim_generation,
             expected_source_revision=claim.source_revision,
@@ -225,7 +226,11 @@ class DiscordSettingsResponseService:
         committed = await self._resolve(context)
         return DiscordSettingsResponse(
             response=_confirmation_response(committed),
-            cleanup_delivery_ids=(),
+            cleanup_plans=(
+                ()
+                if selection.replay_outcome is None
+                else selection.replay_outcome.control_plans
+            ),
         )
 
     async def _mutate_parent(
@@ -264,7 +269,7 @@ class DiscordSettingsResponseService:
         )
         return DiscordSettingsResponse(
             response=_confirmation_response(mutation.settings),
-            cleanup_delivery_ids=mutation.cleanup_delivery_ids,
+            cleanup_plans=mutation.cleanup_plans,
         )
 
     async def _mutate_thread(
@@ -304,7 +309,7 @@ class DiscordSettingsResponseService:
         )
         return DiscordSettingsResponse(
             response=_confirmation_response(mutation.settings),
-            cleanup_delivery_ids=mutation.cleanup_delivery_ids,
+            cleanup_plans=mutation.cleanup_plans,
         )
 
     async def _resolve(

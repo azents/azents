@@ -58,6 +58,7 @@ from azents.services.external_channel.participation import (
 from azents.services.external_channel.provider_control import (
     ExternalChannelProviderControlService,
 )
+from azents.services.external_channel.provider_effect import ProviderEffectPlan
 from azents.services.external_channel.selector import (
     ExternalChannelSelectorCandidate,
     ExternalChannelSelectorCatalog,
@@ -73,6 +74,7 @@ from azents.services.external_channel.slack_events import (
     SlackInteractionView,
     SlackInteractionViewResult,
 )
+from azents.testing.external_channel import make_provider_effect_plan
 
 _VALID_EXPIRY = datetime.datetime.max.replace(tzinfo=datetime.UTC)
 _EXPIRED_AT = datetime.datetime.min.replace(tzinfo=datetime.UTC)
@@ -251,10 +253,10 @@ class _Slack:
 
 class _ProviderControl:
     def __init__(self) -> None:
-        self.calls: list[str] = []
+        self.calls: list[ProviderEffectPlan] = []
 
-    async def attempt_delivery(self, delivery_attempt_id: str) -> None:
-        self.calls.append(delivery_attempt_id)
+    async def attempt(self, plan: ProviderEffectPlan) -> None:
+        self.calls.append(plan)
 
 
 class _Replay:
@@ -266,7 +268,7 @@ class _Replay:
             kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
             reason=ExternalChannelIngestionReason.ACCEPTED,
             mailbox_item_id=None,
-            control_delivery_attempt_id=None,
+            control_plans=(),
             connection_id=None,
         )
         self.calls: list[dict[str, object]] = []
@@ -799,12 +801,13 @@ async def test_typed_submission_replays_and_delivers_committed_control() -> None
         offset=0,
     )
     provider_control = _ProviderControl()
+    plan = make_provider_effect_plan("selector-replay")
     replay = _Replay(
         ExternalChannelIngestionOutcome(
             kind=ExternalChannelIngestionOutcomeKind.AWAITING_ACCESS,
             reason=ExternalChannelIngestionReason.ACCESS_REQUIRED,
             mailbox_item_id=None,
-            control_delivery_attempt_id="delivery-1",
+            control_plans=(plan,),
             connection_id="connection-1",
         )
     )
@@ -831,7 +834,7 @@ async def test_typed_submission_replays_and_delivers_committed_control() -> None
 
     assert len(replay.calls) == 1
     assert replay.calls[0]["selector_interaction_id"] == "admission-1"
-    assert provider_control.calls == ["delivery-1"]
+    assert provider_control.calls == [plan]
 
 
 @pytest.mark.asyncio

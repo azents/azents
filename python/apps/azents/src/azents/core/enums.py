@@ -933,20 +933,8 @@ class ExternalChannelActionMode(enum.StrEnum):
     CONTINUE = "continue"
 
 
-class ExternalChannelDeliveryOriginType(enum.StrEnum):
-    """Domain origin that committed a provider delivery intent."""
-
-    CHANNEL_ACTION = "channel_action"
-    ACCESS_REQUEST = "access_request"
-    SETUP_CLAIM = "setup_claim"
-    BINDING_DISCONNECT = "binding_disconnect"
-    CONNECTION_DISCONNECT = "connection_disconnect"
-    BINDING_SETTINGS_AVAILABLE = "binding_settings_available"
-    MANAGER_OPERATION = "manager_operation"
-
-
 class ExternalChannelDeliveryOperation(enum.StrEnum):
-    """External provider side effect requested by a delivery intent."""
+    """External provider side effect requested by a direct effect."""
 
     REPLY = "reply"
     PROGRESS_CREATE = "progress_create"
@@ -955,21 +943,9 @@ class ExternalChannelDeliveryOperation(enum.StrEnum):
     CONTROL_MESSAGE = "control_message"
 
 
-class ExternalChannelDeliveryStatus(enum.StrEnum):
-    """Outcome state of one external provider delivery attempt."""
-
-    PENDING = "pending"
-    ATTEMPTING = "attempting"
-    DELIVERED = "delivered"
-    FAILED = "failed"
-    UNKNOWN = "unknown"
-    NOT_ATTEMPTED = "not_attempted"
-
-
 class ExternalChannelWorkProjectionStatus(enum.StrEnum):
     """Current provider projection state for one Channel Work part."""
 
-    PENDING = "pending"
     PRESENT = "present"
     FAILED = "failed"
     UNKNOWN = "unknown"

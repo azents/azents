@@ -47,7 +47,7 @@ from azents.engine.tools.runtime_instruction_context import (
     RuntimeInstructionContextStore,
 )
 from azents.repos.external_channel.work_data import (
-    ChannelActionCommit,
+    ChannelActionResult,
     ChannelWorkSnapshot,
     ChannelWorkTask,
 )
@@ -335,18 +335,6 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
         context: SessionIdleHookContext,
     ) -> SessionIdleResult | None:
         del context
-        runtime_context = (
-            None
-            if self.runtime_context_store is None
-            else self.runtime_context_store.get()
-        )
-        await self.service.drain_runtime_provider_settlements(
-            provider_delivery_capability=(
-                None
-                if runtime_context is None
-                else runtime_context.provider_delivery_capability
-            ),
-        )
         works = await self.service.snapshot(
             session_id=self.session_id,
             agent_id=self.agent_id,
@@ -393,22 +381,6 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                 ]
             )
             try:
-                existing = await self.service.find_existing_action(
-                    session_id=self.session_id,
-                    client_tool_call_id=execution.call_id,
-                )
-                if existing is not None:
-                    result, request_payload = existing
-                    _validate_existing_tool_request(
-                        request_payload,
-                        value=value,
-                        tasks=tasks,
-                    )
-                    return json.dumps(
-                        _result_payload(result),
-                        ensure_ascii=False,
-                        sort_keys=True,
-                    )
                 runtime_context = (
                     None
                     if self.runtime_context_store is None
@@ -587,64 +559,25 @@ def render_channel_work_compaction_snapshot(
     return "\n".join(lines).rstrip()
 
 
-def _result_payload(result: ChannelActionCommit) -> dict[str, object]:
+def _result_payload(result: ChannelActionResult) -> dict[str, object]:
     return {
-        "action_id": result.action_id,
         "binding": result.binding_id,
         "state": result.work_status.value,
         "state_revision": result.state_revision,
-        "deliveries": [
+        "outcomes": [
             {
-                "operation": delivery.operation.value,
-                "status": delivery.status.value,
-                **(
-                    {"provider_message_key": delivery.provider_message_key}
-                    if delivery.provider_message_key is not None
-                    else {}
-                ),
+                "operation": outcome.operation.value,
+                "part": outcome.part,
+                "status": outcome.status,
                 **(
                     {
-                        "reason": delivery.error_kind,
-                        "detail": delivery.error_summary,
+                        "reason": outcome.reason,
+                        "detail": outcome.detail,
                     }
-                    if delivery.error_kind is not None
+                    if outcome.reason is not None
                     else {}
                 ),
             }
-            for delivery in result.deliveries
+            for outcome in result.outcomes
         ],
     }
-
-
-def _validate_existing_tool_request(
-    request_payload: dict[str, object],
-    *,
-    value: ChannelActionInput,
-    tasks: list[ChannelWorkTask] | None,
-) -> None:
-    expected: dict[str, object] = {
-        "binding": value.binding,
-        "mode": value.mode,
-        "message": value.message,
-    }
-    if value.mode == "continue":
-        if value.title is not None:
-            expected["title"] = value.title
-        if tasks is not None:
-            expected["todo_update"] = [task.model_dump(mode="json") for task in tasks]
-    expected = {key: item for key, item in expected.items() if item is not None}
-    persisted_without_files = {
-        key: item for key, item in request_payload.items() if key != "files"
-    }
-    persisted_files = request_payload.get("files")
-    if value.files is None:
-        files_match = persisted_files is None
-    elif isinstance(persisted_files, list):
-        files_match = [
-            item.get("path") if isinstance(item, dict) else None
-            for item in persisted_files
-        ] == value.files
-    else:
-        files_match = False
-    if persisted_without_files != expected or not files_match:
-        raise ValueError("Client tool call identity conflicts with an action.")

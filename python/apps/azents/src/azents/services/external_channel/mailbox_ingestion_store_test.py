@@ -2,6 +2,8 @@
 
 import dataclasses
 import datetime
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
@@ -14,7 +16,6 @@ from azents.core.enums import (
     ExternalChannelAppMode,
     ExternalChannelConnectionStatus,
     ExternalChannelConversationScopeKind,
-    ExternalChannelDeliveryStatus,
     ExternalChannelIngressProfile,
     ExternalChannelMessageLifecycle,
     ExternalChannelMessageRevisionKind,
@@ -37,7 +38,6 @@ from azents.repos.external_channel.data import (
     ExternalChannelBinding,
     ExternalChannelConnection,
     ExternalChannelConversationPosition,
-    ExternalChannelDeliveryAttempt,
     ExternalChannelResource,
     ExternalChannelSetupClaim,
 )
@@ -49,7 +49,9 @@ from azents.services.external_channel.conversation import (
 )
 from azents.services.external_channel.ingestion import (
     ExternalChannelCanonicalHistoryMessage,
+    ExternalChannelIngestionAcceptance,
     ExternalChannelIngestionOperation,
+    ExternalChannelIngestionPreparation,
     ExternalChannelIngestionReason,
     ExternalChannelIngestionRequest,
     ExternalChannelIngressAuthority,
@@ -66,6 +68,7 @@ from azents.services.external_channel.participation_state import (
     projection_with_setup_source,
     setup_source_from_projection,
 )
+from azents.testing.external_channel import make_provider_effect_plan
 
 
 def test_session_url_uses_canonical_workspace_route() -> None:
@@ -207,13 +210,14 @@ def test_response_mode_accepts_ordinary_message_for_all_messages() -> None:
 def _store(
     *,
     repository: object,
+    work_repository: object | None = None,
     agent_repository: object | None = None,
     root_creation_service: object | None = None,
 ) -> ExternalChannelMailboxIngestionStore:
     return ExternalChannelMailboxIngestionStore(
         session_manager=MagicMock(),
         repository=cast(ExternalChannelRepository, repository),
-        work_repository=MagicMock(),
+        work_repository=work_repository or MagicMock(),
         agent_repository=agent_repository or MagicMock(),
         agent_session_repository=MagicMock(),
         root_agent_session_creation_service=root_creation_service or MagicMock(),
@@ -284,16 +288,169 @@ def _history(
     )
 
 
+async def _accepted_control_plan_case(
+    *,
+    existing_binding: bool,
+) -> SimpleNamespace:
+    session = cast(
+        AsyncSession,
+        SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock()),
+    )
+
+    @asynccontextmanager
+    async def session_context() -> AsyncIterator[AsyncSession]:
+        yield session
+
+    repository = MagicMock()
+    work_repository = MagicMock()
+    mailbox_service = MagicMock()
+    mailbox_service.enqueue = AsyncMock(
+        return_value=SimpleNamespace(
+            created=True,
+            mailbox_item=SimpleNamespace(id="mailbox-1"),
+        )
+    )
+    store = _store(repository=repository, work_repository=work_repository)
+    store.session_manager = MagicMock(return_value=session_context())
+    store.mailbox_service = mailbox_service
+    store.agent_session_repository = MagicMock()
+    store.agent_session_repository.mark_running_for_input_wakeup = AsyncMock()
+
+    request = _slack_request()
+    connection = ExternalChannelConnection.model_construct(id="connection-1")
+    position = ExternalChannelConversationPosition.model_construct(
+        id="position-1",
+        connection_id=connection.id,
+        read_through_position=None,
+    )
+    route = ExternalChannelAgentRoute.model_construct(
+        id="route-1",
+        agent_id="agent-1",
+    )
+    resource = ExternalChannelResource.model_construct(
+        id="resource-1",
+        connection_id=connection.id,
+        resource_type=ExternalChannelResourceType.THREAD,
+        provider_resource_key=request.locator.provider_resource_key,
+        labels={
+            "provider": "slack",
+            "tenant_id": "tenant-1",
+            "channel_id": "channel-1",
+            "thread_ts": "thread-1",
+        },
+        status=ExternalChannelResourceStatus.ACTIVE,
+    )
+    binding = ExternalChannelBinding.model_construct(
+        id="binding-1",
+        resource_id=resource.id,
+        route_id=route.id,
+        agent_session_id="session-1",
+        response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+        disconnected_at=None,
+    )
+    conversation = _Conversation(
+        source_resource=resource,
+        resource=resource,
+        route=route,
+        setting=None,
+        binding=binding if existing_binding else None,
+        principal_id="principal-1",
+        selector=None,
+        setup_claim=None,
+        setup_required=False,
+    )
+    work = SimpleNamespace(id="work-1")
+    presence_plan = make_provider_effect_plan("joined-presence")
+    settings_plan = make_provider_effect_plan("binding-settings")
+    progress_plan = make_provider_effect_plan("initial-progress")
+    presence_intent = AsyncMock(return_value=presence_plan)
+    settings_intent = AsyncMock(return_value=settings_plan)
+
+    store._lock_authority = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=connection
+    )
+    repository.lock_conversation_position = AsyncMock(return_value=position)
+    repository.get_resource_by_provider_key = AsyncMock(return_value=resource)
+    store._replay_source_matches = MagicMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=True
+    )
+    store._resolve_conversation = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=conversation
+    )
+    repository.get_active_block = AsyncMock(return_value=None)
+    repository.get_active_access_grant = AsyncMock(return_value=object())
+    store._create_binding = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=SimpleNamespace(binding=binding, session_created=True)
+    )
+    repository.ensure_active_work = AsyncMock(return_value=work)
+    store._create_session_presence_intent = (  # pyright: ignore[reportPrivateUsage]
+        presence_intent
+    )
+    store._create_binding_settings_on_demand_intent = (  # pyright: ignore[reportPrivateUsage]
+        settings_intent
+    )
+    store._create_initial_progress_intent = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=progress_plan
+    )
+    repository.advance_conversation_position_if_current = AsyncMock(return_value=True)
+    store._initialize_thread_position = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+    )
+    store._complete_setup_replay = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+    )
+
+    acceptance: ExternalChannelIngestionAcceptance = await store.accept(
+        request=request,
+        preparation=ExternalChannelIngestionPreparation(
+            position_id=position.id,
+            exclusive_start_position=None,
+            immediate_outcome=None,
+            wake_mailbox_item_id=None,
+            wake_session_id=None,
+            priority_request=None,
+        ),
+        history=_history(),
+    )
+    return SimpleNamespace(
+        acceptance=acceptance,
+        presence_intent=presence_intent,
+        settings_intent=settings_intent,
+        presence_plan=presence_plan,
+        settings_plan=settings_plan,
+        progress_plan=progress_plan,
+    )
+
+
+async def test_new_binding_admission_includes_joined_presence() -> None:
+    """A new Binding admission returns joined presence with initial progress."""
+    case = await _accepted_control_plan_case(existing_binding=False)
+
+    assert case.acceptance.control_plans == (
+        case.presence_plan,
+        case.progress_plan,
+    )
+    case.presence_intent.assert_awaited_once()
+    case.settings_intent.assert_not_awaited()
+
+
+async def test_existing_binding_admission_excludes_joined_presence() -> None:
+    """An existing Binding mention returns settings and progress without joined."""
+    case = await _accepted_control_plan_case(existing_binding=True)
+
+    assert case.acceptance.control_plans == (
+        case.settings_plan,
+        case.progress_plan,
+    )
+    case.presence_intent.assert_not_awaited()
+    case.settings_intent.assert_awaited_once()
+
+
 async def test_session_presence_intent_replaces_open_session_control() -> None:
     """A new binding commits provider-neutral joined presence instead of link copy."""
     repository = MagicMock()
-    repository.create_delivery_attempt_idempotent = AsyncMock(
-        return_value=ExternalChannelDeliveryAttempt.model_construct(
-            id="delivery-1",
-            status=ExternalChannelDeliveryStatus.PENDING,
-        )
-    )
-    store = _store(repository=repository)
+    work_repository = MagicMock()
+    plan = make_provider_effect_plan("joined-presence")
+    work_repository.prepare_direct_control = AsyncMock(return_value=plan)
+    store = _store(repository=repository, work_repository=work_repository)
     connection = ExternalChannelConnection.model_construct(
         id="connection-1",
         workspace_id="workspace-1",
@@ -332,15 +489,15 @@ async def test_session_presence_intent_replaces_open_session_control() -> None:
         disconnected_at=None,
     )
 
-    delivery_id = await store._create_session_presence_intent(  # pyright: ignore[reportPrivateUsage]
+    result = await store._create_session_presence_intent(  # pyright: ignore[reportPrivateUsage]
         cast(AsyncSession, MagicMock()),
         resource=resource,
         binding=binding,
     )
 
-    assert delivery_id == "delivery-1"
-    create = repository.create_delivery_attempt_idempotent.await_args.args[1]
-    assert create.request_payload == {
+    assert result == plan
+    call = work_repository.prepare_direct_control.await_args.kwargs
+    assert call["request_payload"] == {
         "control_kind": "session_presence",
         "control_version": 2,
         "presence_state": "joined",
@@ -353,15 +510,13 @@ async def test_session_presence_intent_replaces_open_session_control() -> None:
 async def test_existing_binding_settings_intent_is_on_demand_and_versioned() -> None:
     """The next eligible mention creates one non-rollout settings entry point."""
     repository = MagicMock()
-    repository.create_delivery_attempt_idempotent = AsyncMock(
-        return_value=ExternalChannelDeliveryAttempt.model_construct(
-            id="settings-delivery-1",
-            status=ExternalChannelDeliveryStatus.PENDING,
-        )
-    )
-    store = _store(repository=repository)
+    work_repository = MagicMock()
+    plan = make_provider_effect_plan("binding-settings")
+    work_repository.prepare_direct_control = AsyncMock(return_value=plan)
+    store = _store(repository=repository, work_repository=work_repository)
     resource = ExternalChannelResource.model_construct(
         id="resource-1",
+        connection_id="connection-1",
         labels={
             "provider": "slack",
             "tenant_id": "tenant-1",
@@ -372,21 +527,19 @@ async def test_existing_binding_settings_intent_is_on_demand_and_versioned() -> 
     binding = ExternalChannelBinding.model_construct(
         id="binding-1",
         resource_id=resource.id,
+        route_id="route-1",
     )
 
-    delivery_id = await store._create_binding_settings_on_demand_intent(  # pyright: ignore[reportPrivateUsage]
+    result = await store._create_binding_settings_on_demand_intent(  # pyright: ignore[reportPrivateUsage]
         cast(AsyncSession, MagicMock()),
         resource=resource,
         binding=binding,
     )
 
-    assert delivery_id == "settings-delivery-1"
-    create = repository.create_delivery_attempt_idempotent.await_args.args[1]
-    assert create.origin_type.value == "binding_settings_available"
-    assert create.origin_id == "binding-1"
-    assert create.binding_id == "binding-1"
-    assert create.part_ordinal == 3
-    assert create.request_payload == {
+    assert result == plan
+    call = work_repository.prepare_direct_control.await_args.kwargs
+    assert call["binding_id"] == "binding-1"
+    assert call["request_payload"] == {
         "control_kind": "binding_settings_on_demand",
         "control_version": 3,
         "tenant_id": "tenant-1",
@@ -441,14 +594,10 @@ async def test_setup_required_commits_claim_without_conversation_side_effects() 
     repository.get_active_block = AsyncMock(return_value=None)
     repository.get_active_access_grant = AsyncMock(return_value=object())
     repository.create_binding_idempotent = AsyncMock()
-    repository.create_delivery_attempt_idempotent = AsyncMock(
-        return_value=ExternalChannelDeliveryAttempt.model_construct(
-            id="setup-delivery-1",
-            status=ExternalChannelDeliveryStatus.PENDING,
-        )
-    )
     work_repository = MagicMock()
     work_repository.ensure_active_work = AsyncMock()
+    plan = make_provider_effect_plan("setup-required")
+    work_repository.prepare_direct_control = AsyncMock(return_value=plan)
     root_creation_service = MagicMock()
     root_creation_service.create_root_session = AsyncMock()
     mailbox_service = MagicMock()
@@ -457,9 +606,9 @@ async def test_setup_required_commits_claim_without_conversation_side_effects() 
     agent_session_repository.mark_running_for_input_wakeup = AsyncMock()
     store = _store(
         repository=repository,
+        work_repository=work_repository,
         root_creation_service=root_creation_service,
     )
-    store.work_repository = work_repository
     store.mailbox_service = mailbox_service
     store.agent_session_repository = agent_session_repository
     route = ExternalChannelAgentRoute.model_construct(
@@ -516,13 +665,11 @@ async def test_setup_required_commits_claim_without_conversation_side_effects() 
     assert acceptance.reason is ExternalChannelIngestionReason.SETUP_REQUIRED
     assert acceptance.mailbox_item_id is None
     assert acceptance.session_id is None
-    assert acceptance.control_delivery_attempt_id == "setup-delivery-1"
+    assert acceptance.control_plans == (plan,)
     assert acceptance.connection_id == "connection-1"
-    create = repository.create_delivery_attempt_idempotent.await_args.args[1]
-    assert create.origin_type.value == "setup_claim"
-    assert create.origin_id == claim.id
-    assert create.part_ordinal == claim.source_revision
-    assert create.request_payload == {
+    call = work_repository.prepare_direct_control.await_args.kwargs
+    assert call["operation_seed"] == "setup:claim-1:1:1"
+    assert call["request_payload"] == {
         "control_kind": "setup_required",
         "control_version": 2,
         "setup_claim_id": "claim-1",

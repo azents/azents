@@ -3,24 +3,55 @@
 import datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
 from typing import cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from azents.core.enums import (
+    ExternalChannelAppMode,
+    ExternalChannelDeliveryOperation,
+    ExternalChannelProvider,
+)
 from azents.rdb.session import SessionManager
 from azents.repos.external_channel.repository import ExternalChannelRepository
-from azents.repos.external_channel.work_data import ChannelDeliveryTarget
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
 )
 from azents.services.external_channel.connection_revocation import (
     ExternalChannelConnectionRevocationService,
 )
+from azents.services.external_channel.provider_effect import (
+    ProviderEffectPlan,
+    ProviderOperationKey,
+    ProviderTarget,
+)
 from azents.services.external_channel.slack_events import SlackConnectionRevocation
 
 _NOW = datetime.datetime(2026, 7, 29, 1, tzinfo=datetime.UTC)
+
+
+def _plan() -> ProviderEffectPlan:
+    return ProviderEffectPlan(
+        target=ProviderTarget(
+            operation=ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            binding_id="binding-1",
+            resource_id="resource-1",
+            connection_id="connection-1",
+            provider=ExternalChannelProvider.SLACK,
+            app_mode=ExternalChannelAppMode.SINGLE,
+            encrypted_credentials="encrypted",
+            provider_tenant_id="tenant-1",
+            capabilities=None,
+            workspace_handle="workspace",
+            agent_id="agent-1",
+            agent_session_id="session-1",
+            agent_name="Agent",
+            agent_avatar=None,
+            request_payload={"control_kind": "session_presence"},
+        ),
+        operation_key=ProviderOperationKey.from_seed("connection-revocation"),
+    )
 
 
 class _Session:
@@ -45,9 +76,9 @@ class _Repository:
         self,
         _session: AsyncSession,
         **kwargs: object,
-    ) -> tuple[str, ...]:
+    ) -> tuple[ProviderEffectPlan, ...]:
         self.terminated.append(kwargs)
-        return ("delivery-1",)
+        return (_plan(),)
 
     async def purge_disconnected_connection_provider_state(
         self,
@@ -73,25 +104,14 @@ class _ActionService:
 
     def __init__(self, session: _Session) -> None:
         self.session = session
-        self.attempted: list[ChannelDeliveryTarget] = []
+        self.attempted: list[ProviderEffectPlan] = []
 
-    async def prepare_delivery_in_session(
+    async def execute_terminal_control(
         self,
-        _session: AsyncSession,
-        delivery_attempt_id: str,
-    ) -> ChannelDeliveryTarget:
-        assert delivery_attempt_id == "delivery-1"
-        return cast(
-            ChannelDeliveryTarget,
-            SimpleNamespace(delivery_attempt_id=delivery_attempt_id),
-        )
-
-    async def attempt_captured_terminal_delivery(
-        self,
-        target: ChannelDeliveryTarget,
+        plan: ProviderEffectPlan,
     ) -> None:
         assert self.session.committed
-        self.attempted.append(target)
+        self.attempted.append(plan)
 
 
 def _service() -> tuple[

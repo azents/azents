@@ -59,7 +59,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-08-03
-spec_version: 41
+spec_version: 42
 ---
 
 # External Channel
@@ -84,7 +84,8 @@ contain multiple independent bindings.
 - Connection and route records are Workspace/Agent administration state.
 - Provider resources, principals, conversation positions, access requests, and
   selector interactions retain only routing, authorization, and replay identity.
-- Bindings, Channel Work, channel actions, and delivery attempts are Session lifecycle resources.
+- Bindings, Channel Work, and Work-owned provider projection parts are Session
+  lifecycle resources.
 - Credentials are encrypted at rest and decrypted only inside provider adapters. Public APIs, generated clients, prompts, events, logs, UI state, and test evidence expose only redacted credential status.
 - Provider history is the inbound content authority. One accepted history range becomes
   one canonical mailbox item and then contiguous Session events with provider, resource,
@@ -119,7 +120,7 @@ contain multiple independent bindings.
 | Binding | Persistent link from one route/resource to one AgentSession with one required concrete `mention_only` or `all_messages` response mode. `disconnected_at IS NULL` identifies the current connected relationship; a non-null timestamp is its terminal boundary. Configured parent/thread creation copies the active participation setting; legacy isolated-thread access replay without a setup claim copies the Agent default. Binding, real Session, and first canonical mailbox input commit together only after setup selection or for an already configured conversation. |
 | Mailbox item and Session events | One deterministic mailbox item contains the ordered immutable provider-history projection. The conversation position compare-and-set is the sole duplicate-prevention and ordering authority. Mailbox identity owns input idempotency and pending wake recovery. Only a mailbox whose admission created the root Session may transiently authorize its exact human `authorized_invocation` event as the initial automatic-title input; promotion and mailbox deletion consume that eligibility. Promotion creates the canonical External Channel Session events; no parallel provider-message, revision, invocation-batch, activation, title-attempt, or wake-dispatch record exists. |
 | Access request/grant/block | Opaque approval request with a content-free provider locator and conversation-position replay boundary, Session- or Agent-scoped grant, and Agent-scoped block for one external principal. Final decisions retain their authorization result independently from post-commit approval-control cleanup. |
-| Channel Work/action/delivery | Binding-scoped durable current-work title and ordered provider-neutral tasks with stable identities, status, optional details, optional output, and labeled URL sources; one work-cycle-owned desired progress state and provider identity; one atomic explicit action; and persisted provider intents/outcomes. File-bearing replies retain only bounded Runtime source manifests and delivery phase evidence. Management derives projection state from the latest progress operation belonging to the current work cycle. |
+| Channel Work and provider projection | Binding-scoped durable current-work title and ordered provider-neutral tasks with stable identities, status, optional details, optional output, and labeled URL sources. Work-owned projection parts retain only the current desired revision, current provider identity, and current projection status required for later update or deletion. Agent-requested publication executes through the ordinary Tool call/result history with process-local effect plans and no separate Action or delivery history. |
 
 ## State Invariants
 
@@ -172,13 +173,14 @@ contain multiple independent bindings.
   connected binding, route, current credentials, and directional capability. Transient
   Gateway or Socket health is not outbound authority; provider authentication and
   authorization remain authoritative at download time.
-- File-bearing External Channel state retains provider metadata, direct provider-address keys,
-  bounded Runtime transfer manifests, consumer-claim identity, and terminal delivery
-  evidence only. Provider bodies enter the common Server-to-Runtime transfer path only
+- File-bearing External Channel state retains provider metadata and direct
+  provider-address keys only. Provider bodies enter the common Server-to-Runtime transfer path only
   after a current authorization recheck. Runtime bodies leave through one verified
-  Runtime-to-provider transfer per source. No External Channel row, event, prompt,
-  queue payload, or delivery record stores transfer bytes, provider upload URLs,
-  object-store credentials, object keys, or trusted object handles.
+  Runtime-to-provider transfer per source during the current Tool execution. Runtime
+  transfer claims follow their existing bounded coordinator lifecycle. No External
+  Channel row, event, prompt, or queue payload stores transfer bytes, provider upload
+  URLs, object-store credentials, object keys, trusted object handles, or a provider
+  operation history.
 - A Discord connection is scoped to its validated Application and target Guild. The
   callback selector is opaque and retained only as a hash; the Application public key,
   Bot identity, and required Guild Message Command identifier are
@@ -211,14 +213,15 @@ contain multiple independent bindings.
   verified object before Runtime delivery. Any metadata, response-header, or body-size
   mismatch fails closed without a Runtime destination commit; provider URLs and bytes
   remain outside durable External Channel state.
-- Selected setup replay or configured synchronous binding acceptance atomically commits the binding, real Session,
-  canonical mailbox input, conversation-position advance, running transition, one
-  versioned joined-presence intent with Session navigation and conversation settings,
-  and one checking work projection.
+- Selected setup replay or configured synchronous binding acceptance atomically
+  commits the binding, real Session, canonical mailbox input, conversation-position
+  advance, running transition, and one checking work projection, then returns
+  process-local joined-presence and initial-progress plans.
   Broker wake follows that commit using the mailbox item as its recovery identity.
-  Provider-control delivery is independent background work: failed, unknown, or
-  cancelled presence or progress delivery never blocks mailbox promotion, Session
-  wake, or AgentRun creation. Slack lowers work through its
+  The ingress caller attempts the plans once after its provider acknowledgement
+  boundary. Failed, unknown, cancelled, or interrupted presence or progress effects
+  never block mailbox promotion, Session wake, or AgentRun creation and create no
+  recovery work. Slack lowers work through its
   retained Tracker message; Discord lowers each work snapshot to one retained compact
   Embed Tracker. The Embed title carries the current-work title, while its bounded
   description carries the status summary, every ordered task title and status marker,
@@ -227,11 +230,12 @@ contain multiple independent bindings.
   separate readable content. A parent-channel Resource posts directly to the Slack or
   Discord parent channel. A Discord thread Resource provisions or reuses one delivery
   thread, persists that target, and sends approval controls, Session navigation,
-  replies, files, progress, recovery, and cleanup to that thread. A delivered final answer
-  deletes active progress, and separate work cycles never share provider identities.
+  replies, files, progress, and cleanup to that thread. A delivered final answer
+  permits active-progress deletion, and separate work cycles never share provider
+  identities.
 - A newly created External Channel root Session uses only the creating mailbox's exact
   human `authorized_invocation` event for the existing two-phase automatic title
-  lifecycle. Session admission, wake, AgentRun creation, and ordinary provider delivery
+  lifecycle. Session admission, wake, AgentRun creation, and ordinary provider effects
   do not wait for title generation. After the matching `auto_initial` to
   `auto_generated` title commit, Discord performs one best-effort operation only for a
   directly created eligible thread: revalidate current lifecycle authority, read the
@@ -253,11 +257,10 @@ contain multiple independent bindings.
   Slack-specific blocks and revision-derived `block_id` values are created only
   at the provider presentation boundary. Slack streaming is not used; retained
   `chat.postMessage` and `chat.update` mutations apply complete snapshots.
-- Confirmed deletion clears only the matching Tracker identity and creates one
-  replacement from durable desired state while work remains active. A replacement
-  that captured an older desired revision is updated once to the latest state after
-  creation. Finished work never recreates a Tracker, and a missing delete target is
-  already absent.
+- Confirmed deletion clears only the matching Tracker identity. It does not create a
+  replacement or catch-up effect. A later explicit progress transition may create a
+  new Tracker from the then-current desired state. Finished work never recreates a
+  Tracker, and a missing delete target is already absent.
 - Inbound message-create snapshots are immutable. Provider edit and delete callbacks
   are excluded; they do not create lifecycle corrections or rewrite already accepted
   Session input.
@@ -372,7 +375,7 @@ Agent connection list.
 
 Session Channels shows bindings, the current Channel Work title, typed ordered
 tasks, failed state, details, output, source links, Activity Tracker projection
-state, delivery outcomes, grants, parent-channel versus thread location, concrete
+state, grants, parent-channel versus thread location, concrete
 response mode, and terminal disconnect state. Agent administrators may replace the
 mode only while the binding remains connected and owned by the requested Agent and
 Session. A parent Binding mutation updates its active participation setting in the
@@ -392,10 +395,14 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
-- **2026-08-03** (spec_version 41) — Added creation-bound one-shot automatic Session
+- **2026-08-03** (spec_version 42) — Added creation-bound one-shot automatic Session
   title eligibility and direct-created Discord provisional-title evidence, followed
   by one non-blocking post-title-commit GET and conditional PATCH with no recovery
   state.
+- **2026-08-02** (spec_version 41) — Made normal Session Tool history the sole
+  Agent-requested publication history, replaced non-Tool delivery work with
+  process-local direct controls, and retained only owner-local current provider
+  projection state.
 - **2026-08-02** (spec_version 40) — Removed the deployment participation gate and
   made first-mention setup, participation settings, parent-channel Resources, and
   provider settings controls unconditional canonical behavior.

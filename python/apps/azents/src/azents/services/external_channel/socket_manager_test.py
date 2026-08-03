@@ -42,6 +42,9 @@ from azents.services.external_channel.ingestion import (
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionProcessor,
 )
+from azents.services.external_channel.provider_control import (
+    ExternalChannelProviderControlService,
+)
 from azents.services.external_channel.shortcut_source import (
     ExternalChannelShortcutSourceService,
 )
@@ -56,6 +59,7 @@ from azents.services.external_channel.socket_manager import (
 from azents.services.external_channel.transport_ingestion import (
     ExternalChannelTransportIngestionService,
 )
+from azents.testing.external_channel import make_provider_effect_plan
 
 
 class _SessionDouble:
@@ -163,6 +167,7 @@ def _service(
     *,
     transport_ingestion_service: object | None = None,
     revocation_service: object | None = None,
+    provider_control: object | None = None,
 ) -> SlackSocketManagerService:
     """Build a manager around lifecycle-only doubles."""
 
@@ -184,6 +189,10 @@ def _service(
         revocation_service=cast(
             ExternalChannelConnectionRevocationService,
             revocation_service or object(),
+        ),
+        provider_control=cast(
+            ExternalChannelProviderControlService,
+            provider_control or object(),
         ),
         manager_id="manager-1",
         config=config,
@@ -215,7 +224,7 @@ def _outcome(
         mailbox_item_id=(
             "batch-1" if kind is ExternalChannelIngestionOutcomeKind.ACCEPTED else None
         ),
-        control_delivery_attempt_id=None,
+        control_plans=(),
         connection_id=None,
     )
 
@@ -251,6 +260,56 @@ async def test_owned_socket_event_uses_lease_authority_without_legacy_admission(
     assert authority.ingress_profile is ExternalChannelIngressProfile.SLACK_SOCKET
     assert authority.lease_owner == "manager-1"
     assert authority.lease_generation is None
+
+
+@pytest.mark.asyncio
+async def test_owned_socket_schedules_controls_without_waiting_for_completion() -> None:
+    """Socket admission returns while every committed control runs in background."""
+    plans = (
+        make_provider_effect_plan("socket-presence"),
+        make_provider_effect_plan("socket-progress"),
+    )
+    transport = SimpleNamespace(
+        ingest_slack_event=AsyncMock(
+            return_value=ExternalChannelIngestionOutcome(
+                kind=ExternalChannelIngestionOutcomeKind.ACCEPTED,
+                reason=ExternalChannelIngestionReason.ACCEPTED,
+                mailbox_item_id="batch-1",
+                control_plans=plans,
+                connection_id="connection-1",
+            )
+        )
+    )
+    release = asyncio.Event()
+
+    async def attempt(_plan: object) -> None:
+        await release.wait()
+
+    provider_control = SimpleNamespace(attempt=AsyncMock(side_effect=attempt))
+    service = _service(
+        _SessionDouble(),
+        _RepositoryDouble(),
+        transport_ingestion_service=transport,
+        provider_control=provider_control,
+    )
+
+    result = await service._handle_owned_event(  # pyright: ignore[reportPrivateUsage]
+        connection_id="connection-1",
+        configuration=_configuration(),
+        event=_event("app_mention"),
+    )
+    await asyncio.sleep(0)
+
+    assert isinstance(result, ExternalChannelIngestionOutcome)
+    assert result.control_plans == plans
+    assert [call.args[0] for call in provider_control.attempt.await_args_list] == list(
+        plans
+    )
+    assert len(service.control_tasks) == 2
+    release.set()
+    await asyncio.gather(*tuple(service.control_tasks))
+    await asyncio.sleep(0)
+    assert service.control_tasks == set()
 
 
 @pytest.mark.asyncio

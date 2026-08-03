@@ -17614,31 +17614,6 @@
         ],
         "title": "ExternalChannelDecisionInput"
       },
-      "ExternalChannelDeliveryOperation": {
-        "type": "string",
-        "enum": [
-          "reply",
-          "progress_create",
-          "progress_update",
-          "progress_delete",
-          "control_message"
-        ],
-        "title": "ExternalChannelDeliveryOperation",
-        "description": "External provider side effect requested by a delivery intent."
-      },
-      "ExternalChannelDeliveryStatus": {
-        "type": "string",
-        "enum": [
-          "pending",
-          "attempting",
-          "delivered",
-          "failed",
-          "unknown",
-          "not_attempted"
-        ],
-        "title": "ExternalChannelDeliveryStatus",
-        "description": "Outcome state of one external provider delivery attempt."
-      },
       "ExternalChannelMultiConnectionImpact": {
         "properties": {
           "connection_id": {
@@ -20241,13 +20216,6 @@
                 "type": "null"
               }
             ]
-          },
-          "deliveries": {
-            "items": {
-              "$ref": "#/components/schemas/ManagedDelivery"
-            },
-            "type": "array",
-            "title": "Deliveries"
           }
         },
         "type": "object",
@@ -20263,8 +20231,7 @@
           "disconnected_at",
           "disconnect_reason",
           "latest_activity_at",
-          "work",
-          "deliveries"
+          "work"
         ],
         "title": "ManagedBinding"
       },
@@ -20517,9 +20484,9 @@
             "type": "integer",
             "title": "Disconnected Parent Binding Count"
           },
-          "cleanup_delivery_count": {
+          "direct_cleanup_count": {
             "type": "integer",
-            "title": "Cleanup Delivery Count"
+            "title": "Direct Cleanup Count"
           }
         },
         "type": "object",
@@ -20530,7 +20497,7 @@
           "terminated_setup_claim_count",
           "expired_interaction_count",
           "disconnected_parent_binding_count",
-          "cleanup_delivery_count"
+          "direct_cleanup_count"
         ],
         "title": "ManagedChannelDefaultMutation",
         "description": "Sanitized selected-Agent mutation result and terminal lifecycle impact."
@@ -20756,83 +20723,6 @@
           "connection"
         ],
         "title": "ManagedConnectionSetup"
-      },
-      "ManagedDelivery": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "operation": {
-            "$ref": "#/components/schemas/ExternalChannelDeliveryOperation"
-          },
-          "status": {
-            "$ref": "#/components/schemas/ExternalChannelDeliveryStatus"
-          },
-          "error_kind": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error Kind"
-          },
-          "error_summary": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error Summary"
-          },
-          "attempted_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Attempted At"
-          },
-          "completed_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Completed At"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "operation",
-          "status",
-          "error_kind",
-          "error_summary",
-          "attempted_at",
-          "completed_at",
-          "created_at"
-        ],
-        "title": "ManagedDelivery"
       },
       "ManagedGrant": {
         "properties": {

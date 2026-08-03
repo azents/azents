@@ -598,6 +598,6 @@ def _retryable_failure() -> ExternalChannelIngestionOutcome:
         kind=ExternalChannelIngestionOutcomeKind.RETRYABLE_FAILURE,
         reason=ExternalChannelIngestionReason.HISTORY_UNAVAILABLE,
         mailbox_item_id=None,
-        control_delivery_attempt_id=None,
+        control_plans=(),
         connection_id=None,
     )

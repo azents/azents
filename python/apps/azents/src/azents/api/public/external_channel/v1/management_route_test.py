@@ -125,7 +125,6 @@ def _binding(
         disconnect_reason=None,
         latest_activity_at=now,
         work=None,
-        deliveries=[],
     )
 
 
