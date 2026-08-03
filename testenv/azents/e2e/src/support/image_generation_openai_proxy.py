@@ -111,7 +111,7 @@ _EXTERNAL_CHANNEL_FAILURE_PROGRESS_CALL_ID = "call_external_channel_failure_prog
 _EXTERNAL_CHANNEL_TURN_BINDING = re.compile(r"Binding: ([A-Za-z0-9_-]+)")
 _EXTERNAL_CHANNEL_COMPACTION_BINDING = re.compile(r"### Binding `([^`]+)`")
 _EXTERNAL_CHANNEL_DISCORD_TITLE_MARKER = "Private Discord Gateway invocation"
-_SESSION_TITLE_SYSTEM_MARKER = "You are a session title generator"
+_SESSION_TITLE_SYSTEM_MARKER = "Create a brief title from the request"
 _DISCORD_PROVIDER_BARRIER_URL = os.environ.get(
     "DISCORD_PROVIDER_BARRIER_URL",
     "http://discord-fake:8085/__testenv/barrier",

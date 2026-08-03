@@ -2,6 +2,8 @@
 
 import asyncio
 import dataclasses
+import enum
+import json
 import logging
 import re
 from collections.abc import Sequence
@@ -11,6 +13,8 @@ from azcommon.logging import bind_extra
 from fastapi import Depends
 from litellm.exceptions import OpenAIError as LiteLLMOpenAIError
 from openai import OpenAIError as OpenAIBaseError
+from openai.types.responses.response_text_config_param import ResponseTextConfigParam
+from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -45,6 +49,7 @@ from azents.engine.responses import (
 from azents.engine.run.errors import ModelCallError, ModelStreamTimeoutError
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
+    ModelProviderFailureCategory,
     model_provider_error_log_fields,
     model_provider_failure,
 )
@@ -71,31 +76,50 @@ _TITLE_MAX_CHARS = 50
 _TITLE_RESPONSE_MAX_OUTPUT_TOKENS = 80
 _TITLE_CONTEXT_EVENT_LIMIT = 40
 _TITLE_CONTEXT_CHAR_LIMIT = 12_000
+_TITLE_TEXT_CONFIG_ADAPTER: TypeAdapter[ResponseTextConfigParam] = TypeAdapter(
+    ResponseTextConfigParam
+)
+_TITLE_STRUCTURED_TEXT_CONFIG = _TITLE_TEXT_CONFIG_ADAPTER.validate_python(
+    {
+        "format": {
+            "type": "json_schema",
+            "name": "session_title",
+            "schema": {
+                "type": "object",
+                "properties": {"title": {"type": "string"}},
+                "required": ["title"],
+                "additionalProperties": False,
+            },
+            "strict": True,
+        },
+        "verbosity": "low",
+    }
+)
+_PLAIN_TITLE_OUTPUT_INSTRUCTION = (
+    "\nReturn only the title as plain text without JSON, labels, quotes, "
+    "or explanation."
+)
 _TITLE_PROMPT = """\
-You are a session title generator. Output ONLY a session title. Nothing else.
-
 <task>
-Generate a brief title from the user's initial prompt so the user can find
-this agent session later. You only receive the first user prompt, not the
-assistant response or later transcript.
+Create a brief title from the request so the user can find it later. You only
+receive the initial request, not the assistant response or later transcript.
 
-Your output must be:
+The title must be:
 - A single line
 - 50 characters or fewer
-- No explanations
 </task>
 
 <rules>
 - Use the same language as the user's main request.
 - Make the title grammatically correct and natural.
 - Focus on the user's main goal, topic, question, request, or decision from
-  the initial prompt.
+  the initial request.
 - Do not rely on assistant responses, tool results, or later user corrections.
 - Preserve important names, places, dates, numbers, filenames, product names,
-  error codes, and domain-specific terms when relevant.
-- Do not mention tool names or internal agent actions.
-- Do not mention "session", "conversation", "chat", "summary",
-  "summarizing", or "generating".
+  tools, error codes, and domain-specific terms that appear in the request.
+- Do not invent or mention internal Agent actions or tools absent from the request.
+- Ignore platform markup used only to address the Agent, such as Bot or App
+  mentions, while preserving references that are relevant to the request.
 - Never answer the user's question.
 - Never say you cannot generate a title.
 - Do not assume unstated context or domain.
@@ -115,6 +139,20 @@ Your output must be:
 "summarize the attached notes" -> Attached notes summary
 </examples>
 """
+
+
+class TitleOutputMode(enum.StrEnum):
+    """Automatic title response envelope."""
+
+    STRUCTURED = "structured"
+    PLAIN_TEXT = "plain_text"
+
+
+@dataclasses.dataclass(frozen=True)
+class TitleOutputContractError(Exception):
+    """Structured title output could not be decoded through its schema."""
+
+    kind: str
 
 
 def initial_title_from_user_text(text: str) -> str | None:
@@ -182,6 +220,63 @@ def clean_generated_title(text: str) -> str | None:
         candidate = line.strip().strip("\"'`")
         if candidate:
             return _truncate_title(candidate)
+    return None
+
+
+def decode_structured_title(text: str) -> str | None:
+    """Decode the closed Structured Output title contract."""
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise TitleOutputContractError("schema_decode") from exc
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"title"}
+        or not isinstance(value.get("title"), str)
+    ):
+        raise TitleOutputContractError("schema_decode")
+    normalized = _normalize_space(value["title"])
+    return _truncate_title(normalized) if normalized else None
+
+
+def title_output_contract_incompatibility(
+    failure: ModelProviderFailure,
+    *,
+    provider: LLMProvider,
+) -> str | None:
+    """Classify bounded evidence that Structured Output is unavailable."""
+    if provider is LLMProvider.OPENROUTER and (
+        failure.provider_code
+        in {
+            "no_available_providers",
+            "no_endpoints_found",
+        }
+        or failure.provider_error_type
+        in {
+            "no_available_providers",
+            "no_endpoints_found",
+        }
+    ):
+        return "unroutable_schema"
+    if failure.category is not ModelProviderFailureCategory.INVALID_REQUEST:
+        return None
+    parameter = failure.provider_error_param
+    if parameter is not None and (
+        parameter == "response_format"
+        or parameter.startswith(("response_format.", "response_format["))
+        or parameter == "text.format"
+        or parameter.startswith(("text.format.", "text.format["))
+    ):
+        return "rejected_parameter"
+    if failure.provider_code in {
+        "invalid_json_schema",
+        "invalid_response_format",
+        "json_schema_unsupported",
+        "response_format_unsupported",
+        "unsupported_json_schema",
+        "unsupported_response_format",
+    }:
+        return "unsupported_contract"
     return None
 
 
@@ -288,6 +383,15 @@ class SessionTitleService:
 
         model = to_runtime_model(selection.provider, selection.model_identifier)
         credential_kwargs = build_credential_kwargs(integration)
+        structured_capability = (
+            selection.normalized_capabilities.tool_calling.strict_json_schema
+        )
+        active_mode = (
+            TitleOutputMode.PLAIN_TEXT
+            if structured_capability is False
+            else TitleOutputMode.STRUCTURED
+        )
+        compatibility_transitioned = False
         attempt_number = 1
         while True:
             if attempt_number > 1 and not await self._generation_is_current(
@@ -305,22 +409,100 @@ class SessionTitleService:
                     session_id=session_id,
                     attempt_number=attempt_number,
                     watchdog=self.model_stream_watchdog,
+                    output_mode=active_mode,
                 )
+            except TitleOutputContractError as exc:
+                if (
+                    structured_capability is None
+                    and active_mode is TitleOutputMode.STRUCTURED
+                    and not compatibility_transitioned
+                ):
+                    logger.warning(
+                        "Automatic session title output contract was not honored",
+                        extra={
+                            "session_id": session_id,
+                            "agent_id": agent_id,
+                            "attempt_number": attempt_number,
+                            "provider": selection.provider.value,
+                            "model": model,
+                            "title_structured_output_capability": None,
+                            "title_output_mode": active_mode.value,
+                            "title_output_mode_transitioned": True,
+                            "title_output_contract_incompatibility": exc.kind,
+                        },
+                    )
+                    active_mode = TitleOutputMode.PLAIN_TEXT
+                    compatibility_transitioned = True
+                    continue
+                logger.warning(
+                    "Automatic session title output contract was not honored",
+                    extra={
+                        "session_id": session_id,
+                        "agent_id": agent_id,
+                        "attempt_number": attempt_number,
+                        "provider": selection.provider.value,
+                        "model": model,
+                        "title_structured_output_capability": structured_capability,
+                        "title_output_mode": active_mode.value,
+                        "title_output_mode_transitioned": (compatibility_transitioned),
+                        "title_output_contract_incompatibility": exc.kind,
+                    },
+                )
+                return None
             except ModelProviderFailure as exc:
+                incompatibility = (
+                    title_output_contract_incompatibility(
+                        exc,
+                        provider=selection.provider,
+                    )
+                    if active_mode is TitleOutputMode.STRUCTURED
+                    else None
+                )
+                if (
+                    structured_capability is None
+                    and active_mode is TitleOutputMode.STRUCTURED
+                    and not compatibility_transitioned
+                    and incompatibility is not None
+                ):
+                    attempt_logger = bind_extra(
+                        logger,
+                        {
+                            "session_id": session_id,
+                            "agent_id": agent_id,
+                            "attempt_number": attempt_number,
+                            **model_provider_error_log_fields(exc),
+                            "title_structured_output_capability": None,
+                            "title_output_mode": active_mode.value,
+                            "title_output_mode_transitioned": True,
+                            "title_output_contract_incompatibility": incompatibility,
+                        },
+                    )
+                    attempt_logger.warning(
+                        "Automatic session title output contract is unavailable"
+                    )
+                    active_mode = TitleOutputMode.PLAIN_TEXT
+                    compatibility_transitioned = True
+                    continue
                 retry_available = self.retry_policy.retry_available(attempt_number)
-                L = bind_extra(
+                attempt_logger = bind_extra(
                     logger,
                     {
                         "session_id": session_id,
                         "agent_id": agent_id,
                         "attempt_number": attempt_number,
                         **model_provider_error_log_fields(exc),
+                        "title_structured_output_capability": structured_capability,
+                        "title_output_mode": active_mode.value,
+                        "title_output_mode_transitioned": compatibility_transitioned,
+                        "title_output_contract_incompatibility": incompatibility,
                         "provider_failure_retry_outcome": (
                             "scheduled" if retry_available else "exhausted"
                         ),
                     },
                 )
-                L.warning("Automatic session title provider attempt failed")
+                attempt_logger.warning(
+                    "Automatic session title provider attempt failed"
+                )
                 if not retry_available:
                     return None
                 await asyncio.sleep(self.retry_policy.backoff_seconds(attempt_number))
@@ -334,6 +516,10 @@ class SessionTitleService:
                         "attempt_number": attempt_number,
                         "provider": selection.provider.value,
                         "model": model,
+                        "title_structured_output_capability": structured_capability,
+                        "title_output_mode": active_mode.value,
+                        "title_output_mode_transitioned": compatibility_transitioned,
+                        "title_output_contract_incompatibility": None,
                         "model_stream_timeout_kind": exc.timeout_kind,
                         "model_stream_failure_code": exc.failure_code,
                         "model_stream_deadline_seconds": exc.deadline_seconds,
@@ -350,6 +536,10 @@ class SessionTitleService:
                         "attempt_number": attempt_number,
                         "provider": selection.provider.value,
                         "model": model,
+                        "title_structured_output_capability": structured_capability,
+                        "title_output_mode": active_mode.value,
+                        "title_output_mode_transitioned": compatibility_transitioned,
+                        "title_output_contract_incompatibility": None,
                     },
                 )
                 return None
@@ -383,8 +573,9 @@ async def generate_session_title_with_model(
     session_id: str | None,
     attempt_number: int | None,
     watchdog: ModelStreamWatchdog,
+    output_mode: TitleOutputMode,
 ) -> str | None:
-    """Generate a session title with the standard LiteLLM Responses API path."""
+    """Generate a session title through one selected response envelope."""
     timeout_policy = watchdog.resolve_policy(
         provider=provider.value,
         model=model,
@@ -403,9 +594,16 @@ async def generate_session_title_with_model(
     input_items: list[dict[str, object]] = [
         {
             "role": "user",
-            "content": "Generate a title for this initial user prompt:\n" + context,
+            "content": "Create a title from this request:\n" + context,
         }
     ]
+    structured = output_mode is TitleOutputMode.STRUCTURED
+    instructions = (
+        _TITLE_PROMPT if structured else _TITLE_PROMPT + _PLAIN_TITLE_OUTPUT_INSTRUCTION
+    )
+    text_config = (
+        _TITLE_STRUCTURED_TEXT_CONFIG if structured else DEFAULT_RESPONSES_TEXT_CONFIG
+    )
     try:
         if provider in {LLMProvider.OPENAI, LLMProvider.CHATGPT_OAUTH}:
             text = await call_openai_responses_text(
@@ -413,8 +611,8 @@ async def generate_session_title_with_model(
                 model=model,
                 credential_kwargs=credential_kwargs,
                 input_items=input_items,
-                instructions=_TITLE_PROMPT,
-                text=DEFAULT_RESPONSES_TEXT_CONFIG,
+                instructions=instructions,
+                text=text_config,
                 watchdog=watchdog,
                 timeout_policy=timeout_policy,
                 call_context=call_context,
@@ -425,12 +623,18 @@ async def generate_session_title_with_model(
                 model=model,
                 credential_kwargs=credential_kwargs,
                 input_items=input_items,
-                instructions=_TITLE_PROMPT,
+                instructions=instructions,
                 stream=True,
                 max_output_tokens=_TITLE_RESPONSE_MAX_OUTPUT_TOKENS,
                 watchdog=watchdog,
                 timeout_policy=timeout_policy,
                 call_context=call_context,
+                text=text_config,
+                extra_body=(
+                    {"provider": {"require_parameters": True}}
+                    if structured and provider is LLMProvider.OPENROUTER
+                    else None
+                ),
             )
             text = await extract_response_text(response)
     except ModelProviderFailure:
@@ -445,12 +649,15 @@ async def generate_session_title_with_model(
             status_code=None,
             provider_code=exc.code,
             provider_error_type=exc.event_type,
+            provider_error_param=exc.param,
         ) from None
     except (LiteLLMOpenAIError, OpenAIBaseError) as exc:
         failure = map_litellm_provider_error(exc, call_context=call_context)
         raise failure from None
     if not text:
         return None
+    if structured:
+        return decode_structured_title(text)
     return clean_generated_title(text)
 
 

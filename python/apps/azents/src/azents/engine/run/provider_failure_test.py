@@ -114,6 +114,7 @@ def test_builds_safe_failure_and_stable_fingerprint() -> None:
         status_code=500,
         provider_code="server_error",
         provider_error_type="api_error",
+        provider_error_param=None,
     )
     second = model_provider_failure(
         operation="sampling",
@@ -124,6 +125,7 @@ def test_builds_safe_failure_and_stable_fingerprint() -> None:
         status_code=500,
         provider_code="server_error",
         provider_error_type="api_error",
+        provider_error_param=None,
     )
 
     assert first.category == ModelProviderFailureCategory.PROVIDER_UNAVAILABLE
@@ -152,6 +154,7 @@ def test_unknown_failure_raises_internal_error_with_bounded_diagnostics() -> Non
             status_code=None,
             provider_code="new_code",
             provider_error_type=None,
+            provider_error_param=None,
         )
 
     assert raised.value.provider_code == "new_code"
@@ -171,6 +174,7 @@ def test_unknown_failure_redacts_internal_diagnostics() -> None:
             status_code=None,
             provider_code="future_failure",
             provider_error_type="future_error",
+            provider_error_param=None,
         )
 
     assert "sk-abcdefghijk" not in str(raised.value)
@@ -189,6 +193,7 @@ def test_provider_error_log_fields_cover_unclassified_safe_diagnostics() -> None
             status_code=None,
             provider_code="future_failure",
             provider_error_type="future_error",
+            provider_error_param=None,
         )
 
     fields = model_provider_error_log_fields(raised.value)
@@ -201,6 +206,7 @@ def test_provider_error_log_fields_cover_unclassified_safe_diagnostics() -> None
         "provider_failure_status_code": None,
         "provider_failure_code": "future_failure",
         "provider_failure_error_type": "future_error",
+        "provider_failure_error_param": None,
         "provider_failure_message": "Rejected api_key=[REDACTED]",
         "provider_failure_fingerprint": raised.value.fingerprint,
         "provider_failure_category": "unknown",

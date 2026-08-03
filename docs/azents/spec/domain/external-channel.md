@@ -59,7 +59,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-08-03
-spec_version: 42
+spec_version: 43
 ---
 
 # External Channel
@@ -235,8 +235,13 @@ contain multiple independent bindings.
   identities.
 - A newly created External Channel root Session uses only the creating mailbox's exact
   human `authorized_invocation` event for the existing two-phase automatic title
-  lifecycle. Session admission, wake, AgentRun creation, and ordinary provider effects
-  do not wait for title generation. After the matching `auto_initial` to
+  lifecycle. The title model receives prompt-only guidance to ignore Bot or App markup
+  used only to address the Agent while preserving request-relevant references; canonical
+  provider content, reference evidence, and deterministic initial-title input remain
+  unchanged. Saved lightweight-model Structured Output capability selects the same
+  tri-state response-envelope behavior used by ordinary Sessions without changing the
+  selected provider integration or model. Session admission, wake, AgentRun creation,
+  and ordinary provider effects do not wait for title generation. After the matching `auto_initial` to
   `auto_generated` title commit, Discord performs one best-effort operation only for a
   directly created eligible thread: revalidate current lifecycle authority, read the
   thread once, and send at most one name-only update when the current name still equals
@@ -395,6 +400,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-03** (spec_version 43) — Applied saved lightweight-model title output modes and
+  prompt-only invocation-markup guidance to External Channel creation without mutating canonical
+  provider evidence or Discord projection ownership.
 - **2026-08-03** (spec_version 42) — Added creation-bound one-shot automatic Session
   title eligibility and direct-created Discord provisional-title evidence, followed
   by one non-blocking post-title-commit GET and conditional PATCH with no recovery

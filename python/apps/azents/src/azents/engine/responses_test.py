@@ -46,6 +46,7 @@ async def test_call_responses_model_builds_standard_payload(
         watchdog=_TEST_WATCHDOG,
         timeout_policy=_TEST_POLICY,
         call_context=_TEST_CONTEXT,
+        extra_body=None,
     )
 
     assert await extract_response_text(response) == "Insurance option comparison"
@@ -70,6 +71,7 @@ async def test_call_responses_model_builds_standard_payload(
             "api_key": None,
             "api_base": None,
             "base_url": None,
+            "extra_body": None,
         }
     ]
 
@@ -101,6 +103,7 @@ async def test_call_responses_model_uses_openai_compatible_options(
         watchdog=_TEST_WATCHDOG,
         timeout_policy=_TEST_POLICY,
         call_context=_TEST_CONTEXT,
+        extra_body=None,
     )
 
     assert await extract_response_text(response) == "Config review"
@@ -143,6 +146,7 @@ async def test_call_responses_model_uses_xai_options(
         watchdog=_TEST_WATCHDOG,
         timeout_policy=_TEST_POLICY,
         call_context=_TEST_CONTEXT,
+        extra_body=None,
     )
 
     assert calls[0]["custom_llm_provider"] == "xai"
@@ -188,6 +192,7 @@ async def test_call_responses_model_preserves_openrouter_attribution(
         watchdog=_TEST_WATCHDOG,
         timeout_policy=_TEST_POLICY,
         call_context=_TEST_CONTEXT,
+        extra_body={"provider": {"require_parameters": True}},
     )
 
     assert calls[0]["custom_llm_provider"] == "openrouter"
@@ -196,6 +201,9 @@ async def test_call_responses_model_preserves_openrouter_attribution(
     assert calls[0]["api_base"] == OPENROUTER_API_BASE_URL
     assert calls[0]["extra_headers"] == {
         "X-OpenRouter-Title": OPENROUTER_APP_TITLE,
+    }
+    assert calls[0]["extra_body"] == {
+        "provider": {"require_parameters": True},
     }
     assert calls[0]["instructions"] == "Generate a title"
 

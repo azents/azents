@@ -4,7 +4,7 @@
       "match": {
         "endpoint": "chat",
         "userMessage": "Watchdog session title timeout",
-        "systemMessage": "You are a session title generator"
+        "systemMessage": "Create a brief title from the request"
       },
       "response": {
         "content": "This title must time out."
@@ -19,7 +19,7 @@
       "match": {
         "endpoint": "chat",
         "userMessage": "Provider title retry",
-        "systemMessage": "You are a session title generator",
+        "systemMessage": "Create a brief title from the request",
         "sequenceIndex": 0
       },
       "response": {
@@ -35,20 +35,47 @@
       "match": {
         "endpoint": "chat",
         "userMessage": "Provider title retry",
-        "systemMessage": "You are a session title generator",
+        "systemMessage": "Create a brief title from the request",
         "sequenceIndex": 1
       },
       "response": {
-        "content": "Provider title retry recovered"
+        "content": "{\"title\":\"Provider title retry recovered\"}"
       }
     },
     {
       "match": {
         "endpoint": "chat",
-        "systemMessage": "You are a session title generator"
+        "userMessage": "Structured title fallback",
+        "systemMessage": "Create a brief title from the request",
+        "sequenceIndex": 0
       },
       "response": {
-        "content": "Upload session initialized."
+        "error": {
+          "message": "The response format is unsupported.",
+          "type": "invalid_request_error",
+          "code": "invalid_request",
+          "param": "text.format"
+        },
+        "status": 400
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Structured title fallback",
+        "systemMessage": "Return only the title as plain text without JSON, labels, quotes"
+      },
+      "response": {
+        "content": "Structured title fallback recovered"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "systemMessage": "Create a brief title from the request"
+      },
+      "response": {
+        "content": "{\"title\":\"Upload session initialized.\"}"
       }
     },
     {
@@ -59,6 +86,16 @@
       },
       "response": {
         "content": "PROVIDER_TITLE_RUN_COMPLETED"
+      }
+    },
+    {
+      "match": {
+        "endpoint": "chat",
+        "userMessage": "Structured title fallback",
+        "hasToolResult": false
+      },
+      "response": {
+        "content": "TITLE_OUTPUT_FALLBACK_RUN_COMPLETED"
       }
     },
     {

@@ -110,7 +110,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-08-03
-spec_version: 138
+spec_version: 139
 ---
 
 # Conversation & Events
@@ -284,11 +284,22 @@ External Channel root Session may instead use only the creation-marked human
 results are ineligible. Its title text is limited to the authorized body and bounded safe attachment
 names and media types without reading attachment contents. The worker then immediately schedules
 best-effort lightweight model title generation from that exact initial prompt without waiting for the
-first run to complete. The resulting concise `auto_generated` title only replaces the deterministic
-title while `title_source = auto_initial` and `title_generation_event_id` still points at the same
-initial prompt event. Manual title updates or clears therefore remain authoritative, while
-long-running first turns do not delay automatic title generation. Title generation and any
-post-commit External Channel title projection failures must not affect run execution.
+first run to complete. The Agent's saved lightweight-model snapshot selects the response envelope:
+`strict_json_schema = true` uses only a strict one-field Structured Output contract, `false` uses only
+title-only plain text, and `null` starts with Structured Output. The unknown branch changes once to
+plain text only when a typed provider parameter or code identifies that output contract as unsupported
+or unroutable, or when a successful response cannot be decoded as the required title object.
+Authentication, rate limiting, timeout, transport, provider availability, and other operational
+failures retain the active mode and existing provider retry policy. Every request keeps the same saved
+provider integration and model. Shared instructions preserve request-named products, tools, filenames,
+and technical terms and tell the model to ignore platform markup used only to address the Agent
+without rewriting the canonical input.
+
+The resulting concise `auto_generated` title only replaces the deterministic title while
+`title_source = auto_initial` and `title_generation_event_id` still points at the same initial prompt
+event. Manual title updates or clears therefore remain authoritative, while long-running first turns
+do not delay automatic title generation. Title generation and any post-commit External Channel title
+projection failures must not affect run execution.
 Clients display `title` when present and otherwise fall back to a contextual label such as "Team
 primary" or "Session". Concrete session route top bars show this session title while preserving the
 Agent avatar/icon affordance, and expose an inline title edit action that calls the manual title update
@@ -1083,6 +1094,9 @@ participant.
 
 ## 12. Changelog
 
+- **2026-08-03** — v139. Added saved-capability-directed Structured Output and plain-text automatic
+  title envelopes, one bounded unknown-capability compatibility transition, and prompt-only
+  invocation-markup guidance without changing title authority.
 - **2026-08-03** — v138. Allowed only the creation-marked authorized human External
   Channel trigger for a new root Session to enter the existing two-phase automatic
   title lifecycle, with safe attachment metadata and non-blocking post-commit provider

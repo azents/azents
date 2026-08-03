@@ -22,6 +22,7 @@ def test_provider_retry_state_hides_diagnostics_from_public_presentation() -> No
         status_code=400,
         provider_code="invalid_request",
         provider_error_type="bad_request_error",
+        provider_error_param=None,
     )
     occurred_at = datetime.datetime.now(datetime.UTC)
     retry_state = FailedRunRetryState.from_attempt(

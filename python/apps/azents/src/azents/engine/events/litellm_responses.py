@@ -43,6 +43,7 @@ from azents.engine.run.provider_failure import (
     classify_model_provider_failure,
     extract_provider_message_text,
     model_provider_failure,
+    sanitize_provider_error_param,
     sanitize_provider_identifier,
 )
 
@@ -502,6 +503,7 @@ def map_litellm_provider_error(
     provider_error_type = sanitize_provider_identifier(
         error_body.get("type") or exc.__class__.__name__
     )
+    provider_error_param = sanitize_provider_error_param(error_body.get("param"))
     category = classify_model_provider_failure(
         status_code=status_code,
         provider_code=provider_code,
@@ -519,6 +521,7 @@ def map_litellm_provider_error(
         status_code=status_code,
         provider_code=provider_code,
         provider_error_type=provider_error_type,
+        provider_error_param=provider_error_param,
         retry_hint_seconds=_retry_after_seconds(exc),
         category=category,
     )

@@ -78,7 +78,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-08-03
-spec_version: 142
+spec_version: 143
 ---
 
 # Agent Execution Loop
@@ -157,7 +157,8 @@ normalizer requires both the documented SDK event class and exact wire discrimin
 terminal event, raise before durable model events or markers are appended. Provider-attributed SDK
 exceptions, transport failures, and typed terminal events enter the `ModelProviderFailure` contract
 only when their status or typed identifiers map to a known category. That contract retains only a
-bounded redacted provider-authored scalar message and validated safe diagnostics; raw bodies,
+bounded redacted provider-authored scalar message and validated safe diagnostics, including a
+sanitized provider parameter path when the typed error supplies one; raw bodies,
 credentials, headers, request/model output, and stream frames never cross the adapter boundary. When
 LiteLLM exposes an error only through its bounded SDK serialization, the adapter parses that wrapper
 and retains only the provider's scalar `message`, `code`, and `type`. Every provider-attributed error
@@ -1202,6 +1203,9 @@ icon.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 143) — Retained sanitized typed provider parameter paths in the
+  common failure contract so bounded operation-local compatibility logic does not infer from raw
+  messages or broad status categories.
 - **2026-08-03** (spec_version 142) — Extended the existing automatic-title input
   boundary to creation-authorized External Channel human invocations and kept the
   post-commit one-shot Discord projection outside AgentRun success.

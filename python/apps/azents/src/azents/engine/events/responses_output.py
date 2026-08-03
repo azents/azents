@@ -456,6 +456,7 @@ class _ResponsesOutputStream:
                 status_code=None,
                 provider_code="stream_ended_before_completion",
                 provider_error_type="response_stream_transport",
+                provider_error_param=None,
                 category=ModelProviderFailureCategory.TRANSPORT,
             )
         return self._build_output()
@@ -707,6 +708,7 @@ def _incomplete_response_model_error(
         status_code=None,
         provider_code=provider_code,
         provider_error_type="response_incomplete",
+        provider_error_param=details.get("param"),
     )
 
 
@@ -733,6 +735,7 @@ def _failed_response_model_error(
         status_code=None,
         provider_code=provider_code,
         provider_error_type=error.get("type") or "response_failed",
+        provider_error_param=error.get("param"),
     )
 
 
@@ -758,6 +761,7 @@ def _response_error_event_model_error(
         status_code=None,
         provider_code=provider_code,
         provider_error_type=item.get("type") or "response_error",
+        provider_error_param=item.get("param"),
     )
 
 
