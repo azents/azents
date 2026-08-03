@@ -41,12 +41,12 @@ logger = logging.getLogger(__name__)
 _SUMMARY_CHARS_PER_TOKEN = 4
 _SUMMARY_DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000
 _SUMMARY_TARGET_CONTEXT_RATIO = 0.03
-_SUMMARY_LIMIT_CONTEXT_RATIO = 0.05
+_SUMMARY_LIMIT_CONTEXT_RATIO = 0.08
 _SUMMARY_TRUNCATE_TOLERANCE_RATIO = 1.1
 _MIN_SUMMARY_TARGET_CHARS = 12_000
 _MAX_SUMMARY_TARGET_CHARS = 24_000
 _MIN_SUMMARY_LIMIT_CHARS = 16_000
-_MAX_SUMMARY_LIMIT_CHARS = 32_000
+_MAX_SUMMARY_LIMIT_CHARS = 50_000
 _SUMMARY_ROUNDING_CHARS = 1_000
 _SUMMARY_TRUNCATION_NOTE = "\n\n[Truncated by Azents compaction guard.]"
 
@@ -106,6 +106,13 @@ execution priority. Include commands, outcomes, errors, paths, branches, PRs,
 IDs, and conclusions when they help the next agent act. Use Needs verification
 only for uncertainty that materially affects the next action.
 
+Scale checkpoint detail to task complexity. Use concise structure to eliminate
+repetition and conversational narration while retaining continuation-relevant
+state and evidence. For complex or multi-stage work, preserve the details needed
+to continue directly from the checkpoint, including evidence of completed work
+and conclusions from resolved questions. Keep simple checkpoints brief and let
+task complexity determine length.
+
 This is an internal handoff. Output only the checkpoint.
 """
 
@@ -136,7 +143,12 @@ Required output sections:
 ## References
 
 Guidelines:
-- Use concise bullets.
+- Scale checkpoint detail to task complexity and let complexity determine length.
+- Use concise bullets to eliminate repetition and conversational narration while
+  retaining continuation-relevant state and evidence.
+- For complex or multi-stage work, preserve the details needed to continue
+  directly from the checkpoint, including evidence of completed work and
+  conclusions from resolved questions.
 - Describe the current working state rather than narrating the conversation.
 - Start from the furthest completed and verified progress.
 - Make Next Actions concrete, ordered, and directly useful for continuing work.

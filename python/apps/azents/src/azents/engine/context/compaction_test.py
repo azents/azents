@@ -56,9 +56,9 @@ class TestSummaryBudget:
 
         assert budget == CompactionSummaryBudget(
             target_chars=15_000,
-            limit_chars=26_000,
-            truncate_chars=29_000,
-            max_output_tokens=6_500,
+            limit_chars=41_000,
+            truncate_chars=46_000,
+            max_output_tokens=10_250,
         )
 
     def test_computes_large_context_budget_with_max_clamp(self) -> None:
@@ -67,9 +67,9 @@ class TestSummaryBudget:
 
         assert budget == CompactionSummaryBudget(
             target_chars=24_000,
-            limit_chars=32_000,
-            truncate_chars=36_000,
-            max_output_tokens=8_000,
+            limit_chars=50_000,
+            truncate_chars=55_000,
+            max_output_tokens=12_500,
         )
 
     def test_unknown_context_uses_128k_fallback(self) -> None:
@@ -114,6 +114,10 @@ class TestSummaryPrompt:
         assert "most advanced validated state" in prompt
         assert "furthest verified progress" in prompt
         assert "order next actions by execution priority" in prompt
+        assert "Scale checkpoint detail to task complexity" in prompt
+        assert "retaining continuation-relevant state and evidence" in prompt
+        assert "including evidence of completed work" in prompt
+        assert "let task complexity determine length" in prompt
         assert "Needs verification" in prompt
         assert "Output only the checkpoint" in prompt
 
@@ -138,6 +142,10 @@ class TestSummaryPrompt:
         assert "previous state to update" in template
         assert "furthest completed and verified progress" in template
         assert "concrete, ordered" in template
+        assert "Scale checkpoint detail to task complexity" in template
+        assert "retaining continuation-relevant state and evidence" in template
+        assert "including evidence of completed work" in template
+        assert "let complexity determine length" in template
         assert "bounded recent user-message and transcript excerpts" in template
 
 
