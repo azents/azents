@@ -146,10 +146,10 @@ async def test_reconciler_refreshes_stale_provider_connection_before_start_timeo
     assert updated.failure_code is None
 
 
-async def test_reconciler_dispatches_periodic_provider_start_for_running_runtime(
+async def test_reconciler_observes_running_runtime_without_restarting_it(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """Control dispatches idempotent START to converge running Runtime config."""
+    """Control observes a running Runtime without reconciling its Pod spec."""
     runtime_repository = AgentRuntimeRepository()
     async with rdb_session_manager() as session:
         workspace_id = await _create_workspace(session, "reconciler-observe-ws")
@@ -173,16 +173,29 @@ async def test_reconciler_dispatches_periodic_provider_start_for_running_runtime
             RuntimeDesiredState.RUNNING,
         )
         assert command is not None
-        await _attach_runtime_configuration(
+        revision = await _attach_runtime_configuration(
             session,
             runtime_id=runtime.id,
             target_desired_generation=command.desired_generation,
+        )
+        await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(applied_runtime_configuration_revision_id=revision.id)
         )
         await runtime_repository.mark_lifecycle_dispatched(
             session,
             runtime.id,
             command.desired_generation,
         )
+        observed = await runtime_repository.record_provider_observed_state(
+            session,
+            runtime.id,
+            RuntimeProviderObservedState.RUNNING,
+            1,
+            command.desired_generation,
+        )
+        assert observed is not None
         old_observe_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
             minutes=10
         )
@@ -232,8 +245,8 @@ async def test_reconciler_dispatches_periodic_provider_start_for_running_runtime
 
     assert dispatched == 1
     assert claimed is not None
-    assert claimed.operation_type == "provider.start"
-    assert claimed.payload["command_type"] == "start"
+    assert claimed.operation_type == "provider.observe"
+    assert claimed.payload["command_type"] == "observe"
     payload = claimed.payload["payload"]
     assert isinstance(payload, dict)
     auth = payload["auth"]
