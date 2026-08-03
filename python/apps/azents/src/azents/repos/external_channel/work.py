@@ -361,12 +361,23 @@ class ExternalChannelWorkRepository:
                     RDBExternalChannelWork.status == ExternalChannelWorkStatus.ACTIVE,
                     RDBExternalChannelBinding.disconnected_at.is_(None),
                 )
+                .with_for_update(of=RDBExternalChannelWork)
             )
         ).one_or_none()
         if row is None:
             return None
         work, binding, resource, route, connection = row
         if work.desired_progress_payload is None:
+            return None
+        existing_part = await session.scalar(
+            sa.select(RDBExternalChannelWorkProjectionPart)
+            .where(
+                RDBExternalChannelWorkProjectionPart.work_id == work.id,
+                RDBExternalChannelWorkProjectionPart.part_ordinal == 0,
+            )
+            .with_for_update()
+        )
+        if existing_part is not None:
             return None
         if connection.provider is ExternalChannelProvider.SLACK:
             rendered = render_slack_persisted_progress(
@@ -399,7 +410,7 @@ class ExternalChannelWorkRepository:
             payload["embeds"] = page.embeds
         payload["work_id"] = work.id
         payload["part_ordinal"] = 0
-        return await self.prepare_direct_control(
+        plan = await self.prepare_direct_control(
             session,
             connection_id=connection.id,
             resource_id=resource.id,
@@ -411,6 +422,19 @@ class ExternalChannelWorkRepository:
                 f"initial-progress:{work.id}:{work.desired_progress_revision}"
             ),
         )
+        if plan is None:
+            return None
+        session.add(
+            RDBExternalChannelWorkProjectionPart(
+                work_id=work.id,
+                part_ordinal=0,
+                desired_progress_revision=work.desired_progress_revision,
+                status=ExternalChannelWorkProjectionStatus.UNKNOWN,
+                provider_message_key=None,
+            )
+        )
+        await session.flush()
+        return plan
 
     async def prepare_access_control_delete(
         self,
