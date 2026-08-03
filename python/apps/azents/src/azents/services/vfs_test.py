@@ -12,6 +12,7 @@ from azents.core.vfs import (
     make_vfs_source_revision,
 )
 from azents.services.vfs import (
+    GLOBAL_RELEASE_SOURCE,
     ReleaseVfsCatalog,
     VfsFileResolutionError,
     VfsProjectionService,
@@ -24,6 +25,22 @@ async def test_release_catalog_allows_an_empty_catalog() -> None:
 
     assert snapshot.diagnostics == []
     assert snapshot.revisions == []
+
+
+async def test_release_catalog_loads_platform_skill_creator() -> None:
+    """The approved global Skill Creator is packaged into the release source."""
+    snapshot = await ReleaseVfsCatalog().snapshot([GLOBAL_RELEASE_SOURCE])
+
+    entries = {
+        entry.canonical_uri: entry
+        for revision in snapshot.revisions
+        for entry in revision.entries
+    }
+    entry = entries["azents://skills/azents/skill-creator/SKILL.md"]
+    body = entry.decode_body().decode("utf-8")
+
+    assert "name: skill-creator" in body
+    assert "description:" in body
 
 
 def _projection() -> VfsProjection:
@@ -85,6 +102,15 @@ class _MappedSessionRepository:
         return self.sessions.get(session_id)
 
 
+class _NoAttachmentsRepository:
+    """AgentToolkitRepository test double without attached Toolkits."""
+
+    async def list_by_agent(self, session: object, agent_id: str) -> list[object]:
+        """Return no attached Toolkits."""
+        del session, agent_id
+        return []
+
+
 @asynccontextmanager
 async def _session_manager() -> AsyncIterator[object]:
     yield object()
@@ -111,6 +137,26 @@ async def test_release_catalog_reuses_an_empty_catalog() -> None:
 
     assert first.revisions == second.revisions
     assert first.diagnostics == second.diagnostics == []
+
+
+async def test_preview_includes_platform_skill_creator_without_attachments() -> None:
+    """The global Skill Creator does not depend on a ToolkitConfig attachment."""
+    service = VfsProjectionService(
+        session_manager=_session_manager,  # pyright: ignore[reportArgumentType]
+        toolkit_registry={},
+        catalog=ReleaseVfsCatalog(),
+        agent_run_repository=object(),  # pyright: ignore[reportArgumentType]
+        agent_session_repository=object(),  # pyright: ignore[reportArgumentType]
+        agent_toolkit_repository=_NoAttachmentsRepository(),  # pyright: ignore[reportArgumentType]
+        toolkit_repository=object(),  # pyright: ignore[reportArgumentType]
+    )
+
+    projection = await service.build_preview(
+        agent_id="agent-1",
+        workspace_id="workspace-1",
+    )
+
+    assert projection.find("azents://skills/azents/skill-creator/SKILL.md")
 
 
 async def test_resolve_file_returns_projection_provenance_and_verified_entry() -> None:
