@@ -1172,6 +1172,35 @@ async def test_start_reuses_pod_when_runner_image_and_config_are_unchanged() -> 
 
 
 @pytest.mark.asyncio
+async def test_start_reuses_matching_pending_pod_after_api_defaulting() -> None:
+    """A retried START must not replace the same generation while it is Pending."""
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    command = _command(RuntimeLifecycleCommandType.START)
+    await provider.start(command)
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pod = api.pods[pod_key]
+    runner = pod.spec.containers[0]
+    pending = dataclasses.replace(
+        pod,
+        spec=dataclasses.replace(
+            pod.spec,
+            containers=(
+                dataclasses.replace(runner, env=tuple(reversed(runner.env))),
+                *pod.spec.containers[1:],
+            ),
+        ),
+        status=PodStatus(phase="Pending", ready=False),
+    )
+    api.pods[pod_key] = pending
+
+    await provider.start(command)
+
+    assert api.deleted_pods == []
+    assert api.pods[pod_key] == pending
+
+
+@pytest.mark.asyncio
 async def test_observe_known_runtimes_reports_pod_and_pvc() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)

@@ -196,7 +196,10 @@ class RuntimeLifecycleReconciler:
             if (
                 runtime.desired_state is RuntimeDesiredState.RUNNING
                 and runtime.provider_observed_state
-                is not RuntimeProviderObservedState.RUNNING
+                in {
+                    RuntimeProviderObservedState.UNKNOWN,
+                    RuntimeProviderObservedState.STOPPED,
+                }
             )
             else RuntimeProviderCommandType.OBSERVE
         )

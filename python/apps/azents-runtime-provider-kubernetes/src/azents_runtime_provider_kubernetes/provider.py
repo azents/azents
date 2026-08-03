@@ -656,6 +656,20 @@ class KubernetesRuntimeProvider:
         for key, value in expected.metadata.annotations.items():
             if annotations.get(key) != value:
                 return False
+        # A Pending Pod with the exact lifecycle/configuration fence already is
+        # this START request in progress. Kubernetes may default or admit fields
+        # that make a full round-trip spec comparison unequal; deleting that Pod
+        # on every retry prevents it from ever reaching Running. Pod specs are
+        # immutable, and a new Provider/configuration generation changes the
+        # checked labels/annotations above, so retaining the matching Pending Pod
+        # is both idempotent and generation-fenced.
+        if (
+            pod.status is not None
+            and pod.status.phase == "Pending"
+            and _container_images_equal(pod.spec.containers, expected.spec.containers)
+            and _pod_volumes_equal(pod.spec.volumes, expected.spec.volumes)
+        ):
+            return True
         if not _container_specs_equal(
             pod.spec.containers,
             expected.spec.containers,
@@ -1507,6 +1521,15 @@ def _container_specs_equal(
             strict=True,
         )
     )
+
+
+def _container_images_equal(
+    actual: Sequence[ContainerSpec],
+    expected: Sequence[ContainerSpec],
+) -> bool:
+    return {container.name: container.image for container in actual} == {
+        container.name: container.image for container in expected
+    }
 
 
 def _container_specs_equal_for_in_place(
