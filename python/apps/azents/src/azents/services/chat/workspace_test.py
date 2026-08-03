@@ -590,7 +590,7 @@ async def test_download_uses_verified_transfer_not_runner_file_read() -> None:
             expected_size=5,
             target=ServerToRuntimeTarget(
                 runtime_id="runtime-1",
-                desired_generation=1,
+                desired_generation=7,
             ),
         )
     ]
@@ -856,6 +856,7 @@ def _make_agent_runtime(
     workspace_path: str | None = AGENT_WORKSPACE_ROOT.as_posix(),
     provider_observed_state: RuntimeProviderObservedState | None = None,
     desired_state: RuntimeDesiredState | None = None,
+    desired_generation: int = 7,
 ) -> AgentRuntime:
     if provider_observed_state is None:
         provider_observed_state = RuntimeProviderObservedState.RUNNING
@@ -870,6 +871,7 @@ def _make_agent_runtime(
         workspace_id="workspace-1",
         agent_id="agent-1",
         desired_state=desired_state,
+        desired_generation=desired_generation,
         provider_observed_state=provider_observed_state,
         runner_state=RuntimeRunnerState.READY,
         runner_generation=1,

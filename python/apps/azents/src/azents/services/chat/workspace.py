@@ -1159,7 +1159,7 @@ class AgentWorkspaceFileService:
                     expected_size=stat.size_bytes,
                     target=ServerToRuntimeTarget(
                         runtime_id=runtime.id,
-                        desired_generation=runtime.runner_generation,
+                        desired_generation=runtime.desired_generation,
                     ),
                 )
             )

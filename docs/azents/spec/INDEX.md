@@ -22,7 +22,7 @@ Details of all living specs. Synchronized from frontmatter.
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-30 | 5 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-08-02 | 78 |
 | user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-20 | 8 |
-| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-08-02 | 55 |
+| workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-08-03 | 55 |
 
 ## Flow Specs
 
@@ -38,7 +38,7 @@ Details of all living specs. Synchronized from frontmatter.
 | [External Channel Delivery and Channel Work](flow/external-channel-delivery.md) | @Hardtack | 2026-08-03 | 33 |
 | [External Channel Lifecycle](flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-02 | 29 |
 | [External Channel Provider Ingress](flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-03 | 32 |
-| [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-08-02 | 37 |
+| [File Exchange Storage](flow/file-exchange-storage.md) | @Hardtack | 2026-08-03 | 37 |
 | [Kimi OAuth Flow](flow/kimi-oauth.md) | @Hardtack | 2026-08-01 | 1 |
 | [MCP OAuth Flow](flow/mcp-oauth.md) | @Hardtack | 2026-06-29 | 4 |
 | [OpenRouter API Key Provider Flow](flow/openrouter-api-key.md) | @Hardtack | 2026-08-01 | 3 |

@@ -21,6 +21,7 @@ from azents.runtime.transfer.runtime_image_read import (
     RuntimeImageReadService,
 )
 from azents.runtime.transfer.runtime_to_server import (
+    RuntimeToServerTransferError,
     RuntimeToServerTransferRequest,
     VerifiedRuntimeUpload,
 )
@@ -44,11 +45,14 @@ class _Resolver:
 class _Transfer:
     """Drive feature callbacks with one verified opaque object."""
 
+    error: RuntimeToServerTransferError | None = None
     requests: list[RuntimeToServerTransferRequest] = field(default_factory=list)
 
     async def transfer(self, request: RuntimeToServerTransferRequest) -> None:
         """Publish a verified object through the feature callback."""
         self.requests.append(request)
+        if self.error is not None:
+            raise self.error
         await request.callback.publish(
             VerifiedRuntimeUpload(
                 identity=CoordinatorTransferIdentity(
@@ -203,6 +207,22 @@ async def test_model_file_size_failure_preserves_typed_result() -> None:
         )
 
     assert exc_info.value.error == ModelFileOversized(max_bytes=3, actual_bytes=4)
+
+
+@pytest.mark.asyncio
+async def test_transfer_failure_becomes_image_read_error() -> None:
+    """Managed transfer failures cross the tool boundary as typed image errors."""
+    transfer = _Transfer(
+        error=RuntimeToServerTransferError("Runtime upload terminated")
+    )
+
+    with pytest.raises(RuntimeImageReadError, match="Runtime upload terminated"):
+        await _service(
+            transfer,
+            _Resolver(),
+            AsyncMock(),
+            AsyncMock(),
+        ).read(_request())
 
 
 @pytest.mark.asyncio

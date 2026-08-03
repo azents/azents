@@ -16,6 +16,7 @@ from azents.runtime.transfer.present_file_publication import (
 )
 from azents.runtime.transfer.runtime_to_server import (
     RuntimeToServerPublicationCallback,
+    RuntimeToServerTransferError,
     RuntimeToServerTransferRequest,
     VerifiedRuntimeUpload,
 )
@@ -132,23 +133,26 @@ class RuntimeImageReadService:
             model_file_service=self.model_file_service,
             request=request,
         )
-        await self.transfer_service.transfer(
-            RuntimeToServerTransferRequest(
-                target=request.target,
-                agent_id=request.authority.agent_id,
-                session_id=request.authority.session_id,
-                operation_id=operation_id,
-                runtime_path=request.runtime_path,
-                expected_size=request.expected_size,
-                expected_sha256=None,
-                product_maximum_size=self.product_maximum_size,
-                provider_maximum_size=self.product_maximum_size,
-                deadline_at=datetime.datetime.now(datetime.UTC) + self.deadline,
-                resource_class="read_image",
-                publication_id=operation_id,
-                callback=callback,
+        try:
+            await self.transfer_service.transfer(
+                RuntimeToServerTransferRequest(
+                    target=request.target,
+                    agent_id=request.authority.agent_id,
+                    session_id=request.authority.session_id,
+                    operation_id=operation_id,
+                    runtime_path=request.runtime_path,
+                    expected_size=request.expected_size,
+                    expected_sha256=None,
+                    product_maximum_size=self.product_maximum_size,
+                    provider_maximum_size=self.product_maximum_size,
+                    deadline_at=datetime.datetime.now(datetime.UTC) + self.deadline,
+                    resource_class="read_image",
+                    publication_id=operation_id,
+                    callback=callback,
+                )
             )
-        )
+        except RuntimeToServerTransferError as exc:
+            raise RuntimeImageReadError(str(exc)) from exc
         if callback.model_file is None:
             raise RuntimeImageReadError(
                 "Runtime image transfer completed without model input"

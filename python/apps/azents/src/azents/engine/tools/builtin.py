@@ -718,7 +718,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             )
             return ServerToRuntimeTarget(
                 runtime_id=runtime.id,
-                desired_generation=runtime.runner_generation,
+                desired_generation=runtime.desired_generation,
             )
 
         async def resolve_edit_target() -> RuntimeEditTarget:

@@ -79,10 +79,14 @@ from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import MemorySummary
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
-from azents.runtime.transfer.runtime_image_read import RuntimeImageReadService
+from azents.runtime.transfer.runtime_image_read import (
+    RuntimeImageReadError,
+    RuntimeImageReadService,
+)
 from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderDeliveryExecutor,
 )
+from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.runtime_storage_error import RuntimeStorageError
@@ -875,6 +879,38 @@ class TestRuntimeToolkitUpdateContext:
 
         names = {tool.spec.name for tool in state.tools}
         assert {"import_file", "present_file", "read_image"} <= names
+
+    @pytest.mark.asyncio
+    async def test_read_image_uses_runtime_lifecycle_generation(self) -> None:
+        """Managed image transfer uses lifecycle rather than Runner generation."""
+        image_service = AsyncMock(spec=RuntimeImageReadService)
+        image_service.read.side_effect = RuntimeImageReadError("transfer failed")
+        toolkit = _make_toolkit(
+            storage_files={"/workspace/agent/photo.png": b"png"},
+            runtime_image_read_service=image_service,
+        )
+        authority = SessionResourceAuthority(
+            workspace_id="ws-1",
+            agent_id="agent-1",
+            session_id="session-1",
+            root_session_id="session-1",
+            run_id="run-1",
+            run_index=1,
+            owner_generation=1,
+        )
+        state = await toolkit.update_context(
+            _make_context(resource_authority=authority)
+        )
+        tool = next(tool for tool in state.tools if tool.spec.name == "read_image")
+
+        with pytest.raises(FunctionToolError, match="transfer failed"):
+            await tool.handler(json.dumps({"path": "/workspace/agent/photo.png"}))
+
+        request = image_service.read.await_args.args[0]
+        assert request.target == ServerToRuntimeTarget(
+            runtime_id="runtime-1",
+            desired_generation=7,
+        )
 
     @pytest.mark.asyncio
     async def test_update_context_registers_instruction_context(self) -> None:
