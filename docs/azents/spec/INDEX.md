@@ -28,7 +28,7 @@ Details of all living specs. Synchronized from frontmatter.
 
 | Title | Owner | Last Verified | Version |
 |---|---|---|---|
-| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-08-03 | 143 |
+| [Agent Execution Loop](flow/agent-execution-loop.md) | @Hardtack | 2026-08-03 | 144 |
 | [Agent Runtime Control](flow/agent-runtime-control.md) | @Hardtack | 2026-08-03 | 46 |
 | [Agent Runtime Persistence](flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-31 | 13 |
 | [Chat Session Resync](flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |

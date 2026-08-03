@@ -78,7 +78,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-08-03
-spec_version: 143
+spec_version: 144
 ---
 
 # Agent Execution Loop
@@ -113,9 +113,10 @@ Main steps:
    provider-tool activity snapshots when observed.
 10. Before a normalized client-tool call is appended or admitted for execution, the immutable prepared Tool Catalog snapshots its DB-attached Toolkit source (`toolkit_config_id`, `toolkit_type`, `toolkit_name`, and `toolkit_slug`) onto the call. The same snapshot is retained by `active_tool_calls` and their live projections; built-in and auto-bound calls remain source-less.
 11. Foreground client tools execute in parallel and results are appended as event `client_tool_result`.
-12. The adapter computes normalized `needs_follow_up` from provider-neutral client-tool semantics and
-    best-effort provider-dialect signals. When it is false, the runner observes the terminal
-    `RunComplete` boundary and then transitions `AgentSession.run_state` to idle.
+12. The adapter computes normalized `needs_follow_up` as the requirement for another model step after
+    current client tools complete. The runner always executes admitted client calls first. When the
+    field is false, it then observes the terminal `RunComplete` boundary and transitions
+    `AgentSession.run_state` to idle.
 
 ### Team Session authority boundary
 
@@ -178,14 +179,15 @@ frames, request data, output data, and headers remain excluded.
 
 Completed output items may reconstruct a successfully completed response but do not independently
 prove response completion. Once the adapter has observed the provider-native successful completion
-boundary, it may normalize a dialect continuation signal such as exact `end_turn = false` into
-`needs_follow_up`. The adapter also sets the same normalized field when canonical foreground client
-tool calls require execution and another model step. This field is the execution loop's sole lifecycle
-source of truth: when true, the loop executes any client calls and continues, or continues directly
-when none exist; when false, the Run completes. Durable assistant text, reasoning, provider-tool
-events, and other model output do not independently control termination. Incomplete tool calls are
-never admitted. A user stop remains a separate interruption path and may durably preserve assistant
-text received before completion.
+boundary, an exact boolean `end_turn` extension is authoritative for whether another model step is
+required: `false` requests follow-up and `true` completes after any admitted client calls finish. When
+the extension is absent or malformed, canonical foreground client calls use the standard follow-up
+fallback while tool-less output completes. Tool execution and model continuation are independent:
+every admitted client call executes even when `needs_follow_up` is false, and only the later model
+dispatch is skipped. Durable assistant text, reasoning, provider-tool events, and other model output
+do not independently control termination. Incomplete tool calls are never admitted. A user stop
+remains a separate interruption path and may durably preserve assistant text received before
+completion.
 
 ### OpenAI Responses physical transport and incremental continuation
 
@@ -1203,6 +1205,9 @@ icon.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 144) — Separated client-tool execution from post-tool model
+  continuation so exact `end_turn=true` final tool turns execute their tools and then complete across
+  OpenAI and LiteLLM Responses adapters.
 - **2026-08-03** (spec_version 143) — Retained sanitized typed provider parameter paths in the
   common failure contract so bounded operation-local compatibility logic does not infer from raw
   messages or broad status categories.

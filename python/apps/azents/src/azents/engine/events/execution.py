@@ -634,9 +634,7 @@ class AgentRunExecution[
                         for event in appended
                         if isinstance(event.payload, ClientToolCallPayload)
                     ]
-                    # The adapter combines provider-neutral client-tool semantics
-                    # with best-effort dialect hints into one lifecycle decision.
-                    if not needs_follow_up:
+                    if not client_tool_calls and not needs_follow_up:
                         async with self.session_manager() as session:
                             run_marker = await self._append_run_marker(
                                 session,
@@ -704,6 +702,32 @@ class AgentRunExecution[
                             )
                         await finish_turn("cancelled")
                         return AgentRunStatus.INTERRUPTED
+                    if not needs_follow_up:
+                        async with self.session_manager() as session:
+                            run_marker = await self._append_run_marker(
+                                session,
+                                request.session_id,
+                                request.run_id,
+                                "completed",
+                            )
+                            terminal_result = _terminal_result_from_events(appended)
+                            await self._mark_terminal(
+                                session,
+                                request.run_id,
+                                AgentRunStatus.COMPLETED,
+                                terminal_result_event_id=terminal_result.event_id,
+                                terminal_result_message=terminal_result.message,
+                            )
+                        if self.output_sink is not None:
+                            await self.output_sink(
+                                NormalizedAdapterOutput(
+                                    needs_follow_up=False,
+                                    events=[],
+                                ),
+                                [run_marker],
+                            )
+                        await finish_turn("completed")
+                        return AgentRunStatus.COMPLETED
                     await finish_turn("completed")
                 except asyncio.CancelledError:
                     raise

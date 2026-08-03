@@ -305,10 +305,11 @@ def responses_need_follow_up(
     response: dict[str, object],
     events: Sequence[Event],
 ) -> bool:
-    """Combine standard client-tool and best-effort dialect continuation signals."""
-    return response.get("end_turn") is False or any(
-        isinstance(event.payload, ClientToolCallPayload) for event in events
-    )
+    """Resolve dialect continuation before the standard client-tool fallback."""
+    end_turn = response.get("end_turn")
+    if isinstance(end_turn, bool):
+        return not end_turn
+    return any(isinstance(event.payload, ClientToolCallPayload) for event in events)
 
 
 class _ResponsesOutputStream:

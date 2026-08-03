@@ -152,7 +152,7 @@ class NormalizedAdapterOutput(BaseModel):
     needs_follow_up: bool = Field(
         description=(
             "Adapter-computed source of truth for whether execution requires "
-            "another model step"
+            "another model step after current client tool calls complete"
         )
     )
     events: list[Event] = Field(default_factory=list)
