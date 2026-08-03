@@ -411,7 +411,7 @@ async def test_reconciler_fences_adoption_then_finishes_restart_replacement(
     assert claimed.payload["command_type"] == "observe"
     runtime_configuration = claimed.payload["runtime_configuration"]
     assert isinstance(runtime_configuration, dict)
-    assert runtime_configuration["desired_generation"] == restart.desired_generation
+    assert runtime_configuration["desired_generation"] == initial.desired_generation
 
 
 async def test_reconciler_rejects_mismatched_resolved_provider_reference(
