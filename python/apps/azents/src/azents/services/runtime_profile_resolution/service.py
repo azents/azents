@@ -116,6 +116,14 @@ class RuntimeProfileResolutionService:
                     ),
                 )
 
+            # Lifecycle commands lock the Runtime before cloning a configuration
+            # revision whose foreign keys reference the Profile source rows below.
+            # Lock an existing Runtime first so resolution cannot hold those source
+            # rows while waiting for the lifecycle transaction's Runtime lock.
+            existing = await self.runtime_repository.get_by_agent_id_for_update(
+                session,
+                agent.id,
+            )
             profile = await self.profile_repository.get_workspace_runtime_profile(
                 session,
                 workspace_id=agent.workspace_id,
@@ -151,10 +159,6 @@ class RuntimeProfileResolutionService:
                     message="The selected Runtime Provider was not found.",
                 )
 
-            existing = await self.runtime_repository.get_by_agent_id_for_update(
-                session,
-                agent.id,
-            )
             created = False
             if existing is None:
                 ensured = await self.runtime_repository.ensure_with_create(

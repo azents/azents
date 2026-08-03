@@ -1,10 +1,13 @@
 """Exact Runtime Profile resolution integration tests."""
 
+import asyncio
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager, suppress
 from unittest.mock import AsyncMock
 
 import sqlalchemy as sa
 from azcommon.result import Success
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import (
     LLMProvider,
@@ -20,11 +23,14 @@ from azents.core.runtime_profile import (
     RuntimeProfileLifecycle,
 )
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.runtime_profile import RDBRuntimeConfigurationRevision
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_profile.data import (
     RuntimeInfrastructureProfileCreate,
     WorkspaceRuntimeProfileCreate,
@@ -45,8 +51,23 @@ from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import make_test_model_selection_dict
 
-from .data import RuntimeProfileResolutionUnavailable
+from .data import RuntimeProfileResolutionResult, RuntimeProfileResolutionUnavailable
 from .service import RuntimeProfileResolutionService
+
+
+class _SignalingAgentRuntimeRepository(AgentRuntimeRepository):
+    """Signal when resolution reaches the existing Runtime lock."""
+
+    def __init__(self, lock_attempted: asyncio.Event) -> None:
+        self.lock_attempted = lock_attempted
+
+    async def get_by_agent_id_for_update(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+    ) -> AgentRuntime | None:
+        self.lock_attempted.set()
+        return await super().get_by_agent_id_for_update(session, agent_id)
 
 
 def _contract_payload() -> dict[str, object]:
@@ -264,6 +285,90 @@ async def test_resolution_creates_ready_revision_and_reuses_same_digest(
     assert repeated.runtime.desired_runtime_configuration_revision_id == (
         first.desired_revision.id
     )
+
+
+async def test_resolution_avoids_lifecycle_configuration_fk_deadlock(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """Resolution waits on Runtime before locking revision FK source rows."""
+    del latest_db_schema
+
+    @asynccontextmanager
+    async def independent_session_manager() -> AsyncGenerator[AsyncSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+            try:
+                yield session
+            except Exception:
+                await session.rollback()
+                raise
+            else:
+                await session.commit()
+
+    async with independent_session_manager() as session:
+        agent_id, _ = await _seed_selected_agent(
+            session,
+            handle="runtime-resolution-lifecycle-lock-order",
+        )
+
+    service = _service(independent_session_manager)
+    ready = await service.ensure_for_agent(agent_id)
+    lock_attempted = asyncio.Event()
+    service.runtime_repository = _SignalingAgentRuntimeRepository(lock_attempted)
+    resolution_task: asyncio.Task[RuntimeProfileResolutionResult] | None = None
+
+    try:
+        async with independent_session_manager() as lifecycle_session:
+            locked_runtime = await lifecycle_session.scalar(
+                sa.select(RDBAgentRuntime)
+                .where(RDBAgentRuntime.id == ready.runtime.id)
+                .with_for_update()
+            )
+            assert locked_runtime is not None
+
+            resolution_task = asyncio.create_task(service.ensure_for_agent(agent_id))
+            await asyncio.wait_for(lock_attempted.wait(), timeout=5)
+            await asyncio.sleep(0)
+            assert not resolution_task.done()
+
+            revision = ready.desired_revision
+            lifecycle_session.add(
+                RDBRuntimeConfigurationRevision(
+                    runtime_id=revision.runtime_id,
+                    provider_id=revision.provider_id,
+                    provider_capability_revision_id=(
+                        revision.provider_capability_revision_id
+                    ),
+                    infrastructure_profile_id=revision.infrastructure_profile_id,
+                    infrastructure_profile_version=(
+                        revision.infrastructure_profile_version
+                    ),
+                    workspace_runtime_profile_id=(
+                        revision.workspace_runtime_profile_id
+                    ),
+                    workspace_runtime_profile_version=(
+                        revision.workspace_runtime_profile_version
+                    ),
+                    agent_selection_version=revision.agent_selection_version,
+                    resolution_status=revision.resolution_status,
+                    required_capabilities=list(revision.required_capabilities),
+                    missing_capabilities=list(revision.missing_capabilities),
+                    source_trace=revision.source_trace,
+                    digest=revision.digest,
+                    target_desired_generation=(revision.target_desired_generation + 1),
+                    reason_code=revision.reason_code,
+                    resolved_configuration=revision.resolved_configuration,
+                )
+            )
+            await asyncio.wait_for(lifecycle_session.flush(), timeout=5)
+
+        repeated = await asyncio.wait_for(resolution_task, timeout=5)
+        assert repeated.runtime.id == ready.runtime.id
+    finally:
+        if resolution_task is not None and not resolution_task.done():
+            resolution_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await resolution_task
 
 
 async def test_resolution_records_blocked_revision_without_losing_prior_desired(
