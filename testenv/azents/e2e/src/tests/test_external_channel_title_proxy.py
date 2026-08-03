@@ -14,7 +14,10 @@ def test_discord_title_request_match_is_specific() -> None:
         "messages": [
             {
                 "role": "system",
-                "content": "You are a session title generator. Output only a title.",
+                "content": (
+                    "<task>Create a brief title from the request so the user can "
+                    "find it later.</task>"
+                ),
             },
             {
                 "role": "user",

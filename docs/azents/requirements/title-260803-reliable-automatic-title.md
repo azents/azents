@@ -2,6 +2,7 @@
 title: "Reliable Automatic Session Title Requirements"
 created: 2026-08-03
 updated: 2026-08-03
+implemented: 2026-08-03
 tags: [session, title, llm, external-channel]
 document_role: primary
 document_type: requirements

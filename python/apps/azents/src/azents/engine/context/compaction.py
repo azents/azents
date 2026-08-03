@@ -347,6 +347,7 @@ async def _summarize_text_attempt(
             watchdog=watchdog,
             timeout_policy=timeout_policy,
             call_context=call_context,
+            extra_body=None,
         )
         return await extract_response_text(response)
     except ModelProviderFailure:
@@ -363,6 +364,7 @@ async def _summarize_text_attempt(
             status_code=None,
             provider_code=exc.code,
             provider_error_type=exc.event_type,
+            provider_error_param=exc.param,
         ) from None
     except ModelCallError as exc:
         raise CompactionFailedError(exc.user_message) from exc

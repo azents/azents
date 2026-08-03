@@ -16,8 +16,8 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-02 | 62 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-03 | 138 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-03 | 42 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-03 | 139 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-03 | 43 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-01 | 18 |
@@ -31,7 +31,7 @@ Design documents are accumulated records and are not listed individually in this
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
-| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-03 | 142 |
+| [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-03 | 143 |
 | [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-03 | 46 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-07-31 | 13 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
@@ -385,7 +385,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Adopt testenv QA Fixture-First Architecture Historical Requirements Reconstruction](requirements/testenv-260512-testenv-qa-fixtures.md) | testenv-260512 | 2026-05-12 | - |
 | [Resolve Prompt Model Targets at Run Time Historical Requirements Reconstruction](requirements/time-260710-time-target-resolution.md) | time-260710 | 2026-07-10 | - |
 | [External Channel Session and Discord Thread Automatic Title Requirements](requirements/title-260802-external-channel-automatic-title.md) | title-260802 | 2026-08-02 | 2026-08-03 |
-| [Reliable Automatic Session Title Requirements](requirements/title-260803-reliable-automatic-title.md) | title-260803 | 2026-08-03 | - |
+| [Reliable Automatic Session Title Requirements](requirements/title-260803-reliable-automatic-title.md) | title-260803 | 2026-08-03 | 2026-08-03 |
 | [Expose Session Todo State through Toolkit State and Chat Live State Historical Requirements Reconstruction](requirements/todo-260613-todo-toolkit-ui.md) | todo-260613 | 2026-06-13 | - |
 | [Token Usage Storage Historical Requirements Reconstruction](requirements/token-260305-token-usage.md) | token-260305 | 2026-03-05 | 2026-04-21 |
 | [Toolkit Assignment Historical Requirements Reconstruction](requirements/toolkit-260225-toolkit-assignment.md) | toolkit-260225 | 2026-02-25 | 2026-03-23 |

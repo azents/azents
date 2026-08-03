@@ -59,6 +59,7 @@ class ResponsesOutputError(Exception):
     event_type: str
     message: str | None = None
     code: object | None = None
+    param: object | None = None
 
 
 def responses_endpoint_kwargs(
@@ -127,6 +128,7 @@ async def call_responses_model(
     watchdog: ModelStreamWatchdog,
     timeout_policy: ModelStreamTimeoutPolicy,
     call_context: ModelStreamCallContext,
+    extra_body: dict[str, object] | None,
     text: ResponseTextConfigParam = DEFAULT_RESPONSES_TEXT_CONFIG,
 ) -> object:
     """Call LiteLLM Responses API with Azents-standard endpoint handling."""
@@ -156,6 +158,7 @@ async def call_responses_model(
             api_key=endpoint_kwargs.api_key,
             api_base=endpoint_kwargs.api_base,
             base_url=endpoint_kwargs.base_url,
+            extra_body=extra_body,
             timeout=connect_only_http_timeout(timeout_policy.connect_timeout_seconds),
         )
         if isinstance(response, AsyncIterable):
@@ -299,6 +302,7 @@ def _stream_error(event: dict[str, object]) -> ResponsesOutputError | None:
             event_type=event_type,
             message=message if isinstance(message, str) else None,
             code=code,
+            param=details.get("param"),
         )
 
     incomplete_details = model_dump(response.get("incomplete_details"))
@@ -307,6 +311,7 @@ def _stream_error(event: dict[str, object]) -> ResponsesOutputError | None:
         event_type=event_type,
         message=reason if isinstance(reason, str) else None,
         code=reason,
+        param=incomplete_details.get("param"),
     )
 
 

@@ -60,6 +60,7 @@ class UnclassifiedModelProviderError(RuntimeError):
     status_code: int | None
     provider_code: str | None
     provider_error_type: str | None
+    provider_error_param: str | None
     provider: str
     integration: str | None
     model: str
@@ -73,6 +74,7 @@ class UnclassifiedModelProviderError(RuntimeError):
         status_code: int | None,
         provider_code: object,
         provider_error_type: object,
+        provider_error_param: object,
         provider: str,
         integration: str | None,
         model: str,
@@ -87,6 +89,7 @@ class UnclassifiedModelProviderError(RuntimeError):
         )
         self.provider_code = sanitize_provider_identifier(provider_code)
         self.provider_error_type = sanitize_provider_identifier(provider_error_type)
+        self.provider_error_param = sanitize_provider_error_param(provider_error_param)
         self.provider = sanitize_provider_identifier(provider) or "unknown"
         self.integration = sanitize_provider_identifier(integration)
         self.model = sanitize_provider_identifier(model) or "unknown"
@@ -104,6 +107,8 @@ class UnclassifiedModelProviderError(RuntimeError):
             diagnostics.append(f"provider_code={self.provider_code}")
         if self.provider_error_type is not None:
             diagnostics.append(f"provider_error_type={self.provider_error_type}")
+        if self.provider_error_param is not None:
+            diagnostics.append(f"provider_error_param={self.provider_error_param}")
         if self.provider_message is not None:
             diagnostics.append(f"provider_message={self.provider_message}")
         super().__init__(
@@ -121,6 +126,7 @@ class ModelProviderFailure(ModelCallError):
     status_code: int | None
     provider_code: str | None
     provider_error_type: str | None
+    provider_error_param: str | None
     retry_hint_seconds: float | None
     provider: str
     integration: str | None
@@ -138,6 +144,7 @@ class ModelProviderFailure(ModelCallError):
         status_code: int | None,
         provider_code: str | None,
         provider_error_type: str | None,
+        provider_error_param: str | None,
         retry_hint_seconds: float | None,
         provider: str,
         integration: str | None,
@@ -150,6 +157,7 @@ class ModelProviderFailure(ModelCallError):
         safe_model = sanitize_provider_identifier(model) or "unknown"
         safe_code = sanitize_provider_identifier(provider_code)
         safe_error_type = sanitize_provider_identifier(provider_error_type)
+        safe_error_param = sanitize_provider_error_param(provider_error_param)
         safe_status = (
             status_code
             if isinstance(status_code, int) and 100 <= status_code <= 599
@@ -169,6 +177,7 @@ class ModelProviderFailure(ModelCallError):
                 status_code=safe_status,
                 provider_code=safe_code,
                 provider_error_type=safe_error_type,
+                provider_error_param=safe_error_param,
                 provider=safe_provider,
                 integration=safe_integration,
                 model=safe_model,
@@ -184,6 +193,7 @@ class ModelProviderFailure(ModelCallError):
         self.status_code = safe_status
         self.provider_code = safe_code
         self.provider_error_type = safe_error_type
+        self.provider_error_param = safe_error_param
         self.retry_hint_seconds = safe_retry_hint
         self.provider = safe_provider
         self.integration = safe_integration
@@ -202,12 +212,14 @@ def model_provider_failure(
     status_code: int | None,
     provider_code: object,
     provider_error_type: object,
+    provider_error_param: object,
     retry_hint_seconds: float | None = None,
     category: ModelProviderFailureCategory | None = None,
 ) -> ModelProviderFailure:
     """Build one classified provider failure from typed adapter fields."""
     safe_code = sanitize_provider_identifier(provider_code)
     safe_error_type = sanitize_provider_identifier(provider_error_type)
+    safe_error_param = sanitize_provider_error_param(provider_error_param)
     resolved_category = category or classify_model_provider_failure(
         status_code=status_code,
         provider_code=safe_code,
@@ -223,6 +235,7 @@ def model_provider_failure(
         status_code=status_code,
         provider_code=safe_code,
         provider_error_type=safe_error_type,
+        provider_error_param=safe_error_param,
         retry_hint_seconds=retry_hint_seconds,
         provider=provider,
         integration=integration,
@@ -439,6 +452,7 @@ def model_provider_error_log_fields(
         "provider_failure_status_code": error.status_code,
         "provider_failure_code": error.provider_code,
         "provider_failure_error_type": error.provider_error_type,
+        "provider_failure_error_param": error.provider_error_param,
         "provider_failure_message": error.provider_message,
         "provider_failure_fingerprint": error.fingerprint,
     }
@@ -473,6 +487,7 @@ def model_provider_error_fingerprint(
             str(error.status_code or ""),
             error.provider_code or "",
             error.provider_error_type or "",
+            error.provider_error_param or "",
             message_shape,
         ]
     )

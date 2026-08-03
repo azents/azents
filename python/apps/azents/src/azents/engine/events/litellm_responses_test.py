@@ -2955,6 +2955,7 @@ class TestLiteLLMResponsesModelAdapter:
                     "message": "Request rejected",
                     "type": "invalid_request_error",
                     "code": "invalid_request",
+                    "param": "text.format",
                 },
             ),
             call_context=ModelStreamCallContext(
@@ -2973,6 +2974,7 @@ class TestLiteLLMResponsesModelAdapter:
         assert failure.provider_message == "Request rejected"
         assert failure.provider_code == "invalid_request"
         assert failure.provider_error_type == "invalid_request_error"
+        assert failure.provider_error_param == "text.format"
         assert "Error code" not in failure.user_message
 
     def test_serialized_litellm_error_extracts_only_typed_provider_fields(
@@ -2985,7 +2987,8 @@ class TestLiteLLMResponsesModelAdapter:
                     "Error code: 400 - {'error': {'message': "
                     "'Request rejected api_key=sk-abcdefghijk', "
                     "'type': 'invalid_request_error', "
-                    "'code': 'invalid_request'}}"
+                    "'code': 'invalid_request', "
+                    "'param': 'text.format'}}"
                 ),
                 model="openrouter/google/gemini-3.5-flash",
                 llm_provider="openrouter",
@@ -3006,6 +3009,7 @@ class TestLiteLLMResponsesModelAdapter:
         assert failure.provider_message == "Request rejected api_key=[REDACTED]"
         assert failure.provider_code == "invalid_request"
         assert failure.provider_error_type == "invalid_request_error"
+        assert failure.provider_error_param == "text.format"
 
     async def test_auth_error_is_user_visible(
         self,

@@ -3478,6 +3478,7 @@ async def test_provider_failure_uses_full_budget_despite_retryability() -> None:
         status_code=400,
         provider_code="invalid_request",
         provider_error_type="bad_request",
+        provider_error_param=None,
     )
     retry_state: FailedRunRetryState | None = None
     finalization_reasons: list[str | None] = []
@@ -3820,6 +3821,7 @@ async def test_record_provider_failure_logs_safe_structured_attempt(
         status_code=503,
         provider_code="server_error",
         provider_error_type="api_error",
+        provider_error_param=None,
     )
     attempt = executor._failed_run_attempt_from_user_visible_error(  # pyright: ignore[reportPrivateUsage]  # Exercise provider-attempt logging directly.
         failure,
@@ -3877,6 +3879,7 @@ def test_chat_live_retry_state_hides_provider_diagnostic_taxonomy() -> None:
         status_code=503,
         provider_code="server_error",
         provider_error_type="api_error",
+        provider_error_param=None,
     )
     attempt = executor._failed_run_attempt_from_user_visible_error(  # pyright: ignore[reportPrivateUsage]  # Exercise the live provider retry projection directly.
         failure,
@@ -3923,6 +3926,7 @@ async def test_execute_prioritizes_stop_over_provider_failure_persistence(
         status_code=503,
         provider_code="server_error",
         provider_error_type="api_error",
+        provider_error_param=None,
     )
     engine = _AlwaysProviderFailingEngine(failure)
     finalizer = _FailedRunFinalizer()
@@ -4007,6 +4011,7 @@ async def test_execute_clears_retry_state_when_retry_emits_run_stopped(
         status_code=503,
         provider_code="server_error",
         provider_error_type="api_error",
+        provider_error_param=None,
     )
     engine = _ProviderFailThenStopEngine(failure)
     finalizer = _FailedRunFinalizer()

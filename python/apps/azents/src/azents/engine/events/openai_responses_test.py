@@ -1172,6 +1172,7 @@ async def test_adapter_maps_sdk_status_error_without_duplicate_adapter_log(
     assert raised.value.status_code == 400
     assert raised.value.provider_code == "future_error"
     assert raised.value.provider_error_type == "future_error_type"
+    assert raised.value.provider_error_param == "input[0].tools[1]"
     assert raised.value.provider_message == "Rejected api_key=[REDACTED]"
     assert raised.value.__cause__ is error
     assert "OpenAI Responses SDK request failed" not in caplog.text

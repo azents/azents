@@ -782,6 +782,7 @@ class OpenAIResponsesModelAdapter:
                 status_code=failure.status_code,
                 provider_code=f"websocket_{failure.stage}",
                 provider_error_type="websocket_transport",
+                provider_error_param=None,
                 category=_websocket_failure_category(failure.status_code),
             ) from None
         except OpenAIError as exc:
@@ -1314,6 +1315,7 @@ class _OpenAIResponsesOutputStream:
                 provider_message=None,
                 provider_code=provider_code,
                 provider_error_type="response_incomplete",
+                provider_error_param=None,
             )
         elif (
             isinstance(native_event, ResponseFailedEvent)
@@ -1333,6 +1335,7 @@ class _OpenAIResponsesOutputStream:
                 provider_message=provider_message,
                 provider_code=provider_code,
                 provider_error_type="response_failed",
+                provider_error_param=None,
             )
         elif (
             isinstance(native_event, ResponseErrorEvent)
@@ -1347,6 +1350,7 @@ class _OpenAIResponsesOutputStream:
                 provider_message=native_event.message,
                 provider_code=native_event.code,
                 provider_error_type="response_error",
+                provider_error_param=native_event.param,
             )
         elif (
             isinstance(native_event, ResponseCompletedEvent)
@@ -1374,6 +1378,7 @@ class _OpenAIResponsesOutputStream:
                 status_code=None,
                 provider_code="stream_ended_before_completion",
                 provider_error_type="response_stream_transport",
+                provider_error_param=None,
                 category=ModelProviderFailureCategory.TRANSPORT,
             )
         return self._build_output()
@@ -1863,6 +1868,7 @@ def _map_openai_terminal_error(
     provider_message: str | None,
     provider_code: str | None,
     provider_error_type: str,
+    provider_error_param: object,
 ) -> ModelProviderFailure:
     """Convert one typed terminal event into the common provider contract."""
     return model_provider_failure(
@@ -1877,6 +1883,7 @@ def _map_openai_terminal_error(
         status_code=None,
         provider_code=provider_code,
         provider_error_type=provider_error_type,
+        provider_error_param=provider_error_param,
     )
 
 
@@ -1926,6 +1933,7 @@ def _map_openai_error(
     provider_error_type = sanitize_provider_identifier(
         error_body.get("type") or exc.__class__.__name__
     )
+    provider_error_param = sanitize_provider_error_param(error_body.get("param"))
     category = classify_model_provider_failure(
         status_code=status_code,
         provider_code=provider_code,
@@ -1944,6 +1952,7 @@ def _map_openai_error(
         status_code=status_code,
         provider_code=provider_code,
         provider_error_type=provider_error_type,
+        provider_error_param=provider_error_param,
         retry_hint_seconds=_openai_retry_after_seconds(exc),
         category=category,
     )

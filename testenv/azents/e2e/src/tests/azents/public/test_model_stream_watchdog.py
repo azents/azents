@@ -55,6 +55,9 @@ _TITLE_RESPONSE = "WATCHDOG_TITLE_RUN_COMPLETED"
 _TITLE_PROVIDER_RETRY_PROMPT = "Provider title retry"
 _TITLE_PROVIDER_RETRY_RESPONSE = "PROVIDER_TITLE_RUN_COMPLETED"
 _TITLE_PROVIDER_RETRY_TITLE = "Provider title retry recovered"
+_TITLE_OUTPUT_FALLBACK_PROMPT = "Structured title fallback"
+_TITLE_OUTPUT_FALLBACK_RESPONSE = "TITLE_OUTPUT_FALLBACK_RUN_COMPLETED"
+_TITLE_OUTPUT_FALLBACK_TITLE = "Structured title fallback recovered"
 
 
 def _wait_until(
@@ -910,4 +913,57 @@ class TestModelStreamWatchdog:
             title_recovered,
             timeout=15,
             message=f"provider title retry did not recover: {observed!r}",
+        )
+
+    def test_session_title_unknown_capability_falls_back_to_plain_text(
+        self,
+        public_api_client: azentspublicclient.ApiClient,
+        admin_api_client: azentsadminclient.ApiClient,
+        azents_public_server_url: str,
+        azents_engine_worker_container: object,
+    ) -> None:
+        """Typed Structured Output rejection changes only the title envelope."""
+        del azents_engine_worker_container
+        workspace = setup_workspace(
+            public_api_client,
+            admin_api_client,
+            azents_public_server_url,
+        )
+        agent_id = create_agent(public_api_client, workspace)
+        result = run_message(
+            public_api_client=public_api_client,
+            public_url=azents_public_server_url,
+            token=workspace.token,
+            agent_id=agent_id,
+            message=_TITLE_OUTPUT_FALLBACK_PROMPT,
+        )
+        payload = wait_for_rest_contents(
+            server_url=azents_public_server_url,
+            token=workspace.token,
+            session_id=result.session_id,
+            expected=[_TITLE_OUTPUT_FALLBACK_RESPONSE],
+        )
+        assert not system_error_events(payload)
+
+        observed: dict[str, object] | None = None
+
+        def title_recovered() -> bool:
+            nonlocal observed
+            response = requests.get(
+                f"{azents_public_server_url}/chat/v1/agents/{agent_id}"
+                f"/sessions/{result.session_id}",
+                headers=auth_headers(workspace.token),
+                timeout=10,
+            )
+            response.raise_for_status()
+            observed = json_object(response)
+            return (
+                observed.get("title") == _TITLE_OUTPUT_FALLBACK_TITLE
+                and observed.get("title_source") == "auto_generated"
+            )
+
+        _wait_until(
+            title_recovered,
+            timeout=15,
+            message=f"title output fallback did not recover: {observed!r}",
         )
