@@ -129,11 +129,11 @@ RUN chmod +x /usr/local/bin/azents-git-credential \
     && git config --system credential.useHttpPath true
 
 RUN groupadd --gid 1000 agent \
-    && useradd --uid 1000 --gid 1000 -m -d /workspace/agent -s /bin/bash agent
+    && useradd --uid 1000 --gid 1000 -m -d /home/agent -s /bin/bash agent
 
-ENV HOME=/workspace/agent
-ENV PATH=/usr/local/bin/corepack-shims:/workspace/agent/.local/bin:${PATH}
-WORKDIR /workspace/agent
+ENV HOME=/home/agent
+ENV PATH=/usr/local/bin/corepack-shims:/home/agent/.local/bin:${PATH}
+WORKDIR /workspace/python/apps/azents-runtime-runner
 
 USER agent
 

@@ -748,7 +748,7 @@ def _registration() -> RunnerRegistration:
         capabilities=("bash", "file.read"),
         health="ok",
         workspace_path="/workspace/agent",
-        metadata={"workspace_path_source": "provider"},
+        metadata={"region": "test"},
         auth_credential_id="credential-1",
         runtime_configuration=_runtime_configuration_evidence(),
     )

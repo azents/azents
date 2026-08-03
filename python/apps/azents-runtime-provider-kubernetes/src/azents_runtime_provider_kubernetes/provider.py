@@ -106,7 +106,6 @@ _LABEL_WORKSPACE_ID = "azents/workspace-id"
 _LABEL_DESIRED_GENERATION = "azents/desired-generation"
 _LABEL_PROVIDER_GENERATION = "azents/provider-generation"
 _LABEL_CONFIGURATION_MANAGED = "azents/runtime-configuration-managed"
-_ANNOTATION_WORKSPACE_PATH = "azents/workspace-path"
 _ANNOTATION_CONFIGURATION_REVISION_ID = "azents/runtime-configuration-revision-id"
 _ANNOTATION_CONFIGURATION_DIGEST = "azents/runtime-configuration-digest"
 _LABEL_IMAGE_GENERATION = "azents/image-generation"
@@ -123,7 +122,7 @@ _ENV_PROVIDER_GENERATION = "AZ_RUNTIME_PROVIDER_GENERATION"
 _ENV_DESIRED_GENERATION = "AZ_RUNTIME_DESIRED_GENERATION"
 _ENV_RUNNER_AUTH_TOKEN = "AZ_RUNTIME_RUNNER_AUTH_TOKEN"
 _ENV_RUNNER_AUTH_CREDENTIAL_ID = "AZ_RUNTIME_RUNNER_AUTH_CREDENTIAL_ID"
-_ENV_WORKSPACE_PATH = "AZ_AGENT_WORKSPACE_PATH"
+_ENV_HOME = "HOME"
 _ENV_CONFIGURATION_REVISION_ID = "AZ_RUNTIME_CONFIGURATION_REVISION_ID"
 _ENV_CONFIGURATION_DIGEST = "AZ_RUNTIME_CONFIGURATION_DIGEST"
 _ENV_CONFIGURATION_DESIRED_GENERATION = "AZ_RUNTIME_CONFIGURATION_DESIRED_GENERATION"
@@ -173,12 +172,12 @@ class KubernetesRuntimeProviderConfig:
     runtime_control_namespace: str
     runtime_control_labels: Mapping[str, str]
     runtime_control_port: int
+    workspace_mount_path: str
     network_hard_cap_allowed_cidrs: tuple[str, ...] = ()
     network_hard_cap_denied_cidrs: tuple[str, ...] = ()
     network_hard_cap_extra_egress: tuple[NetworkPolicyEgressRule, ...] = ()
     image_pull_secrets: tuple[LocalObjectReference, ...] = ()
     pod_annotations: Mapping[str, str] = dataclasses.field(default_factory=dict)
-    workspace_mount_path: str = "/workspace/agent"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -400,7 +399,6 @@ class KubernetesRuntimeProvider:
                     reason="terminal_resources_absent",
                     provider_runtime_id=None,
                 ),
-                workspace_path="",
                 terminal_delete_acknowledged=True,
             ),
         )
@@ -762,10 +760,7 @@ class KubernetesRuntimeProvider:
                 name=_pvc_name(command.identity.runtime_id),
                 namespace=self._config.namespace,
                 labels=self._labels(command),
-                annotations={
-                    **self._base_annotations(),
-                    **self._configuration_annotations(command),
-                },
+                annotations=self._configuration_annotations(command),
             ),
             spec=PersistentVolumeClaimSpec(
                 storage_class_name=volume.storage_class_name,
@@ -985,13 +980,9 @@ class KubernetesRuntimeProvider:
             _LABEL_WORKSPACE_ID: identity.workspace_id,
         }
 
-    def _base_annotations(self) -> dict[str, str]:
-        return {_ANNOTATION_WORKSPACE_PATH: self._workspace_mount_path}
-
     def _pod_annotations(self, command: RuntimeLifecycleCommand) -> dict[str, str]:
         return {
             **self._config.pod_annotations,
-            **self._base_annotations(),
             **self._configuration_annotations(command),
         }
 
@@ -1020,7 +1011,7 @@ class KubernetesRuntimeProvider:
             _ENV_AGENT_ID: identity.agent_id,
             _ENV_WORKSPACE_ID: identity.workspace_id,
             _ENV_PROVIDER_ID: self._config.provider_id,
-            _ENV_WORKSPACE_PATH: self._workspace_mount_path,
+            _ENV_HOME: self._workspace_mount_path,
         }
         if command.auth.control_tls_ca_pem is not None:
             env[_ENV_CONTROL_TLS_CA_PEM] = command.auth.control_tls_ca_pem
@@ -1062,7 +1053,6 @@ class KubernetesRuntimeProvider:
             observed_state=observed_state,
             observed_desired_generation=command.desired_generation,
             provider_runtime_id=provider_runtime_id,
-            workspace_path=self._workspace_mount_path,
             reason=reason,
             diagnostic={},
             reported_at=datetime.now(UTC),
@@ -1084,10 +1074,6 @@ class KubernetesRuntimeProvider:
                 _LABEL_DESIRED_GENERATION,
             ),
             provider_runtime_id=pod.metadata.name,
-            workspace_path=pod.metadata.annotations.get(
-                _ANNOTATION_WORKSPACE_PATH,
-                self._workspace_mount_path,
-            ),
             reason=reason,
             diagnostic={"source": "pod"},
             reported_at=datetime.now(UTC),
@@ -1121,10 +1107,6 @@ class KubernetesRuntimeProvider:
                     _LABEL_DESIRED_GENERATION,
                 ),
                 provider_runtime_id=None,
-                workspace_path=event.pod.metadata.annotations.get(
-                    _ANNOTATION_WORKSPACE_PATH,
-                    self._workspace_mount_path,
-                ),
                 reason="pod_deleted",
                 diagnostic={"source": "pod_watch", "event_type": event.event_type},
                 reported_at=datetime.now(UTC),
@@ -1158,10 +1140,6 @@ class KubernetesRuntimeProvider:
                 _LABEL_DESIRED_GENERATION,
             ),
             provider_runtime_id=None,
-            workspace_path=pvc.metadata.annotations.get(
-                _ANNOTATION_WORKSPACE_PATH,
-                self._workspace_mount_path,
-            ),
             reason="pvc_present_without_pod",
             diagnostic={"source": "pvc"},
             reported_at=datetime.now(UTC),

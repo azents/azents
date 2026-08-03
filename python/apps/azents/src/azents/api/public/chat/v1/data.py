@@ -847,7 +847,7 @@ class AgentSessionProjectDefaultsResponse(BaseModel):
 class SessionWorkspaceProjectRegisterRequest(BaseModel):
     """Existing Agent Workspace folder Project registration payload."""
 
-    path: str = Field(description="Existing directory path under /workspace/agent")
+    path: str = Field(description="Existing directory path under the Agent Workspace")
 
 
 class ProjectBrowserManifestPreviewRequest(BaseModel):
@@ -1140,7 +1140,7 @@ class AgentWorkspaceRuntimeResponse(BaseModel):
     runtime_id: str | None = Field(description="AgentRuntime ID")
     workspace_path: str | None = Field(
         default=None,
-        description="Agent Workspace path reported by the provider",
+        description="Agent Workspace path reported by the Runner",
     )
     detail: str | None = Field(default=None, description="Status description")
 

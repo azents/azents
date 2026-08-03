@@ -182,6 +182,7 @@ class _RuntimeRepository(AgentRuntimeRepository):
             update={
                 "runner_state": RuntimeRunnerState.READY,
                 "runner_generation": 7,
+                "workspace_path": "/workspace/agent",
             }
         )
 
@@ -662,6 +663,7 @@ def _input_service(
         root_agent_session_creation_service=RootAgentSessionCreationService(
             agent_session_repository=AgentSessionRepository(),
             automatic_project_repository=AgentAutomaticProjectRepository(),
+            agent_runtime_repository=_RuntimeRepository(),
             session_workspace_project_repository=SessionWorkspaceProjectRepository(),
         ),
         chat_write_request_repository=ChatWriteRequestRepository(),

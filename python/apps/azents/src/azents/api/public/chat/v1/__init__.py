@@ -2850,7 +2850,7 @@ def _raise_workspace_error(error: AgentWorkspaceError) -> None:
         case AgentWorkspacePathUnavailable():
             raise HTTPException(
                 status_code=409,
-                detail="Provider has not reported Agent Workspace path yet.",
+                detail="Runner has not reported Agent Workspace path yet.",
             )
         case AgentWorkspaceRuntimeInactive():
             raise HTTPException(

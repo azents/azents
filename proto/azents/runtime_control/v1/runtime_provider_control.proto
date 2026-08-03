@@ -82,13 +82,13 @@ message ProviderCommand {
 }
 
 message RuntimeProviderReport {
+  reserved 7;
   string runtime_id = 1;
   string provider_id = 2;
   uint64 provider_generation = 3;
   string observed_state = 4;
   uint64 observed_desired_generation = 5;
   string provider_runtime_id = 6;
-  string workspace_path = 7;
   string reason = 8;
   map<string, string> diagnostic = 9;
   google.protobuf.Timestamp reported_at = 10;

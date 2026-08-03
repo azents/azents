@@ -35,7 +35,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
 last_verified_at: 2026-08-03
-spec_version: 46
+spec_version: 47
 ---
 
 # Agent Runtime Control
@@ -147,7 +147,7 @@ Runtime Transfer authorization or startup input.
 - exact infrastructure Profile and Workspace Runtime Profile IDs
 - desired and applied Runtime configuration revision IDs
 - provider observed state, provider generation, provider runtime id, connection state
-- provider-reported Agent Workspace path
+- runner-reported Agent Workspace path
 - runner state, runner generation, active operation ids, connection state
 - current-generation failure code/message/details
 - run state for the Agent execution loop
@@ -269,11 +269,11 @@ ACK may carry the same pending evidence; Runner adopts it locally and emits its 
 report. Control promotes the desired revision to applied only when Provider and Runner evidence both
 match. There is no separate Runner configuration-update request/ACK protocol.
 
-Provider reports backend observed state and metadata. The Agent Workspace absolute path is provider metadata and is stored on `agent_runtimes.workspace_path`. Runner registration can validate that it mounted the same path, but Runner is not the authority for choosing the Agent Workspace path.
+Provider reports backend observed state and configuration evidence without Agent Workspace metadata. Current-generation Runner registration and state reports carry the effective absolute Agent Workspace path; Control validates and stores that value in `agent_runtimes.workspace_path`.
 
 Kubernetes Runtime Pod reuse compares Provider-managed configuration while allowing additive fields injected by Kubernetes admission and defaulting. In particular, configured tolerations must remain present, but built-in `NoExecute` tolerations added by Kubernetes do not make an otherwise reusable Pod stale or trigger replacement during repeated start reconciliation.
 
-If Provider is disconnected or reports no workspace path for a Runtime that needs workspace access, Control records an explicit failure/unavailable state. It must not invent a fallback path. `PROVIDER_WORKSPACE_PATH_MISSING` is the explicit error for a missing provider path.
+Missing or non-absolute current Runner workspace evidence records `RUNNER_WORKSPACE_PATH_MISSING` or `RUNNER_WORKSPACE_PATH_INVALID` and prevents Runner readiness. Advancing the desired generation clears the previous Runner path so another generation cannot reuse stale evidence. Control never invents a fallback path.
 
 Kubernetes and Docker Providers are external components. They must not import Azents server modules, DB sessions, repositories, or in-process managers. They communicate with Control only via the runtime-control protocol and their backend APIs.
 
@@ -352,7 +352,7 @@ creating retention retry work. Retention purge has no Runtime operation client o
 it checkpoints the database-only `session.git-worktrees@1` compatibility participant and deletes
 allocation rows through database finalization without inspecting physical Git state.
 
-Runner registration and state reports include a mounted workspace path. Control compares it with the provider-reported path and records an explicit failure if they differ. A Runner `busy` report means it is healthy and actively executing an operation, so Control persists it as `ready` rather than treating it as a Runtime failure. Operation routing uses runner generation fencing so stale runner streams cannot complete newer operations.
+Runner resolves the Agent Workspace from explicit startup input and otherwise from `HOME`, requires a normalized absolute path, and reports it during registration and state updates. The current-generation report is authoritative; Provider metadata does not approve or override it. A Runner `busy` report means it is healthy and actively executing an operation, so Control persists it as `ready` rather than treating it as a Runtime failure. Operation routing uses runner generation fencing so stale runner streams cannot complete newer operations.
 
 Every ordinary Runner operation carries common nullable `owner_session_id` scheduling context in the operation request and domain envelope. Server-side clients require callers to pass the nullable value explicitly. Session-scoped process, file, Skill projection, Project registration, and worktree operations pass the invoking Agent Session ID. This includes internal file stat/list/read operations performed after a successful visible `read` to discover AGENTS.md and Claude Rules appendices. Subagents use their own Agent Session ID for both visible and appendix-internal work while resolving files against their parent Agent Runtime. Agent Workspace management, Agent Project catalog work, pre-Session Git preview, and other Agent-level operations pass `None` and use the system owner. Ownership is trusted scheduling and operator-diagnostic context, not authorization proof, and it is not exposed in model-visible tool output.
 
@@ -446,6 +446,7 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-08-03** (spec_version 47) — Made current-generation Runner reports authoritative for Agent Workspace path state, removed Provider workspace metadata and equality checks, and cleared stale path evidence when desired generation advances.
 - **2026-07-31** (spec_version 45) — Defined generation/configuration-fenced NetworkPolicy trust for
   Pod watch reports so verified Ready state cannot regress through an unverified watch race.
 - **2026-07-31** (spec_version 44) — Replaced policy snapshots and Apply with exact desired/applied

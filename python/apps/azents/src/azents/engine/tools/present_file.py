@@ -6,6 +6,7 @@ Export runtime file as Exchange artifact and share with user.
 import logging
 import posixpath
 import uuid
+from pathlib import PurePosixPath
 
 from pydantic import BaseModel, Field
 
@@ -35,19 +36,19 @@ from azents.services.session_storage import guess_media_type
 
 logger = logging.getLogger(__name__)
 
-_PRESENTABLE_ROOT = "/workspace/agent"
 _PUBLICATION_ID_NAMESPACE = uuid.uuid5(
     uuid.NAMESPACE_URL,
     "https://azents.ai/runtime-transfer/present-file-publication",
 )
 
 
-def _is_presentable_path(path: str) -> bool:
+def _is_presentable_path(path: str, workspace_root: str | None) -> bool:
     """Check whether path is durable runtime path shareable with user."""
-    normalized = posixpath.normpath(path)
-    return normalized == _PRESENTABLE_ROOT or normalized.startswith(
-        f"{_PRESENTABLE_ROOT}/"
-    )
+    if workspace_root is None:
+        return False
+    normalized = PurePosixPath(posixpath.normpath(path))
+    root = PurePosixPath(posixpath.normpath(workspace_root))
+    return normalized.is_relative_to(root)
 
 
 def _publication_id(*, run_id: str, call_id: str, runtime_path: str) -> str:
@@ -71,6 +72,7 @@ def make_present_file_tool(
     session_storage: FileStorage,
     publication_capability: RuntimeToServerPublicationCapability | None,
     authority: SessionResourceAuthority,
+    workspace_root: str | None,
 ) -> FunctionTool:
     """Create present_file tool.
 
@@ -84,7 +86,7 @@ def make_present_file_tool(
         """Export runtime file as Exchange artifact."""
         if not input.paths:
             raise FunctionToolError("No paths provided.")
-        if publication_capability is None:
+        if publication_capability is None or workspace_root is None:
             raise FunctionToolError("Runtime file transfer is unavailable.")
         execution = get_client_tool_execution_context()
 
@@ -92,10 +94,9 @@ def make_present_file_tool(
         errors: list[str] = []
 
         for abs_path in input.paths:
-            if not _is_presentable_path(abs_path):
+            if not _is_presentable_path(abs_path, workspace_root):
                 errors.append(
-                    "Only files under /workspace/agent can be presented to the user: "
-                    f"{abs_path}"
+                    f"Only files under the Agent Workspace can be presented: {abs_path}"
                 )
                 continue
 
@@ -252,8 +253,7 @@ def make_present_file_tool(
         name="present_file",
         description=(
             "Present files to the user. "
-            "Provide a list of absolute paths "
-            "under /workspace/agent (e.g. /workspace/agent/result.png). "
+            "Provide a list of absolute paths under the Agent Workspace. "
             f"{RUNTIME_ACCESSIBLE_PATHS_MSG} "
             "The files will be exported as exchange:// file-location attachments that "
             "the user can preview and download."

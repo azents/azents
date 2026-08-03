@@ -150,6 +150,7 @@ def _toolkit(
         store.set(
             RuntimeInstructionContext(
                 file_storage=file_storage,
+                workspace_root="/runtime/home",
                 projects=(),
                 transfer_capability=None,
                 publication_capability=None,

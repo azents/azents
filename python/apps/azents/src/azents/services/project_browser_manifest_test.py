@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     AgentProjectCatalogStatus,
     LLMProvider,
+    RuntimeRunnerState,
     SessionGitWorktreeBranchCreatedBy,
     SessionGitWorktreeStatus,
     WorkspaceUserRole,
@@ -104,6 +105,16 @@ async def _create_fixture(
     )
     session.add(agent)
     await session.flush()
+    runtime_repository = AgentRuntimeRepository()
+    runtime = await runtime_repository.ensure_for_agent(session, agent.id)
+    await runtime_repository.record_runner_state(
+        session,
+        runtime.id,
+        RuntimeRunnerState.UNKNOWN,
+        1,
+        expected_desired_generation=runtime.desired_generation,
+        workspace_path="/workspace/agent",
+    )
     agent_session = (
         await AgentSessionRepository().ensure_team_primary_for_agent(
             session,
@@ -143,6 +154,7 @@ def _service(session: AsyncSession) -> ProjectBrowserManifestService:
         project_repository=SessionWorkspaceProjectRepository(),
         worktree_repository=SessionGitWorktreeRepository(),
         catalog_repository=catalog_repository,
+        agent_runtime_repository=AgentRuntimeRepository(),
         workspace_user_repository=WorkspaceUserRepository(),
         catalog_service=AgentProjectCatalogService(
             catalog_repository=catalog_repository,

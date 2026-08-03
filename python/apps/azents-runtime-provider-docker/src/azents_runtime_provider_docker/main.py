@@ -129,12 +129,10 @@ async def _run_control_loop(
         capabilities=(
             "lifecycle",
             "observe",
-            "workspace_path",
             "host_directory_persistence",
         ),
         config_schema_version=_CONFIG_SCHEMA_VERSION,
         metadata={
-            "workspace_path": settings.workspace_path,
             "tmp_path": settings.tmp_path,
         },
         capability_contract=_CAPABILITY_CONTRACT,
@@ -207,10 +205,7 @@ class ProviderSettings:
         )
         self.provider_id = _required_env("AZ_RUNTIME_PROVIDER_ID")
         self.host_data_root = Path(_required_env("AZ_RUNTIME_PROVIDER_HOST_DATA_ROOT"))
-        self.workspace_path = os.environ.get(
-            "AZ_RUNTIME_PROVIDER_WORKSPACE_PATH",
-            "/workspace/agent",
-        )
+        self.workspace_path = _required_env("AZ_RUNTIME_PROVIDER_WORKSPACE_PATH")
         self.tmp_path = os.environ.get("AZ_RUNTIME_PROVIDER_TMP_PATH", "/tmp/agent")
         self.runner_env = _runner_env_from_env()
         self.docker_host = os.environ.get("AZ_RUNTIME_PROVIDER_DOCKER_HOST")

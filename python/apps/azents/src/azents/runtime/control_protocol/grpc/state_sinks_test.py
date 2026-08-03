@@ -46,29 +46,6 @@ from azents.runtime.control_protocol.grpc.state_sinks import (
 from azents.testing.model_selection import make_test_model_selection_dict
 
 
-async def test_runner_state_sink_rejects_missing_provider_workspace_path(
-    rdb_session_manager: SessionManager[AsyncSession],
-) -> None:
-    """Runner cannot make a Runtime runnable before Provider reports workspace path."""
-    repo = AgentRuntimeRepository()
-    async with rdb_session_manager() as session:
-        runtime_id = await _create_runtime(session, "runner-sink-missing")
-    sink = RuntimeRunnerStateRepositorySink(
-        repo,
-        _profile_repository(),
-        rdb_session_manager,
-    )
-
-    await sink.record_runner_state(_report(runtime_id, "/workspace/agent"))
-
-    async with rdb_session_manager() as session:
-        runtime = await repo.get_by_id(session, runtime_id)
-    assert runtime is not None
-    assert runtime.runner_state == RuntimeRunnerState.FAILED
-    assert runtime.workspace_path is None
-    assert runtime.failure_code == "PROVIDER_WORKSPACE_PATH_MISSING"
-
-
 async def test_runner_heartbeat_configuration_waits_for_provider_ack(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
@@ -265,7 +242,6 @@ async def test_provider_running_report_clears_start_timeout_failure(
             observed_state=SharedProviderState.RUNNING,
             observed_desired_generation=command.desired_generation,
             provider_runtime_id="pod-runtime",
-            workspace_path="/workspace/agent",
             reason="ready",
             diagnostic={},
             reported_at=datetime(2026, 5, 25, tzinfo=UTC),
@@ -323,7 +299,6 @@ async def test_provider_starting_report_does_not_acknowledge_configuration(
             observed_state=SharedProviderState.STARTING,
             observed_desired_generation=3,
             provider_runtime_id="pod-runtime",
-            workspace_path="/workspace/agent",
             reason="pod_starting",
             diagnostic={},
             reported_at=datetime(2026, 7, 31, tzinfo=UTC),
@@ -358,7 +333,6 @@ async def test_provider_report_ignores_finalized_runtime(
             observed_state=SharedProviderState.RUNNING,
             observed_desired_generation=0,
             provider_runtime_id="orphan-provider-runtime",
-            workspace_path="/workspace/agent",
             reason="late_observation",
             diagnostic={},
             reported_at=datetime(2026, 7, 30, tzinfo=UTC),
@@ -401,7 +375,6 @@ async def test_provider_report_rejects_bound_runtime_provider_mismatch(
                 observed_state=SharedProviderState.RUNNING,
                 observed_desired_generation=0,
                 provider_runtime_id="provider-runtime",
-                workspace_path="/workspace/agent",
                 reason="mismatch",
                 diagnostic={},
                 reported_at=datetime.now(UTC),
@@ -434,7 +407,6 @@ async def test_provider_terminal_delete_acknowledgement_clears_runtime_path(
             observed_state=SharedProviderState.STOPPED,
             observed_desired_generation=requested.desired_generation,
             provider_runtime_id=None,
-            workspace_path="",
             reason="terminal_resources_absent",
             diagnostic={},
             reported_at=datetime(2026, 7, 21, tzinfo=UTC),
@@ -453,66 +425,101 @@ async def test_provider_terminal_delete_acknowledgement_clears_runtime_path(
     assert runtime.terminal_delete_acknowledged_at is not None
 
 
-async def test_runner_state_sink_rejects_workspace_mismatch(
+async def test_runner_state_sink_persists_runner_workspace_path(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """Runner workspace path mismatch becomes an explicit Runtime failure."""
+    """Runner report owns the persisted Agent Workspace path."""
     repo = AgentRuntimeRepository()
     async with rdb_session_manager() as session:
-        runtime_id = await _create_runtime(session, "runner-sink-mismatch")
-        await repo.record_provider_observed_state(
-            session,
-            runtime_id,
-            RuntimeProviderObservedState.RUNNING,
-            1,
-            3,
-            workspace_path="/workspace/provider",
-        )
+        runtime_id = await _create_runtime(session, "runner-sink-workspace")
     sink = RuntimeRunnerStateRepositorySink(
         repo,
         _profile_repository(),
         rdb_session_manager,
     )
 
-    await sink.record_runner_state(_report(runtime_id, "/workspace/runner"))
-
-    async with rdb_session_manager() as session:
-        runtime = await repo.get_by_id(session, runtime_id)
-    assert runtime is not None
-    assert runtime.runner_state == RuntimeRunnerState.FAILED
-    assert runtime.workspace_path == "/workspace/provider"
-    assert runtime.failure_code == "RUNNER_WORKSPACE_PATH_MISMATCH"
-
-
-async def test_runner_state_sink_preserves_provider_workspace_path(
-    rdb_session_manager: SessionManager[AsyncSession],
-) -> None:
-    """Matching Runner report records readiness without changing Provider path."""
-    repo = AgentRuntimeRepository()
-    async with rdb_session_manager() as session:
-        runtime_id = await _create_runtime(session, "runner-sink-ready")
-        await repo.record_provider_observed_state(
-            session,
-            runtime_id,
-            RuntimeProviderObservedState.RUNNING,
-            1,
-            3,
-            workspace_path="/workspace/provider",
-        )
-    sink = RuntimeRunnerStateRepositorySink(
-        repo,
-        _profile_repository(),
-        rdb_session_manager,
-    )
-
-    await sink.record_runner_state(_report(runtime_id, "/workspace/provider"))
+    await sink.record_runner_state(_report(runtime_id, "/runtime/home"))
 
     async with rdb_session_manager() as session:
         runtime = await repo.get_by_id(session, runtime_id)
     assert runtime is not None
     assert runtime.runner_state == RuntimeRunnerState.READY
-    assert runtime.workspace_path == "/workspace/provider"
+    assert runtime.workspace_path == "/runtime/home"
     assert runtime.failure_code is None
+
+
+async def test_runner_state_sink_rejects_missing_workspace_path(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Runner readiness requires Agent Workspace path evidence."""
+    repo = AgentRuntimeRepository()
+    async with rdb_session_manager() as session:
+        runtime_id = await _create_runtime(session, "runner-sink-missing-workspace")
+    sink = RuntimeRunnerStateRepositorySink(
+        repo,
+        _profile_repository(),
+        rdb_session_manager,
+    )
+
+    await sink.record_runner_state(_report(runtime_id, ""))
+
+    async with rdb_session_manager() as session:
+        runtime = await repo.get_by_id(session, runtime_id)
+    assert runtime is not None
+    assert runtime.runner_state == RuntimeRunnerState.FAILED
+    assert runtime.workspace_path is None
+    assert runtime.failure_code == "RUNNER_WORKSPACE_PATH_MISSING"
+
+
+async def test_runner_state_sink_normalizes_workspace_path(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Runner workspace evidence is normalized before persistence."""
+    repo = AgentRuntimeRepository()
+    async with rdb_session_manager() as session:
+        runtime_id = await _create_runtime(session, "runner-sink-normalized-workspace")
+    sink = RuntimeRunnerStateRepositorySink(
+        repo,
+        _profile_repository(),
+        rdb_session_manager,
+    )
+
+    await sink.record_runner_state(_report(runtime_id, "/runtime/home/../agent"))
+
+    async with rdb_session_manager() as session:
+        runtime = await repo.get_by_id(session, runtime_id)
+    assert runtime is not None
+    assert runtime.runner_state == RuntimeRunnerState.READY
+    assert runtime.workspace_path == "/runtime/agent"
+    assert runtime.failure_code is None
+
+
+async def test_runner_state_sink_rejects_relative_workspace_path(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """Runner workspace evidence must be absolute."""
+    repo = AgentRuntimeRepository()
+    async with rdb_session_manager() as session:
+        runtime_id = await _create_runtime(session, "runner-sink-relative-workspace")
+    profile_repository = _profile_repository()
+    cast(
+        AsyncMock,
+        profile_repository.record_runner_configuration_evidence,
+    ).return_value = None
+    sink = RuntimeRunnerStateRepositorySink(
+        repo,
+        profile_repository,
+        rdb_session_manager,
+    )
+
+    await sink.record_runner_state(_report(runtime_id, "runtime/home"))
+
+    async with rdb_session_manager() as session:
+        runtime = await repo.get_by_id(session, runtime_id)
+    assert runtime is not None
+    assert runtime.runner_state == RuntimeRunnerState.FAILED
+    assert runtime.workspace_path is None
+    assert runtime.failure_code == "RUNNER_WORKSPACE_PATH_INVALID"
 
 
 async def test_runner_state_sink_treats_busy_runner_as_ready(
@@ -528,7 +535,6 @@ async def test_runner_state_sink_treats_busy_runner_as_ready(
             RuntimeProviderObservedState.RUNNING,
             1,
             3,
-            workspace_path="/workspace/provider",
         )
     sink = RuntimeRunnerStateRepositorySink(
         repo,
@@ -560,7 +566,6 @@ async def test_runner_state_sink_records_runner_stream_closed_as_disconnected(
             RuntimeProviderObservedState.RUNNING,
             1,
             3,
-            workspace_path="/workspace/provider",
         )
     sink = RuntimeRunnerStateRepositorySink(
         repo,
@@ -597,7 +602,6 @@ async def test_runner_state_sink_ignores_stale_report_with_lower_generation(
             RuntimeProviderObservedState.RUNNING,
             1,
             3,
-            workspace_path="/workspace/provider",
         )
         await repo.record_runner_state(
             session,
@@ -605,6 +609,7 @@ async def test_runner_state_sink_ignores_stale_report_with_lower_generation(
             RuntimeRunnerState.READY,
             2,
             expected_desired_generation=0,
+            workspace_path="/runtime/home",
         )
     sink = RuntimeRunnerStateRepositorySink(
         repo,
@@ -649,7 +654,6 @@ async def test_runner_state_sink_ignores_previous_desired_generation(
             RuntimeProviderObservedState.STARTING,
             1,
             command.desired_generation,
-            workspace_path="/workspace/provider",
         )
     profile_repository = _profile_repository()
     sink = RuntimeRunnerStateRepositorySink(
@@ -690,7 +694,6 @@ async def test_runner_state_sink_fences_generation_changed_during_validation(
             RuntimeProviderObservedState.RUNNING,
             1,
             0,
-            workspace_path="/workspace/provider",
         )
     profile_repository = _profile_repository()
 

@@ -21,8 +21,8 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
   - infra/charts/azents/**
-last_verified_at: 2026-07-31
-spec_version: 13
+last_verified_at: 2026-08-03
+spec_version: 14
 ---
 
 # Agent Runtime Persistence
@@ -30,9 +30,9 @@ spec_version: 13
 ## Overview
 
 Agent Workspace durability is owned by the Runtime Provider backend, not by the Azents server
-process and not by S3 checkpoint/restore as a event path. The Provider reports the Agent
-Workspace absolute path as Runtime metadata. Server file APIs and prompts consume that reported
-path instead of hardcoding `/home/sandbox`.
+process and not by S3 checkpoint/restore as an event path. The current-generation Runner reports
+the effective Agent Workspace absolute path as Runtime metadata. Server file APIs, Projects,
+worktrees, and prompts consume that reported path without a fixed server-side fallback.
 
 ## Runtime Profile binding and configuration revisions
 
@@ -71,19 +71,15 @@ correctness must not depend on checkpoint commit/restore.
 
 ## Workspace Path Contract
 
-Provider reports the Agent Workspace path on lifecycle command completion and observe reports.
-Control stores it on the Runtime row and exposes it through server-computed workspace/bootstrap
-responses.
+Runner resolves an explicit startup path before `HOME`, normalizes it, requires an absolute
+non-empty value, and reports it during registration and state updates. Control stores valid
+current-generation evidence on the Runtime row and exposes it through server-computed
+workspace/bootstrap responses.
 
-The current external providers mount `/workspace/agent` by default. That value is an implementation
-default reported by Provider, not an API fallback. If the provider reports another absolute path,
-the server uses that path after validation. If the provider reports no path, workspace operations
-return explicit unavailable/failure state and do not fall back to `/home/sandbox` or
-`/workspace/agent`.
-
-Runner receives the provider path through provider-created backend configuration. Runner reports
-its mounted path during registration/state updates; Control validates equality and records a
-failure when Runner and Provider disagree.
+Providers choose their deployment mount paths and configure Runner `HOME` and working directory to
+the mount. They do not report, approve, or clear Agent Workspace metadata. Missing or invalid Runner
+evidence makes workspace operations unavailable, and a new desired generation clears the previous
+path until its Runner reports current evidence.
 
 ## Destructive Operation Boundary
 
@@ -121,8 +117,8 @@ The active Provider keeps the Kubernetes Pod watch as a long-lived request witho
 socket-read deadline. Normal server-side watch completion is reopened independently and does not
 rotate the authoritative Runtime Control connection.
 
-For each Runtime, the provider creates or reuses an EBS-backed PVC and mounts it at the reported
-Agent Workspace path in the Runner Pod. PVC identity is tied to Runtime identity/generation labels
+For each Runtime, the provider creates or reuses an EBS-backed PVC and mounts it at its configured
+Runner home path in the Pod. PVC identity is tied to Runtime identity/generation labels
 and fenced by Control generation. Stale observations cannot overwrite newer desired generations.
 
 Reset is the only non-terminal command that may delete and recreate the PVC contents. Terminal
@@ -134,7 +130,7 @@ without DinD contains only the unprivileged Runner. A DinD-enabled Profile adds 
 privileged DIND sidecar and mounts its Runtime-private Unix socket read-only into the Runner. There
 is no Docker API Gateway or partial operation allowlist. The complete Docker capability supports
 CLI, Compose, SDK, Testcontainers, Ryuk, and port-binding workflows supported by the daemon.
-The Runner and DIND sidecar mount the Agent Workspace PVC at the same provider-reported absolute
+The Runner and DIND sidecar mount the Agent Workspace PVC at the same configured absolute
 path and mount one Pod-local shared temporary volume at `/tmp`, bounded by the Profile's Runtime
 ephemeral-storage allocation. Docker bind mounts sourced from the Agent Workspace or `/tmp`,
 including Compose paths relative to the Agent Workspace, therefore resolve to the same files from
@@ -158,7 +154,7 @@ until an explicit reset or terminal deletion recreates storage.
 ## Docker Provider v1
 
 Docker Provider v1 assumes one stable Docker host. For each Runtime it creates a host directory and
-bind-mounts it into the Runner container at the reported Agent Workspace path. The host directory is
+bind-mounts it into the Runner container at its configured Runner home path. The host directory is
 the event persistence source.
 
 Stop/restart/recover and ordinary recreation may remove/recreate containers, but must keep the host
@@ -171,7 +167,7 @@ Session Workspace Project registry rows are AgentSession-scoped DB state. They a
 filesystem snapshots. Runtime persistence preserves the bytes; the session registry preserves which
 child paths are registered or awaiting registration approval for the selected conversation.
 
-Project paths are normalized as children of the provider-reported Agent Workspace root. The root
+Project paths are normalized as children of the current Runner-reported Agent Workspace root. The root
 itself is not a Project. Runtime persistence does not own Project membership. azents-web exposes
 Project management inside the concrete session Workspace surface. The Workspace browser opens in
 Project mode by default, keeps `All files` as an explicit Agent Workspace root inspection mode, and
@@ -184,8 +180,9 @@ Required checks:
 
 - Docker provider tests show stop/restart preserves the host directory and reset is destructive.
 - Kubernetes provider tests render PVC-backed Runtime resources and leader-election settings.
-- Workspace service tests reject missing provider workspace paths with explicit errors.
-- Runner state sink tests preserve provider path authority and reject missing/mismatched paths.
+- Workspace service tests reject missing current Runner workspace paths with explicit errors.
+- Runner state sink tests persist normalized Runner path authority and reject missing or invalid paths.
+- Provider tests verify configured mount, Runner `HOME`, and working-directory alignment without Provider workspace reports.
 - Deterministic azents E2E covers Agent Workspace bootstrap and reset action availability.
 - Runtime Profile E2E uses Admin/Public API setup and a real Docker Provider to verify unconfigured,
   default, and explicit selection; exact desired/applied evidence; explicit recreation; Provider
@@ -195,6 +192,7 @@ Required checks:
 
 ## Changelog
 
+- **2026-08-03 (spec_version=14)** — Made Runner-reported current-generation workspace evidence authoritative, retained Provider mount configuration as deployment state only, and removed fixed-path and Provider-equality fallback behavior.
 - **2026-07-31 (spec_version=13)** — Replaced Provider selection and execution-policy snapshots
   with exact Workspace Runtime Profile binding, immutable desired/applied configuration revisions,
   current-capability evidence, migration-only legacy conversion, and explicit recreation.

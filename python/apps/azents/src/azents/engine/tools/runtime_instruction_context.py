@@ -87,6 +87,7 @@ class RuntimeInstructionContext:
     """Runtime file context shared by instruction appendix providers."""
 
     file_storage: FileStorage
+    workspace_root: str | None
     projects: tuple[SessionWorkspaceProject, ...]
     transfer_capability: RuntimeTransferCapability | None
     publication_capability: RuntimeToServerPublicationCapability | None

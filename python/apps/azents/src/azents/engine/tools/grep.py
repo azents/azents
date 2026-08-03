@@ -57,7 +57,7 @@ class GrepInput(BaseModel):
     path: str = Field(
         description=(
             "Absolute file or directory path to search in "
-            "(e.g. /workspace/agent/, /tmp/file.txt, /workspace/agent/src/)"
+            "inside the Agent Workspace or /tmp"
         ),
     )
     recursive: bool = Field(

@@ -17,6 +17,7 @@ from azents.core.enums import (
     RuntimeProviderLifecycleState,
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
+    RuntimeRunnerState,
 )
 from azents.core.runtime_profile import (
     RuntimeConfigurationResolutionStatus,
@@ -408,6 +409,15 @@ async def test_configuration_evidence_promotes_after_provider_and_runner_ack(
         assert (
             persisted_runtime.applied_runtime_configuration_revision_id == revision.id
         )
+        runtime_with_workspace = await runtime_repository.record_runner_state(
+            session,
+            runtime.id,
+            RuntimeRunnerState.READY,
+            runner_generation=1,
+            expected_desired_generation=runtime.desired_generation,
+            workspace_path="/runtime/old-home",
+        )
+        assert runtime_with_workspace is not None
 
         command = await runtime_repository.set_desired_state_if_ready(
             session,
@@ -419,6 +429,7 @@ async def test_configuration_evidence_promotes_after_provider_and_runner_ack(
 
         assert command is not None
         assert command.desired_generation == runtime.desired_generation + 1
+        assert command.runtime.workspace_path is None
         assert command.runtime.desired_runtime_configuration_revision_id != revision.id
         next_revision_id = command.runtime.desired_runtime_configuration_revision_id
         assert next_revision_id is not None

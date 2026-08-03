@@ -52,8 +52,8 @@ code_paths:
 api_routes:
   - /toolkit/v1
   - /shell-environment/v1
-last_verified_at: 2026-08-02
-spec_version: 78
+last_verified_at: 2026-08-03
+spec_version: 79
 ---
 
 # Toolkit
@@ -325,9 +325,9 @@ Memory Read and Memory Write are resolved as separate auto-bound capabilities. M
 - ShellToolkitConfig has fields `allowed_domains`, `denied_domains`, `agent_data_root`, `memory_enabled` ([`core/tools.py` L331-356](../../../../python/apps/azents/src/azents/core/tools.py)).
 - Runtime reads allow/block lists from Runtime settings, builds `SandboxDomainConfig`, and Agent Runtime lifecycle path passes it to Provider allocation policy ([`services/agent_runtime`](../../../../python/apps/azents/src/azents/services/agent_runtime), [`runtime`](../../../../python/apps/azents/src/azents/runtime)).
 - If `allowed_domains` is empty, it runs in "allow all" mode (only denied_domains applied).
-- Runtime file tools guide LLM-facing path surface for durable working files under Provider-reported Agent Workspace and temporary files under `/tmp/**`. User upload is copied to Runtime by `import_file` using `exchange://{object_key}` file-location URI, and internal artifact is copied with `artifact://{storage_key}` file-location URI. `/tmp/**` destination import warns that result can disappear after Runtime restart and returns original URI for reimport. `present_file` exports only files under durable Agent Workspace as user-visible `exchange://{object_key}` attachment.
+- Runtime file tools guide the LLM-facing path surface for durable working files under the current Runner-reported Agent Workspace and temporary files under `/tmp/**`. Static tool schemas name the Agent Workspace generically, while the dynamic Runtime prompt renders the exact current root. User upload is copied to Runtime by `import_file` using `exchange://{object_key}` file-location URI, and internal artifact is copied with `artifact://{storage_key}` file-location URI. `/tmp/**` destination import warns that result can disappear after Runtime restart and returns original URI for reimport. `present_file` exports only files under the current durable Agent Workspace as user-visible `exchange://{object_key}` attachment.
 - `grep` file tool accepts both file path and directory path. Directory path searches recursively by default. Built-in heavy-directory excludes such as `.git`, `node_modules`, `.next`, and build/cache directories are applied by default. `exclude` adds caller-provided exclude patterns on top of those defaults; `disable_default_excludes: true` explicitly scans paths that the defaults would skip. Grep also enforces searched-file and scanned-byte safety caps so sparse matches across very large workspaces do not monopolize Runtime operation time.
-- `glob` file tool accepts absolute path patterns and implements a shell-style pathname matching subset: `*`, `?`, character classes (`[...]`), recursive `**` matching zero or more path segments, and comma-separated brace alternatives such as `*.{jpg,png}`, including nested alternatives. Recursive patterns search below the non-glob prefix and may return matching directories as well as files, so `/workspace/agent/.claude/skills/*` exposes directory entries and `/foo/bar/**/baz.{jpg,png}` matches both `/foo/bar/baz.jpg` and nested equivalents. Brace expansion is evaluated once per tool call and is limited to 256 alternatives. Brace sequences such as `{1..10}`, extglob, variable expansion, command substitution, shell quoting, backslash escaping, and tilde expansion are not supported. Patterns beginning with `~` fail explicitly instead of depending on the Runtime process home directory. Built-in heavy-directory excludes such as `.git`, `node_modules`, `.next`, and build/cache directories are applied by default. `exclude` adds caller-provided exclude patterns on top of those defaults; `disable_default_excludes: true` explicitly scans paths that the defaults would skip.
+- `glob` file tool accepts absolute path patterns and implements a shell-style pathname matching subset: `*`, `?`, character classes (`[...]`), recursive `**` matching zero or more path segments, and comma-separated brace alternatives such as `*.{jpg,png}`, including nested alternatives. Recursive patterns search below the non-glob prefix and may return matching directories as well as files, so `<agent-workspace>/.claude/skills/*` exposes directory entries and `/foo/bar/**/baz.{jpg,png}` matches both `/foo/bar/baz.jpg` and nested equivalents. Brace expansion is evaluated once per tool call and is limited to 256 alternatives. Brace sequences such as `{1..10}`, extglob, variable expansion, command substitution, shell quoting, backslash escaping, and tilde expansion are not supported. Patterns beginning with `~` fail explicitly instead of depending on the Runtime process home directory. Built-in heavy-directory excludes such as `.git`, `node_modules`, `.next`, and build/cache directories are applied by default. `exclude` adds caller-provided exclude patterns on top of those defaults; `disable_default_excludes: true` explicitly scans paths that the defaults would skip.
 - Runtime tool prompt guides LLM to prefer dedicated file tools for filesystem work: use `read` instead of `cat`, `grep` instead of shell `grep`/`rg`, `write`/`edit` instead of shell redirection or `sed` when possible. Use `exec_command` for command execution, package installation, or when dedicated tool does not fit. Use `write_stdin` with empty `chars` to poll a running process. Runtime config prompts sort registered projects and domain lists deterministically.
 - `exec_command(command, workdir?, yield_time_ms?, max_output_bytes?)` starts a pipe-based Runner-owned process. If the process exits within the yield window, the tool result includes final output and exit code. If it is still running, the result includes collected output plus a process `process_id` for later interaction. `yield_time_ms` defaults to 10000 ms and accepts the 250-30000 ms range.
 - `write_stdin(process_id, chars = "", yield_time_ms?, max_output_bytes?)` writes to an existing process. Empty `chars` is the poll primitive and only drains unread output. `yield_time_ms=0` returns the currently buffered output immediately. Non-empty writes default to 250 ms and allow 0-30000 ms; empty polls default to 5000 ms and allow 0-300000 ms. Missing/expired/terminated process ids are returned as normal tool observations with structured metadata rather than assistant/system failures. Per [exec-260628/ADR](../../adr/exec-260628-exec-stop-termination.md), user stop requests TERM for all live exec processes owned by the stopped `AgentSession`; worker graceful shutdown/handover does not TERM runner-owned exec processes by itself.
@@ -374,7 +374,7 @@ AGENTS.md instruction loader registers runtime hooks through `hooks()`. It does 
 
 Shell runtime treats AGENTS.md as a successful `read` tool result appendix, not as a Toolkit/system prompt fragment.
 
-- Root instruction candidate is `/workspace/agent/AGENTS.md` for read targets under `/workspace/agent`.
+- Root instruction candidate is `<current-agent-workspace>/AGENTS.md` for read targets under the current Runner-reported root.
 - Registered Project instruction candidates are `AGENTS.md` files from the Project root to the read target directory, parent-to-child.
 - Candidate content is read fresh from Runtime file storage only while handling a successful `read` result. AGENTS.md content is not cached.
 - Missing and non-file candidates are ignored and cached as discovery misses for five seconds within the Session-managed Toolkit instance, avoiding repeated stat operations during read bursts.
@@ -400,7 +400,7 @@ Activation and context:
 
 Candidate roots:
 
-- Workspace rules are discovered under `/workspace/agent/.claude/rules/**/*.md` for read targets under `/workspace/agent`.
+- Workspace rules are discovered under `<current-agent-workspace>/.claude/rules/**/*.md` for read targets under the current Runner-reported root.
 - If the read target is inside a registered Project, Project rules are also discovered under `<project.path>/.claude/rules/**/*.md`.
 - Workspace-root rules are evaluated before Project-root rules.
 - Nested `.claude/rules` roots below arbitrary subdirectories are not discovered.
@@ -412,7 +412,7 @@ Matching and safety:
 
 - A rule without `paths` frontmatter is global for its source owner root.
 - `paths` frontmatter may be a string or a list of strings. Unsupported shapes or malformed frontmatter cause the rule to be skipped quietly.
-- Relative `paths` globs match paths relative to the source owner root (`/workspace/agent` for workspace rules, `<project.path>` for Project rules).
+- Relative `paths` globs match paths relative to the source owner root (the current Runner-reported Agent Workspace for workspace rules, `<project.path>` for Project rules).
 - Absolute `paths` globs match normalized absolute runtime paths.
 - Glob matching is path-segment aware; `**` matches zero or more path segments.
 - Discovered rules are ordered deterministically by normalized runtime path within each root.
@@ -550,7 +550,7 @@ Toolkit resolution receives an execution mode. Root sessions use root mode. Chil
 - `[default-shell-env-not-deletable]` Deleting default ShellEnvironment returns 400 (`DefaultCannotBeDeleted`).
 - `[shell-domain-whitelist]` If ShellEnvironment.allowed_domains is not empty, sandbox network proxy blocks domain requests outside whitelist. denied_domains are always blocked regardless of allow status.
 - `[shell-env-name-unique]` `(workspace_id, name)` is UNIQUE — duplicate ShellEnvironment name forbidden.
-- `[agent-workspace-file-tool-boundary]` Shell file tools guide Provider-reported Agent Workspace subpaths and `/tmp/**` paths. External Exchange files and internal Artifacts enter Runtime through `import_file`; `/tmp/**` import result includes transient warning and original file-location URI. User-downloadable file is exported by `present_file` only from Agent Workspace subfile as `exchange://{object_key}` attachment.
+- `[agent-workspace-file-tool-boundary]` Shell file tools guide current Runner-reported Agent Workspace subpaths and `/tmp/**` paths. External Exchange files and internal Artifacts enter Runtime through `import_file`; `/tmp/**` import result includes transient warning and original file-location URI. User-downloadable file is exported by `present_file` only from an Agent Workspace subfile as `exchange://{object_key}` attachment.
 - `[agents-md-project-boundary]` Project-scoped `AGENTS.md` auto-load works only inside registered Project. Agent Workspace root instruction is separate root scope, and Agent Workspace root itself is not treated as Project.
 - `[toolkit-hook-effects]` Toolkit tool-call hook may perform `on_before_tool_call` deny and `on_after_tool_call` text output replacement within [hook-260518/ADR](../../adr/hook-260518-hook.md) scope. Arbitrary input mutation, retry/continuation wrapper, credential trace storage are not allowed.
 - `[toolkit-session-lifecycle]` Executable Toolkit instance is managed by session-scoped lifecycle registry tied to `_SessionRunner` active lifetime. Each actionable wake-up resolves a fresh desired toolkit snapshot. A binding with the same stable identity and source revision retains its entered instance; a changed revision enters a replacement before the previous instance is closed. New or replacement toolkit `__aenter__()` must complete before engine `update_context()` call. Removed and replaced toolkits are `__aexit__()` only after successful reconciliation.
@@ -735,6 +735,7 @@ and never becomes the Channel Work source of truth.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 79) — Derived Runtime tool guidance, filesystem Skill roots, AGENTS.md, Claude rules, and `present_file` boundaries from the current Runner-reported Agent Workspace while removing fixed absolute paths from static schemas and prompts.
 - **2026-08-02** (spec_version 78) — Replaced durable External Channel Action and
   Delivery execution records with normal Tool call/result history and ordered
   immediate provider-effect outcomes.

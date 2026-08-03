@@ -93,7 +93,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
 last_verified_at: 2026-08-03
-spec_version: 55
+spec_version: 56
 ---
 
 # Workspace & Membership
@@ -104,7 +104,7 @@ Workspace is the top-level product collaboration unit in Azents. It is the permi
 
 Workspace roles are unrelated to the instance-wide `system_admin` role. OWNER or MANAGER membership grants no Admin Web or Admin API access, and system-administrator assignment grants no implicit Workspace membership. Fresh Admin bootstrap creates no Workspace; a bootstrapped administrator creates or joins Workspaces later through ordinary Public API product flows.
 
-In this document, **Workspace** refers only to the organization unit above. Runtime working storage owned by AgentRuntime is called **Agent Workspace**. Agent Workspace absolute path is Runtime metadata reported by Provider, and server stores and uses this value in `agent_runtimes.workspace_path`. The `workspace` naming in code/API paths may remain for compatibility, but documents distinguish organization-level Workspace from Agent Workspace.
+In this document, **Workspace** refers only to the organization unit above. Runtime working storage owned by AgentRuntime is called **Agent Workspace**. Its absolute path is current-generation Runtime metadata reported by Runner, and server stores and uses this value in `agent_runtimes.workspace_path`. The `workspace` naming in code/API paths may remain for compatibility, but documents distinguish organization-level Workspace from Agent Workspace.
 
 There are two membership acquisition paths: (1) `WorkspaceInvitation` flow where an existing member invites by email, and (2) `WorkspaceJoinRequest` flow where an external user requests to join. Both converge into creation of a `WorkspaceUser` record. WorkspaceUser is the only current workspace membership model; sub-workspace Team and TeamMember concepts are not part of current behavior.
 
@@ -227,9 +227,9 @@ UI renders server-calculated summary/actions. It does not recompute availability
 | `PROVIDER_DISCONNECTED` | `UNAVAILABLE` | No Provider connection/observation, so lifecycle/workspace access unavailable. Show explicit error |
 | `RUNNER_UNAVAILABLE` | `UNAVAILABLE` | Provider observation exists but Runner operation path is absent. Show retry/recover action |
 | `FAILED` | `UNAVAILABLE` | Show server failure code/message and only available actions |
-| `RUNNING` | `READY` | File list/read/download available only if provider-reported Agent Workspace path and Runner operation path are both valid |
+| `RUNNING` | `READY` | File list/read/download available only if the current Runner-reported Agent Workspace path and Runner operation path are both valid |
 
-File list/read/write/upload/download APIs work only when Runtime is `RUNNING`, Provider reported Agent Workspace path, and Runner operation path is ready. If Provider path is missing, return unavailable/failure based on `PROVIDER_WORKSPACE_PATH_MISSING` and do not create `/home/sandbox` or `/workspace/agent` fallback.
+File list/read/write/upload/download APIs work only when Runtime is `RUNNING`, a current Runner report supplied a valid absolute Agent Workspace path, and Runner operation path is ready. Missing or invalid Runner evidence produces `RUNNER_WORKSPACE_PATH_MISSING` or `RUNNER_WORKSPACE_PATH_INVALID`; the server does not invent a fallback path.
 
 Agent Workspace path preview first uses Runner `file.stat` to classify the path. Text-preview candidates use bounded `file.read_text` with UTF-8 strict decoding; binary preview candidates return no text body and do not use Control file chunks. Complete Workspace downloads authorize the requester before Runtime access, stat the regular file, and consume one verified Runtime transfer object in the API response adapter. Neither surface reconstructs a complete file body from Runner Control Base64 events. Directory paths return `DIRECTORY` listing data for tree navigation; azents-web opens directories in the file tree instead of rendering a separate directory preview page.
 
@@ -270,7 +270,7 @@ Agent Workspace data. No Agent Apply action exists.
 
 ### Agent Workspace Projects
 
-Agent Workspace Project is a boundary registry explicitly registered by user for an existing directory under AgentRuntime's Provider-reported Agent Workspace. Agent Workspace root itself is not a Project. Current public API registers any non-root descendant directory under `/workspace/agent`, including nested folders.
+Agent Workspace Project is a boundary registry explicitly registered by user for an existing directory under AgentRuntime's current Runner-reported Agent Workspace. Agent Workspace root itself is not a Project. Current public API registers any non-root descendant directory under that Runtime-specific root, including nested folders.
 
 - Project Source, archive upload, empty folder bootstrap, Runtime pending load/ACK do not exist in public API or current DB/service/runtime provisioning layers. Provisioning such as file creation, archive extract, and git clone is separated into future Project Import/Provisioning phase.
 - New session creation accepts `existing_project_paths` plus ordered `setup_actions`. Existing Project paths register explicit Project paths and do not copy Projects from the team-primary session. `create_git_worktree` setup actions create Azents-owned Git worktrees from source Project paths and starting refs, then register the created worktree paths as session Projects. Legacy `workspace_items`, `workspace_mode`, and `project_paths` requests are not part of the current contract.
@@ -301,7 +301,7 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
 - `POST /chat/v1/agents/{agent_id}/workspace/project-browser-manifest/preview` accepts explicit `project_paths` before a session exists and returns the same Project browser entry model. Preview entries do not expose session registry removal because no session Project row exists yet, and they do not expose repository metadata.
 - Project browser manifest reads do not call runtime runner file stat/list operations before responding. Missing or unchecked catalog projection is represented as stored/unchecked status and may be refreshed by separate boundary-triggered sync work.
 - `DELETE /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id}` removes only the selected Session's shared context registry row. Filesystem folder deletion is destructive and not included. Azents-owned worktree cleanup is a separate explicit cleanup or archive-time best-effort lifecycle based on `session_agent_context_git_worktrees` ownership metadata, not on the Project registry row alone. Retention purge deletes only the allocation row and never accesses Runtime or Git state.
-- `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup` requests destructive cleanup for Azents-owned worktree allocations. When `project_id` is supplied, cleanup is scoped to the allocation linked to that session Project; otherwise cleanup covers all non-cleaned allocations for the session. Cleanup validates session ownership, Azents worktree-root containment, branch name presence, and Azents-created branch ownership before calling Runner Git cleanup. Successful cleanup removes the Git worktree without force, deletes the Azents-created branch, removes the catalog entry, deletes the linked session Project row, and best-effort removes the empty session-scoped worktree parent directory. Failure or cancellation of that final empty-parent removal does not revert otherwise confirmed Git cleanup.
+- `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup` requests destructive cleanup for Azents-owned worktree allocations. When `project_id` is supplied, cleanup is scoped to the allocation linked to that session Project; otherwise cleanup covers all non-cleaned allocations for the session. Cleanup validates session ownership, containment under `<current-agent-workspace>/.azents/worktrees`, branch name presence, and Azents-created branch ownership before calling Runner Git cleanup. Successful cleanup removes the Git worktree without force, deletes the Azents-created branch, removes the catalog entry, deletes the linked session Project row, and best-effort removes the empty session-scoped worktree parent directory. Failure or cancellation of that final empty-parent removal does not revert otherwise confirmed Git cleanup.
 - `cleanup_orphan_git_worktrees` is a parameterless, explicit chat TurnAction rather than a direct
   destructive REST route. It is scoped to the invoking Session's current Runtime and may force-remove
   dirty or untracked Azents-managed worktrees that are not connected to any active root Session while
@@ -313,7 +313,7 @@ Agent Workspace Project is a boundary registry explicitly registered by user for
   best-effort non-blocking competitor. The action's live and durable result is bounded and
   content-free, with per-candidate `removed`, `already_absent`, `protected`, `failed`, or
   `unresolved` outcome.
-- Path policy follows: `/workspace/agent` root forbidden, path outside `/workspace/agent` forbidden, exact duplicate Project path per session forbidden. Nested Project paths are allowed.
+- Path policy follows: the current Agent Workspace root is forbidden, paths outside that root are forbidden, and exact duplicate Project paths per session are forbidden. Nested Project paths are allowed.
 New-session azents-web UI shows a compact additive workspace item list above the draft first-message composer. It loads stored last-created-session defaults, shows recent agent-level presets, lets users add repository folders to the list, and lets each selected folder switch between repository and new worktree modes from the row-level type selector. The runtime-backed folder picker can select the current folder so a Git repository directory itself can be added without relying on an existing preset. Worktree branch selection in this draft UI uses the Git ref preview endpoint but exposes only local branches by default; remote branches and tags are not shown in the base branch selector. Concrete session azents-web UI exposes Project management inside the Workspace surface instead of a separate Projects tab. The Workspace browser opens in `Projects` mode by default, lists registered Project roots, and keeps `All files` as an explicit secondary mode rooted at the Agent Workspace root. Empty Project sets show an explicit empty Projects state and do not fall back to Agent Workspace root entries. Project browser root rows display the folder basename as the primary label and render the full absolute path as dimmed, truncated secondary text after the name. The secondary path truncates before the primary label; the primary label truncates only when it exceeds the available row width. Git-backed Project root rows use a Git folder icon; non-Git Project roots keep the normal folder icon.
 
 In an existing concrete session, Register Project opens a runtime-backed Agent Workspace folder picker rooted at the Agent Workspace root. The picker reads Agent Workspace filesystem entries, not Project browser manifest entries or the already-registered Project set. Git repository folders render with a Git folder icon. Selecting a non-Git folder validates and registers it as an existing Agent Workspace directory through the session Project register API. Selecting a Git repository folder opens a registration mode dialog with `Existing directory` and `New worktree` choices. `New worktree` requires a starting ref from Git ref preview and submits a durable `create_git_worktree` operation TurnAction with the current message/input boundary rather than appending session-initialization setup work. The operation creates a session-scoped Azents-owned worktree, registers the generated worktree path as a session Project, upserts the Agent Project Catalog, refreshes the Project/Skill projection, and lets the active run rebuild context after the Project registry changes. Worktree execution is keyed by the source `input_buffer_id` and fenced by the admitting Session owner generation. Active state and logs remain live until completion, failure, or cancellation atomically appends one durable result snapshot and removes the live execution. Ownership takeover cancels leftover work without re-executing the Git side effect; terminal results have no retry or discard mutation APIs.
@@ -615,7 +615,7 @@ stateDiagram-v2
 ## Glossary
 
 - **Workspace** — top-level unit of Azents service. Space where users create agents and collaborate; shared boundary for all resources.
-- **Agent Workspace** — durable Runtime working directory owned by AgentRuntime. Absolute path is Provider metadata. Current Kubernetes/Docker Provider v1 reports `/workspace/agent` by default, but server/API contract does not hardcode this value. It is not the Workspace/Membership domain in this document; lifecycle/persistence contract is covered in `spec/flow/agent-runtime-control.md` and `spec/flow/agent-runtime-persistence.md`.
+- **Agent Workspace** — durable Runtime working directory owned by AgentRuntime. Its current absolute path is Runner-reported Runtime metadata. Provider deployment configuration chooses the mounted storage location, but server/API behavior has no fixed path fallback. It is not the Workspace/Membership domain in this document; lifecycle/persistence contract is covered in `spec/flow/agent-runtime-control.md` and `spec/flow/agent-runtime-persistence.md`.
 - **Handle** — globally unique URL slug identifier of Workspace.
 - **WorkspaceUser** — Workspace × User membership. Has role and display name.
 - **Role** — permission hierarchy OWNER / MANAGER / MEMBER (`WorkspaceUserRole`).
@@ -623,12 +623,13 @@ stateDiagram-v2
 - **Join Request** — external user's join request. PENDING/MUTED state (`JoinRequestStatus`).
 - **Ownership Transfer** — 2-step operation transitioning OWNER → MANAGER / new OWNER → OWNER in single transaction.
 - **Mute** — state that stops JoinRequest notification. Returns to PENDING automatically on re-request.
-- **Agent Workspace Project** — Project boundary explicitly registered for an existing directory under AgentRuntime's Provider-reported Agent Workspace.
+- **Agent Workspace Project** — Project boundary explicitly registered for an existing directory under AgentRuntime's current Runner-reported Agent Workspace.
 - **Project browser manifest** — backend-owned read model for Project-first browser entries, status projection, repository metadata, and action capabilities.
 - **Agent Project Catalog** — Agent-scoped path candidate/status projection table used by Project browser and new-session preview UI. It is not the canonical session Project binding.
 
 ## Changelog
 
+- **2026-08-03 (spec_version=56)** — Made the current-generation Runner report authoritative for the Runtime-specific Agent Workspace root and derived Project, browser, and managed-worktree boundaries from that root without a fixed fallback.
 - **2026-08-02 (spec_version=55)** — Generalized Workspace Multi App authority to
   Slack and Discord, added provider-principal initial channel-default provenance, and
   coupled default replacement/clear to setup invalidation and parent-Binding

@@ -81,8 +81,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/default-response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/external-channels/slack
-last_verified_at: 2026-08-02
-spec_version: 62
+last_verified_at: 2026-08-03
+spec_version: 63
 ---
 
 # Agent Domain Spec
@@ -225,8 +225,8 @@ Agent/Workspace settings API resolves each client-sent `{ llm_provider_integrati
 Every Agent owns one `agent_automatic_project_settings` row, created with revision 1
 and an empty item set when the Agent is created. Its
 `agent_automatic_project_items` rows store a unique ordered list of normalized
-absolute Agent Workspace directory paths. Position and path are both unique within
-one Agent policy.
+absolute directory paths under the current Runner-reported Agent Workspace root.
+Position and path are both unique within one Agent policy.
 
 The policy is administrator-managed configuration for automatic root Session
 creation. It is distinct from `agent_project_defaults`, presets, and catalog
@@ -509,6 +509,7 @@ Following contracts do not exist in current system.
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-08-03 | 63 | Bound automatic Project policy path normalization to the current Runner-reported Agent Workspace root. |
 | 2026-08-02 | 62 | Made the Agent response mode the initial source for provider-channel participation settings and legacy isolated-thread creation while preserving separate provider-principal and AgentAdmin management authority. |
 | 2026-08-01 | 61 | Added the Agent-owned External Channel default response mode, AgentAdmin-managed External Channel API, and creation-time copy semantics without generic Agent API exposure or retroactive binding updates. |
 | 2026-08-01 | 60 | Added binding leave-presence and purge-safe post-commit provider cleanup to Agent decommission while preserving shared Multi App authority. |

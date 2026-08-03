@@ -23,8 +23,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-02
-spec_version: 18
+last_verified_at: 2026-08-03
+spec_version: 19
 ---
 
 # E2E Primary Test Strategy
@@ -188,12 +188,14 @@ azents feature design must include `## Test Strategy` section. Minimum items are
 External substrate features such as Agent Runtime Provider are recorded in two layers.
 
 - deterministic evidence: auth negative matrix, redaction assertion, prerequisite contract lint, diagnostic API shape, no-active-provider helper behavior, explicit skip/fail reason of Helm render test.
-- live evidence: provider-enabled lifecycle, Provider-reported workspace path, persistence preservation across stop/restart, reset-only destructive behavior, reconnect/stale generation, provider liveness, Helm-enabled environment participation.
+- live evidence: provider-enabled lifecycle, Runner-reported workspace path, persistence preservation across stop/restart, reset-only destructive behavior, reconnect/stale generation, provider liveness, Helm-enabled environment participation.
 
 Local/PR environment without live substrate does not fake live PASS. Instead, separate prerequisite snapshot state and deterministic evidence in PR body and design QA record. If primary E2E substrate such as Browser runner or Docker/testcontainers is unavailable and product path cannot be executed, do not replace it with PASS. Track scenario, blocker category, observed error, expected verification target, and next action in GitHub Issue, and leave blocked evidence plus issue link in design QA record.
 
 ## Changelog
 
+- **2026-08-03** — v19. Updated Runtime Provider live evidence to verify the
+  current Runner-reported Agent Workspace path rather than Provider metadata.
 - **2026-08-02** — v18. Added deterministic public-boundary verification for
   first-mention setup absence, original-trigger continuation, parent/thread behavior,
   provider-native settings, selected-Agent lifecycle transitions, provider command

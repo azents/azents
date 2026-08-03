@@ -9,6 +9,7 @@ import logging
 import posixpath
 import time
 from collections.abc import Callable, Sequence
+from pathlib import PurePosixPath
 from typing import Any, Literal, Protocol
 
 import frontmatter
@@ -37,7 +38,6 @@ from azents.engine.tooling.toolkit_state import (
     ToolkitStateStore,
 )
 from azents.engine.tools.builtin_agents import (
-    SESSION_WORKSPACE_ROOT,
     extract_tool_path_refs,
     project_for_path,
 )
@@ -288,10 +288,11 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
         if not refs:
             return None
         target_path = refs[0].path
-        if not _is_under_workspace_root(target_path):
-            return None
         instruction_context = self._instruction_context()
-        if instruction_context is None:
+        if instruction_context is None or not _is_under_workspace_root(
+            target_path,
+            instruction_context.workspace_root,
+        ):
             return None
 
         async with self._appendix_lock:
@@ -381,7 +382,11 @@ class ClaudeRulesToolkit(Toolkit[ClaudeRulesToolkitConfig]):
     ) -> _ClaudeRulesMatchResult:
         dedupe = await self._load_appendix_dedupe_state()
         already_appended = set(dedupe.appended_paths)
-        roots = claude_rule_roots_for_path(target_path, instruction_context.projects)
+        roots = claude_rule_roots_for_path(
+            target_path,
+            instruction_context.projects,
+            workspace_root=instruction_context.workspace_root,
+        )
         discovery = await self._discover_rule_candidates(
             instruction_context.file_storage,
             roots,
@@ -512,15 +517,19 @@ class ClaudeRulesToolkitProvider(ToolkitProvider[ClaudeRulesToolkitConfig]):
 def claude_rule_roots_for_path(
     target_path: str,
     projects: Sequence[SessionWorkspaceProject],
+    *,
+    workspace_root: str | None,
 ) -> list[ClaudeRuleRoot]:
     """Return supported Claude rule roots applicable to target path."""
+    if workspace_root is None:
+        return []
     normalized = _normalize_runtime_path(target_path)
-    if normalized is None or not _is_under_workspace_root(normalized):
+    if normalized is None or not _is_under_workspace_root(normalized, workspace_root):
         return []
     roots = [
         ClaudeRuleRoot(
-            owner_root=SESSION_WORKSPACE_ROOT,
-            rules_root=posixpath.join(SESSION_WORKSPACE_ROOT, CLAUDE_RULES_DIR),
+            owner_root=workspace_root,
+            rules_root=posixpath.join(workspace_root, CLAUDE_RULES_DIR),
             kind="workspace",
         )
     ]
@@ -758,17 +767,16 @@ def _path_segments(path: str) -> tuple[str, ...]:
 
 
 def _relative_to_root(path: str, root: str) -> str:
-    normalized = posixpath.normpath(path)
-    normalized_root = posixpath.normpath(root)
-    if normalized == normalized_root:
-        return ""
-    return normalized[len(normalized_root) + 1 :]
+    normalized = PurePosixPath(posixpath.normpath(path))
+    normalized_root = PurePosixPath(posixpath.normpath(root))
+    relative = normalized.relative_to(normalized_root)
+    return "" if relative == PurePosixPath(".") else relative.as_posix()
 
 
 def _is_under_root(path: str, root: str) -> bool:
-    normalized = posixpath.normpath(path)
-    normalized_root = posixpath.normpath(root)
-    return normalized == normalized_root or normalized.startswith(f"{normalized_root}/")
+    normalized = PurePosixPath(posixpath.normpath(path))
+    normalized_root = PurePosixPath(posixpath.normpath(root))
+    return normalized.is_relative_to(normalized_root)
 
 
 def _base_tool_name(tool_name: str) -> str:
@@ -778,9 +786,9 @@ def _base_tool_name(tool_name: str) -> str:
     return tool_name.split("__", 1)[1]
 
 
-def _is_under_workspace_root(path: str) -> bool:
+def _is_under_workspace_root(path: str, workspace_root: str | None) -> bool:
     """Return whether path is inside the agent workspace root."""
-    return _is_under_root(path, SESSION_WORKSPACE_ROOT)
+    return workspace_root is not None and _is_under_root(path, workspace_root)
 
 
 def _normalize_runtime_path(path: str) -> str | None:

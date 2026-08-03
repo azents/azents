@@ -154,7 +154,6 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
     assert sent[0].WhichOneof("payload") == "register"
     assert sent[1].WhichOneof("payload") == "heartbeat"
     assert sent[2].command_completion.runtime_id == "runtime-1"
-    assert sent[2].command_completion.report.workspace_path == "/workspace/agent"
     await client.close()
 
 
@@ -250,7 +249,7 @@ def _registration() -> ProviderRegistration:
         protocol_version="agent-runtime-provider.v1",
         capabilities=("lifecycle", "observe"),
         config_schema_version="v1",
-        metadata={"workspace_path_source": "provider"},
+        metadata={"region": "test"},
         capability_contract={"schema_version": 1},
     )
 
@@ -263,7 +262,6 @@ def _report() -> RuntimeProviderReport:
         observed_state=RuntimeProviderObservedState.RUNNING,
         observed_desired_generation=5,
         provider_runtime_id="runtime-provider-id",
-        workspace_path="/workspace/agent",
         reason="container_running",
         diagnostic={},
         reported_at=_now(),

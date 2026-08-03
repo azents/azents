@@ -18,7 +18,6 @@ from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_setting import (
     RDBAgentAutomaticProjectSetting,
 )
-from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -244,9 +243,14 @@ async def _create_fixture(
             role=WorkspaceUserRole.OWNER,
         )
         runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent.id)
-        rdb_runtime = await session.get(RDBAgentRuntime, runtime.id)
-        assert rdb_runtime is not None
-        rdb_runtime.runner_state = RuntimeRunnerState.READY
+        await AgentRuntimeRepository().record_runner_state(
+            session,
+            runtime.id,
+            RuntimeRunnerState.READY,
+            1,
+            expected_desired_generation=runtime.desired_generation,
+            workspace_path="/workspace/agent",
+        )
         return _Fixture(
             workspace_id=workspace_id,
             agent_id=agent.id,
@@ -455,6 +459,20 @@ class TestAgentAutomaticProjectService:
             project_paths=["/workspace/agent/payments"],
         )
         assert isinstance(populated, Success)
+        async with rdb_session_manager() as session:
+            runtime = await AgentRuntimeRepository().get_by_agent_id(
+                session,
+                fixture.agent_id,
+            )
+            assert runtime is not None
+            await AgentRuntimeRepository().record_runner_state(
+                session,
+                runtime.id,
+                RuntimeRunnerState.UNKNOWN,
+                runtime.runner_generation + 1,
+                expected_desired_generation=runtime.desired_generation,
+                workspace_path=None,
+            )
         service = _service(session_manager, runner_operations=None)
 
         result = await service.replace_policy(

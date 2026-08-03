@@ -48,7 +48,10 @@ from azents.engine.tools.builtin import (
     RuntimeRunnerFileStorage,
     RuntimeToolkit,
 )
-from azents.engine.tools.builtin_agents import AgentsAppendixDedupeState
+from azents.engine.tools.builtin_agents import (
+    AgentsAppendixDedupeState,
+    _agents_appendix_candidates_for_path,  # pyright: ignore[reportPrivateUsage]  # Exercise root containment directly.
+)
 from azents.engine.tools.read_text import make_read_text_tool
 from azents.engine.tools.runtime_instruction_context import (
     PresentFilePublicationExecutor,
@@ -95,6 +98,15 @@ from azents.services.session_resource_authority import SessionResourceAuthority
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def test_agents_appendix_supports_filesystem_root_workspace() -> None:
+    """Filesystem root can be the Runner-reported Agent Workspace."""
+    assert _agents_appendix_candidates_for_path(
+        "/project/file.txt",
+        [],
+        workspace_root="/",
+    ) == ["/AGENTS.md"]
 
 
 def _make_context(
@@ -187,6 +199,7 @@ def _make_runtime_repo(
         provider_observed_state=provider_observed_state,
         runner_state=runner_state,
         runner_generation=1,
+        workspace_path="/workspace/agent",
     )
     return repo
 
@@ -677,6 +690,7 @@ def _make_toolkit(
         provider_observed_state=provider_observed_state,
         runner_state=runner_state,
         runner_generation=1,
+        workspace_path="/workspace/agent",
     )
     project_repo = AsyncMock(spec=SessionWorkspaceProjectRepository)
     project_repo.list_projects.return_value = projects or []
@@ -765,6 +779,7 @@ class TestBuiltinToolkitProviderResolve:
             provider_observed_state=RuntimeProviderObservedState.RUNNING,
             runner_state=RuntimeRunnerState.READY,
             runner_generation=1,
+            workspace_path="/workspace/agent",
         )
         provider = BuiltinToolkitProvider(
             exchange_file_service=AsyncMock(spec=ExchangeFileService),
@@ -1024,7 +1039,7 @@ class TestRuntimeToolkitUpdateContext:
         instruction_context = cast(Any, toolkit)._agents_context
         assert instruction_context.publication_capability is None
         runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
-        runtime_repo.get_by_agent_id.assert_awaited_once()
+        assert runtime_repo.get_by_agent_id.await_count == 2
 
     @pytest.mark.asyncio
     async def test_update_context_withholds_provider_delivery_until_runtime_is_ready(
@@ -1046,7 +1061,7 @@ class TestRuntimeToolkitUpdateContext:
         instruction_context = cast(Any, toolkit)._agents_context
         assert instruction_context.provider_delivery_capability is None
         runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
-        runtime_repo.get_by_agent_id.assert_awaited_once()
+        assert runtime_repo.get_by_agent_id.await_count == 2
 
     @pytest.mark.asyncio
     async def test_update_context_withholds_transfer_until_runtime_is_ready(
@@ -1071,7 +1086,7 @@ class TestRuntimeToolkitUpdateContext:
         instruction_context = cast(Any, toolkit)._agents_context
         assert instruction_context.transfer_capability is None
         runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
-        runtime_repo.get_by_agent_id.assert_awaited_once()
+        assert runtime_repo.get_by_agent_id.await_count == 2
 
     @pytest.mark.asyncio
     async def test_file_storage_propagates_owner_and_reuses_runtime_snapshot(
@@ -1133,7 +1148,7 @@ class TestRuntimeToolkitUpdateContext:
             ("grep", "session-1"),
             ("run_bash", "session-1"),
         ]
-        runtime_repo.get_by_agent_id.assert_awaited_once()
+        assert runtime_repo.get_by_agent_id.await_count == 2
 
     @pytest.mark.asyncio
     async def test_subagent_read_and_appendix_share_parent_runtime_with_child_owner(
@@ -1174,7 +1189,7 @@ class TestRuntimeToolkitUpdateContext:
             ("stat", "child-session"),
             ("read_text", "child-session"),
         ]
-        runtime_repo.get_by_agent_id.assert_awaited_once()
+        assert runtime_repo.get_by_agent_id.await_count == 2
         assert runtime_repo.get_by_agent_id.await_args.args[1] == "parent-agent"
 
     @pytest.mark.asyncio
@@ -1206,7 +1221,7 @@ class TestRuntimeToolkitUpdateContext:
         )
 
         assert decision is not None
-        runtime_repo.get_by_agent_id.assert_awaited_once()
+        assert runtime_repo.get_by_agent_id.await_count == 2
         tool_record = next(
             record
             for record in caplog.records
@@ -1243,11 +1258,13 @@ class TestRuntimeToolkitUpdateContext:
 
     @pytest.mark.asyncio
     async def test_prompt_includes_agent_workspace_path(self) -> None:
-        """Prompt includes /workspace/agent path."""
+        """Prompt includes the current Runner-reported workspace path."""
         toolkit = _make_toolkit(agent_id="agent-1")
+        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
+        runtime_repo.get_by_agent_id.return_value.workspace_path = "/runtime/home"
         ctx = _make_context()
         await toolkit.update_context(ctx)
-        assert "/workspace/agent/" in (await toolkit.get_static_prompt(_make_context()))
+        assert "/runtime/home/" in (await toolkit.get_static_prompt(_make_context()))
 
     @pytest.mark.asyncio
     async def test_prompt_does_not_advertise_withheld_resource_tools(self) -> None:
@@ -1298,7 +1315,7 @@ class TestRuntimeToolkitUpdateContext:
         assert "`/workspace/agent/admin`" in (
             await toolkit.get_static_prompt(_make_context())
         )
-        assert "`/workspace/agent` itself is not a Project" in (
+        assert "The Agent Workspace root itself is not a Project" in (
             await toolkit.get_static_prompt(_make_context())
         )
 
@@ -2149,6 +2166,7 @@ class TestProcessToolHandler:
                 provider_observed_state=RuntimeProviderObservedState.STOPPING,
                 runner_state=RuntimeRunnerState.UNKNOWN,
                 runner_generation=1,
+                workspace_path="/workspace/agent",
             ),
             SimpleNamespace(
                 id="runtime-1",
@@ -2157,6 +2175,7 @@ class TestProcessToolHandler:
                 provider_observed_state=RuntimeProviderObservedState.RUNNING,
                 runner_state=RuntimeRunnerState.READY,
                 runner_generation=2,
+                workspace_path="/workspace/agent",
             ),
         ]
         runner_operations = cast(

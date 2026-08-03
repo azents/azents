@@ -45,8 +45,6 @@ from azents.services.runtime_directory_validation import (
     validate_runtime_directory,
 )
 
-SESSION_WORKSPACE_ROOT = PurePosixPath("/workspace/agent")
-
 
 @dataclasses.dataclass(frozen=True)
 class InvalidProjectPath:
@@ -101,7 +99,21 @@ ProjectAccessError = AgentNotFound | ProjectAccessDenied
 ProjectFolderRegistrationError = ProjectAccessError | ProjectCreateError
 
 
-def normalize_session_workspace_path(path: str) -> str:
+def normalize_agent_workspace_root(workspace_root: str | None) -> PurePosixPath:
+    """Normalize the Runner-reported Agent Workspace root."""
+    if workspace_root is None or not workspace_root.strip():
+        raise ValueError("Agent Workspace path is unavailable")
+    normalized = PurePosixPath(posixpath.normpath(workspace_root.strip()))
+    if not normalized.is_absolute():
+        raise ValueError("Agent Workspace path must be absolute")
+    return normalized
+
+
+def normalize_session_workspace_path(
+    path: str,
+    *,
+    workspace_root: str,
+) -> str:
     """Normalize absolute path inside Session Workspace.
 
     :param path: Path to validate
@@ -115,19 +127,27 @@ def normalize_session_workspace_path(path: str) -> str:
     if not pure.is_absolute():
         raise ValueError("Project path must be absolute")
     normalized = PurePosixPath("/") / pure.relative_to("/")
-    if normalized == SESSION_WORKSPACE_ROOT:
+    root = normalize_agent_workspace_root(workspace_root)
+    if normalized == root:
         raise ValueError("Session Workspace root cannot be a Project")
-    if not normalized.is_relative_to(SESSION_WORKSPACE_ROOT):
+    if not normalized.is_relative_to(root):
         raise ValueError("Project path must be under Agent Workspace root")
     return normalized.as_posix()
 
 
-def normalize_session_workspace_project_paths(paths: list[str]) -> list[str]:
+def normalize_session_workspace_project_paths(
+    paths: list[str],
+    *,
+    workspace_root: str,
+) -> list[str]:
     """Normalize Project paths and remove exact duplicates while preserving order."""
     normalized_paths: list[str] = []
     seen: set[str] = set()
     for path in paths:
-        normalized = normalize_session_workspace_path(path)
+        normalized = normalize_session_workspace_path(
+            path,
+            workspace_root=workspace_root,
+        )
         if normalized in seen:
             continue
         seen.add(normalized)
@@ -477,8 +497,24 @@ class SessionWorkspaceProjectService:
         path: str,
     ) -> Result[str, InvalidProjectPath | ProjectPathConflict]:
         """Validate Project path inside open DB session."""
+        agent_session = await self.agent_session_repository.get_by_id(
+            session,
+            session_id,
+        )
+        if agent_session is None:
+            return Failure(
+                InvalidProjectPath(path=path, reason="AgentSession not found")
+            )
+        runtime = await self.agent_runtime_repository.get_by_agent_id(
+            session,
+            agent_session.agent_id,
+        )
         try:
-            normalized = normalize_session_workspace_path(path)
+            normalized = normalize_session_workspace_path(
+                path,
+                workspace_root=(runtime.workspace_path if runtime is not None else None)
+                or "",
+            )
         except ValueError as exc:
             return Failure(InvalidProjectPath(path=path, reason=str(exc)))
         existing_project = await self.repository.get_project_by_path(

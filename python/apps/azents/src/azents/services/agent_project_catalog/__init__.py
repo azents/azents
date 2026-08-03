@@ -28,6 +28,7 @@ from azents.runtime.control_protocol.runner_operations import (
 from azents.runtime.deps import get_runtime_runner_operation_client
 from azents.services.session_workspace_project import (
     InvalidProjectPath,
+    normalize_agent_workspace_root,
     normalize_session_workspace_path,
     normalize_session_workspace_project_paths,
 )
@@ -67,11 +68,15 @@ class AgentProjectCatalogService:
         path: str,
     ) -> Result[AgentProjectCatalogEntry, InvalidProjectPath]:
         """Upsert one Project candidate path."""
-        try:
-            normalized = normalize_session_workspace_path(path)
-        except ValueError as exc:
-            return Failure(InvalidProjectPath(path=path, reason=str(exc)))
         async with self.session_manager() as session:
+            try:
+                workspace_root = await self._workspace_root(session, agent_id)
+                normalized = normalize_session_workspace_path(
+                    path,
+                    workspace_root=workspace_root,
+                )
+            except ValueError as exc:
+                return Failure(InvalidProjectPath(path=path, reason=str(exc)))
             entry = await self.catalog_repository.upsert_entry(
                 session,
                 agent_id=agent_id,
@@ -87,11 +92,15 @@ class AgentProjectCatalogService:
         paths: list[str],
     ) -> Result[list[AgentProjectCatalogEntry], InvalidProjectPath]:
         """Upsert Project candidate paths."""
-        try:
-            normalized_paths = normalize_session_workspace_project_paths(paths)
-        except ValueError as exc:
-            return Failure(InvalidProjectPath(path="", reason=str(exc)))
         async with self.session_manager() as session:
+            try:
+                workspace_root = await self._workspace_root(session, agent_id)
+                normalized_paths = normalize_session_workspace_project_paths(
+                    paths,
+                    workspace_root=workspace_root,
+                )
+            except ValueError as exc:
+                return Failure(InvalidProjectPath(path="", reason=str(exc)))
             entries: list[AgentProjectCatalogEntry] = []
             for path in normalized_paths:
                 entries.append(
@@ -123,11 +132,15 @@ class AgentProjectCatalogService:
         paths: list[str],
     ) -> Result[list[AgentProjectCatalogEntry], InvalidProjectPath]:
         """Fetch catalog entries for normalized Project paths."""
-        try:
-            normalized_paths = normalize_session_workspace_project_paths(paths)
-        except ValueError as exc:
-            return Failure(InvalidProjectPath(path="", reason=str(exc)))
         async with self.session_manager() as session:
+            try:
+                workspace_root = await self._workspace_root(session, agent_id)
+                normalized_paths = normalize_session_workspace_project_paths(
+                    paths,
+                    workspace_root=workspace_root,
+                )
+            except ValueError as exc:
+                return Failure(InvalidProjectPath(path="", reason=str(exc)))
             return Success(
                 await self.catalog_repository.list_entries_by_paths(
                     session,
@@ -143,15 +156,21 @@ class AgentProjectCatalogService:
         path: str,
     ) -> Result[AgentProjectCatalogEntry, InvalidProjectPath]:
         """Refresh one Project candidate filesystem status projection."""
-        try:
-            normalized = normalize_session_workspace_path(path)
-        except ValueError as exc:
-            return Failure(InvalidProjectPath(path=path, reason=str(exc)))
         async with self.session_manager() as session:
             runtime = await self.agent_runtime_repository.get_by_agent_id(
                 session,
                 agent_id,
             )
+            try:
+                workspace_root = normalize_agent_workspace_root(
+                    runtime.workspace_path if runtime is not None else None
+                ).as_posix()
+                normalized = normalize_session_workspace_path(
+                    path,
+                    workspace_root=workspace_root,
+                )
+            except ValueError as exc:
+                return Failure(InvalidProjectPath(path=path, reason=str(exc)))
         patch = await self._status_patch(runtime, normalized)
         async with self.session_manager() as session:
             entry = await self.catalog_repository.update_status(
@@ -170,15 +189,21 @@ class AgentProjectCatalogService:
         paths: list[str],
     ) -> Result[list[AgentProjectCatalogEntry], InvalidProjectPath]:
         """Refresh multiple Project candidate filesystem status projections."""
-        try:
-            normalized_paths = normalize_session_workspace_project_paths(paths)
-        except ValueError as exc:
-            return Failure(InvalidProjectPath(path="", reason=str(exc)))
         async with self.session_manager() as session:
             runtime = await self.agent_runtime_repository.get_by_agent_id(
                 session,
                 agent_id,
             )
+            try:
+                workspace_root = normalize_agent_workspace_root(
+                    runtime.workspace_path if runtime is not None else None
+                ).as_posix()
+                normalized_paths = normalize_session_workspace_project_paths(
+                    paths,
+                    workspace_root=workspace_root,
+                )
+            except ValueError as exc:
+                return Failure(InvalidProjectPath(path="", reason=str(exc)))
         patches = [await self._status_patch(runtime, path) for path in normalized_paths]
         async with self.session_manager() as session:
             entries: list[AgentProjectCatalogEntry] = []
@@ -193,6 +218,20 @@ class AgentProjectCatalogService:
                 )
             await session.commit()
             return Success(entries)
+
+    async def _workspace_root(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+    ) -> str:
+        """Return the current Runner-reported Agent Workspace root."""
+        runtime = await self.agent_runtime_repository.get_by_agent_id(
+            session,
+            agent_id,
+        )
+        return normalize_agent_workspace_root(
+            runtime.workspace_path if runtime is not None else None
+        ).as_posix()
 
     async def _status_patch(
         self,

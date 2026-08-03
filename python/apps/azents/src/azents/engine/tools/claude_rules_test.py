@@ -171,7 +171,7 @@ class _SymlinkStorage(FakeSharedStorage):
         return metadata
 
 
-def _make_project(*, path: str = "/workspace/agent/project") -> SessionWorkspaceProject:
+def _make_project(*, path: str = "/runtime/home/project") -> SessionWorkspaceProject:
     """Create SessionWorkspaceProject for tests."""
     now = datetime.now(UTC)
     return SessionWorkspaceProject(
@@ -215,6 +215,7 @@ def _make_toolkit(storage: FakeSharedStorage) -> ClaudeRulesToolkit:
     context_store.set(
         RuntimeInstructionContext(
             file_storage=storage,
+            workspace_root="/runtime/home",
             projects=(_make_project(),),
             transfer_capability=None,
             publication_capability=None,
@@ -253,24 +254,38 @@ class TestClaudeRuleRoots:
     def test_workspace_file_uses_workspace_root_only(self) -> None:
         """Workspace files outside registered Projects use only workspace rules."""
         roots = claude_rule_roots_for_path(
-            "/workspace/agent/notes.txt",
+            "/runtime/home/notes.txt",
             [_make_project()],
+            workspace_root="/runtime/home",
         )
 
         assert [(root.kind, root.rules_root) for root in roots] == [
-            ("workspace", "/workspace/agent/.claude/rules")
+            ("workspace", "/runtime/home/.claude/rules")
         ]
 
     def test_project_file_uses_workspace_then_project_roots(self) -> None:
         """Project files use workspace rules before Project rules."""
         roots = claude_rule_roots_for_path(
-            "/workspace/agent/project/src/app.py",
+            "/runtime/home/project/src/app.py",
             [_make_project()],
+            workspace_root="/runtime/home",
         )
 
         assert [(root.kind, root.rules_root) for root in roots] == [
-            ("workspace", "/workspace/agent/.claude/rules"),
-            ("project", "/workspace/agent/project/.claude/rules"),
+            ("workspace", "/runtime/home/.claude/rules"),
+            ("project", "/runtime/home/project/.claude/rules"),
+        ]
+
+    def test_filesystem_root_workspace_accepts_descendants(self) -> None:
+        """Filesystem root can own workspace Claude rules."""
+        roots = claude_rule_roots_for_path(
+            "/project/src/app.py",
+            [],
+            workspace_root="/",
+        )
+
+        assert [(root.kind, root.rules_root) for root in roots] == [
+            ("workspace", "/.claude/rules")
         ]
 
 
@@ -281,9 +296,9 @@ class TestClaudeRuleDiscovery:
         """Discovery returns Markdown rule files in sorted path order."""
         storage = FakeSharedStorage(
             {
-                "/workspace/agent/.claude/rules/b.md": b"b",
-                "/workspace/agent/.claude/rules/a.md": b"a",
-                "/workspace/agent/.claude/rules/ignored.txt": b"x",
+                "/runtime/home/.claude/rules/b.md": b"b",
+                "/runtime/home/.claude/rules/a.md": b"a",
+                "/runtime/home/.claude/rules/ignored.txt": b"x",
             }
         )
 
@@ -291,8 +306,8 @@ class TestClaudeRuleDiscovery:
             storage,
             [
                 ClaudeRuleRoot(
-                    owner_root="/workspace/agent",
-                    rules_root="/workspace/agent/.claude/rules",
+                    owner_root="/runtime/home",
+                    rules_root="/runtime/home/.claude/rules",
                     kind="workspace",
                 )
             ],
@@ -300,30 +315,31 @@ class TestClaudeRuleDiscovery:
         )
 
         assert [file.path for file in files] == [
-            "/workspace/agent/.claude/rules/a.md",
-            "/workspace/agent/.claude/rules/b.md",
+            "/runtime/home/.claude/rules/a.md",
+            "/runtime/home/.claude/rules/b.md",
         ]
 
     async def test_realpath_dedupe_keeps_first_root_order_occurrence(self) -> None:
         """Duplicate resolved paths keep the first source-root occurrence."""
-        workspace_rule = "/workspace/agent/.claude/rules/shared.md"
-        project_rule = "/workspace/agent/project/.claude/rules/shared.md"
+        workspace_rule = "/runtime/home/.claude/rules/shared.md"
+        project_rule = "/runtime/home/project/.claude/rules/shared.md"
         storage = _SymlinkStorage(
             {
                 workspace_rule: b"workspace",
                 project_rule: b"project",
             },
             real_paths={
-                workspace_rule: "/workspace/agent/shared.md",
-                project_rule: "/workspace/agent/shared.md",
+                workspace_rule: "/runtime/home/shared.md",
+                project_rule: "/runtime/home/shared.md",
             },
         )
 
         files = await discover_claude_rule_files(
             storage,
             claude_rule_roots_for_path(
-                "/workspace/agent/project/src/app.py",
+                "/runtime/home/project/src/app.py",
                 [_make_project()],
+                workspace_root="/runtime/home",
             ),
             agent_id="agent-1",
         )
@@ -332,18 +348,18 @@ class TestClaudeRuleDiscovery:
 
     async def test_symlink_outside_owner_root_is_skipped(self) -> None:
         """Rules resolving outside their owner root are skipped quietly."""
-        outside_rule = "/workspace/agent/project/.claude/rules/outside.md"
+        outside_rule = "/runtime/home/project/.claude/rules/outside.md"
         storage = _SymlinkStorage(
             {outside_rule: b"outside"},
-            real_paths={outside_rule: "/workspace/agent/other/outside.md"},
+            real_paths={outside_rule: "/runtime/home/other/outside.md"},
         )
 
         files = await discover_claude_rule_files(
             storage,
             [
                 ClaudeRuleRoot(
-                    owner_root="/workspace/agent/project",
-                    rules_root="/workspace/agent/project/.claude/rules",
+                    owner_root="/runtime/home/project",
+                    rules_root="/runtime/home/project/.claude/rules",
                     kind="project",
                 )
             ],
@@ -359,15 +375,31 @@ class TestClaudeRuleMatching:
     def test_global_rule_matches_owner_root(self) -> None:
         """Rules without paths apply to their owner root."""
         roots = claude_rule_roots_for_path(
-            "/workspace/agent/project/src/app.py",
+            "/runtime/home/project/src/app.py",
             [_make_project()],
+            workspace_root="/runtime/home",
         )
 
         assert rule_matches_target(
             "# Global",
-            "/workspace/agent/project/.claude/rules/global.md",
+            "/runtime/home/project/.claude/rules/global.md",
             roots,
-            "/workspace/agent/project/src/app.py",
+            "/runtime/home/project/src/app.py",
+        )
+
+    def test_relative_paths_glob_supports_filesystem_root_workspace(self) -> None:
+        """Relative workspace globs retain the first path segment under root."""
+        roots = claude_rule_roots_for_path(
+            "/project/src/app.py",
+            [],
+            workspace_root="/",
+        )
+
+        assert rule_matches_target(
+            "---\npaths: project/**/*.py\n---\n# Python",
+            "/.claude/rules/python.md",
+            roots,
+            "/project/src/app.py",
         )
 
     def test_relative_paths_glob_uses_owner_root_and_segment_aware_starstar(
@@ -375,61 +407,64 @@ class TestClaudeRuleMatching:
     ) -> None:
         """Relative globs resolve against owner root and support ** segments."""
         roots = claude_rule_roots_for_path(
-            "/workspace/agent/project/src/app.py",
+            "/runtime/home/project/src/app.py",
             [_make_project()],
+            workspace_root="/runtime/home",
         )
 
         assert rule_matches_target(
             "---\npaths: src/**/*.py\n---\n# Python",
-            "/workspace/agent/project/.claude/rules/python.md",
+            "/runtime/home/project/.claude/rules/python.md",
             roots,
-            "/workspace/agent/project/src/app.py",
+            "/runtime/home/project/src/app.py",
         )
         assert rule_matches_target(
             "---\npaths: src/**/*.py\n---\n# Python",
-            "/workspace/agent/project/.claude/rules/python.md",
+            "/runtime/home/project/.claude/rules/python.md",
             roots,
-            "/workspace/agent/project/src/pkg/app.py",
+            "/runtime/home/project/src/pkg/app.py",
         )
         assert not rule_matches_target(
             "---\npaths: src/**/*.py\n---\n# Python",
-            "/workspace/agent/project/.claude/rules/python.md",
+            "/runtime/home/project/.claude/rules/python.md",
             roots,
-            "/workspace/agent/project/tests/app.py",
+            "/runtime/home/project/tests/app.py",
         )
 
     def test_absolute_paths_glob_matches_absolute_runtime_path(self) -> None:
         """Absolute globs match normalized absolute Runtime paths."""
         roots = claude_rule_roots_for_path(
-            "/workspace/agent/project/src/app.py",
+            "/runtime/home/project/src/app.py",
             [_make_project()],
+            workspace_root="/runtime/home",
         )
 
         assert rule_matches_target(
-            "---\npaths:\n  - /workspace/agent/project/**/*.py\n---\n# Python",
-            "/workspace/agent/.claude/rules/python.md",
+            "---\npaths:\n  - /runtime/home/project/**/*.py\n---\n# Python",
+            "/runtime/home/.claude/rules/python.md",
             roots,
-            "/workspace/agent/project/src/app.py",
+            "/runtime/home/project/src/app.py",
         )
 
     def test_malformed_frontmatter_and_bad_paths_shape_skip(self) -> None:
         """Malformed or unsupported paths metadata skips the rule quietly."""
         roots = claude_rule_roots_for_path(
-            "/workspace/agent/project/src/app.py",
+            "/runtime/home/project/src/app.py",
             [_make_project()],
+            workspace_root="/runtime/home",
         )
 
         assert not rule_matches_target(
             "---\npaths: [unterminated\n---\n# Bad",
-            "/workspace/agent/.claude/rules/bad.md",
+            "/runtime/home/.claude/rules/bad.md",
             roots,
-            "/workspace/agent/project/src/app.py",
+            "/runtime/home/project/src/app.py",
         )
         assert not rule_matches_target(
             "---\npaths: {bad: shape}\n---\n# Bad",
-            "/workspace/agent/.claude/rules/bad.md",
+            "/runtime/home/.claude/rules/bad.md",
             roots,
-            "/workspace/agent/project/src/app.py",
+            "/runtime/home/project/src/app.py",
         )
 
 
@@ -441,8 +476,8 @@ class TestClaudeRulesToolkit:
         toolkit = _make_toolkit(
             FakeSharedStorage(
                 {
-                    "/workspace/agent/.claude/rules/global.md": b"# Global",
-                    "/workspace/agent/project/.claude/rules/python.md": (
+                    "/runtime/home/.claude/rules/global.md": b"# Global",
+                    "/runtime/home/project/.claude/rules/python.md": (
                         b"---\npaths: src/**/*.py\n---\n# Python"
                     ),
                 }
@@ -451,46 +486,44 @@ class TestClaudeRulesToolkit:
 
         result = await _run_after_tool_call_hook(
             toolkit,
-            _make_after_read_context("/workspace/agent/project/src/app.py"),
+            _make_after_read_context("/runtime/home/project/src/app.py"),
         )
         second = await _run_after_tool_call_hook(
             toolkit,
-            _make_after_read_context("/workspace/agent/project/src/other.py"),
+            _make_after_read_context("/runtime/home/project/src/other.py"),
         )
 
         assert result is not None
         assert "Relevant Claude rules" in result.output_text
-        assert "### /workspace/agent/.claude/rules/global.md" in result.output_text
-        assert (
-            "### /workspace/agent/project/.claude/rules/python.md" in result.output_text
-        )
+        assert "### /runtime/home/.claude/rules/global.md" in result.output_text
+        assert "### /runtime/home/project/.claude/rules/python.md" in result.output_text
         assert second is None
 
     async def test_cached_discovery_and_pre_io_dedupe_avoid_repeat_rpcs(
         self,
     ) -> None:
         """Repeated reads reuse root discovery and skip deduped content I/O."""
-        rule_path = "/workspace/agent/.claude/rules/global.md"
+        rule_path = "/runtime/home/.claude/rules/global.md"
         storage = _CountingStorage({rule_path: b"# Global"})
         toolkit = _make_toolkit(storage)
 
         first = await _run_after_tool_call_hook(
             toolkit,
-            _make_after_read_context("/workspace/agent/project/src/app.py"),
+            _make_after_read_context("/runtime/home/project/src/app.py"),
         )
         list_calls = list(storage.list_calls)
         stat_calls = list(storage.stat_calls)
         get_calls = list(storage.get_calls)
         second = await _run_after_tool_call_hook(
             toolkit,
-            _make_after_read_context("/workspace/agent/project/src/other.py"),
+            _make_after_read_context("/runtime/home/project/src/other.py"),
         )
 
         assert first is not None
         assert second is None
         assert list_calls == [
-            "/workspace/agent/.claude/rules",
-            "/workspace/agent/project/.claude/rules",
+            "/runtime/home/.claude/rules",
+            "/runtime/home/project/.claude/rules",
         ]
         assert storage.list_calls == list_calls
         assert stat_calls == [rule_path]
@@ -504,17 +537,17 @@ class TestClaudeRulesToolkit:
     ) -> None:
         """Claude rule appendix logs exact discovery and content RPC counts."""
         caplog.set_level(logging.INFO)
-        rule_path = "/workspace/agent/.claude/rules/global.md"
+        rule_path = "/runtime/home/.claude/rules/global.md"
         storage = _CountingStorage({rule_path: b"# Global"})
         toolkit = _make_toolkit(storage)
 
         first = await _run_after_tool_call_hook(
             toolkit,
-            _make_after_read_context("/workspace/agent/project/src/app.py"),
+            _make_after_read_context("/runtime/home/project/src/app.py"),
         )
         second = await _run_after_tool_call_hook(
             toolkit,
-            _make_after_read_context("/workspace/agent/project/src/other.py"),
+            _make_after_read_context("/runtime/home/project/src/other.py"),
         )
 
         assert first is not None
@@ -551,7 +584,7 @@ class TestClaudeRulesToolkit:
         self,
     ) -> None:
         """Parallel reads list, stat, read, and append one rule only once."""
-        rule_path = "/workspace/agent/.claude/rules/global.md"
+        rule_path = "/runtime/home/.claude/rules/global.md"
         storage = _CountingStorage({rule_path: b"# Global"})
         storage.get_started_event = asyncio.Event()
         storage.get_continue_event = asyncio.Event()
@@ -560,7 +593,7 @@ class TestClaudeRulesToolkit:
         first_task = asyncio.create_task(
             _run_after_tool_call_hook(
                 toolkit,
-                _make_after_read_context("/workspace/agent/one.py"),
+                _make_after_read_context("/runtime/home/one.py"),
             )
         )
         await storage.get_started_event.wait()
@@ -570,7 +603,7 @@ class TestClaudeRulesToolkit:
             second_started.set()
             return await _run_after_tool_call_hook(
                 toolkit,
-                _make_after_read_context("/workspace/agent/two.py"),
+                _make_after_read_context("/runtime/home/two.py"),
             )
 
         second_task = asyncio.create_task(run_second())
@@ -583,24 +616,24 @@ class TestClaudeRulesToolkit:
 
         assert first is not None
         assert second is None
-        assert storage.list_calls == ["/workspace/agent/.claude/rules"]
+        assert storage.list_calls == ["/runtime/home/.claude/rules"]
         assert storage.stat_calls == [rule_path]
         assert storage.get_calls == [rule_path]
 
     async def test_compaction_clears_rule_path_discovery_cache(self) -> None:
         """Compaction refreshes previously empty rule-root discovery."""
-        rule_path = "/workspace/agent/.claude/rules/global.md"
+        rule_path = "/runtime/home/.claude/rules/global.md"
         storage = _CountingStorage()
         toolkit = _make_toolkit(storage)
 
         first = await _run_after_tool_call_hook(
             toolkit,
-            _make_after_read_context("/workspace/agent/one.py"),
+            _make_after_read_context("/runtime/home/one.py"),
         )
         storage.add_file(rule_path, b"# New")
         second = await _run_after_tool_call_hook(
             toolkit,
-            _make_after_read_context("/workspace/agent/two.py"),
+            _make_after_read_context("/runtime/home/two.py"),
         )
         await _run_session_compact_hook(
             toolkit,
@@ -613,7 +646,7 @@ class TestClaudeRulesToolkit:
         )
         third = await _run_after_tool_call_hook(
             toolkit,
-            _make_after_read_context("/workspace/agent/three.py"),
+            _make_after_read_context("/runtime/home/three.py"),
         )
 
         assert first is None
@@ -621,22 +654,22 @@ class TestClaudeRulesToolkit:
         assert third is not None
         assert "# New" in third.output_text
         assert storage.list_calls == [
-            "/workspace/agent/.claude/rules",
-            "/workspace/agent/.claude/rules",
+            "/runtime/home/.claude/rules",
+            "/runtime/home/.claude/rules",
         ]
 
     async def test_failed_read_and_non_read_are_unchanged(self) -> None:
         """Original read failures and non-read tools do not append rules."""
         toolkit = _make_toolkit(
-            FakeSharedStorage({"/workspace/agent/.claude/rules/global.md": b"# Global"})
+            FakeSharedStorage({"/runtime/home/.claude/rules/global.md": b"# Global"})
         )
         failed_read = _make_after_read_context(
-            "/workspace/agent/project/src/app.py",
+            "/runtime/home/project/src/app.py",
             output_text=None,
             error_message="boom",
         )
         non_read = _make_after_read_context(
-            "/workspace/agent/project/src/app.py",
+            "/runtime/home/project/src/app.py",
             tool_name="write",
         )
 
@@ -646,12 +679,12 @@ class TestClaudeRulesToolkit:
     async def test_compaction_clears_dedupe(self) -> None:
         """Compaction clears path dedupe so rules can append again."""
         toolkit = _make_toolkit(
-            FakeSharedStorage({"/workspace/agent/.claude/rules/global.md": b"# Global"})
+            FakeSharedStorage({"/runtime/home/.claude/rules/global.md": b"# Global"})
         )
 
         first = await _run_after_tool_call_hook(
             toolkit,
-            _make_after_read_context("/workspace/agent/project/src/app.py"),
+            _make_after_read_context("/runtime/home/project/src/app.py"),
         )
         await _run_session_compact_hook(
             toolkit,
@@ -664,7 +697,7 @@ class TestClaudeRulesToolkit:
         )
         second = await _run_after_tool_call_hook(
             toolkit,
-            _make_after_read_context("/workspace/agent/project/src/other.py"),
+            _make_after_read_context("/runtime/home/project/src/other.py"),
         )
 
         assert first is not None
@@ -682,7 +715,7 @@ class TestClaudeRulesToolkit:
 
         result = await _run_after_tool_call_hook(
             toolkit,
-            _make_after_read_context("/workspace/agent/project/src/app.py"),
+            _make_after_read_context("/runtime/home/project/src/app.py"),
         )
 
         assert result is None
@@ -723,8 +756,8 @@ def test_render_claude_rules_appendix_includes_raw_frontmatter() -> None:
     rendered = render_claude_rules_appendix(
         [
             ClaudeRuleFile(
-                path="/workspace/agent/.claude/rules/python.md",
-                real_path="/workspace/agent/.claude/rules/python.md",
+                path="/runtime/home/.claude/rules/python.md",
+                real_path="/runtime/home/.claude/rules/python.md",
                 content="---\npaths: '**/*.py'\n---\n# Python",
             )
         ]

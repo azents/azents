@@ -4,6 +4,7 @@ import contextlib
 import datetime
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import cast
 
 import pytest
@@ -41,10 +42,9 @@ from azents.runtime.transfer.workspace_download import (
     RuntimeWorkspaceDownloadService,
     WorkspaceDownloadRequest,
 )
-from azents.services.chat.workspace import (
-    AGENT_WORKSPACE_ROOT,
-    AgentWorkspaceFileService,
-)
+from azents.services.chat.workspace import AgentWorkspaceFileService
+
+AGENT_WORKSPACE_ROOT = PurePosixPath("/runtime/home")
 
 _NOW = datetime.datetime(2026, 5, 24, tzinfo=datetime.UTC)
 

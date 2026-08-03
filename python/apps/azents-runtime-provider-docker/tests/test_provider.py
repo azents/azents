@@ -121,6 +121,7 @@ def _provider(tmp_path: Path, docker: FakeDockerApi) -> DockerRuntimeProvider:
         docker,
         DockerRuntimeProviderConfig(
             provider_id="provider-docker",
+            workspace_mount_path="/runtime/home",
             host_data_root=tmp_path,
             runner_env={},
         ),
@@ -170,13 +171,11 @@ async def test_start_creates_container_with_workspace_bind(tmp_path: Path) -> No
     result = await provider.start(_command(RuntimeLifecycleCommandType.START))
 
     assert result.report.observed_state is RuntimeProviderObservedState.RUNNING
-    assert result.report.workspace_path == "/workspace/agent"
     container = docker.containers["azents-runtime-runtime-1"]
     assert container.spec.user == "1000:1000"
-    assert container.spec.working_dir == "/workspace/agent"
-    assert any(
-        bind.container_path == "/workspace/agent" for bind in container.spec.binds
-    )
+    assert container.spec.working_dir == "/runtime/home"
+    assert any(bind.container_path == "/runtime/home" for bind in container.spec.binds)
+    assert container.spec.env["HOME"] == "/runtime/home"
     assert container.spec.env["AZ_RUNTIME_TRANSFER_ENDPOINT"] == "runtime-transfer:8030"
     assert "AZ_RUNTIME_TRANSFER_STAGING_DIRECTORY" not in container.spec.env
     assert container.spec.env["AZ_RUNTIME_RUNNER_AUTH_TOKEN"] == "runner-token-1"
@@ -202,6 +201,7 @@ async def test_start_passes_runner_limit_environment_to_container(
         docker,
         DockerRuntimeProviderConfig(
             provider_id="provider-docker",
+            workspace_mount_path="/runtime/home",
             host_data_root=tmp_path,
             runner_env=runner_env,
         ),
@@ -231,6 +231,7 @@ async def test_start_replaces_container_when_runner_limit_environment_changes(
         docker,
         DockerRuntimeProviderConfig(
             provider_id="provider-docker",
+            workspace_mount_path="/runtime/home",
             host_data_root=tmp_path,
             runner_env=initial_env,
         ),
@@ -240,6 +241,7 @@ async def test_start_replaces_container_when_runner_limit_environment_changes(
         docker,
         DockerRuntimeProviderConfig(
             provider_id="provider-docker",
+            workspace_mount_path="/runtime/home",
             host_data_root=tmp_path,
             runner_env=replacement_env,
         ),
@@ -445,7 +447,6 @@ async def test_terminal_delete_removes_container_and_workspace_idempotently(
     )
 
     assert first.report.terminal_delete_acknowledged is True
-    assert first.report.workspace_path == ""
     assert second.report.terminal_delete_acknowledged is True
     assert "azents-runtime-runtime-1" not in docker.containers
     assert not marker.exists()

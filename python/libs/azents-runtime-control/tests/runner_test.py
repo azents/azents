@@ -739,7 +739,7 @@ def _loop(
 
 
 def _registration() -> RunnerRegistration:
-    metadata: Mapping[str, str] = {"workspace_path_source": "provider"}
+    metadata: Mapping[str, str] = {"region": "test"}
     capabilities: Sequence[str] = ("bash", "file.read")
     return RunnerRegistration(
         runtime_id="runtime-1",
