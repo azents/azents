@@ -97,6 +97,7 @@ async def test_create_and_update_message_preserve_rich_embeds_and_components() -
             channel_id="333",
             message_id="555",
             content="",
+            components=components,
             embeds=[embed],
         )
 
@@ -104,6 +105,7 @@ async def test_create_and_update_message_preserve_rich_embeds_and_components() -
     assert json.loads(calls[0].content)["components"] == components
     assert json.loads(calls[1].content) == {
         "content": "",
+        "components": components,
         "embeds": [embed],
     }
 

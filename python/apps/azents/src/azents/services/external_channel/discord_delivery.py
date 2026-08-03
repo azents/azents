@@ -353,6 +353,7 @@ class DiscordDeliveryClient:
         channel_id: str,
         message_id: str,
         content: str,
+        components: list[dict[str, object]] | None = None,
         embeds: list[dict[str, object]] | None = None,
     ) -> DiscordDeliveryResult:
         """Update one currently owned Discord message."""
@@ -362,6 +363,7 @@ class DiscordDeliveryClient:
             bot_token=bot_token,
             json_body={
                 "content": content,
+                **({"components": components} if components is not None else {}),
                 **({"embeds": embeds} if embeds is not None else {}),
             },
         )

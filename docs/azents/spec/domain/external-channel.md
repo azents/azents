@@ -59,7 +59,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-08-03
-spec_version: 43
+spec_version: 44
 ---
 
 # External Channel
@@ -227,12 +227,15 @@ contain multiple independent bindings.
   description carries the status summary, every ordered task title and status marker,
   then prioritized details, output, and labeled sources. The functional Tracker body is
   not duplicated as ordinary message content; Multi App Agent attribution remains
-  separate readable content. A parent-channel Resource posts directly to the Slack or
-  Discord parent channel. A Discord thread Resource provisions or reuses one delivery
-  thread, persists that target, and sends approval controls, Session navigation,
-  replies, files, progress, and cleanup to that thread. A delivered final answer
-  permits active-progress deletion, and separate work cycles never share provider
-  identities.
+  separate readable content. Every initial and updated Tracker also carries one
+  provider-native `View session` control. The provider delivery boundary derives its
+  canonical Agent Session URL from the current Workspace, Agent, and Session target;
+  Channel Work and projection state retain neither the URL nor provider component.
+  A parent-channel Resource posts directly to the Slack or Discord parent channel. A
+  Discord thread Resource provisions or reuses one delivery thread, persists that
+  target, and sends approval controls, Session navigation, replies, files, progress,
+  and cleanup to that thread. A delivered final answer permits active-progress
+  deletion, and separate work cycles never share provider identities.
 - A newly created External Channel root Session uses only the creating mailbox's exact
   human `authorized_invocation` event for the existing two-phase automatic title
   lifecycle. The title model receives prompt-only guidance to ignore Bot or App markup
@@ -400,6 +403,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-03** (spec_version 44) — Added canonical `View session` navigation to
+  every initial and updated Slack and Discord Activity Tracker without persisting
+  URLs or changing Work projection ownership.
 - **2026-08-03** (spec_version 43) — Applied saved lightweight-model title output modes and
   prompt-only invocation-markup guidance to External Channel creation without mutating canonical
   provider evidence or Discord projection ownership.

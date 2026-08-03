@@ -17,7 +17,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-02 | 62 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-03 | 139 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-03 | 43 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-03 | 44 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-01 | 18 |
@@ -38,7 +38,7 @@ Design documents are accumulated records and are not listed individually in this
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-07-22 | 31 |
 | [External Channel Authorization](spec/flow/external-channel-authorization.md) | @Hardtack | 2026-08-03 | 21 |
-| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-03 | 32 |
+| [External Channel Delivery and Channel Work](spec/flow/external-channel-delivery.md) | @Hardtack | 2026-08-03 | 33 |
 | [External Channel Lifecycle](spec/flow/external-channel-lifecycle.md) | @Hardtack | 2026-08-02 | 29 |
 | [External Channel Provider Ingress](spec/flow/external-channel-provider-ingress.md) | @Hardtack | 2026-08-03 | 32 |
 | [File Exchange Storage](spec/flow/file-exchange-storage.md) | @Hardtack | 2026-08-02 | 37 |
@@ -161,6 +161,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Session Workspace Project Existing Folder Registration Historical Requirements Reconstruction](requirements/existing-260611-existing-folder-registration.md) | existing-260611 | 2026-06-11 | 2026-06-11 |
 | [External Watch / Raw Session Event Subscription Historical Requirements Reconstruction](requirements/external-260503-external-watch-raw-subscription.md) | external-260503 | 2026-05-03 | 2026-05-03 |
 | [Discord Message Invocation Requirements](requirements/external-260726-discord-message-invocation.md) | external-260726 | 2026-07-26 | - |
+| [External Channel Activity Tracker Session Navigation Requirements](requirements/external-260803-activity-tracker-session-navigation.md) | external-260803 | 2026-08-03 | 2026-08-03 |
 | [Failed-run Error Retry and Finalization Historical Requirements Reconstruction](requirements/failed-260627-failed-error-retry.md) | failed-260627 | 2026-06-27 | - |
 | [Scope Failed-run Retry to One Model Turn Historical Requirements Reconstruction](requirements/failed-260716-failed-retry-to-turn.md) | failed-260716 | 2026-07-16 | 2026-03-26 |
 | [Keep OpenAI HTTP Failure Semantics at the Azents Boundary Historical Requirements Reconstruction](requirements/failure-260716-openai-http-failure-semantics-at-the-azents-boundary.md) | failure-260716 | 2026-07-16 | - |
@@ -522,6 +523,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Session Workspace Project Existing Folder Registration Historical Decision Reconstruction](adr/existing-260611-existing-folder-registration.md)
 - [External Watch / Raw Session Event Subscription Historical Decision Reconstruction](adr/external-260503-external-watch-raw-subscription.md)
 - [Discord Message Invocation](adr/external-260726-discord-message-invocation.md)
+- [External Channel Activity Tracker Session Navigation](adr/external-260803-activity-tracker-session-navigation.md)
 - [Failed-run Error Retry and Finalization](adr/failed-260627-failed-error-retry.md)
 - [Scope Failed-run Retry to One Model Turn](adr/failed-260716-failed-retry-to-turn.md)
 - [Keep OpenAI HTTP Failure Semantics at the Azents Boundary](adr/failure-260716-openai-http-failure-semantics-at-the-azents-boundary.md)

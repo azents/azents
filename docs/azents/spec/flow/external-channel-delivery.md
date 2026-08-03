@@ -35,7 +35,7 @@ code_paths:
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-03
-spec_version: 32
+spec_version: 33
 ---
 
 # External Channel Delivery and Channel Work
@@ -264,7 +264,9 @@ Session title and Agent execution.
   Nested tasks use `task_id`, literal title, Slack status, and optional literal
   rich-text details/output plus labeled URL sources. They omit standalone
   `task_card` block types. The Plan sends no `plan_id`, is read-only, and requires
-  no Slack interaction callback.
+  no Slack interaction callback. Initial creation and every complete update append
+  one Block Kit `View session` action derived from the current provider target's
+  canonical Workspace, Agent, and Session identity.
 - Task or title changes update the retained provider message with the complete
   latest Block Kit payload through `chat.update`. A revision-derived provider-only
   `block_id` changes for each message iteration. Slack Agent streaming methods are
@@ -278,8 +280,10 @@ Session title and Agent execution.
   containing `◉ Agent is checking your message` from the same accepted binding
   transaction. Later complete snapshots replace that retained message's content with an
   empty string and its Embed with the current bounded title, status summary, ordered
-  checklist, prioritized context, and labeled sources. Update, delete, replacement,
-  and final-reply cleanup use the same Work-owned Tracker identity and revision fence.
+  checklist, prioritized context, and labeled sources. Creation and update both send
+  one `View session` link component derived from the current canonical Workspace,
+  Agent, and Session target. Update, delete, replacement, and final-reply cleanup use
+  the same Work-owned Tracker identity and revision fence.
 - An eligible explicit mention in an existing connected Binding may create one
   idempotent version-3 settings control for that Binding. The control contains only
   provider-native `Conversation settings`, does not repeat joined presence or rewrite
@@ -369,6 +373,8 @@ lifecycle transition and creates no recovery work.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 33) — Added canonical `View session` controls to
+  initial and updated Slack and Discord Activity Trackers.
 - **2026-08-03** (spec_version 32) — Retained exact provisional-title evidence only
   for direct Discord thread creation and added one post-title-commit GET plus
   conditional name-only PATCH with no retry or delivery-attempt ledger.
