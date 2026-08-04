@@ -1,10 +1,11 @@
 """SecurityService tests."""
 
 import datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, create_autospec
 
 from azcommon.result import Failure, Success
 from sqlalchemy.ext.asyncio import AsyncSession
+from types_aiobotocore_ses.client import SESClient
 
 from azents.core.config import (
     AuthConfig,
@@ -61,7 +62,7 @@ def _make_email_service(*, configured: bool) -> EmailService:
                 verification_expire_minutes=10,
                 web_url="https://azents.example.com",
             ),
-            ses_client=object(),  # type: ignore[arg-type]
+            ses_client=create_autospec(SESClient, instance=True),
         )
     service.send_verification_code = AsyncMock()
     return service

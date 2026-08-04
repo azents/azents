@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.repos.agent_decommission_finalizer import (
@@ -30,7 +31,7 @@ class _ExistsSessionDouble:
 @pytest.mark.asyncio
 async def test_finalizer_rejects_remaining_external_channel_route() -> None:
     """An Agent route remains a hard finalization fence after Session purge."""
-    session = _ExistsSessionDouble([False] * 6 + [True])
+    session = cast(AsyncSession, _ExistsSessionDouble([False] * 6 + [True]))
 
     with pytest.raises(
         RuntimeError,
@@ -38,7 +39,7 @@ async def test_finalizer_rejects_remaining_external_channel_route() -> None:
     ):
         repository = AgentDecommissionFinalizerRepository()
         await repository._require_absent_lifecycle_roots(
-            session,  # type: ignore[arg-type]
+            session,
             agent_id="agent-1",
         )
 
@@ -46,15 +47,16 @@ async def test_finalizer_rejects_remaining_external_channel_route() -> None:
 @pytest.mark.asyncio
 async def test_finalizer_does_not_treat_workspace_connection_as_agent_root() -> None:
     """Workspace-owned External Channel connections remain outside Agent cleanup."""
-    session = _ExistsSessionDouble([False] * 15)
+    session_double = _ExistsSessionDouble([False] * 15)
+    session = cast(AsyncSession, session_double)
 
     repository = AgentDecommissionFinalizerRepository()
     await repository._require_absent_lifecycle_roots(
-        session,  # type: ignore[arg-type]
+        session,
         agent_id="agent-1",
     )
 
-    checked_sql = "\n".join(session.statements)
+    checked_sql = "\n".join(session_double.statements)
     assert "external_channel_connections" not in checked_sql
 
 
