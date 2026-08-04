@@ -5,7 +5,7 @@ import json
 import logging
 import math
 from collections.abc import Mapping
-from typing import Final
+from typing import Final, TypeGuard
 
 import httpx
 
@@ -211,9 +211,16 @@ def _window_minutes(reset: str | None) -> int | None:
 
 def _mapping(value: object, field: str) -> Mapping[str, object]:
     """Return a JSON object mapping or reject an invalid source shape."""
-    if not isinstance(value, Mapping):
+    if not _is_string_object_mapping(value):
         raise _InvalidOpenRouterUsagePayload(f"{field} must be an object")
     return value
+
+
+def _is_string_object_mapping(
+    value: object,
+) -> TypeGuard[Mapping[str, object]]:
+    """Return whether a value is a mapping with string keys."""
+    return isinstance(value, Mapping) and all(isinstance(key, str) for key in value)
 
 
 def _number(value: object, field: str) -> float:

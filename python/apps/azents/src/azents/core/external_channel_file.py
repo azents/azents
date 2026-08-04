@@ -4,6 +4,7 @@ import copy
 import enum
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import TypeGuard
 from urllib.parse import quote, unquote
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -180,7 +181,7 @@ def external_channel_file_metadata_items(
     files = attachment_metadata.get("files")
     if not isinstance(files, list):
         return ()
-    return tuple(item for item in files if isinstance(item, dict))
+    return tuple(item for item in files if _is_string_object_dict(item))
 
 
 def add_external_channel_file_locators(
@@ -195,7 +196,7 @@ def add_external_channel_file_locators(
     if not isinstance(files, list):
         return enriched
     for item in files:
-        if not isinstance(item, dict):
+        if not _is_string_object_dict(item):
             continue
         provider_value = item.get("provider")
         provider_file_id = item.get("provider_file_id")
@@ -230,3 +231,8 @@ def add_external_channel_file_locators(
             provider_message_id=provider_message_id,
         ).encode()
     return enriched
+
+
+def _is_string_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    """Return whether a value is a dictionary with string keys."""
+    return isinstance(value, dict) and all(isinstance(key, str) for key in value)
