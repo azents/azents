@@ -51,6 +51,7 @@ from azents.engine.events.types import (
 )
 from azents.engine.run.errors import CompactionFailedError, CompactionPlanStaleError
 from azents.repos.agent_execution.data import EventCreate
+from azents.testing.types import is_string_object_dict
 
 
 class _Session(AsyncSession):
@@ -1916,15 +1917,15 @@ def test_external_message_is_visible_to_tokens_and_continuity() -> None:
         event
     )
 
-    assert isinstance(value, dict)
+    assert is_string_object_dict(value)
     assert value["message_type"] == "external_channel_message"
     assert value["authorization"] == "context_only"
     assert value["truncated_context"] == {"message_count": 3, "size": 256}
     attachments = value["attachments"]
-    assert isinstance(attachments, dict)
+    assert is_string_object_dict(attachments)
     files = attachments["files"]
     assert isinstance(files, list)
-    assert isinstance(files[0], dict)
+    assert is_string_object_dict(files[0])
     assert files[0]["file"] == "external-file:v1:slack:binding-1:::F123"
     assert "secret-download" not in str(value)
     visible_bytes = filters._estimate_event_visible_bytes(  # pyright: ignore[reportPrivateUsage]

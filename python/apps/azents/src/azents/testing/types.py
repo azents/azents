@@ -12,3 +12,8 @@ def is_object_factory(value: object) -> TypeGuard[Callable[..., object]]:
 def is_string_object_dict(value: object) -> TypeGuard[dict[str, object]]:
     """Return whether a value is a dictionary with string keys."""
     return isinstance(value, dict) and all(isinstance(key, str) for key in value)
+
+
+def is_object_list(value: object) -> TypeGuard[list[object]]:
+    """Return whether a value is a list with an unconstrained item type."""
+    return isinstance(value, list)

@@ -220,3 +220,55 @@ The phase reduces the baseline from 537 to 495 diagnostics:
 
 The remaining diagnostics require larger result-union narrowing, service-double
 completion, external-library typing, or dynamic-data validation work.
+
+## Current-Main Category Baseline
+
+Subsequent merged mechanical cleanup reduced the backend baseline from 495 to 420
+diagnostics. After unrelated work reached `main`, the baseline collected from
+commit `cb9748515` was 431 diagnostics.
+
+The current backlog is grouped by root cause rather than individual file:
+
+| Category | Count | Disposition |
+| --- | ---: | --- |
+| Test doubles and test dynamic data | 125 | Next bulk cleanup category |
+| External Channel contracts | 110 | Requires separate contract review |
+| API and Result-union narrowing | 103 | Preserve current policy; defer |
+| Exhaustive unions and other contracts | 48 | Review by contract family |
+| Production container narrowing | 19 | Validate by boundary family |
+| Migration and third-party extensions | 13 | Do not edit executed migrations |
+| TypedDict dynamic-key access | 10 | Mechanical read-boundary cleanup |
+| Read-only protocol variance | 2 | Mechanical read-boundary cleanup |
+| Callable naming contract | 1 | Requires explicit callable policy |
+
+## Phase 7: Structural Read and Container Narrowing
+
+The seventh documented phase groups structurally equivalent read-boundary fixes
+instead of delivering isolated diagnostics.
+
+This phase:
+
+- Declares tool-call identity fields as read-only protocol properties so frozen
+  admitted-call models satisfy the consumer contract.
+- Accepts OpenAI response options through a read-only mapping in typed value
+  readers while preserving the validated `OpenAIResponsesOptions` producer.
+- Names the existing string-header validation as a TypeGuard without changing its
+  accepted values or error behavior.
+- Uses shared test TypeGuards before reading nested JSON dictionaries and mutating
+  dynamically loaded lists.
+
+### Phase 7 Result
+
+The phase reduces the current-main baseline from 431 to 389 diagnostics:
+
+- Structural read-only protocol diagnostics: 2 to 0
+- OpenAI option dynamic-key diagnostics: 10 to 0
+- Selected test container diagnostics: 29 to 0
+- Existing credential-header container diagnostic: 1 to 0
+- Pyright: 0 errors
+- Targeted tests: 191 passed
+- Backend tests: 3,942 passed
+
+The next bulk category is test-double contract completion. Result unions,
+External Channel contracts, generated code, and executed migrations remain outside
+this mechanical phase.

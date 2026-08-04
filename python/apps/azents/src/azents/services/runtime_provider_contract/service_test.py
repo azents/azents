@@ -19,6 +19,7 @@ from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_policy.repository import (
     RuntimeProviderPolicyRepository,
 )
+from azents.testing.types import is_object_list, is_string_object_dict
 
 from .service import (
     RuntimeProviderContractService,
@@ -264,8 +265,10 @@ async def test_advertisement_rejects_invalid_profile_contract_declarations(
     service = _service(rdb_session_manager)
     invalid_payload = _contract_payload()
     declarations = invalid_payload["profile_contracts"]
-    assert isinstance(declarations, list)
-    declarations.append(dict(declarations[0]))
+    assert is_object_list(declarations)
+    first_declaration = declarations[0]
+    assert is_string_object_dict(first_declaration)
+    declarations.append(dict(first_declaration))
 
     with pytest.raises(RuntimeProviderContractUnavailable) as raised:
         await service.propose_contract(
