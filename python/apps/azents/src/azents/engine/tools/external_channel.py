@@ -13,7 +13,6 @@ from azents.core.enums import (
 )
 from azents.core.external_channel_file import (
     MAX_EXTERNAL_CHANNEL_FILES,
-    MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES,
 )
 from azents.core.external_channel_progress import (
     MAX_EXTERNAL_CHANNEL_TASK_SOURCES,
@@ -274,12 +273,6 @@ class DownloadExternalFileInput(BaseModel):
         min_length=1,
         max_length=2_048,
         description="Opaque locator from External Channel Files. Pass it unchanged.",
-    )
-    expected_size_bytes: int = Field(
-        ge=0,
-        le=MAX_EXTERNAL_CHANNEL_INBOUND_FILE_BYTES,
-        strict=True,
-        description="Pass the exact declared byte size; any mismatch fails.",
     )
     path: str = Field(
         min_length=1,
@@ -569,7 +562,6 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                     agent_id=self.agent_id,
                     operation_id=self.run_id,
                     file=args.file,
-                    expected_size_bytes=args.expected_size_bytes,
                     path=args.path,
                     overwrite=args.overwrite,
                     file_storage=context.file_storage,

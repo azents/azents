@@ -393,9 +393,13 @@ def test_normalizes_bounded_file_metadata_and_fail_closed_modes() -> None:
     assert first["unsupported_reason"] is None
     assert second["unsupported_reason"] == "external_file"
     assert third["unsupported_reason"] == "slack_connect_file"
-    assert fourth["unsupported_reason"] == "sparse_file"
+    assert fourth["supported"] is True
+    assert fourth["declared_size"] is None
+    assert fourth["unsupported_reason"] is None
     assert fifth["unsupported_reason"] == "unsupported_mode"
-    assert sixth["unsupported_reason"] == "invalid_size"
+    assert sixth["supported"] is True
+    assert sixth["declared_size"] is None
+    assert sixth["unsupported_reason"] is None
     assert "url_private" not in repr(projected)
     assert "must not survive" not in repr(projected)
 
@@ -936,6 +940,60 @@ async def test_file_info_returns_current_metadata_and_private_download_target() 
     assert info.private_url == "https://files.slack.test/download/F123"
     assert requests[0].url.path == "/api/files.info"
     assert requests[0].url.params["file"] == "F123"
+    assert requests[0].headers["Authorization"] == "Bearer xoxb-secret"
+
+
+@pytest.mark.parametrize("declared_size", (None, -1, "7", True))
+async def test_file_info_treats_invalid_metadata_size_as_advisory(
+    declared_size: object,
+) -> None:
+    """Fresh hosted-file identity remains supported without a Slack size."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "ok": True,
+                "file": {
+                    "id": "F123",
+                    "name": "report.csv",
+                    "size": declared_size,
+                    "mode": "hosted",
+                    "url_private": "https://files.slack.test/private/F123",
+                },
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        info = await _client(http).fetch_file_download_info(
+            bot_token="xoxb-secret",
+            provider_file_id="F123",
+        )
+
+    assert info.metadata.declared_size is None
+    assert info.metadata.supported is True
+    assert info.metadata.unsupported_reason is None
+
+
+async def test_private_file_content_length_uses_authenticated_final_url() -> None:
+    """The authenticated private URL HEAD exclusively declares transfer size."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, headers={"Content-Length": "7"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        size = await _client(http).fetch_private_file_content_length(
+            bot_token="xoxb-secret",
+            private_url="https://files.slack.test/private/F123",
+            max_bytes=10,
+        )
+
+    assert size == 7
+    assert len(requests) == 1
+    assert requests[0].method == "HEAD"
+    assert requests[0].url == "https://files.slack.test/private/F123"
     assert requests[0].headers["Authorization"] == "Bearer xoxb-secret"
 
 

@@ -2334,7 +2334,7 @@ def normalize_slack_file_metadata(
     mode = _bounded_file_string(raw_file.get("mode"))
     external_type = _bounded_file_string(raw_file.get("external_type"))
     file_access = _bounded_file_string(raw_file.get("file_access"))
-    declared_size, invalid_size = _file_declared_size(raw_file.get("size"))
+    declared_size = _file_declared_size(raw_file.get("size"))
     external = (
         raw_file.get("is_external") is True
         or external_type is not None
@@ -2347,9 +2347,7 @@ def normalize_slack_file_metadata(
         unsupported_reason = ExternalChannelFileUnsupportedReason.EXTERNAL_FILE
     elif provider_file_id is None:
         unsupported_reason = ExternalChannelFileUnsupportedReason.MISSING_FILE_ID
-    elif invalid_size:
-        unsupported_reason = ExternalChannelFileUnsupportedReason.INVALID_SIZE
-    elif mode is None or declared_size is None or (name is None and title is None):
+    elif mode is None or (name is None and title is None):
         unsupported_reason = ExternalChannelFileUnsupportedReason.SPARSE_FILE
     elif mode != "hosted":
         unsupported_reason = ExternalChannelFileUnsupportedReason.UNSUPPORTED_MODE
@@ -2374,12 +2372,10 @@ def _bounded_file_string(value: object) -> str | None:
     return value[:MAX_EXTERNAL_CHANNEL_FILE_TEXT_LENGTH]
 
 
-def _file_declared_size(value: object) -> tuple[int | None, bool]:
-    if value is None:
-        return None, False
+def _file_declared_size(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        return None, True
-    return value, False
+        return None
+    return value
 
 
 def _normalized_size(

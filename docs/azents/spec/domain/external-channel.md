@@ -60,7 +60,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-08-04
-spec_version: 48
+spec_version: 49
 ---
 
 # External Channel
@@ -224,15 +224,16 @@ contain multiple independent bindings.
   remains connection-local health. General Agent Workers own neither provider socket.
 - Production Discord Gateway endpoint selection belongs to `discord.py`; Azents does
   not expose a custom or insecure Gateway endpoint override.
-- Inbound Slack and Discord attachments retain only bounded identifiers, filename, media
-  type, and an exact non-negative declared byte size in durable state. An attachment is
-  materialized only after the Agent supplies that displayed size to
-  `download_external_file`; absent or unsupported metadata remains visible but is not
-  downloadable.
-- The trusted provider adapter refreshes current metadata, requires one matching HTTP
-  `Content-Length`, streams and counts the response body, and stages an immutable
-  verified object before Runtime delivery. Any metadata, response-header, or body-size
-  mismatch fails closed without a Runtime destination commit; provider URLs and bytes
+- Inbound Slack and Discord attachments retain bounded identifiers, filename, media
+  type, and optional advisory provider size in durable state. Missing, malformed, or
+  stale provider size does not make an otherwise supported hosted attachment
+  unavailable, and `download_external_file` accepts no caller-selected size.
+- The trusted provider adapter refreshes current identity and authorization metadata,
+  uses only the authenticated final download URL's HTTP `Content-Length` as the
+  declared transfer size and policy input, streams and counts the response body, and
+  stages an immutable verified object before Runtime delivery. The GET response
+  declaration and body must match that size exactly; excess bytes terminate streaming
+  and an early end fails without a Runtime destination commit. Provider URLs and bytes
   remain outside durable External Channel state.
 - Selected setup replay or configured synchronous binding acceptance atomically
   commits the binding, real Session, canonical mailbox input, conversation-position
@@ -427,6 +428,10 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-04** (spec_version 49) — Removed `expected_size_bytes` and provider
+  metadata-size gating from Slack and Discord downloads. The authenticated final URL
+  `Content-Length` now exclusively declares transfer size and must match the streamed
+  body exactly.
 - **2026-08-04** (spec_version 48) — Added continuation-scoped binding authority for
   silent Channel Work completion that rejects unfinished tasks and produces no
   provider effect.
@@ -487,9 +492,9 @@ Connection responses expose provider identity, capabilities, health, route relat
   Discord typed lifecycle evidence through fenced health transitions; and made
   unexpected Slack Socket manager completion terminate Worker supervision.
 - **2026-07-30** (spec_version 28) — Raised verified inbound attachment eligibility to
-  500 MiB, bound Agent selection to the displayed byte size, required matching current
-  metadata/HTTP `Content-Length`/received-body evidence, and retained provider bytes
-  only in trusted verified staging.
+  500 MiB and retained provider bytes only in trusted verified staging. Caller-selected
+  and provider metadata-size agreement from this version was removed by spec_version
+  49.
 
 - **2026-07-30** (spec_version 27) — Removed bot-trigger policy and inbound
   edit/delete correction behavior, made pending admission metadata-only and

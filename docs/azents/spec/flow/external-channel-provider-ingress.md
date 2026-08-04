@@ -51,8 +51,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-03
-spec_version: 32
+last_verified_at: 2026-08-04
+spec_version: 33
 ---
 
 # External Channel Provider Ingress
@@ -356,18 +356,22 @@ Slack HTTP, Socket Mode, and provider-history projection use the same bounded Sl
 bounded, malformed or truncated items fail closed, and no private URL or file body enters
 the mailbox projection or Agent context.
 
-Direct hosted uploads with an ID, non-negative declared size, supported mode, visible
-access, and no external or Slack Connect classification receive a provider-addressed
+Direct hosted uploads with an ID, supported mode, visible access, and no external or
+Slack Connect classification receive a provider-addressed
 `external-file:v1:<provider>:<binding>:<channel>:<message>:<file>` key. Slack leaves
 channel and message empty; Discord includes both. External files, Slack Connect files, sparse
-access-check records, unsupported modes, missing IDs, and invalid sizes remain visible
-with stable unsupported reasons but cannot be downloaded.
+access-check records, unsupported modes, and missing IDs remain visible with stable
+unsupported reasons but cannot be downloaded. Missing or malformed provider metadata
+size remains visible as absent advisory data and does not make an otherwise supported
+hosted attachment unavailable.
 
 The first Agent turn, replay, filters, compaction continuity, structured visible values,
 and token accounting render the same ordered metadata and direct keys. Rendering an
 attachment never materializes its bytes. Explicit download later rechecks active
 ownership, directional capability, `files.info` metadata, provider authorization,
-declared size, and actual streamed bytes.
+and provider identity. The authenticated final URL `Content-Length` is the sole
+declared transfer size; the GET response declaration and actual streamed bytes must
+match it exactly.
 
 ## Evidence and Redaction
 
@@ -396,6 +400,10 @@ execution and do not own persistent provider connections.
 
 ## Changelog
 
+- **2026-08-04** (spec_version 33) — Made provider metadata size advisory for Slack
+  and Discord attachments. Download eligibility now relies on identity and provider
+  support, while the final authenticated URL `Content-Length` exclusively declares
+  transfer size.
 - **2026-08-03** (spec_version 32) — Added creation-only mailbox title eligibility
   consumed by the exact authorized human trigger during promotion without gating
   admission, wake, or execution.

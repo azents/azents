@@ -473,63 +473,31 @@ def _project_attachments(
         if not isinstance(attachment, dict):
             continue
         provider_file_id = _bounded_string(attachment.get("id"))
-        declared_size = attachment.get("size")
-        if not isinstance(declared_size, int) or isinstance(declared_size, bool):
-            metadata = ExternalChannelFileMetadata(
-                provider=ExternalChannelProvider.DISCORD,
-                provider_file_id=provider_file_id,
-                name=_bounded_string(attachment.get("filename")),
-                title=None,
-                media_type=_bounded_string(attachment.get("content_type")),
-                declared_size=None,
-                mode=None,
-                external=False,
-                file_access=None,
-                supported=False,
-                unsupported_reason=ExternalChannelFileUnsupportedReason.INVALID_SIZE,
-            )
-        elif provider_file_id is None:
-            metadata = ExternalChannelFileMetadata(
-                provider=ExternalChannelProvider.DISCORD,
-                provider_file_id=None,
-                name=_bounded_string(attachment.get("filename")),
-                title=None,
-                media_type=_bounded_string(attachment.get("content_type")),
-                declared_size=declared_size if declared_size >= 0 else None,
-                mode=None,
-                external=False,
-                file_access=None,
-                supported=False,
-                unsupported_reason=ExternalChannelFileUnsupportedReason.MISSING_FILE_ID,
-            )
-        elif declared_size < 0:
-            metadata = ExternalChannelFileMetadata(
-                provider=ExternalChannelProvider.DISCORD,
-                provider_file_id=provider_file_id,
-                name=_bounded_string(attachment.get("filename")),
-                title=None,
-                media_type=_bounded_string(attachment.get("content_type")),
-                declared_size=None,
-                mode=None,
-                external=False,
-                file_access=None,
-                supported=False,
-                unsupported_reason=ExternalChannelFileUnsupportedReason.INVALID_SIZE,
-            )
-        else:
-            metadata = ExternalChannelFileMetadata(
-                provider=ExternalChannelProvider.DISCORD,
-                provider_file_id=provider_file_id,
-                name=_bounded_string(attachment.get("filename")),
-                title=None,
-                media_type=_bounded_string(attachment.get("content_type")),
-                declared_size=declared_size,
-                mode=None,
-                external=False,
-                file_access=None,
-                supported=True,
-                unsupported_reason=None,
-            )
+        raw_declared_size = attachment.get("size")
+        declared_size = (
+            raw_declared_size
+            if isinstance(raw_declared_size, int)
+            and not isinstance(raw_declared_size, bool)
+            and raw_declared_size >= 0
+            else None
+        )
+        metadata = ExternalChannelFileMetadata(
+            provider=ExternalChannelProvider.DISCORD,
+            provider_file_id=provider_file_id,
+            name=_bounded_string(attachment.get("filename")),
+            title=None,
+            media_type=_bounded_string(attachment.get("content_type")),
+            declared_size=declared_size,
+            mode=None,
+            external=False,
+            file_access=None,
+            supported=provider_file_id is not None,
+            unsupported_reason=(
+                None
+                if provider_file_id is not None
+                else ExternalChannelFileUnsupportedReason.MISSING_FILE_ID
+            ),
+        )
         projected_metadata = metadata.model_dump(mode="json")
         projected_metadata["source_channel_id"] = source_channel_id
         files.append(projected_metadata)

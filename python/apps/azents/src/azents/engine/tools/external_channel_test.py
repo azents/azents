@@ -495,11 +495,14 @@ async def test_download_external_file_uses_current_runtime_storage() -> None:
         "channel_action",
         "download_external_file",
     ]
+    download_schema = state.tools[1].spec.input_schema
+    properties = download_schema.get("properties")
+    assert isinstance(properties, dict)
+    assert "expected_size_bytes" not in properties
     output = await state.tools[1].handler(
         json.dumps(
             {
                 "file": "external-file:v1:slack:binding-1:::F123",
-                "expected_size_bytes": 42,
                 "path": "/workspace/agent/report.csv",
                 "overwrite": False,
             }
@@ -518,7 +521,6 @@ async def test_download_external_file_uses_current_runtime_storage() -> None:
     assert call["agent_id"] == "agent-1"
     assert call["operation_id"] == "run-current"
     assert call["file"] == "external-file:v1:slack:binding-1:::F123"
-    assert call["expected_size_bytes"] == 42
     assert call["path"] == "/workspace/agent/report.csv"
     assert call["overwrite"] is False
     assert call["file_storage"] is file_storage
