@@ -2,7 +2,7 @@
 
 import dataclasses
 import datetime
-from typing import Annotated, Literal, cast
+from typing import Annotated, Literal
 
 from azcommon.result import Failure, Result, Success
 from fastapi import Depends
@@ -349,14 +349,16 @@ def _build_breakdown(
         elif isinstance(payload, ProviderToolCallPayload):
             chars["tool"] += len(render_provider_tool_semantic(payload))
 
-    known_chars = {key: value for key, value in chars.items() if value > 0}
+    known_chars: dict[ContextBreakdownKey, int] = {
+        key: value for key, value in chars.items() if value > 0
+    }
     total_chars = sum(known_chars.values())
     if total_chars <= 0:
         return []
 
     return [
         SessionContextBreakdownSegment(
-            key=cast(ContextBreakdownKey, key),
+            key=key,
             tokens=value,
             percent=round((value / total_chars) * 100, 1),
         )

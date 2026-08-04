@@ -1,5 +1,7 @@
 """Memory repository."""
 
+from typing import List
+
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -206,7 +208,7 @@ class MemoryRepository:
         agent_id: str,
         user_id: str | None,
         type: str | None = None,
-    ) -> list[Memory]:
+    ) -> List[Memory]:
         """Fetch full memory list for one exact scope.
 
         :param session: Database session
@@ -238,7 +240,7 @@ class MemoryRepository:
         user_id: str | None,
         query: str,
         type: str | None = None,
-    ) -> list[Memory]:
+    ) -> List[Memory]:
         """Search full memory rows for one exact scope.
 
         :param session: Database session
@@ -320,7 +322,7 @@ class MemoryRepository:
         agent_id: str,
         user_id: str | None,
         type: str | None = None,
-    ) -> list[MemorySummary]:
+    ) -> List[MemorySummary]:
         """Fetch memory summary list.
 
         :param session: Database session
@@ -354,7 +356,7 @@ class MemoryRepository:
         user_id: str | None,
         include_agent_scope: bool,
         query: str,
-    ) -> list[MemorySummary]:
+    ) -> List[MemorySummary]:
         """Search memory using case-insensitive all-term matching.
 
         :param session: Database session
@@ -393,7 +395,7 @@ class MemoryRepository:
         user_id: str | None,
         include_agent_scope: bool,
         query: str,
-    ) -> list[MemorySearchMatch]:
+    ) -> List[MemorySearchMatch]:
         """Search memories matching any query term, ranked by matched term count.
 
         :param session: Database session

@@ -8,7 +8,7 @@ aiodocker 0.x 는 type stub 을 제공하지 않아 strict pyright 가 import �
 azents Docker runtime 경로에서 필요한 최소 surface 만 둔다.
 """
 
-from typing import Any
+from typing import Any, List
 
 from aiodocker.containers import DockerContainer
 from aiodocker.exceptions import DockerError
@@ -30,7 +30,7 @@ class _Networks:
         self,
         *,
         filters: dict[str, Any],
-    ) -> list[dict[str, Any]]: ...
+    ) -> List[dict[str, Any]]: ...
     async def create(self, config: dict[str, Any]) -> None: ...
 
 class _Images:

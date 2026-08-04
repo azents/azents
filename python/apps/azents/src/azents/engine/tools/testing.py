@@ -6,6 +6,7 @@ Provides helpers reused in tests, such as fake storage.
 import fnmatch
 import re
 from functools import lru_cache
+from typing import List
 
 from azents.engine.io.attachments import RuntimeAttachment
 from azents.services.file_storage import GrepFileMatch, GrepLineMatch, GrepResult
@@ -108,9 +109,9 @@ class FakeSharedStorage:
         agent_id: str = "",
         user_id: str = "",
         recursive: bool = False,
-        exclude_patterns: list[str] | None = None,
+        exclude_patterns: List[str] | None = None,
         include_directories: bool = False,
-    ) -> list[RuntimeAttachment]:
+    ) -> List[RuntimeAttachment]:
         """Return the file list."""
         del agent_id, user_id
         if path in self._files:
@@ -145,8 +146,8 @@ class FakeSharedStorage:
         *,
         agent_id: str = "",
         user_id: str = "",
-        exclude_patterns: list[str] | None,
-    ) -> list[RuntimeAttachment]:
+        exclude_patterns: List[str] | None,
+    ) -> List[RuntimeAttachment]:
         """Return entries matching the Runtime-native glob contract."""
         del user_id
         prefix = _extract_glob_dir_prefix(pattern)
@@ -170,7 +171,7 @@ class FakeSharedStorage:
         *,
         agent_id: str = "",
         user_id: str = "",
-    ) -> list[str]:
+    ) -> List[str]:
         """Return subdirectory name list."""
         prefix = path.rstrip("/") + "/"
         dirs: set[str] = set()
@@ -191,7 +192,7 @@ class FakeSharedStorage:
         agent_id: str = "",
         pattern: str,
         recursive: bool = True,
-        exclude_patterns: list[str] | None = None,
+        exclude_patterns: List[str] | None = None,
         max_matching_files: int = 50,
         max_lines_per_file: int = 10,
         max_searched_files: int | None = None,

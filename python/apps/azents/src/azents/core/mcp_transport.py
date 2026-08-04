@@ -10,7 +10,6 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import timedelta
-from typing import cast
 
 import httpx
 from mcp.client.session import ClientSession
@@ -34,10 +33,7 @@ def _is_http_405(exc: Exception) -> bool:
     Also checks recursively when wrapped by ExceptionGroup.
     """
     if isinstance(exc, ExceptionGroup):
-        subs = cast(
-            tuple[Exception, ...],
-            exc.exceptions,
-        )
+        subs = exc.exceptions
         return any(_is_http_405(sub) for sub in subs)
     if isinstance(exc, httpx.HTTPStatusError):
         return exc.response.status_code == 405
@@ -54,10 +50,7 @@ def _extract_rate_limit_delay(exc: Exception) -> float | None:
     :return: Wait time in seconds. None when not 429.
     """
     if isinstance(exc, ExceptionGroup):
-        subs = cast(
-            tuple[Exception, ...],
-            exc.exceptions,
-        )
+        subs = exc.exceptions
         for sub in subs:
             delay = _extract_rate_limit_delay(sub)
             if delay is not None:
@@ -264,10 +257,7 @@ def extract_network_error(exc: Exception) -> str | None:
     """
     # Extract actual error from ExceptionGroup when wrapped by asyncio TaskGroup
     if isinstance(exc, ExceptionGroup):
-        subs = cast(
-            tuple[Exception, ...],
-            exc.exceptions,
-        )
+        subs = exc.exceptions
         if subs:
             return extract_network_error(subs[0])
         return None
