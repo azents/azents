@@ -783,7 +783,6 @@ class TestAgentSessionInputService:
                 session,
                 workspace_id,
                 "draft-session-idempotent",
-                workspace_path=None,
             )
 
         service = AgentSessionInputService(

@@ -34,6 +34,7 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAgentRoute,
@@ -117,6 +118,22 @@ async def _agent(session: AsyncSession, workspace_id: str, slug: str) -> RDBAgen
     session.add(agent)
     await session.flush()
     return agent
+
+
+async def _add_agent_workspace_runtime(
+    session: AsyncSession,
+    *,
+    workspace_id: str,
+    agent_id: str,
+) -> None:
+    """Add persisted Runner workspace evidence for a root Session fixture."""
+    runtime = RDBAgentRuntime(
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+    )
+    runtime.workspace_path = "/workspace/agent"
+    session.add(runtime)
+    await session.flush()
 
 
 def _connection_create(
@@ -270,6 +287,7 @@ async def _cleanup_committed_workspace(
         DELETE FROM session_agent_contexts
         WHERE workspace_id = :workspace_id
         """,
+        "DELETE FROM agent_runtimes WHERE workspace_id = :workspace_id",
         "DELETE FROM agent_sessions WHERE workspace_id = :workspace_id",
         "DELETE FROM agents WHERE workspace_id = :workspace_id",
         """
@@ -599,6 +617,16 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
 
     resource = await _resource(
         rdb_session, repo, connection_id=multi_connection.id, key="binding-resource"
+    )
+    await _add_agent_workspace_runtime(
+        rdb_session,
+        workspace_id=workspace_id,
+        agent_id=first_agent.id,
+    )
+    await _add_agent_workspace_runtime(
+        rdb_session,
+        workspace_id=workspace_id,
+        agent_id=second_agent.id,
     )
     first_session = await AgentSessionRepository().create(
         rdb_session,
@@ -1201,6 +1229,11 @@ async def test_binding_creation_serializes_on_resource_lock(
                 connection_id=connection.id,
                 key=f"binding-lock-{suffix}",
             )
+            await _add_agent_workspace_runtime(
+                setup,
+                workspace_id=workspace_id,
+                agent_id=agent.id,
+            )
             agent_session = await AgentSessionRepository().create(
                 setup,
                 AgentSessionCreate(
@@ -1378,6 +1411,16 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
     resource = await _resource(
         rdb_session, repo, connection_id=multi_connection.id, key="binding-unique"
     )
+    await _add_agent_workspace_runtime(
+        rdb_session,
+        workspace_id=workspace_id,
+        agent_id=first_agent.id,
+    )
+    await _add_agent_workspace_runtime(
+        rdb_session,
+        workspace_id=workspace_id,
+        agent_id=second_agent.id,
+    )
     first_session = await AgentSessionRepository().create(
         rdb_session,
         AgentSessionCreate(
@@ -1476,6 +1519,11 @@ async def test_manual_binding_disconnect_returns_one_leave_presence_plan(
             unavailable_at=None,
             deleted_at=None,
         ),
+    )
+    await _add_agent_workspace_runtime(
+        rdb_session,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
     )
     agent_session = await AgentSessionRepository().create(
         rdb_session,
@@ -1615,6 +1663,11 @@ async def test_multi_channel_default_transition_terminalizes_only_parent_state(
             unavailable_at=None,
             deleted_at=None,
         ),
+    )
+    await _add_agent_workspace_runtime(
+        rdb_session,
+        workspace_id=workspace_id,
+        agent_id=first_agent.id,
     )
     first_parent_session = await AgentSessionRepository().create(
         rdb_session,
@@ -1873,6 +1926,11 @@ async def test_multi_channel_default_transition_terminalizes_only_parent_state(
     assert await rdb_session.get(RDBAgentSession, first_parent_session.id) is not None
     assert await rdb_session.get(RDBAgentSession, thread_session.id) is not None
 
+    await _add_agent_workspace_runtime(
+        rdb_session,
+        workspace_id=workspace_id,
+        agent_id=second_agent.id,
+    )
     second_parent_session = await AgentSessionRepository().create(
         rdb_session,
         AgentSessionCreate(
@@ -2103,6 +2161,11 @@ async def test_multi_route_removal_captures_leave_presence_before_detach(
             deleted_at=None,
         ),
     )
+    await _add_agent_workspace_runtime(
+        rdb_session,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+    )
     agent_session = await AgentSessionRepository().create(
         rdb_session,
         AgentSessionCreate(
@@ -2304,6 +2367,11 @@ async def test_provider_uninstall_captures_one_leave_presence(
             unavailable_at=None,
             deleted_at=None,
         ),
+    )
+    await _add_agent_workspace_runtime(
+        rdb_session,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
     )
     agent_session = await AgentSessionRepository().create(
         rdb_session,

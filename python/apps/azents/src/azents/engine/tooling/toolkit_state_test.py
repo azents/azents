@@ -5,7 +5,7 @@ from azcommon.result import Success
 from pydantic import Field, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import LLMProvider
+from azents.core.enums import LLMProvider, RuntimeRunnerState
 from azents.engine.tooling.toolkit_state import (
     ToolkitStateIdentity,
     ToolkitStateModel,
@@ -126,7 +126,16 @@ async def _create_agent_and_session(
     """Create AgentRuntime and AgentSession for tests."""
     workspace_id = await _create_workspace(session, f"toolkit-state-{suffix}")
     agent_id = await _create_agent(session, workspace_id, f"toolkit-state-{suffix}")
-    runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
+    runtime_repository = AgentRuntimeRepository()
+    runtime = await runtime_repository.ensure_for_agent(session, agent_id)
+    await runtime_repository.record_runner_state(
+        session,
+        runtime.id,
+        RuntimeRunnerState.UNKNOWN,
+        1,
+        expected_desired_generation=runtime.desired_generation,
+        workspace_path="/workspace/agent",
+    )
     agent_session = (
         await AgentSessionRepository().ensure_team_primary_for_agent(
             session, workspace_id=runtime.workspace_id, agent_id=runtime.agent_id
