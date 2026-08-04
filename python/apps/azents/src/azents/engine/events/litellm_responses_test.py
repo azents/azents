@@ -110,6 +110,7 @@ from azents.testing.model_stream import (
     make_test_model_stream_context,
     make_test_model_stream_watchdog,
 )
+from azents.testing.types import is_string_object_dict
 
 _PNG_BASE64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ"
@@ -1608,7 +1609,11 @@ class TestLiteLLMResponsesLowerer:
 
         output = request.input[-1]["output"]
         assert isinstance(output, list)
-        assert "file content is not available" in output[0]["text"]
+        first_output = output[0]
+        assert is_string_object_dict(first_output)
+        text = first_output["text"]
+        assert isinstance(text, str)
+        assert "file content is not available" in text
 
     def test_lowers_compaction_summary_with_resume_prefix(self) -> None:
         """Inject compaction summary with user message prefix."""

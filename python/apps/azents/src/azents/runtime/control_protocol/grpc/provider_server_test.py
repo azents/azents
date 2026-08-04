@@ -5,6 +5,7 @@
 
 import asyncio
 import dataclasses
+from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import NoReturn
 
@@ -50,6 +51,12 @@ from azents.services.runtime_provider_control.data import (
     RuntimeProviderCredentialAuthentication,
     RuntimeProviderCredentialUnavailable,
 )
+
+
+async def _close_stream[MessageT](stream: AsyncIterator[MessageT]) -> None:
+    """Close the concrete async generator returned by the test subject."""
+    assert isinstance(stream, AsyncGenerator)
+    await stream.aclose()
 
 
 @dataclasses.dataclass
@@ -227,7 +234,7 @@ async def test_provider_grpc_registers_and_acks_heartbeat() -> None:
     stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
     accepted = await anext(stream)
     heartbeat_ack = await anext(stream)
-    await stream.aclose()
+    await _close_stream(stream)
 
     assert accepted.register_accepted.provider_id == "provider-1"
     assert accepted.register_accepted.generation == 1
@@ -253,7 +260,7 @@ async def test_provider_grpc_rejects_stream_generation_mismatch() -> None:
     stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
     accepted = await anext(stream)
     error = await anext(stream)
-    await stream.aclose()
+    await _close_stream(stream)
 
     assert accepted.register_accepted.generation == 1
     assert error.error.code == "STALE_PROVIDER_GENERATION"
@@ -284,8 +291,8 @@ async def test_provider_grpc_rejects_report_after_newer_registration() -> None:
     )
 
     error = await anext(old_stream)
-    await old_stream.aclose()
-    await new_stream.aclose()
+    await _close_stream(old_stream)
+    await _close_stream(new_stream)
 
     assert old_accepted.register_accepted.generation == 1
     assert new_accepted.register_accepted.generation == 2
@@ -314,7 +321,7 @@ async def test_provider_grpc_rejects_report_generation_mismatch() -> None:
     stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
     accepted = await anext(stream)
     error = await anext(stream)
-    await stream.aclose()
+    await _close_stream(stream)
 
     assert accepted.register_accepted.generation == 1
     assert error.error.code == "STALE_PROVIDER_GENERATION"
@@ -395,7 +402,7 @@ async def test_provider_grpc_relays_commands_and_records_completion() -> None:
     assert replies[0].event.event_type is RuntimeReplyEventType.FINAL_SUCCESS
     assert "workspace_path" not in replies[0].event.payload
     assert not hasattr(sink.reports[0], "workspace_path")
-    await stream.aclose()
+    await _close_stream(stream)
 
 
 @pytest.mark.asyncio
@@ -498,7 +505,7 @@ async def test_provider_grpc_rejects_report_provider_id_spoofing() -> None:
     stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
     await anext(stream)
     error = await anext(stream)
-    await stream.aclose()
+    await _close_stream(stream)
 
     assert error.error.code == "PROVIDER_IDENTITY_MISMATCH"
     assert sink.reports == []
@@ -521,7 +528,7 @@ async def test_provider_grpc_accepts_provider_credential_metadata() -> None:
         ),
     )
     accepted = await anext(stream)
-    await stream.aclose()
+    await _close_stream(stream)
 
     assert accepted.register_accepted.provider_id == "provider-1"
 

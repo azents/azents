@@ -15,6 +15,7 @@ from azents.engine.run.types import FunctionTool
 from azents.engine.tooling.toolkit_state import ToolkitStateIdentity
 from azents.engine.tools.github import GitHubInstallationBinding, GitHubToolkit
 from azents.engine.tools.mcp_base import McpToolSnapshotItem, McpToolSnapshotState
+from azents.testing.types import is_object_factory
 
 _GITHUB_MCP_URL = "https://api.githubcopilot.com/mcp/"
 
@@ -32,7 +33,8 @@ class _FakeToolkitStateHandle:
         """Load state from in-memory store."""
         key = self._key()
         if key not in self._states:
-            return default_factory()  # type: ignore[operator]
+            assert is_object_factory(default_factory)
+            return default_factory()
         return self._states[key]
 
     async def save(self, state: object) -> object:

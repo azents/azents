@@ -18,6 +18,7 @@ from azents.engine.events.engine_events import (
     SubagentTreeChanged,
     TodoStateChanged,
 )
+from azents.testing.types import is_string_object_dict
 from azents.worker.events.publisher import PublicChatControlEvent, WorkerEventPublisher
 from azents.worker.live.event_projector import LiveEventProjector
 
@@ -186,5 +187,7 @@ async def test_durable_event_uses_one_canonical_history_frame_after_flush() -> N
         call for call in calls if isinstance(call, tuple) and call[0] == "publish"
     ]
     assert len(published) == 1
-    assert published[0][2]["type"] == "history_event_appended"
+    published_payload = published[0][2]
+    assert is_string_object_dict(published_payload)
+    assert published_payload["type"] == "history_event_appended"
     assert calls[-1] == ("update", "session-1", event)

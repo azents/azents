@@ -14,6 +14,7 @@ from azents.engine.events.external_channel_rendering import (
     render_external_channel_turn,
 )
 from azents.engine.events.types import ExternalChannelMessagePayload
+from azents.testing.types import is_string_object_dict
 
 
 def _payload(
@@ -318,7 +319,13 @@ def test_file_renderer_omits_untrusted_locator_values() -> None:
     value = external_channel_message_visible_value(payload)
     rendered = render_external_channel_message(payload)
 
-    assert "file" not in value["attachments"]["files"][0]  # type: ignore[index]
+    attachments = value["attachments"]
+    assert is_string_object_dict(attachments)
+    files = attachments["files"]
+    assert isinstance(files, list)
+    first_file = files[0]
+    assert is_string_object_dict(first_file)
+    assert "file" not in first_file
     assert "secret-download" not in rendered
 
 
@@ -348,7 +355,9 @@ def test_embed_metadata_is_visible_without_urls_or_provider_payload() -> None:
     rendered_message = render_external_channel_message(payload)
     rendered_turn = render_external_channel_turn([payload])
 
-    assert value["attachments"]["embeds"] == [  # type: ignore[index]
+    attachments = value["attachments"]
+    assert is_string_object_dict(attachments)
+    assert attachments["embeds"] == [
         {
             "type": "rich",
             "title": "Incident summary",

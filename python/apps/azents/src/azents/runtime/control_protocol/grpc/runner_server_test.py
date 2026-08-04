@@ -6,6 +6,7 @@
 import asyncio
 import dataclasses
 import inspect
+from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import NoReturn
 
@@ -58,6 +59,12 @@ from azents.runtime.coordination.memory import (
 )
 from azents.runtime.transfer.data import RuntimeTransferFailure
 from azents.runtime.transfer.result_coordinator import RuntimeRunnerTransferResultSink
+
+
+async def _close_stream[MessageT](stream: AsyncIterator[MessageT]) -> None:
+    """Close the concrete async generator returned by the test subject."""
+    assert isinstance(stream, AsyncGenerator)
+    await stream.aclose()
 
 
 @dataclasses.dataclass
@@ -428,7 +435,7 @@ async def test_runner_grpc_registers_and_acks_heartbeat() -> None:
     stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
     accepted = await anext(stream)
     heartbeat_ack = await anext(stream)
-    await stream.aclose()
+    await _close_stream(stream)
 
     assert accepted.register_accepted.runtime_id == "runtime-1"
     assert accepted.register_accepted.generation == 1
@@ -472,7 +479,7 @@ async def test_runner_grpc_revoke_current_connection_on_close() -> None:
 
     stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
     accepted = await anext(stream)
-    await stream.aclose()
+    await _close_stream(stream)
 
     result = await service.dispatch_runner_operation(
         RuntimeRunnerOperation(
@@ -507,13 +514,13 @@ async def test_runner_grpc_ignores_stale_stream_close_after_reconnect() -> None:
     new_stream = servicer.ConnectRunner(new_inbound, FakeGrpcContext())
     new_accepted = await anext(new_stream)
 
-    await old_stream.aclose()
+    await _close_stream(old_stream)
 
     assert old_accepted.register_accepted.generation == 1
     assert new_accepted.register_accepted.generation == 2
     assert sink.reports == []
 
-    await new_stream.aclose()
+    await _close_stream(new_stream)
     assert sink.reports[-1].runner_generation == 2
     assert sink.reports[-1].diagnostic["connection_id"] == "connection-2"
 
@@ -537,7 +544,7 @@ async def test_runner_grpc_rejects_stream_generation_mismatch() -> None:
     stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
     accepted = await anext(stream)
     error = await anext(stream)
-    await stream.aclose()
+    await _close_stream(stream)
 
     assert accepted.register_accepted.generation == 1
     assert error.error.code == "STALE_RUNNER_GENERATION"
@@ -570,8 +577,8 @@ async def test_runner_grpc_rejects_state_report_after_newer_registration() -> No
     )
 
     error = await anext(old_stream)
-    await old_stream.aclose()
-    await new_stream.aclose()
+    await _close_stream(old_stream)
+    await _close_stream(new_stream)
 
     assert old_accepted.register_accepted.generation == 1
     assert new_accepted.register_accepted.generation == 2
@@ -602,7 +609,7 @@ async def test_runner_grpc_rejects_state_report_generation_mismatch() -> None:
     stream = servicer.ConnectRunner(inbound, FakeGrpcContext())
     accepted = await anext(stream)
     error = await anext(stream)
-    await stream.aclose()
+    await _close_stream(stream)
 
     assert accepted.register_accepted.generation == 1
     assert error.error.code == "STALE_RUNNER_GENERATION"
@@ -701,7 +708,7 @@ async def test_runner_grpc_relays_operations_and_appends_events() -> None:
     assert replies[0].event.event_type is RuntimeReplyEventType.PROCESS_OUTPUT
     assert replies[0].event.payload["process_id"] == "proc_123"
     assert replies[0].event.payload["text"] == "Serving HTTP"
-    await stream.aclose()
+    await _close_stream(stream)
 
 
 @pytest.mark.asyncio
@@ -758,7 +765,7 @@ async def test_runner_grpc_expires_operation_before_relay() -> None:
         )
         is None
     )
-    await stream.aclose()
+    await _close_stream(stream)
 
 
 @pytest.mark.asyncio
@@ -805,7 +812,7 @@ async def test_runner_grpc_rejects_start_for_canceled_operation() -> None:
 
     start_ack = await anext(stream)
     assert not start_ack.operation_start_ack.allowed
-    await stream.aclose()
+    await _close_stream(stream)
 
 
 @pytest.mark.asyncio
@@ -1156,7 +1163,7 @@ async def test_runner_grpc_relays_git_operation_payload() -> None:
     assert command.operation_request.git_remove_worktree.branch_name == (
         "azents/session"
     )
-    await stream.aclose()
+    await _close_stream(stream)
 
 
 @pytest.mark.asyncio
@@ -1243,7 +1250,7 @@ async def test_runner_grpc_round_trips_file_glob_payload_and_result() -> None:
             }
         ]
     }
-    await stream.aclose()
+    await _close_stream(stream)
 
 
 @pytest.mark.asyncio
@@ -1375,7 +1382,7 @@ async def test_runner_grpc_relays_file_apply_patch_and_preserves_failure() -> No
     assert detail["failed"] == {"path": "src/legacy.py", "action": "delete"}
     assert detail["not_attempted"] == [{"path": "src/after.py", "action": "add"}]
     assert detail["exact"] is True
-    await stream.aclose()
+    await _close_stream(stream)
 
 
 @pytest.mark.asyncio
@@ -1451,7 +1458,7 @@ async def test_runner_grpc_relays_file_edit_and_replacement_count() -> None:
         await asyncio.sleep(0)
 
     assert replies[0].event.payload == {"replacements": 3}
-    await stream.aclose()
+    await _close_stream(stream)
 
 
 @pytest.mark.asyncio
@@ -1499,7 +1506,7 @@ async def test_runner_grpc_accepts_runtime_bound_bearer_credential() -> None:
         kind=RuntimeConnectionKind.RUNNER,
         subject_id="runtime-1",
     )
-    await stream.aclose()
+    await _close_stream(stream)
 
     assert accepted.register_accepted.runtime_id == "runtime-1"
     assert connection is not None
@@ -1651,7 +1658,7 @@ async def test_runner_grpc_start_claim_is_atomic() -> None:
     )
     retry_ack = await anext(stream)
     assert not retry_ack.operation_start_ack.allowed
-    await stream.aclose()
+    await _close_stream(stream)
 
 
 @pytest.mark.asyncio
@@ -1702,7 +1709,7 @@ async def test_runner_grpc_relays_ordered_cancel_command() -> None:
     assert cancel_message.request_id == "req-cancel"
     assert cancel_message.operation_cancel.runtime_id == "runtime-1"
     assert cancel_message.operation_cancel.operation_id == operation.operation_id
-    await stream.aclose()
+    await _close_stream(stream)
 
 
 @pytest.mark.asyncio
@@ -1779,7 +1786,7 @@ async def test_runner_grpc_rejects_late_final_after_cancel() -> None:
     )
     assert len(replies) == 1
     assert replies[0].event.event_type is RuntimeReplyEventType.FINAL_ERROR
-    await stream.aclose()
+    await _close_stream(stream)
 
 
 def test_connect_runner_outbound_queue_is_bounded() -> None:

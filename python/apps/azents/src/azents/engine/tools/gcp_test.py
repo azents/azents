@@ -25,6 +25,7 @@ from azents.engine.tools.gcp import (
     _GcpServerConfig,  # pyright: ignore[reportPrivateUsage] — directly configure internal server settings in tests
     _is_read_only_tool,  # pyright: ignore[reportPrivateUsage] — directly validate internal utility function in tests
 )
+from azents.testing.types import is_object_factory
 
 
 class _FakeToolkitStateHandle:
@@ -39,7 +40,8 @@ class _FakeToolkitStateHandle:
         """Load state from in-memory store."""
         key = self._key()
         if key not in self._states:
-            return default_factory()  # type: ignore[operator]
+            assert is_object_factory(default_factory)
+            return default_factory()
         return self._states[key]
 
     async def save(self, state: object) -> object:

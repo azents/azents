@@ -50,6 +50,7 @@ from azents.repos.workspace_user.data import WorkspaceUser
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.artifact import ArtifactService
 from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.testing.types import is_string_object_dict
 
 _NOW = datetime.datetime.now(datetime.timezone.utc)
 
@@ -570,8 +571,12 @@ async def test_file_part_capability_branch_e2e_path() -> None:
     ).lower(transcript, model="text-only")
     output = text_only_request.input[-1]["output"]
     assert isinstance(output, list)
-    assert output[0]["type"] == "input_text"
-    assert "model does not support this file input" in output[0]["text"]
+    first_output = output[0]
+    assert is_string_object_dict(first_output)
+    assert first_output["type"] == "input_text"
+    text = first_output["text"]
+    assert isinstance(text, str)
+    assert "model does not support this file input" in text
 
 
 @pytest.mark.asyncio

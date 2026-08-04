@@ -2202,7 +2202,9 @@ class TestProcessToolHandler:
         assert websocket_payloads[0]["kind"] == "client_tool_result"
         payload = websocket_payloads[0]["payload"]
         assert isinstance(payload, dict)
-        assert "stdout:" in payload["output"]
+        output = payload["output"]
+        assert isinstance(output, str)
+        assert "stdout:" in output
 
     @pytest.mark.asyncio
     async def test_exec_command_reuses_runtime_runner_without_lifecycle_events(
