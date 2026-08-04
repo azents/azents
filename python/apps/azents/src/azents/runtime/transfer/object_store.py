@@ -4,8 +4,14 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Protocol
 
-from azcommon.infra.s3.service import S3MultipartUpload, S3ObjectIdentity, S3Service
+from azcommon.infra.s3.service import (
+    S3MultipartUpload,
+    S3MultipartUploadPage,
+    S3ObjectIdentity,
+    S3ObjectSummaryPage,
+)
 
 from azents.runtime.transfer.data import (
     RUNTIME_TRANSFER_MAXIMUM_PAGE_SIZE,
@@ -14,6 +20,51 @@ from azents.runtime.transfer.data import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class RuntimeTransferObjectStore(Protocol):
+    """Object-store operations required by Runtime transfer cleanup."""
+
+    async def abort_multipart_upload(self, *, upload: S3MultipartUpload) -> None:
+        """Abort one trusted multipart upload."""
+        ...
+
+    async def delete(self, *, bucket: str, key: str) -> None:
+        """Delete one trusted object."""
+        ...
+
+    async def delete_verified_transfer_object(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        expected_size: int,
+        expected_sha256: str,
+    ) -> None:
+        """Delete one verified completed transfer object."""
+        ...
+
+    async def list_object_summaries_page(
+        self,
+        *,
+        bucket: str,
+        prefix: str,
+        maximum_keys: int,
+        continuation_token: str | None,
+    ) -> S3ObjectSummaryPage:
+        """List one bounded object page."""
+        ...
+
+    async def list_multipart_uploads_page(
+        self,
+        *,
+        bucket: str,
+        prefix: str,
+        maximum_uploads: int,
+        key_marker: str | None,
+        upload_id_marker: str | None,
+    ) -> S3MultipartUploadPage:
+        """List one bounded multipart-upload page."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -43,7 +94,7 @@ class RuntimeTransferS3Cleanup:
     def __init__(
         self,
         *,
-        object_store: S3Service,
+        object_store: RuntimeTransferObjectStore,
         bucket: str,
         object_prefix: str,
     ) -> None:

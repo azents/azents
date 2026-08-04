@@ -123,13 +123,24 @@ class _ObjectStore:
             raise RuntimeError("abort unavailable")
         self.aborted.append(upload.upload_id)
 
+    async def delete_verified_transfer_object(
+        self,
+        *,
+        identity: S3ObjectIdentity,
+        expected_size: int,
+        expected_sha256: str,
+    ) -> None:
+        """Record verified cleanup through the ordinary fake delete path."""
+        del expected_size, expected_sha256
+        await self.delete(bucket=identity.bucket, key=identity.key)
+
 
 @pytest.mark.asyncio
 async def test_orphan_repair_uses_one_hour_cutoff_and_bounded_cursors() -> None:
     """Old artifacts are cleaned without state while young artifacts remain."""
     object_store = _ObjectStore()
     cleanup = RuntimeTransferS3Cleanup(
-        object_store=object_store,  # type: ignore[arg-type]
+        object_store=object_store,
         bucket="bucket",
         object_prefix="/v1/runtime-transfer/",
     )
@@ -181,12 +192,12 @@ async def test_orphan_repair_rejects_unbounded_or_unsafe_input() -> None:
     object_store = _ObjectStore()
     with pytest.raises(ValueError, match="object prefix"):
         RuntimeTransferS3Cleanup(
-            object_store=object_store,  # type: ignore[arg-type]
+            object_store=object_store,
             bucket="bucket",
             object_prefix="/",
         )
     cleanup = RuntimeTransferS3Cleanup(
-        object_store=object_store,  # type: ignore[arg-type]
+        object_store=object_store,
         bucket="bucket",
         object_prefix="runtime-transfer",
     )
@@ -228,7 +239,7 @@ async def test_orphan_repair_logs_skipped_storage_age_evidence(
         skipped_entries=3,
     )
     cleanup = RuntimeTransferS3Cleanup(
-        object_store=object_store,  # type: ignore[arg-type]
+        object_store=object_store,
         bucket="bucket",
         object_prefix="runtime-transfer",
     )

@@ -25,11 +25,7 @@ from azents.services.exchange_file import (
     SessionNotFound,
 )
 from azents.services.session_resource_authority import SessionResourceAuthority
-from azents.services.vfs import (
-    VfsFileResolutionError,
-    VfsProjectionService,
-    VfsResolvedFile,
-)
+from azents.services.vfs import VfsFileResolutionError, VfsResolvedFile
 
 
 @dataclasses.dataclass(frozen=True)
@@ -92,6 +88,22 @@ class ImportFileResolver(Protocol):
 
     async def resolve(self, uri: str) -> ImportResolvedFile:
         """Resolve URI to one authorized metadata-only source."""
+        ...
+
+
+class VfsTransferFileResolver(Protocol):
+    """Resolve one current-run VFS file for an authorized transfer."""
+
+    async def resolve_transfer_file(
+        self,
+        *,
+        run_id: str,
+        agent_id: str,
+        session_id: str,
+        workspace_id: str,
+        uri: str,
+    ) -> VfsResolvedFile:
+        """Resolve one VFS entry without eager body decoding."""
         ...
 
 
@@ -235,7 +247,7 @@ class ArtifactImportResolver:
 class AzentsImportResolver:
     """Current-run Azents VFS URI resolver."""
 
-    vfs_projection_service: VfsProjectionService
+    vfs_projection_service: VfsTransferFileResolver
     authority: SessionResourceAuthority
 
     async def resolve(self, uri: str) -> ImportResolvedFile:
