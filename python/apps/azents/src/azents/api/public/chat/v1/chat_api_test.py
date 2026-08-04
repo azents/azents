@@ -11,6 +11,7 @@ from fastapi import BackgroundTasks, HTTPException
 from pydantic import ValidationError
 
 from azents.api.public.chat.v1 import (
+    _prepare_session_working_folder_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin Session-folder retry finalization behavior directly.
     _run_session_receive_loop,  # pyright: ignore[reportPrivateUsage]  # Pin health-check generation behavior.
     _SubscriptionRegistration,  # pyright: ignore[reportPrivateUsage]  # Pin subscription generation semantics.
     _validate_rest_session,  # pyright: ignore[reportPrivateUsage]  # Pin the REST session validation helper directly.
@@ -51,6 +52,7 @@ from azents.api.public.chat.v1.data import (
     ChatSessionCreateMessageWriteRequest,
     CleanupSessionGitWorktreeRequest,
     GoalStatusUpdateRequest,
+    PrepareSessionWorkingFolderRequest,
 )
 from azents.broker.broadcast import (
     WebSocketBroadcast,
@@ -139,6 +141,7 @@ from azents.services.chat_write import (
     AcceptedStopRequest,
     ChatWriteService,
 )
+from azents.services.mailbox import MailboxAdmissionResult
 from azents.services.session_git_worktree import (
     GitWorktreeCleanupRequest,
     GitWorktreeCleanupRequestError,
@@ -479,11 +482,14 @@ class _RestWriteChatService(ChatSessionService):
         session_id: str = "0123456789abcdef0123456789abcdef",
         *,
         session_kind: AgentSessionKind = AgentSessionKind.ROOT,
+        prepare_created: bool = True,
     ) -> None:
         self.session_id = session_id
         self.session_kind = session_kind
+        self.prepare_created = prepare_created
         self.get_agent_session_calls: list[tuple[str, str, str]] = []
         self.live_session_ids: list[str] = []
+        self.prepare_calls: list[dict[str, object]] = []
         self.event = Event(
             id="1123456789abcdef0123456789abcdef",
             session_id=session_id,
@@ -523,6 +529,36 @@ class _RestWriteChatService(ChatSessionService):
             created_at=datetime.datetime(2026, 6, 5, tzinfo=datetime.UTC),
         )
         self.mailbox_projection = mailbox_item_to_pending_projection(self.mailbox_item)
+
+    async def prepare_session_working_folder(
+        self,
+        **kwargs: object,
+    ) -> Success[MailboxAdmissionResult]:
+        """Return a Session-folder preparation mailbox admission."""
+        self.prepare_calls.append(kwargs)
+        client_request_id = str(kwargs["client_request_id"])
+        self.mailbox_item = MailboxItem.model_validate(
+            self.mailbox_item.model_dump(mode="python")
+            | {
+                "kind": MailboxItemKind.ACTION_MESSAGE,
+                "sender_user_id": None,
+                "content": "",
+                "idempotency_key": (
+                    "session-working-folder:prepare:"
+                    f"{self.session_id}:{client_request_id}"
+                ),
+                "metadata": {"source": "system"},
+                "action": {"type": "create_session_working_folder"},
+                "payload": None,
+            }
+        )
+        self.mailbox_projection = None
+        return Success(
+            MailboxAdmissionResult(
+                mailbox_item=self.mailbox_item,
+                created=self.prepare_created,
+            )
+        )
 
     async def get_agent_session(
         self,
@@ -570,7 +606,9 @@ class _RestWriteChatService(ChatSessionService):
         return Success(
             ChatLiveStateSnapshot(
                 partial_history_events=[],
-                mailbox_items=[self.mailbox_projection],
+                mailbox_items=(
+                    [] if self.mailbox_projection is None else [self.mailbox_projection]
+                ),
                 run=None,
             )
         )
@@ -1916,6 +1954,73 @@ class TestRestMessageWriteContract:
             assert exc.detail == "Subagent sessions are read-only."
         else:
             raise AssertionError("Expected HTTPException")
+
+    async def test_session_folder_prepare_finalizes_new_action_retry(
+        self,
+    ) -> None:
+        """A new Session-folder retry wakes without publishing its internal action."""
+        broker = _MemoryBroker()
+        broadcast = _MemoryBroadcast()
+        chat_service = _RestWriteChatService()
+
+        response = await _prepare_session_working_folder_via_rest(
+            chat_service,
+            broker,
+            broadcast,
+            InMemoryLiveEventStore(),
+            PrepareSessionWorkingFolderRequest(client_request_id="folder-retry-1"),
+            agent_id="agent-1",
+            session_id="0123456789abcdef0123456789abcdef",
+            user_id="user-1",
+        )
+
+        assert chat_service.prepare_calls == [
+            {
+                "agent_id": "agent-1",
+                "session_id": "0123456789abcdef0123456789abcdef",
+                "user_id": "user-1",
+                "client_request_id": "folder-retry-1",
+            }
+        ]
+        assert chat_service.mailbox_item.kind is MailboxItemKind.ACTION_MESSAGE
+        assert chat_service.mailbox_item.scheduling_mode is (
+            MailboxSchedulingMode.WAKE_SESSION
+        )
+        assert chat_service.mailbox_item.action == {
+            "type": "create_session_working_folder"
+        }
+        assert response.accepted.id == chat_service.mailbox_item.id
+        assert response.client_request_id == "folder-retry-1"
+        assert response.history_reload_required is False
+        assert len(broker.messages) == 1
+        assert isinstance(broker.messages[0], SessionWakeUp)
+        assert response.snapshot.mailbox_items == []
+        assert broadcast.events == []
+
+    async def test_session_folder_prepare_retry_rewakes_without_rebroadcast(
+        self,
+    ) -> None:
+        """An existing retry repairs wake delivery without duplicate UI state."""
+        broker = _MemoryBroker()
+        broadcast = _MemoryBroadcast()
+        chat_service = _RestWriteChatService(prepare_created=False)
+
+        response = await _prepare_session_working_folder_via_rest(
+            chat_service,
+            broker,
+            broadcast,
+            InMemoryLiveEventStore(),
+            PrepareSessionWorkingFolderRequest(client_request_id="folder-retry-1"),
+            agent_id="agent-1",
+            session_id="0123456789abcdef0123456789abcdef",
+            user_id="user-1",
+        )
+
+        assert response.accepted.id == chat_service.mailbox_item.id
+        assert response.history_reload_required is False
+        assert len(broker.messages) == 1
+        assert isinstance(broker.messages[0], SessionWakeUp)
+        assert broadcast.events == []
 
     async def test_existing_session_message_commits_buffer_and_returns_snapshot(
         self,

@@ -40,7 +40,10 @@ export type WorkspaceEntryStatus = {
 
 export type WorkspaceEntrySource =
   | { type: "workspace" }
-  | { type: "session_project" | "preview_project"; projectId: string | null };
+  | {
+      type: "session_folder" | "session_project" | "preview_project";
+      projectId: string | null;
+    };
 
 export type WorkspaceEntry = {
   name: string;

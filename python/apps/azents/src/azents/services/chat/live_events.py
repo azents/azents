@@ -301,6 +301,15 @@ def _mailbox_item_requested_profile(
     )
 
 
+def mailbox_item_is_publicly_presentable(mailbox_item: MailboxItem) -> bool:
+    """Return whether a pending mailbox item has a public chat presentation."""
+    return not (
+        mailbox_item.kind is MailboxItemKind.ACTION_MESSAGE
+        and mailbox_item.action is not None
+        and mailbox_item.action.get("type") == "create_session_working_folder"
+    )
+
+
 def mailbox_item_to_pending_projection(
     mailbox_item: MailboxItem,
 ) -> PendingMailboxEnvelope:

@@ -65,7 +65,11 @@ from azents.repos.session_workspace_project import SessionWorkspaceProjectReposi
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
-from azents.services.mailbox import MailboxEnqueue, MailboxService
+from azents.services.mailbox import (
+    MailboxAdmissionResult,
+    MailboxEnqueue,
+    MailboxService,
+)
 from azents.services.root_agent_session_creation import (
     RootAgentSessionCreationService,
 )
@@ -112,6 +116,7 @@ from .data import (
     NewSessionProjectDefaultWorkspaceItem,
     NotWorkspaceMember,
     PaginatedEvents,
+    PrepareSessionWorkingFolderError,
     PrimarySessionArchiveBlocked,
     PrimarySessionPinBlocked,
     PurgeStartedRestoreBlocked,
@@ -133,6 +138,7 @@ from .data import (
 from .live_events import (
     LiveEventStore,
     active_tool_call_to_live_event,
+    mailbox_item_is_publicly_presentable,
     mailbox_item_to_pending_projection,
 )
 
@@ -1535,6 +1541,7 @@ class ChatSessionService:
             mailbox_items_projection = [
                 mailbox_item_to_pending_projection(mailbox_item)
                 for mailbox_item in mailbox_items
+                if mailbox_item_is_publicly_presentable(mailbox_item)
             ]
             run = await self.agent_run_repository.get_running_by_session_id(
                 session,
@@ -1863,6 +1870,63 @@ class ChatSessionService:
                 buffer_id=buffer_id,
             )
         return Success(None)
+
+    async def prepare_session_working_folder(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        user_id: str,
+        client_request_id: str,
+    ) -> Result[MailboxAdmissionResult, PrepareSessionWorkingFolderError]:
+        """Enqueue an explicit retry for the canonical Session working folder."""
+        async with self.session_manager() as session:
+            agent_session = await self.agent_session_repository.get_by_id(
+                session,
+                session_id,
+            )
+            if (
+                agent_session is None
+                or agent_session.agent_id != agent_id
+                or agent_session.status != AgentSessionStatus.ACTIVE
+            ):
+                return Failure(SessionNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=agent_session.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(SessionAccessDenied())
+            if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+                return Failure(SubagentSessionReadOnly())
+            admission = await self.mailbox_item_service.enqueue(
+                session,
+                MailboxEnqueue(
+                    session_id=session_id,
+                    kind=MailboxItemKind.ACTION_MESSAGE,
+                    scheduling_mode=MailboxSchedulingMode.WAKE_SESSION,
+                    requested_model_target_label=None,
+                    requested_reasoning_effort=None,
+                    sender_user_id=None,
+                    content="",
+                    idempotency_key=(
+                        f"session-working-folder:prepare:{session_id}:"
+                        f"{client_request_id}"
+                    ),
+                    metadata={
+                        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                        "source": "system",
+                    },
+                    action=CreateSessionWorkingFolderAction().model_dump(mode="json"),
+                    attachments=[],
+                    file_parts=[],
+                ),
+            )
+            await session.commit()
+            return Success(admission)
 
 
 def _workspace_item_from_default(

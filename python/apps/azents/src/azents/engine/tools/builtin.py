@@ -94,6 +94,7 @@ from azents.engine.tools.write import make_write_tool
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
+from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.memory.data import MemorySummary
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
@@ -569,6 +570,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         session_manager: SessionManager[AsyncSession],
         agent_runtime_repo: AgentRuntimeRepository,
         agent_runtime_service: AgentRuntimeService,
+        agent_session_repository: AgentSessionRepository,
         project_repo: SessionWorkspaceProjectRepository,
         server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor,
         runtime_image_read_service: RuntimeImageReadService | None,
@@ -591,6 +593,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         self.session_manager = session_manager
         self.agent_runtime_repo = agent_runtime_repo
         self.agent_runtime_service = agent_runtime_service
+        self.agent_session_repository = agent_session_repository
         self.project_repo = project_repo
         self.agents_store = agents_store
         self.server_to_runtime_transfer_service = server_to_runtime_transfer_service
@@ -808,6 +811,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                 agent_runtime_repo=self.agent_runtime_repo,
                 agent_runtime_service=(self.agent_runtime_service),
                 session_manager=self.session_manager,
+                agent_session_repository=self.agent_session_repository,
                 agent_id=runtime_agent_id,
                 publish_event=context.publish_event,
                 owner_session_id=self._session_id,
@@ -859,10 +863,14 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             key=lambda project: project.path,
         )
         workspace_root = await self._load_workspace_root()
+        working_folder_path = await self._load_working_folder_path(
+            session_id=self._session_id
+        )
         del context
         return self._render_config_prompt(
             projects=projects,
             workspace_root=workspace_root,
+            working_folder_path=working_folder_path,
         )
 
     async def _make_instruction_context(
@@ -910,11 +918,26 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             )
         return runtime.workspace_path if runtime is not None else None
 
+    async def _load_working_folder_path(self, *, session_id: str) -> str:
+        """Load the exact context-owned Session working folder."""
+        if not session_id:
+            raise RuntimeError("Runtime Session ID is unavailable")
+        repository = self.agent_session_repository
+        async with self.session_manager() as session:
+            context = await repository.get_working_folder_context_by_session_id(
+                session,
+                session_id=session_id,
+            )
+        if context is None:
+            raise RuntimeError("Session working-folder context is unavailable")
+        return context.working_folder_path
+
     def _render_config_prompt(
         self,
         *,
         projects: list[SessionWorkspaceProject],
         workspace_root: str | None,
+        working_folder_path: str,
     ) -> str:
         """Return domain allow/block settings and accessible scope prompt."""
         parts: list[str] = []
@@ -926,14 +949,28 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             "`write`, `delete`, `glob`, `grep`, `edit`, or `apply_patch` as "
             "appropriate. Use `exec_command` for command execution and "
             "`write_stdin` to interact with a running process.",
-            "Recommended locations:",
-            (
-                f"- `{workspace_root}/` — Durable working files for this agent runtime"
-                if workspace_root is not None
-                else "- The Agent Workspace — Durable working files for this runtime"
-            ),
+            "Storage locations:",
+            f"- `{working_folder_path}` — Current Session working folder. "
+            "Use this as the default workdir and for ordinary Session output.",
+            "- Project directories — Durable project-specific files and instructions.",
             "- `/tmp/` — Temporary scratch space for the current runtime instance",
         ]
+        if workspace_root is not None:
+            scope_lines.extend(
+                [
+                    f"- `{workspace_root}/` — Agent Workspace shared across "
+                    "Sessions. Use it explicitly for cross-Session or Agent-level "
+                    "files.",
+                    "",
+                    "If the Session working folder is missing, run "
+                    f"`mkdir -p {working_folder_path}` with `workdir` set "
+                    f"explicitly to `{workspace_root}` before retrying.",
+                ]
+            )
+        else:
+            scope_lines.append(
+                "- The Runner-reported Agent Workspace path is unavailable."
+            )
         if projects:
             scope_lines.extend(
                 [
@@ -994,6 +1031,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         agent_runtime_repo: AgentRuntimeRepository,
         agent_runtime_service: AgentRuntimeService,
         runner_operations: RuntimeRunnerOperationClient,
+        agent_session_repository: AgentSessionRepository,
         project_repo: SessionWorkspaceProjectRepository,
         server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor,
         runtime_image_read_service: RuntimeImageReadService | None,
@@ -1010,6 +1048,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         self.agent_runtime_repo = agent_runtime_repo
         self.agent_runtime_service = agent_runtime_service
         self.runner_operations = runner_operations
+        self.agent_session_repository = agent_session_repository
         self.project_repo = project_repo
         self.agents_store = agents_store
         self.server_to_runtime_transfer_service = server_to_runtime_transfer_service
@@ -1046,6 +1085,7 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
             session_manager=self.session_manager,
             agent_runtime_repo=self.agent_runtime_repo,
             agent_runtime_service=(self.agent_runtime_service),
+            agent_session_repository=self.agent_session_repository,
             project_repo=self.project_repo,
             agents_store=self.agents_store,
             server_to_runtime_transfer_service=self.server_to_runtime_transfer_service,
@@ -1711,6 +1751,7 @@ def make_exec_command_tool(
     agent_runtime_repo: AgentRuntimeRepository,
     agent_runtime_service: AgentRuntimeService,
     session_manager: SessionManager[AsyncSession] | None,
+    agent_session_repository: AgentSessionRepository,
     agent_id: str,
     publish_event: Callable[[EngineEvent], Awaitable[None]],
     owner_session_id: str,
@@ -1721,6 +1762,23 @@ def make_exec_command_tool(
     async def handler(args: ExecCommandInput) -> FunctionToolResult:
         secret_env = await _collect_secret_env(peer_toolkits, agent_id)
         try:
+            workdir = args.workdir
+            if workdir is None:
+                if session_manager is None:
+                    raise FunctionToolError(
+                        "Session working-folder context is unavailable."
+                    )
+                repository = agent_session_repository
+                async with session_manager() as session:
+                    context = await repository.get_working_folder_context_by_session_id(
+                        session,
+                        session_id=owner_session_id,
+                    )
+                if context is None:
+                    raise FunctionToolError(
+                        "Session working-folder context is unavailable."
+                    )
+                workdir = context.working_folder_path
             runtime = await _ready_runtime_for_agent(
                 agent_runtime_repo=agent_runtime_repo,
                 agent_runtime_service=(agent_runtime_service),
@@ -1732,7 +1790,7 @@ def make_exec_command_tool(
                 runtime_id=runtime.id,
                 runner_generation=runtime.runner_generation,
                 command=args.command,
-                workdir=args.workdir,
+                workdir=workdir,
                 yield_time_ms=args.yield_time_ms,
                 max_output_bytes=args.max_output_bytes,
                 env=secret_env or None,

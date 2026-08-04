@@ -321,6 +321,7 @@ __all__ = [
     "PendingMailboxItem",
     "PendingMailboxUserMessagePresentation",
     "PlatformGitHubAppAuthorizationReason",
+    "PrepareSessionWorkingFolderRequest",
     "Presentation",
     "PreviewPasswordResetTokenRequest",
     "PreviewPasswordResetTokenResponse",
@@ -761,6 +762,7 @@ from azentspublicclient.models.pending_mailbox_goal_continuation_presentation im
 from azentspublicclient.models.pending_mailbox_item import PendingMailboxItem as PendingMailboxItem
 from azentspublicclient.models.pending_mailbox_user_message_presentation import PendingMailboxUserMessagePresentation as PendingMailboxUserMessagePresentation
 from azentspublicclient.models.platform_git_hub_app_authorization_reason import PlatformGitHubAppAuthorizationReason as PlatformGitHubAppAuthorizationReason
+from azentspublicclient.models.prepare_session_working_folder_request import PrepareSessionWorkingFolderRequest as PrepareSessionWorkingFolderRequest
 from azentspublicclient.models.presentation import Presentation as Presentation
 from azentspublicclient.models.preview_password_reset_token_request import PreviewPasswordResetTokenRequest as PreviewPasswordResetTokenRequest
 from azentspublicclient.models.preview_password_reset_token_response import PreviewPasswordResetTokenResponse as PreviewPasswordResetTokenResponse

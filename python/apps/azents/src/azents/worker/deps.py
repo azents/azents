@@ -208,6 +208,10 @@ def get_builtin_toolkit_provider(
         AgentRuntimeService,
         Depends(),
     ],
+    agent_session_repository: Annotated[
+        AgentSessionRepository,
+        Depends(AgentSessionRepository),
+    ],
     config: Annotated[Config, Depends(get_config)],
     s3_service: Annotated[S3Service, Depends(get_s3_service)],
     coordinator: Annotated[
@@ -236,6 +240,7 @@ def get_builtin_toolkit_provider(
         agent_runtime_repo=AgentRuntimeRepository(),
         agent_runtime_service=agent_runtime_service,
         runner_operations=runner_operations,
+        agent_session_repository=agent_session_repository,
         project_repo=SessionWorkspaceProjectRepository(),
         server_to_runtime_transfer_service=transfer.server_to_runtime,
         runtime_image_read_service=transfer.runtime_image_read,

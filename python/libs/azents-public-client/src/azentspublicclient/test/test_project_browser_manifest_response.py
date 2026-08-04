@@ -53,7 +53,7 @@ class TestProjectBrowserManifestResponse(unittest.TestCase):
                         kind = 'directory', 
                         repository_type = 'git', 
                         source = azentspublicclient.models.project_browser_entry_source_response.ProjectBrowserEntrySourceResponse(
-                            type = 'session_project', 
+                            type = 'session_folder', 
                             project_id = '', ), 
                         status = azentspublicclient.models.project_browser_entry_status_response.ProjectBrowserEntryStatusResponse(
                             value = 'unchecked', 
@@ -66,7 +66,8 @@ class TestProjectBrowserManifestResponse(unittest.TestCase):
                             delete_worktree = True, 
                             filesystem_delete = True, 
                             filesystem_move = True, 
-                            filesystem_rename = True, ), )
+                            filesystem_rename = True, 
+                            prepare_session_folder = True, ), )
                     ],
                 empty_state = azentspublicclient.models.project_browser_empty_state_response.ProjectBrowserEmptyStateResponse(
                     title = '', 
@@ -91,7 +92,7 @@ class TestProjectBrowserManifestResponse(unittest.TestCase):
                         kind = 'directory', 
                         repository_type = 'git', 
                         source = azentspublicclient.models.project_browser_entry_source_response.ProjectBrowserEntrySourceResponse(
-                            type = 'session_project', 
+                            type = 'session_folder', 
                             project_id = '', ), 
                         status = azentspublicclient.models.project_browser_entry_status_response.ProjectBrowserEntryStatusResponse(
                             value = 'unchecked', 
@@ -104,7 +105,8 @@ class TestProjectBrowserManifestResponse(unittest.TestCase):
                             delete_worktree = True, 
                             filesystem_delete = True, 
                             filesystem_move = True, 
-                            filesystem_rename = True, ), )
+                            filesystem_rename = True, 
+                            prepare_session_folder = True, ), )
                     ],
         )
         """
