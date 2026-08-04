@@ -414,6 +414,104 @@ async def test_reconciler_fences_adoption_then_finishes_restart_replacement(
     assert runtime_configuration["desired_generation"] == restart.desired_generation
 
 
+async def test_reconciler_repairs_stale_stop_configuration_generation(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """STOP clones usable configuration evidence for its desired generation."""
+    runtime_repository = AgentRuntimeRepository()
+    profile_repository = RuntimeProfileRepository()
+    async with rdb_session_manager() as session:
+        workspace_id = await _create_workspace(session, "reconciler-stop-repair-ws")
+        agent_id = await _create_agent(
+            session,
+            workspace_id,
+            "reconciler-stop-repair-agent",
+        )
+        runtime = await runtime_repository.ensure_for_agent(session, agent_id)
+        await _bind_runtime_provider(session, runtime.id)
+        start = await runtime_repository.set_desired_state(
+            session,
+            runtime.id,
+            RuntimeLifecycleCommandType.START,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert start is not None
+        source_revision = await _attach_runtime_configuration(
+            session,
+            runtime_id=runtime.id,
+            target_desired_generation=start.desired_generation,
+        )
+        stop = await runtime_repository.set_desired_state(
+            session,
+            runtime.id,
+            RuntimeLifecycleCommandType.STOP,
+            RuntimeDesiredState.STOPPED,
+        )
+        assert stop is not None
+        repeated = await runtime_repository.set_desired_state(
+            session,
+            runtime.id,
+            RuntimeLifecycleCommandType.STOP,
+            RuntimeDesiredState.STOPPED,
+        )
+        assert repeated is not None
+        assert repeated.desired_generation == stop.desired_generation
+
+    store = InMemoryRuntimeCoordinationStore()
+    control_protocol = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: "stop-repair-request",
+    )
+    accepted = await control_protocol.register_provider(
+        _provider_registration(),
+        registered_at=datetime.datetime.now(datetime.UTC),
+    )
+    reconciler = RuntimeLifecycleReconciler(
+        runtime_repository=runtime_repository,
+        profile_repository=profile_repository,
+        session_manager=rdb_session_manager,
+        coordination_store=store,
+        control_protocol=control_protocol,
+        config=RuntimeLifecycleDispatchConfig(
+            runner_image="runner:test",
+            runner_control_endpoint="runtime-control:9090",
+            runner_transfer_endpoint="runtime-transfer:9091",
+            runner_credential_identifier=_runner_credential_verifier(),
+            runner_control_tls_ca_pem=None,
+            allow_insecure_runner_control=True,
+        ),
+    )
+
+    dispatched = await reconciler.reconcile_once(limit=10)
+    claimed = await control_protocol.claim_next_provider_request(
+        provider_id="provider-1",
+        generation=accepted.generation,
+        consumer_id="provider-worker",
+        block_ms=0,
+    )
+    async with rdb_session_manager() as session:
+        updated = await runtime_repository.get_by_agent_id(session, agent_id)
+        assert updated is not None
+        revision_id = updated.desired_runtime_configuration_revision_id
+        assert revision_id is not None
+        repaired_revision = await profile_repository.get_configuration_revision(
+            session,
+            revision_id=revision_id,
+        )
+
+    assert dispatched == 1
+    assert claimed is not None
+    assert claimed.operation_type == "provider.stop"
+    assert claimed.payload["desired_generation"] == stop.desired_generation
+    runtime_configuration = claimed.payload["runtime_configuration"]
+    assert isinstance(runtime_configuration, dict)
+    assert runtime_configuration["desired_generation"] == stop.desired_generation
+    assert repaired_revision is not None
+    assert repaired_revision.id != source_revision.id
+    assert repaired_revision.digest == source_revision.digest
+    assert repaired_revision.target_desired_generation == stop.desired_generation
+
+
 async def test_reconciler_rejects_mismatched_resolved_provider_reference(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:

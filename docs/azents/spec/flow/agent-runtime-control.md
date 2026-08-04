@@ -34,7 +34,7 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
-last_verified_at: 2026-08-03
+last_verified_at: 2026-08-04
 spec_version: 47
 ---
 
@@ -209,7 +209,7 @@ through the ordinary heartbeat acknowledgement, wait for a matching Runner state
 NetworkPolicy-only change in place, wait for explicit recreation, or do nothing. Independent loops
 must not select competing lifecycle and configuration actions for the same observation.
 
-Provider and Runner request streams use explicit claim/ack delivery. Control returns each claimed request with the stream cursor and consumer-group metadata needed to acknowledge the request only after it has been sent on the matching gRPC stream. Unacknowledged requests may be reclaimed after an idle interval so a Control replica crash or stream interruption does not strand in-flight Provider/Runner work.
+Provider and Runner request streams use explicit claim/ack delivery. Control returns each claimed request with the stream cursor and consumer-group metadata needed to acknowledge the request only after it has been sent on the matching gRPC stream. Unacknowledged requests may be reclaimed after an idle interval so a Control replica crash or stream interruption does not strand in-flight Provider/Runner work. A repeated stop request for a Runtime already targeted by stop retains the existing desired generation. Before dispatching stop, stopped-desired observe, or terminal delete, Control ensures that usable immutable configuration evidence exists for the current desired generation by reusing an existing exact revision or cloning the retained ready desired/applied evidence. This repair also lets lifecycle reconciliation recover rows created before the exact-generation invariant was enforced.
 
 Runner operation cancellation is an ordered request on the same generation-scoped stream as the original operation. Control records `cancel_requested_at`, transitions non-final metadata to `cancel_requested`, and appends `operation.cancel` after the operation request. Start authorization atomically claims an active operation as running, so cancellation may win before handler creation. A Runner whose start claim is denied emits the operation's terminal cancellation result instead of silently dropping the request. Pending work is removed from the owner queue; active work is cancelled through its handler task. Final operation metadata and reply cursors remain authoritative, and a late Runner final cannot overwrite an already accepted terminal result.
 
