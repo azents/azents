@@ -169,6 +169,15 @@ class _SlackClient:
             raise self.info_error
         return self.info
 
+    async def fetch_private_file_content_length(
+        self, *, bot_token: str, private_url: str, max_bytes: int
+    ) -> int:
+        del bot_token, private_url
+        size = sum(len(chunk) for chunk in self.chunks)
+        if size > max_bytes:
+            raise SlackProviderFileTooLarge("oversize")
+        return size
+
     @asynccontextmanager
     async def open_private_file_stream(
         self,
@@ -248,6 +257,15 @@ class _DiscordClient:
         if self.info_error is not None:
             raise self.info_error
         return self.info
+
+    async def fetch_attachment_content_length(
+        self, *, download_url: str, max_bytes: int
+    ) -> int:
+        del download_url
+        size = sum(len(chunk) for chunk in self.chunks)
+        if size > max_bytes:
+            raise DiscordFileTooLarge("oversize")
+        return size
 
     @asynccontextmanager
     async def open_attachment_stream(
@@ -814,7 +832,7 @@ async def test_declared_and_actual_oversize_never_write_runtime_file() -> None:
         slack_client=_SlackClient(info=_file_info(declared_size=101)),
     )
 
-    with pytest.raises(ExternalChannelFileTransferError, match="100 bytes"):
+    with pytest.raises(ExternalChannelFileTransferError, match="Selected file size"):
         await _download(
             declared_service,
             session_id="session-1",
@@ -1208,7 +1226,7 @@ async def test_discord_size_limits_and_size_mismatch_never_write() -> None:
         slack_client=_SlackClient(),
         discord_client=_DiscordClient(info=_discord_file_info(declared_size=101)),
     )
-    with pytest.raises(ExternalChannelFileTransferError, match="100 bytes"):
+    with pytest.raises(ExternalChannelFileTransferError, match="Selected file size"):
         await _download(
             declared_service,
             session_id="session-1",

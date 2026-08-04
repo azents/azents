@@ -1005,6 +1005,30 @@ class SlackConversationClient:
             private_url=private_url,
         )
 
+    async def fetch_private_file_content_length(
+        self, *, bot_token: str, private_url: str, max_bytes: int
+    ) -> int:
+        """Return the bounded final private-file response length."""
+        try:
+            response = await self.http_client.head(
+                private_url, headers={"Authorization": f"Bearer {bot_token}"}
+            )
+        except httpx.RequestError as error:
+            raise SlackProviderTemporaryError(
+                "Slack file download is temporarily unavailable."
+            ) from error
+        if response.status_code < 200 or response.status_code >= 300:
+            raise SlackProviderRequestRejected("Slack file length check failed.")
+        values = response.headers.get_list("Content-Length")
+        if len(values) != 1 or not values[0].isascii() or not values[0].isdecimal():
+            raise SlackProviderRequestRejected(
+                "Slack file response has an invalid content length."
+            )
+        size = int(values[0])
+        if size > max_bytes:
+            raise SlackProviderFileTooLarge("Slack file exceeds the configured limit.")
+        return size
+
     def open_private_file_stream(
         self,
         *,
