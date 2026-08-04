@@ -1964,9 +1964,9 @@ class TestRestMessageWriteContract:
         chat_service = _RestWriteChatService()
 
         response = await _prepare_session_working_folder_via_rest(
-            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            chat_service,
+            broker,
+            broadcast,
             InMemoryLiveEventStore(),
             PrepareSessionWorkingFolderRequest(client_request_id="folder-retry-1"),
             agent_id="agent-1",
@@ -2006,9 +2006,9 @@ class TestRestMessageWriteContract:
         chat_service = _RestWriteChatService(prepare_created=False)
 
         response = await _prepare_session_working_folder_via_rest(
-            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            chat_service,
+            broker,
+            broadcast,
             InMemoryLiveEventStore(),
             PrepareSessionWorkingFolderRequest(client_request_id="folder-retry-1"),
             agent_id="agent-1",
