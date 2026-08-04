@@ -1162,6 +1162,79 @@ class TestSessionGitWorktreeService:
             "reason_code": "invalid_stored_path",
         }
 
+    async def test_git_worktree_action_rejects_invalid_stored_folder_path(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Git allocation does not use a stored path outside the managed root."""
+        async with rdb_session_manager() as session:
+            workspace_id, _, agent_id = await _create_agent_context(
+                session,
+                "worktree-invalid-folder-path",
+            )
+            agent_session = await AgentSessionRepository().create(
+                session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+            root_agent = await AgentSessionRepository().get_session_agent_by_session_id(
+                session,
+                agent_session.id,
+            )
+            assert root_agent is not None
+            context = await session.get(RDBSessionAgentContext, root_agent.context_id)
+            assert context is not None
+            context.working_folder_path = "/workspace/agent/not-managed"
+            action = CreateGitWorktreeAction(
+                source_project_path="/workspace/agent/repo",
+                starting_ref="main",
+            )
+            execution = await ActionExecutionRepository().create(
+                session,
+                ActionExecutionCreate(
+                    sender_user_id=None,
+                    id=None,
+                    session_id=agent_session.id,
+                    mailbox_item_id="01900000000070008000000000000015",
+                    action_type=action.type,
+                    action=action.model_dump(mode="json"),
+                    status=ActionExecutionStatus.PENDING,
+                    owner_generation=1,
+                ),
+            )
+        runner = _RunnerOperations()
+        service = _service(rdb_session_manager, runner)
+
+        result = await service.run_git_worktree_action(
+            agent_id=agent_id,
+            session_id=agent_session.id,
+            execution=execution,
+            action=action,
+            owner_generation=execution.owner_generation,
+        )
+
+        assert result.completed is True
+        assert result.context_invalidated is False
+        assert runner.calls == []
+        async with rdb_session_manager() as session:
+            events = await EventTranscriptRepository().list_recent_by_session_id(
+                session,
+                agent_session.id,
+                limit=20,
+            )
+        terminal_events = [
+            event for event in events if event.kind is EventKind.ACTION_EXECUTION_RESULT
+        ]
+        assert len(terminal_events) == 1
+        payload = terminal_events[0].payload
+        assert isinstance(payload, ActionExecutionResultPayload)
+        execution_value = payload.action_execution["execution"]
+        assert isinstance(execution_value, dict)
+        assert execution_value["status"] == "failed"
+
     async def test_manual_cleanup_rejects_subagent_session(self) -> None:
         """Do not allow direct worktree cleanup mutations for child subagents."""
         result = await _readonly_service().request_manual_cleanup(
@@ -2041,8 +2114,6 @@ class TestSessionGitWorktreeService:
             "create_git_worktree",
             "remove_git_worktree",
             "delete_git_branch",
-            "list_files",
-            "delete_file",
         ]
         remove_call = runner.calls[1]
         assert remove_call["force"] is False
@@ -2249,13 +2320,12 @@ class TestSessionGitWorktreeService:
             "Git worktree cleanup completed: confirmed_absent."
         )
 
-    async def test_archive_root_tree_cleanup_ignores_canceled_empty_parent_cleanup(
+    async def test_archive_cleanup_skips_legacy_parent_for_canonical_path(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
-        caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Canceled best-effort parent cleanup does not block durable convergence."""
-        runner = _RunnerOperations(parent_delete_canceled=True)
+        """Canonical worktree cleanup never removes the legacy worktree parent."""
+        runner = _RunnerOperations()
         runner.remove_outcome = "already_absent"
         (
             worktree_service,
@@ -2268,15 +2338,11 @@ class TestSessionGitWorktreeService:
             runner=runner,
         )
 
-        with caplog.at_level(
-            logging.INFO,
-            logger="azents.services.session_git_worktree",
-        ):
-            count = await worktree_service.run_archive_cleanup_for_root_tree(
-                agent_id=agent_id,
-                root_session_id=session_id,
-                subtree_session_ids=[session_id],
-            )
+        count = await worktree_service.run_archive_cleanup_for_root_tree(
+            agent_id=agent_id,
+            root_session_id=session_id,
+            subtree_session_ids=[session_id],
+        )
 
         async with rdb_session_manager() as session:
             allocation = await SessionGitWorktreeRepository().get_by_session_id(
@@ -2293,18 +2359,113 @@ class TestSessionGitWorktreeService:
             "create_git_worktree",
             "remove_git_worktree",
             "delete_git_branch",
+        ]
+
+    async def test_archive_cleanup_rejects_invalid_canonical_context_before_runner_io(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """A malformed context cannot authorize external Git cleanup."""
+        runner = _RunnerOperations()
+        (
+            worktree_service,
+            _,
+            agent_id,
+            session_id,
+        ) = await _create_ready_worktree_session(
+            rdb_session_manager,
+            slug="invalid-canonical-cleanup",
+            runner=runner,
+        )
+        runner.calls.clear()
+        async with rdb_session_manager() as session:
+            allocation_repository = SessionGitWorktreeRepository()
+            allocation = await allocation_repository.get_by_session_id(
+                session,
+                session_id=session_id,
+            )
+            root_agent = await AgentSessionRepository().get_session_agent_by_session_id(
+                session,
+                session_id,
+            )
+            assert allocation is not None
+            assert root_agent is not None
+            context = await session.get(RDBSessionAgentContext, root_agent.context_id)
+            assert context is not None
+            context.working_folder_path = "/workspace/agent/external"
+            await allocation_repository.update_target(
+                session,
+                worktree_id=allocation.id,
+                worktree_path="/workspace/agent/external/worktrees/repo",
+                branch_name=allocation.branch_name,
+            )
+
+        await worktree_service.run_archive_cleanup_for_root_tree(
+            agent_id=agent_id,
+            root_session_id=session_id,
+            subtree_session_ids=[session_id],
+        )
+
+        assert runner.calls == []
+        async with rdb_session_manager() as session:
+            allocation = await SessionGitWorktreeRepository().get_by_session_id(
+                session,
+                session_id=session_id,
+            )
+        assert allocation is not None
+        assert allocation.status is SessionGitWorktreeStatus.CLEANUP_FAILED
+        assert allocation.cleanup_summary == "Session working-folder path is invalid."
+
+    async def test_archive_cleanup_keeps_legacy_parent_cleanup(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Recorded legacy paths retain legacy parent cleanup behavior."""
+        runner = _RunnerOperations()
+        (
+            worktree_service,
+            _,
+            agent_id,
+            session_id,
+        ) = await _create_ready_worktree_session(
+            rdb_session_manager,
+            slug="legacy-parent-cleanup",
+            runner=runner,
+        )
+        async with rdb_session_manager() as session:
+            allocation_repository = SessionGitWorktreeRepository()
+            allocation = await allocation_repository.get_by_session_id(
+                session,
+                session_id=session_id,
+            )
+            agent_session = await AgentSessionRepository().get_by_id(
+                session,
+                session_id,
+            )
+            assert allocation is not None
+            assert agent_session is not None
+            await allocation_repository.update_target(
+                session,
+                worktree_id=allocation.id,
+                worktree_path=(
+                    f"/workspace/agent/.azents/worktrees/{agent_session.handle}/repo"
+                ),
+                branch_name=allocation.branch_name,
+            )
+
+        await worktree_service.run_archive_cleanup_for_root_tree(
+            agent_id=agent_id,
+            root_session_id=session_id,
+            subtree_session_ids=[session_id],
+        )
+
+        assert [call["operation"] for call in runner.calls] == [
+            "create_git_worktree",
+            "remove_git_worktree",
+            "delete_git_branch",
             "list_files",
             "delete_file",
         ]
-        skipped_parent_record = next(
-            record
-            for record in caplog.records
-            if record.message == "Skipped empty session worktree directory cleanup"
-        )
-        assert skipped_parent_record.__dict__["session_id"] == session_id
-        assert skipped_parent_record.__dict__["worktree_id"] == allocation.id
-        assert "parent_path" not in skipped_parent_record.__dict__
-        assert "/workspace/" not in skipped_parent_record.getMessage()
 
     async def test_manual_cleanup_rejects_ordinary_project_target(
         self,

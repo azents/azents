@@ -182,13 +182,74 @@ class AgentSessionRepository:
         context = result.scalar_one_or_none()
         if context is None:
             return None
-        return SessionWorkingFolderContext(
-            id=context.id,
-            agent_id=context.agent_id,
-            agent_runtime_id=context.agent_runtime_id,
-            working_folder_path=context.working_folder_path,
-            cleanup_status=context.working_folder_cleanup_status,
+        return self._build_working_folder_context(context)
+
+    async def mark_working_folder_cleanup_pending(
+        self,
+        session: AsyncSession,
+        *,
+        root_session_id: str,
+    ) -> SessionWorkingFolderContext | None:
+        """Mark one root Session working-folder cleanup pending under row lock."""
+        result = await session.execute(
+            sa.select(RDBSessionAgentContext)
+            .join(
+                RDBSessionAgent,
+                RDBSessionAgent.context_id == RDBSessionAgentContext.id,
+            )
+            .where(RDBSessionAgent.agent_session_id == root_session_id)
+            .with_for_update()
         )
+        context = result.scalar_one_or_none()
+        if (
+            context is None
+            or context.working_folder_cleanup_status
+            is not SessionWorkingFolderCleanupStatus.NOT_ATTEMPTED
+        ):
+            return None
+        context.working_folder_cleanup_status = (
+            SessionWorkingFolderCleanupStatus.PENDING
+        )
+        context.working_folder_cleanup_summary = None
+        context.working_folder_cleanup_completed_at = None
+        await session.flush()
+        return self._build_working_folder_context(context)
+
+    async def complete_working_folder_cleanup(
+        self,
+        session: AsyncSession,
+        *,
+        context_id: str,
+        status: SessionWorkingFolderCleanupStatus,
+        summary: str,
+        completed_at: datetime.datetime,
+    ) -> bool:
+        """Terminalize one pending Session working-folder cleanup attempt."""
+        if status not in {
+            SessionWorkingFolderCleanupStatus.SUCCEEDED,
+            SessionWorkingFolderCleanupStatus.FAILED,
+        }:
+            raise ValueError("Working-folder cleanup status must be terminal")
+        if len(summary) > 500:
+            raise ValueError("Working-folder cleanup summary exceeds 500 characters")
+        result = cast(
+            CursorResult[Any],
+            await session.execute(
+                sa.update(RDBSessionAgentContext)
+                .where(
+                    RDBSessionAgentContext.id == context_id,
+                    RDBSessionAgentContext.working_folder_cleanup_status
+                    == SessionWorkingFolderCleanupStatus.PENDING,
+                )
+                .values(
+                    working_folder_cleanup_status=status,
+                    working_folder_cleanup_summary=summary,
+                    working_folder_cleanup_completed_at=completed_at,
+                )
+            ),
+        )
+        await session.flush()
+        return result.rowcount == 1
 
     async def get_root_session_agent_by_session_id(
         self,
@@ -1169,6 +1230,23 @@ class AgentSessionRepository:
                 end_reason=None,
             )
         )
+        await session.execute(
+            sa.update(RDBSessionAgentContext)
+            .where(
+                RDBSessionAgentContext.id.in_(
+                    sa.select(RDBSessionAgent.context_id).where(
+                        RDBSessionAgent.agent_session_id == root_session_id
+                    )
+                )
+            )
+            .values(
+                working_folder_cleanup_status=(
+                    SessionWorkingFolderCleanupStatus.NOT_ATTEMPTED
+                ),
+                working_folder_cleanup_summary=None,
+                working_folder_cleanup_completed_at=None,
+            )
+        )
         await session.flush()
 
     async def archive(
@@ -1737,6 +1815,19 @@ class AgentSessionRepository:
             parent_observed_event_id=rdb.parent_observed_event_id,
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,
+        )
+
+    def _build_working_folder_context(
+        self,
+        rdb: RDBSessionAgentContext,
+    ) -> SessionWorkingFolderContext:
+        """Convert one SessionAgentContext working-folder projection."""
+        return SessionWorkingFolderContext(
+            id=rdb.id,
+            agent_id=rdb.agent_id,
+            agent_runtime_id=rdb.agent_runtime_id,
+            working_folder_path=rdb.working_folder_path,
+            cleanup_status=rdb.working_folder_cleanup_status,
         )
 
     def _build(self, rdb: RDBAgentSession) -> AgentSession:
