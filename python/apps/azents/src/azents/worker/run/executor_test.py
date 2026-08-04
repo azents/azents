@@ -1170,7 +1170,7 @@ def _executor(
         integration_repository=cast(LLMProviderIntegrationRepository, object()),
         toolkit_registry=cast(dict[str, ToolkitProvider[Any]], {}),
         vfs_projection_service=cast(
-            VfsProjectionService,
+            VfsProjectionService[AsyncSession],
             vfs_projection_service,
         ),
         agent_toolkit_repository=cast(AgentToolkitRepository, object()),

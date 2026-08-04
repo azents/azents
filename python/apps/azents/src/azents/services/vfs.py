@@ -7,12 +7,10 @@ import mimetypes
 import pathlib
 import posixpath
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from importlib import resources
 from importlib.resources.abc import Traversable
-from typing import Any
-
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Any, AsyncContextManager, Generic, Protocol, TypeVar
 
 from azents.core.tools import ToolkitProvider
 from azents.core.vfs import (
@@ -27,12 +25,14 @@ from azents.core.vfs import (
     make_vfs_source_revision,
     make_vfs_uri,
 )
-from azents.rdb.session import SessionManager
-from azents.repos.agent_execution import AgentRunRepository
-from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.toolkit import AgentToolkitRepository, ToolkitRepository
 
 logger = logging.getLogger(__name__)
+
+VfsSessionT_contra = TypeVar(
+    "VfsSessionT_contra",
+    bound="VfsSession",
+    contravariant=True,
+)
 
 GLOBAL_RELEASE_SOURCE = VfsSourceSpec(
     source_id="release:azents",
@@ -68,6 +68,134 @@ class VfsResolvedFile:
     projection_revision_id: str
     projection_hash: str
     entry: VfsFileEntry
+
+
+class VfsSession(Protocol):
+    """Database session operation used by VFS projection persistence."""
+
+    async def commit(self) -> None:
+        """Commit a persisted projection."""
+        ...
+
+
+class VfsRun(Protocol):
+    """Run fields used to validate one VFS projection."""
+
+    @property
+    def session_id(self) -> str:
+        """Return the owning Session id."""
+        ...
+
+    @property
+    def vfs_projection(self) -> VfsProjection | None:
+        """Return the persisted VFS projection."""
+        ...
+
+
+class VfsSessionRecord(Protocol):
+    """Session ownership fields used by VFS projection lookup."""
+
+    @property
+    def agent_id(self) -> str:
+        """Return the owning Agent id."""
+        ...
+
+    @property
+    def workspace_id(self) -> str:
+        """Return the owning Workspace id."""
+        ...
+
+
+class VfsToolkitAttachment(Protocol):
+    """Toolkit attachment fields used to select VFS release sources."""
+
+    @property
+    def id(self) -> str:
+        """Return the attachment id."""
+        ...
+
+    @property
+    def toolkit_id(self) -> str:
+        """Return the attached toolkit id."""
+        ...
+
+    @property
+    def toolkit_type(self) -> str:
+        """Return the attached toolkit type."""
+        ...
+
+
+class VfsToolkitConfig(Protocol):
+    """Toolkit configuration fields used to select VFS release sources."""
+
+    @property
+    def enabled(self) -> bool:
+        """Return whether the toolkit is enabled."""
+        ...
+
+    @property
+    def workspace_id(self) -> str:
+        """Return the owning Workspace id."""
+        ...
+
+
+class VfsRunRepository(Protocol[VfsSessionT_contra]):
+    """Run repository operations used by VFS projection service."""
+
+    async def get_by_id(
+        self,
+        session: VfsSessionT_contra,
+        run_id: str,
+    ) -> VfsRun | None:
+        """Load one Agent run."""
+        ...
+
+    async def set_vfs_projection_if_unset(
+        self,
+        session: VfsSessionT_contra,
+        *,
+        run_id: str,
+        session_id: str,
+        projection: VfsProjection,
+    ) -> VfsProjection:
+        """Persist a VFS projection exactly once."""
+        ...
+
+
+class VfsSessionRepository(Protocol[VfsSessionT_contra]):
+    """Session repository operation used by VFS projection service."""
+
+    async def get_by_id(
+        self,
+        session: VfsSessionT_contra,
+        agent_session_id: str,
+    ) -> VfsSessionRecord | None:
+        """Load one Agent session."""
+        ...
+
+
+class VfsAgentToolkitRepository(Protocol[VfsSessionT_contra]):
+    """Toolkit attachment operation used by VFS projection service."""
+
+    async def list_by_agent(
+        self,
+        session: VfsSessionT_contra,
+        agent_id: str,
+    ) -> Sequence[VfsToolkitAttachment]:
+        """List toolkit attachments for one Agent."""
+        ...
+
+
+class VfsToolkitRepository(Protocol[VfsSessionT_contra]):
+    """Toolkit configuration operation used by VFS projection service."""
+
+    async def get_by_id(
+        self,
+        session: VfsSessionT_contra,
+        toolkit_id: str,
+    ) -> VfsToolkitConfig | None:
+        """Load one toolkit configuration."""
+        ...
 
 
 class ReleaseVfsCatalog:
@@ -111,16 +239,16 @@ class ReleaseVfsCatalog:
 
 
 @dataclasses.dataclass(frozen=True)
-class VfsProjectionService:
+class VfsProjectionService(Generic[VfsSessionT_contra]):
     """Build and persist immutable VFS projections for Agent runs."""
 
-    session_manager: SessionManager[AsyncSession]
+    session_manager: Callable[[], AsyncContextManager[VfsSessionT_contra]]
     toolkit_registry: Mapping[str, ToolkitProvider[Any]]
     catalog: ReleaseVfsCatalog
-    agent_run_repository: AgentRunRepository
-    agent_session_repository: AgentSessionRepository
-    agent_toolkit_repository: AgentToolkitRepository
-    toolkit_repository: ToolkitRepository
+    agent_run_repository: VfsRunRepository[VfsSessionT_contra]
+    agent_session_repository: VfsSessionRepository[VfsSessionT_contra]
+    agent_toolkit_repository: VfsAgentToolkitRepository[VfsSessionT_contra]
+    toolkit_repository: VfsToolkitRepository[VfsSessionT_contra]
 
     async def build_preview(
         self,

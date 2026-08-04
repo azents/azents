@@ -27,6 +27,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.broker.broadcast import (
     WebSocketBroadcast,
@@ -2192,7 +2193,7 @@ async def list_input_actions(
     chat_service: Annotated[ChatSessionService, Depends()],
     skill_store: Annotated[SkillStateStore, Depends(get_skill_state_store)],
     vfs_projection_service: Annotated[
-        VfsProjectionService | None,
+        VfsProjectionService[AsyncSession] | None,
         Depends(get_vfs_projection_service),
     ],
 ) -> InputActionListResponse:

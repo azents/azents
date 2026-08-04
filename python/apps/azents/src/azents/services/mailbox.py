@@ -270,7 +270,7 @@ class MailboxService:
         ActionExecutionRepository, Depends(ActionExecutionRepository)
     ]
     vfs_projection_service: Annotated[
-        VfsProjectionService | None,
+        VfsProjectionService[AsyncSession] | None,
         Depends(get_vfs_projection_service),
     ]
     external_channel_repository: Annotated[

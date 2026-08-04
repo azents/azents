@@ -347,7 +347,7 @@ class RunExecutor:
         dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
     ]
     vfs_projection_service: Annotated[
-        VfsProjectionService, Depends(get_vfs_projection_service)
+        VfsProjectionService[AsyncSession], Depends(get_vfs_projection_service)
     ]
     agent_toolkit_repository: Annotated[
         AgentToolkitRepository, Depends(AgentToolkitRepository)

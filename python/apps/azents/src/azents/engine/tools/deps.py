@@ -118,7 +118,7 @@ def get_vfs_projection_service(
         dict[str, ToolkitProvider[Any]], Depends(get_toolkit_registry)
     ],
     catalog: Annotated[ReleaseVfsCatalog, Depends(get_release_vfs_catalog)],
-) -> VfsProjectionService:
+) -> VfsProjectionService[AsyncSession]:
     """Create the run VFS projection service."""
     return VfsProjectionService(
         session_manager=session_manager,
@@ -175,7 +175,7 @@ def get_skill_state_store(
 def get_skill_toolkit_provider(
     skill_store: Annotated[SkillStateStore, Depends(get_skill_state_store)],
     vfs_projection_service: Annotated[
-        VfsProjectionService,
+        VfsProjectionService[AsyncSession],
         Depends(get_vfs_projection_service),
     ],
 ) -> SkillToolkitProvider:
