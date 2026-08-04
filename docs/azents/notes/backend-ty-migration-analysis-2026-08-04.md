@@ -169,3 +169,26 @@ The phase reduces the baseline from 745 to 637 diagnostics:
 
 The production `AgentRunExecution` generic shape and runtime behavior remain
 unchanged.
+
+## Phase 5: Chat API Test Doubles
+
+The fifth phase makes Chat API service doubles explicitly satisfy the concrete
+dependencies and broker protocol used by the public route helpers.
+
+This phase:
+
+- Completes the in-memory broker against the full `SessionBroker` lifecycle
+  surface, including keyword-compatible parameter names.
+- Makes WebSocket broadcast, Chat session, Chat write, AgentSession input,
+  worktree cleanup, and Skill state doubles inherit the dependencies they model.
+- Aligns overridden result types with the complete production error unions while
+  preserving each test's configured runtime result.
+
+### Phase 5 Result
+
+The phase reduces the baseline from 637 to 537 diagnostics:
+
+- `chat_api_test.py` diagnostics: 100 to 0
+- Targeted `ty` check: passed
+
+The production Chat API behavior and dependency interfaces remain unchanged.

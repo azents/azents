@@ -52,13 +52,17 @@ from azents.api.public.chat.v1.data import (
     CleanupSessionGitWorktreeRequest,
     GoalStatusUpdateRequest,
 )
-from azents.broker.broadcast import WebSocketBroadcastPublishError
+from azents.broker.broadcast import (
+    WebSocketBroadcast,
+    WebSocketBroadcastPublishError,
+)
 from azents.broker.types import (
     BrokerMessage,
     PublishedEvent,
     SessionActivity,
     SessionStopSignal,
     SessionWakeUp,
+    WorkerSignal,
 )
 from azents.core.auth.deps import CurrentUser
 from azents.core.enums import (
@@ -86,7 +90,7 @@ from azents.engine.events.action_messages import (
 from azents.engine.events.types import Event, UserMessagePayload
 from azents.engine.run.input import InputMessage
 from azents.engine.tools.goal import GoalStateSnapshot
-from azents.engine.tools.skill import SkillProjectionState
+from azents.engine.tools.skill import SkillProjectionState, SkillStateStore
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
 from azents.rdb.models.event import JSONValue
 from azents.repos.agent_session.data import (
@@ -96,24 +100,32 @@ from azents.repos.agent_session.data import (
 from azents.repos.chat_write_request.data import ChatWriteRequest
 from azents.repos.mailbox.data import MailboxItem
 from azents.services.agent_session_input import (
+    AgentSessionInputService,
     BufferedAgentSessionInputResult,
     CreatedAgentSessionInputResult,
 )
+from azents.services.chat import ChatSessionService
 from azents.services.chat.data import (
+    ArchiveSessionError,
     ArchiveSessionResult,
     ChatLiveRunState,
     ChatLiveStateSnapshot,
+    EnsureSessionError,
     InvalidSessionTitle,
     PaginatedEvents,
     PrimarySessionArchiveBlocked,
     PrimarySessionPinBlocked,
+    RestoreSessionError,
     RunningSessionArchiveBlocked,
     SessionAccessDenied,
+    SessionAccessError,
     SessionNotFound,
+    SetSessionPinnedError,
     SubagentTreeNode,
     SubagentTreeProjection,
     UpdateGoalResult,
     UpdateGoalStatusInput,
+    UpdateSessionTitleError,
 )
 from azents.services.chat.live_events import (
     InMemoryLiveEventStore,
@@ -125,8 +137,14 @@ from azents.services.chat_write import (
     AcceptedEditInput,
     AcceptedPendingCommand,
     AcceptedStopRequest,
+    ChatWriteService,
 )
-from azents.services.session_git_worktree import GitWorktreeCleanupRequest
+from azents.services.session_git_worktree import (
+    GitWorktreeCleanupRequest,
+    GitWorktreeCleanupRequestError,
+    SessionGitWorktreeService,
+)
+from azents.services.session_workspace_project import InvalidProjectPath
 
 
 class _MemoryBroker:
@@ -140,40 +158,80 @@ class _MemoryBroker:
         """Record sent broker messages."""
         self.messages.append(message)
 
-    async def receive_messages(self) -> list[BrokerMessage]:
+    async def receive_messages(self) -> list[WorkerSignal]:
         """Not used in tests."""
         return []
 
-    async def publish_event(self, _session_id: str, _event: PublishedEvent) -> None:
-        """Not used in tests."""
+    async def notify_mailbox_activity(self, session_id: str) -> None:
+        """Accept mailbox-only notification."""
+        del session_id
 
-    async def renew_session_ttl(self, _session_id: str) -> None:
+    async def publish_event(self, session_id: str, event: PublishedEvent) -> None:
         """Not used in tests."""
+        del session_id, event
 
-    async def renew_session_owner_heartbeat(self, _session_id: str) -> None:
+    async def renew_session_ttl(self, session_id: str) -> None:
         """Not used in tests."""
+        del session_id
 
-    async def release_session_lock(self, _session_id: str) -> None:
+    async def renew_session_owner_heartbeat(self, session_id: str) -> None:
         """Not used in tests."""
+        del session_id
+
+    async def release_session_lock(self, session_id: str) -> None:
+        """Not used in tests."""
+        del session_id
 
     async def set_session_activity(
         self,
-        _session_id: str,
+        session_id: str,
         *,
         run_id: str,
         phase: AgentRunPhase | None = None,
     ) -> None:
         """Not used in tests."""
+        del session_id, run_id, phase
 
-    async def clear_session_activity(self, _session_id: str) -> None:
+    async def clear_session_activity(self, session_id: str) -> None:
         """Not used in tests."""
+        del session_id
 
-    async def get_session_activity(self, _session_id: str) -> SessionActivity | None:
+    async def get_session_activity(self, session_id: str) -> SessionActivity | None:
         """Return current test activity state."""
+        del session_id
         return self.activity
 
+    async def purge_session_state(self, session_id: str) -> None:
+        """Accept session-state cleanup."""
+        del session_id
 
-class _MemoryBroadcast:
+    async def acquire_cutover_replay_barrier(
+        self,
+        session_ids: tuple[str, ...],
+    ) -> str:
+        """Return one deterministic replay barrier token."""
+        del session_ids
+        return "barrier-token"
+
+    async def release_cutover_replay_barrier(
+        self,
+        session_ids: tuple[str, ...],
+        token: str,
+    ) -> None:
+        """Accept replay barrier release."""
+        del session_ids, token
+
+    async def renew_cutover_replay_barrier(
+        self,
+        session_ids: tuple[str, ...],
+        token: str,
+    ) -> bool:
+        """Keep the deterministic replay barrier active."""
+        del session_ids, token
+        return True
+
+
+class _MemoryBroadcast(WebSocketBroadcast):
     """WebSocket broadcast for tests."""
 
     def __init__(self) -> None:
@@ -200,8 +258,11 @@ class _WebSocket:
         self.sent.append(event)
 
 
-class _FailingBroadcast:
+class _FailingBroadcast(WebSocketBroadcast):
     """WebSocket broadcast that simulates unavailable Redis publication."""
+
+    def __init__(self) -> None:
+        """Initialize without a live Redis dependency."""
 
     async def publish(self, session_id: str, event_json: dict[str, object]) -> None:
         """Fail every publication attempt."""
@@ -266,7 +327,7 @@ async def test_health_check_ack_requires_current_confirmed_generation() -> None:
     ]
 
 
-class _BufferedInputService:
+class _BufferedInputService(AgentSessionInputService):
     """AgentSessionInputService double for tests."""
 
     def __init__(
@@ -410,7 +471,7 @@ class _BufferedInputService:
         )
 
 
-class _RestWriteChatService:
+class _RestWriteChatService(ChatSessionService):
     """ChatSessionService double for REST write tests."""
 
     def __init__(
@@ -515,12 +576,12 @@ class _RestWriteChatService:
         )
 
 
-class _StopChatService:
+class _StopChatService(ChatSessionService):
     """Stop access control service double for tests."""
 
     def __init__(self) -> None:
         self.session_ids: list[str] = []
-        self.result: Success[AgentSession] | Failure[SessionAccessDenied] = Success(
+        self.result: Result[AgentSession, SessionAccessError] = Success(
             AgentSession(
                 owner_generation=0,
                 inference_state=None,
@@ -549,68 +610,64 @@ class _StopChatService:
         session_id: str,
         *,
         user_id: str,
-    ) -> Success[AgentSession] | Failure[SessionAccessDenied]:
+    ) -> Result[AgentSession, SessionAccessError]:
         """Return session access validation result."""
         del user_id
         self.session_ids.append(session_id)
         return self.result
 
 
-class _SubagentTreeChatService:
+class _SubagentTreeChatService(ChatSessionService):
     """Subagent Tree service double for route tests."""
 
     def __init__(self) -> None:
-        self.result: Success[SubagentTreeProjection] | Failure[SessionNotFound] = (
-            Success(
-                SubagentTreeProjection(
-                    root_session_agent_id="root-agent",
-                    root_agent_session_id="1123456789abcdef0123456789abcdef",
-                    current_session_agent_id="root-agent",
-                    nodes=[
-                        SubagentTreeNode(
-                            session_agent_id="root-agent",
-                            agent_session_id="1123456789abcdef0123456789abcdef",
-                            parent_session_agent_id=None,
-                            name="root",
-                            path="/root",
-                            agent_type="default",
-                            status="running",
-                            last_task_message=None,
-                            last_message_at=None,
-                            unread_result=False,
-                            latest_run_id=None,
-                            latest_run_index=None,
-                            latest_run_status=None,
-                            terminal_result_event_id=None,
-                            terminal_result_message=None,
-                            children=[
-                                SubagentTreeNode(
-                                    session_agent_id="child-agent",
-                                    agent_session_id=(
-                                        "2123456789abcdef0123456789abcdef"
-                                    ),
-                                    parent_session_agent_id="root-agent",
-                                    name="child",
-                                    path="/root/child",
-                                    agent_type="default",
-                                    status="completed",
-                                    last_task_message="work",
-                                    last_message_at=datetime.datetime(
-                                        2026, 7, 10, 4, 5, tzinfo=datetime.UTC
-                                    ),
-                                    unread_result=True,
-                                    latest_run_id=("3123456789abcdef0123456789abcdef"),
-                                    latest_run_index=1,
-                                    latest_run_status=AgentRunStatus.COMPLETED,
-                                    terminal_result_event_id=(
-                                        "4123456789abcdef0123456789abcdef"
-                                    ),
-                                    terminal_result_message="done",
-                                )
-                            ],
-                        )
-                    ],
-                )
+        self.result: Result[SubagentTreeProjection, SessionAccessError] = Success(
+            SubagentTreeProjection(
+                root_session_agent_id="root-agent",
+                root_agent_session_id="1123456789abcdef0123456789abcdef",
+                current_session_agent_id="root-agent",
+                nodes=[
+                    SubagentTreeNode(
+                        session_agent_id="root-agent",
+                        agent_session_id="1123456789abcdef0123456789abcdef",
+                        parent_session_agent_id=None,
+                        name="root",
+                        path="/root",
+                        agent_type="default",
+                        status="running",
+                        last_task_message=None,
+                        last_message_at=None,
+                        unread_result=False,
+                        latest_run_id=None,
+                        latest_run_index=None,
+                        latest_run_status=None,
+                        terminal_result_event_id=None,
+                        terminal_result_message=None,
+                        children=[
+                            SubagentTreeNode(
+                                session_agent_id="child-agent",
+                                agent_session_id="2123456789abcdef0123456789abcdef",
+                                parent_session_agent_id="root-agent",
+                                name="child",
+                                path="/root/child",
+                                agent_type="default",
+                                status="completed",
+                                last_task_message="work",
+                                last_message_at=datetime.datetime(
+                                    2026, 7, 10, 4, 5, tzinfo=datetime.UTC
+                                ),
+                                unread_result=True,
+                                latest_run_id="3123456789abcdef0123456789abcdef",
+                                latest_run_index=1,
+                                latest_run_status=AgentRunStatus.COMPLETED,
+                                terminal_result_event_id=(
+                                    "4123456789abcdef0123456789abcdef"
+                                ),
+                                terminal_result_message="done",
+                            )
+                        ],
+                    )
+                ],
             )
         )
 
@@ -620,13 +677,13 @@ class _SubagentTreeChatService:
         agent_id: str,
         session_id: str,
         user_id: str,
-    ) -> Success[SubagentTreeProjection] | Failure[SessionNotFound]:
+    ) -> Result[SubagentTreeProjection, SessionAccessError]:
         """Return configured Subagent Tree projection."""
         del agent_id, session_id, user_id
         return self.result
 
 
-class _GoalStatusChatService:
+class _GoalStatusChatService(ChatSessionService):
     """Goal status service double for tests."""
 
     def __init__(self) -> None:
@@ -675,7 +732,7 @@ class _GoalStatusChatService:
         )
 
 
-class _StopWriteService:
+class _StopWriteService(ChatWriteService):
     """Stop write service double for tests."""
 
     def __init__(self) -> None:
@@ -702,7 +759,7 @@ class _StopWriteService:
         )
 
 
-class _RestWriteIdempotencyService:
+class _RestWriteIdempotencyService(ChatWriteService):
     """REST edit/command idempotency service double."""
 
     def __init__(self, *, created: bool = True) -> None:
@@ -792,8 +849,11 @@ class _RestWriteIdempotencyService:
         return record
 
 
-class _EmptySkillStore:
+class _EmptySkillStore(SkillStateStore):
     """SkillStateStore double with empty projection."""
+
+    def __init__(self) -> None:
+        """Initialize without a repository dependency."""
 
     async def load(self, agent_id: str, session_id: str) -> SkillProjectionState:
         """Return empty Skill projection state."""
@@ -801,8 +861,11 @@ class _EmptySkillStore:
         return SkillProjectionState()
 
 
-class _DeleteInputBufferService:
+class _DeleteInputBufferService(ChatSessionService):
     """ChatSessionService double for tests."""
+
+    def __init__(self) -> None:
+        """Initialize without repository dependencies."""
 
     async def delete_mailbox_item(
         self,
@@ -816,7 +879,7 @@ class _DeleteInputBufferService:
         return Success(None)
 
 
-class _EventService:
+class _EventService(ChatSessionService):
     """Event query service double for tests."""
 
     def __init__(self) -> None:
@@ -927,7 +990,7 @@ class _EventService:
         )
 
 
-class _AgentSessionRouteChatService:
+class _AgentSessionRouteChatService(ChatSessionService):
     """Agent session route service double for tests."""
 
     def __init__(self) -> None:
@@ -996,9 +1059,7 @@ class _AgentSessionRouteChatService:
         )
         self.archive_result: Result[
             ArchiveSessionResult,
-            SessionNotFound
-            | PrimarySessionArchiveBlocked
-            | RunningSessionArchiveBlocked,
+            ArchiveSessionError,
         ] = Success(
             ArchiveSessionResult(
                 archived_session_id="2123456789abcdef0123456789abcdef",
@@ -1007,7 +1068,7 @@ class _AgentSessionRouteChatService:
         )
         self.pin_result: Result[
             AgentSession,
-            SessionNotFound | PrimarySessionPinBlocked,
+            SetSessionPinnedError,
         ] = Success(self.secondary_session)
 
     async def get_team_primary_session(
@@ -1015,18 +1076,18 @@ class _AgentSessionRouteChatService:
         *,
         agent_id: str,
         user_id: str,
-    ) -> Result[AgentSession, SessionNotFound]:
+    ) -> Result[AgentSession, EnsureSessionError]:
         """Return team primary session lookup result."""
         del user_id
         self.agent_id = agent_id
-        return self.result
+        return Success(self.primary_session)
 
     async def list_agent_sessions(
         self,
         *,
         agent_id: str,
         user_id: str,
-    ) -> Result[list[AgentSession], SessionNotFound]:
+    ) -> Result[list[AgentSession], EnsureSessionError]:
         """Return agent session list result."""
         del user_id
         self.agent_id = agent_id
@@ -1037,7 +1098,7 @@ class _AgentSessionRouteChatService:
         *,
         agent_id: str,
         user_id: str,
-    ) -> Result[list[AgentSessionUnreadTerminalRunProjection], SessionNotFound]:
+    ) -> Result[list[AgentSessionUnreadTerminalRunProjection], EnsureSessionError]:
         """Return active session rows with their unread boundaries."""
         del user_id
         self.agent_id = agent_id
@@ -1075,7 +1136,7 @@ class _AgentSessionRouteChatService:
         agent_id: str,
         session_id: str,
         user_id: str,
-    ) -> Result[AgentSession, SessionNotFound]:
+    ) -> Result[AgentSession, RestoreSessionError]:
         """Return restored agent session result."""
         del user_id
         self.agent_id = agent_id
@@ -1098,7 +1159,7 @@ class _AgentSessionRouteChatService:
         user_id: str,
         existing_project_paths: list[str],
         setup_actions: list[CreateGitWorktreeAction],
-    ) -> Result[AgentSession, SessionNotFound]:
+    ) -> Result[AgentSession, EnsureSessionError | InvalidProjectPath]:
         """Return created team session result."""
         del user_id
         self.agent_id = agent_id
@@ -1150,11 +1211,8 @@ class _AgentSessionRouteChatService:
         *,
         agent_id: str,
         session_id: str,
-        user_id: str,
-    ) -> Result[
-        ArchiveSessionResult,
-        SessionNotFound | PrimarySessionArchiveBlocked | RunningSessionArchiveBlocked,
-    ]:
+        user_id: str | None,
+    ) -> Result[ArchiveSessionResult, ArchiveSessionError]:
         """Return archive operation result."""
         del user_id
         self.agent_id = agent_id
@@ -1167,7 +1225,7 @@ class _AgentSessionRouteChatService:
         session_id: str,
         user_id: str,
         title: str | None,
-    ) -> Result[AgentSession, SessionNotFound | InvalidSessionTitle]:
+    ) -> Result[AgentSession, UpdateSessionTitleError]:
         """Return title update result."""
         del user_id
         self.session_id = session_id
@@ -1184,7 +1242,7 @@ class _AgentSessionRouteChatService:
         session_id: str,
         user_id: str,
         pinned: bool,
-    ) -> Result[AgentSession, SessionNotFound | PrimarySessionPinBlocked]:
+    ) -> Result[AgentSession, SetSessionPinnedError]:
         """Return updated automatic-archive protection state."""
         del user_id
         self.agent_id = agent_id
@@ -1198,7 +1256,7 @@ class _AgentSessionRouteChatService:
         return Success(self.secondary_session)
 
 
-class _RouteWorktreeCleanupService:
+class _RouteWorktreeCleanupService(SessionGitWorktreeService):
     """Session worktree cleanup service double for route tests."""
 
     def __init__(self) -> None:
@@ -1212,7 +1270,7 @@ class _RouteWorktreeCleanupService:
         session_id: str,
         user_id: str,
         session_workspace_project_id: str | None,
-    ) -> Result[GitWorktreeCleanupRequest, object]:
+    ) -> Result[GitWorktreeCleanupRequest, GitWorktreeCleanupRequestError]:
         """Record manual cleanup request."""
         self.manual_cleanup_calls.append(
             (agent_id, session_id, user_id, session_workspace_project_id)
@@ -1243,7 +1301,7 @@ class TestAgentSessionRoutes:
         response = await get_team_primary_agent_session(
             agent_id="agent-1",
             current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
-            chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            chat_service=chat_service,
         )
 
         assert response.id == "1123456789abcdef0123456789abcdef"
@@ -1262,7 +1320,7 @@ class TestAgentSessionRoutes:
         response = await list_agent_sessions(
             agent_id="agent-1",
             current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
-            chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            chat_service=chat_service,
             retention_service=retention_service,
         )
 
@@ -1290,7 +1348,7 @@ class TestAgentSessionRoutes:
         response = await list_archived_agent_sessions(
             agent_id="3123456789abcdef0123456789abcdef",
             current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
-            chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            chat_service=chat_service,
             retention_service=retention_service,
         )
 
@@ -1310,7 +1368,7 @@ class TestAgentSessionRoutes:
             agent_id="3123456789abcdef0123456789abcdef",
             session_id="2123456789abcdef0123456789abcdef",
             current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
-            chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            chat_service=chat_service,
         )
 
         assert response.status == AgentSessionStatus.ACTIVE
@@ -1329,8 +1387,8 @@ class TestAgentSessionRoutes:
                 setup_actions=[],
             ),
             current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
-            chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
-            broker=_MemoryBroker(),  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            chat_service=chat_service,
+            broker=_MemoryBroker(),
         )
 
         assert response.id == "2123456789abcdef0123456789abcdef"
@@ -1355,8 +1413,8 @@ class TestAgentSessionRoutes:
                 setup_actions=[action],
             ),
             current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
-            chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
-            broker=broker,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            chat_service=chat_service,
+            broker=broker,
         )
 
         assert response.id == "2123456789abcdef0123456789abcdef"
@@ -1373,7 +1431,7 @@ class TestAgentSessionRoutes:
             session_id="1123456789abcdef0123456789abcdef",
             request=AgentSessionTitleUpdateRequest(title="Design review"),
             current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
-            chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            chat_service=chat_service,
         )
 
         assert response.title == "Design review"
@@ -1389,7 +1447,7 @@ class TestAgentSessionRoutes:
             session_id="2123456789abcdef0123456789abcdef",
             request=AgentSessionPinUpdateRequest(pinned=True),
             current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
-            chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            chat_service=chat_service,
         )
 
         assert response.pinned is True
@@ -1408,7 +1466,7 @@ class TestAgentSessionRoutes:
                 session_id="1123456789abcdef0123456789abcdef",
                 request=AgentSessionPinUpdateRequest(pinned=True),
                 current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
-                chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+                chat_service=chat_service,
             )
         except Exception as exc:
             assert getattr(exc, "status_code", None) == 409
@@ -1426,7 +1484,7 @@ class TestAgentSessionRoutes:
             agent_id="agent-1",
             session_id="2123456789abcdef0123456789abcdef",
             current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
-            chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            chat_service=chat_service,
         )
 
         assert response is None
@@ -1446,7 +1504,7 @@ class TestAgentSessionRoutes:
             ),
             background_tasks=background_tasks,
             current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
-            session_git_worktree_service=service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+            session_git_worktree_service=service,
         )
 
         assert response is None
@@ -1470,7 +1528,7 @@ class TestAgentSessionRoutes:
                 agent_id="agent-1",
                 session_id="1123456789abcdef0123456789abcdef",
                 current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
-                chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+                chat_service=chat_service,
             )
         except Exception as exc:
             assert getattr(exc, "status_code", None) == 409
@@ -1490,7 +1548,7 @@ class TestAgentSessionRoutes:
                 agent_id="agent-1",
                 session_id="2123456789abcdef0123456789abcdef",
                 current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
-                chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+                chat_service=chat_service,
             )
         except Exception as exc:
             assert getattr(exc, "status_code", None) == 409
@@ -1507,7 +1565,7 @@ class TestAgentSessionRoutes:
                 session_id="1123456789abcdef0123456789abcdef",
                 request=AgentSessionTitleUpdateRequest(title="invalid"),
                 current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
-                chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+                chat_service=chat_service,
             )
         except Exception as exc:
             assert getattr(exc, "status_code", None) == 400
@@ -1524,7 +1582,7 @@ class TestAgentSessionRoutes:
                 agent_id="agent-1",
                 session_id="2223456789abcdef0123456789abcdef",
                 current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
-                chat_service=chat_service,  # pyright: ignore[reportArgumentType]  # Service double exposes the route method surface.
+                chat_service=chat_service,
             )
         except Exception as exc:
             assert getattr(exc, "status_code", None) == 404
@@ -1548,9 +1606,9 @@ class TestUpdateSessionGoalStatus:
                 resume_hint=" CI credentials are restored. ",
             ),
             CurrentUser(user_id="user-1", session_id="auth-session"),
-            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            chat_service,
+            broker,
+            broadcast,
         )
 
         assert response.status == "active"
@@ -1573,9 +1631,9 @@ class TestUpdateSessionGoalStatus:
             "1123456789abcdef0123456789abcdef",
             GoalStatusUpdateRequest(status="active", resume_hint=None),
             CurrentUser(user_id="user-1", session_id="auth-session"),
-            _GoalStatusChatService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            _FailingBroadcast(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required method.
+            _GoalStatusChatService(),
+            broker,
+            _FailingBroadcast(),
         )
 
         assert response.status == "active"
@@ -1592,7 +1650,7 @@ class TestGetSubagentTree:
             "1123456789abcdef0123456789abcdef",
             "1123456789abcdef0123456789abcdef",
             CurrentUser(user_id="user-1", session_id="auth-session"),
-            _SubagentTreeChatService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required method.
+            _SubagentTreeChatService(),
         )
 
         dumped = response.model_dump(mode="json")
@@ -1626,7 +1684,7 @@ class TestGetSubagentTree:
                 "1123456789abcdef0123456789abcdef",
                 "1123456789abcdef0123456789abcdef",
                 CurrentUser(user_id="user-1", session_id="auth-session"),
-                service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required method.
+                service,
             )
         except Exception as exc:
             assert getattr(exc, "status_code", None) == 404
@@ -1646,9 +1704,9 @@ class TestStopSessionRun:
         response = await stop_session_run(
             "1123456789abcdef0123456789abcdef",
             CurrentUser(user_id="user-1", session_id="auth-session"),
-            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            chat_write_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            chat_service,
+            chat_write_service,
+            broker,
         )
 
         assert response.session_id == "1123456789abcdef0123456789abcdef"
@@ -1674,9 +1732,9 @@ class TestStopSessionRun:
         await stop_session_run(
             "1123456789abcdef0123456789abcdef",
             CurrentUser(user_id="user-1", session_id="auth-session"),
-            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            chat_write_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            chat_service,
+            chat_write_service,
+            broker,
         )
 
         assert [
@@ -1696,9 +1754,9 @@ class TestStopSessionRun:
             await stop_session_run(
                 "1123456789abcdef0123456789abcdef",
                 CurrentUser(user_id="user-1", session_id="auth-session"),
-                chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-                chat_write_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-                broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+                chat_service,
+                chat_write_service,
+                broker,
             )
         except Exception as exc:
             assert getattr(exc, "status_code", None) == 404
@@ -1717,8 +1775,8 @@ class TestListInputActions:
         response = await list_input_actions(
             "1123456789abcdef0123456789abcdef",
             CurrentUser(user_id="user-1", session_id="auth-session"),
-            _EventService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            _EmptySkillStore(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _EventService(),
+            _EmptySkillStore(),
             None,
         )
 
@@ -1773,7 +1831,7 @@ class TestEventRoutes:
         response = await list_history_events(
             "1123456789abcdef0123456789abcdef",
             CurrentUser(user_id="user-1", session_id="auth-session"),
-            _EventService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _EventService(),
         )
 
         assert response.model_dump(mode="json") == {
@@ -1813,7 +1871,7 @@ class TestEventRoutes:
         response = await list_live_events(
             "1123456789abcdef0123456789abcdef",
             CurrentUser(user_id="user-1", session_id="auth-session"),
-            _EventService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _EventService(),
             InMemoryLiveEventStore(),
         )
 
@@ -1848,7 +1906,7 @@ class TestRestMessageWriteContract:
 
         try:
             await _validate_rest_session(
-                chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required method.
+                chat_service,
                 agent_id="agent-1",
                 session_id="0123456789abcdef0123456789abcdef",
                 user_id="user-1",
@@ -1869,12 +1927,12 @@ class TestRestMessageWriteContract:
         input_service = _BufferedInputService()
 
         response = await _write_message_via_rest(
-            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            chat_service,
+            input_service,
             _exchange_file_service(),
             _model_file_service(),
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broker,
+            broadcast,
             InMemoryLiveEventStore(),
             ChatMessageWriteRequest(
                 agent_id="agent-1",
@@ -1915,12 +1973,12 @@ class TestRestMessageWriteContract:
         chat_service = _RestWriteChatService()
 
         response = await _write_message_via_rest(
-            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            _BufferedInputService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            chat_service,
+            _BufferedInputService(),
             _exchange_file_service(),
             _model_file_service(),
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            _FailingBroadcast(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required method.
+            broker,
+            _FailingBroadcast(),
             InMemoryLiveEventStore(),
             ChatMessageWriteRequest(
                 agent_id="agent-1",
@@ -1946,12 +2004,12 @@ class TestRestMessageWriteContract:
         broadcast = _MemoryBroadcast()
 
         response = await _write_message_via_rest(
-            _RestWriteChatService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            _BufferedInputService(created=False),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _RestWriteChatService(),
+            _BufferedInputService(created=False),
             _exchange_file_service(),
             _model_file_service(),
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broker,
+            broadcast,
             InMemoryLiveEventStore(),
             ChatMessageWriteRequest(
                 agent_id="agent-1",
@@ -1978,15 +2036,15 @@ class TestRestMessageWriteContract:
         broadcast = _MemoryBroadcast()
 
         response = await _write_message_via_rest(
-            _RestWriteChatService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            _BufferedInputService(  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _RestWriteChatService(),
+            _BufferedInputService(
                 created=False,
                 pending=False,
             ),
             _exchange_file_service(),
             _model_file_service(),
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broker,
+            broadcast,
             InMemoryLiveEventStore(),
             ChatMessageWriteRequest(
                 agent_id="agent-1",
@@ -2018,10 +2076,10 @@ class TestRestMessageWriteContract:
         input_service = _BufferedInputService()
 
         response = await _write_new_session_message_via_rest(
-            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            chat_service,
+            input_service,
+            broker,
+            broadcast,
             InMemoryLiveEventStore(),
             ChatSessionCreateMessageWriteRequest(
                 client_request_id="client-new-1",
@@ -2070,10 +2128,10 @@ class TestRestMessageWriteContract:
         )
 
         response = await _write_new_session_message_via_rest(
-            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            chat_service,
+            input_service,
+            broker,
+            broadcast,
             InMemoryLiveEventStore(),
             ChatSessionCreateMessageWriteRequest(
                 client_request_id="client-new-mixed",
@@ -2107,10 +2165,10 @@ class TestRestMessageWriteContract:
         broadcast = _MemoryBroadcast()
 
         response = await _write_new_session_message_via_rest(
-            _RestWriteChatService(session_id="4123456789abcdef0123456789abcdef"),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            _BufferedInputService(created=False),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _RestWriteChatService(session_id="4123456789abcdef0123456789abcdef"),
+            _BufferedInputService(created=False),
+            broker,
+            broadcast,
             InMemoryLiveEventStore(),
             ChatSessionCreateMessageWriteRequest(
                 client_request_id="client-new-pending-retry",
@@ -2140,13 +2198,13 @@ class TestRestMessageWriteContract:
         broadcast = _MemoryBroadcast()
 
         response = await _write_new_session_message_via_rest(
-            _RestWriteChatService(session_id="4123456789abcdef0123456789abcdef"),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            _BufferedInputService(  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _RestWriteChatService(session_id="4123456789abcdef0123456789abcdef"),
+            _BufferedInputService(
                 created=False,
                 pending=False,
             ),
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broker,
+            broadcast,
             InMemoryLiveEventStore(),
             ChatSessionCreateMessageWriteRequest(
                 client_request_id="client-new-promoted-retry",
@@ -2173,7 +2231,7 @@ class TestRestMessageWriteContract:
         chat_service = _RestWriteChatService()
 
         session_id = await _validate_rest_session(
-            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            chat_service,
             session_id="0123456789abcdef0123456789abcdef",
             agent_id="agent-1",
             user_id="user-1",
@@ -2197,12 +2255,12 @@ class TestRestMessageWriteContract:
 
         try:
             await _write_message_via_rest(
-                chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-                input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+                chat_service,
+                input_service,
                 _exchange_file_service(),
                 _model_file_service(),
-                broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-                broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+                broker,
+                broadcast,
                 InMemoryLiveEventStore(),
                 ChatMessageWriteRequest(
                     agent_id="agent-1",
@@ -2234,13 +2292,13 @@ class TestRestMessageWriteContract:
         input_service = _BufferedInputService()
 
         response = await _write_input_via_rest(
-            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            chat_service,
+            input_service,
             AsyncMock(),  # ChatWriteService is not used for CreateGitWorktreeAction.
             _exchange_file_service(),
             _model_file_service(),
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broker,
+            broadcast,
             InMemoryLiveEventStore(),
             ChatInputWriteRequest(
                 agent_id="agent-1",
@@ -2280,13 +2338,13 @@ class TestRestMessageWriteContract:
         input_service = _BufferedInputService()
 
         response = await _write_input_via_rest(
-            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            input_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            chat_service,
+            input_service,
             AsyncMock(),  # ChatWriteService is not used for SkillAction.
             _exchange_file_service(),
             _model_file_service(),
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broker,
+            broadcast,
             InMemoryLiveEventStore(),
             ChatInputWriteRequest(
                 agent_id="agent-1",
@@ -2325,11 +2383,11 @@ class TestRestEditCommandWriteContract:
         idempotency = _RestWriteIdempotencyService(created=True)
 
         response = await _write_edit_message_via_rest(
-            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            idempotency,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            chat_service,
+            idempotency,
             _exchange_file_service(),
             _model_file_service(),
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broker,
             InMemoryLiveEventStore(),
             ChatEditMessageWriteRequest(
                 agent_id="agent-1",
@@ -2362,11 +2420,11 @@ class TestRestEditCommandWriteContract:
         idempotency = _RestWriteIdempotencyService(created=False)
 
         response = await _write_edit_message_via_rest(
-            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            idempotency,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            chat_service,
+            idempotency,
             _exchange_file_service(),
             _model_file_service(),
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            broker,
             InMemoryLiveEventStore(),
             ChatEditMessageWriteRequest(
                 agent_id="agent-1",
@@ -2393,9 +2451,9 @@ class TestRestEditCommandWriteContract:
         idempotency = _RestWriteIdempotencyService(created=True)
 
         response = await _write_command_via_rest(
-            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            idempotency,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            chat_service,
+            idempotency,
+            broker,
             InMemoryLiveEventStore(),
             ChatCommandWriteRequest(
                 agent_id="agent-1",
@@ -2422,9 +2480,9 @@ class TestRestEditCommandWriteContract:
         idempotency = _RestWriteIdempotencyService(created=False)
 
         response = await _write_command_via_rest(
-            chat_service,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            idempotency,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broker,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            chat_service,
+            idempotency,
+            broker,
             InMemoryLiveEventStore(),
             ChatCommandWriteRequest(
                 agent_id="agent-1",
@@ -2487,8 +2545,8 @@ class TestChatInputBufferContract:
             "0123456789abcdef0123456789abcdef",
             "1123456789abcdef0123456789abcdef",
             CurrentUser(user_id="user-1", session_id="auth-session"),
-            _DeleteInputBufferService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            broadcast,  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
+            _DeleteInputBufferService(),
+            broadcast,
         )
 
         assert broadcast.events == [
@@ -2508,6 +2566,6 @@ class TestChatInputBufferContract:
             "0123456789abcdef0123456789abcdef",
             "1123456789abcdef0123456789abcdef",
             CurrentUser(user_id="user-1", session_id="auth-session"),
-            _DeleteInputBufferService(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required methods.
-            _FailingBroadcast(),  # pyright: ignore[reportArgumentType]  # Test double implements only the required method.
+            _DeleteInputBufferService(),
+            _FailingBroadcast(),
         )
