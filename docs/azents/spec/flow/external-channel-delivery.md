@@ -35,8 +35,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-03
-spec_version: 35
+last_verified_at: 2026-08-04
+spec_version: 36
 ---
 
 # External Channel Delivery and Channel Work
@@ -176,9 +176,9 @@ Tool effect only; External Channel does not persist a file-delivery record.
 
 After commit, every Runtime manifest creates one metadata-only Runtime transfer attempt
 through the existing trusted transfer coordinator.
-The trusted provider-delivery capability claims the verified transfer object, resolves
-its opaque object handle only inside trusted backend code, and exposes only a bounded
-async byte stream to Slack. The ordered batch retains every Runtime consumer claim
+The trusted provider-delivery service resolves the current Runtime when the file-bearing
+Tool executes, claims the verified transfer object, resolves its opaque object handle only
+inside trusted backend code, and exposes only a bounded async byte stream to Slack. The ordered batch retains every Runtime consumer claim
 until the one `files.completeUploadExternal` result. Runtime source bytes never use ordinary
 `FileStorage.read_range` relay and never create ExchangeFile, Artifact, ModelFile, or
 FilePart resources.
@@ -385,6 +385,7 @@ lifecycle transition and creates no recovery work.
 
 ## Changelog
 
+- **2026-08-04** (spec_version 36) — Removed provider-delivery capability gating. The required service now resolves Runtime readiness only during file-bearing Tool execution.
 - **2026-08-03** (spec_version 35) — Made binding-specific Session-bound Toolkit
   State the sole Channel Work and current provider-projection authority while
   preserving commit-before-I/O delivery and cycle/revision settlement fences.

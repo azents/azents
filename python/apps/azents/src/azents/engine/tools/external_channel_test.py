@@ -2,6 +2,7 @@
 
 import json
 from typing import cast
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -39,6 +40,7 @@ from azents.repos.external_channel.work_data import (
     ChannelWorkSnapshot,
     ChannelWorkTask,
 )
+from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
 )
@@ -153,14 +155,22 @@ def _toolkit(
     )
     if file_storage is not None:
         store = RuntimeInstructionContextStore()
+
+        async def resolve_runtime_target() -> ServerToRuntimeTarget:
+            return ServerToRuntimeTarget(
+                runtime_id="runtime-1",
+                desired_generation=1,
+            )
+
         store.set(
             RuntimeInstructionContext(
                 file_storage=file_storage,
                 workspace_root="/runtime/home",
                 projects=(),
-                transfer_capability=None,
-                publication_capability=None,
-                provider_delivery_capability=None,
+                transfer_service=AsyncMock(),
+                publication_service=AsyncMock(),
+                provider_delivery_service=AsyncMock(),
+                resolve_runtime_target=resolve_runtime_target,
             )
         )
         toolkit.set_runtime_context_store(store)
@@ -407,20 +417,21 @@ async def test_download_external_file_uses_current_runtime_storage() -> None:
         "media_type": "text/csv",
         "path": "/workspace/agent/report.csv",
     }
-    assert file_transfer_service.calls == [
-        {
-            "session_id": "session-1",
-            "agent_id": "agent-1",
-            "operation_id": "run-current",
-            "file": "external-file:v1:slack:binding-1:::F123",
-            "expected_size_bytes": 42,
-            "path": "/workspace/agent/report.csv",
-            "overwrite": False,
-            "file_storage": file_storage,
-            "transfer_service": None,
-            "transfer_target": None,
-        }
-    ]
+    assert len(file_transfer_service.calls) == 1
+    call = file_transfer_service.calls[0]
+    assert call["session_id"] == "session-1"
+    assert call["agent_id"] == "agent-1"
+    assert call["operation_id"] == "run-current"
+    assert call["file"] == "external-file:v1:slack:binding-1:::F123"
+    assert call["expected_size_bytes"] == 42
+    assert call["path"] == "/workspace/agent/report.csv"
+    assert call["overwrite"] is False
+    assert call["file_storage"] is file_storage
+    assert isinstance(call["transfer_service"], AsyncMock)
+    assert call["transfer_target"] == ServerToRuntimeTarget(
+        runtime_id="runtime-1",
+        desired_generation=1,
+    )
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 from typing import cast
 
+import pytest
 from azcommon.infra.s3.service import S3Service
 from azents_runtime_control.grpc_transfer_coordinator_client import (
     GrpcRuntimeTransferCoordinatorClient,
@@ -34,20 +35,16 @@ def _config(
     )
 
 
-def test_worker_transfer_services_remain_absent_without_coordinator() -> None:
-    """No local state or storage fallback is composed without Coordinator trust."""
-    services = create_worker_transfer_services(
-        config=_config(),
-        coordinator=None,
-        s3_service=cast(S3Service, object()),
-        exchange_file_service=cast(ExchangeFileService, object()),
-        model_file_service=cast(ModelFileService, object()),
-    )
-
-    assert services.server_to_runtime is None
-    assert services.present_file_publication is None
-    assert services.provider_delivery is None
-    assert services.import_staging is None
+def test_worker_transfer_services_require_coordinator() -> None:
+    """The Worker cannot start Runtime file services without its Coordinator."""
+    with pytest.raises(RuntimeError, match="Coordinator is required"):
+        create_worker_transfer_services(
+            config=_config(),
+            coordinator=None,
+            s3_service=cast(S3Service, object()),
+            exchange_file_service=cast(ExchangeFileService, object()),
+            model_file_service=cast(ModelFileService, object()),
+        )
 
 
 def test_worker_transfer_services_share_only_the_injected_coordinator() -> None:
@@ -77,14 +74,12 @@ def test_worker_transfer_services_share_only_the_injected_coordinator() -> None:
 
 def test_external_channel_staging_requires_the_worker_coordinator() -> None:
     """Inbound provider bytes cannot stage without Worker Coordinator trust."""
-    assert (
+    with pytest.raises(RuntimeError, match="Coordinator is required"):
         create_worker_external_channel_inbound_staging_configuration(
             config=_config(),
             coordinator=None,
             s3_service=cast(S3Service, object()),
         )
-        is None
-    )
 
 
 def test_external_channel_staging_uses_the_bounded_transfer_namespace() -> None:

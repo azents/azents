@@ -18,9 +18,6 @@ from azents.engine.tools.present_file import (
     _is_presentable_path,  # pyright: ignore[reportPrivateUsage]  # Exercise root containment directly.
     make_present_file_tool,
 )
-from azents.engine.tools.runtime_instruction_context import (
-    RuntimeToServerPublicationCapability,
-)
 from azents.engine.tools.testing import FakeSharedStorage
 from azents.repos.exchange_file.data import ExchangeFile
 from azents.runtime.transfer.present_file_publication import (
@@ -133,21 +130,19 @@ def _make_exchange_file(*, filename: str, size_bytes: int) -> ExchangeFile:
     )
 
 
-def _capability(
-    service: _PublicationService,
-) -> RuntimeToServerPublicationCapability:
-    """Build an opaque Runtime publication capability for one test."""
-    return RuntimeToServerPublicationCapability(service=service, target=_TARGET)
+async def _resolve_runtime_target() -> ServerToRuntimeTarget:
+    return _TARGET
 
 
 def _tool(
     storage: FakeSharedStorage,
-    capability: RuntimeToServerPublicationCapability | None,
+    service: _PublicationService,
 ) -> FunctionTool:
     """Create the tool under test."""
     return make_present_file_tool(
         session_storage=storage,
-        publication_capability=capability,
+        publication_service=service,
+        resolve_runtime_target=_resolve_runtime_target,
         authority=_authority(),
         workspace_root="/runtime/home",
     )
@@ -189,7 +184,7 @@ async def test_present_file_publishes_large_file_without_body_relay() -> None:
     service = _PublicationService()
 
     result = await _invoke(
-        _tool(storage, _capability(service)),
+        _tool(storage, service),
         paths=[path],
     )
 
@@ -208,18 +203,6 @@ async def test_present_file_publishes_large_file_without_body_relay() -> None:
 
 
 @pytest.mark.asyncio
-async def test_present_file_fails_closed_without_publication_capability() -> None:
-    """Never fall back to FileStorage.get when managed transfer is unavailable."""
-    path = "/runtime/home/result.txt"
-    storage = _NoBodyReadStorage({path: b"hello"})
-
-    with pytest.raises(FunctionToolError, match="transfer is unavailable"):
-        await _invoke(_tool(storage, None), paths=[path])
-
-    assert storage.get_calls == []
-
-
-@pytest.mark.asyncio
 async def test_present_file_preserves_partial_multi_path_results() -> None:
     """Continue after a missing path and return the successfully published file."""
     good_path = "/runtime/home/result.txt"
@@ -228,7 +211,7 @@ async def test_present_file_preserves_partial_multi_path_results() -> None:
     service = _PublicationService()
 
     result = await _invoke(
-        _tool(storage, _capability(service)),
+        _tool(storage, service),
         paths=[missing_path, good_path],
     )
 
@@ -259,7 +242,7 @@ async def test_present_file_reports_authority_failure_and_continues() -> None:
     )
 
     result = await _invoke(
-        _tool(storage, _capability(service)),
+        _tool(storage, service),
         paths=[denied_path, good_path],
     )
 
@@ -285,7 +268,7 @@ async def test_present_file_reports_terminal_upload_failure_and_continues() -> N
     )
 
     result = await _invoke(
-        _tool(storage, _capability(service)),
+        _tool(storage, service),
         paths=[failed_path, good_path],
     )
 
@@ -310,7 +293,7 @@ async def test_present_file_logs_bounded_publication_failure_context(
 
     with caplog.at_level(logging.WARNING):
         await _invoke(
-            _tool(storage, _capability(service)),
+            _tool(storage, service),
             paths=[failed_path],
             call_id="call-observability",
         )
@@ -341,7 +324,7 @@ async def test_present_file_rejects_disallowed_path_without_publication() -> Non
     service = _PublicationService()
     tool = _tool(
         _NoBodyReadStorage({"/tmp/output.txt": b"temporary"}),
-        _capability(service),
+        service,
     )
 
     result = await _invoke(tool, paths=["/tmp/output.txt"])
@@ -360,7 +343,7 @@ async def test_present_file_propagates_runtime_stat_failure() -> None:
 
     with pytest.raises(FunctionToolError, match="Failed to access file"):
         await _invoke(
-            _tool(_UnavailableStatStorage(), _capability(service)),
+            _tool(_UnavailableStatStorage(), service),
             paths=["/runtime/home/result.txt"],
         )
 
@@ -373,7 +356,7 @@ async def test_present_file_reuses_publication_id_for_a_retried_tool_call() -> N
     path = "/runtime/home/result.txt"
     storage = _NoBodyReadStorage({path: b"hello"})
     service = _PublicationService()
-    tool = _tool(storage, _capability(service))
+    tool = _tool(storage, service)
 
     await _invoke(tool, paths=[path], call_id="call-retry")
     await _invoke(tool, paths=[path], call_id="call-retry")
@@ -392,7 +375,7 @@ async def test_present_file_scopes_publication_id_to_runtime_path() -> None:
     service = _PublicationService()
 
     await _invoke(
-        _tool(storage, _capability(service)),
+        _tool(storage, service),
         paths=[first_path, second_path],
         call_id="call-multiple",
     )

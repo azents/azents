@@ -68,6 +68,7 @@ from azents.services.external_channel.file_transfer import (
 from azents.services.external_channel.slack_events import (
     SLACK_MARKDOWN_TEXT_MAX_LENGTH,
 )
+from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_resource_authority import SessionResourceAuthority
 
 EXTERNAL_CHANNEL_TOOLKIT_SLUG = "external_channel"
@@ -467,10 +468,15 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                         else runtime_context.file_storage
                     ),
                     authority=self.resource_authority,
-                    provider_delivery_capability=(
+                    provider_delivery_service=(
                         None
                         if runtime_context is None
-                        else runtime_context.provider_delivery_capability
+                        else runtime_context.provider_delivery_service
+                    ),
+                    resolve_runtime_target=(
+                        None
+                        if runtime_context is None
+                        else runtime_context.resolve_runtime_target
                     ),
                 )
             except ValueError as error:
@@ -500,6 +506,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                     "Runtime file storage is unavailable for this run."
                 )
             try:
+                transfer_target = await context.resolve_runtime_target()
                 result = await self.file_transfer_service.download(
                     session_id=self.session_id,
                     agent_id=self.agent_id,
@@ -509,19 +516,13 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                     path=args.path,
                     overwrite=args.overwrite,
                     file_storage=context.file_storage,
-                    transfer_service=(
-                        None
-                        if context.transfer_capability is None
-                        else context.transfer_capability.service
-                    ),
-                    transfer_target=(
-                        None
-                        if context.transfer_capability is None
-                        else context.transfer_capability.target
-                    ),
+                    transfer_service=context.transfer_service,
+                    transfer_target=transfer_target,
                 )
             except ExternalChannelFileTransferError as error:
                 raise FunctionToolError(str(error)) from None
+            except RuntimeStorageError as error:
+                raise FunctionToolError(error.detail) from None
             return json.dumps(
                 {
                     "path": result.path,

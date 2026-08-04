@@ -313,11 +313,11 @@ class _WorkerTransferServices:
     def __init__(
         self,
         *,
-        server_to_runtime: ServerToRuntimeTransferService | None,
-        runtime_image_read: RuntimeImageReadService | None,
-        present_file_publication: PresentFilePublicationService | None,
-        provider_delivery: RuntimeToProviderDeliveryService | None,
-        import_staging: ImportFileStagingConfiguration | None,
+        server_to_runtime: ServerToRuntimeTransferService,
+        runtime_image_read: RuntimeImageReadService,
+        present_file_publication: PresentFilePublicationService,
+        provider_delivery: RuntimeToProviderDeliveryService,
+        import_staging: ImportFileStagingConfiguration,
     ) -> None:
         self.server_to_runtime = server_to_runtime
         self.runtime_image_read = runtime_image_read
@@ -336,13 +336,7 @@ def create_worker_transfer_services(
 ) -> _WorkerTransferServices:
     """Compose feature consumers without constructing transfer state locally."""
     if coordinator is None:
-        return _WorkerTransferServices(
-            server_to_runtime=None,
-            runtime_image_read=None,
-            present_file_publication=None,
-            provider_delivery=None,
-            import_staging=None,
-        )
+        raise RuntimeError("Runtime Transfer Coordinator is required by the Worker")
     bucket = config.workspace_s3.bucket
     if not bucket:
         raise ValueError("Runtime transfer requires a workspace S3 bucket")
@@ -413,10 +407,10 @@ def create_worker_external_channel_inbound_staging_configuration(
     config: Config,
     coordinator: GrpcRuntimeTransferCoordinatorClient | None,
     s3_service: S3Service,
-) -> ExternalChannelInboundStagingConfiguration | None:
-    """Return trusted provider staging only with a configured Coordinator."""
+) -> ExternalChannelInboundStagingConfiguration:
+    """Return trusted provider staging for the required Worker Coordinator."""
     if coordinator is None:
-        return None
+        raise RuntimeError("Runtime Transfer Coordinator is required by the Worker")
     bucket = config.workspace_s3.bucket
     if not bucket:
         raise ValueError("Runtime transfer requires a workspace S3 bucket")

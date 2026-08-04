@@ -23,7 +23,6 @@ from azents.engine.tools.import_file import (
     ImportFileStagingConfiguration,
     make_import_file_tool,
 )
-from azents.engine.tools.runtime_instruction_context import RuntimeTransferCapability
 from azents.engine.tools.testing import FakeSharedStorage
 from azents.repos.artifact.data import Artifact
 from azents.repos.exchange_file.data import ExchangeFile
@@ -69,11 +68,8 @@ class _ReadOnlyStorage(FakeSharedStorage):
         raise PermissionError("read-only")
 
 
-def _transfer_capability(service: _TransferService) -> RuntimeTransferCapability:
-    return RuntimeTransferCapability(
-        service=service,
-        target=ServerToRuntimeTarget(runtime_id="runtime-1", desired_generation=2),
-    )
+async def _resolve_runtime_target() -> ServerToRuntimeTarget:
+    return ServerToRuntimeTarget(runtime_id="runtime-1", desired_generation=2)
 
 
 def _staging_configuration() -> ImportFileStagingConfiguration:
@@ -190,26 +186,9 @@ def _tool(
         artifact_service=artifact_service,
         vfs_projection_service=vfs_projection_service,  # pyright: ignore[reportArgumentType]
         authority=_authority(),
-        transfer_capability=_transfer_capability(transfer_service),
+        transfer_service=transfer_service,
+        resolve_runtime_target=_resolve_runtime_target,
         staging_configuration=_staging_configuration(),
-    )
-
-
-def _unavailable_tool(
-    *,
-    storage: FakeSharedStorage,
-    exchange_file_service: AsyncMock,
-    artifact_service: AsyncMock,
-) -> FunctionTool:
-    """Construct import_file without the Server-to-Runtime capability."""
-    return make_import_file_tool(
-        session_storage=storage,
-        exchange_file_service=exchange_file_service,
-        artifact_service=artifact_service,
-        vfs_projection_service=None,
-        authority=_authority(),
-        transfer_capability=None,
-        staging_configuration=None,
     )
 
 
@@ -361,27 +340,6 @@ async def test_import_file_fails_explicit_destination_conflict_before_admission(
 
     exchange_service.resolve_transfer_source_for_authority.assert_awaited_once()
     assert transfer_service.requests == []
-
-
-@pytest.mark.asyncio
-async def test_import_file_fails_closed_without_transfer_capability() -> None:
-    """No legacy Runtime write occurs when transfer composition is unavailable."""
-    exchange_file = _make_exchange_file()
-    exchange_service = AsyncMock()
-    exchange_service.resolve_transfer_source_for_authority.return_value = Success(
-        ExchangeFileTransferSource(file=exchange_file)
-    )
-    storage = FakeSharedStorage()
-    tool = _unavailable_tool(
-        storage=storage,
-        exchange_file_service=exchange_service,
-        artifact_service=AsyncMock(),
-    )
-
-    with pytest.raises(FunctionToolError, match="transfer service is unavailable"):
-        await tool.handler(json.dumps({"uri": exchange_file.uri}))
-
-    assert storage.put_calls == []
 
 
 @pytest.mark.asyncio

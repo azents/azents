@@ -357,11 +357,11 @@ def _make_builtin_provider() -> BuiltinToolkitProvider:
         agent_runtime_service=AsyncMock(),
         runner_operations=AsyncMock(),
         project_repo=AsyncMock(),
-        server_to_runtime_transfer_service=None,
+        server_to_runtime_transfer_service=AsyncMock(),
         runtime_image_read_service=None,
-        runtime_to_server_publication_service=None,
-        runtime_to_provider_delivery_service=None,
-        import_file_staging_configuration=None,
+        runtime_to_server_publication_service=AsyncMock(),
+        runtime_to_provider_delivery_service=AsyncMock(),
+        import_file_staging_configuration=AsyncMock(),
     )
 
 

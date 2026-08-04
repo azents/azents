@@ -51,8 +51,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolActivityGroup.tsx
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-03
-spec_version: 38
+last_verified_at: 2026-08-04
+spec_version: 39
 ---
 
 # File Exchange Storage
@@ -114,14 +114,14 @@ not.
 `exchange://{object_key}` materializes a user-visible attachment into a Runtime file.
 `artifact://{storage_key}` materializes an agent/tool internal output Artifact into a
 Runtime file. Both resolve an authority-checked source manifest and use the common
-Server-to-Runtime transfer capability; an existing managed S3 object is copied into the
+Server-to-Runtime transfer service; an existing managed S3 object is copied into the
 Control-owned immutable transfer object without an application-memory body relay.
 Original file bytes are not attached directly to the LLM prompt.
 
 `azents://` materializes one immutable managed file from the current run projection.
 The resolver verifies run, Agent, Session, and Workspace ownership, exact projection
 membership, Base64 decoding, decoded size, and content hash before incrementally staging
-the source into the same Server-to-Runtime transfer capability. Ordinary Runtime file
+the source into the same Server-to-Runtime transfer service. Ordinary Runtime file
 tools do not resolve the URI directly. The source entry remains in the retained AgentRun
 projection; only the copied Runtime path follows Runtime persistence rules, and a
 default `/tmp/agent/imports/` copy is temporary.
@@ -134,15 +134,15 @@ the current active External Channel binding. The service refreshes provider meta
 before opening a provider response, requires the selected size, refreshed metadata size,
 HTTP `Content-Length`, and incrementally counted body size to agree, and rejects a file
 above the effective per-file inbound policy (at most 500 MiB). It stages only the
-verified source into the common Server-to-Runtime capability and waits for the Runtime
+verified source through the common Server-to-Runtime service and waits for the Runtime
 destination commit. Runtime admission does not reject an independent valid file for
 active-file or aggregate-byte pressure; delivery chunks wait in FIFO-per-file
 round-robin order. The Tool result retains only Runtime path, filename, media type, and
 verified byte count.
 
 A file-bearing `channel_action` accepts absolute Runtime paths and `exchange://` URIs.
-Runtime paths are statted before commit and, when the trusted Runtime provider-delivery
-capability is available, move through one verified Runtime upload attempt per source. The
+Runtime paths are statted before commit and move through the trusted Runtime
+provider-delivery service in one verified upload attempt per source. The
 provider receives a bounded native stream from the internally resolved verified object; no
 ordinary Runtime range-read relay exposes the complete body to the application. A successful
 provider result is followed by authoritative consumer acknowledgement and transfer settlement.
@@ -269,6 +269,7 @@ lifetime. Object existence alone never creates Exchange publication authority.
 
 ## Changelog
 
+- **2026-08-04** — v39. Removed optional Runtime file-transfer capability gating. Runtime transfer, publication, and provider-delivery services are always bound, while Runtime readiness is resolved only when the corresponding Tool executes.
 - **2026-08-03** — v38. Bound `present_file` publication to the current Runner-reported Agent Workspace root instead of Provider metadata or a fixed path.
 - **2026-08-02** — v37. Removed the obsolete durable External Channel
   Action/Delivery manifest claim and documented request-local file publication with

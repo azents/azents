@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -11,18 +12,17 @@ from azents.runtime.transfer.present_file_publication import (
     PresentFilePublicationRequest,
 )
 from azents.runtime.transfer.runtime_to_provider import (
-    RuntimeToProviderDeliveryCapability,
+    RuntimeToProviderDeliveryExecutor,
 )
 from azents.runtime.transfer.server_to_runtime import (
     ServerToRuntimeTarget,
     ServerToRuntimeTransferRequest,
 )
 from azents.services.file_storage import FileStorage
-from azents.services.session_resource_authority import SessionResourceAuthority
 
 
 class ServerToRuntimeTransferExecutor(Protocol):
-    """Backend-only terminal-success transfer service capability."""
+    """Backend-only terminal-success transfer service."""
 
     async def transfer(self, request: ServerToRuntimeTransferRequest) -> None:
         """Deliver one source and return only after Runtime commit success."""
@@ -30,56 +30,14 @@ class ServerToRuntimeTransferExecutor(Protocol):
 
 
 class PresentFilePublicationExecutor(Protocol):
-    """Backend-only managed publication capability for Runtime file output."""
+    """Backend-only managed publication service for Runtime file output."""
 
     async def publish(self, request: PresentFilePublicationRequest) -> ExchangeFile:
         """Publish one Runtime file to user-visible Exchange storage."""
         ...
 
 
-@dataclass(frozen=True)
-class RuntimeTransferCapability:
-    """Current Runtime transfer identity and an injected backend service."""
-
-    service: ServerToRuntimeTransferExecutor
-    target: ServerToRuntimeTarget
-
-
-class RuntimeToServerPublicationCapability:
-    """Expose Runtime publication operations without storage implementation data."""
-
-    def __init__(
-        self,
-        *,
-        service: PresentFilePublicationExecutor,
-        target: ServerToRuntimeTarget,
-    ) -> None:
-        """Bind one trusted publication operation to the selected Runtime."""
-        self._service = service
-        self.target = target
-
-    async def publish(
-        self,
-        *,
-        runtime_path: str,
-        filename: str,
-        media_type: str,
-        expected_size: int,
-        authority: SessionResourceAuthority,
-        publication_id: str,
-    ) -> ExchangeFile:
-        """Publish one Runtime file after final managed transfer settlement."""
-        return await self._service.publish(
-            PresentFilePublicationRequest(
-                runtime_path=runtime_path,
-                filename=filename,
-                media_type=media_type,
-                expected_size=expected_size,
-                authority=authority,
-                target=self.target,
-                publication_id=publication_id,
-            )
-        )
+RuntimeTargetResolver = Callable[[], Awaitable[ServerToRuntimeTarget]]
 
 
 @dataclass(frozen=True)
@@ -89,9 +47,10 @@ class RuntimeInstructionContext:
     file_storage: FileStorage
     workspace_root: str | None
     projects: tuple[SessionWorkspaceProject, ...]
-    transfer_capability: RuntimeTransferCapability | None
-    publication_capability: RuntimeToServerPublicationCapability | None
-    provider_delivery_capability: RuntimeToProviderDeliveryCapability | None
+    transfer_service: ServerToRuntimeTransferExecutor
+    publication_service: PresentFilePublicationExecutor
+    provider_delivery_service: RuntimeToProviderDeliveryExecutor
+    resolve_runtime_target: RuntimeTargetResolver
 
 
 class RuntimeInstructionContextStore:

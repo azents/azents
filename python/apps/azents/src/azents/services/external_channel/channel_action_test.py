@@ -155,8 +155,10 @@ async def test_slack_tracker_delivery_includes_session_navigation(
         bot_token="slack-secret",
         file_storage=None,
         agent_id=None,
+        session_id=None,
         authority=None,
-        provider_delivery_capability=None,
+        provider_delivery_service=None,
+        resolve_runtime_target=None,
     )
 
     call = method.await_args
