@@ -18,6 +18,11 @@ from openai.types.responses.tool_param import ToolParam
 from openai.types.shared_params.reasoning import Reasoning
 from pydantic import TypeAdapter, ValidationError
 
+from azents.core.type_guards import (
+    is_object_list,
+    is_string_list,
+    is_string_object_dict,
+)
 from azents.engine.events.protocols import (
     NativeEvent,
     NativeModelRequest,
@@ -254,9 +259,9 @@ class LiteLLMResponsesModelAdapter:
         if not isinstance(response_id, str) or not response_id:
             return
         raw_output = completed_response.get("output")
-        output_items = (
-            [item for item in raw_output if isinstance(item, dict)]
-            if isinstance(raw_output, list) and raw_output
+        output_items: list[dict[str, object]] = (
+            [item for item in raw_output if is_string_object_dict(item)]
+            if is_object_list(raw_output) and raw_output
             else completed_output_items
         )
         self.continuation_planner.record_completion(
@@ -489,7 +494,7 @@ def _optional_stop(kwargs: dict[str, object], key: str) -> str | list[str] | Non
         return None
     if isinstance(value, str):
         return value
-    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+    if is_string_list(value):
         return value
     raise TypeError(f"LiteLLM kwarg {key} must be str or list[str]")
 
@@ -722,7 +727,7 @@ def _response_api_usage_or_none(value: object) -> ResponseAPIUsage | None:
 
 def _list_or_empty(value: object) -> list[object]:
     """Safely return Responses output list."""
-    if isinstance(value, list):
+    if is_object_list(value):
         return value
     return []
 

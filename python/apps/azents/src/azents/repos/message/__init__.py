@@ -6,6 +6,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import EventKind, MessageRole
+from azents.core.type_guards import is_object_list
 from azents.engine.events.action_messages import ActionMessagePayload
 from azents.engine.events.output_parts import iter_output_parts
 from azents.engine.events.provider_tool_rendering import render_provider_tool_semantic
@@ -457,15 +458,17 @@ def _output_content_text(content: object) -> str:
     """Convert Event output content to display text."""
     if isinstance(content, str):
         return content
-    if isinstance(content, list):
+    if is_object_list(content):
         return _tool_output_text(content) or ""
     return ""
 
 
-def _tool_output_text(output: ToolOutput) -> str | None:
+def _tool_output_text(output: ToolOutput | list[object]) -> str | None:
     """Merge text parts of Tool output."""
+    if isinstance(output, str):
+        return output
     lines: list[str] = []
-    for part in iter_output_parts(output):
+    for part in output:
         if isinstance(part, OutputTextPart):
             lines.append(part.text)
     if lines:

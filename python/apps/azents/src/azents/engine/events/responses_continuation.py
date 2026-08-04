@@ -5,6 +5,8 @@ import dataclasses
 from collections.abc import Mapping, Sequence
 from typing import Protocol
 
+from azents.core.type_guards import is_string_object_dict
+
 
 class ResponsesContinuationRequest(Protocol):
     """Logical Responses request surface needed by continuation planning."""
@@ -168,7 +170,7 @@ def sanitize_responses_native_item(
 
 def _sanitize_responses_native_value(value: object) -> object:
     """Remove raw blob fields from nested Responses native values."""
-    if isinstance(value, dict):
+    if is_string_object_dict(value):
         return sanitize_responses_native_item(value)
     if isinstance(value, list):
         return [_sanitize_responses_native_value(item) for item in value]

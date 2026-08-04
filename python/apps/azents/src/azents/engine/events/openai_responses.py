@@ -67,6 +67,7 @@ from websockets.exceptions import InvalidStatus, WebSocketException
 from azents.core.chatgpt_oauth import CHATGPT_OAUTH_BACKEND_BASE_URL
 from azents.core.enums import LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.type_guards import is_string_object_dict
 from azents.engine.events.file_parts import ModelFileResolver
 from azents.engine.events.protocols import (
     CompletedAdapterOutput,
@@ -1960,10 +1961,10 @@ def _map_openai_error(
 
 def _openai_error_body(exc: OpenAIError) -> dict[str, object]:
     """Return only the typed provider error object from an SDK status failure."""
-    if not isinstance(exc, APIStatusError) or not isinstance(exc.body, dict):
+    if not isinstance(exc, APIStatusError) or not is_string_object_dict(exc.body):
         return {}
     nested_error = exc.body.get("error")
-    return nested_error if isinstance(nested_error, dict) else exc.body
+    return nested_error if is_string_object_dict(nested_error) else exc.body
 
 
 def _openai_retry_after_seconds(exc: OpenAIError) -> float | None:
@@ -2012,7 +2013,7 @@ def _sdk_model_dump(value: object) -> dict[str, object]:
     """Serialize SDK models while preserving transient provider output fields."""
     if value is None:
         return {}
-    if isinstance(value, dict):
+    if is_string_object_dict(value):
         return dict(value)
     if isinstance(value, _SDKModel):
         return value.model_dump(

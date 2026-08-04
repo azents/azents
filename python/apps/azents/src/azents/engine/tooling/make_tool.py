@@ -105,7 +105,9 @@ def make_tool(
     :return: FunctionTool instance
     :raises ValueError: When description cannot be determined
     """
-    tool_name = name or fn.__name__
+    tool_name = name or getattr(fn, "__name__", None)
+    if not tool_name:
+        raise ValueError("Tool name is required when callable has no __name__")
 
     tool_description = description or (fn.__doc__ or "").strip()
     if not tool_description:
