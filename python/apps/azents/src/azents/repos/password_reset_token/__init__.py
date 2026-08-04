@@ -1,9 +1,11 @@
 """Password reset token repository."""
 
 import datetime
+from typing import Any, cast
 
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.password_reset_token import (
@@ -88,12 +90,15 @@ class PasswordResetTokenRepository:
         revoked_at: datetime.datetime,
     ) -> bool:
         """Revoke Password reset token."""
-        result = await session.execute(
-            sa.update(RDBPasswordResetToken)
-            .where(RDBPasswordResetToken.id == token_id)
-            .values(revoked_at=revoked_at)
+        result = cast(
+            CursorResult[Any],
+            await session.execute(
+                sa.update(RDBPasswordResetToken)
+                .where(RDBPasswordResetToken.id == token_id)
+                .values(revoked_at=revoked_at)
+            ),
         )
-        return (result.rowcount or 0) > 0  # type: ignore[union-attr]
+        return (result.rowcount or 0) > 0
 
     async def get_available_by_token_hash(
         self,

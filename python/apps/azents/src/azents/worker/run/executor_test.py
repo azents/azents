@@ -118,6 +118,7 @@ from azents.testing.model_selection import (
     make_test_model_selection,
     make_test_model_settings,
 )
+from azents.testing.types import is_string_object_dict
 from azents.transport.chat import chat_live_run_updated_dump
 from azents.worker.config import AgentWorkerConfig
 from azents.worker.live.event_projector import LiveEventProjector
@@ -3941,7 +3942,7 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
     latest_live_run = live_event_projector.live_run_updates[-1][1]
     wire_event = chat_live_run_updated_dump("session-001", latest_live_run)
     wire_run = wire_event["run"]
-    assert isinstance(wire_run, dict)
+    assert is_string_object_dict(wire_run)
     assert wire_run["inference_profile"] == {
         "model_target_label": "default",
         "model_display_name": "gpt-4o",

@@ -9,6 +9,8 @@ import sqlalchemy as sa
 from pytest_alembic.runner import MigrationContext
 from sqlalchemy.engine import Engine
 
+from azents.testing.types import is_string_object_dict
+
 _PARENT_REVISION = "24a6ab0f0b98"
 _REVISION = "a8e8788ca12d"
 _WORKSPACE_ID = "workspace-runtime-cutover"
@@ -465,7 +467,7 @@ def test_runtime_profile_cutover_blocks_missing_provider_capability(
     profile_contracts = contract["profile_contracts"]
     assert isinstance(profile_contracts, list)
     profile_contract = profile_contracts[0]
-    assert isinstance(profile_contract, dict)
+    assert is_string_object_dict(profile_contract)
     profile_contract["capabilities"] = [
         "docker.container-profile",
         "runtime.resources",

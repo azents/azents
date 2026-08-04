@@ -247,14 +247,15 @@ def canonicalize_runtime_provider_contract(
     canonical_json["optional_capabilities"] = sorted(
         canonical_json["optional_capabilities"]
     )
-    profile_contracts = canonical_json["profile_contracts"]
-    if not isinstance(profile_contracts, list):
-        raise AssertionError("Provider Profile contracts must be a list.")
-    canonical_json["profile_contracts"] = sorted(
-        profile_contracts,
+    profile_contracts = sorted(
+        (
+            profile_contract.model_dump(mode="json")
+            for profile_contract in contract.profile_contracts
+        ),
         key=lambda item: (item["profile_kind"], item["contract_family"]),
     )
-    for profile_contract in canonical_json["profile_contracts"]:
+    canonical_json["profile_contracts"] = profile_contracts
+    for profile_contract in profile_contracts:
         profile_contract["schema_versions"] = sorted(
             profile_contract["schema_versions"]
         )

@@ -31,6 +31,7 @@ from azents.core.xai import XAI_API_BASE_URL
 from azents.repos.llm_provider_integration.data import (
     LLMProviderIntegrationWithSecrets,
 )
+from azents.testing.types import is_string_object_dict
 
 
 def _make_integration(
@@ -355,6 +356,6 @@ class TestBuildCredentialKwargs:
         assert result["api_base"] == KIMI_CODE_API_BASE_URL
         assert result["custom_llm_provider"] == "moonshot"
         headers = result["extra_headers"]
-        assert isinstance(headers, dict)
+        assert is_string_object_dict(headers)
         assert headers["X-Msh-Platform"] == "kimi_cli"
         assert headers["X-Msh-Device-Id"] == "kimi-device-id"

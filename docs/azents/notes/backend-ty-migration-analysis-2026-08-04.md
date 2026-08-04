@@ -192,3 +192,31 @@ The phase reduces the baseline from 637 to 537 diagnostics:
 - Targeted `ty` check: passed
 
 The production Chat API behavior and dependency interfaces remain unchanged.
+
+## Phase 6: Small Typed Boundary Cleanup
+
+The sixth phase groups isolated diagnostics that can be corrected without changing
+product behavior or result-union policy.
+
+This phase:
+
+- Narrows dynamic dictionaries and optional Mock call records in tests before
+  accessing their typed members.
+- Aligns test monkeypatch signatures with the methods they replace.
+- Builds canonical Runtime Provider Profile payloads from validated Pydantic models.
+- Narrows SQLAlchemy DML results to `CursorResult` before reading `rowcount`.
+- Supports both synchronous test doubles and asynchronous Redis client return values
+  at two typed boundaries.
+
+### Phase 6 Result
+
+The phase reduces the baseline from 537 to 495 diagnostics:
+
+- Changed-file `ty` check: passed
+- Pyright: 0 errors
+- Targeted tests: 452 passed
+- Migration tests: 8 passed
+- Backend tests: 3,902 passed
+
+The remaining diagnostics require larger result-union narrowing, service-double
+completion, external-library typing, or dynamic-data validation work.

@@ -97,7 +97,9 @@ class TestMergeEnvVarCredentials:
             user_id="user-1",
         )
 
-        repo_update = toolkit_repo.update_by_id.await_args.args[2]
+        await_args = toolkit_repo.update_by_id.await_args
+        assert await_args is not None
+        repo_update = await_args.args[2]
         assert (
             repo_update["credentials"] == '{"values": {"AZENTS_POSTGRES_USER": "user"}}'
         )

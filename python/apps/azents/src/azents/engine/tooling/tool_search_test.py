@@ -33,6 +33,7 @@ from azents.repos.toolkit_state import (
     ToolkitStateRepository,
 )
 from azents.repos.toolkit_state.data import ToolkitStateRecord, ToolkitStateUpsert
+from azents.testing.types import is_string_object_dict
 
 
 async def _handler(arguments: str) -> str:
@@ -492,8 +493,8 @@ async def test_tool_search_schema_and_handler_activate_ranked_results() -> None:
     assert state.tool_names[0] == "github__create_issue"
     assert tool.spec.name == "tool_search"
     properties = tool.spec.input_schema["properties"]
-    assert isinstance(properties, dict)
+    assert is_string_object_dict(properties)
     limit_schema = properties["limit"]
-    assert isinstance(limit_schema, dict)
+    assert is_string_object_dict(limit_schema)
     assert limit_schema["default"] == 5
     assert limit_schema["maximum"] == 10

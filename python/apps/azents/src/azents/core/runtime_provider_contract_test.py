@@ -7,6 +7,7 @@ from azents.core.runtime_provider_contract import (
     RuntimeProviderCapabilityContract,
     canonicalize_runtime_provider_contract,
 )
+from azents.testing.types import is_string_object_dict
 
 
 def _contract() -> RuntimeProviderCapabilityContract:
@@ -76,7 +77,7 @@ def test_contract_canonicalization_sorts_set_backed_fields() -> None:
     profile_contracts = first.canonical_json["profile_contracts"]
     assert isinstance(profile_contracts, list)
     profile_contract = profile_contracts[0]
-    assert isinstance(profile_contract, dict)
+    assert is_string_object_dict(profile_contract)
     assert profile_contract["schema_versions"] == [1, 2]
     assert profile_contract["capabilities"] == [
         "kubernetes.pod-profile",

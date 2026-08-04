@@ -27,6 +27,7 @@ from azents.engine.events.types import (
 )
 from azents.services.chat.data import ChatLiveRunState
 from azents.services.chat.live_events import InMemoryLiveEventStore, RedisLiveEventStore
+from azents.testing.types import is_string_object_dict
 from azents.worker.live.event_projector import LiveEventProjector
 
 
@@ -173,7 +174,7 @@ async def test_stale_terminal_event_does_not_clear_newer_run_projection() -> Non
     assert store.clear_count == 0
     assert [event[1]["type"] for event in broadcast.events] == ["live_run_updated"]
     live_run = broadcast.events[0][1]["run"]
-    assert isinstance(live_run, dict)
+    assert is_string_object_dict(live_run)
     assert live_run["model_call_started_at"] == "2026-07-14T00:00:00+00:00"
 
     await projector.publish_live_run_cleared("session-001", run_id="run-b")
@@ -241,9 +242,9 @@ async def test_active_tool_calls_broadcast_without_redis_storage() -> None:
         "live_event_removed",
     ]
     upserted = broadcast.events[0][1]["event"]
-    assert isinstance(upserted, dict)
+    assert is_string_object_dict(upserted)
     payload = upserted["payload"]
-    assert isinstance(payload, dict)
+    assert is_string_object_dict(payload)
     assert payload["call_id"] == "call-1"
     assert broadcast.events[1][1]["event_id"] == upserted["id"]
 

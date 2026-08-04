@@ -41,7 +41,7 @@ def _revision() -> RuntimeConfigurationRevision:
 
 def _all_keys(value: object) -> set[str]:
     if isinstance(value, dict):
-        return set(value) | {
+        return {key for key in value if isinstance(key, str)} | {
             key for child in value.values() for key in _all_keys(child)
         }
     if isinstance(value, list):

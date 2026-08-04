@@ -18,6 +18,7 @@ from azents.services.external_channel.discord_events import (
     project_discord_message,
 )
 from azents.services.external_channel.discord_gateway import DiscordGatewayMessageEvent
+from azents.testing.types import is_string_object_dict
 
 
 def _guild(*, guild_id: int = 300) -> MagicMock:
@@ -377,7 +378,7 @@ def test_normalizes_create_with_principal_and_attachment_metadata() -> None:
     assert normalized.attachment_metadata is not None
     files = normalized.attachment_metadata["files"]
     assert isinstance(files, list)
-    assert isinstance(files[0], dict)
+    assert is_string_object_dict(files[0])
     assert files[0]["provider_file_id"] == "500"
     assert normalized.reference_mappings == {
         "users": {"300": "participant"},

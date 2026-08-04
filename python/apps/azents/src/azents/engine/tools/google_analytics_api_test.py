@@ -169,7 +169,9 @@ class TestGetMetadata:
         client = _make_client(data_client=data_client)
         result = await client.get_metadata(property_id="123456")
 
-        assert len(result["dimensions"]) == 1  # pyright: ignore[reportArgumentType]  # dict value is list
+        dimensions = result["dimensions"]
+        assert isinstance(dimensions, list)
+        assert len(dimensions) == 1
         data_client.get_metadata.assert_called_once()
 
 

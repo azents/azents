@@ -3,9 +3,10 @@
 import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import Any, Literal, cast
 
 import sqlalchemy as sa
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
@@ -505,14 +506,18 @@ class SessionWorkspaceProjectRepository:
             session,
             session_id=session_id,
         )
-        result = await session.execute(
-            sa.delete(RDBSessionAgentContextProject).where(
-                RDBSessionAgentContextProject.id == project_id,
-                RDBSessionAgentContextProject.session_agent_context_id == context_id,
-            )
+        result = cast(
+            CursorResult[Any],
+            await session.execute(
+                sa.delete(RDBSessionAgentContextProject).where(
+                    RDBSessionAgentContextProject.id == project_id,
+                    RDBSessionAgentContextProject.session_agent_context_id
+                    == context_id,
+                )
+            ),
         )
         await session.flush()
-        return result.rowcount > 0  # pyright: ignore[reportAttributeAccessIssue]  # SQLAlchemy CursorResult.rowcount returns int at runtime.
+        return result.rowcount > 0
 
     async def _get_context_id_by_session_id(
         self,

@@ -234,7 +234,9 @@ async def test_parent_mutation_rejects_replacement_setting_before_any_write() ->
 
 
 @pytest.mark.asyncio
-async def test_replay_failure_preserves_committed_location_for_recovery() -> None:
+async def test_replay_failure_preserves_committed_location_for_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Selection commits first and reports a recoverable replay failure."""
     events: list[str] = []
     pending = _claim(status=ExternalChannelSetupClaimStatus.PENDING_LOCATION)
@@ -257,8 +259,25 @@ async def test_replay_failure_preserves_committed_location_for_recovery() -> Non
     replay.replay_setup_claim = replay_setup_claim
     service = _service(repository=repository, replay=replay)
 
-    async def commit_location(**kwargs: object) -> _CommittedLocation:
-        del kwargs
+    async def commit_location(
+        *,
+        setup_claim_id: str,
+        expected_claim_generation: int,
+        expected_source_revision: int,
+        location: ExternalChannelConversationLocation,
+        configured_by_principal_id: str,
+        source: ExternalChannelSetupSourceProjection,
+        now: datetime.datetime,
+    ) -> _CommittedLocation:
+        del (
+            setup_claim_id,
+            expected_claim_generation,
+            expected_source_revision,
+            location,
+            configured_by_principal_id,
+            source,
+            now,
+        )
         events.append("commit")
         return _CommittedLocation(
             setting=_setting(),
@@ -266,7 +285,7 @@ async def test_replay_failure_preserves_committed_location_for_recovery() -> Non
             created=True,
         )
 
-    service._commit_location = commit_location  # pyright: ignore[reportPrivateUsage]
+    monkeypatch.setattr(service, "_commit_location", commit_location)
 
     result = await service.select_location(
         setup_claim_id=pending.id,
@@ -339,7 +358,9 @@ async def test_location_selection_resolves_explicit_target_resource(
 
     assert resolved.resource_type is expected_resource_type
     if location is ExternalChannelConversationLocation.CHANNEL:
-        create = repository.create_resource_idempotent.await_args.args[1]
+        create_args = repository.create_resource_idempotent.await_args
+        assert create_args is not None
+        create = create_args.args[1]
         assert create.resource_type is ExternalChannelResourceType.PARENT_CHANNEL
         assert create.provider_resource_key == "channel-1"
         repository.lock_resource.assert_not_awaited()

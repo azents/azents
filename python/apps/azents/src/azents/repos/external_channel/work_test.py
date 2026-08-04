@@ -10,6 +10,7 @@ import pytest
 from azcommon.result import Success
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ClauseElement
 
 from azents.core.enums import (
     ExternalChannelAccessRequestStatus,
@@ -151,10 +152,8 @@ def test_projection_state_accepts_typed_projection_parts() -> None:
     )
 
 
-def _where_sql(statement: object) -> str:
-    compiled = str(
-        statement.compile(dialect=postgresql.dialect())  # type: ignore[attr-defined]
-    )
+def _where_sql(statement: ClauseElement) -> str:
+    compiled = str(statement.compile(dialect=postgresql.dialect()))
     return compiled.partition("WHERE")[2]
 
 
@@ -184,7 +183,9 @@ async def test_direct_control_ignores_connection_health_status() -> None:
     )
 
     assert plan is not None
-    connection_query = session.scalar.await_args.args[0]
+    scalar_args = session.scalar.await_args
+    assert scalar_args is not None
+    connection_query = scalar_args.args[0]
     where_sql = _where_sql(connection_query)
     assert "external_channel_connections.status" not in where_sql
     assert "external_channel_connections.disconnected_at IS NULL" in where_sql
@@ -630,7 +631,9 @@ async def test_direct_effect_revalidation_ignores_connection_health_status() -> 
             effect=effect,
         )
 
-    revalidation_query = session.execute.await_args.args[0]
+    execute_args = session.execute.await_args
+    assert execute_args is not None
+    revalidation_query = execute_args.args[0]
     assert "external_channel_connections.status" not in _where_sql(revalidation_query)
 
 
