@@ -102,9 +102,18 @@ class _VfsService:
         )
         self.projection = make_vfs_projection([revision])
 
-    async def resolve_transfer_file(self, **kwargs: object) -> VfsResolvedFile:
+    async def resolve_transfer_file(
+        self,
+        *,
+        run_id: str,
+        agent_id: str,
+        session_id: str,
+        workspace_id: str,
+        uri: str,
+    ) -> VfsResolvedFile:
         """Return the fixture entry from the run projection."""
-        entry = self.projection.find(str(kwargs["uri"]))
+        del run_id, agent_id, session_id, workspace_id
+        entry = self.projection.find(uri)
         if entry is None:
             raise AssertionError("Missing VFS fixture entry")
         return VfsResolvedFile(
@@ -184,7 +193,7 @@ def _tool(
         session_storage=storage,
         exchange_file_service=exchange_file_service,
         artifact_service=artifact_service,
-        vfs_projection_service=vfs_projection_service,  # pyright: ignore[reportArgumentType]
+        vfs_projection_service=vfs_projection_service,
         authority=_authority(),
         transfer_service=transfer_service,
         resolve_runtime_target=_resolve_runtime_target,

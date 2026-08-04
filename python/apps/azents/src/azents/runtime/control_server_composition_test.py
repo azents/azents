@@ -85,6 +85,10 @@ class _Cleanup:
             skipped_storage_entries=0,
         )
 
+    async def cleanup(self, record: object) -> None:
+        """Satisfy the stale-stream cleanup collaborator contract."""
+        del record
+
 
 def _settings() -> RuntimeControlSettings:
     return RuntimeControlSettings(
@@ -205,8 +209,8 @@ async def test_transfer_repair_one_shot_runs_bounded_categories() -> None:
     now = datetime(2026, 7, 28, 12, tzinfo=UTC)
 
     observed = await repair_transfer_once(
-        coordinator,  # type: ignore[arg-type]
-        cleanup=cleanup,  # type: ignore[arg-type]
+        coordinator,
+        cleanup=cleanup,
         now=now,
         page_size=7,
     )

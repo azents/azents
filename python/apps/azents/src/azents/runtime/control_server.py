@@ -8,7 +8,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 
 import aioboto3
 import boto3
@@ -76,12 +76,18 @@ from azents.runtime.coordination.redis import (
 from azents.runtime.transfer.control import (
     create_runtime_control_transfer_state_store,
 )
-from azents.runtime.transfer.coordinator import RuntimeTransferCoordinator
+from azents.runtime.transfer.coordinator import (
+    RuntimeTransferCleanup,
+    RuntimeTransferCoordinator,
+)
 from azents.runtime.transfer.data import (
     RUNTIME_TRANSFER_MAXIMUM_AGE,
     RUNTIME_TRANSFER_MAXIMUM_PAGE_SIZE,
 )
-from azents.runtime.transfer.object_store import RuntimeTransferS3Cleanup
+from azents.runtime.transfer.object_store import (
+    RuntimeTransferOrphanRepairResult,
+    RuntimeTransferS3Cleanup,
+)
 from azents.runtime.transfer.result_coordinator import (
     RuntimeRunnerTransferResultCoordinator,
 )
@@ -114,6 +120,45 @@ _DEFAULT_TRANSFER_OBJECT_PREFIX = "runtime-transfer"
 _MAX_TRANSFER_TTL_SECONDS = 3_600
 _MAX_TRANSFER_PROCESS_BUFFER_BYTES = 64 * 1024 * 1024
 _LOGGER = logging.getLogger(__name__)
+
+
+class RuntimeTransferRepairCleanup(RuntimeTransferCleanup, Protocol):
+    """Cleanup operations used by the periodic transfer repair pass."""
+
+    async def repair_orphans(
+        self,
+        *,
+        now: datetime,
+        maximum_age: timedelta,
+        page_size: int,
+    ) -> RuntimeTransferOrphanRepairResult:
+        """Repair one bounded page of untracked storage artifacts."""
+        ...
+
+
+class RuntimeTransferRepairCoordinator(Protocol):
+    """Coordinator operations used by one periodic transfer repair pass."""
+
+    async def repair_terminal_correlations(self, *, page_size: int) -> int:
+        """Repair retained terminal correlation records."""
+        ...
+
+    async def repair_pending(self, *, page_size: int) -> int:
+        """Repair pending transfer dispatches."""
+        ...
+
+    async def reconcile_generations(self, *, page_size: int) -> int:
+        """Reconcile transfer generation ownership."""
+        ...
+
+    async def repair_stale_stream_claims(
+        self,
+        *,
+        cleanup: RuntimeTransferCleanup | None,
+        page_size: int,
+    ) -> int:
+        """Repair stale transfer stream claims."""
+        ...
 
 
 class RuntimeControlSettings(BaseSettings):
@@ -532,9 +577,9 @@ async def _run_transfer_repair(
 
 
 async def repair_transfer_once(
-    coordinator: RuntimeTransferCoordinator,
+    coordinator: RuntimeTransferRepairCoordinator,
     *,
-    cleanup: RuntimeTransferS3Cleanup,
+    cleanup: RuntimeTransferRepairCleanup,
     now: datetime,
     page_size: int,
 ) -> int:

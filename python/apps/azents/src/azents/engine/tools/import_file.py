@@ -25,6 +25,7 @@ from azents.engine.tools.import_resolver import (
     ResolvedArtifactImportSource,
     ResolvedExchangeImportSource,
     ResolvedVfsImportSource,
+    VfsTransferFileResolver,
 )
 from azents.engine.tools.path_policy import RUNTIME_ACCESSIBLE_PATHS_MSG
 from azents.engine.tools.runtime_instruction_context import (
@@ -46,7 +47,6 @@ from azents.services.exchange_file import ExchangeFileService
 from azents.services.file_storage import FileStorage
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_resource_authority import SessionResourceAuthority
-from azents.services.vfs import VfsProjectionService
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ def make_import_file_tool(
     session_storage: FileStorage,
     exchange_file_service: ExchangeFileService,
     artifact_service: ArtifactService,
-    vfs_projection_service: VfsProjectionService | None,
+    vfs_projection_service: VfsTransferFileResolver | None,
     authority: SessionResourceAuthority,
     transfer_service: ServerToRuntimeTransferExecutor,
     resolve_runtime_target: RuntimeTargetResolver,
