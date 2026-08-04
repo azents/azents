@@ -8,7 +8,7 @@ import posixpath
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Any, Literal, assert_never
+from typing import Any, Literal, Protocol, assert_never
 
 import frontmatter
 import yaml
@@ -16,7 +16,7 @@ from azcommon.uuid import uuid7
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.broker.broadcast import WebSocketBroadcast, WebSocketBroadcastPublishError
+from azents.broker.broadcast import WebSocketBroadcastPublishError
 from azents.core.enums import AgentSessionRunState, RuntimeRunnerState
 from azents.core.tools import (
     ResolveContext,
@@ -51,7 +51,8 @@ from azents.engine.tooling.toolkit_state import (
     ToolkitStateStore,
 )
 from azents.engine.tools.runtime_io import (
-    RuntimeRunnerOperationClient,
+    RuntimeFileListResult,
+    RuntimeFileTextReadResult,
     RuntimeRunnerOperationFailedError,
     RuntimeRunnerOperationGenerationError,
     RuntimeRunnerOperationUnavailable,
@@ -60,7 +61,7 @@ from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
-from azents.services.vfs import VfsFileResolutionError, VfsProjectionService
+from azents.services.vfs import VfsFileResolutionError, VfsResolvedFile
 from azents.transport.chat import chat_input_actions_updated_dump
 
 logger = logging.getLogger(__name__)
@@ -161,6 +162,135 @@ class _SkillPathCandidate:
 
     source: SkillSourceRoot
     skill_path: str
+
+
+class SkillStateReader(Protocol):
+    """Skill projection state read operation."""
+
+    async def load(
+        self,
+        agent_id: str,
+        session_id: str,
+    ) -> SkillProjectionState:
+        """Return the current Skill projection state."""
+        ...
+
+
+class SkillProjectionStateStore(SkillStateReader, Protocol):
+    """Skill projection synchronization state operations."""
+
+    async def replace_latest(
+        self,
+        agent_id: str,
+        session_id: str,
+        snapshot: SkillProjectionSnapshot,
+    ) -> SkillProjectionState:
+        """Replace the latest Skill projection snapshot."""
+        ...
+
+
+class SkillRuntimeStateStore(SkillStateReader, Protocol):
+    """Skill run-lifecycle state operations."""
+
+    async def adopt_latest(
+        self,
+        agent_id: str,
+        session_id: str,
+    ) -> SkillProjectionState:
+        """Adopt the latest Skill projection as active."""
+        ...
+
+
+class SkillRuntimeFileReader(Protocol):
+    """Runtime file operations required for Skill discovery."""
+
+    async def list_files(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        recursive: bool = False,
+        exclude_patterns: list[str] | None = None,
+        deadline_at: datetime.datetime,
+    ) -> RuntimeFileListResult:
+        """List direct Skill source entries."""
+        ...
+
+    async def read_text_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        offset: int,
+        max_bytes: int,
+        encoding: str,
+        deadline_at: datetime.datetime,
+    ) -> RuntimeFileTextReadResult:
+        """Read one bounded Skill entrypoint."""
+        ...
+
+
+class SkillVfsFileResolver(Protocol):
+    """Managed VFS operation required by the load_skill tool."""
+
+    async def resolve_file(
+        self,
+        *,
+        run_id: str,
+        agent_id: str,
+        session_id: str,
+        workspace_id: str,
+        uri: str,
+    ) -> VfsResolvedFile:
+        """Resolve one managed Skill file."""
+        ...
+
+
+class SkillVfsProjectionReader(SkillVfsFileResolver, Protocol):
+    """Managed VFS operations required by the Skill Toolkit."""
+
+    async def load_run_projection(
+        self,
+        *,
+        run_id: str,
+        agent_id: str,
+        session_id: str,
+        workspace_id: str,
+    ) -> VfsProjection:
+        """Load the exact current-run VFS projection."""
+        ...
+
+
+class SkillActionProjectionReader(Protocol):
+    """Managed VFS operation required by composer actions."""
+
+    async def projection_for_actions(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        workspace_id: str,
+        running: bool,
+        active_run_id: str | None,
+    ) -> VfsProjection:
+        """Return the VFS projection visible to input actions."""
+        ...
+
+
+class SkillBroadcast(Protocol):
+    """Session broadcast operation required by Skill projection updates."""
+
+    async def publish(
+        self,
+        session_id: str,
+        event_json: dict[str, object],
+    ) -> None:
+        """Publish one input-action update."""
+        ...
 
 
 class SkillStateStore:
@@ -290,12 +420,12 @@ class SkillProjectionService:
     def __init__(
         self,
         *,
-        store: SkillStateStore,
+        store: SkillProjectionStateStore,
         session_manager: SessionManager[AsyncSession],
-        runner_operations: RuntimeRunnerOperationClient | None = None,
+        runner_operations: SkillRuntimeFileReader | None = None,
         runtime_repository: AgentRuntimeRepository | None = None,
         project_repository: SessionWorkspaceProjectRepository | None = None,
-        broadcast: WebSocketBroadcast | None = None,
+        broadcast: SkillBroadcast | None = None,
     ) -> None:
         """Create Skill projection service."""
         self.store = store
@@ -364,7 +494,7 @@ class SkillProjectionService:
     async def _scan_runtime(
         self,
         *,
-        runner_operations: RuntimeRunnerOperationClient,
+        runner_operations: SkillRuntimeFileReader,
         runtime_id: str,
         runner_generation: int,
         owner_session_id: str,
@@ -423,7 +553,7 @@ class SkillProjectionService:
     async def _skill_paths_in_root(
         self,
         *,
-        runner_operations: RuntimeRunnerOperationClient,
+        runner_operations: SkillRuntimeFileReader,
         runtime_id: str,
         runner_generation: int,
         owner_session_id: str,
@@ -458,7 +588,7 @@ class SkillProjectionService:
     async def _read_skill_item(
         self,
         *,
-        runner_operations: RuntimeRunnerOperationClient,
+        runner_operations: SkillRuntimeFileReader,
         runtime_id: str,
         runner_generation: int,
         owner_session_id: str,
@@ -519,9 +649,9 @@ class SkillToolkit(Toolkit[SkillToolkitConfig]):
     def __init__(
         self,
         *,
-        store: SkillStateStore,
+        store: SkillRuntimeStateStore,
         projection_service: SkillProjectionService | None,
-        vfs_projection_service: VfsProjectionService | None,
+        vfs_projection_service: SkillVfsProjectionReader | None,
         agent_id: str,
         session_id: str,
     ) -> None:
@@ -662,9 +792,9 @@ class SkillToolkitProvider(ToolkitProvider[SkillToolkitConfig]):
     def __init__(
         self,
         *,
-        store: SkillStateStore,
+        store: SkillRuntimeStateStore,
         projection_service: SkillProjectionService | None,
-        vfs_projection_service: VfsProjectionService | None,
+        vfs_projection_service: SkillVfsProjectionReader | None,
     ) -> None:
         """Create Skill Toolkit provider."""
         self.store = store
@@ -759,8 +889,8 @@ def skill_item_from_vfs_entry(entry: VfsFileEntry) -> SkillProjectionItem:
 
 def make_load_skill_tool(
     *,
-    store: SkillStateStore,
-    vfs_projection_service: VfsProjectionService | None,
+    store: SkillStateReader,
+    vfs_projection_service: SkillVfsFileResolver | None,
     agent_id: str,
     session_id: str,
     workspace_id: str,
@@ -853,9 +983,9 @@ def skill_actions_from_snapshot(
 
 
 async def load_skill_projection_for_actions(
-    store: SkillStateStore,
+    store: SkillStateReader,
     *,
-    vfs_projection_service: VfsProjectionService | None,
+    vfs_projection_service: SkillActionProjectionReader | None,
     agent_id: str,
     session_id: str,
     workspace_id: str,

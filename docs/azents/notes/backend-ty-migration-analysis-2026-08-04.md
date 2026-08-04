@@ -272,3 +272,34 @@ The phase reduces the current-main baseline from 431 to 389 diagnostics:
 The next bulk category is test-double contract completion. Result unions,
 External Channel contracts, generated code, and executed migrations remain outside
 this mechanical phase.
+
+## Phase 8: Runtime File Capability Protocols
+
+The eighth phase replaces two over-broad Runtime Runner dependencies with the
+specific file-operation capabilities their consumers invoke.
+
+This phase:
+
+- Defines the Skill scanner's list/read contract independently from unrelated
+  Runtime process, write, edit, and patch operations.
+- Separates managed Skill projection loading, file resolution, and action
+  projection lookup into consumer-specific protocols.
+- Defines the Workspace browser's list, preview, stat, create, delete, and move
+  capability surface without requiring the complete Runner client.
+- Makes Skill and Workspace test doubles expose exact keyword-compatible methods
+  and correctly typed async session managers.
+- Removes obsolete test suppressions without adding casts or new ignores.
+
+### Phase 8 Result
+
+The phase reduces the stacked baseline from 389 to 349 diagnostics:
+
+- Skill Toolkit and projection test-double diagnostics: 22 to 0
+- Workspace file-operation test-double diagnostics: 18 to 0
+- Pyright: 0 errors
+- Targeted tests: 35 passed
+- Backend tests: 3,942 passed
+
+VFS repository test doubles remain the next isolated test-contract batch.
+Agent-decommission doubles remain separate because they cross the External Channel
+lifecycle boundary.

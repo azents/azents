@@ -376,8 +376,13 @@ class _FakeRuntimeWorkspaceDownloadService:
 
 
 @contextlib.asynccontextmanager
-async def _session_manager() -> AsyncGenerator[AsyncSession]:
-    yield object()  # pyright: ignore[reportReturnType]
+async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
+    """Yield one unused but correctly typed test session."""
+    session = AsyncSession()
+    try:
+        yield session
+    finally:
+        await session.close()
 
 
 @pytest.mark.asyncio
@@ -387,7 +392,7 @@ async def test_get_workspace_reads_active_runtime_with_runner() -> None:
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
-        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
         session_manager=_session_manager,
     )
@@ -416,7 +421,7 @@ async def test_get_workspace_uses_agent_runtime_without_session_match() -> None:
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
-        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
         session_manager=_session_manager,
     )
@@ -443,7 +448,7 @@ async def test_get_workspace_reports_missing_provider_workspace_path() -> None:
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
-        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
         session_manager=_session_manager,
     )
@@ -468,7 +473,7 @@ async def test_get_workspace_reports_stopped_runtime_not_started() -> None:
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
-        runner_operations=_FakeRunnerOperations(),  # pyright: ignore[reportArgumentType]
+        runner_operations=_FakeRunnerOperations(),
         runtime_repository=_FakeRuntimeRepository(runtime),
         session_manager=_session_manager,
     )
@@ -490,7 +495,7 @@ async def test_get_workspace_shows_starting_when_start_requested() -> None:
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
-        runner_operations=_FakeRunnerOperations(),  # pyright: ignore[reportArgumentType]
+        runner_operations=_FakeRunnerOperations(),
         runtime_repository=_FakeRuntimeRepository(runtime),
         session_manager=_session_manager,
     )
@@ -514,7 +519,7 @@ async def test_get_workspace_error_exposes_restart_action() -> None:
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
-        runner_operations=_FakeRunnerOperations(),  # pyright: ignore[reportArgumentType]
+        runner_operations=_FakeRunnerOperations(),
         runtime_repository=_FakeRuntimeRepository(runtime),
         session_manager=_session_manager,
     )
@@ -536,7 +541,7 @@ async def test_read_path_uses_stat_to_return_file_preview() -> None:
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
-        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
         session_manager=_session_manager,
     )
@@ -564,7 +569,7 @@ async def test_download_uses_verified_transfer_not_runner_file_read() -> None:
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
-        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
         session_manager=_session_manager,
         runtime_workspace_download_service=cast(
@@ -603,7 +608,7 @@ async def test_read_path_uses_stat_to_return_directory_listing() -> None:
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
-        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
         session_manager=_session_manager,
     )
@@ -651,7 +656,7 @@ async def test_read_path_marks_git_repository_directories() -> None:
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
-        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
         session_manager=_session_manager,
     )
@@ -679,7 +684,7 @@ async def test_stat_path_returns_inspector_metadata() -> None:
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
-        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
         session_manager=_session_manager,
     )
@@ -705,7 +710,7 @@ async def test_mkdir_path_calls_runner_with_normalized_path() -> None:
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
-        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
         session_manager=_session_manager,
     )
@@ -726,7 +731,7 @@ async def test_delete_path_rejects_workspace_root() -> None:
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
-        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
         session_manager=_session_manager,
     )
@@ -749,7 +754,7 @@ async def test_move_path_rejects_destination_outside_workspace_root() -> None:
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
-        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
         session_manager=_session_manager,
     )
@@ -773,7 +778,7 @@ async def test_move_path_calls_runner_for_rename() -> None:
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
-        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
         session_manager=_session_manager,
     )
@@ -803,7 +808,7 @@ async def test_bulk_delete_paths_calls_runner() -> None:
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
-        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
         session_manager=_session_manager,
     )
@@ -828,7 +833,7 @@ async def test_bulk_move_paths_calls_runner() -> None:
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
-        runner_operations=runner_operations,  # pyright: ignore[reportArgumentType]
+        runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
         session_manager=_session_manager,
     )

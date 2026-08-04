@@ -1,10 +1,13 @@
 """Skill Toolkit tests."""
 
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionRunState
 from azents.core.tools import TurnContext
@@ -18,13 +21,13 @@ from azents.engine.tools.runtime_io import (
     RuntimeFileListEntry,
     RuntimeFileListResult,
     RuntimeFileTextReadResult,
-    RuntimeRunnerOperationClient,
 )
 from azents.engine.tools.skill import (
     SkillProjectionItem,
     SkillProjectionService,
     SkillProjectionSnapshot,
     SkillProjectionState,
+    SkillRuntimeFileReader,
     SkillToolkit,
     load_skill_projection_for_actions,
     make_load_skill_tool,
@@ -80,6 +83,16 @@ def _project(
 async def _noop_publish_event(event: object) -> None:
     """Ignore test-only published events."""
     del event
+
+
+@asynccontextmanager
+async def _session_manager() -> AsyncIterator[AsyncSession]:
+    """Yield one unused but correctly typed test session."""
+    session = AsyncSession()
+    try:
+        yield session
+    finally:
+        await session.close()
 
 
 class _SkillScanRunner:
@@ -154,7 +167,7 @@ class _TestableSkillProjectionService(SkillProjectionService):
     async def scan_runtime_for_test(
         self,
         *,
-        runner_operations: RuntimeRunnerOperationClient,
+        runner_operations: SkillRuntimeFileReader,
         runtime_id: str,
         runner_generation: int,
         owner_session_id: str,
@@ -202,10 +215,25 @@ class _VfsService:
         self.load_calls: list[dict[str, object]] = []
         self.resolve_calls: list[dict[str, object]] = []
 
-    async def resolve_file(self, **kwargs: object) -> VfsResolvedFile:
+    async def resolve_file(
+        self,
+        *,
+        run_id: str,
+        agent_id: str,
+        session_id: str,
+        workspace_id: str,
+        uri: str,
+    ) -> VfsResolvedFile:
         """Resolve one file from the configured projection."""
-        self.resolve_calls.append(kwargs)
-        uri = str(kwargs["uri"])
+        self.resolve_calls.append(
+            {
+                "run_id": run_id,
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "workspace_id": workspace_id,
+                "uri": uri,
+            }
+        )
         entry = self.projection.find(uri)
         if entry is None:
             raise AssertionError(f"Missing fixture URI: {uri}")
@@ -215,25 +243,54 @@ class _VfsService:
             entry=entry,
         )
 
-    async def load_run_projection(self, **kwargs: object) -> VfsProjection:
+    async def load_run_projection(
+        self,
+        *,
+        run_id: str,
+        agent_id: str,
+        session_id: str,
+        workspace_id: str,
+    ) -> VfsProjection:
         """Return one managed projection and capture its authorization identity."""
-        self.load_calls.append(kwargs)
+        self.load_calls.append(
+            {
+                "run_id": run_id,
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "workspace_id": workspace_id,
+            }
+        )
         return self.projection
 
-    async def projection_for_actions(self, **kwargs: object) -> VfsProjection:
+    async def projection_for_actions(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        workspace_id: str,
+        running: bool,
+        active_run_id: str | None,
+    ) -> VfsProjection:
         """Return configured composer projection and capture run identity."""
-        active_run_id = kwargs.get("active_run_id")
-        if active_run_id is not None and not isinstance(active_run_id, str):
-            raise TypeError("active_run_id must be a string")
-        self.action_calls.append((bool(kwargs["running"]), active_run_id))
+        del agent_id, session_id, workspace_id
+        self.action_calls.append((running, active_run_id))
         return self.projection
 
 
 class _UnavailableVfsService:
     """VFS projection test double that simulates an in-progress run."""
 
-    async def projection_for_actions(self, **_kwargs: object) -> VfsProjection:
+    async def projection_for_actions(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        workspace_id: str,
+        running: bool,
+        active_run_id: str | None,
+    ) -> VfsProjection:
         """Report that the current run has not persisted a VFS projection yet."""
+        del agent_id, session_id, workspace_id, running, active_run_id
         raise VfsFileResolutionError(
             "storage_unavailable",
             "Active run VFS projection is unavailable",
@@ -243,8 +300,17 @@ class _UnavailableVfsService:
 class _ForbiddenVfsService:
     """VFS projection test double that rejects access."""
 
-    async def projection_for_actions(self, **_kwargs: object) -> VfsProjection:
+    async def projection_for_actions(
+        self,
+        *,
+        agent_id: str,
+        session_id: str,
+        workspace_id: str,
+        running: bool,
+        active_run_id: str | None,
+    ) -> VfsProjection:
         """Report an authorization failure that must not be hidden."""
+        del agent_id, session_id, workspace_id, running, active_run_id
         raise VfsFileResolutionError(
             "permission_denied",
             "Run VFS projection access denied",
@@ -269,6 +335,17 @@ class _SkillStore:
     ) -> SkillProjectionState:
         """Return configured state after accepting a latest projection adoption."""
         del agent_id, session_id
+        return self.state
+
+    async def replace_latest(
+        self,
+        agent_id: str,
+        session_id: str,
+        snapshot: SkillProjectionSnapshot,
+    ) -> SkillProjectionState:
+        """Replace latest state for projection-service tests."""
+        del agent_id, session_id
+        self.state = self.state.model_copy(update={"latest": snapshot})
         return self.state
 
 
@@ -342,9 +419,9 @@ class TestSkillToolkit:
         projection = _managed_projection()
         service = _VfsService(projection)
         toolkit = SkillToolkit(
-            store=_SkillStore(SkillProjectionState()),  # pyright: ignore[reportArgumentType]
+            store=_SkillStore(SkillProjectionState()),
             projection_service=None,
-            vfs_projection_service=service,  # pyright: ignore[reportArgumentType]
+            vfs_projection_service=service,
             agent_id="agent-1",
             session_id="session-1",
         )
@@ -384,7 +461,7 @@ class TestLoadSkill:
             SkillProjectionState(active=SkillProjectionSnapshot(items=[item]))
         )
         tool = make_load_skill_tool(
-            store=store,  # pyright: ignore[reportArgumentType]
+            store=store,
             vfs_projection_service=None,
             agent_id="agent-1",
             session_id="session-1",
@@ -407,8 +484,8 @@ class TestLoadSkill:
         store = _SkillStore(SkillProjectionState())
         skill_uri = "azents://skills/azents/review/SKILL.md"
         tool = make_load_skill_tool(
-            store=store,  # pyright: ignore[reportArgumentType]
-            vfs_projection_service=service,  # pyright: ignore[reportArgumentType]
+            store=store,
+            vfs_projection_service=service,
             agent_id="agent-1",
             session_id="session-1",
             workspace_id="workspace-1",
@@ -428,7 +505,7 @@ class TestLoadSkill:
         """Tool fails fast without runtime fallback when path is absent."""
         store = _SkillStore(SkillProjectionState())
         tool = make_load_skill_tool(
-            store=store,  # pyright: ignore[reportArgumentType]
+            store=store,
             vfs_projection_service=None,
             agent_id="agent-1",
             session_id="session-1",
@@ -450,7 +527,7 @@ class TestLoadSkill:
             )
         )
         tool = make_load_skill_tool(
-            store=store,  # pyright: ignore[reportArgumentType]
+            store=store,
             vfs_projection_service=None,
             agent_id="agent-1",
             session_id="session-1",
@@ -484,12 +561,12 @@ class TestSkillProjectionService:
             },
         )
         service = _TestableSkillProjectionService(
-            store=object(),  # pyright: ignore[reportArgumentType]
-            session_manager=object(),  # pyright: ignore[reportArgumentType]
+            store=_SkillStore(SkillProjectionState()),
+            session_manager=_session_manager,
         )
 
         items = await service.scan_runtime_for_test(
-            runner_operations=runner,  # pyright: ignore[reportArgumentType]
+            runner_operations=runner,
             runtime_id="runtime-1",
             runner_generation=1,
             owner_session_id="session-1",
@@ -519,12 +596,12 @@ class TestSkillProjectionService:
             files={agents_skill_path: body, claude_skill_path: body},
         )
         service = _TestableSkillProjectionService(
-            store=object(),  # pyright: ignore[reportArgumentType]
-            session_manager=object(),  # pyright: ignore[reportArgumentType]
+            store=_SkillStore(SkillProjectionState()),
+            session_manager=_session_manager,
         )
 
         items = await service.scan_runtime_for_test(
-            runner_operations=runner,  # pyright: ignore[reportArgumentType]
+            runner_operations=runner,
             runtime_id="runtime-1",
             runner_generation=1,
             owner_session_id="session-1",
@@ -546,9 +623,9 @@ class TestSkillProjectionService:
         """Skill projection changes notify clients to reload input actions."""
         broadcast = _Broadcast()
         service = SkillProjectionService(
-            store=object(),  # pyright: ignore[reportArgumentType]
-            session_manager=object(),  # pyright: ignore[reportArgumentType]
-            broadcast=broadcast,  # pyright: ignore[reportArgumentType]
+            store=_SkillStore(SkillProjectionState()),
+            session_manager=_session_manager,
+            broadcast=broadcast,
         )
 
         await service.publish_input_actions_updated("session-1")
@@ -596,8 +673,8 @@ class TestSkillAction:
         service = _VfsService(_managed_projection())
 
         snapshot = await load_skill_projection_for_actions(
-            store,  # pyright: ignore[reportArgumentType]
-            vfs_projection_service=service,  # pyright: ignore[reportArgumentType]
+            store,
+            vfs_projection_service=service,
             agent_id="agent-1",
             session_id="session-1",
             workspace_id="workspace-1",
@@ -622,8 +699,8 @@ class TestSkillAction:
         )
 
         snapshot = await load_skill_projection_for_actions(
-            store,  # pyright: ignore[reportArgumentType]
-            vfs_projection_service=_UnavailableVfsService(),  # pyright: ignore[reportArgumentType]
+            store,
+            vfs_projection_service=_UnavailableVfsService(),
             agent_id="agent-1",
             session_id="session-1",
             workspace_id="workspace-1",
@@ -640,8 +717,8 @@ class TestSkillAction:
 
         with pytest.raises(VfsFileResolutionError, match="access denied"):
             await load_skill_projection_for_actions(
-                store,  # pyright: ignore[reportArgumentType]
-                vfs_projection_service=_ForbiddenVfsService(),  # pyright: ignore[reportArgumentType]
+                store,
+                vfs_projection_service=_ForbiddenVfsService(),
                 agent_id="agent-1",
                 session_id="session-1",
                 workspace_id="workspace-1",
