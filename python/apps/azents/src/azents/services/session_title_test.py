@@ -65,6 +65,7 @@ from azents.services.session_title import (
 )
 from azents.testing.model_selection import make_test_model_settings
 from azents.testing.model_stream import make_test_model_stream_watchdog
+from azents.testing.types import is_string_object_dict
 
 
 class TestSessionTitleHelpers:
@@ -564,8 +565,10 @@ class TestSessionTitleHelpers:
         assert title == "OpenRouter title"
         assert calls[0]["extra_body"] == {"provider": {"require_parameters": True}}
         text = calls[0]["text"]
-        assert isinstance(text, dict)
-        assert text["format"]["type"] == "json_schema"
+        assert is_string_object_dict(text)
+        text_format = text["format"]
+        assert is_string_object_dict(text_format)
+        assert text_format["type"] == "json_schema"
         instructions = calls[0]["instructions"]
         assert isinstance(instructions, str)
         assert "title as plain text" not in instructions

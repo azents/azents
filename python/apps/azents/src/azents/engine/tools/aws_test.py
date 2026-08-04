@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.tools import AwsToolkitConfig, ToolkitState, TurnContext
 from azents.engine.tooling.toolkit_state import ToolkitStateIdentity
 from azents.engine.tools.aws import AwsCredentialProvider, AwsToolkit
+from azents.testing.types import is_object_factory
 
 
 class _FakeToolkitStateHandle:
@@ -30,7 +31,8 @@ class _FakeToolkitStateHandle:
         """Load state from in-memory store."""
         key = self._key()
         if key not in self._states:
-            return default_factory()  # type: ignore[operator]
+            assert is_object_factory(default_factory)
+            return default_factory()
         return self._states[key]
 
     async def save(self, state: object) -> object:

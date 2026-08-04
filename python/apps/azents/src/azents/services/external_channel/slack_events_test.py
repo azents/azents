@@ -45,6 +45,7 @@ from azents.services.external_channel.slack_events import (
     slack_message_reference_ids,
     slack_provider_position,
 )
+from azents.testing.types import is_string_object_dict
 
 
 def _encoded_sdk_params(
@@ -380,13 +381,21 @@ def test_normalizes_bounded_file_metadata_and_fail_closed_modes() -> None:
     assert isinstance(projected, list)
     assert len(projected) == 20
     assert normalized.attachment_metadata["files_truncated"] is True
-    assert projected[0]["supported"] is True
-    assert projected[0]["unsupported_reason"] is None
-    assert projected[1]["unsupported_reason"] == "external_file"
-    assert projected[2]["unsupported_reason"] == "slack_connect_file"
-    assert projected[3]["unsupported_reason"] == "sparse_file"
-    assert projected[4]["unsupported_reason"] == "unsupported_mode"
-    assert projected[5]["unsupported_reason"] == "invalid_size"
+    first_six = projected[:6]
+    first, second, third, fourth, fifth, sixth = first_six
+    assert is_string_object_dict(first)
+    assert is_string_object_dict(second)
+    assert is_string_object_dict(third)
+    assert is_string_object_dict(fourth)
+    assert is_string_object_dict(fifth)
+    assert is_string_object_dict(sixth)
+    assert first["supported"] is True
+    assert first["unsupported_reason"] is None
+    assert second["unsupported_reason"] == "external_file"
+    assert third["unsupported_reason"] == "slack_connect_file"
+    assert fourth["unsupported_reason"] == "sparse_file"
+    assert fifth["unsupported_reason"] == "unsupported_mode"
+    assert sixth["unsupported_reason"] == "invalid_size"
     assert "url_private" not in repr(projected)
     assert "must not survive" not in repr(projected)
 
@@ -791,8 +800,10 @@ async def test_thread_page_uses_cursor_and_normalizes_messages() -> None:
     assert page.messages[0].attachment_metadata is not None
     files = page.messages[0].attachment_metadata["files"]
     assert isinstance(files, list)
-    assert files[0]["provider_file_id"] == "F1"
-    assert files[0]["supported"] is True
+    first_file = files[0]
+    assert is_string_object_dict(first_file)
+    assert first_file["provider_file_id"] == "F1"
+    assert first_file["supported"] is True
     assert "url_private" not in repr(files)
     assert requests[0].url.params["cursor"] == "cursor-1"
     assert requests[0].headers["Authorization"] == "Bearer xoxb-secret"

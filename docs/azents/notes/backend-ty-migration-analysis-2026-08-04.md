@@ -94,3 +94,34 @@ The phase reduces the baseline from 948 to 911 diagnostics:
 The remaining diagnostics require typed fixture correction, union narrowing,
 third-party interface modeling, or dynamic-data validation and are intentionally
 outside this mechanical phase.
+
+## Phase 2: Test Narrowing and Stream Cleanup
+
+The second phase starts from `main` commit `bb803e99f`, where unrelated merged work
+increased the baseline from 911 to 913 diagnostics.
+
+This phase:
+
+- Narrows dynamic dictionaries, list elements, strings, and callable factories in
+  tests before using their typed operations.
+- Uses shared TypeGuard helpers for reusable string-keyed dictionary and factory
+  checks.
+- Closes Runtime Control test streams through a helper that verifies the concrete
+  value is an `AsyncGenerator` before calling `aclose()`.
+- Preserves the production gRPC interface as `AsyncIterator`; generated protobuf and
+  gRPC files remain unchanged.
+
+### Phase 2 Result
+
+The phase reduces the current-main baseline from 913 to 862 diagnostics:
+
+- Runtime Control stream `aclose` diagnostics: 27 to 0
+- Test-only `not-subscriptable` diagnostics: 16 to 0
+- `call-non-callable` diagnostics: 6 to 0
+- `unsupported-operator` diagnostics: 1 to 0
+- Pyright: 0 errors
+- Targeted tests: 402 passed
+- Backend tests: 3,889 passed
+
+The two remaining `not-subscriptable` diagnostics are production validation issues
+in `runtime_provider_contract.py` and remain outside this test-focused phase.

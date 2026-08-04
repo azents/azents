@@ -2,7 +2,7 @@
 
 import asyncio
 import datetime
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import cast
@@ -416,13 +416,19 @@ async def test_retryable_ingestion_releases_degraded_after_sdk_lifecycle(
     release = AsyncMock(return_value=True)
 
     class _RetryableRunner:
-        def __init__(self, **kwargs: object) -> None:
-            self.report_active = kwargs["report_active"]
-            self.report_gap = kwargs["report_gap"]
+        def __init__(
+            self,
+            *,
+            report_active: Callable[[], Awaitable[object]],
+            report_gap: Callable[[str], Awaitable[object]],
+            **_: object,
+        ) -> None:
+            self.report_active = report_active
+            self.report_gap = report_gap
 
         async def run_connection(self, **_: object) -> None:
-            await self.report_gap("socket_connecting")  # type: ignore[operator]
-            await self.report_active()  # type: ignore[operator]
+            await self.report_gap("socket_connecting")
+            await self.report_active()
             raise SlackSocketRetryableIngestion("retryable")
 
     monkeypatch.setattr(service, "_claim", claim)
