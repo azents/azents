@@ -792,7 +792,7 @@ class McpBasedToolkit(Toolkit[McpConfigT], ABC, Generic[McpConfigT]):
             if item.model_name != item.raw_name:
                 tool = dataclasses.replace(
                     tool,
-                    spec=dataclasses.replace(tool.spec, name=item.model_name),
+                    spec=tool.spec.model_copy(update={"name": item.model_name}),
                 )
             tools.append(tool)
         return tools

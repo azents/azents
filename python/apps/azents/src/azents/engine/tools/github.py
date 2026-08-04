@@ -696,7 +696,7 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
             if item.model_name != item.raw_name:
                 tool = replace(
                     tool,
-                    spec=replace(tool.spec, name=item.model_name),
+                    spec=tool.spec.model_copy(update={"name": item.model_name}),
                 )
             tools.append(tool)
         return tools
