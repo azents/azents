@@ -12,6 +12,7 @@ from openai.types.responses.response_text_config_param import ResponseTextConfig
 from pydantic import TypeAdapter
 
 from azents.core.enums import LLMProvider
+from azents.core.type_guards import is_string_object_dict, is_string_string_dict
 from azents.engine.events.litellm_responses import guard_litellm_streaming_logging
 from azents.engine.model_stream import (
     ModelStreamCallContext,
@@ -248,7 +249,7 @@ def extract_message_item_text(item: dict[str, object]) -> str:
 
 def model_dump(item: object) -> dict[str, object]:
     """Convert Pydantic/dict response item to dict."""
-    if isinstance(item, dict):
+    if is_string_object_dict(item):
         return item
     if isinstance(item, _ModelDumpable):
         return item.model_dump(mode="python")
@@ -400,9 +401,7 @@ def _optional_headers(value: object) -> dict[str, str] | None:
     """Validate optional credential headers."""
     if value is None:
         return None
-    if not isinstance(value, dict) or not all(
-        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
-    ):
+    if not is_string_string_dict(value):
         raise TypeError("extra_headers must be dict[str, str]")
     return dict(value)
 

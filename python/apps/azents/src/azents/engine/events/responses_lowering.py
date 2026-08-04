@@ -12,6 +12,7 @@ from openai.types.responses.response_includable import ResponseIncludable
 
 from azents.core.enums import EventKind, LLMModelDeveloper, LLMProvider
 from azents.core.llm_catalog import ModelCapabilities
+from azents.core.type_guards import is_string_object_dict
 from azents.engine.events.external_channel_rendering import (
     render_external_channel_message,
     render_external_channel_turn,
@@ -815,7 +816,7 @@ def _set_item_cache_control_if_absent(item: dict[str, object]) -> bool:
         return True
     if isinstance(content, list) and content:
         last_part = content[-1]
-        if isinstance(last_part, dict):
+        if is_string_object_dict(last_part):
             return _set_cache_control_if_absent(last_part)
     return False
 

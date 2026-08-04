@@ -7,6 +7,7 @@ from typing import ClassVar, Literal
 from azcommon.uuid import uuid7
 
 from azents.core.enums import EventKind
+from azents.core.type_guards import is_string_object_dict
 from azents.engine.events.protocols import (
     CompletedAdapterOutput,
     ContentDeltaProjection,
@@ -959,7 +960,7 @@ def _extract_reasoning_part_text(item: dict[str, object], key: str) -> str:
 
 def response_item_dict(value: object) -> dict[str, object]:
     """Safely return dict value."""
-    if isinstance(value, dict):
+    if is_string_object_dict(value):
         return value
     return {}
 

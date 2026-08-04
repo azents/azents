@@ -9,6 +9,11 @@ import time
 import httpx
 import jwt
 
+from azents.core.type_guards import (
+    is_string_object_dict,
+    is_string_object_dict_list,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -118,7 +123,7 @@ async def list_user_installations(
         response.raise_for_status()
         data: dict[str, object] = response.json()
         installations = data.get("installations")
-        if not isinstance(installations, list):
+        if not is_string_object_dict_list(installations):
             return []
         return installations
 
@@ -145,7 +150,7 @@ async def list_installations(jwt_token: str) -> list[dict[str, object]]:
         )
         response.raise_for_status()
         data: object = response.json()
-        if not isinstance(data, list):
+        if not is_string_object_dict_list(data):
             return []
         return data
 
@@ -204,7 +209,7 @@ async def get_installation(jwt_token: str, installation_id: str) -> dict[str, ob
         )
         response.raise_for_status()
         data: object = response.json()
-        if not isinstance(data, dict):
+        if not is_string_object_dict(data):
             return {}
         return data
 
