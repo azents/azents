@@ -718,8 +718,14 @@ def _coerce_paths_value(value: object) -> list[str] | None:
     if isinstance(value, str):
         stripped = value.strip()
         return [stripped] if stripped else None
-    if isinstance(value, list) and all(isinstance(item, str) for item in value):
-        patterns = [item.strip() for item in value if item.strip()]
+    if isinstance(value, list):
+        patterns: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                return None
+            stripped = item.strip()
+            if stripped:
+                patterns.append(stripped)
         return patterns or None
     return None
 
