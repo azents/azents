@@ -1,8 +1,5 @@
 """gRPC Runtime transfer coordinator client tests."""
 
-# pyright: reportAttributeAccessIssue=false
-# Protobuf generated modules expose dynamic message attributes.
-
 import dataclasses
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
@@ -63,7 +60,7 @@ class FakeCoordinatorStub:
         request: Message,
         *,
         metadata: Sequence[tuple[str, str]],
-    ) -> Message:
+    ) -> runtime_transfer_coordinator_pb2.AdmitTransferResponse:
         """Return an admission response.
 
         :param request: admission request
@@ -85,7 +82,7 @@ class FakeCoordinatorStub:
         request: Message,
         *,
         metadata: Sequence[tuple[str, str]],
-    ) -> Message:
+    ) -> runtime_transfer_coordinator_pb2.TransferStatusResponse:
         """Return a status response.
 
         :param request: ready request
@@ -99,7 +96,7 @@ class FakeCoordinatorStub:
         request: Message,
         *,
         metadata: Sequence[tuple[str, str]],
-    ) -> Message:
+    ) -> runtime_transfer_coordinator_pb2.TransferStatusResponse:
         """Return a status response.
 
         :param request: dispatch request
@@ -113,7 +110,7 @@ class FakeCoordinatorStub:
         request: Message,
         *,
         metadata: Sequence[tuple[str, str]],
-    ) -> Message:
+    ) -> runtime_transfer_coordinator_pb2.TransferStatusResponse:
         """Return a status response.
 
         :param request: cancellation request
@@ -127,7 +124,7 @@ class FakeCoordinatorStub:
         request: Message,
         *,
         metadata: Sequence[tuple[str, str]],
-    ) -> Message:
+    ) -> runtime_transfer_coordinator_pb2.GetVerifiedObjectResponse:
         """Return a verified-object response.
 
         :param request: verified-object request
@@ -153,7 +150,7 @@ class FakeCoordinatorStub:
         request: Message,
         *,
         metadata: Sequence[tuple[str, str]],
-    ) -> Message:
+    ) -> runtime_transfer_coordinator_pb2.TransferStatusResponse:
         """Return a status response.
 
         :param request: consumer claim request
@@ -167,7 +164,7 @@ class FakeCoordinatorStub:
         request: Message,
         *,
         metadata: Sequence[tuple[str, str]],
-    ) -> Message:
+    ) -> runtime_transfer_coordinator_pb2.TransferStatusResponse:
         """Return a status response."""
         return self._status("RenewConsumerLease", request, metadata)
 
@@ -176,7 +173,7 @@ class FakeCoordinatorStub:
         request: Message,
         *,
         metadata: Sequence[tuple[str, str]],
-    ) -> Message:
+    ) -> runtime_transfer_coordinator_pb2.TransferStatusResponse:
         """Return a status response.
 
         :param request: consumer acknowledgement request
@@ -190,7 +187,7 @@ class FakeCoordinatorStub:
         request: Message,
         *,
         metadata: Sequence[tuple[str, str]],
-    ) -> Message:
+    ) -> runtime_transfer_coordinator_pb2.TransferStatusResponse:
         """Return a status response.
 
         :param request: consumer abandonment request
@@ -204,7 +201,7 @@ class FakeCoordinatorStub:
         request: Message,
         *,
         metadata: Sequence[tuple[str, str]],
-    ) -> Message:
+    ) -> runtime_transfer_coordinator_pb2.TransferStatusResponse:
         """Return a status response.
 
         :param request: settlement request
@@ -218,7 +215,7 @@ class FakeCoordinatorStub:
         request: Message,
         *,
         metadata: Sequence[tuple[str, str]],
-    ) -> Message:
+    ) -> runtime_transfer_coordinator_pb2.TransferStatusResponse:
         """Return a status response.
 
         :param request: cleanup request
@@ -227,12 +224,39 @@ class FakeCoordinatorStub:
         """
         return self._status("RecordCleanup", request, metadata)
 
+    async def RegisterPreparationCleanup(
+        self,
+        request: Message,
+        *,
+        metadata: Sequence[tuple[str, str]],
+    ) -> runtime_transfer_coordinator_pb2.TransferStatusResponse:
+        """Return a status response."""
+        return self._status("RegisterPreparationCleanup", request, metadata)
+
+    async def PromotePreparationCleanup(
+        self,
+        request: Message,
+        *,
+        metadata: Sequence[tuple[str, str]],
+    ) -> runtime_transfer_coordinator_pb2.TransferStatusResponse:
+        """Return a status response."""
+        return self._status("PromotePreparationCleanup", request, metadata)
+
+    async def ClearPreparationCleanup(
+        self,
+        request: Message,
+        *,
+        metadata: Sequence[tuple[str, str]],
+    ) -> runtime_transfer_coordinator_pb2.TransferStatusResponse:
+        """Return a status response."""
+        return self._status("ClearPreparationCleanup", request, metadata)
+
     async def GetTransferStatus(
         self,
         request: Message,
         *,
         metadata: Sequence[tuple[str, str]],
-    ) -> Message:
+    ) -> runtime_transfer_coordinator_pb2.TransferStatusResponse:
         """Return a status response.
 
         :param request: status request
@@ -246,7 +270,7 @@ class FakeCoordinatorStub:
         operation: str,
         request: Message,
         metadata: Sequence[tuple[str, str]],
-    ) -> Message:
+    ) -> runtime_transfer_coordinator_pb2.TransferStatusResponse:
         self.calls.append((operation, request, metadata))
         return runtime_transfer_coordinator_pb2.TransferStatusResponse(
             status=_status_message()

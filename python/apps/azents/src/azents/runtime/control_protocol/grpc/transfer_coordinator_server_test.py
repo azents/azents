@@ -1,8 +1,9 @@
 """Runtime transfer coordinator gRPC socket-boundary tests."""
 
+from __future__ import annotations
+
 # pyright: reportAttributeAccessIssue=false
 # Protobuf generated modules expose dynamic message/RPC attributes.
-
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
@@ -253,7 +254,7 @@ async def _server(
 ) -> tuple[
     grpc.aio.Server,
     grpc.aio.Channel,
-    pb_grpc.RuntimeTransferCoordinatorStub,
+    pb_grpc.RuntimeTransferCoordinatorAsyncStub,
     RuntimeTransferCoordinatorCredentialSupplier,
 ]:
     server = grpc.aio.server()

@@ -1,8 +1,5 @@
 """Runner transfer shared value validation tests."""
 
-# pyright: reportAttributeAccessIssue=false
-# Protobuf generated modules expose dynamic message attributes.
-
 from datetime import UTC, datetime
 
 import pytest
@@ -126,7 +123,7 @@ def test_transfer_intent_maps_absent_optional_fields_to_none() -> None:
     ],
 )
 def test_transfer_cancel_maps_each_reason(
-    proto_reason: int,
+    proto_reason: runtime_runner_control_pb2.RunnerTransferCancelReason.ValueType,
     reason: RunnerTransferCancelReason,
 ) -> None:
     """Map every bounded protobuf cancellation reason."""

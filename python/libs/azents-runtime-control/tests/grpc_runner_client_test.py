@@ -1,8 +1,5 @@
 """gRPC Runner Control client tests."""
 
-# pyright: reportAttributeAccessIssue=false
-# protobuf generated modules expose dynamic message attributes.
-
 import asyncio
 from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime

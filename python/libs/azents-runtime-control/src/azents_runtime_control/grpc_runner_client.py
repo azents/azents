@@ -1,13 +1,10 @@
 """gRPC Runner Control client for Runtime Runner processes."""
 
-# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
-# protobuf generated modules expose dynamic message attributes.
-
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterable, AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import grpc
 from google.protobuf import timestamp_pb2
@@ -19,7 +16,6 @@ from azents_runtime_control.grpc_tls import (
 from azents_runtime_control.proto import (
     runtime_configuration_pb2,
     runtime_runner_control_pb2,
-    runtime_runner_control_pb2_grpc,
     runtime_runner_transfer_pb2,
 )
 from azents_runtime_control.runner import (
@@ -52,6 +48,15 @@ from azents_runtime_control.runner_transfer import (
 )
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 
+if TYPE_CHECKING:
+    from azents_runtime_control.proto.runtime_runner_control_pb2_grpc import (
+        RuntimeRunnerControlAsyncStub as _RuntimeRunnerControlStub,
+    )
+else:
+    from azents_runtime_control.proto.runtime_runner_control_pb2_grpc import (
+        RuntimeRunnerControlStub as _RuntimeRunnerControlStub,
+    )
+
 
 class RunnerControlStream(Protocol):
     """Callable gRPC stream constructor."""
@@ -62,7 +67,7 @@ class RunnerControlStream(Protocol):
         /,
         *,
         metadata: Sequence[tuple[str, str]] | None = None,
-    ) -> AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage]:
+    ) -> AsyncIterable[runtime_runner_control_pb2.RunnerControlMessage]:
         """Open a bidirectional Runtime Control stream."""
         ...
 
@@ -123,7 +128,7 @@ class GrpcRunnerControlClient(RunnerControlClient):
             allow_insecure=allow_insecure,
             options=(("grpc.use_local_subchannel_pool", 1),),
         )
-        stub = runtime_runner_control_pb2_grpc.RuntimeRunnerControlStub(channel)
+        stub = _RuntimeRunnerControlStub(channel)
         return cls(
             stub.ConnectRunner,
             channel=channel,
@@ -313,7 +318,7 @@ class GrpcRunnerControlClient(RunnerControlClient):
 
     async def _receive(
         self,
-        responses: AsyncIterator[runtime_runner_control_pb2.RunnerControlMessage],
+        responses: AsyncIterable[runtime_runner_control_pb2.RunnerControlMessage],
     ) -> None:
         try:
             async for message in responses:
@@ -502,7 +507,7 @@ def _operation(
             )
             for chunk in operation.body_chunks
         ),
-        deadline_at=_optional_datetime(operation, "deadline_at"),
+        deadline_at=_optional_datetime(operation),
     )
 
 
@@ -1483,9 +1488,8 @@ def _datetime(value: timestamp_pb2.Timestamp) -> datetime:
 
 def _optional_datetime(
     message: runtime_runner_control_pb2.RunnerOperationRequest,
-    field_name: str,
 ) -> datetime | None:
-    if not message.HasField(field_name):
+    if not message.HasField("deadline_at"):
         return None
     return _datetime(message.deadline_at)
 
@@ -1664,7 +1668,9 @@ def _transfer_identity(
     )
 
 
-def _transfer_direction(value: int) -> RunnerTransferDirection:
+def _transfer_direction(
+    value: runtime_runner_transfer_pb2.TransferDirection.ValueType,
+) -> RunnerTransferDirection:
     return {
         runtime_runner_transfer_pb2.TRANSFER_DIRECTION_DOWNLOAD: (
             RunnerTransferDirection.DOWNLOAD
@@ -1675,7 +1681,9 @@ def _transfer_direction(value: int) -> RunnerTransferDirection:
     }[value]
 
 
-def _transfer_failure(value: int) -> RunnerTransferFailure:
+def _transfer_failure(
+    value: runtime_runner_control_pb2.RunnerTransferFailure.ValueType,
+) -> RunnerTransferFailure:
     return {
         runtime_runner_control_pb2.RUNNER_TRANSFER_FAILURE_UNAVAILABLE: (
             RunnerTransferFailure.UNAVAILABLE

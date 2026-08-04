@@ -48,7 +48,7 @@ code_paths:
   - typescript/apps/azents-admin-web/src/features/runtime-providers/**
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
   - typescript/apps/azents-web/src/features/runtime-profiles/**
-last_verified_at: 2026-08-03
+last_verified_at: 2026-08-04
 spec_version: 15
 ---
 

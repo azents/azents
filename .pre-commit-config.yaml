@@ -64,6 +64,36 @@ repos:
             python/libs/az-common/.*|
             (?!)
           )$
+  # azents-runtime-control
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.11.0
+    hooks:
+      - id: uv-lock
+        files: \/pyproject\.toml$
+        args: [--project, python/libs/azents-runtime-control]
+  - repo: local
+    hooks:
+      - id: generate-azents-runtime-control-proto
+        name: Generate azents-runtime-control protobuf code
+        language: unsupported
+        entry: bash -c 'cd python/libs/azents-runtime-control && uv run python scripts/generate_proto.py'
+        files: |
+          (?x)^(
+            proto/azents/runtime_control/.*|
+            python/libs/azents-runtime-control/(pyproject\.toml|uv\.lock|scripts/generate_proto\.py|src/azents_runtime_control/proto/.*)|
+            (?!)
+          )$
+        pass_filenames: false
+      - id: ty-azents-runtime-control
+        name: Run ty in azents-runtime-control
+        language: unsupported
+        entry: bash -c 'cd python/libs/azents-runtime-control && uv run ty check --error-on-warning'
+        files: |
+          (?x)^(
+            proto/azents/runtime_control/.*|
+            python/libs/azents-runtime-control/.*|
+            (?!)
+          )$
   # azents
   - repo: local
     hooks:

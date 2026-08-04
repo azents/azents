@@ -15,7 +15,7 @@ $ uv run pytest
 Run the configured type checker for the subproject:
 
 ```console
-$ uv run pyright                         # azents, azents-runtime-control
+$ uv run pyright                         # azents
 $ uv run ty check --error-on-warning     # other maintained Python projects
 ```
 
