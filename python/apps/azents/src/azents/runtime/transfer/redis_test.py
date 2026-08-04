@@ -28,6 +28,7 @@ from azents.runtime.transfer.redis import (
     _RedisTransferRecordEnvelope,  # pyright: ignore[reportPrivateUsage]  # Private test seam.
     _terminal_bucket_epochs,  # pyright: ignore[reportPrivateUsage]  # Private test seam.
 )
+from azents.testing.types import is_string_object_dict
 
 _NOW = datetime(2026, 7, 25, 12, tzinfo=timezone(timedelta(hours=9)))
 _DIGEST = "a" * 64
@@ -105,14 +106,14 @@ def _json_payload(record: RuntimeTransferRecord) -> dict[str, object]:
 def _record_value(payload: dict[str, object]) -> dict[str, object]:
     """Return the nested record object for one test payload."""
     record = payload["record"]
-    assert isinstance(record, dict)
+    assert is_string_object_dict(record)
     return record
 
 
 def _admission_value(payload: dict[str, object]) -> dict[str, object]:
     """Return the nested admission object for one test payload."""
     admission = _record_value(payload)["admission"]
-    assert isinstance(admission, dict)
+    assert is_string_object_dict(admission)
     return admission
 
 
@@ -169,7 +170,7 @@ def test_record_envelope_round_trips_all_public_and_private_evidence() -> None:
 
     assert len(encoded) <= _MAX_SERIALIZED_RECORD_BYTES
     decoded_json: object = json.loads(encoded)
-    assert isinstance(decoded_json, dict)
+    assert is_string_object_dict(decoded_json)
     assert set(decoded_json) == {"private", "record", "version"}
     assert decoded_json["private"] == {"admission_released": True}
     assert _decode_record_envelope(encoded) == _RedisTransferRecordEnvelope(

@@ -15,7 +15,7 @@ from collections.abc import (
     Sequence,
 )
 from types import SimpleNamespace
-from typing import Any, Literal, Protocol, TypedDict, runtime_checkable
+from typing import Any, Literal, Protocol, TypedDict, TypeGuard, runtime_checkable
 
 from litellm import completion_cost
 from litellm.types.llms.openai import ResponsesAPIResponse
@@ -2038,9 +2038,7 @@ def _optional_credential_string(
 def _optional_credential_headers(value: object) -> dict[str, str] | None:
     if value is None:
         return None
-    if not isinstance(value, dict) or not all(
-        isinstance(key, str) and isinstance(item, str) for key, item in value.items()
-    ):
+    if not _is_string_string_dict(value):
         raise TypeError("OpenAI client extra_headers must be dict[str, str]")
     return dict(value)
 
@@ -2059,7 +2057,7 @@ def _openai_custom_headers_from_environment() -> dict[str, str] | None:
 
 
 def _optional_str(
-    options: OpenAIResponsesOptions,
+    options: Mapping[str, object],
     key: str,
 ) -> str | None | Omit:
     if key not in options:
@@ -2071,7 +2069,7 @@ def _optional_str(
 
 
 def _optional_int(
-    options: OpenAIResponsesOptions,
+    options: Mapping[str, object],
     key: str,
 ) -> int | None | Omit:
     if key not in options:
@@ -2083,7 +2081,7 @@ def _optional_int(
 
 
 def _optional_bool(
-    options: OpenAIResponsesOptions,
+    options: Mapping[str, object],
     key: str,
 ) -> bool | None | Omit:
     if key not in options:
@@ -2095,7 +2093,7 @@ def _optional_bool(
 
 
 def _optional_float(
-    options: OpenAIResponsesOptions,
+    options: Mapping[str, object],
     key: str,
 ) -> float | None | Omit:
     if key not in options:
@@ -2109,7 +2107,7 @@ def _optional_float(
 
 
 def _optional_reasoning(
-    options: OpenAIResponsesOptions,
+    options: Mapping[str, object],
     key: str,
 ) -> Reasoning | None | Omit:
     if key not in options:
@@ -2124,7 +2122,7 @@ def _optional_reasoning(
 
 
 def _optional_include(
-    options: OpenAIResponsesOptions,
+    options: Mapping[str, object],
     key: str,
 ) -> list[ResponseIncludable] | None | Omit:
     if key not in options:
@@ -2136,7 +2134,7 @@ def _optional_include(
 
 
 def _optional_text(
-    options: OpenAIResponsesOptions,
+    options: Mapping[str, object],
     key: str,
 ) -> ResponseTextConfigParam | None | Omit:
     if key not in options:
@@ -2148,7 +2146,7 @@ def _optional_text(
 
 
 def _optional_object(
-    options: OpenAIResponsesOptions,
+    options: Mapping[str, object],
     key: str,
 ) -> object | Omit:
     if key not in options:
@@ -2157,7 +2155,7 @@ def _optional_object(
 
 
 def _optional_service_tier(
-    options: OpenAIResponsesOptions,
+    options: Mapping[str, object],
     key: str,
 ) -> str | None | Omit:
     if key not in options:
@@ -2169,7 +2167,7 @@ def _optional_service_tier(
 
 
 def _optional_headers(
-    options: OpenAIResponsesOptions,
+    options: Mapping[str, object],
     key: str,
 ) -> dict[str, str] | None:
     if key not in options:
@@ -2177,11 +2175,16 @@ def _optional_headers(
     value = options[key]
     if value is None:
         return None
-    if not isinstance(value, dict) or not all(
-        isinstance(name, str) and isinstance(item, str) for name, item in value.items()
-    ):
+    if not _is_string_string_dict(value):
         raise TypeError("OpenAI Responses extra_headers must be dict[str, str]")
     return dict(value)
+
+
+def _is_string_string_dict(value: object) -> TypeGuard[dict[str, str]]:
+    """Return whether a value is a dictionary with string keys and values."""
+    return isinstance(value, dict) and all(
+        isinstance(name, str) and isinstance(item, str) for name, item in value.items()
+    )
 
 
 def _stop_extra_body(options: OpenAIResponsesOptions) -> dict[str, object] | None:

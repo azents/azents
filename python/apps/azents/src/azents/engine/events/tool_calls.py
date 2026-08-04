@@ -17,9 +17,20 @@ from azents.repos.agent_execution.data import EventCreate
 class ToolCallIdentity(Protocol):
     """Minimal admitted call identity needed for terminal finalization."""
 
-    call_id: str
-    name: str
-    wire_dialect: ClientToolWireDialect
+    @property
+    def call_id(self) -> str:
+        """Return the admitted tool call identifier."""
+        ...
+
+    @property
+    def name(self) -> str:
+        """Return the admitted tool name."""
+        ...
+
+    @property
+    def wire_dialect(self) -> ClientToolWireDialect:
+        """Return the admitted provider wire dialect."""
+        ...
 
 
 def tool_call_external_id(run_id: str, call_id: str) -> str:

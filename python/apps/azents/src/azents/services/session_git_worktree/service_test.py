@@ -102,6 +102,7 @@ from azents.services.session_git_worktree import (
 )
 from azents.services.session_workspace_project import InvalidProjectPath
 from azents.testing.model_selection import make_test_model_selection_dict
+from azents.testing.types import is_string_object_dict
 
 _TEST_INFERENCE_PROFILE = RequestedInferenceProfile(
     model_target_label="Primary",
@@ -945,7 +946,7 @@ class TestSessionGitWorktreeService:
         payload = terminal_events[0].payload
         assert isinstance(payload, ActionExecutionResultPayload)
         execution_value = payload.action_execution["execution"]
-        assert isinstance(execution_value, dict)
+        assert is_string_object_dict(execution_value)
         assert execution_value["action_type"] == action.type
         assert execution_value["status"] == "completed"
         assert execution_value["result"] == {
@@ -1013,7 +1014,7 @@ class TestSessionGitWorktreeService:
         payload = terminal_events[0].payload
         assert isinstance(payload, ActionExecutionResultPayload)
         execution_value = payload.action_execution["execution"]
-        assert isinstance(execution_value, dict)
+        assert is_string_object_dict(execution_value)
         assert execution_value["status"] == "failed"
         assert execution_value["result"] == {
             "phase": "failed",
@@ -1079,7 +1080,7 @@ class TestSessionGitWorktreeService:
         payload = terminal_events[0].payload
         assert isinstance(payload, ActionExecutionResultPayload)
         execution_value = payload.action_execution["execution"]
-        assert isinstance(execution_value, dict)
+        assert is_string_object_dict(execution_value)
         assert execution_value["status"] == "failed"
         assert execution_value["result"] == {
             "phase": "failed",
@@ -1154,7 +1155,7 @@ class TestSessionGitWorktreeService:
         payload = terminal_events[0].payload
         assert isinstance(payload, ActionExecutionResultPayload)
         execution_value = payload.action_execution["execution"]
-        assert isinstance(execution_value, dict)
+        assert is_string_object_dict(execution_value)
         assert execution_value["status"] == "failed"
         assert execution_value["result"] == {
             "phase": "failed",
@@ -1232,7 +1233,7 @@ class TestSessionGitWorktreeService:
         payload = terminal_events[0].payload
         assert isinstance(payload, ActionExecutionResultPayload)
         execution_value = payload.action_execution["execution"]
-        assert isinstance(execution_value, dict)
+        assert is_string_object_dict(execution_value)
         assert execution_value["status"] == "failed"
 
     async def test_manual_cleanup_rejects_subagent_session(self) -> None:
@@ -1325,7 +1326,7 @@ class TestSessionGitWorktreeService:
         terminal_payload = terminal_events[0].payload
         assert isinstance(terminal_payload, ActionExecutionResultPayload)
         terminal_execution = terminal_payload.action_execution["execution"]
-        assert isinstance(terminal_execution, dict)
+        assert is_string_object_dict(terminal_execution)
         assert terminal_execution["status"] == "completed"
         assert runner.calls == [
             {
@@ -1543,7 +1544,7 @@ class TestSessionGitWorktreeService:
         payload = recovered_events[0].payload
         assert isinstance(payload, ActionExecutionResultPayload)
         terminal_execution = payload.action_execution["execution"]
-        assert isinstance(terminal_execution, dict)
+        assert is_string_object_dict(terminal_execution)
         assert terminal_execution["status"] == "cancelled"
         assert terminal_execution["cancellation_summary"] == (
             "Operation cancelled during Session ownership handover."
@@ -1639,7 +1640,7 @@ class TestSessionGitWorktreeService:
         payload = terminal_events[0].payload
         assert isinstance(payload, ActionExecutionResultPayload)
         terminal_execution = payload.action_execution["execution"]
-        assert isinstance(terminal_execution, dict)
+        assert is_string_object_dict(terminal_execution)
         assert terminal_execution["status"] == "cancelled"
         assert terminal_execution["cancellation_summary"] == expected_summary
 
@@ -1803,7 +1804,7 @@ class TestSessionGitWorktreeService:
         assert isinstance(terminal_payload, ActionExecutionResultPayload)
         terminal_projection = terminal_payload.action_execution
         terminal_execution = terminal_projection["execution"]
-        assert isinstance(terminal_execution, dict)
+        assert is_string_object_dict(terminal_execution)
         assert terminal_execution["status"] == "failed"
 
     async def test_branch_collision_suffixes_final_branch(
@@ -1961,7 +1962,7 @@ class TestSessionGitWorktreeService:
         payload = terminal_events[-1].payload
         assert isinstance(payload, ActionExecutionResultPayload)
         execution_value = payload.action_execution["execution"]
-        assert isinstance(execution_value, dict)
+        assert is_string_object_dict(execution_value)
         assert execution_value["status"] == "failed"
 
     async def test_status_refresh_warning_does_not_block_ready(
@@ -2028,7 +2029,7 @@ class TestSessionGitWorktreeService:
         assert isinstance(payload, ActionExecutionResultPayload)
         execution_value = payload.action_execution["execution"]
         event_values = payload.action_execution["events"]
-        assert isinstance(execution_value, dict)
+        assert is_string_object_dict(execution_value)
         assert isinstance(event_values, list)
         assert execution_value["status"] == "completed"
         assert any(
