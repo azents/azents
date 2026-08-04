@@ -211,6 +211,30 @@ const projectRootEntries: WorkspaceEntry[] = [
     },
     source: { type: "session_project", projectId: "project-2" },
   },
+  {
+    name: "Session files",
+    path: "/workspace/agent/.azents/sessions/change-number-cabbage",
+    kind: "directory",
+    size: null,
+    mediaType: null,
+    modifiedAt: null,
+    repositoryType: null,
+    capabilities: {
+      open: true,
+      removeProject: false,
+      deleteWorktree: false,
+      filesystemDelete: false,
+      filesystemMove: false,
+      filesystemRename: false,
+    },
+    status: {
+      value: "available",
+      detail: null,
+      checkedAt: "2026-07-04T10:00:00.000Z",
+      stale: false,
+    },
+    source: { type: "session_folder", projectId: null },
+  },
 ];
 
 const readyProjectState: WorkspaceProjectPanelState = {

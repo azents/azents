@@ -114,6 +114,10 @@ function isProjectRootEntry(entry: WorkspaceEntry, depth: number): boolean {
   );
 }
 
+function isSessionFolderEntry(entry: WorkspaceEntry): boolean {
+  return entry.source?.type === "session_folder";
+}
+
 function getEntryDisplayName(entry: WorkspaceEntry, depth: number): string {
   if (isProjectRootEntry(entry, depth)) {
     return getBasename(entry.path);
@@ -125,7 +129,10 @@ function getEntryDisplayPath(
   entry: WorkspaceEntry,
   depth: number,
 ): string | null {
-  return isProjectRootEntry(entry, depth) ? entry.path : null;
+  return isProjectRootEntry(entry, depth) ||
+    (depth === 0 && isSessionFolderEntry(entry))
+    ? entry.path
+    : null;
 }
 
 function getFileExtension(name: string): string {
@@ -161,6 +168,11 @@ function getFileIcon(
 
 function sortEntries(entries: WorkspaceEntry[]): WorkspaceEntry[] {
   return [...entries].sort((a, b) => {
+    const aIsSessionFolder = isSessionFolderEntry(a);
+    const bIsSessionFolder = isSessionFolderEntry(b);
+    if (aIsSessionFolder !== bIsSessionFolder) {
+      return aIsSessionFolder ? -1 : 1;
+    }
     if (a.kind !== b.kind) {
       return a.kind === "directory" ? -1 : 1;
     }
