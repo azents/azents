@@ -10,6 +10,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from typing import Protocol
 
 from redis.asyncio import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -22,6 +23,23 @@ _SUBSCRIPTION_CONFIRMATION_TIMEOUT_SECONDS = 5.0
 
 class WebSocketBroadcastPublishError(Exception):
     """WebSocket broadcast publish failed."""
+
+
+class _RedisPubSub(Protocol):
+    """Redis PubSub operations used by WebSocket broadcast helpers."""
+
+    async def get_message(
+        self,
+        *,
+        ignore_subscribe_messages: bool,
+        timeout: float,
+    ) -> dict[str, object] | None:
+        """Return the next available PubSub message."""
+        ...
+
+    def listen(self) -> AsyncIterator[dict[str, object]]:
+        """Return the PubSub message stream."""
+        ...
 
 
 class WebSocketBroadcast:
@@ -71,13 +89,13 @@ class WebSocketBroadcast:
 
     @staticmethod
     async def _wait_for_subscription_confirmation(
-        pubsub: object,
+        pubsub: _RedisPubSub,
         channel: str,
     ) -> None:
         """Wait until Redis confirms registration for the requested channel."""
         async with asyncio.timeout(_SUBSCRIPTION_CONFIRMATION_TIMEOUT_SECONDS):
             while True:
-                message = await pubsub.get_message(  # pyright: ignore[reportAttributeAccessIssue]  # redis.asyncio PubSub typing is incomplete
+                message = await pubsub.get_message(
                     ignore_subscribe_messages=False,
                     timeout=1.0,
                 )
@@ -91,10 +109,10 @@ class WebSocketBroadcast:
 
     @staticmethod
     async def _iter_events(
-        pubsub: object,
+        pubsub: _RedisPubSub,
     ) -> AsyncIterator[dict[str, object]]:
         """Convert Pub/Sub messages to dict and yield them."""
-        async for raw_message in pubsub.listen():  # pyright: ignore[reportAttributeAccessIssue]  # redis.asyncio PubSub listen() typing is incomplete
+        async for raw_message in pubsub.listen():
             if raw_message["type"] != "message":
                 continue
             raw_data = raw_message["data"]

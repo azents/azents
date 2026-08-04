@@ -130,9 +130,10 @@ class ToolkitRepository:
             return Success(toolkit)
 
         try:
-            values = dict(update)
-            if "credentials" in values:
-                raw: str | None = values.pop("credentials")  # type: ignore[assignment]  # Value type is inferred as object when converting TypedDict to dict
+            values: dict[str, object] = dict(update)
+            if "credentials" in update:
+                raw = update["credentials"]
+                values.pop("credentials")
                 values["encrypted_credentials"] = self._encrypt(raw)
             values["revision"] = RDBToolkitConfig.revision + 1
             result = await session.execute(

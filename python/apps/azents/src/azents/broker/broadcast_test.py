@@ -46,10 +46,10 @@ class _PubSub:
         """Record cleanup."""
         self.closed = True
 
-    async def listen(self) -> AsyncIterator[object]:
+    async def listen(self) -> AsyncIterator[dict[str, object]]:
         """Provide an empty async iterator when requested."""
         if False:
-            yield None
+            yield {}
 
 
 class _Redis:
