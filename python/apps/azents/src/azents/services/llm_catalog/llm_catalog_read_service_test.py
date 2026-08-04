@@ -6,6 +6,7 @@ import datetime
 
 import pytest
 from azcommon.result import Success
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     LLMCatalogAttemptStatus,
@@ -13,6 +14,7 @@ from azents.core.enums import (
     LLMCatalogScope,
     LLMProvider,
 )
+from azents.repos.llm_catalog import LLMCatalogRepository
 from azents.repos.llm_catalog.data import (
     LLMCatalog,
     LLMCatalogEntryList,
@@ -24,17 +26,17 @@ from azents.services.llm_catalog import ModelCatalogReadService
 class _SessionManager:
     """Async session manager used by tests."""
 
-    async def __aenter__(self) -> object:
-        return object()
+    async def __aenter__(self) -> AsyncSession:
+        return AsyncSession()
 
-    async def __aexit__(self, *args: object) -> None:
+    async def __aexit__(self, *args: object) -> bool | None:
         return None
 
     def __call__(self) -> "_SessionManager":
         return self
 
 
-class _CatalogRepository:
+class _CatalogRepository(LLMCatalogRepository):
     """Catalog repository used by tests."""
 
     def __init__(self, page: LLMCatalogEntryList) -> None:
@@ -42,22 +44,24 @@ class _CatalogRepository:
 
     async def list_entries_by_integration(
         self,
-        _session: object,
+        session: AsyncSession,
         *,
         integration_id: str,
         workspace_id: str,
         search: str | None,
         limit: int,
         offset: int,
-    ) -> LLMCatalogEntryList:
+    ) -> LLMCatalogEntryList | None:
+        del session, integration_id, workspace_id, search, limit, offset
         return self.page
 
     async def get_latest_integration_attempt_for_workspace(
         self,
-        _session: object,
+        session: AsyncSession,
         *,
         workspace_id: str,
     ) -> LLMCatalogSyncAttempt | None:
+        del session, workspace_id
         return None
 
 
@@ -97,8 +101,8 @@ async def test_read_service_returns_latest_failed_attempt_without_snapshot() -> 
         ),
     )
     service = ModelCatalogReadService(
-        session_manager=_SessionManager(),  # type: ignore[arg-type]
-        catalog_repository=_CatalogRepository(page),  # type: ignore[arg-type]
+        session_manager=_SessionManager(),
+        catalog_repository=_CatalogRepository(page),
     )
 
     result = await service.list_entries_by_integration(

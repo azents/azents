@@ -13,6 +13,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from textwrap import dedent
+from typing import Protocol
 
 from mcp.types import Tool as McpBaseTool
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
@@ -249,6 +250,18 @@ class GitHubSelectedInstallationStore:
         )
 
 
+class GitHubSelectedInstallationStoreProtocol(Protocol):
+    """Persist the selected GitHub installation for one session."""
+
+    async def load(self) -> str | None:
+        """Load the selected installation ID."""
+        ...
+
+    async def save(self, installation_id: str) -> None:
+        """Persist the selected installation ID."""
+        ...
+
+
 @dataclass
 class GitHubInstallationBinding:
     """Runtime binding state for one GitHub installation."""
@@ -364,7 +377,8 @@ class GitHubToolkit(Toolkit[GitHubToolkitConfig]):
         lazy_mcp_secret_provider: Callable[[], Awaitable[str | None]] | None = None,
         lazy_mcp_proxy_url: str | None = None,
         installation_bindings: list[GitHubInstallationBinding] | None = None,
-        selected_installation_store: GitHubSelectedInstallationStore | None = None,
+        selected_installation_store: GitHubSelectedInstallationStoreProtocol
+        | None = None,
     ) -> None:
         """Initialize GitHubToolkit.
 

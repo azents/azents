@@ -110,6 +110,7 @@ from .mailbox import (
     MailboxService,
     PreparedMailboxFiles,
     TurnEffect,
+    VfsFileResolver,
     build_external_channel_mailbox_payload,
     external_channel_continuation_binding_ids_for_buffer,
     fold_turn_eligibility,
@@ -795,7 +796,7 @@ def _mailbox_item_service(
     exchange_file_service: ExchangeFileService | None = None,
     model_file_service: ModelFileService | None = None,
     event_transcript_repository: EventTranscriptRepository | None = None,
-    vfs_projection_service: object | None = None,
+    vfs_projection_service: VfsFileResolver | None = None,
 ) -> MailboxService:
     """Create MailboxService for tests."""
     return MailboxService(
@@ -809,7 +810,7 @@ def _mailbox_item_service(
         ),
         agent_run_repository=AgentRunRepository(),
         action_execution_repository=ActionExecutionRepository(),
-        vfs_projection_service=vfs_projection_service,  # pyright: ignore[reportArgumentType]
+        vfs_projection_service=vfs_projection_service,
         external_channel_repository=ExternalChannelRepository(),
     )
 
