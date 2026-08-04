@@ -33,7 +33,10 @@ from azents.repos.agent_execution.data import (
 class NativeRequestInspection(Protocol):
     """Narrow logical-request surface used by shared post-lower guards."""
 
-    model: str
+    @property
+    def model(self) -> str:
+        """Return the selected model name."""
+        ...
 
     def native_request_input_chars(self) -> int:
         """Estimate the complete logical request size before dispatch planning."""
