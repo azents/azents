@@ -164,21 +164,6 @@ def _setup_project_browser(
         ),
         _headers=headers,
     )
-    primary_session_response = requests.get(
-        f"{public_url}/chat/v1/agents/{agent.id}/team-primary-session",
-        headers=headers,
-        timeout=10,
-    )
-    primary_session_response.raise_for_status()
-    primary_session_id = _response_object(
-        primary_session_response,
-        label="Team primary session response",
-    ).get("id")
-    if not isinstance(primary_session_id, str):
-        raise AssertionError(
-            "Team primary session response did not include id: "
-            f"{primary_session_response.text!r}"
-        )
     runtime_api = AgentRuntimeV1Api(public_api_client)
     runtime_api.agent_runtime_v1_start_agent_runtime(
         agent_id=agent.id,
@@ -199,6 +184,21 @@ def _setup_project_browser(
         time.sleep(1)
     else:
         raise AssertionError(f"Runtime Runner did not become ready: {last_state!r}")
+    primary_session_response = requests.get(
+        f"{public_url}/chat/v1/agents/{agent.id}/team-primary-session",
+        headers=headers,
+        timeout=10,
+    )
+    primary_session_response.raise_for_status()
+    primary_session_id = _response_object(
+        primary_session_response,
+        label="Team primary session response",
+    ).get("id")
+    if not isinstance(primary_session_id, str):
+        raise AssertionError(
+            "Team primary session response did not include id: "
+            f"{primary_session_response.text!r}"
+        )
     return _ProjectBrowserSetup(
         token=token,
         primary_session_id=primary_session_id,
@@ -306,12 +306,13 @@ def _assert_project_root_capabilities(
     assert capabilities.get("filesystem_rename") is False
 
 
-def test_empty_project_manifest_has_explicit_empty_state(
+def test_empty_project_manifest_includes_the_session_folder(
     public_api_client: azentspublicclient.ApiClient,
     admin_api_client: azentsadminclient.ApiClient,
     azents_public_server_url: str,
+    runtime_workspace_path: str,
 ) -> None:
-    """A session with no Projects returns empty Projects mode without root fallback."""
+    """A session with no Projects exposes its fixed Session-folder root."""
     setup = _setup_project_browser(
         public_api_client=public_api_client,
         admin_api_client=admin_api_client,
@@ -326,10 +327,19 @@ def test_empty_project_manifest_has_explicit_empty_state(
     )
 
     assert manifest.get("active_mode") == "projects"
-    assert _manifest_entries(manifest) == []
-    empty_state = _JSON_OBJECT.validate_python(manifest.get("empty_state"))
-    assert isinstance(empty_state.get("title"), str)
-    assert isinstance(empty_state.get("description"), str)
+    entries = _manifest_entries(manifest)
+    assert len(entries) == 1
+    session_entry = entries[0]
+    path = session_entry.get("path")
+    assert isinstance(path, str)
+    assert path.startswith(f"{runtime_workspace_path}/.azents/sessions/")
+    source = _JSON_OBJECT.validate_python(session_entry.get("source"))
+    assert source.get("type") == "session_folder"
+    assert source.get("project_id") is None
+    capabilities = _JSON_OBJECT.validate_python(session_entry.get("capabilities"))
+    assert capabilities.get("prepare_session_folder") is True
+    _assert_project_root_capabilities(session_entry, remove_project=False)
+    assert manifest.get("empty_state") is None
 
     modes = _object_items(manifest.get("modes"), label="manifest modes")
     assert [mode.get("id") for mode in modes] == ["projects", "all_files"]
@@ -366,8 +376,19 @@ def test_session_project_manifest_uses_registry_capabilities_and_removal(
     entries = _manifest_entries(manifest)
 
     assert manifest.get("active_mode") == "projects"
-    assert _entry_paths(entries) == paths
-    for entry in entries:
+    assert len(entries) == 3
+    session_entry = entries[0]
+    session_path = session_entry.get("path")
+    assert isinstance(session_path, str)
+    assert session_path.startswith(f"{runtime_workspace_path}/.azents/sessions/")
+    session_source = _JSON_OBJECT.validate_python(session_entry.get("source"))
+    assert session_source.get("type") == "session_folder"
+    assert session_source.get("project_id") is None
+    _assert_project_root_capabilities(session_entry, remove_project=False)
+
+    project_entries = entries[1:]
+    assert _entry_paths(project_entries) == paths
+    for entry in project_entries:
         assert entry.get("kind") == "directory"
         source = _JSON_OBJECT.validate_python(entry.get("source"))
         assert source.get("type") == "session_project"
@@ -401,7 +422,7 @@ def test_session_project_manifest_uses_registry_capabilities_and_removal(
         agent_id=setup.agent_id,
         session_id=session_id,
     )
-    assert _entry_paths(_manifest_entries(after_manifest)) == [paths[1]]
+    assert _entry_paths(_manifest_entries(after_manifest)) == [session_path, paths[1]]
 
 
 def test_pre_session_preview_uses_project_manifest_entry_model(
