@@ -31,7 +31,6 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
 from azentspublicclient.models.secrets import Secrets
 from docker.models.containers import Container
 from pydantic import TypeAdapter, ValidationError
-from testcontainers.core.container import DockerContainer
 
 from support.runtime_profiles import create_workspace_runtime_profile
 from support.utils import (
@@ -319,13 +318,25 @@ def _assert_no_live_action_executions(
     token: str,
     session_id: str,
 ) -> None:
-    """Verify terminal handoff removed the live operation projection."""
-    live = _live_projection(
-        server_url=server_url,
-        token=token,
-        session_id=session_id,
+    """Wait until terminal action handoff leaves the Session idle."""
+    deadline = time.monotonic() + 30
+    last_live: dict[str, object] | None = None
+    while time.monotonic() < deadline:
+        live = _live_projection(
+            server_url=server_url,
+            token=token,
+            session_id=session_id,
+        )
+        last_live = live
+        if (
+            live.get("action_executions") == []
+            and live.get("session_run_state") == "idle"
+        ):
+            return
+        time.sleep(0.5)
+    raise AssertionError(
+        f"terminal action handoff did not leave the Session idle: {last_live!r}"
     )
-    assert live.get("action_executions") == []
 
 
 def _action_execution_status(projection: dict[str, object]) -> str:
@@ -348,8 +359,10 @@ def _action_execution_id(projection: dict[str, object]) -> str:
 
 def _terminal_action_execution_projection(
     history: dict[str, object],
+    *,
+    action_type: str,
 ) -> dict[str, object] | None:
-    """Return the latest durable action execution result projection."""
+    """Return the latest durable result projection for one action type."""
     events = _object_list(history.get("items"), label="history events")
     for event in reversed(events):
         if event.get("kind") != "action_execution_result":
@@ -358,7 +371,10 @@ def _terminal_action_execution_projection(
         projection = payload.get("action_execution")
         if projection is None:
             raise AssertionError(f"action result projection is missing: {event!r}")
-        return _OBJECT_ADAPTER.validate_python(projection)
+        action_projection = _OBJECT_ADAPTER.validate_python(projection)
+        execution = _OBJECT_ADAPTER.validate_python(action_projection.get("execution"))
+        if execution.get("action_type") == action_type:
+            return action_projection
     return None
 
 
@@ -368,8 +384,9 @@ def _wait_for_action_execution_status(
     token: str,
     session_id: str,
     status: str,
+    action_type: str,
 ) -> dict[str, object]:
-    """Wait for the session action execution to reach a status."""
+    """Wait for one session action execution to reach a status."""
     deadline = time.monotonic() + 90
     last_history: dict[str, object] | None = None
     while time.monotonic() < deadline:
@@ -380,7 +397,10 @@ def _wait_for_action_execution_status(
             params={"limit": "100"},
         )
         last_history = history
-        projection = _terminal_action_execution_projection(history)
+        projection = _terminal_action_execution_projection(
+            history,
+            action_type=action_type,
+        )
         if projection is None:
             time.sleep(0.5)
             continue
@@ -460,7 +480,10 @@ def _wait_for_worktree_project_path(
 def _branch_name_from_worktree_path(worktree_path: str) -> str:
     """Return the default Azents branch name for a worktree path."""
     path = PurePosixPath(worktree_path)
-    session_handle = path.parent.name
+    if path.parent.name == "worktrees" and path.parent.parent.parent.name == "sessions":
+        session_handle = path.parent.parent.name
+    else:
+        session_handle = path.parent.name
     return f"azents/{session_handle}"
 
 
@@ -474,18 +497,18 @@ def _assert_path_absent(container: Container, path: str) -> None:
     _exec(container, f"test ! -e {shlex.quote(path)}")
 
 
-def _assert_branch_present(
-    container: Container,
-    *,
-    source_path: str,
-    branch_name: str,
-) -> None:
-    """Assert an Azents-owned branch remains present."""
-    _exec(
-        container,
-        f"cd {shlex.quote(source_path)} && "
-        f'test -n "$(git branch --list {shlex.quote(branch_name)})"',
-    )
+def _wait_for_path_absent(container: Container, path: str) -> None:
+    """Wait for one Runtime path to become absent."""
+    deadline = time.monotonic() + 60
+    last_error: AssertionError | None = None
+    while time.monotonic() < deadline:
+        try:
+            _assert_path_absent(container, path)
+            return
+        except AssertionError as exc:
+            last_error = exc
+            time.sleep(0.5)
+    raise AssertionError(f"Runtime path did not become absent: {path}") from last_error
 
 
 def _assert_branch_absent(
@@ -516,46 +539,17 @@ def _set_retention(system_api: SystemV1Api, retention_days: int | None) -> None:
     )
 
 
-def _run_purge_scheduler(container: DockerContainer) -> None:
-    """Trigger and execute one archived-session purge scheduler pass."""
-    script = """
-import asyncio
-from azents.app import run_with_container
-from azents.core.config import Config
-from azents.scheduler.service import SchedulerService
-
-async def main():
-    config = Config.from_env()
-    async with run_with_container(config) as dependency_container:
-        scheduler = await dependency_container.solve(SchedulerService)
-        state = await scheduler.trigger("archived_session_purge")
-        if state is None:
-            raise RuntimeError("unknown scheduler task")
-        await scheduler.run_once()
-
-asyncio.run(main())
-"""
-    result = container.get_wrapped_container().exec_run(["python", "-c", script])
-    exit_code = cast(Any, result).exit_code
-    if exit_code != 0:
-        output = cast(Any, result).output.decode(errors="replace")
-        raise AssertionError(
-            f"archived-session purge failed with exit {exit_code}:\n{output}"
-        )
-
-
 class TestSessionGitWorktreeLifecycle:
     """Session Git worktree product behavior."""
 
-    def test_git_ref_preview_worktree_archive_preservation_and_purge_cleanup(
+    def test_git_ref_preview_worktree_archive_and_restore_cleanup(
         self,
         public_api_client: azentspublicclient.ApiClient,
         admin_api_client: azentsadminclient.ApiClient,
         azents_public_server_url: str,
-        azents_admin_server_container: DockerContainer,
         azents_engine_worker_container: object,
     ) -> None:
-        """Archive preserves an owned worktree until durable purge deletes it."""
+        """Archive deletes one owned Session folder without restoring old bytes."""
         del azents_engine_worker_container
         token, workspace_handle, agent_id = _create_runtime_agent(
             public_api_client=public_api_client,
@@ -592,6 +586,7 @@ class TestSessionGitWorktreeLifecycle:
             token=token,
             session_id=session_id,
             status="completed",
+            action_type="create_git_worktree",
         )
         action_execution_id = _action_execution_id(projection)
         _assert_no_live_action_executions(
@@ -626,6 +621,7 @@ class TestSessionGitWorktreeLifecycle:
             token=token,
             session_id=failed_session_id,
             status="failed",
+            action_type="create_git_worktree",
         )
         failed_execution_id = _action_execution_id(failed_projection)
         failed_execution = _OBJECT_ADAPTER.validate_python(
@@ -661,6 +657,8 @@ class TestSessionGitWorktreeLifecycle:
             session_id=session_id,
         )
         branch_name = _branch_name_from_worktree_path(worktree_path)
+        session_folder_path = PurePosixPath(worktree_path).parent.parent.as_posix()
+        assert PurePosixPath(session_folder_path).parent.name == "sessions"
         _exec(
             container,
             f"test -f {shlex.quote(worktree_path)}/README.md && "
@@ -673,39 +671,46 @@ class TestSessionGitWorktreeLifecycle:
             container,
             f"printf 'dirty cleanup e2e\\n' > {shlex.quote(worktree_path)}/dirty.txt",
         )
+        external_sentinel_path = f"{source_path}/session-folder-sentinel-{unique()}"
+        external_link_path = f"{session_folder_path}/external-sentinel"
+        create_external_sentinel = (
+            f"printf 'external sentinel\\n' > {shlex.quote(external_sentinel_path)}"
+        )
+        _exec(
+            container,
+            "\n".join(
+                [
+                    create_external_sentinel,
+                    (
+                        f"ln -s {shlex.quote(external_sentinel_path)} "
+                        f"{shlex.quote(external_link_path)}"
+                    ),
+                ]
+            ),
+        )
         system_api = SystemV1Api(admin_api_client)
-        _set_retention(system_api, 0)
+        _set_retention(system_api, None)
         try:
             _post_empty(
                 server_url=azents_public_server_url,
                 token=token,
                 path=f"/chat/v1/agents/{agent_id}/sessions/{session_id}/archive",
             )
-            _assert_path_present(container, worktree_path)
-            _assert_branch_present(
+            _wait_for_path_absent(container, session_folder_path)
+            _assert_branch_absent(
                 container,
                 source_path=source_path,
                 branch_name=branch_name,
             )
+            _assert_path_present(container, external_sentinel_path)
 
-            _run_purge_scheduler(azents_admin_server_container)
-
-            deadline = time.monotonic() + 60
-            last_error: AssertionError | None = None
-            while time.monotonic() < deadline:
-                try:
-                    _assert_path_absent(container, worktree_path)
-                    _assert_branch_absent(
-                        container,
-                        source_path=source_path,
-                        branch_name=branch_name,
-                    )
-                    return
-                except AssertionError as exc:
-                    last_error = exc
-                    time.sleep(0.5)
-            raise AssertionError(
-                "worktree purge cleanup did not finish"
-            ) from last_error
+            restored = _post_json(
+                server_url=azents_public_server_url,
+                token=token,
+                path=f"/chat/v1/agents/{agent_id}/sessions/{session_id}/restore",
+                payload={},
+            )
+            assert restored.get("status") == "active"
+            _assert_path_absent(container, worktree_path)
         finally:
             _set_retention(system_api, 30)

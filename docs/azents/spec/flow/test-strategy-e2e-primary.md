@@ -23,8 +23,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-03
-spec_version: 20
+last_verified_at: 2026-08-04
+spec_version: 21
 ---
 
 # E2E Primary Test Strategy
@@ -148,6 +148,16 @@ Always-on required CI does not depend on external credentials.
   the PostgreSQL position fence; Redis replicas serialize the same scope; unavailable
   Redis remains a surfaced retryable failure with no memory fallback.
 - Focused Runtime Provider E2E uses a locally bootstrapped and API-enrolled Docker Provider to run selected `runtime_provider` journeys, including Tool Search Runtime Hooks, provider-native External Channel progress, and the External Channel file-transfer journey.
+- Session working-folder coverage uses public API and the focused Docker Runtime
+  Provider without direct product-database writes. Project Browser verifies that a
+  Runner-ready Session exposes its Session folder first, retains it after registered
+  Project removal, and keeps pre-session preview Project-only. Worktree lifecycle
+  verifies a new worktree below the Session folder, action-specific durable terminal
+  history and idle handoff, archive-time Git plus whole-folder cleanup, external
+  symlink-target preservation, and restore without byte recovery. PostgreSQL
+  migration coverage starts from the pre-expand schema, verifies expand backfill
+  with `working_folder_path IS NULL` count zero, then verifies the non-null named
+  unique contract and reversible transitional index.
 - Web Surface E2E runs in a separate parallel lane with `uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src`.
 - Web Surface journeys use a pinned remote Chromium container. Web images are built from the tested worktree, and TLS gateways reproduce production secure-cookie and path-routing behavior without external credentials.
 - The stable `ci-python-e2e` required gate aggregates the deterministic, focused Runtime Provider, and Web Surface lane results for the scopes selected by path filtering.
@@ -204,6 +214,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 
 ## Changelog
 
+- **2026-08-04** — v21. Added deterministic Session working-folder public and
+  Docker Runtime E2E coverage plus PostgreSQL expand/backfill/contract migration
+  evidence, including archive symlink-boundary and restore behavior.
 - **2026-08-03** — v20. Added required-lane JUnit, pytest output, slow-test,
   Docker diagnostic, and browser failure artifacts plus the same-repository sticky PR
   observability summary.

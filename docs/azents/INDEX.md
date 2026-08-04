@@ -25,14 +25,14 @@ Design documents are accumulated records and are not listed individually in this
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-04 | 84 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-04 | 57 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-04 | 58 |
 
 ## Living Specs — Flow
 
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-04 | 147 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-04 | 47 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-04 | 48 |
 | [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-03 | 14 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
@@ -48,7 +48,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Periodic Execution Flow Spec](spec/flow/periodic-execution.md) | - | 2026-07-26 | 11 |
 | [Run Resume](spec/flow/run-resume.md) | @Hardtack | 2026-07-24 | 25 |
 | [Session Context Inspector](spec/flow/session-context-inspector.md) | @Hardtack | 2026-07-21 | 18 |
-| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-03 | 20 |
+| [E2E Primary Test Strategy](spec/flow/test-strategy-e2e-primary.md) | @Hardtack | 2026-08-04 | 21 |
 | [xAI API Key Provider Flow](spec/flow/xai-api-key.md) | @Hardtack | 2026-08-01 | 3 |
 | [xAI OAuth Flow](spec/flow/xai-oauth.md) | @Hardtack | 2026-08-01 | 6 |
 
@@ -345,7 +345,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Extensible Session Lifecycle Requirements](requirements/session-260721-lifecycle-extensibility.md) | session-260721 | 2026-07-21 | - |
 | [Team Session Execution Boundaries Requirements](requirements/session-260724-team-session-execution-boundaries.md) | session-260724 | 2026-07-24 | - |
 | [Session Auto-Archive Requirements](requirements/session-260726-auto-archive.md) | session-260726 | 2026-07-26 | 2026-07-26 |
-| [Session Working Folder Requirements](requirements/session-260803-session-working-folder.md) | session-260803 | 2026-08-03 | - |
+| [Session Working Folder Requirements](requirements/session-260803-session-working-folder.md) | session-260803 | 2026-08-03 | 2026-08-04 |
 | [Agent Settings Pages and Memory UI Historical Requirements Reconstruction](requirements/settings-260702-settings-pages-and-memory-ui.md) | settings-260702 | 2026-07-02 | - |
 | [Model-Scoped Selectable Model Settings Historical Requirements Reconstruction](requirements/settings-260716-selectable-settings.md) | settings-260716 | 2026-07-16 | - |
 | [Model Unread Run Results as Session-Shared State Historical Requirements Reconstruction](requirements/shared-260720-shared-unread-result.md) | shared-260720 | 2026-07-20 | - |
