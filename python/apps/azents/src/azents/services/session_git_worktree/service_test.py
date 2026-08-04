@@ -222,7 +222,7 @@ class _UnavailableRuntimeRepository(_RuntimeRepository):
         )
 
 
-class _RunnerOperations:
+class _RunnerOperations(RuntimeRunnerOperationClient):
     """Runner operation double for Git worktree operations."""
 
     def __init__(
@@ -694,7 +694,7 @@ def _service(
         action_execution_repository=ActionExecutionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         session_manager=session_manager,
-        runner_operations=runner,  # pyright: ignore[reportArgumentType]
+        runner_operations=runner,
     )
 
 

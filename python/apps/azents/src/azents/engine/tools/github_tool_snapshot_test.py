@@ -270,7 +270,7 @@ async def test_multi_installation_uses_snapshot_while_lazy_mcp_is_pending() -> N
     toolkit = GitHubToolkit(
         config=_make_config(),
         installation_bindings=[hardtack, azents],
-        selected_installation_store=_FakeSelectedInstallationStore(),  # type: ignore[arg-type]
+        selected_installation_store=_FakeSelectedInstallationStore(),
     )
 
     try:
@@ -314,7 +314,7 @@ async def test_multi_installation_without_snapshot_keeps_switch_tool_only() -> N
     toolkit = GitHubToolkit(
         config=_make_config(),
         installation_bindings=[azents, hardtack],
-        selected_installation_store=_FakeSelectedInstallationStore(),  # type: ignore[arg-type]
+        selected_installation_store=_FakeSelectedInstallationStore(),
     )
 
     try:

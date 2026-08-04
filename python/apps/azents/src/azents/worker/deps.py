@@ -156,7 +156,7 @@ def get_skill_toolkit_provider(
     ],
     broadcast: Annotated[WebSocketBroadcast, Depends(get_broadcast)],
     vfs_projection_service: Annotated[
-        VfsProjectionService,
+        VfsProjectionService[AsyncSession],
         Depends(get_vfs_projection_service),
     ],
 ) -> SkillToolkitProvider:
@@ -201,7 +201,7 @@ def get_builtin_toolkit_provider(
     artifact_service: Annotated[ArtifactService, Depends(ArtifactService)],
     model_file_service: Annotated[ModelFileService, Depends(ModelFileService)],
     vfs_projection_service: Annotated[
-        VfsProjectionService,
+        VfsProjectionService[AsyncSession],
         Depends(get_vfs_projection_service),
     ],
     agent_runtime_service: Annotated[

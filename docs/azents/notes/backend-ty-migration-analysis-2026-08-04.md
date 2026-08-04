@@ -303,3 +303,40 @@ The phase reduces the stacked baseline from 389 to 349 diagnostics:
 VFS repository test doubles remain the next isolated test-contract batch.
 Agent-decommission doubles remain separate because they cross the External Channel
 lifecycle boundary.
+
+## Phase 9: VFS Projection and Isolated Test-Double Contracts
+
+The ninth phase continues the stacked test-double cleanup with consumers whose
+runtime behavior is already defined by a small, local capability surface.
+
+This phase:
+
+- Makes VFS projection collaborators generic over their session capability and
+  updates production dependency injection sites with `AsyncSession`.
+- Narrows the Mailbox managed-Skill resolver to its single `resolve_file`
+  capability.
+- Models the GitHub selected-installation state collaborator through `load` and
+  `save` instead of its persistence implementation.
+- Makes the LLM catalog read fixture conform to its real session-manager and
+  repository contracts.
+- Replaces Kubernetes test assignments to lightkube overloads with a scoped
+  pytest monkeypatch seam exposed by the test fixture subtype.
+- Removes obsolete type suppressions from the affected test fixtures.
+
+### Phase 9 Result
+
+The VFS commit was measured at 312 diagnostics. The isolated follow-up unit
+reduced that measurement to 297 diagnostics:
+
+- VFS projection collaborators: 15 diagnostics removed.
+- GitHub snapshot, LLM catalog, Mailbox, Session Git worktree, and Kubernetes
+  fixtures: 15 diagnostics removed.
+- Pyright: 0 errors, 0 warnings.
+- Targeted tests: 160 passed.
+
+Agent-decommission doubles remain deferred. Their 19 diagnostics inject partial
+doubles into the scheduler-owned service for External Channel archive and cleanup,
+retention, broker, runtime-finalization, and persistent repository collaborators.
+Removing those diagnostics mechanically would require either checker-only dynamic
+assignment or a new lifecycle-wide collaborator contract. That boundary requires
+separate contract review and remains outside this isolated test-double phase.

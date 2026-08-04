@@ -8,7 +8,7 @@ import aiohttp
 import pytest
 from kubernetes_asyncio.client import Configuration
 from kubernetes_asyncio.client.rest import ApiException
-from lightkube import ApiError
+from lightkube import ApiError, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.tools import (
@@ -1217,11 +1217,19 @@ class TestConfiguredWsApiClient:
 # ---------------------------------------------------------------------------
 
 
+class _TestKubernetesToolkit(KubernetesToolkit):
+    """Expose the injected lightkube client for controlled test replacement."""
+
+    def test_client(self) -> AsyncClient:
+        """Return the test fixture client."""
+        return self._clients["prod"]
+
+
 class TestKubernetesToolHandlers:
     """Test that Kubernetes tool handler calls k8s API correctly."""
 
     @pytest.fixture
-    def k8s_toolkit(self) -> KubernetesToolkit:
+    def k8s_toolkit(self) -> _TestKubernetesToolkit:
         """KubernetesToolkit in read-write mode."""
         mock_client = MagicMock()
         mock_exec_client = MagicMock()
@@ -1230,7 +1238,7 @@ class TestKubernetesToolHandlers:
             clusters=[ClusterConfig(name="prod", auth_type="token")],
             read_only=False,
         )
-        return KubernetesToolkit(
+        return _TestKubernetesToolkit(
             config=config,
             clients={"prod": mock_client},
             exec_clients={"prod": mock_exec_client},
@@ -1239,7 +1247,7 @@ class TestKubernetesToolHandlers:
 
     @pytest.mark.asyncio
     async def test_k8s_list_handler_calls_lightkube(
-        self, k8s_toolkit: KubernetesToolkit
+        self, k8s_toolkit: _TestKubernetesToolkit, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """k8s_list handler calls lightkube client.list()."""
         context = _make_context()
@@ -1258,7 +1266,7 @@ class TestKubernetesToolHandlers:
         k8s_toolkit._discovery_caches["prod"].get_resource_class = MagicMock(  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
             return_value=mock_res_class
         )
-        k8s_toolkit._clients["prod"].list = _mock_list  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue] — directly set internal attribute in tests
+        monkeypatch.setattr(k8s_toolkit.test_client(), "list", _mock_list)
 
         result = await tool.handler(
             json.dumps(
@@ -1277,7 +1285,7 @@ class TestKubernetesToolHandlers:
 
     @pytest.mark.asyncio
     async def test_k8s_list_pagination_with_offset(
-        self, k8s_toolkit: KubernetesToolkit
+        self, k8s_toolkit: _TestKubernetesToolkit, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """k8s_list skips by offset and returns by limit."""
         context = _make_context()
@@ -1293,7 +1301,7 @@ class TestKubernetesToolHandlers:
         k8s_toolkit._discovery_caches["prod"].get_resource_class = MagicMock(  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
             return_value=mock_res_class
         )
-        k8s_toolkit._clients["prod"].list = _mock_list  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue] — directly set internal attribute in tests
+        monkeypatch.setattr(k8s_toolkit.test_client(), "list", _mock_list)
 
         result = await tool.handler(
             json.dumps(
@@ -1317,7 +1325,7 @@ class TestKubernetesToolHandlers:
 
     @pytest.mark.asyncio
     async def test_k8s_list_pagination_no_more_items(
-        self, k8s_toolkit: KubernetesToolkit
+        self, k8s_toolkit: _TestKubernetesToolkit, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """k8s_list does not include next_offset when no remaining item exists."""
         context = _make_context()
@@ -1333,7 +1341,7 @@ class TestKubernetesToolHandlers:
         k8s_toolkit._discovery_caches["prod"].get_resource_class = MagicMock(  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
             return_value=mock_res_class
         )
-        k8s_toolkit._clients["prod"].list = _mock_list  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue] — directly set internal attribute in tests
+        monkeypatch.setattr(k8s_toolkit.test_client(), "list", _mock_list)
 
         result = await tool.handler(
             json.dumps(
@@ -1389,7 +1397,7 @@ class TestKubernetesToolHandlers:
 
     @pytest.mark.asyncio
     async def test_k8s_logs_handler_calls_lightkube(
-        self, k8s_toolkit: KubernetesToolkit
+        self, k8s_toolkit: _TestKubernetesToolkit, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """k8s_logs handler calls lightkube client.log()."""
         context = _make_context()
@@ -1401,7 +1409,7 @@ class TestKubernetesToolHandlers:
             yield "log line 1\n"
             yield "log line 2\n"
 
-        k8s_toolkit._clients["prod"].log = _mock_log  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue] — directly set internal attribute in tests
+        monkeypatch.setattr(k8s_toolkit.test_client(), "log", _mock_log)
 
         result = await tool.handler(
             json.dumps(
@@ -1523,7 +1531,7 @@ class TestKubernetesToolHandlers:
 
     @pytest.mark.asyncio
     async def test_k8s_list_output_filter_projects_fields(
-        self, k8s_toolkit: KubernetesToolkit
+        self, k8s_toolkit: _TestKubernetesToolkit, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Project fields with JMESPath when output_filter is specified."""
         context = _make_context()
@@ -1546,7 +1554,7 @@ class TestKubernetesToolHandlers:
         k8s_toolkit._discovery_caches["prod"].get_resource_class = MagicMock(  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
             return_value=mock_res_class
         )
-        k8s_toolkit._clients["prod"].list = _mock_list  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue] — directly set internal attribute in tests
+        monkeypatch.setattr(k8s_toolkit.test_client(), "list", _mock_list)
 
         result = await tool.handler(
             json.dumps(
@@ -1568,7 +1576,7 @@ class TestKubernetesToolHandlers:
 
     @pytest.mark.asyncio
     async def test_k8s_list_output_filter_with_condition(
-        self, k8s_toolkit: KubernetesToolkit
+        self, k8s_toolkit: _TestKubernetesToolkit, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """k8s_list filters + projects with output_filter condition."""
         context = _make_context()
@@ -1593,7 +1601,7 @@ class TestKubernetesToolHandlers:
         k8s_toolkit._discovery_caches["prod"].get_resource_class = MagicMock(  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
             return_value=mock_res_class
         )
-        k8s_toolkit._clients["prod"].list = _mock_list  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue] — directly set internal attribute in tests
+        monkeypatch.setattr(k8s_toolkit.test_client(), "list", _mock_list)
 
         result = await tool.handler(
             json.dumps(
@@ -1612,7 +1620,7 @@ class TestKubernetesToolHandlers:
 
     @pytest.mark.asyncio
     async def test_k8s_list_invalid_output_filter_raises_error(
-        self, k8s_toolkit: KubernetesToolkit
+        self, k8s_toolkit: _TestKubernetesToolkit, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Invalid output_filter raises FunctionToolError."""
         context = _make_context()
@@ -1626,7 +1634,7 @@ class TestKubernetesToolHandlers:
         k8s_toolkit._discovery_caches["prod"].get_resource_class = MagicMock(  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
             return_value=mock_res_class
         )
-        k8s_toolkit._clients["prod"].list = _mock_list  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue] — directly set internal attribute in tests
+        monkeypatch.setattr(k8s_toolkit.test_client(), "list", _mock_list)
 
         with pytest.raises(FunctionToolError, match="Invalid output_filter"):
             await tool.handler(
@@ -1761,7 +1769,7 @@ class TestKubernetesToolHandlers:
 
     @pytest.mark.asyncio
     async def test_k8s_list_api_error_raises_function_tool_error(
-        self, k8s_toolkit: KubernetesToolkit
+        self, k8s_toolkit: _TestKubernetesToolkit, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """lightkube ApiError is converted to FunctionToolError."""
         context = _make_context()
@@ -1781,7 +1789,11 @@ class TestKubernetesToolHandlers:
             raise ApiError(status=status_dict)
             yield  # unreachable yield to make async generator
 
-        k8s_toolkit._clients["prod"].list = _mock_list_error  # pyright: ignore[reportPrivateUsage, reportAttributeAccessIssue] — directly set internal attribute in tests
+        monkeypatch.setattr(
+            k8s_toolkit.test_client(),
+            "list",
+            _mock_list_error,
+        )
 
         with pytest.raises(FunctionToolError, match="403.*Forbidden"):
             await tool.handler(

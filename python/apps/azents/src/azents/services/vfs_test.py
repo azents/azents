@@ -2,7 +2,7 @@
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from types import SimpleNamespace
+from dataclasses import dataclass
 
 import pytest
 
@@ -16,6 +16,10 @@ from azents.services.vfs import (
     ReleaseVfsCatalog,
     VfsFileResolutionError,
     VfsProjectionService,
+    VfsRun,
+    VfsSessionRecord,
+    VfsToolkitAttachment,
+    VfsToolkitConfig,
 )
 
 
@@ -59,72 +63,162 @@ def _projection() -> VfsProjection:
     return make_vfs_projection([revision])
 
 
+@dataclass(frozen=True)
+class _Run:
+    """Minimal persisted run view."""
+
+    session_id: str
+    vfs_projection: VfsProjection | None
+
+
+@dataclass(frozen=True)
+class _Session:
+    """Minimal persisted session ownership view."""
+
+    agent_id: str
+    workspace_id: str
+
+    async def commit(self) -> None:
+        """Satisfy the projection persistence session contract."""
+
+
 class _RunRepository:
     """AgentRunRepository test double."""
 
     def __init__(self, projection: VfsProjection) -> None:
         self.projection = projection
 
-    async def get_by_id(self, session: object, run_id: str) -> object:
+    async def get_by_id(self, session: _Session, run_id: str) -> VfsRun:
         del session, run_id
-        return SimpleNamespace(session_id="session-1", vfs_projection=self.projection)
+        return _Run(session_id="session-1", vfs_projection=self.projection)
+
+    async def set_vfs_projection_if_unset(
+        self,
+        session: _Session,
+        *,
+        run_id: str,
+        session_id: str,
+        projection: VfsProjection,
+    ) -> VfsProjection:
+        """Return the fixture projection for unexercised persistence paths."""
+        del session, run_id, session_id
+        return projection
 
 
 class _SessionRepository:
     """AgentSessionRepository test double."""
 
-    async def get_by_id(self, session: object, session_id: str) -> object:
-        del session, session_id
-        return SimpleNamespace(agent_id="agent-1", workspace_id="workspace-1")
+    async def get_by_id(
+        self, session: _Session, agent_session_id: str
+    ) -> VfsSessionRecord:
+        del session, agent_session_id
+        return _Session(agent_id="agent-1", workspace_id="workspace-1")
 
 
 class _MappedRunRepository:
     """AgentRunRepository test double with per-run projections."""
 
-    def __init__(self, runs: dict[str, object]) -> None:
+    def __init__(self, runs: dict[str, VfsRun]) -> None:
         self.runs = runs
 
-    async def get_by_id(self, session: object, run_id: str) -> object | None:
+    async def get_by_id(self, session: _Session, run_id: str) -> VfsRun | None:
         """Return the configured run without falling back to another run."""
         del session
         return self.runs.get(run_id)
+
+    async def set_vfs_projection_if_unset(
+        self,
+        session: _Session,
+        *,
+        run_id: str,
+        session_id: str,
+        projection: VfsProjection,
+    ) -> VfsProjection:
+        """Return the requested projection for unexercised persistence paths."""
+        del session, run_id, session_id
+        return projection
 
 
 class _MappedSessionRepository:
     """AgentSessionRepository test double with per-session ownership."""
 
-    def __init__(self, sessions: dict[str, object]) -> None:
+    def __init__(self, sessions: dict[str, VfsSessionRecord]) -> None:
         self.sessions = sessions
 
-    async def get_by_id(self, session: object, session_id: str) -> object | None:
+    async def get_by_id(
+        self, session: _Session, agent_session_id: str
+    ) -> VfsSessionRecord | None:
         """Return the configured Session ownership record."""
         del session
-        return self.sessions.get(session_id)
+        return self.sessions.get(agent_session_id)
 
 
 class _NoAttachmentsRepository:
     """AgentToolkitRepository test double without attached Toolkits."""
 
-    async def list_by_agent(self, session: object, agent_id: str) -> list[object]:
+    async def list_by_agent(
+        self, session: _Session, agent_id: str
+    ) -> list[VfsToolkitAttachment]:
         """Return no attached Toolkits."""
         del session, agent_id
         return []
 
 
+class _UnusedRunRepository:
+    """Fail if preview-only tests unexpectedly load a run."""
+
+    async def get_by_id(self, session: _Session, run_id: str) -> VfsRun | None:
+        del session, run_id
+        raise AssertionError("Run repository is not used by preview")
+
+    async def set_vfs_projection_if_unset(
+        self,
+        session: _Session,
+        *,
+        run_id: str,
+        session_id: str,
+        projection: VfsProjection,
+    ) -> VfsProjection:
+        del session, run_id, session_id, projection
+        raise AssertionError("Run repository is not used by preview")
+
+
+class _UnusedSessionRepository:
+    """Fail if preview-only tests unexpectedly load a session."""
+
+    async def get_by_id(
+        self, session: _Session, agent_session_id: str
+    ) -> VfsSessionRecord | None:
+        del session, agent_session_id
+        raise AssertionError("Session repository is not used by preview")
+
+
+class _UnusedToolkitRepository:
+    """Fail if empty-attachment tests unexpectedly load a toolkit."""
+
+    async def get_by_id(
+        self, session: _Session, toolkit_id: str
+    ) -> VfsToolkitConfig | None:
+        del session, toolkit_id
+        raise AssertionError("Toolkit repository is not used for no attachments")
+
+
 @asynccontextmanager
-async def _session_manager() -> AsyncIterator[object]:
-    yield object()
+async def _session_manager() -> AsyncIterator[_Session]:
+    yield _Session(agent_id="", workspace_id="")
 
 
-def _projection_service(projection: VfsProjection) -> VfsProjectionService:
+def _projection_service(
+    projection: VfsProjection,
+) -> VfsProjectionService[_Session]:
     return VfsProjectionService(
-        session_manager=_session_manager,  # pyright: ignore[reportArgumentType]
+        session_manager=_session_manager,
         toolkit_registry={},
         catalog=ReleaseVfsCatalog(),
-        agent_run_repository=_RunRepository(projection),  # pyright: ignore[reportArgumentType]
-        agent_session_repository=_SessionRepository(),  # pyright: ignore[reportArgumentType]
-        agent_toolkit_repository=object(),  # pyright: ignore[reportArgumentType]
-        toolkit_repository=object(),  # pyright: ignore[reportArgumentType]
+        agent_run_repository=_RunRepository(projection),
+        agent_session_repository=_SessionRepository(),
+        agent_toolkit_repository=_NoAttachmentsRepository(),
+        toolkit_repository=_UnusedToolkitRepository(),
     )
 
 
@@ -142,13 +236,13 @@ async def test_release_catalog_reuses_an_empty_catalog() -> None:
 async def test_preview_includes_platform_skill_creator_without_attachments() -> None:
     """The global Skill Creator does not depend on a ToolkitConfig attachment."""
     service = VfsProjectionService(
-        session_manager=_session_manager,  # pyright: ignore[reportArgumentType]
+        session_manager=_session_manager,
         toolkit_registry={},
         catalog=ReleaseVfsCatalog(),
-        agent_run_repository=object(),  # pyright: ignore[reportArgumentType]
-        agent_session_repository=object(),  # pyright: ignore[reportArgumentType]
-        agent_toolkit_repository=_NoAttachmentsRepository(),  # pyright: ignore[reportArgumentType]
-        toolkit_repository=object(),  # pyright: ignore[reportArgumentType]
+        agent_run_repository=_UnusedRunRepository(),
+        agent_session_repository=_UnusedSessionRepository(),
+        agent_toolkit_repository=_NoAttachmentsRepository(),
+        toolkit_repository=_UnusedToolkitRepository(),
     )
 
     projection = await service.build_preview(
@@ -243,35 +337,35 @@ async def test_subagent_run_loads_its_own_projection() -> None:
     )
     child_projection = make_vfs_projection([child_revision])
     service = VfsProjectionService(
-        session_manager=_session_manager,  # pyright: ignore[reportArgumentType]
+        session_manager=_session_manager,
         toolkit_registry={},
         catalog=ReleaseVfsCatalog(),
-        agent_run_repository=_MappedRunRepository(  # pyright: ignore[reportArgumentType]
+        agent_run_repository=_MappedRunRepository(
             {
-                "parent-run": SimpleNamespace(
+                "parent-run": _Run(
                     session_id="parent-session",
                     vfs_projection=parent_projection,
                 ),
-                "child-run": SimpleNamespace(
+                "child-run": _Run(
                     session_id="child-session",
                     vfs_projection=child_projection,
                 ),
             }
         ),
-        agent_session_repository=_MappedSessionRepository(  # pyright: ignore[reportArgumentType]
+        agent_session_repository=_MappedSessionRepository(
             {
-                "parent-session": SimpleNamespace(
+                "parent-session": _Session(
                     agent_id="parent-agent",
                     workspace_id="workspace-1",
                 ),
-                "child-session": SimpleNamespace(
+                "child-session": _Session(
                     agent_id="child-agent",
                     workspace_id="workspace-1",
                 ),
             }
         ),
-        agent_toolkit_repository=object(),  # pyright: ignore[reportArgumentType]
-        toolkit_repository=object(),  # pyright: ignore[reportArgumentType]
+        agent_toolkit_repository=_NoAttachmentsRepository(),
+        toolkit_repository=_UnusedToolkitRepository(),
     )
 
     loaded = await service.load_run_projection(

@@ -85,7 +85,7 @@ from azents.services.session_title import (
     initial_title_from_event,
     initial_title_from_external_channel_event,
 )
-from azents.services.vfs import VfsFileResolutionError, VfsProjectionService
+from azents.services.vfs import VfsFileResolutionError, VfsResolvedFile
 
 logger = logging.getLogger(__name__)
 _JSON_OBJECT_ADAPTER = TypeAdapter[dict[str, JSONValue]](dict[str, JSONValue])
@@ -249,6 +249,22 @@ class MailboxProcessor(Protocol):
         ...
 
 
+class VfsFileResolver(Protocol):
+    """Resolve managed VFS files for a concrete active run."""
+
+    async def resolve_file(
+        self,
+        *,
+        run_id: str,
+        agent_id: str,
+        session_id: str,
+        workspace_id: str,
+        uri: str,
+    ) -> VfsResolvedFile:
+        """Resolve one exact authorized VFS file."""
+        ...
+
+
 @dataclasses.dataclass(frozen=True)
 class MailboxService:
     """Own session-bound input buffer reads, writes, and promotion."""
@@ -270,7 +286,7 @@ class MailboxService:
         ActionExecutionRepository, Depends(ActionExecutionRepository)
     ]
     vfs_projection_service: Annotated[
-        VfsProjectionService | None,
+        VfsFileResolver | None,
         Depends(get_vfs_projection_service),
     ]
     external_channel_repository: Annotated[

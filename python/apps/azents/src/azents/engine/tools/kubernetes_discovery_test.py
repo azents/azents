@@ -1,5 +1,6 @@
 """ResourceDiscoveryCache tests."""
 
+import dataclasses
 import json
 from unittest.mock import AsyncMock
 
@@ -218,5 +219,5 @@ class TestResourceDiscoveryCache:
         info = ResourceInfo(
             group="", version="v1", kind="Pod", plural="pods", namespaced=True
         )
-        with pytest.raises(AttributeError):
-            info.kind = "Service"  # type: ignore[misc]
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            ResourceInfo.__setattr__(info, "kind", "Service")
