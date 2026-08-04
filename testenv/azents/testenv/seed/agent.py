@@ -62,8 +62,6 @@ class AgentService:
             handle=workspace.handle,
             agent_create_request=AgentCreateRequest(
                 name=actual_name,
-                llm_provider_integration_id=None,
-                llm_provider_model=None,
                 additional_properties={"model_config_id": model_config_id},
                 type=AgentType(agent_type),
                 shell_enabled=shell_enabled,

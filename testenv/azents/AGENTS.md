@@ -4,6 +4,16 @@ This directory is the test substrate for preparing local infrastructure, fixture
 
 Coding and operational conventions for this area live in `.claude/rules/testenv-conventions.md`, including the no-direct-DB-write rule and live credential snapshot rules.
 
+## Quality Checks
+
+```bash
+cd testenv/azents
+uv run ruff check .
+uv run ruff format --check .
+uv run ty check --error-on-warning
+uv run pytest
+```
+
 ## Event Preparation Path
 
 ```bash

@@ -132,7 +132,7 @@ jobs:
         run: python -m pip install --upgrade pre-commit
       - name: Run pre-commit structural hooks
         env:
-          SKIP: ruff-check,ruff-format,ty-az-common,dump-openapi-spec-azents,pyright-azents,ty-testenv-azents-e2e,ts-format,ts-lint,ts-typecheck
+          SKIP: ruff-check,ruff-format,ty-az-common,dump-openapi-spec-azents,pyright-azents,ty-testenv-azents,ty-testenv-azents-e2e,ts-format,ts-lint,ts-typecheck
         run: pre-commit run --all-files --show-diff-on-failure --color=always
 
   ci_python_run:
@@ -155,6 +155,8 @@ jobs:
           - project: python/apps/azents-runtime-provider-kubernetes
             typechecker: ty
           - project: python/apps/azents-runtime-provider-docker
+            typechecker: ty
+          - project: testenv/azents
             typechecker: ty
     steps:
       - name: Checkout
