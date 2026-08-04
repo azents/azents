@@ -8,6 +8,7 @@ same worker handles messages for the same session.
 """
 
 import asyncio
+import inspect
 import json
 import logging
 import time
@@ -238,16 +239,20 @@ class RedisBroker:
         """
         encoded = encode_broker_message(message)
         msg_key = f"{self._SESSION_PREFIX}{message.session_id}:messages"
-        await self._redis.rpush(msg_key, encoded)
+        pushed = self._redis.rpush(msg_key, encoded)
+        if inspect.isawaitable(pushed):
+            await pushed
         await self._redis.expire(msg_key, self._MESSAGE_TTL)
         try:
             await self._publish_wake_up(message.session_id)
         except RedisError:
-            await self._redis.lrem(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits LREM.
+            removed = self._redis.lrem(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits LREM.
                 msg_key,
                 1,
-                encoded,
+                encoded.decode(),
             )
+            if inspect.isawaitable(removed):
+                await removed
             raise
 
     async def notify_mailbox_activity(self, session_id: str) -> None:
@@ -339,9 +344,15 @@ class RedisBroker:
             msg_key = f"{self._SESSION_PREFIX}{session_id}:messages"
             messages: list[WorkerSignal] = []
             while True:
-                raw = await self._redis.lpop(msg_key)
+                raw = self._redis.lpop(msg_key)
+                if inspect.isawaitable(raw):
+                    raw = await raw
                 if raw is None:
                     break
+                if isinstance(raw, str):
+                    raw = raw.encode()
+                if not isinstance(raw, bytes):
+                    raise RuntimeError("Redis broker message must be bytes or text")
                 messages.append(decode_broker_message(raw))
 
             if not messages:
