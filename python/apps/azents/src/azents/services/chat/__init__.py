@@ -22,12 +22,15 @@ from azents.core.enums import (
     EventKind,
     MailboxItemKind,
     MailboxSchedulingMode,
+    RuntimeRunnerState,
+    SessionWorkingFolderCleanupStatus,
 )
 from azents.core.inference_profile import AppliedInferenceProfile
 from azents.core.session_lifecycle import (
     SessionLifecycleParticipantDefinition,
     SessionLifecycleTransitionContext,
 )
+from azents.core.session_working_folder import validate_session_working_folder_path
 from azents.engine.events.action_messages import (
     CreateGitWorktreeAction,
     CreateSessionWorkingFolderAction,
@@ -57,6 +60,7 @@ from azents.repos.agent_session.data import (
     AgentSessionCreate,
     AgentSessionUnreadTerminalRunProjection,
     SessionAgent,
+    SessionWorkingFolderContext,
 )
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.message import MessageRepository
@@ -64,6 +68,13 @@ from azents.repos.session_git_worktree import SessionGitWorktreeRepository
 from azents.repos.session_workspace_project import SessionWorkspaceProjectRepository
 from azents.repos.session_workspace_project.data import SessionWorkspaceProjectCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
+from azents.runtime.control_protocol.runner_operations import (
+    RuntimeRunnerOperationClient,
+    RuntimeRunnerOperationFailedError,
+    RuntimeRunnerOperationGenerationError,
+    RuntimeRunnerOperationUnavailable,
+)
+from azents.runtime.deps import get_runtime_runner_operation_client
 from azents.services.external_channel.lifecycle import ExternalChannelLifecycleService
 from azents.services.mailbox import (
     MailboxAdmissionResult,
@@ -303,6 +314,16 @@ class _InvalidGoalStatusTransitionError(Exception):
 
 
 _SESSION_TITLE_MAX_LENGTH = 200
+_WORKING_FOLDER_CLEANUP_SUMMARY_MAX_LENGTH = 500
+_WORKING_FOLDER_CLEANUP_TIMEOUT_SECONDS = 300
+
+
+def _working_folder_cleanup_failure_summary(
+    error: RuntimeRunnerOperationFailedError,
+) -> str:
+    """Return a bounded cleanup failure summary without Runner error text."""
+    reason_code = (error.code or "runner_operation_failed")[:100]
+    return f"Session working-folder cleanup failed: {reason_code}."
 
 
 @dataclasses.dataclass
@@ -373,6 +394,10 @@ class ChatSessionService:
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
+    runner_operations: Annotated[
+        RuntimeRunnerOperationClient | None,
+        Depends(get_runtime_runner_operation_client),
+    ] = None
 
     async def get_team_primary_session(
         self,
@@ -1033,6 +1058,7 @@ class ChatSessionService:
     ) -> Result[ArchiveSessionResult, ArchiveSessionError]:
         """Archive an active non-primary AgentSession after access validation."""
         archive_cleanup_plans = ()
+        working_folder_context: SessionWorkingFolderContext | None = None
         async with self.session_manager() as session:
             agent_session = await self.agent_session_repository.get_by_id(
                 session,
@@ -1138,6 +1164,16 @@ class ChatSessionService:
                 participant_operation=archive_participant,
                 transition=archive_tree,
             )
+            working_folder_context = (
+                await self.agent_session_repository.mark_working_folder_cleanup_pending(
+                    session,
+                    root_session_id=session_id,
+                )
+            )
+            if working_folder_context is None:
+                raise RuntimeError(
+                    "Root Session working-folder cleanup state is unavailable"
+                )
             if purge_after is not None:
                 await self.archived_session_retention_repository.schedule_purge_job(
                     session,
@@ -1164,6 +1200,12 @@ class ChatSessionService:
                         "root_session_id": session_id,
                     },
                 )
+            assert working_folder_context is not None
+            await self._run_archive_working_folder_cleanup(
+                agent_id=agent_id,
+                root_session_id=session_id,
+                context=working_folder_context,
+            )
             cleanup_requested = (
                 await self.external_channel_lifecycle_service.consume_archive_cleanup(
                     archive_cleanup_plans
@@ -1175,6 +1217,171 @@ class ChatSessionService:
                     archived_session_id=session_id,
                     cleanup_requested=cleanup_requested,
                 )
+            )
+
+    async def _run_archive_working_folder_cleanup(
+        self,
+        *,
+        agent_id: str,
+        root_session_id: str,
+        context: SessionWorkingFolderContext,
+    ) -> None:
+        """Delete one committed Session folder and terminalize its bounded result."""
+        try:
+            working_folder_path = validate_session_working_folder_path(
+                context.working_folder_path
+            )
+        except ValueError:
+            await self._complete_working_folder_cleanup(
+                context_id=context.id,
+                status=SessionWorkingFolderCleanupStatus.FAILED,
+                summary="Session working-folder cleanup failed: invalid_stored_path.",
+            )
+            return
+
+        async with self.session_manager() as session:
+            runtime = await self.agent_runtime_repository.get_by_agent_id(
+                session,
+                agent_id,
+            )
+        if runtime is None or runtime.runner_state is not RuntimeRunnerState.READY:
+            await self._complete_working_folder_cleanup(
+                context_id=context.id,
+                status=SessionWorkingFolderCleanupStatus.FAILED,
+                summary="Session working-folder cleanup failed: runtime_unavailable.",
+            )
+            return
+        runner_operations = self.runner_operations
+        if runner_operations is None:
+            await self._complete_working_folder_cleanup(
+                context_id=context.id,
+                status=SessionWorkingFolderCleanupStatus.FAILED,
+                summary=(
+                    "Session working-folder cleanup failed: "
+                    "runner_operations_unavailable."
+                ),
+            )
+            return
+        try:
+            target = await runner_operations.stat_file(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                owner_session_id=root_session_id,
+                path=working_folder_path,
+                deadline_at=(
+                    datetime.datetime.now(datetime.UTC)
+                    + datetime.timedelta(
+                        seconds=_WORKING_FOLDER_CLEANUP_TIMEOUT_SECONDS
+                    )
+                ),
+            )
+            if target.kind == "missing":
+                await self._complete_working_folder_cleanup(
+                    context_id=context.id,
+                    status=SessionWorkingFolderCleanupStatus.SUCCEEDED,
+                    summary=(
+                        "Session working-folder cleanup completed: already_absent."
+                    ),
+                )
+                return
+            if target.kind not in {"directory", "symlink"}:
+                await self._complete_working_folder_cleanup(
+                    context_id=context.id,
+                    status=SessionWorkingFolderCleanupStatus.FAILED,
+                    summary=(
+                        "Session working-folder cleanup failed: invalid_target_kind."
+                    ),
+                )
+                return
+            await runner_operations.delete_file(
+                runtime_id=runtime.id,
+                runner_generation=runtime.runner_generation,
+                owner_session_id=root_session_id,
+                path=working_folder_path,
+                recursive=True,
+                deadline_at=(
+                    datetime.datetime.now(datetime.UTC)
+                    + datetime.timedelta(
+                        seconds=_WORKING_FOLDER_CLEANUP_TIMEOUT_SECONDS
+                    )
+                ),
+            )
+        except RuntimeRunnerOperationFailedError as error:
+            if error.code == "NOT_FOUND":
+                await self._complete_working_folder_cleanup(
+                    context_id=context.id,
+                    status=SessionWorkingFolderCleanupStatus.SUCCEEDED,
+                    summary=(
+                        "Session working-folder cleanup completed: already_absent."
+                    ),
+                )
+                return
+            await self._complete_working_folder_cleanup(
+                context_id=context.id,
+                status=SessionWorkingFolderCleanupStatus.FAILED,
+                summary=_working_folder_cleanup_failure_summary(error),
+            )
+            return
+        except (
+            RuntimeRunnerOperationUnavailable,
+            RuntimeRunnerOperationGenerationError,
+        ):
+            await self._complete_working_folder_cleanup(
+                context_id=context.id,
+                status=SessionWorkingFolderCleanupStatus.FAILED,
+                summary="Session working-folder cleanup failed: runtime_unavailable.",
+            )
+            return
+        except Exception:
+            logger.exception(
+                "Archived Session working-folder cleanup failed unexpectedly",
+                extra={
+                    "agent_id": agent_id,
+                    "root_session_id": root_session_id,
+                    "context_id": context.id,
+                },
+            )
+            await self._complete_working_folder_cleanup(
+                context_id=context.id,
+                status=SessionWorkingFolderCleanupStatus.FAILED,
+                summary="Session working-folder cleanup failed: unexpected_error.",
+            )
+            return
+        await self._complete_working_folder_cleanup(
+            context_id=context.id,
+            status=SessionWorkingFolderCleanupStatus.SUCCEEDED,
+            summary="Session working-folder cleanup completed: deleted.",
+        )
+
+    async def _complete_working_folder_cleanup(
+        self,
+        *,
+        context_id: str,
+        status: SessionWorkingFolderCleanupStatus,
+        summary: str,
+    ) -> None:
+        """Persist one post-commit folder cleanup result without archive rollback."""
+        try:
+            async with self.session_manager() as session:
+                completed = (
+                    await self.agent_session_repository.complete_working_folder_cleanup(
+                        session,
+                        context_id=context_id,
+                        status=status,
+                        summary=summary[:_WORKING_FOLDER_CLEANUP_SUMMARY_MAX_LENGTH],
+                        completed_at=datetime.datetime.now(datetime.UTC),
+                    )
+                )
+                await session.commit()
+            if not completed:
+                logger.error(
+                    "Archived Session working-folder cleanup terminal state was lost",
+                    extra={"context_id": context_id, "cleanup_status": status},
+                )
+        except Exception:
+            logger.exception(
+                "Archived Session working-folder cleanup terminal state failed",
+                extra={"context_id": context_id, "cleanup_status": status},
             )
 
     async def auto_archive_once(self, *, limit: int = 100) -> dict[str, int]:

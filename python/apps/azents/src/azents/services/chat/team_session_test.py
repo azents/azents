@@ -2,7 +2,7 @@
 
 import datetime
 import logging
-from typing import cast
+from typing import Literal, cast
 
 import pytest
 import sqlalchemy as sa
@@ -17,6 +17,7 @@ from azents.core.enums import (
     EventKind,
     LLMProvider,
     RuntimeRunnerState,
+    SessionWorkingFolderCleanupStatus,
     WorkspaceUserRole,
 )
 from azents.rdb.models.agent import RDBAgent
@@ -25,6 +26,7 @@ from azents.rdb.models.agent_automatic_project_setting import (
 )
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
+from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.session import SessionManager
 from azents.repos.action_execution import ActionExecutionRepository
 from azents.repos.agent import AgentRepository
@@ -35,6 +37,7 @@ from azents.repos.agent_project_catalog import AgentProjectCatalogRepository
 from azents.repos.agent_project_default import AgentProjectDefaultRepository
 from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
 from azents.repos.external_channel.lifecycle import ExternalChannelLifecycleRepository
@@ -49,6 +52,12 @@ from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import WorkspaceUserCreate
+from azents.runtime.control_protocol.runner_operations import (
+    RuntimeFileDeleteResult,
+    RuntimeFileStatResult,
+    RuntimeRunnerOperationClient,
+    RuntimeRunnerOperationFailedError,
+)
 from azents.services.chat.data import (
     InvalidSessionTitle,
 )
@@ -168,6 +177,8 @@ def _service(
     *,
     session_git_worktree_repository: SessionGitWorktreeRepository | None = None,
     session_git_worktree_service: SessionGitWorktreeService | None = None,
+    agent_runtime_repository: AgentRuntimeRepository | None = None,
+    runner_operations: RuntimeRunnerOperationClient | None = None,
 ) -> ChatSessionService:
     """Create ChatSessionService for tests."""
     return ChatSessionService(
@@ -183,7 +194,7 @@ def _service(
         action_execution_repository=ActionExecutionRepository(),
         event_transcript_repository=EventTranscriptRepository(),
         agent_session_repository=AgentSessionRepository(),
-        agent_runtime_repository=AgentRuntimeRepository(),
+        agent_runtime_repository=(agent_runtime_repository or AgentRuntimeRepository()),
         root_agent_session_creation_service=RootAgentSessionCreationService(
             agent_session_repository=AgentSessionRepository(),
             automatic_project_repository=AgentAutomaticProjectRepository(),
@@ -218,6 +229,7 @@ def _service(
             action_service=cast(ExternalChannelActionService, _ChannelActionService()),
         ),
         session_manager=rdb_session_manager,
+        runner_operations=runner_operations,
     )
 
 
@@ -268,6 +280,7 @@ class _ArchiveCleanupService:
         self.failure = failure
         self.calls: list[tuple[str, str, tuple[str, ...]]] = []
         self.observed_statuses: list[AgentSessionStatus] = []
+        self.observed_cleanup_statuses: list[SessionWorkingFolderCleanupStatus] = []
 
     async def run_archive_cleanup_for_root_tree(
         self,
@@ -283,11 +296,115 @@ class _ArchiveCleanupService:
                 session,
                 root_session_id,
             )
+            context = (
+                await AgentSessionRepository().get_working_folder_context_by_session_id(
+                    session,
+                    session_id=root_session_id,
+                )
+            )
         assert root is not None
+        assert context is not None
         self.observed_statuses.append(root.status)
+        self.observed_cleanup_statuses.append(context.cleanup_status)
         if self.failure is not None:
             raise self.failure
         return 1
+
+
+class _ReadyRuntimeRepository(AgentRuntimeRepository):
+    """Return a ready Runtime for deterministic archive cleanup tests."""
+
+    async def get_by_agent_id(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+    ) -> AgentRuntime | None:
+        """Return one ready Runtime without a fixture persistence dependency."""
+        del session
+        now = datetime.datetime.now(datetime.UTC)
+        return AgentRuntime(
+            id="runtime-archive-cleanup",
+            workspace_id="workspace-archive-cleanup",
+            agent_id=agent_id,
+            runner_state=RuntimeRunnerState.READY,
+            runner_generation=7,
+            created_at=now,
+            updated_at=now,
+        )
+
+
+class _FolderDeleteRunner(RuntimeRunnerOperationClient):
+    """Record one archive-owned recursive Session-folder delete."""
+
+    def __init__(
+        self,
+        *,
+        failure: RuntimeRunnerOperationFailedError | None = None,
+        target_kind: Literal[
+            "directory", "file", "symlink", "other", "missing"
+        ] = "directory",
+    ) -> None:
+        self.failure = failure
+        self.target_kind: Literal[
+            "directory", "file", "symlink", "other", "missing"
+        ] = target_kind
+        self.calls: list[dict[str, object]] = []
+        self.stat_calls: list[dict[str, object]] = []
+
+    async def stat_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        deadline_at: datetime.datetime,
+    ) -> RuntimeFileStatResult:
+        """Return a lexical root kind for archive cleanup validation."""
+        del deadline_at
+        self.stat_calls.append(
+            {
+                "runtime_id": runtime_id,
+                "runner_generation": runner_generation,
+                "owner_session_id": owner_session_id,
+                "path": path,
+            }
+        )
+        return RuntimeFileStatResult(
+            path=path,
+            kind=self.target_kind,
+            size_bytes=None,
+            symlink=self.target_kind == "symlink",
+            real_path=None,
+            resolved_kind=self.target_kind,
+            modified_at=None,
+            final_cursor="folder-stat",
+        )
+
+    async def delete_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        recursive: bool,
+        deadline_at: datetime.datetime,
+    ) -> RuntimeFileDeleteResult:
+        """Record or fail one exact recursive delete."""
+        del deadline_at
+        self.calls.append(
+            {
+                "runtime_id": runtime_id,
+                "runner_generation": runner_generation,
+                "owner_session_id": owner_session_id,
+                "path": path,
+                "recursive": recursive,
+            }
+        )
+        if self.failure is not None:
+            raise self.failure
+        return RuntimeFileDeleteResult(path=path, final_cursor="folder-delete")
 
 
 class TestChatSessionTeamSessions:
@@ -1123,7 +1240,12 @@ class TestChatSessionTeamSessions:
         )
         assert isinstance(create_result, Success)
 
-        archive_result = await _service(rdb_session_manager).archive_agent_session(
+        folder_delete_runner = _FolderDeleteRunner()
+        archive_result = await _service(
+            rdb_session_manager,
+            agent_runtime_repository=_ReadyRuntimeRepository(),
+            runner_operations=folder_delete_runner,
+        ).archive_agent_session(
             agent_id=agent_id,
             session_id=create_result.value.id,
             user_id=user_id,
@@ -1150,6 +1272,34 @@ class TestChatSessionTeamSessions:
             )
             assert archived.archive_policy_revision == 1
             assert archived.archive_retention_days_snapshot == 30
+            context = (
+                await AgentSessionRepository().get_working_folder_context_by_session_id(
+                    verify_session,
+                    session_id=create_result.value.id,
+                )
+            )
+            assert context is not None
+            context_row = await verify_session.get(
+                RDBSessionAgentContext,
+                context.id,
+            )
+            assert context_row is not None
+            assert (
+                context_row.working_folder_cleanup_status
+                is SessionWorkingFolderCleanupStatus.SUCCEEDED
+            )
+            assert context_row.working_folder_cleanup_summary == (
+                "Session working-folder cleanup completed: deleted."
+            )
+            assert context_row.working_folder_cleanup_completed_at is not None
+        assert len(folder_delete_runner.calls) == 1
+        assert (
+            folder_delete_runner.calls[0]["owner_session_id"] == create_result.value.id
+        )
+        assert folder_delete_runner.calls[0]["path"] == (
+            f"/workspace/agent/.azents/sessions/{create_result.value.handle}"
+        )
+        assert folder_delete_runner.calls[0]["recursive"] is True
 
         archived_list = await _service(
             rdb_session_manager
@@ -1169,6 +1319,30 @@ class TestChatSessionTeamSessions:
         assert restore_result.value.status == AgentSessionStatus.ACTIVE
         assert restore_result.value.archived_at is None
         assert restore_result.value.purge_after is None
+        async with rdb_session_manager() as verify_session:
+            restored_context = (
+                await AgentSessionRepository().get_working_folder_context_by_session_id(
+                    verify_session,
+                    session_id=create_result.value.id,
+                )
+            )
+        assert restored_context is not None
+        assert (
+            restored_context.cleanup_status
+            is SessionWorkingFolderCleanupStatus.NOT_ATTEMPTED
+        )
+
+        rearchive_result = await _service(
+            rdb_session_manager,
+            agent_runtime_repository=_ReadyRuntimeRepository(),
+            runner_operations=folder_delete_runner,
+        ).archive_agent_session(
+            agent_id=agent_id,
+            session_id=create_result.value.id,
+            user_id=user_id,
+        )
+        assert isinstance(rearchive_result, Success)
+        assert len(folder_delete_runner.calls) == 2
 
     async def test_archive_worktree_cleanup_failure_keeps_archive_successful(
         self,
@@ -1212,6 +1386,7 @@ class TestChatSessionTeamSessions:
             rdb_session_manager,
             failure=RuntimeError("Runtime runner is unavailable."),
         )
+        folder_delete_runner = _FolderDeleteRunner()
 
         with caplog.at_level(
             logging.ERROR,
@@ -1223,6 +1398,8 @@ class TestChatSessionTeamSessions:
                     SessionGitWorktreeService,
                     cleanup_service,
                 ),
+                agent_runtime_repository=_ReadyRuntimeRepository(),
+                runner_operations=folder_delete_runner,
             ).archive_agent_session(
                 agent_id=agent_id,
                 session_id=create_result.value.id,
@@ -1238,6 +1415,10 @@ class TestChatSessionTeamSessions:
             )
         ]
         assert cleanup_service.observed_statuses == [AgentSessionStatus.ARCHIVED]
+        assert cleanup_service.observed_cleanup_statuses == [
+            SessionWorkingFolderCleanupStatus.PENDING
+        ]
+        assert len(folder_delete_runner.calls) == 1
         assert any(
             record.message == "Archived Session Git worktree cleanup failed"
             for record in caplog.records
@@ -1250,6 +1431,142 @@ class TestChatSessionTeamSessions:
         assert archived is not None
         assert archived.status is AgentSessionStatus.ARCHIVED
         assert archived.archived_at is not None
+
+    @pytest.mark.parametrize(
+        (
+            "failure",
+            "target_kind",
+            "expected_status",
+            "expected_summary",
+            "expected_delete_count",
+        ),
+        [
+            (
+                None,
+                "directory",
+                SessionWorkingFolderCleanupStatus.SUCCEEDED,
+                "Session working-folder cleanup completed: deleted.",
+                1,
+            ),
+            (
+                RuntimeRunnerOperationFailedError(
+                    "Folder does not exist.",
+                    code="NOT_FOUND",
+                ),
+                "directory",
+                SessionWorkingFolderCleanupStatus.SUCCEEDED,
+                "Session working-folder cleanup completed: already_absent.",
+                1,
+            ),
+            (
+                RuntimeRunnerOperationFailedError(
+                    "Permission denied.",
+                    code="DELETE_FAILED",
+                ),
+                "directory",
+                SessionWorkingFolderCleanupStatus.FAILED,
+                "Session working-folder cleanup failed: DELETE_FAILED.",
+                1,
+            ),
+            (
+                None,
+                "file",
+                SessionWorkingFolderCleanupStatus.FAILED,
+                "Session working-folder cleanup failed: invalid_target_kind.",
+                0,
+            ),
+            (
+                None,
+                "symlink",
+                SessionWorkingFolderCleanupStatus.SUCCEEDED,
+                "Session working-folder cleanup completed: deleted.",
+                1,
+            ),
+            (
+                None,
+                "missing",
+                SessionWorkingFolderCleanupStatus.SUCCEEDED,
+                "Session working-folder cleanup completed: already_absent.",
+                0,
+            ),
+        ],
+    )
+    async def test_archive_folder_cleanup_terminalizes_without_changing_success(
+        self,
+        rdb_session: AsyncSession,
+        rdb_session_manager: SessionManager[AsyncSession],
+        failure: RuntimeRunnerOperationFailedError | None,
+        target_kind: Literal["directory", "file", "symlink", "missing"],
+        expected_status: SessionWorkingFolderCleanupStatus,
+        expected_summary: str,
+        expected_delete_count: int,
+    ) -> None:
+        """Folder delete outcomes are terminal observations, not archive results."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "team-session-folder-cleanup-terminal",
+        )
+        user_id = await _create_user(
+            rdb_session,
+            "team-session-folder-cleanup-terminal@example.com",
+        )
+        await _add_workspace_user(
+            rdb_session,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "team-folder-cleanup-terminal-agent",
+        )
+        await AgentSessionRepository().ensure_team_primary_for_agent(
+            rdb_session,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+        )
+        await rdb_session.commit()
+        create_result = await _service(rdb_session_manager).create_team_session(
+            agent_id=agent_id,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+        )
+        assert isinstance(create_result, Success)
+        folder_delete_runner = _FolderDeleteRunner(
+            failure=failure,
+            target_kind=target_kind,
+        )
+
+        archive_result = await _service(
+            rdb_session_manager,
+            agent_runtime_repository=_ReadyRuntimeRepository(),
+            runner_operations=folder_delete_runner,
+        ).archive_agent_session(
+            agent_id=agent_id,
+            session_id=create_result.value.id,
+            user_id=user_id,
+        )
+
+        assert isinstance(archive_result, Success)
+        assert len(folder_delete_runner.stat_calls) == 1
+        assert len(folder_delete_runner.calls) == expected_delete_count
+        async with rdb_session_manager() as verify_session:
+            context = (
+                await AgentSessionRepository().get_working_folder_context_by_session_id(
+                    verify_session,
+                    session_id=create_result.value.id,
+                )
+            )
+            assert context is not None
+            context_row = await verify_session.get(
+                RDBSessionAgentContext,
+                context.id,
+            )
+        assert context_row is not None
+        assert context_row.working_folder_cleanup_status is expected_status
+        assert context_row.working_folder_cleanup_summary == expected_summary
+        assert context_row.working_folder_cleanup_completed_at is not None
 
     async def test_archive_team_primary_session_is_blocked(
         self,

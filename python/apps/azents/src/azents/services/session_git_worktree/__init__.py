@@ -1475,6 +1475,13 @@ class SessionGitWorktreeService:
                 session,
                 session_id,
             )
+            context_repository = self.agent_session_repository
+            working_folder_context = (
+                await context_repository.get_working_folder_context_by_session_id(
+                    session,
+                    session_id=session_id,
+                )
+            )
         if agent_session is None or agent_session.agent_id != agent_id:
             await self._mark_action_execution_failed(
                 execution=execution,
@@ -1508,6 +1515,24 @@ class SessionGitWorktreeService:
                 completed=True,
                 context_invalidated=False,
             )
+        if working_folder_context is None:
+            raise RuntimeError("Active root Session is missing working-folder context")
+        try:
+            working_folder_path = validate_session_working_folder_path(
+                working_folder_context.working_folder_path
+            )
+        except ValueError:
+            await self._mark_action_execution_failed(
+                execution=execution,
+                allocation=None,
+                reason="Session working-folder path is invalid.",
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
         async with self.session_manager() as session:
             execution = await self.action_execution_repository.mark_running(
                 session,
@@ -1519,9 +1544,9 @@ class SessionGitWorktreeService:
                 execution=execution,
                 session_id=session_id,
                 session_handle=agent_session.handle,
+                working_folder_path=working_folder_path,
                 source_project_path=normalized_source_path,
                 starting_ref=action.starting_ref.strip(),
-                workspace_root=workspace_root,
             )
         await self._publish_action_execution_projection(
             execution=execution,
@@ -1662,9 +1687,9 @@ class SessionGitWorktreeService:
         execution: ActionExecution,
         session_id: str,
         session_handle: str,
+        working_folder_path: str,
         source_project_path: str,
         starting_ref: str,
-        workspace_root: str,
     ) -> SessionGitWorktree:
         """Create or fetch the worktree allocation for an action execution."""
         existing = (
@@ -1677,10 +1702,12 @@ class SessionGitWorktreeService:
             return existing
         worktree_path, branch_name = _target_names(
             session_handle=session_handle,
+            worktree_parent_path=(
+                PurePosixPath(working_folder_path) / "worktrees"
+            ).as_posix(),
             source_project_path=source_project_path,
             path_suffix=1,
             branch_suffix=1,
-            workspace_root=workspace_root,
         )
         return await self.session_git_worktree_repository.create(
             session,
@@ -1720,9 +1747,6 @@ class SessionGitWorktreeService:
                 runtime_id=runtime.id,
                 path_suffix=path_suffix,
                 branch_suffix=branch_suffix,
-                workspace_root=normalize_agent_workspace_root(
-                    runtime.workspace_path
-                ).as_posix(),
             )
             command_argv = [
                 "git",
@@ -2499,12 +2523,21 @@ class SessionGitWorktreeService:
                         ),
                     )
                     continue
-                ownership_error = _cleanup_ownership_error(
+                async with self.session_manager() as session:
+                    repository = self.agent_session_repository
+                    context = await repository.get_working_folder_context_by_session_id(
+                        session,
+                        session_id=allocation.session_id,
+                    )
+                _, ownership_error = _cleanup_classification(
                     allocation=allocation,
                     session_id=creator_session_id,
                     workspace_root=normalize_agent_workspace_root(
                         runtime.workspace_path
                     ).as_posix(),
+                    working_folder_path=(
+                        context.working_folder_path if context is not None else None
+                    ),
                 )
                 if ownership_error is not None:
                     _log_archive_cleanup_failure(
@@ -2571,12 +2604,21 @@ class SessionGitWorktreeService:
         force: bool,
     ) -> SessionGitWorktree | None:
         """Run cleanup for one session-owned Git worktree allocation."""
-        ownership_error = _cleanup_ownership_error(
+        async with self.session_manager() as session:
+            repository = self.agent_session_repository
+            context = await repository.get_working_folder_context_by_session_id(
+                session,
+                session_id=allocation.session_id,
+            )
+        cleanup_classification, ownership_error = _cleanup_classification(
             allocation=allocation,
             session_id=session_id,
             workspace_root=normalize_agent_workspace_root(
                 runtime.workspace_path
             ).as_posix(),
+            working_folder_path=(
+                context.working_folder_path if context is not None else None
+            ),
         )
         if ownership_error is not None:
             await self._mark_cleanup_failed(
@@ -2624,10 +2666,11 @@ class SessionGitWorktreeService:
                     deadline_at=_git_operation_deadline(),
                     text_output_callback=None,
                 )
-            await self._cleanup_empty_session_worktree_parent(
-                runtime=runtime,
-                allocation=allocation,
-            )
+            if cleanup_classification == "legacy":
+                await self._cleanup_empty_session_worktree_parent(
+                    runtime=runtime,
+                    allocation=allocation,
+                )
             cleaned_at = datetime.now(UTC)
             async with self.session_manager() as session:
                 await self.agent_project_catalog_repository.delete_entry_by_path(
@@ -2778,21 +2821,19 @@ class SessionGitWorktreeService:
         runtime_id: str,
         path_suffix: int,
         branch_suffix: int,
-        workspace_root: str,
     ) -> SessionGitWorktree:
         """Apply DB-visible target suffixing before a runner attempt."""
         current_path_suffix = path_suffix
         current_branch_suffix = branch_suffix
         for _ in range(_MAX_COLLISION_ATTEMPTS):
             worktree_path, branch_name = _target_names(
-                session_handle=_handle_from_worktree_path(
-                    allocation.worktree_path,
-                    workspace_root=workspace_root,
-                ),
+                session_handle=_branch_session_handle(allocation.branch_name),
+                worktree_parent_path=PurePosixPath(
+                    allocation.worktree_path
+                ).parent.as_posix(),
                 source_project_path=allocation.source_project_path,
                 path_suffix=current_path_suffix,
                 branch_suffix=current_branch_suffix,
-                workspace_root=workspace_root,
             )
             async with self.session_manager() as session:
                 project_repository = self.session_workspace_project_repository
@@ -2855,10 +2896,10 @@ def _git_operation_deadline() -> datetime:
 def _target_names(
     *,
     session_handle: str,
+    worktree_parent_path: str,
     source_project_path: str,
     path_suffix: int,
     branch_suffix: int,
-    workspace_root: str,
 ) -> tuple[str, str]:
     repo_leaf = _repo_leaf(source_project_path)
     path_leaf = repo_leaf if path_suffix == 1 else f"{repo_leaf}-{path_suffix}"
@@ -2866,9 +2907,8 @@ def _target_names(
     branch_name = (
         branch_base if branch_suffix == 1 else f"{branch_base}-{branch_suffix}"
     )
-    worktree_root = PurePosixPath(workspace_root) / ".azents" / "worktrees"
     return (
-        (worktree_root / session_handle / path_leaf).as_posix(),
+        (PurePosixPath(worktree_parent_path) / path_leaf).as_posix(),
         branch_name,
     )
 
@@ -2880,15 +2920,12 @@ def _repo_leaf(source_project_path: str) -> str:
     return sanitized or "repo"
 
 
-def _handle_from_worktree_path(
-    worktree_path: str,
-    *,
-    workspace_root: str,
-) -> str:
-    """Recover the session handle from an allocated worktree path."""
-    worktree_root = PurePosixPath(workspace_root) / ".azents" / "worktrees"
-    relative = PurePosixPath(worktree_path).relative_to(worktree_root)
-    return relative.parts[0]
+def _branch_session_handle(branch_name: str) -> str:
+    """Recover the stable session-handle prefix from an Azents branch name."""
+    prefix = "azents/"
+    if not branch_name.startswith(prefix):
+        raise ValueError("Recorded worktree branch is not Azents-managed")
+    return re.sub(r"-\d+$", "", branch_name.removeprefix(prefix))
 
 
 def _session_worktree_parent_path(
@@ -2907,25 +2944,44 @@ def _session_worktree_parent_path(
     return (worktree_root / relative.parts[0]).as_posix()
 
 
-def _cleanup_ownership_error(
+def _cleanup_classification(
     *,
     allocation: SessionGitWorktree,
     session_id: str,
     workspace_root: str,
-) -> str | None:
-    """Return a cleanup safety error when ownership validation fails."""
+    working_folder_path: str | None,
+) -> tuple[Literal["legacy", "canonical"] | None, str | None]:
+    """Classify a recorded allocation or return its cleanup safety error."""
     if allocation.session_id != session_id:
-        return "Cleanup request does not match the owning session."
-    worktree_root = PurePosixPath(workspace_root) / ".azents" / "worktrees"
+        return None, "Cleanup request does not match the owning session."
+    worktree_path = PurePosixPath(allocation.worktree_path)
+    legacy_worktree_root = PurePosixPath(workspace_root) / ".azents" / "worktrees"
     try:
-        PurePosixPath(allocation.worktree_path).relative_to(worktree_root)
+        worktree_path.relative_to(legacy_worktree_root)
     except ValueError:
-        return "Recorded worktree path is outside the Azents worktree root."
+        if working_folder_path is None:
+            return None, "Session working-folder context is missing."
+        try:
+            canonical_working_folder_path = validate_session_working_folder_path(
+                working_folder_path
+            )
+        except ValueError:
+            return None, "Session working-folder path is invalid."
+        canonical_parent = PurePosixPath(canonical_working_folder_path) / "worktrees"
+        try:
+            relative_worktree_path = worktree_path.relative_to(canonical_parent)
+        except ValueError:
+            return None, "Recorded worktree path is outside the managed roots."
+        if not relative_worktree_path.parts:
+            return None, "Recorded worktree path is not a worktree child."
+        classification: Literal["legacy", "canonical"] = "canonical"
+    else:
+        classification = "legacy"
     if not allocation.branch_name:
-        return "Recorded Git branch name is missing."
+        return None, "Recorded Git branch name is missing."
     if allocation.branch_created_by is not SessionGitWorktreeBranchCreatedBy.AZENTS:
-        return "Recorded Git branch is not Azents-created."
-    return None
+        return None, "Recorded Git branch is not Azents-created."
+    return classification, None
 
 
 def _log_archive_cleanup_failure(

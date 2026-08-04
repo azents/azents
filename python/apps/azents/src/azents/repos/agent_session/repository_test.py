@@ -424,6 +424,178 @@ class TestAgentSessionRepository:
         assert context.working_folder_cleanup_summary is None
         assert context.working_folder_cleanup_completed_at is None
 
+    async def test_working_folder_cleanup_transitions_from_pending_to_terminal(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """The root context records one bounded archive cleanup attempt."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "working-folder-cleanup-transition",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "working-folder-cleanup-transition",
+        )
+        repo = AgentSessionRepository()
+        created = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+
+        pending = await repo.mark_working_folder_cleanup_pending(
+            rdb_session,
+            root_session_id=created.id,
+        )
+        assert pending is not None
+        completed_at = datetime.datetime.now(datetime.UTC)
+        completed = await repo.complete_working_folder_cleanup(
+            rdb_session,
+            context_id=pending.id,
+            status=SessionWorkingFolderCleanupStatus.SUCCEEDED,
+            summary="Session working folder cleanup completed: deleted.",
+            completed_at=completed_at,
+        )
+        repeated_pending = await repo.mark_working_folder_cleanup_pending(
+            rdb_session,
+            root_session_id=created.id,
+        )
+
+        assert pending.cleanup_status is SessionWorkingFolderCleanupStatus.PENDING
+        assert completed is True
+        assert repeated_pending is None
+        root_agent = await repo.get_session_agent_by_session_id(
+            rdb_session,
+            created.id,
+        )
+        assert root_agent is not None
+        context = await rdb_session.get(RDBSessionAgentContext, root_agent.context_id)
+        assert context is not None
+        assert (
+            context.working_folder_cleanup_status
+            is SessionWorkingFolderCleanupStatus.SUCCEEDED
+        )
+        assert context.working_folder_cleanup_summary == (
+            "Session working folder cleanup completed: deleted."
+        )
+        assert context.working_folder_cleanup_completed_at == completed_at
+
+    async def test_working_folder_cleanup_rejects_nonterminal_status(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Terminalization refuses a nonterminal cleanup status."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "working-folder-cleanup-invalid-status",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "working-folder-cleanup-invalid-status",
+        )
+        repo = AgentSessionRepository()
+        created = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        pending = await repo.mark_working_folder_cleanup_pending(
+            rdb_session,
+            root_session_id=created.id,
+        )
+        assert pending is not None
+
+        with pytest.raises(ValueError, match="must be terminal"):
+            await repo.complete_working_folder_cleanup(
+                rdb_session,
+                context_id=pending.id,
+                status=SessionWorkingFolderCleanupStatus.PENDING,
+                summary="not terminal",
+                completed_at=datetime.datetime.now(datetime.UTC),
+            )
+
+    async def test_restore_tree_resets_working_folder_cleanup_for_rearchive(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Restore clears prior cleanup observations before a new archive attempt."""
+        workspace_id = await _create_workspace(
+            rdb_session,
+            "working-folder-cleanup-restore",
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "working-folder-cleanup-restore",
+        )
+        repo = AgentSessionRepository()
+        created = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+            ),
+        )
+        pending = await repo.mark_working_folder_cleanup_pending(
+            rdb_session,
+            root_session_id=created.id,
+        )
+        assert pending is not None
+        completed = await repo.complete_working_folder_cleanup(
+            rdb_session,
+            context_id=pending.id,
+            status=SessionWorkingFolderCleanupStatus.SUCCEEDED,
+            summary="Session working folder cleanup completed: deleted.",
+            completed_at=datetime.datetime.now(datetime.UTC),
+        )
+        assert completed is True
+        await repo.archive_tree(
+            rdb_session,
+            root_session_id=created.id,
+            session_ids=[created.id],
+            archived_at=datetime.datetime.now(datetime.UTC),
+            purge_after=None,
+            policy_revision=1,
+            retention_days=None,
+        )
+
+        await repo.restore_tree(
+            rdb_session,
+            root_session_id=created.id,
+            session_ids=[created.id],
+        )
+
+        root_agent = await repo.get_session_agent_by_session_id(
+            rdb_session,
+            created.id,
+        )
+        assert root_agent is not None
+        context = await rdb_session.get(RDBSessionAgentContext, root_agent.context_id)
+        assert context is not None
+        assert (
+            context.working_folder_cleanup_status
+            is SessionWorkingFolderCleanupStatus.NOT_ATTEMPTED
+        )
+        assert context.working_folder_cleanup_summary is None
+        assert context.working_folder_cleanup_completed_at is None
+        assert (
+            await repo.mark_working_folder_cleanup_pending(
+                rdb_session,
+                root_session_id=created.id,
+            )
+            is not None
+        )
+
     async def test_update_title_round_trips_custom_title(
         self, rdb_session: AsyncSession
     ) -> None:

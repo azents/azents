@@ -1290,6 +1290,63 @@ async def test_file_bulk_delete_removes_multiple_files(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_file_delete_unlinks_root_symlink_without_following_target(
+    tmp_path: Path,
+) -> None:
+    """Recursive delete unlinks a lexical root symlink instead of its target."""
+    external = tmp_path / "external"
+    external.mkdir()
+    sentinel = external / "sentinel.txt"
+    sentinel.write_text("preserve")
+    root_link = tmp_path / "session-folder"
+    root_link.symlink_to(external, target_is_directory=True)
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="file.delete",
+            payload={"path": str(root_link), "recursive": True},
+        )
+    )
+
+    assert root_link.is_symlink() is False
+    assert sentinel.read_text() == "preserve"
+    assert client.events[-1].event_type is RuntimeRunnerEventType.FINAL_SUCCESS
+
+
+@pytest.mark.asyncio
+async def test_file_delete_does_not_follow_descendant_symlink(
+    tmp_path: Path,
+) -> None:
+    """Recursive delete removes a descendant link while preserving its target."""
+    session_folder = tmp_path / "session-folder"
+    session_folder.mkdir()
+    (session_folder / "ordinary.txt").write_text("remove")
+    external = tmp_path / "external"
+    external.mkdir()
+    sentinel = external / "sentinel.txt"
+    sentinel.write_text("preserve")
+    (session_folder / "external-link").symlink_to(
+        external,
+        target_is_directory=True,
+    )
+    client = _FakeClient()
+    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+
+    await operations.handle(
+        _operation(
+            operation_type="file.delete",
+            payload={"path": str(session_folder), "recursive": True},
+        )
+    )
+
+    assert session_folder.exists() is False
+    assert sentinel.read_text() == "preserve"
+    assert client.events[-1].event_type is RuntimeRunnerEventType.FINAL_SUCCESS
+
+
+@pytest.mark.asyncio
 async def test_file_bulk_move_moves_multiple_files_into_directory(
     tmp_path: Path,
 ) -> None:
