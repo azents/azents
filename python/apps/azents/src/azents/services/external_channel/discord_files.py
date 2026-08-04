@@ -289,27 +289,13 @@ def _attachment_metadata(attachment: dict[str, object]) -> ExternalChannelFileMe
             supported=False,
             unsupported_reason=ExternalChannelFileUnsupportedReason.MISSING_FILE_ID,
         )
-    if not _valid_size(declared_size):
-        return ExternalChannelFileMetadata(
-            provider=ExternalChannelProvider.DISCORD,
-            provider_file_id=provider_file_id,
-            name=name,
-            title=None,
-            media_type=media_type,
-            declared_size=None,
-            mode=None,
-            external=False,
-            file_access=None,
-            supported=False,
-            unsupported_reason=ExternalChannelFileUnsupportedReason.INVALID_SIZE,
-        )
     return ExternalChannelFileMetadata(
         provider=ExternalChannelProvider.DISCORD,
         provider_file_id=provider_file_id,
         name=name,
         title=None,
         media_type=media_type,
-        declared_size=declared_size,
+        declared_size=declared_size if _valid_size(declared_size) else None,
         mode=None,
         external=False,
         file_access=None,

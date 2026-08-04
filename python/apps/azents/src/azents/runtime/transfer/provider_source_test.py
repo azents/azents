@@ -363,6 +363,26 @@ async def test_provider_size_mismatch_aborts_and_clears_registered_cleanup() -> 
 
 
 @pytest.mark.asyncio
+async def test_provider_short_body_aborts_and_clears_registered_cleanup() -> None:
+    """A stream ending before the authenticated length never becomes available."""
+    source, store, stream = _source(
+        body=b"four",
+        stream=Stream((b"two",), content_length=4),
+        declared_size=4,
+        maximum_size=4,
+    )
+    cleanup = CleanupCoordinator()
+
+    with pytest.raises(ValueError, match="size"):
+        await source.prepare(preparation=_preparation(cleanup))
+
+    assert stream.opened == stream.closed == 1
+    assert store.aborted
+    assert not store.copy_calls
+    assert [name for name, _ in cleanup.calls] == ["register", "clear"]
+
+
+@pytest.mark.asyncio
 async def test_provider_content_length_mismatch_aborts_before_body_staging() -> None:
     """Reject response-header size evidence before accepting provider bytes."""
     source, store, stream = _source(

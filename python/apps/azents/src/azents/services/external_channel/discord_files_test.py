@@ -56,6 +56,73 @@ async def test_lookup_omits_non_discord_cdn_url_from_current_attachment_info() -
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("declared_size", (None, -1, "7", True))
+async def test_lookup_treats_invalid_metadata_size_as_advisory(
+    declared_size: object,
+) -> None:
+    """Fresh attachment identity remains supported without a provider size."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(
+            200,
+            json={
+                "id": "444",
+                "channel_id": "333",
+                "attachments": [
+                    {
+                        "id": "555",
+                        "filename": "report.csv",
+                        "size": declared_size,
+                        "content_type": "text/csv",
+                        "url": (
+                            "https://cdn.discordapp.com/attachments/333/555/report.csv"
+                        ),
+                    }
+                ],
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        info = await DiscordChannelClient(http_client).fetch_attachment_download_info(
+            bot_token="discord-secret",
+            channel_id="333",
+            message_id="444",
+            attachment_id="555",
+        )
+
+    assert info.metadata.declared_size is None
+    assert info.metadata.supported is True
+    assert info.metadata.unsupported_reason is None
+    assert info.download_url is not None
+
+
+@pytest.mark.asyncio
+async def test_content_length_uses_final_attachment_url() -> None:
+    """The final CDN URL HEAD response exclusively declares transfer size."""
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, headers={"Content-Length": "7"})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        size = await DiscordChannelClient(http_client).fetch_attachment_content_length(
+            download_url=("https://cdn.discordapp.com/attachments/333/555/report.csv"),
+            max_bytes=10,
+        )
+
+    assert size == 7
+    assert len(calls) == 1
+    assert calls[0].method == "HEAD"
+    assert calls[0].url == ("https://cdn.discordapp.com/attachments/333/555/report.csv")
+
+
+@pytest.mark.asyncio
 async def test_download_rejects_non_cdn_urls_without_http_access() -> None:
     """The adapter rejects an invalid URL before a potentially unsafe request."""
     calls: list[httpx.Request] = []

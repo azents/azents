@@ -125,6 +125,28 @@ def test_projects_message_event_without_attachment_urls_or_raw_payload() -> None
     assert '"avatar"' not in serialized
 
 
+def test_projects_invalid_attachment_size_as_advisory_metadata() -> None:
+    """Discord attachment identity remains usable when event size is malformed."""
+    gateway_event = _event()
+    assert gateway_event.message is not None
+    gateway_event.message.attachments[0].size = -1
+
+    event = project_discord_gateway_event(
+        connection_id="connection-1",
+        provider_app_id="app-1",
+        target_guild_id="300",
+        connected_bot_user_id="900",
+        event=gateway_event,
+        received_at=datetime.datetime(2026, 7, 26, tzinfo=datetime.UTC),
+    )
+
+    assert event is not None
+    files = event.envelope["message"]["attachments"]["files"]
+    assert files[0]["declared_size"] is None
+    assert files[0]["supported"] is True
+    assert files[0]["unsupported_reason"] is None
+
+
 def test_projects_connected_bot_managed_role_as_invocation() -> None:
     """A provider-owned Bot role is equivalent to directly mentioning that Bot."""
     role_tags = MagicMock(spec=discord.RoleTags)

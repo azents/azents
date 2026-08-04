@@ -52,7 +52,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/components/ToolCallCard.tsx
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-08-04
-spec_version: 39
+spec_version: 40
 ---
 
 # File Exchange Storage
@@ -128,15 +128,16 @@ default `/tmp/agent/imports/` copy is temporary.
 
 ### Agent transfers an External Channel file
 
-`download_external_file` accepts one opaque `external-file:v1` locator, the exact
-`expected_size_bytes` displayed with that attachment, and one Runtime destination from
-the current active External Channel binding. The service refreshes provider metadata
-before opening a provider response, requires the selected size, refreshed metadata size,
-HTTP `Content-Length`, and incrementally counted body size to agree, and rejects a file
-above the effective per-file inbound policy (at most 500 MiB). It stages only the
-verified source through the common Server-to-Runtime service and waits for the Runtime
-destination commit. Runtime admission does not reject an independent valid file for
-active-file or aggregate-byte pressure; delivery chunks wait in FIFO-per-file
+`download_external_file` accepts one opaque `external-file:v1` locator and one Runtime
+destination from the current active External Channel binding. The service refreshes
+provider identity and authorization metadata, then uses only the authenticated final
+download URL's HTTP `Content-Length` as the declared transfer size and per-file policy
+input (at most 500 MiB). Provider metadata size remains advisory display data and does
+not gate download or authority revalidation. The common Server-to-Runtime source
+requires the GET response `Content-Length` and incrementally counted body size to match
+that declared size, aborting on excess bytes and failing on an early end before any
+Runtime destination commit. Runtime admission does not reject an independent valid file
+for active-file or aggregate-byte pressure; delivery chunks wait in FIFO-per-file
 round-robin order. The Tool result retains only Runtime path, filename, media type, and
 verified byte count.
 
@@ -269,15 +270,18 @@ lifetime. Object existence alone never creates Exchange publication authority.
 
 ## Changelog
 
+- **2026-08-04** — v40. Removed caller-selected and provider-metadata size gating
+  from External Channel downloads. The authenticated final URL `Content-Length` is the
+  sole declared transfer size, with the streamed body required to match it exactly.
 - **2026-08-04** — v39. Removed optional Runtime file-transfer capability gating. Runtime transfer, publication, and provider-delivery services are always bound, while Runtime readiness is resolved only when the corresponding Tool executes.
 - **2026-08-03** — v38. Bound `present_file` publication to the current Runner-reported Agent Workspace root instead of Provider metadata or a fixed path.
 - **2026-08-02** — v37. Removed the obsolete durable External Channel
   Action/Delivery manifest claim and documented request-local file publication with
   sanitized ordinary Tool results.
-- **2026-07-30** — v36. Required explicit displayed-size selection and matching
-  provider metadata, HTTP response declaration, and streamed body for External Channel
-  ingress up to 500 MiB; Runtime delivery now waits fairly at chunk boundaries rather
-  than rejecting independent files for aggregate admission capacity.
+- **2026-07-30** — v36. Added bounded verified External Channel ingress up to
+  500 MiB; Runtime delivery waits fairly at chunk boundaries rather than rejecting
+  independent files for aggregate admission capacity. Caller-selected and metadata
+  size gating from this version was removed by v40.
 - **2026-07-30** — v34. Reverified the External Channel locator, authority
   revalidation, verified Runtime transfer, provider settlement, and no-durable-body
   boundaries after synchronous ingress contraction; no semantic change.

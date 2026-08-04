@@ -44,6 +44,7 @@ from azents.repos.external_channel.work_data import (
     ExternalChannelFileAccessTarget,
 )
 from azents.runtime.transfer.provider_source import (
+    DeferredProviderServerToRuntimeSource,
     ProviderByteStreamResponse,
     ProviderStagingStore,
 )
@@ -457,7 +458,7 @@ def _target(
 def _file_info(
     *,
     provider_file_id: str = "F123",
-    declared_size: int = 7,
+    declared_size: int | None = 7,
     supported: bool = True,
 ) -> SlackFileDownloadInfo:
     return SlackFileDownloadInfo(
@@ -485,8 +486,7 @@ def _file_info(
 def _discord_file_info(
     *,
     provider_file_id: str = "555",
-    declared_size: int = 7,
-    supported: bool = True,
+    declared_size: int | None = 7,
     download_url: str
     | None = "https://cdn.discordapp.com/attachments/333/555/report.csv",
 ) -> DiscordAttachmentDownloadInfo:
@@ -501,10 +501,8 @@ def _discord_file_info(
             mode=None,
             external=False,
             file_access=None,
-            supported=supported,
-            unsupported_reason=(
-                None if supported else ExternalChannelFileUnsupportedReason.INVALID_SIZE
-            ),
+            supported=True,
+            unsupported_reason=None,
         ),
         download_url=download_url,
     )
@@ -578,7 +576,6 @@ async def _download(
     agent_id: str,
     operation_id: str = "run-1",
     file: str,
-    expected_size_bytes: int = 7,
     path: str,
     overwrite: bool,
     file_storage: FileStorage,
@@ -590,7 +587,6 @@ async def _download(
         agent_id=agent_id,
         operation_id=operation_id,
         file=file,
-        expected_size_bytes=expected_size_bytes,
         path=path,
         overwrite=overwrite,
         file_storage=file_storage,
@@ -824,60 +820,63 @@ async def test_explicit_overwrite_skips_existence_rejection() -> None:
 
 
 @pytest.mark.asyncio
-async def test_declared_and_actual_oversize_never_write_runtime_file() -> None:
-    """Provider metadata and actual bytes independently enforce the effective limit."""
-    declared_storage = _FileStorage()
-    declared_service = _service(
+async def test_slack_metadata_size_does_not_gate_download_or_revalidation() -> None:
+    """Only the authenticated final URL declares the Slack transfer size."""
+    storage = _FileStorage()
+    slack_client = _SlackClient(info=_file_info(declared_size=101))
+    service = _service(
         repository=_Repository(_target()),
-        slack_client=_SlackClient(info=_file_info(declared_size=101)),
+        slack_client=slack_client,
+    )
+    transfer = _TransferService()
+
+    result = await _download(
+        service,
+        transfer=transfer,
+        session_id="session-1",
+        agent_id="agent-1",
+        file=_locator(),
+        path="/workspace/agent/report.csv",
+        overwrite=False,
+        file_storage=cast(FileStorage, storage),
     )
 
-    with pytest.raises(ExternalChannelFileTransferError, match="Selected file size"):
-        await _download(
-            declared_service,
-            session_id="session-1",
-            agent_id="agent-1",
-            file=_locator(),
-            path="/workspace/agent/report.csv",
-            overwrite=False,
-            file_storage=cast(FileStorage, declared_storage),
-        )
-
-    actual_storage = _FileStorage()
-    actual_service = _service(
-        repository=_Repository(_target()),
-        slack_client=_SlackClient(),
-    )
-    with pytest.raises(ExternalChannelFileTransferError, match="100 bytes"):
-        await _download(
-            actual_service,
-            transfer=_TransferService(SlackProviderFileTooLarge("oversize")),
-            session_id="session-1",
-            agent_id="agent-1",
-            file=_locator(),
-            path="/workspace/agent/report.csv",
-            overwrite=False,
-            file_storage=cast(FileStorage, actual_storage),
-        )
-
-    assert declared_storage.put_calls == []
-    assert actual_storage.put_calls == []
+    assert result.bytes_written == 7
+    assert transfer.requests[0].source.metadata.size == 7
+    slack_client.info = _file_info(declared_size=None)
+    source = transfer.requests[0].source
+    assert isinstance(source, DeferredProviderServerToRuntimeSource)
+    assert await source.revalidate_authority()
+    assert storage.put_calls == []
 
 
 @pytest.mark.asyncio
-async def test_provider_size_mismatch_never_writes_runtime_file() -> None:
-    """A short complete response is not reported as the declared Slack file."""
-    storage = _FileStorage()
-    service = _service(
+async def test_slack_final_length_limit_and_body_mismatch_never_write() -> None:
+    """HEAD size and streamed bytes independently protect Runtime admission."""
+    oversize_storage = _FileStorage()
+    oversize_service = _service(
         repository=_Repository(_target()),
-        slack_client=_SlackClient(
-            info=_file_info(declared_size=8),
-        ),
+        slack_client=_SlackClient(chunks=(b"x" * 101,)),
     )
-
-    with pytest.raises(ExternalChannelFileTransferError, match="does not match"):
+    with pytest.raises(ExternalChannelFileTransferError, match="100 bytes"):
         await _download(
-            service,
+            oversize_service,
+            session_id="session-1",
+            agent_id="agent-1",
+            file=_locator(),
+            path="/workspace/agent/report.csv",
+            overwrite=False,
+            file_storage=cast(FileStorage, oversize_storage),
+        )
+
+    mismatch_storage = _FileStorage()
+    mismatch_service = _service(
+        repository=_Repository(_target()),
+        slack_client=_SlackClient(),
+    )
+    with pytest.raises(ExternalChannelFileTransferError, match="Content-Length"):
+        await _download(
+            mismatch_service,
             transfer=_TransferService(
                 ValueError("Provider stream size does not match the manifest")
             ),
@@ -886,10 +885,11 @@ async def test_provider_size_mismatch_never_writes_runtime_file() -> None:
             file=_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, storage),
+            file_storage=cast(FileStorage, mismatch_storage),
         )
 
-    assert storage.put_calls == []
+    assert oversize_storage.put_calls == []
+    assert mismatch_storage.put_calls == []
 
 
 @pytest.mark.asyncio
@@ -1216,45 +1216,59 @@ async def test_discord_capability_and_current_attachment_failures_never_write() 
 
 
 @pytest.mark.asyncio
-async def test_discord_size_limits_and_size_mismatch_never_write() -> None:
-    """Declared size, actual stream limit, and final length all gate Runtime writes."""
-    declared_storage = _FileStorage()
-    declared_service = _service(
+async def test_discord_metadata_size_does_not_gate_download_or_revalidation() -> None:
+    """Only the final CDN URL declares the Discord transfer size."""
+    storage = _FileStorage()
+    discord_client = _DiscordClient(info=_discord_file_info(declared_size=101))
+    service = _service(
         repository=_Repository(
             _target(provider=ExternalChannelProvider.DISCORD),
         ),
         slack_client=_SlackClient(),
-        discord_client=_DiscordClient(info=_discord_file_info(declared_size=101)),
+        discord_client=discord_client,
     )
-    with pytest.raises(ExternalChannelFileTransferError, match="Selected file size"):
-        await _download(
-            declared_service,
-            session_id="session-1",
-            agent_id="agent-1",
-            file=_discord_locator(),
-            path="/workspace/agent/report.csv",
-            overwrite=False,
-            file_storage=cast(FileStorage, declared_storage),
-        )
+    transfer = _TransferService()
 
-    actual_storage = _FileStorage()
-    actual_service = _service(
+    result = await _download(
+        service,
+        transfer=transfer,
+        session_id="session-1",
+        agent_id="agent-1",
+        file=_discord_locator(),
+        path="/workspace/agent/report.csv",
+        overwrite=False,
+        file_storage=cast(FileStorage, storage),
+    )
+
+    assert result.bytes_written == 7
+    assert transfer.requests[0].source.metadata.size == 7
+    discord_client.info = _discord_file_info(declared_size=None)
+    source = transfer.requests[0].source
+    assert isinstance(source, DeferredProviderServerToRuntimeSource)
+    assert await source.revalidate_authority()
+    assert storage.put_calls == []
+
+
+@pytest.mark.asyncio
+async def test_discord_final_length_limit_and_body_mismatch_never_write() -> None:
+    """HEAD size and streamed bytes independently protect Runtime admission."""
+    oversize_storage = _FileStorage()
+    oversize_service = _service(
         repository=_Repository(
             _target(provider=ExternalChannelProvider.DISCORD),
         ),
         slack_client=_SlackClient(),
-        discord_client=_DiscordClient(),
+        discord_client=_DiscordClient(chunks=(b"x" * 101,)),
     )
     with pytest.raises(ExternalChannelFileTransferError, match="100 bytes"):
         await _download(
-            actual_service,
-            transfer=_TransferService(DiscordFileTooLarge("oversize")),
+            oversize_service,
             session_id="session-1",
             agent_id="agent-1",
             file=_discord_locator(),
             path="/workspace/agent/report.csv",
             overwrite=False,
-            file_storage=cast(FileStorage, actual_storage),
+            file_storage=cast(FileStorage, oversize_storage),
         )
 
     mismatch_storage = _FileStorage()
@@ -1263,9 +1277,9 @@ async def test_discord_size_limits_and_size_mismatch_never_write() -> None:
             _target(provider=ExternalChannelProvider.DISCORD),
         ),
         slack_client=_SlackClient(),
-        discord_client=_DiscordClient(info=_discord_file_info(declared_size=8)),
+        discord_client=_DiscordClient(),
     )
-    with pytest.raises(ExternalChannelFileTransferError, match="does not match"):
+    with pytest.raises(ExternalChannelFileTransferError, match="Content-Length"):
         await _download(
             mismatch_service,
             transfer=_TransferService(
@@ -1279,8 +1293,7 @@ async def test_discord_size_limits_and_size_mismatch_never_write() -> None:
             file_storage=cast(FileStorage, mismatch_storage),
         )
 
-    assert declared_storage.put_calls == []
-    assert actual_storage.put_calls == []
+    assert oversize_storage.put_calls == []
     assert mismatch_storage.put_calls == []
 
 
