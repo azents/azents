@@ -695,6 +695,7 @@ async def _make_toolkit() -> tuple[
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, publish_event),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     assert state.status == ToolkitStatus.ENABLED
@@ -782,6 +783,7 @@ async def test_subagent_static_prompt_matches_codex_root_prompt() -> None:
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
 
@@ -801,6 +803,7 @@ async def test_subagent_static_prompt_matches_codex_child_prompt() -> None:
             run_id="run-1",
             publish_event=cast(Any, _noop_publish),
             session_id="child-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
 
@@ -896,6 +899,7 @@ async def test_spawn_agent_schema_lists_labels_without_model_identity() -> None:
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
@@ -932,6 +936,7 @@ async def test_spawn_agent_schema_explains_inherit_when_no_targets_are_enabled()
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
@@ -964,6 +969,7 @@ async def test_send_message_is_queue_only() -> None:
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, publish_event),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "send_message")
@@ -996,6 +1002,7 @@ async def test_send_message_from_child_can_target_root() -> None:
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="child-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "send_message")
@@ -1035,6 +1042,7 @@ async def test_followup_task_wakes_target_child() -> None:
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, publish_event),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "followup_task")
@@ -1081,6 +1089,7 @@ async def test_followup_task_rejects_new_activation_over_capacity() -> None:
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "followup_task")
@@ -1110,6 +1119,7 @@ async def test_followup_task_allows_already_active_target_at_capacity() -> None:
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "followup_task")
@@ -1132,6 +1142,7 @@ async def test_followup_task_from_child_rejects_root() -> None:
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="child-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "followup_task")
@@ -1156,6 +1167,7 @@ async def test_interrupt_agent_rejects_root_and_self() -> None:
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="child-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "interrupt_agent")
@@ -1179,6 +1191,7 @@ async def test_interrupt_agent_locks_root_before_stopping_child() -> None:
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "interrupt_agent")
@@ -1203,6 +1216,7 @@ async def test_list_agents_from_child_includes_root_tree() -> None:
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="child-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "list_agents")
@@ -1235,6 +1249,7 @@ async def test_spawn_agent_creates_and_wakes_child_within_limits() -> None:
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _publish_to(published_events)),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
@@ -1295,6 +1310,7 @@ async def test_spawn_agent_applies_target_override_and_normalized_effort() -> No
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
@@ -1340,6 +1356,7 @@ async def test_spawn_agent_allows_effort_only_override_on_disabled_parent_target
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
@@ -1377,6 +1394,7 @@ async def test_spawn_agent_rejects_disabled_explicit_target_without_child_residu
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _publish_to(events)),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
@@ -1414,6 +1432,7 @@ async def test_spawn_agent_reloads_current_policy_before_explicit_override() -> 
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _publish_to(events)),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
@@ -1456,6 +1475,7 @@ async def test_spawn_agent_reloads_current_policy_before_explicit_override() -> 
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _publish_to(events)),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     refreshed_tool = next(
@@ -1497,6 +1517,7 @@ async def test_spawn_agent_rejects_invalid_override_without_child_residue(
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _publish_to(events)),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
@@ -1552,6 +1573,7 @@ async def test_spawn_agent_rejects_invalid_parent_run(
             run_id=parent_run_id,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
@@ -1591,6 +1613,7 @@ async def test_spawn_agent_inserts_boundary_after_forked_history() -> None:
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
@@ -1632,6 +1655,7 @@ async def test_spawn_agent_does_not_insert_boundary_without_forked_history() -> 
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
@@ -1663,6 +1687,7 @@ async def test_spawn_agent_rejects_when_active_subagent_limit_is_reached() -> No
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
@@ -1715,6 +1740,7 @@ async def test_spawn_agent_counts_latest_running_run_toward_active_limit() -> No
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="root-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")
@@ -1746,6 +1772,7 @@ async def test_spawn_agent_rejects_when_depth_limit_is_reached() -> None:
             run_id=_PARENT_RUN_ID,
             publish_event=cast(Any, _noop_publish),
             session_id="child-session",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
     tool = next(tool for tool in state.tools if tool.spec.name == "spawn_agent")

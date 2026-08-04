@@ -73,6 +73,7 @@ class InputPollResult:
     events: list[Event]
     context_invalidated: bool
     complete_run: bool
+    external_channel_continuation_binding_ids: frozenset[str] | None
 
 
 @dataclass(frozen=True)
@@ -180,6 +181,7 @@ class ModelCallPreparer[TNativeRequest](Protocol):
         *,
         transcript: Sequence[Event],
         model: str,
+        external_channel_continuation_binding_ids: frozenset[str],
     ) -> PreparedModelCall[TNativeRequest]:
         """Prepare one model-call turn."""
         ...
@@ -251,6 +253,7 @@ class AgentRunExecutionRequest:
     model: str
     owner_generation: int
     tool_admission_barrier: ToolAdmissionBarrier
+    external_channel_continuation_binding_ids: frozenset[str]
     run_index: int = 1
     max_turns: int | None = None
 
@@ -342,6 +345,9 @@ class AgentRunExecution[
         poll_input_events: InputPoller | None = None,
     ) -> AgentRunStatus:
         """Run until terminal state."""
+        active_external_channel_continuation_binding_ids = (
+            request.external_channel_continuation_binding_ids
+        )
         try:
             for _model_call_index in _turn_range(request.max_turns):
                 if await _stopped(check_stop):
@@ -367,6 +373,13 @@ class AgentRunExecution[
                         return AgentRunStatus.COMPLETED
                     if poll_result.context_invalidated:
                         return AgentRunStatus.RUNNING
+                    if (
+                        poll_result.external_channel_continuation_binding_ids
+                        is not None
+                    ):
+                        active_external_channel_continuation_binding_ids = (
+                            poll_result.external_channel_continuation_binding_ids
+                        )
 
                 async with self.session_manager() as session:
                     head_event_id = await self._model_input_head_event_id(
@@ -456,6 +469,7 @@ class AgentRunExecution[
                 prepared = await self._prepare_model_call(
                     transcript=model_input_transcript,
                     model=request.model,
+                    external_channel_continuation_binding_ids=active_external_channel_continuation_binding_ids,
                 )
                 turn_end_callback = prepared.on_turn_end
                 turn_ended = False
@@ -757,11 +771,13 @@ class AgentRunExecution[
         *,
         transcript: Sequence[Event],
         model: str,
+        external_channel_continuation_binding_ids: frozenset[str],
     ) -> PreparedModelCall[TNativeRequest]:
         """Prepare turn-local model request and tool executor."""
         return await self.model_call_preparer(
             transcript=transcript,
             model=model,
+            external_channel_continuation_binding_ids=external_channel_continuation_binding_ids,
         )
 
     async def _stream_model(

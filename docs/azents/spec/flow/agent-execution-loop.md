@@ -79,7 +79,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
 last_verified_at: 2026-08-04
-spec_version: 146
+spec_version: 147
 ---
 
 # Agent Execution Loop
@@ -1189,13 +1189,26 @@ concise `<provider_reference_mappings>` XML block after the contiguous batch. It
 `user` and `channel` elements carry the provider ID and prefixed display name without
 rewriting the source body.
 
+Mailbox promotion also returns ephemeral External Channel continuation binding scope.
+An `external_channel_continuation` returns its validated active binding IDs. Any other
+eligible input returns an empty set, while no new actionable input returns `None`. Run
+preparation and model-boundary polling carry this value without persisting another
+authorization record. A model call that follows only client-tool results keeps the
+current scope, while newly promoted actionable input replaces it. Combining a
+continuation with any other actionable input produces an empty set. The engine does
+not reverse-search transcript history to reconstruct this scope.
+
 When an active binding exists, runtime adds the direct `channel_action` tool and
-the current binding/work snapshot. Normal assistant text is retained only in
-Azents history and is never implicitly published to the provider. A
+the current binding/work snapshot. Its normal schema permits `finish` and `continue`;
+an `external_channel_continuation` additionally permits binding-scoped `ignore` for
+its continuation binding set. Service authorization repeats that eligibility check.
+Normal assistant text is retained only in Azents history and is never implicitly
+published to the provider. A
 `channel_action` call commits canonical work before its process-local provider
 effects execute outside the transaction. The normal client-tool call and result
 events retain the ordered sanitized outcomes; no separate Action or Delivery history
-is created.
+is created. Eligible `ignore` rejects pending or in-progress tasks before mutation;
+otherwise it finishes empty or all-terminal Work with an empty provider-effect plan.
 
 After a successful run, unfinished Channel Work is an idle-continuation source.
 Continuation remains eligible until every relevant binding finishes or clears
@@ -1210,6 +1223,9 @@ icon.
 
 ## Changelog
 
+- **2026-08-04** (spec_version 147) — Carried External Channel continuation binding
+  scope through polling and tool-result follow-up and used it to expose authorized
+  zero-effect `channel_action ignore` only during continuation.
 - **2026-08-04** (spec_version 146) — Removed optional Runtime transfer capability gating and moved Runtime readiness resolution to actual file Tool execution.
 - **2026-08-03** (spec_version 145) — Restored raw Slack and Discord reference tokens
   in model-visible bodies and moved display-name enrichment into a concise XML mapping

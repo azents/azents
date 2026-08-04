@@ -1585,6 +1585,7 @@ async def test_execute_reports_resolve_failure(
             promoted_event_ids=[],
             user_messages=[],
             has_actionable_work=True,
+            external_channel_continuation_binding_ids=None,
         )
 
     async def resolve_failure(*args: object, **kwargs: object) -> object:
@@ -1670,6 +1671,7 @@ async def test_execute_recovers_activated_run_before_flushing_input(
             promoted_event_ids=[],
             user_messages=[],
             has_actionable_work=False,
+            external_channel_continuation_binding_ids=None,
         )
 
     async def resolve_recovered(*args: object, **kwargs: object) -> object:
@@ -1766,6 +1768,7 @@ async def test_execute_persists_recovered_profile_resolution_failure(
             promoted_event_ids=[],
             user_messages=[],
             has_actionable_work=False,
+            external_channel_continuation_binding_ids=None,
         )
 
     async def fail_recovered_resolution(
@@ -1928,6 +1931,7 @@ async def test_execute_recovers_durable_retry_budget(
             promoted_event_ids=[],
             user_messages=[],
             has_actionable_work=False,
+            external_channel_continuation_binding_ids=None,
         )
 
     async def resolve_recovered(*args: object, **kwargs: object) -> object:
@@ -2013,6 +2017,7 @@ async def test_execute_claims_manual_retry_profile_before_flushing_input(
             promoted_event_ids=["event-001"],
             user_messages=[],
             has_actionable_work=True,
+            external_channel_continuation_binding_ids=None,
         )
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
@@ -2080,6 +2085,7 @@ async def test_execute_activates_pending_child_from_session_snapshot(
             promoted_event_ids=["event-001"],
             user_messages=[],
             has_actionable_work=True,
+            external_channel_continuation_binding_ids=None,
         )
 
     async def resolve_existing(*args: object, **kwargs: object) -> object:
@@ -2181,6 +2187,7 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
                 promoted_event_ids=["event-002"],
                 user_messages=[],
                 has_actionable_work=True,
+                external_channel_continuation_binding_ids=None,
             )
         return RunInputPollResult(
             context_invalidated=False,
@@ -2189,6 +2196,7 @@ async def test_execute_rebuilds_turn_with_exact_updated_inference_state(
             promoted_event_ids=["event-001"],
             user_messages=[],
             has_actionable_work=True,
+            external_channel_continuation_binding_ids=None,
         )
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
@@ -2236,6 +2244,7 @@ async def test_execute_enqueues_follow_up_after_context_invalidating_action(
             user_messages=[],
             has_actionable_work=False,
             context_invalidated=True,
+            external_channel_continuation_binding_ids=None,
         )
 
     async def resolve_failure(*args: object, **kwargs: object) -> object:
@@ -2335,6 +2344,7 @@ async def test_boundary_poll_processes_turn_actions(
             promoted_event_ids=[],
             user_messages=[],
             has_actionable_work=True,
+            external_channel_continuation_binding_ids=None,
         )
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
@@ -2358,6 +2368,7 @@ async def test_boundary_poll_processes_turn_actions(
         user_messages=[],
         context_invalidated=False,
         complete_run=False,
+        external_channel_continuation_binding_ids=None,
     )
     assert process_actions_values == [True]
 
@@ -2388,6 +2399,7 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
             user_messages=[],
             has_actionable_work=False,
             context_invalidated=True,
+            external_channel_continuation_binding_ids=None,
         )
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
@@ -2422,6 +2434,7 @@ async def test_boundary_poll_stops_after_context_invalidating_action(
         complete_run=False,
         user_messages=[],
         context_invalidated=True,
+        external_channel_continuation_binding_ids=None,
     )
     assert context_invalidated is True
     assert lifecycle.wake_ups == [SessionWakeUp(session_id=message.session_id)]
@@ -2504,6 +2517,7 @@ async def test_poll_run_inputs_requires_fresh_snapshot_for_next_fifo_head(
             claimed_count=1,
             inserted_count=0,
             deduped_count=0,
+            external_channel_continuation_binding_ids=None,
         )
 
     monkeypatch.setattr(
@@ -2561,6 +2575,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
             claimed_count=1,
             inserted_count=0,
             deduped_count=0,
+            external_channel_continuation_binding_ids=None,
         ),
         PromotedMailboxItems(
             operation_action=None,
@@ -2582,6 +2597,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
             claimed_count=1,
             inserted_count=1,
             deduped_count=0,
+            external_channel_continuation_binding_ids=None,
         ),
         PromotedMailboxItems(
             operation_action=None,
@@ -2595,6 +2611,7 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
             claimed_count=0,
             inserted_count=0,
             deduped_count=0,
+            external_channel_continuation_binding_ids=None,
         ),
     ]
     processed_operation_actions: list[object | None] = []
@@ -2652,6 +2669,122 @@ async def test_poll_run_inputs_continues_fifo_after_failed_turn_action(
 
 
 @pytest.mark.asyncio
+async def test_poll_run_inputs_clears_continuation_scope_for_mixed_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Other actionable input clears continuation-only ignore scope."""
+    executor = _executor()
+    profiles = [
+        PendingInputInferenceProfile(
+            mailbox_item_id="buffer-external",
+            requires_inference=True,
+            exists=True,
+            requested_inference_profile=None,
+        ),
+        PendingInputInferenceProfile(
+            mailbox_item_id="buffer-ordinary",
+            requires_inference=True,
+            exists=True,
+            requested_inference_profile=None,
+        ),
+        PendingInputInferenceProfile(
+            mailbox_item_id=None,
+            requires_inference=False,
+            exists=False,
+            requested_inference_profile=None,
+        ),
+    ]
+    promoted_batches = [
+        PromotedMailboxItems(
+            operation_action=None,
+            turn_effect=TurnEffect.ELIGIBLE,
+            requested_inference_profile=None,
+            promoted_event_ids=["external-event"],
+            user_messages=[],
+            events=[],
+            deleted_buffer_ids=["buffer-external"],
+            changed_session_agent_ids=[],
+            claimed_count=1,
+            inserted_count=1,
+            deduped_count=0,
+            external_channel_continuation_binding_ids=frozenset({"binding-1"}),
+        ),
+        PromotedMailboxItems(
+            operation_action=None,
+            turn_effect=TurnEffect.ELIGIBLE,
+            requested_inference_profile=None,
+            promoted_event_ids=["ordinary-event"],
+            user_messages=[],
+            events=[],
+            deleted_buffer_ids=["buffer-ordinary"],
+            changed_session_agent_ids=[],
+            claimed_count=1,
+            inserted_count=1,
+            deduped_count=0,
+            external_channel_continuation_binding_ids=frozenset(),
+        ),
+        PromotedMailboxItems(
+            operation_action=None,
+            turn_effect=TurnEffect.NEUTRAL,
+            requested_inference_profile=None,
+            promoted_event_ids=[],
+            user_messages=[],
+            events=[],
+            deleted_buffer_ids=[],
+            changed_session_agent_ids=[],
+            claimed_count=0,
+            inserted_count=0,
+            deduped_count=0,
+            external_channel_continuation_binding_ids=None,
+        ),
+    ]
+
+    async def peek(session_id: str) -> PendingInputInferenceProfile:
+        assert session_id == "session-1"
+        return profiles.pop(0)
+
+    async def promote(*args: object, **kwargs: object) -> PromotedMailboxItems:
+        del args, kwargs
+        return promoted_batches.pop(0)
+
+    async def has_actionable_model_input(session_id: str) -> bool:
+        assert session_id == "session-1"
+        return True
+
+    monkeypatch.setattr(
+        executor.mailbox_item_service,
+        "peek_pending_inference_profile",
+        peek,
+    )
+    monkeypatch.setattr(executor, "_promote_mailbox_items", promote)
+    monkeypatch.setattr(
+        executor,
+        "_has_actionable_model_input",
+        has_actionable_model_input,
+    )
+
+    result = await executor.poll_run_inputs(
+        agent_id="agent-1",
+        session_id="session-1",
+        model="gpt-test",
+        required_inference_profile=None,
+        active_run_id="run-1",
+        owner_generation=1,
+        expected_mailbox_item_id=None,
+        enforce_snapshot_head=False,
+        tool_admission_barrier=ToolAdmissionBarrier(),
+        initial_turn_eligible=False,
+        poll_fn=None,
+        process_actions=False,
+        dispatch_event=_noop_dispatch_event,
+    )
+
+    assert result.external_channel_continuation_binding_ids == frozenset()
+    assert profiles == []
+    assert promoted_batches == []
+
+
+@pytest.mark.asyncio
 async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2685,6 +2818,7 @@ async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
             claimed_count=1,
             inserted_count=1,
             deduped_count=0,
+            external_channel_continuation_binding_ids=None,
         ),
         PromotedMailboxItems(
             operation_action=None,
@@ -2698,6 +2832,7 @@ async def test_poll_run_inputs_publishes_acknowledgment_after_promotion_commit(
             claimed_count=0,
             inserted_count=0,
             deduped_count=0,
+            external_channel_continuation_binding_ids=None,
         ),
     ]
 
@@ -2768,6 +2903,7 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
             claimed_count=1,
             inserted_count=1,
             deduped_count=0,
+            external_channel_continuation_binding_ids=None,
         ),
         PromotedMailboxItems(
             operation_action=None,
@@ -2781,6 +2917,7 @@ async def test_poll_run_inputs_completes_run_after_terminal_preparation_failure(
             claimed_count=0,
             inserted_count=0,
             deduped_count=0,
+            external_channel_continuation_binding_ids=None,
         ),
     ]
 
@@ -2839,6 +2976,7 @@ async def test_execute_cancels_pending_run_after_terminal_preparation_failure(
             promoted_event_ids=["failure-event"],
             user_messages=[],
             has_actionable_work=False,
+            external_channel_continuation_binding_ids=None,
         )
 
     async def resolve_failure(*args: object, **kwargs: object) -> object:
@@ -2926,6 +3064,7 @@ async def test_execute_preserves_actionable_transcript_eligibility(
             promoted_event_ids=[],
             user_messages=[],
             has_actionable_work=True,
+            external_channel_continuation_binding_ids=None,
         )
 
     monkeypatch.setattr(
@@ -2979,6 +3118,7 @@ async def test_execute_ignores_wake_up_without_runtime_input(
             promoted_event_ids=[],
             user_messages=[],
             has_actionable_work=False,
+            external_channel_continuation_binding_ids=None,
         )
 
     async def resolve_failure(*args: object, **kwargs: object) -> object:
@@ -3295,6 +3435,7 @@ async def test_execute_clears_live_projection_after_run_complete(
             promoted_event_ids=[],
             user_messages=[],
             has_actionable_work=True,
+            external_channel_continuation_binding_ids=None,
         )
 
     async def resolve_success(*args: object, **kwargs: object) -> object:
@@ -3576,6 +3717,7 @@ async def test_execute_retries_failed_run_without_durable_error(
             promoted_event_ids=[],
             user_messages=[],
             has_actionable_work=True,
+            external_channel_continuation_binding_ids=None,
         )
 
     async def resolve_success(*args: object, **kwargs: object) -> object:
@@ -3664,6 +3806,7 @@ async def test_execute_resets_retry_budget_after_successful_model_turn(
             promoted_event_ids=[],
             user_messages=[],
             has_actionable_work=True,
+            external_channel_continuation_binding_ids=None,
         )
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
@@ -3740,6 +3883,7 @@ async def test_execute_publishes_retry_state_after_internal_attempt_failure(
             promoted_event_ids=[],
             user_messages=[],
             has_actionable_work=True,
+            external_channel_continuation_binding_ids=None,
         )
 
     async def resolve_success(*args: object, **kwargs: object) -> object:
@@ -3949,6 +4093,7 @@ async def test_execute_prioritizes_stop_over_provider_failure_persistence(
             promoted_event_ids=[],
             user_messages=[],
             has_actionable_work=True,
+            external_channel_continuation_binding_ids=None,
         )
 
     async def resolve_success(*args: object, **kwargs: object) -> object:
@@ -4032,6 +4177,7 @@ async def test_execute_clears_retry_state_when_retry_emits_run_stopped(
             promoted_event_ids=[],
             user_messages=[],
             has_actionable_work=True,
+            external_channel_continuation_binding_ids=None,
         )
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
@@ -4090,6 +4236,7 @@ async def test_execute_finalizes_when_failed_run_retry_is_exhausted(
             promoted_event_ids=[],
             user_messages=[],
             has_actionable_work=True,
+            external_channel_continuation_binding_ids=None,
         )
 
     async def resolve_success(*args: object, **kwargs: object) -> object:
@@ -4159,6 +4306,7 @@ async def test_execute_preserves_retry_attempt_history_after_live_retry_clear(
             promoted_event_ids=[],
             user_messages=[],
             has_actionable_work=True,
+            external_channel_continuation_binding_ids=None,
         )
 
     monkeypatch.setattr(executor, "poll_run_inputs", poll_run_inputs)
@@ -4220,6 +4368,7 @@ async def test_execute_finalizes_non_retryable_failed_run_without_waiting(
             promoted_event_ids=[],
             user_messages=[],
             has_actionable_work=True,
+            external_channel_continuation_binding_ids=None,
         )
 
     async def resolve_success(*args: object, **kwargs: object) -> object:

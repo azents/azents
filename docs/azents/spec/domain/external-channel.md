@@ -60,7 +60,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-08-04
-spec_version: 47
+spec_version: 48
 ---
 
 # External Channel
@@ -108,6 +108,11 @@ contain multiple independent bindings.
   reminder, public projection, and UI presentation. It never reuses
   `goal_continuation`, so active Goal state cannot reinterpret or recursively
   re-trigger Channel work.
+- Promoted `external_channel_continuation` input carries an ephemeral set of its active
+  binding IDs. Client-tool-result follow-up preserves that set until a new actionable
+  input boundary replaces it. Initial External Channel invocation and every
+  non-continuation or mixed boundary carry no silent-completion authority. Eligibility
+  is never inferred by searching transcript history or from an active binding alone.
 - Foreign keys are restrictive across lifecycle roots. AgentSession deletion cannot cascade away provider or audit roots before lifecycle cleanup and verification complete.
 
 ## Core Records
@@ -173,6 +178,14 @@ contain multiple independent bindings.
   invocation. Location selection snapshots the Agent default into the participation
   setting. Later configured Bindings copy that setting, while existing Bindings retain
   their own mode. Existing Agents and historical bindings use `all_messages`.
+- An `external_channel_continuation` model turn may invoke binding-scoped
+  `channel_action ignore` for a binding carried by that continuation. `ignore` accepts
+  no publication or Work-update fields and revalidates scope in the service. It
+  rejects before mutation when any current task is `pending` or `in_progress`. Empty
+  and all-`completed`/`failed` task sets may finish silently: desired progress is
+  cleared, current provider projection observation is retained, and no reply, progress
+  update, file, Tracker deletion, or other provider effect is planned. Initial
+  invocation and other turns retain only `finish` and `continue`.
 - Connection capabilities expose `download_files` and `upload_files` independently.
   Missing legacy fields are unavailable. A model-visible file key directly contains
   its provider request coordinates. It is valid only for the current Agent, Session,
@@ -414,6 +427,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-04** (spec_version 48) — Added continuation-scoped binding authority for
+  silent Channel Work completion that rejects unfinished tasks and produces no
+  provider effect.
 - **2026-08-04** (spec_version 47) — Distinguished required Runtime transfer services from provider connection capabilities and moved Runtime readiness resolution to Tool execution.
 - **2026-08-03** (spec_version 46) — Moved binding-specific Channel Work and its
   ordered current provider projection parts into one Session-bound Toolkit State

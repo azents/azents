@@ -163,6 +163,7 @@ async def test_todo_toolkit_exposes_unprefixed_update_tool() -> None:
         run_id="run-1",
         session_id="session-1",
         publish_event=AsyncMock(),
+        external_channel_continuation_binding_ids=frozenset(),
     )
     state = await toolkit.update_context(context)
 
@@ -188,6 +189,7 @@ async def test_update_todo_returns_compact_acknowledgement() -> None:
             run_id="run-1",
             session_id="session-1",
             publish_event=publish_changed,
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
 

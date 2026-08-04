@@ -30,6 +30,7 @@ def _context(observer: MailboxActivityObserver) -> TurnContext:
         session_id="session-1",
         publish_event=lambda _event: _noop(),
         mailbox_activity_observer=observer,
+        external_channel_continuation_binding_ids=frozenset(),
     )
 
 
