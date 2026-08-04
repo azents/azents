@@ -314,6 +314,33 @@ class RuntimeLifecycleReconciler:
                 return False
             runtime = claimed
 
+        if command_type in {
+            RuntimeProviderCommandType.STOP,
+            RuntimeProviderCommandType.TERMINAL_DELETE,
+        } or (
+            command_type is RuntimeProviderCommandType.OBSERVE
+            and runtime.desired_state is RuntimeDesiredState.STOPPED
+        ):
+            async with self._session_manager() as session:
+                ensure_revision = (
+                    self._runtime_repository.ensure_lifecycle_configuration_revision
+                )
+                prepared = await ensure_revision(
+                    session,
+                    runtime.id,
+                    runtime.desired_generation,
+                )
+            if prepared is None:
+                await self._record_failure(
+                    runtime,
+                    code="RUNTIME_CONFIGURATION_INVALID",
+                    message=(
+                        "Runtime lifecycle configuration evidence is unavailable."
+                    ),
+                )
+                return False
+            runtime = prepared
+
         created_at = datetime.now(UTC)
         runner_credential_id = self._config.runner_credential_identifier.credential_id(
             runtime_id=runtime.id,
@@ -449,16 +476,12 @@ class RuntimeLifecycleReconciler:
             or revision.provider_id != runtime.runtime_provider_resource_id
         ):
             raise ValueError("Runtime configuration Provider binding is invalid.")
-        if require_ready:
-            if revision.target_desired_generation != runtime.desired_generation:
-                raise ValueError("Runtime configuration target generation is stale.")
-            if (
-                revision.resolution_status
-                is not RuntimeConfigurationResolutionStatus.READY
-            ):
-                raise ValueError("Runtime configuration target revision is blocked.")
-            if revision.resolved_configuration is None:
-                raise ValueError("Runtime configuration target document is missing.")
+        if revision.target_desired_generation != runtime.desired_generation:
+            raise ValueError("Runtime configuration target generation is stale.")
+        if revision.resolution_status is not RuntimeConfigurationResolutionStatus.READY:
+            raise ValueError("Runtime configuration target revision is blocked.")
+        if revision.resolved_configuration is None:
+            raise ValueError("Runtime configuration target document is missing.")
         envelope = RuntimeConfigurationEnvelope(
             evidence=RuntimeConfigurationEvidence(
                 revision_id=revision.id,
@@ -469,8 +492,6 @@ class RuntimeLifecycleReconciler:
                 revision.resolved_configuration or {}
             ),
         )
-        if not require_ready:
-            return envelope
         configuration = parse_runtime_configuration_envelope(
             envelope,
             desired_generation=runtime.desired_generation,
@@ -483,6 +504,8 @@ class RuntimeLifecycleReconciler:
             != revision.provider_capability_revision_id
         ):
             raise ValueError("Runtime configuration Provider reference is invalid.")
+        if not require_ready:
+            return envelope
         if (
             revision.infrastructure_profile_id != runtime.infrastructure_profile_id
             or configuration.infrastructure_profile.id

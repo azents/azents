@@ -346,31 +346,134 @@ class AgentRuntimeRepository:
     ) -> AgentRuntimeLifecycleCommand | None:
         """Update Runtime desired state and generation."""
         result = await session.execute(
-            sa.update(RDBAgentRuntime)
+            sa.select(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
                 RDBAgentRuntime.terminal_delete_requested_generation.is_(None),
             )
-            .values(
-                desired_state=desired_state,
-                desired_generation=RDBAgentRuntime.desired_generation + 1,
-                last_lifecycle_command=command_type,
-                reset_final_desired_state=reset_final_desired_state,
-                workspace_path=None,
-                last_state_change_at=sa.func.now(),
-            )
-            .returning(RDBAgentRuntime)
+            .with_for_update()
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
+        if (
+            command_type is RuntimeLifecycleCommandType.STOP
+            and desired_state is RuntimeDesiredState.STOPPED
+            and rdb.desired_state is RuntimeDesiredState.STOPPED
+            and rdb.last_lifecycle_command is RuntimeLifecycleCommandType.STOP
+        ):
+            runtime = self._build(rdb)
+            return AgentRuntimeLifecycleCommand(
+                runtime=runtime,
+                command_type=command_type,
+                desired_generation=runtime.desired_generation,
+            )
+        rdb.desired_state = desired_state
+        rdb.desired_generation += 1
+        rdb.last_lifecycle_command = command_type
+        rdb.reset_final_desired_state = reset_final_desired_state
+        rdb.workspace_path = None
+        rdb.last_state_change_at = datetime.datetime.now(datetime.UTC)
         await session.flush()
+        await session.refresh(rdb)
         runtime = self._build(rdb)
         return AgentRuntimeLifecycleCommand(
             runtime=runtime,
             command_type=command_type,
             desired_generation=runtime.desired_generation,
         )
+
+    async def ensure_lifecycle_configuration_revision(
+        self,
+        session: AsyncSession,
+        runtime_id: str,
+        desired_generation: int,
+    ) -> AgentRuntime | None:
+        """Attach usable immutable configuration evidence to one lifecycle target."""
+        result = await session.execute(
+            sa.select(RDBAgentRuntime)
+            .where(
+                RDBAgentRuntime.id == runtime_id,
+                RDBAgentRuntime.desired_generation == desired_generation,
+            )
+            .with_for_update()
+        )
+        rdb = result.scalar_one_or_none()
+        if rdb is None or rdb.runtime_provider_resource_id is None:
+            return None
+        desired_revision = await _get_configuration_revision(
+            session,
+            rdb.desired_runtime_configuration_revision_id,
+        )
+        if _configuration_revision_is_usable(
+            desired_revision,
+            provider_id=rdb.runtime_provider_resource_id,
+            target_desired_generation=desired_generation,
+        ):
+            return self._build(rdb)
+        applied_revision = await _get_configuration_revision(
+            session,
+            rdb.applied_runtime_configuration_revision_id,
+        )
+        source = next(
+            (
+                revision
+                for revision in (desired_revision, applied_revision)
+                if _configuration_revision_is_usable(
+                    revision,
+                    provider_id=rdb.runtime_provider_resource_id,
+                )
+            ),
+            None,
+        )
+        if source is None:
+            return None
+        existing_result = await session.execute(
+            sa.select(RDBRuntimeConfigurationRevision).where(
+                RDBRuntimeConfigurationRevision.runtime_id == rdb.id,
+                RDBRuntimeConfigurationRevision.digest == source.digest,
+                RDBRuntimeConfigurationRevision.target_desired_generation
+                == desired_generation,
+            )
+        )
+        revision = existing_result.scalar_one_or_none()
+        if revision is None:
+            revision = RDBRuntimeConfigurationRevision(
+                runtime_id=source.runtime_id,
+                provider_id=source.provider_id,
+                provider_capability_revision_id=source.provider_capability_revision_id,
+                infrastructure_profile_id=source.infrastructure_profile_id,
+                infrastructure_profile_version=source.infrastructure_profile_version,
+                workspace_runtime_profile_id=source.workspace_runtime_profile_id,
+                workspace_runtime_profile_version=(
+                    source.workspace_runtime_profile_version
+                ),
+                agent_selection_version=source.agent_selection_version,
+                resolution_status=source.resolution_status,
+                required_capabilities=list(source.required_capabilities),
+                missing_capabilities=list(source.missing_capabilities),
+                source_trace=dict(source.source_trace),
+                digest=source.digest,
+                target_desired_generation=desired_generation,
+                reason_code=None,
+                resolved_configuration=source.resolved_configuration,
+                provider_reported_digest=None,
+                runner_reported_digest=None,
+                provider_acknowledged_at=None,
+                runtime_observed_at=None,
+            )
+            session.add(revision)
+            await session.flush()
+        if not _configuration_revision_is_usable(
+            revision,
+            provider_id=rdb.runtime_provider_resource_id,
+            target_desired_generation=desired_generation,
+        ):
+            return None
+        rdb.desired_runtime_configuration_revision_id = revision.id
+        await session.flush()
+        await session.refresh(rdb)
+        return self._build(rdb)
 
     async def set_desired_state_if_ready(
         self,
@@ -681,7 +784,10 @@ class AgentRuntimeRepository:
         """Store Runtime current-generation failure."""
         result = await session.execute(
             sa.update(RDBAgentRuntime)
-            .where(RDBAgentRuntime.id == runtime_id)
+            .where(
+                RDBAgentRuntime.id == runtime_id,
+                RDBAgentRuntime.desired_generation == failure.generation,
+            )
             .values(
                 failure_generation=failure.generation,
                 failure_code=failure.code,
@@ -1118,3 +1224,32 @@ class AgentRuntimeRepository:
             created_at=rdb.created_at,
             updated_at=rdb.updated_at,
         )
+
+
+async def _get_configuration_revision(
+    session: AsyncSession,
+    revision_id: str | None,
+) -> RDBRuntimeConfigurationRevision | None:
+    if revision_id is None:
+        return None
+    return await session.get(RDBRuntimeConfigurationRevision, revision_id)
+
+
+def _configuration_revision_is_usable(
+    revision: RDBRuntimeConfigurationRevision | None,
+    *,
+    provider_id: str,
+    target_desired_generation: int | None = None,
+) -> bool:
+    if revision is None:
+        return False
+    if (
+        revision.provider_id != provider_id
+        or revision.resolution_status is not RuntimeConfigurationResolutionStatus.READY
+        or revision.resolved_configuration is None
+    ):
+        return False
+    return (
+        target_desired_generation is None
+        or revision.target_desired_generation == target_desired_generation
+    )

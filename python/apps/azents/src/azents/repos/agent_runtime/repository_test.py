@@ -340,6 +340,39 @@ class TestAgentRuntimeRepository:
         )
         assert command.runtime.workspace_path is None
 
+    async def test_repeated_stop_keeps_desired_generation(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """Repeating an already targeted STOP is idempotent."""
+        workspace_id = await _create_workspace(
+            rdb_session, "agent-runtime-repeat-stop-ws"
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "agent-runtime-repeat-stop",
+        )
+        repo = AgentRuntimeRepository()
+        runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+
+        first = await repo.set_desired_state(
+            rdb_session,
+            runtime.id,
+            RuntimeLifecycleCommandType.STOP,
+            RuntimeDesiredState.STOPPED,
+        )
+        assert first is not None
+        repeated = await repo.set_desired_state(
+            rdb_session,
+            runtime.id,
+            RuntimeLifecycleCommandType.STOP,
+            RuntimeDesiredState.STOPPED,
+        )
+
+        assert repeated is not None
+        assert repeated.desired_generation == first.desired_generation
+        assert repeated.runtime.desired_generation == first.runtime.desired_generation
+
     async def test_terminal_delete_acknowledgement_fences_finalization(
         self, rdb_session: AsyncSession
     ) -> None:
@@ -997,6 +1030,61 @@ class TestAgentRuntimeRepository:
         )
 
         assert [candidate.id for candidate in candidates] == [runtime.id]
+
+    async def test_stale_runtime_failure_does_not_overwrite_current_generation(
+        self, rdb_session: AsyncSession
+    ) -> None:
+        """A previous lifecycle generation cannot replace the current failure."""
+        workspace_id = await _create_workspace(
+            rdb_session, "agent-runtime-stale-failure-ws"
+        )
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "agent-runtime-stale-failure",
+        )
+        repo = AgentRuntimeRepository()
+        runtime = await repo.ensure_for_agent(rdb_session, agent_id)
+        start = await repo.set_desired_state(
+            rdb_session,
+            runtime.id,
+            RuntimeLifecycleCommandType.START,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert start is not None
+        stop = await repo.set_desired_state(
+            rdb_session,
+            runtime.id,
+            RuntimeLifecycleCommandType.STOP,
+            RuntimeDesiredState.STOPPED,
+        )
+        assert stop is not None
+        current = await repo.record_runtime_failure(
+            rdb_session,
+            runtime.id,
+            AgentRuntimeFailurePatch(
+                generation=stop.desired_generation,
+                code="CURRENT_FAILURE",
+                message="Current lifecycle failed",
+            ),
+        )
+        stale = await repo.record_runtime_failure(
+            rdb_session,
+            runtime.id,
+            AgentRuntimeFailurePatch(
+                generation=start.desired_generation,
+                code="STALE_FAILURE",
+                message="Previous lifecycle failed late",
+            ),
+        )
+        reloaded = await repo.get_by_id(rdb_session, runtime.id)
+
+        assert current is not None
+        assert stale is None
+        assert reloaded is not None
+        assert reloaded.failure_generation == stop.desired_generation
+        assert reloaded.failure_code == "CURRENT_FAILURE"
+        assert reloaded.failure_message == "Current lifecycle failed"
 
     async def test_lifecycle_dispatch_candidates_retry_current_generation_starting(
         self, rdb_session: AsyncSession
