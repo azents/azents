@@ -7,7 +7,7 @@ so they share types from this module. Durable event transcript types use
 """
 
 import datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, TypeGuard
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -284,10 +284,15 @@ def _project_content_part(part: object) -> object:
     if part.get("type") != "attachment":
         return part
     projected = _project_attachment_dict(part, text_preview_key="preview_summary")
-    if not isinstance(projected, dict):
+    if not _is_string_object_dict(projected):
         return projected
     projected["type"] = "attachment"
     return projected
+
+
+def _is_string_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    """Return whether a value is a dictionary with string keys."""
+    return isinstance(value, dict) and all(isinstance(key, str) for key in value)
 
 
 def _project_attachment_dict(

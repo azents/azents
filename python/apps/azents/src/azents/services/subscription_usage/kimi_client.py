@@ -5,7 +5,7 @@ import json
 import logging
 import math
 from collections.abc import Mapping, Sequence
-from typing import Final
+from typing import Final, TypeGuard
 
 import httpx
 
@@ -90,7 +90,7 @@ class KimiSubscriptionUsageClient:
             body = response.json()
         except json.JSONDecodeError, UnicodeDecodeError:
             return self._invalid_response(http_status=response.status_code)
-        if not isinstance(body, Mapping):
+        if not _is_string_object_mapping(body):
             return self._invalid_response(http_status=response.status_code)
         try:
             return _normalize_usage(body)
@@ -121,7 +121,7 @@ def _normalize_usage(body: Mapping[str, object]) -> KimiUsageSnapshot:
     limits: list[SubscriptionUsageLimit] = []
     summary = body.get("usage")
     if summary is not None:
-        if not isinstance(summary, Mapping):
+        if not _is_string_object_mapping(summary):
             raise _InvalidKimiUsagePayload("usage must be an object")
         row = _normalize_row(
             summary,
@@ -138,12 +138,12 @@ def _normalize_usage(body: Mapping[str, object]) -> KimiUsageSnapshot:
         if not isinstance(raw_limits, Sequence) or isinstance(raw_limits, (str, bytes)):
             raise _InvalidKimiUsagePayload("limits must be a list")
         for index, item in enumerate(raw_limits):
-            if not isinstance(item, Mapping):
+            if not _is_string_object_mapping(item):
                 continue
             detail_value = item.get("detail")
-            detail = detail_value if isinstance(detail_value, Mapping) else item
+            detail = detail_value if _is_string_object_mapping(detail_value) else item
             window_value = item.get("window")
-            window = window_value if isinstance(window_value, Mapping) else None
+            window = window_value if _is_string_object_mapping(window_value) else None
             row = _normalize_row(
                 detail,
                 row_id=f"limit-{index + 1}",
@@ -160,6 +160,13 @@ def _normalize_usage(body: Mapping[str, object]) -> KimiUsageSnapshot:
         limits=tuple(limits),
         financial_details=None,
     )
+
+
+def _is_string_object_mapping(
+    value: object,
+) -> TypeGuard[Mapping[str, object]]:
+    """Return whether a value is a mapping with string keys."""
+    return isinstance(value, Mapping) and all(isinstance(key, str) for key in value)
 
 
 def _normalize_row(

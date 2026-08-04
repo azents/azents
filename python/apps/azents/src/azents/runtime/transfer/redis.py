@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import AsyncContextManager, Protocol, cast
+from typing import AsyncContextManager, Protocol, TypeGuard, cast
 
 from redis.asyncio import Redis
 from redis.exceptions import WatchError
@@ -3451,7 +3451,7 @@ def _decode_stale_cursor(cursor: str) -> _RedisStaleCursor:
         )
     except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError("invalid stale page cursor") from exc
-    if not isinstance(value, dict) or set(value) != {
+    if not _is_string_object_dict(value) or set(value) != {
         "bucket_epoch",
         "kind",
         "member",
@@ -3471,7 +3471,13 @@ def _decode_stale_cursor(cursor: str) -> _RedisStaleCursor:
         or (kind == "terminal" and bucket_epoch is None)
     ):
         raise ValueError("invalid stale page cursor")
+    assert isinstance(kind, str)
     return _RedisStaleCursor(kind, member, bucket_epoch)
+
+
+def _is_string_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    """Return whether a value is a dictionary with string keys."""
+    return isinstance(value, dict) and all(isinstance(key, str) for key in value)
 
 
 def _encode_dispatch_cursor(record_key: str) -> str:
