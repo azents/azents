@@ -2,6 +2,7 @@
 title: "Session Working Folder Requirements"
 created: 2026-08-03
 updated: 2026-08-03
+implemented: 2026-08-04
 tags: [session, workspace, filesystem, project-browser, lifecycle]
 document_role: primary
 document_type: requirements

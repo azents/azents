@@ -35,7 +35,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
 last_verified_at: 2026-08-04
-spec_version: 47
+spec_version: 48
 ---
 
 # Agent Runtime Control
@@ -336,6 +336,15 @@ non-directory target return `worktree_ownership_ambiguous` without deletion.
 for non-Git paths, invalid refs, collisions, ownership ambiguity, and Git command failures so product
 services can persist bounded setup or cleanup classifications.
 
+Session-folder archive cleanup validates the stored exact path against the current
+managed Agent Workspace before Runner I/O and preserves that lexical target through
+deletion. A lexical root symlink is unlinked rather than resolved or traversed; a
+real directory is recursively removed; and descendant symlinks are removed as
+entries without following their targets. A target that escapes the validated managed
+root, or a root that is another filesystem kind, fails before destructive I/O.
+Ordinary file-operation resolution behavior remains unchanged outside this
+Session-folder cleanup contract.
+
 `discover_managed_git_worktrees` and `remove_discovered_git_worktree` serve the explicit manual
 orphan-cleanup TurnAction only. Discovery is confined to the current Runtime's Azents worktree root
 and emits bounded identity metadata, including the canonical target, repository anchor, registration
@@ -446,6 +455,9 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-08-04** (spec_version 48) — Added validated lexical Session-folder
+  deletion: root symlinks are unlinked, descendant symlinks are not followed, and
+  archive cleanup cannot expand outside the stored managed-root boundary.
 - **2026-08-03** (spec_version 47) — Made current-generation Runner reports authoritative for Agent Workspace path state, removed Provider workspace metadata and equality checks, and cleared stale path evidence when desired generation advances.
 - **2026-07-31** (spec_version 45) — Defined generation/configuration-fenced NetworkPolicy trust for
   Pod watch reports so verified Ready state cannot regress through an unverified watch race.

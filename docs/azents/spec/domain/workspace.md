@@ -5,6 +5,8 @@ domain: workspace
 owner: "@Hardtack"
 code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/995d915ed6d6_add_agent_automatic_project_policy.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/5ffa2fdb4e51_add_session_working_folder_context.py
+  - python/apps/azents/db-schemas/rdb/migrations/versions/155e9db4ee7e_contract_session_working_folder_context.py
   - python/apps/azents/src/azents/services/workspace/**
   - python/apps/azents/src/azents/services/workspace_user/**
   - python/apps/azents/src/azents/services/workspace_invitation/**
@@ -93,7 +95,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
 last_verified_at: 2026-08-04
-spec_version: 57
+spec_version: 58
 ---
 
 # Workspace & Membership
@@ -321,6 +323,41 @@ New-session azents-web UI shows a compact additive workspace item list above the
 In an existing concrete session, Register Project opens a runtime-backed Agent Workspace folder picker rooted at the Agent Workspace root. The picker reads Agent Workspace filesystem entries, not Project browser manifest entries or the already-registered Project set. Git repository folders render with a Git folder icon. Selecting a non-Git folder validates and registers it as an existing Agent Workspace directory through the session Project register API. Selecting a Git repository folder opens a registration mode dialog with `Existing directory` and `New worktree` choices. `New worktree` requires a starting ref from Git ref preview and submits a durable `create_git_worktree` operation TurnAction with the current message/input boundary rather than appending session-initialization setup work. The operation creates a session-scoped Azents-owned worktree, registers the generated worktree path as a session Project, upserts the Agent Project Catalog, refreshes the Project/Skill projection, and lets the active run rebuild context after the Project registry changes. Worktree execution is keyed by the source `input_buffer_id` and fenced by the admitting Session owner generation. Active state and logs remain live until completion, failure, or cancellation atomically appends one durable result snapshot and removes the live execution. Ownership takeover cancels leftover work without re-executing the Git side effect; terminal results have no retry or discard mutation APIs.
 
 Git-backed Project root rows separate registry removal from destructive cleanup. `Remove from session` removes only the session Project row. `Delete worktree` is shown only when the backend manifest exposes `delete_worktree` for an Azents-owned non-cleaned allocation and routes to the Git worktree cleanup API. Source upload/list/delete, bootstrap source type selection, agent-initiated Project approval workflow, and loaded/loading/failed state UI are not currently implemented.
+
+### Session working-folder lifecycle
+
+Each root Session context stores one exact, unique, non-null working-folder path
+under the current Runner-reported Agent Workspace. The server persists that path at
+context creation and reuses it for all descendants; it does not reconstruct a
+replacement path from a fixed server root. Initial creation, forward adoption,
+restore, and explicit retry can enqueue the same system-only, queue-first folder
+setup action. Physical presence is not durable state: Runner stat/list is current
+truth, so setup failure or Runtime reset leaves the entry visible and permits later
+Agent repair or explicit retry.
+
+The existing-session Project browser prepends the fixed Session-folder entry before
+registered Project roots. It has `source.type: "session_folder"`, no Project ID,
+`prepare_session_folder: true`, and no root removal, filesystem delete, move, or
+rename capability. It remains visible when the physical directory is missing. The
+same root protection applies to direct workspace mutation surfaces, while ordinary
+descendant file operations remain available. Pre-session manifest preview remains
+Project-only.
+
+The stored path is the authority for ordinary non-Project Session work, new
+worktree allocation, root mutation protection, and archive cleanup. New worktrees
+allocate below `{working_folder_path}/worktrees/{repository_leaf}` and remain both
+nested within the Session-folder filesystem tree and independently registered as
+top-level Git Projects. Recorded legacy allocations retain their stored paths and
+their existing cleanup rule.
+
+Archive commits the complete Session tree and its retention snapshot before external
+cleanup. One successful archive request then makes one best-effort typed Git cleanup
+attempt for each eligible allocation and one lexical recursive delete attempt for
+the exact stored Session-folder path, even if Git cleanup degraded. Cleanup records
+the bounded terminal outcome without changing archive success. Restore preserves the
+stored path but does not recover deleted files or worktrees. Retention purge is
+database-only: it neither accesses Runtime/Git/filesystem state nor retries failed
+folder cleanup.
 
 ### Workspace Home / Membership UI
 
@@ -631,6 +668,10 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-04 (spec_version=58)** — Added the context-owned non-null Session
+  working-folder contract, fixed Project-browser entry and mutation policy, new
+  worktree placement with recorded legacy-path preservation, and post-commit
+  whole-folder archive cleanup without retention-purge filesystem work.
 - **2026-08-04 (spec_version=57)** — Restricted concrete-session Project browser manifest loading to `READY` Agent Workspace state so unavailable and transitional Runtime lifecycle actions remain visible.
 - **2026-08-03 (spec_version=56)** — Made the current-generation Runner report authoritative for the Runtime-specific Agent Workspace root and derived Project, browser, and managed-worktree boundaries from that root without a fixed fallback.
 - **2026-08-02 (spec_version=55)** — Generalized Workspace Multi App authority to
