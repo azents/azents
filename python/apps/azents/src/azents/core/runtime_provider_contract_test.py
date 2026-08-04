@@ -16,7 +16,7 @@ def _contract() -> RuntimeProviderCapabilityContract:
             "schema_version": 1,
             "implementation_key": "kubernetes",
             "implementation_version": "0.1.0",
-            "protocol_version": "agent-runtime-provider-kubernetes-v1",
+            "protocol_version": "agent-runtime-provider-kubernetes-v2",
             "core_lifecycle_operations": [
                 "start",
                 "stop",

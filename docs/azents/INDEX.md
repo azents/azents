@@ -21,7 +21,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-01 | 18 |
-| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-04 | 15 |
+| [Runtime Provider](spec/domain/runtime-provider.md) | runtime-provider | - | 2026-08-04 | 16 |
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-04 | 84 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
@@ -32,8 +32,8 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Owner | Last Verified At | Spec Version |
 |---|---|---|---|
 | [Agent Execution Loop](spec/flow/agent-execution-loop.md) | @Hardtack | 2026-08-04 | 147 |
-| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-04 | 48 |
-| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-03 | 14 |
+| [Agent Runtime Control](spec/flow/agent-runtime-control.md) | @Hardtack | 2026-08-04 | 49 |
+| [Agent Runtime Persistence](spec/flow/agent-runtime-persistence.md) | @Hardtack | 2026-08-04 | 15 |
 | [Chat Session Resync](spec/flow/chat-session-resync.md) | @Hardtack | 2026-07-26 | 42 |
 | [ChatGPT OAuth Flow](spec/flow/chatgpt-oauth.md) | @Hardtack | 2026-08-01 | 18 |
 | [Context Compaction](spec/flow/context-compaction.md) | @Hardtack | 2026-08-03 | 33 |
@@ -315,6 +315,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Hierarchical Runtime Execution Profiles Requirements](requirements/runtime-260726-hierarchical-execution-profiles.md) | runtime-260726 | 2026-07-26 | - |
 | [Profile-Only Runtime Execution Policy Requirements](requirements/runtime-260727-profile-only-execution-policy.md) | runtime-260727 | 2026-07-27 | 2026-07-27 |
 | [Workspace-Owned Runtime Profiles Requirements](requirements/runtime-260730-workspace-owned-runtime-profiles.md) | runtime-260730 | 2026-07-30 | 2026-07-31 |
+| [Runtime Deployment Continuity Requirements](requirements/runtime-260804-deployment-continuity.md) | runtime-260804 | 2026-08-04 | 2026-08-04 |
 | [Bound Runtime Control Connections Requirements](requirements/runtimeauth-260723-bound-runtime-control-connections.md) | runtimeauth-260723 | 2026-07-23 | - |
 | [Agent Sandbox Historical Requirements Reconstruction](requirements/sandbox-260225-sandbox.md) | sandbox-260225 | 2026-02-25 | 2026-03-23 |
 | [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Requirements Reconstruction](requirements/sandbox-260403-sandbox-daemon-sidecar.md) | sandbox-260403 | 2026-04-03 | 2026-04-03 |
@@ -681,6 +682,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Hierarchical Runtime Execution Profiles](adr/runtime-260726-hierarchical-execution-profiles.md)
 - [Profile-Only Runtime Execution Policy](adr/runtime-260727-profile-only-execution-policy.md)
 - [Workspace-Owned Runtime Profiles](adr/runtime-260730-workspace-owned-runtime-profiles.md)
+- [Runtime Deployment Continuity](adr/runtime-260804-deployment-continuity.md)
 - [Bound Runtime Control Connections](adr/runtimeauth-260723-bound-runtime-control-connections.md)
 - [Agent Sandbox Historical Decision Reconstruction](adr/sandbox-260225-sandbox.md)
 - [sandbox-daemon Sidecar Separation + kube API Exec Integration Historical Decision Reconstruction](adr/sandbox-260403-sandbox-daemon-sidecar.md)

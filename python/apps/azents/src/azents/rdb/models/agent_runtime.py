@@ -15,6 +15,7 @@ from azents.core.enums import (
     RuntimeProviderBindingOrigin,
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
+    RuntimeProviderReconciliationStatus,
     RuntimeRunnerState,
 )
 from azents.rdb.models.base import RDBModel
@@ -47,6 +48,12 @@ runtime_provider_observed_state_enum = ENUM(
 runtime_provider_connection_state_enum = ENUM(
     RuntimeProviderConnectionState,
     name="runtime_provider_connection_state",
+    create_type=False,
+    values_callable=_enum_values,
+)
+runtime_provider_reconciliation_status_enum = ENUM(
+    RuntimeProviderReconciliationStatus,
+    name="runtime_provider_reconciliation_status",
     create_type=False,
     values_callable=_enum_values,
 )
@@ -111,6 +118,11 @@ class RDBAgentRuntime(RDBModel):
     IX_PROVIDER_OBSERVE_REQUESTED_AT = sa.Index(
         "ix_agent_runtimes_provider_observe_requested_at",
         "provider_observe_requested_at",
+    )
+    IX_PROVIDER_RECONCILIATION = sa.Index(
+        "ix_agent_runtimes_provider_reconciliation",
+        "provider_reconciliation_status",
+        "provider_reconciliation_kind",
     )
     IX_RUNNER_STATE = sa.Index("ix_agent_runtimes_runner_state", "runner_state")
     id: Mapped[str] = mapped_column(
@@ -259,6 +271,68 @@ class RDBAgentRuntime(RDBModel):
         nullable=True,
         default=None,
     )
+    provider_reconciliation_status: Mapped[
+        RuntimeProviderReconciliationStatus | None
+    ] = mapped_column(
+        runtime_provider_reconciliation_status_enum,
+        init=False,
+        nullable=True,
+        default=None,
+    )
+    provider_reconciliation_kind: Mapped[str | None] = mapped_column(
+        sa.String(128),
+        init=False,
+        nullable=True,
+        default=None,
+    )
+    provider_reconciliation_reason: Mapped[str | None] = mapped_column(
+        sa.String(256),
+        init=False,
+        nullable=True,
+        default=None,
+    )
+    provider_reconciliation_provider_generation: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        init=False,
+        nullable=True,
+        default=None,
+    )
+    provider_reconciliation_observed_generation: Mapped[int | None] = mapped_column(
+        sa.Integer,
+        init=False,
+        nullable=True,
+        default=None,
+    )
+    provider_reconciliation_configuration_revision_id: Mapped[str | None] = (
+        mapped_column(
+            sa.String(32),
+            sa.ForeignKey(
+                "runtime_configuration_revisions.id",
+                ondelete="RESTRICT",
+                use_alter=True,
+                name="fk_agent_runtimes_reconciliation_revision_id",
+            ),
+            init=False,
+            nullable=True,
+            default=None,
+        )
+    )
+    provider_reconciliation_observed_at: Mapped[datetime.datetime | None] = (
+        mapped_column(
+            TimeZoneDateTime,
+            init=False,
+            nullable=True,
+            default=None,
+        )
+    )
+    provider_reconciliation_requested_at: Mapped[datetime.datetime | None] = (
+        mapped_column(
+            TimeZoneDateTime,
+            init=False,
+            nullable=True,
+            default=None,
+        )
+    )
     last_lifecycle_dispatch_generation: Mapped[int] = mapped_column(
         sa.Integer,
         init=False,
@@ -338,5 +412,6 @@ class RDBAgentRuntime(RDBModel):
         IX_LIFECYCLE_DISPATCH,
         IX_PROVIDER_CONNECTION_STATE,
         IX_PROVIDER_OBSERVE_REQUESTED_AT,
+        IX_PROVIDER_RECONCILIATION,
         IX_RUNNER_STATE,
     )

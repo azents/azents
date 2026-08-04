@@ -28,6 +28,7 @@ from azents_runtime_control.provider import (
 )
 from google.protobuf import timestamp_pb2
 
+from azents.core.enums import RuntimeProviderKind
 from azents.core.runtime_runner_credential import RuntimeRunnerIssuedCredential
 from azents.runtime.control_protocol.data import (
     RuntimeProtocolCapabilities,
@@ -56,6 +57,7 @@ from azents.services.runtime_provider_control.data import (
 )
 
 _DEFAULT_COMMAND_BLOCK_MS = 500
+_KUBERNETES_PROVIDER_PROTOCOL_VERSION = "agent-runtime-provider-kubernetes-v2"
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -205,6 +207,16 @@ class RuntimeProviderControlGrpcServicer(
         identity_error = _registration_identity_error(registration, authentication)
         if identity_error is not None:
             await context.abort(grpc.StatusCode.PERMISSION_DENIED, identity_error)
+            raise AssertionError("unreachable")
+        protocol_version_error = _registration_protocol_version_error(
+            registration,
+            authentication,
+        )
+        if protocol_version_error is not None:
+            await context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                protocol_version_error,
+            )
             raise AssertionError("unreachable")
         try:
             await self._contract_proposer.propose_contract(
@@ -767,6 +779,21 @@ def _registration_identity_error(
     if registration.workspace_id != authentication.provider_workspace_id:
         return "Provider workspace does not match authenticated Provider"
     return None
+
+
+def _registration_protocol_version_error(
+    registration: RuntimeProviderRegistration,
+    authentication: RuntimeProviderCredentialAuthentication,
+) -> str | None:
+    """Return unsupported authenticated Provider protocol errors."""
+    if authentication.provider_kind is not RuntimeProviderKind.KUBERNETES:
+        return None
+    if registration.protocol_version == _KUBERNETES_PROVIDER_PROTOCOL_VERSION:
+        return None
+    return (
+        "Kubernetes Runtime Provider protocol version must be "
+        f"{_KUBERNETES_PROVIDER_PROTOCOL_VERSION}"
+    )
 
 
 def _provider_command(

@@ -15,6 +15,9 @@ from azents_runtime_control.provider import (
     RuntimeLifecycleCommandType,
     RuntimeLifecycleResult,
     RuntimeProviderObservedState,
+    RuntimeProviderReconciliationEvidence,
+    RuntimeProviderReconciliationObservation,
+    RuntimeProviderReconciliationStatus,
     RuntimeProviderReport,
 )
 from azents_runtime_control.runtime_configuration import (
@@ -180,20 +183,6 @@ class KubernetesRuntimeProviderConfig:
     pod_annotations: Mapping[str, str] = dataclasses.field(default_factory=dict)
 
 
-@dataclasses.dataclass(frozen=True)
-class _CommandPolicyKey:
-    provider_generation: int
-    desired_generation: int
-    revision_id: str
-    digest: str
-
-
-@dataclasses.dataclass(frozen=True)
-class _VerifiedCommandPolicy:
-    key: _CommandPolicyKey
-    network_policy: NetworkPolicyResource
-
-
 class KubernetesRuntimeProvider:
     """Lifecycle-only Runtime Provider backed by Kubernetes Pod/PVC resources."""
 
@@ -224,7 +213,6 @@ class KubernetesRuntimeProvider:
         self._config = config
         self._runner_env = dict(config.runner_env)
         self._workspace_mount_path = _absolute_posix_path(config.workspace_mount_path)
-        self._verified_command_policies: dict[str, _VerifiedCommandPolicy] = {}
 
     async def start(
         self,
@@ -261,7 +249,6 @@ class KubernetesRuntimeProvider:
             _network_policy_name(command.identity.runtime_id),
             self._config.namespace,
         )
-        self._verified_command_policies.pop(command.identity.runtime_id, None)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.STOP,
             report=await self.observe(command),
@@ -273,7 +260,6 @@ class KubernetesRuntimeProvider:
     ) -> RuntimeLifecycleResult:
         """Recreate the Runtime Pod and policy while preserving its PVC."""
         policy = self._validate_command(command)
-        self._verified_command_policies.pop(command.identity.runtime_id, None)
         _LOGGER.info(
             "Kubernetes Runtime restart requested",
             extra=_log_context(command, self._config),
@@ -292,7 +278,6 @@ class KubernetesRuntimeProvider:
     ) -> RuntimeLifecycleResult:
         """Delete Pod, policy, and PVC, then converge to the reset target."""
         policy = self._validate_command(command)
-        self._verified_command_policies.pop(command.identity.runtime_id, None)
         _LOGGER.info(
             "Kubernetes Runtime reset requested",
             extra={
@@ -329,6 +314,7 @@ class KubernetesRuntimeProvider:
                 observed_state=RuntimeProviderObservedState.STOPPED,
                 reason="reset_pvc_recreated",
                 provider_runtime_id=None,
+                reconciliation=None,
             )
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.RESET,
@@ -389,7 +375,6 @@ class KubernetesRuntimeProvider:
             _pvc_name(command.identity.runtime_id),
             self._config.namespace,
         )
-        self._verified_command_policies.pop(command.identity.runtime_id, None)
         return RuntimeLifecycleResult(
             command_type=RuntimeLifecycleCommandType.TERMINAL_DELETE,
             report=dataclasses.replace(
@@ -398,6 +383,7 @@ class KubernetesRuntimeProvider:
                     observed_state=RuntimeProviderObservedState.STOPPED,
                     reason="terminal_resources_absent",
                     provider_runtime_id=None,
+                    reconciliation=None,
                 ),
                 terminal_delete_acknowledged=True,
             ),
@@ -414,7 +400,6 @@ class KubernetesRuntimeProvider:
             self._config.namespace,
         )
         if pod is None:
-            self._verified_command_policies.pop(command.identity.runtime_id, None)
             pvc = await self._api.get_pvc(
                 _pvc_name(command.identity.runtime_id),
                 self._config.namespace,
@@ -427,32 +412,23 @@ class KubernetesRuntimeProvider:
                 observed_state=RuntimeProviderObservedState.STOPPED,
                 reason=reason,
                 provider_runtime_id=None,
+                reconciliation=None,
             )
         network_policy = await self._api.get_network_policy(
             _network_policy_name(command.identity.runtime_id),
             self._config.namespace,
         )
         expected_network_policy = self._network_policy(command, policy)
-        if network_policy is None or network_policy != expected_network_policy:
-            self._verified_command_policies.pop(command.identity.runtime_id, None)
-            return self._report(
-                command,
-                observed_state=RuntimeProviderObservedState.STARTING,
-                reason="network_policy_not_ready",
-                provider_runtime_id=pod.metadata.name,
-            )
-        self._verified_command_policies[command.identity.runtime_id] = (
-            _VerifiedCommandPolicy(
-                key=_command_policy_key(command),
-                network_policy=expected_network_policy,
-            )
-        )
         observed_state, reason = _observed_state(pod)
         return self._report(
             command,
             observed_state=observed_state,
             reason=reason,
             provider_runtime_id=pod.metadata.name,
+            reconciliation=_network_policy_reconciliation(
+                network_policy,
+                expected_network_policy,
+            ),
         )
 
     async def observe_known_runtimes(self) -> tuple[RuntimeProviderReport, ...]:
@@ -471,8 +447,8 @@ class KubernetesRuntimeProvider:
                 report = self._report_from_pod(pod)
             except ValueError:
                 _LOGGER.warning(
-                    "Kubernetes Runtime Pod observation skipped without trusted "
-                    "policy evidence",
+                    "Kubernetes Runtime Pod observation skipped without valid "
+                    "Runtime metadata",
                     extra={
                         "runtime_id": runtime_id,
                         "provider_id": self._config.provider_id,
@@ -480,7 +456,6 @@ class KubernetesRuntimeProvider:
                     },
                 )
                 continue
-            report = await self._fail_closed_without_command_policy(report)
             seen_runtime_ids.add(runtime_id)
             reports.append(report)
         for pvc in await self._api.list_pvcs(labels, self._config.namespace):
@@ -491,8 +466,8 @@ class KubernetesRuntimeProvider:
                 reports.append(self._report_from_pvc(pvc))
             except ValueError:
                 _LOGGER.warning(
-                    "Kubernetes Runtime PVC observation skipped without trusted "
-                    "policy evidence",
+                    "Kubernetes Runtime PVC observation skipped without valid "
+                    "Runtime metadata",
                     extra={
                         "runtime_id": runtime_id,
                         "provider_id": self._config.provider_id,
@@ -513,8 +488,8 @@ class KubernetesRuntimeProvider:
             except ValueError:
                 runtime_id = event.pod.metadata.labels.get(_LABEL_RUNTIME_ID)
                 _LOGGER.warning(
-                    "Kubernetes Runtime watch event skipped without trusted policy "
-                    "evidence",
+                    "Kubernetes Runtime watch event skipped without valid Runtime "
+                    "metadata",
                     extra={
                         "runtime_id": runtime_id,
                         "provider_id": self._config.provider_id,
@@ -524,26 +499,7 @@ class KubernetesRuntimeProvider:
                 )
                 continue
             if report is not None:
-                if event.event_type == "DELETED":
-                    self._verified_command_policies.pop(report.runtime_id, None)
-                else:
-                    report = await self._fail_closed_without_command_policy(report)
                 yield report
-
-    async def _fail_closed_without_command_policy(
-        self,
-        report: RuntimeProviderReport,
-    ) -> RuntimeProviderReport:
-        verified = self._verified_command_policies.get(report.runtime_id)
-        if verified is not None and verified.key == _report_policy_key(report):
-            network_policy = await self._api.get_network_policy(
-                _network_policy_name(report.runtime_id),
-                self._config.namespace,
-            )
-            if network_policy == verified.network_policy:
-                return report
-            self._verified_command_policies.pop(report.runtime_id, None)
-        return _fail_closed_without_command_policy(report)
 
     async def _ensure_pvc(
         self,
@@ -1059,6 +1015,7 @@ class KubernetesRuntimeProvider:
         observed_state: RuntimeProviderObservedState,
         reason: str,
         provider_runtime_id: str | None,
+        reconciliation: RuntimeProviderReconciliationEvidence | None,
     ) -> RuntimeProviderReport:
         return RuntimeProviderReport(
             runtime_id=command.identity.runtime_id,
@@ -1072,6 +1029,7 @@ class KubernetesRuntimeProvider:
             reported_at=datetime.now(UTC),
             terminal_delete_acknowledged=False,
             runtime_configuration=command.runtime_configuration.evidence,
+            reconciliation=reconciliation,
         )
 
     def _report_from_pod(self, pod: PodResource) -> RuntimeProviderReport:
@@ -1099,6 +1057,7 @@ class KubernetesRuntimeProvider:
                     _LABEL_DESIRED_GENERATION,
                 ),
             ),
+            reconciliation=None,
         )
 
     def _report_from_pod_event(
@@ -1132,6 +1091,7 @@ class KubernetesRuntimeProvider:
                         _LABEL_DESIRED_GENERATION,
                     ),
                 ),
+                reconciliation=None,
             )
         report = self._report_from_pod(event.pod)
         return dataclasses.replace(
@@ -1165,6 +1125,7 @@ class KubernetesRuntimeProvider:
                     _LABEL_DESIRED_GENERATION,
                 ),
             ),
+            reconciliation=None,
         )
 
     def _validate_command(
@@ -1483,42 +1444,45 @@ def _subnet_of_same_family(
     return False
 
 
-def _fail_closed_without_command_policy(
-    report: RuntimeProviderReport,
-) -> RuntimeProviderReport:
-    if report.observed_state not in {
-        RuntimeProviderObservedState.STARTING,
-        RuntimeProviderObservedState.RUNNING,
-    }:
-        return report
+def _network_policy_reconciliation(
+    actual: NetworkPolicyResource | None,
+    expected: NetworkPolicyResource,
+) -> RuntimeProviderReconciliationEvidence:
+    if actual is None:
+        status = RuntimeProviderReconciliationStatus.DRIFTED
+        reason = "network_policy_missing"
+    elif _network_policy_comparison_view(actual) != _network_policy_comparison_view(
+        expected
+    ):
+        status = RuntimeProviderReconciliationStatus.DRIFTED
+        reason = "network_policy_mismatch"
+    else:
+        status = RuntimeProviderReconciliationStatus.IN_SYNC
+        reason = "network_policy_in_sync"
+    return RuntimeProviderReconciliationEvidence(
+        observations=(
+            RuntimeProviderReconciliationObservation(
+                kind="network_policy",
+                status=status,
+                reason=reason,
+                diagnostic={},
+            ),
+        )
+    )
+
+
+def _network_policy_comparison_view(
+    policy: NetworkPolicyResource,
+) -> NetworkPolicyResource:
+    """Exclude historical transport metadata from policy semantics."""
+    labels = {
+        key: value
+        for key, value in policy.metadata.labels.items()
+        if key != _LABEL_PROVIDER_GENERATION
+    }
     return dataclasses.replace(
-        report,
-        observed_state=RuntimeProviderObservedState.STARTING,
-        reason="network_policy_not_ready",
-    )
-
-
-def _command_policy_key(
-    command: RuntimeLifecycleCommand,
-) -> _CommandPolicyKey:
-    evidence = command.runtime_configuration.evidence
-    return _CommandPolicyKey(
-        provider_generation=command.provider_generation,
-        desired_generation=command.desired_generation,
-        revision_id=evidence.revision_id,
-        digest=evidence.digest,
-    )
-
-
-def _report_policy_key(
-    report: RuntimeProviderReport,
-) -> _CommandPolicyKey:
-    evidence = report.runtime_configuration
-    return _CommandPolicyKey(
-        provider_generation=report.provider_generation,
-        desired_generation=report.observed_desired_generation,
-        revision_id=evidence.revision_id,
-        digest=evidence.digest,
+        policy,
+        metadata=dataclasses.replace(policy.metadata, labels=labels),
     )
 
 

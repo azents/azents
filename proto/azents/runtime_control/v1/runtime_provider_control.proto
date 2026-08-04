@@ -93,6 +93,18 @@ message RuntimeProviderReport {
   google.protobuf.Timestamp reported_at = 9;
   bool terminal_delete_acknowledged = 10;
   RuntimeConfigurationEvidence runtime_configuration = 11;
+  RuntimeProviderReconciliationEvidence reconciliation = 12;
+}
+
+message RuntimeProviderReconciliationObservation {
+  string kind = 1;
+  string status = 2;
+  string reason = 3;
+  map<string, string> diagnostic = 4;
+}
+
+message RuntimeProviderReconciliationEvidence {
+  repeated RuntimeProviderReconciliationObservation observations = 1;
 }
 
 message ProviderCommandCompletion {

@@ -13,6 +13,7 @@ from azents_runtime_control.provider import (
     RuntimeLifecycleCommand,
     RuntimeLifecycleCommandType,
     RuntimeProviderObservedState,
+    RuntimeProviderReconciliationStatus,
 )
 from azents_runtime_control.runtime_configuration import (
     JsonValue,
@@ -691,10 +692,55 @@ async def test_observe_running_pod_reports_running() -> None:
 
     assert report.observed_state is RuntimeProviderObservedState.RUNNING
     assert report.reason == "pod_running"
+    assert report.reconciliation is not None
+    assert report.reconciliation.observations[0].kind == "network_policy"
+    assert (
+        report.reconciliation.observations[0].status
+        is RuntimeProviderReconciliationStatus.IN_SYNC
+    )
+    assert report.reconciliation.observations[0].reason == "network_policy_in_sync"
 
 
 @pytest.mark.asyncio
-async def test_verified_running_pod_watch_does_not_regress_to_starting() -> None:
+async def test_provider_reconnect_generation_label_does_not_report_policy_drift() -> (
+    None
+):
+    """Historical Provider generation metadata is not policy semantics."""
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    previous_command = _command(
+        RuntimeLifecycleCommandType.START,
+        provider_generation=7,
+    )
+    await provider.start(previous_command)
+    network_policy_key = (
+        "azents-runtime",
+        "azents-runtime-runtime-1-execution",
+    )
+
+    report = await provider.observe(
+        _command(
+            RuntimeLifecycleCommandType.OBSERVE,
+            provider_generation=8,
+        )
+    )
+
+    assert (
+        api.network_policies[network_policy_key].metadata.labels[
+            "azents/provider-generation"
+        ]
+        == "7"
+    )
+    assert report.reconciliation is not None
+    assert (
+        report.reconciliation.observations[0].status
+        is RuntimeProviderReconciliationStatus.IN_SYNC
+    )
+    assert report.reconciliation.observations[0].reason == "network_policy_in_sync"
+
+
+@pytest.mark.asyncio
+async def test_running_pod_watch_reports_truthful_lifecycle() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
     command = _command(RuntimeLifecycleCommandType.START)
@@ -714,7 +760,7 @@ async def test_verified_running_pod_watch_does_not_regress_to_starting() -> None
 
 
 @pytest.mark.asyncio
-async def test_running_pod_watch_fails_closed_after_provider_restart() -> None:
+async def test_running_pod_watch_remains_running_after_provider_restart() -> None:
     api = FakeKubernetesApi()
     command = _command(RuntimeLifecycleCommandType.START)
     await _provider(api).start(command)
@@ -729,12 +775,13 @@ async def test_running_pod_watch_fails_closed_after_provider_restart() -> None:
 
     reports = [report async for report in restarted_provider.watch_known_runtimes()]
 
-    assert reports[0].observed_state is RuntimeProviderObservedState.STARTING
-    assert reports[0].reason == "network_policy_not_ready"
+    assert reports[0].observed_state is RuntimeProviderObservedState.RUNNING
+    assert reports[0].reason == "pod_running"
+    assert reports[0].reconciliation is None
 
 
 @pytest.mark.asyncio
-async def test_running_pod_watch_revalidates_verified_network_policy() -> None:
+async def test_running_pod_watch_does_not_compare_network_policy() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
     await provider.start(_command(RuntimeLifecycleCommandType.START))
@@ -757,12 +804,13 @@ async def test_running_pod_watch_revalidates_verified_network_policy() -> None:
 
     reports = [report async for report in provider.watch_known_runtimes()]
 
-    assert reports[0].observed_state is RuntimeProviderObservedState.STARTING
-    assert reports[0].reason == "network_policy_not_ready"
+    assert reports[0].observed_state is RuntimeProviderObservedState.RUNNING
+    assert reports[0].reason == "pod_running"
+    assert reports[0].reconciliation is None
 
 
 @pytest.mark.asyncio
-async def test_broadened_network_policy_is_not_ready_in_observe_or_failover() -> None:
+async def test_broadened_network_policy_reports_explicit_observe_drift() -> None:
     api = FakeKubernetesApi()
     provider = _provider(api)
     command = _command(RuntimeLifecycleCommandType.START)
@@ -808,12 +856,53 @@ async def test_broadened_network_policy_is_not_ready_in_observe_or_failover() ->
     failover_reports = await provider.observe_known_runtimes()
     watch_reports = [report async for report in provider.watch_known_runtimes()]
 
-    assert command_report.observed_state is RuntimeProviderObservedState.STARTING
-    assert command_report.reason == "network_policy_not_ready"
-    assert failover_reports[0].observed_state is RuntimeProviderObservedState.STARTING
-    assert failover_reports[0].reason == "network_policy_not_ready"
-    assert watch_reports[0].observed_state is RuntimeProviderObservedState.STARTING
-    assert watch_reports[0].reason == "network_policy_not_ready"
+    assert command_report.observed_state is RuntimeProviderObservedState.RUNNING
+    assert command_report.reason == "pod_running"
+    assert command_report.reconciliation is not None
+    assert command_report.reconciliation.observations[0].kind == "network_policy"
+    assert (
+        command_report.reconciliation.observations[0].status
+        is RuntimeProviderReconciliationStatus.DRIFTED
+    )
+    assert (
+        command_report.reconciliation.observations[0].reason
+        == "network_policy_mismatch"
+    )
+    assert failover_reports[0].observed_state is RuntimeProviderObservedState.RUNNING
+    assert failover_reports[0].reason == "pod_running"
+    assert failover_reports[0].reconciliation is None
+    assert watch_reports[0].observed_state is RuntimeProviderObservedState.RUNNING
+    assert watch_reports[0].reason == "pod_running"
+    assert watch_reports[0].reconciliation is None
+
+
+@pytest.mark.asyncio
+async def test_missing_network_policy_reports_drift_without_lifecycle_change() -> None:
+    api = FakeKubernetesApi()
+    provider = _provider(api)
+    await provider.start(_command(RuntimeLifecycleCommandType.START))
+    pod_key = ("azents-runtime", "azents-runtime-runtime-1")
+    pod = dataclasses.replace(
+        api.pods[pod_key],
+        status=PodStatus(phase="Running", ready=True),
+    )
+    api.pods[pod_key] = pod
+    await api.delete_network_policy(
+        "azents-runtime-runtime-1-execution",
+        "azents-runtime",
+    )
+
+    report = await provider.observe(_command(RuntimeLifecycleCommandType.OBSERVE))
+
+    assert report.observed_state is RuntimeProviderObservedState.RUNNING
+    assert report.reason == "pod_running"
+    assert report.reconciliation is not None
+    assert report.reconciliation.observations[0].kind == "network_policy"
+    assert (
+        report.reconciliation.observations[0].status
+        is RuntimeProviderReconciliationStatus.DRIFTED
+    )
+    assert report.reconciliation.observations[0].reason == "network_policy_missing"
 
 
 @pytest.mark.asyncio

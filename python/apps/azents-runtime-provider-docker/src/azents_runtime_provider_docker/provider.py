@@ -486,6 +486,7 @@ class DockerRuntimeProvider:
             reported_at=datetime.now(UTC),
             terminal_delete_acknowledged=False,
             runtime_configuration=command.runtime_configuration.evidence,
+            reconciliation=None,
         )
 
     def _report_from_container(
@@ -513,6 +514,7 @@ class DockerRuntimeProvider:
                     _LABEL_DESIRED_GENERATION,
                 ),
             ),
+            reconciliation=None,
         )
 
     def _validate_command(

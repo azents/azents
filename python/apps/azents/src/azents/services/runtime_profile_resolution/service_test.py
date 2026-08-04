@@ -75,7 +75,7 @@ def _contract_payload() -> dict[str, object]:
         "schema_version": 1,
         "implementation_key": "kubernetes",
         "implementation_version": "0.1.0",
-        "protocol_version": "agent-runtime-provider-kubernetes-v1",
+        "protocol_version": "agent-runtime-provider-kubernetes-v2",
         "core_lifecycle_operations": [
             "start",
             "stop",
@@ -170,7 +170,7 @@ async def _seed_selected_agent(
             provider_id=provider.id,
             digest="a" * 64,
             implementation_version="0.1.0",
-            protocol_version="agent-runtime-provider-kubernetes-v1",
+            protocol_version="agent-runtime-provider-kubernetes-v2",
             contract=_contract_payload(),
             compatibility={},
         ),

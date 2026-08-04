@@ -1,6 +1,6 @@
 [project]
 name = "azents-runtime-provider-kubernetes"
-version = "0.1.0"
+version = "0.2.0"
 description = "Azents Agent Runtime Kubernetes Provider"
 requires-python = ">=3.14"
 dependencies = [

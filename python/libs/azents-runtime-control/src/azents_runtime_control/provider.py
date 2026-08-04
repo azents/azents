@@ -52,6 +52,76 @@ class RuntimeProviderObservedState(enum.StrEnum):
     FAILED = "failed"
 
 
+class RuntimeProviderReconciliationStatus(enum.StrEnum):
+    """Provider managed-resource comparison status."""
+
+    IN_SYNC = "in_sync"
+    DRIFTED = "drifted"
+
+
+_RECONCILIATION_KIND_MAX_LENGTH = 128
+_RECONCILIATION_REASON_MAX_LENGTH = 256
+_RECONCILIATION_DIAGNOSTIC_MAX_ENTRIES = 16
+_RECONCILIATION_DIAGNOSTIC_KEY_MAX_LENGTH = 128
+_RECONCILIATION_DIAGNOSTIC_VALUE_MAX_LENGTH = 512
+RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_POLICY = "network_policy"
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeProviderReconciliationObservation:
+    """One bounded Provider comparison of a managed Runtime resource."""
+
+    kind: str
+    status: RuntimeProviderReconciliationStatus
+    reason: str
+    diagnostic: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        """Validate one actionable managed-resource comparison."""
+        if not isinstance(self.status, RuntimeProviderReconciliationStatus):
+            raise ValueError("reconciliation status is unsupported")
+        _bounded_reconciliation_string(
+            self.kind,
+            "reconciliation kind",
+            _RECONCILIATION_KIND_MAX_LENGTH,
+        )
+        if self.kind != RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_POLICY:
+            raise ValueError(f"reconciliation kind is unsupported: {self.kind}")
+        _bounded_reconciliation_string(
+            self.reason,
+            "reconciliation reason",
+            _RECONCILIATION_REASON_MAX_LENGTH,
+        )
+        if len(self.diagnostic) > _RECONCILIATION_DIAGNOSTIC_MAX_ENTRIES:
+            raise ValueError("reconciliation diagnostic has too many entries")
+        for key, value in self.diagnostic.items():
+            _bounded_reconciliation_string(
+                key,
+                "reconciliation diagnostic key",
+                _RECONCILIATION_DIAGNOSTIC_KEY_MAX_LENGTH,
+            )
+            _bounded_reconciliation_string(
+                value,
+                "reconciliation diagnostic value",
+                _RECONCILIATION_DIAGNOSTIC_VALUE_MAX_LENGTH,
+            )
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeProviderReconciliationEvidence:
+    """Authoritative kind-scoped comparison evidence from one Provider report."""
+
+    observations: Sequence[RuntimeProviderReconciliationObservation]
+
+    def __post_init__(self) -> None:
+        """Reject an ambiguous or empty reconciliation evidence set."""
+        if not self.observations:
+            raise ValueError("reconciliation observations must not be empty")
+        kinds = [observation.kind for observation in self.observations]
+        if len(kinds) != len(set(kinds)):
+            raise ValueError("reconciliation observation kinds must be unique")
+
+
 @dataclasses.dataclass(frozen=True)
 class RuntimeIdentity:
     """Runtime identity needed by a Provider command."""
@@ -102,6 +172,7 @@ class RuntimeProviderReport:
     reported_at: datetime
     terminal_delete_acknowledged: bool
     runtime_configuration: RuntimeConfigurationEvidence
+    reconciliation: RuntimeProviderReconciliationEvidence | None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -531,3 +602,10 @@ def _deadline_expired(envelope: ProviderCommandEnvelope, now: datetime) -> bool:
     if envelope.deadline_at is None:
         return False
     return envelope.deadline_at <= now
+
+
+def _bounded_reconciliation_string(value: str, name: str, maximum: int) -> None:
+    if not value:
+        raise ValueError(f"{name} must not be empty")
+    if len(value) > maximum:
+        raise ValueError(f"{name} must not exceed {maximum} characters")

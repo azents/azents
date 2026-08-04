@@ -21,8 +21,8 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
   - infra/charts/azents/**
-last_verified_at: 2026-08-03
-spec_version: 14
+last_verified_at: 2026-08-04
+spec_version: 15
 ---
 
 # Agent Runtime Persistence
@@ -62,7 +62,7 @@ fallbacks.
 
 | Provider | Event persistence | Scope |
 |---|---|---|
-| Kubernetes Provider v1 | EBS-backed PVC per Runtime | Production Kubernetes path |
+| Kubernetes Provider v2 | EBS-backed PVC per Runtime | Production Kubernetes path |
 | Docker Provider v1 | Per-Runtime host directory bind mount on a stable single Docker host | Local/dev single-host path |
 
 S3/RustFS checkpoint objects are not the event persistence contract for Agent Runtime v1.
@@ -101,11 +101,15 @@ directory or PVC remains intact.
 Any ambiguous backend outcome is treated as unavailable or retryable until Provider evidence proves
 the desired state. Ambiguity is not permission to delete the workspace.
 
-## Kubernetes Provider v1
+## Kubernetes Provider v2
 
-Kubernetes Provider v1 is an external process that talks to the Kubernetes API and Runtime Control
+Kubernetes Provider v2 is an external process that talks to the Kubernetes API and Runtime Control
 gRPC. It uses Lease leader election so only the active leader issues lifecycle commands for a
 provider id.
+
+Current Runtime Control admits only protocol `agent-runtime-provider-kubernetes-v2`; v1 is rejected
+before capability contract proposal, durable connection registration, or command authority. There
+is no mixed-version operation or legacy report fallback.
 
 A healthy non-leader process reports Kubernetes readiness while it can inspect the leader Lease, so
 a single-replica rolling Deployment can replace the old leader without waiting for the standby to
@@ -151,6 +155,14 @@ never raw unvalidated metadata or an older historical revision. The Pod Profile 
 Agent Workspace PVC capacity. Expansions may apply to the existing PVC; shrink remains deferred
 until an explicit reset or terminal deletion recreates storage.
 
+Pod lifecycle observation is independent of NetworkPolicy verification history. Explicit command
+reports may carry exactly one structured `network_policy` result, while watch, failover, and
+lifecycle-only reports may omit it. Runtime Control persists current drift evidence with Provider
+generation, desired generation, configuration revision, observation time, and bounded reason. It
+atomically claims matching `drifted` evidence for retry-throttled non-destructive
+`UPDATE_CONFIGURATION`; stale evidence cannot dispatch, and matching `in_sync` evidence replaces the
+drift candidate. Unsupported evidence kinds reject the complete report before persistence.
+
 ## Docker Provider v1
 
 Docker Provider v1 assumes one stable Docker host. For each Runtime it creates a host directory and
@@ -192,6 +204,9 @@ Required checks:
 
 ## Changelog
 
+- **2026-08-04 (spec_version=15)** — Advanced Kubernetes Provider admission to v2, removed
+  Provider-local NetworkPolicy lifecycle authority, and persisted exact-generation reconciliation
+  evidence for Runtime Control-owned repair.
 - **2026-08-03 (spec_version=14)** — Made Runner-reported current-generation workspace evidence authoritative, retained Provider mount configuration as deployment state only, and removed fixed-path and Provider-equality fallback behavior.
 - **2026-07-31 (spec_version=13)** — Replaced Provider selection and execution-policy snapshots
   with exact Workspace Runtime Profile binding, immutable desired/applied configuration revisions,

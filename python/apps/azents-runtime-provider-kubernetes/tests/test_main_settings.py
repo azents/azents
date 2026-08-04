@@ -316,6 +316,11 @@ def test_provider_settings_accepts_pod_image_pull_secrets(
 
 def test_capability_contract_declares_kubernetes_pod_profile_support() -> None:
     """Registration advertises the exact current Pod Profile contract."""
+    assert provider_main._PROTOCOL_VERSION == "agent-runtime-provider-kubernetes-v2"
+    assert provider_main._CAPABILITY_CONTRACT["implementation_version"] == "0.2.0"
+    assert provider_main._CAPABILITY_CONTRACT["optional_capabilities"] == [
+        "network_policy_reconciliation"
+    ]
     profile_contracts = provider_main._CAPABILITY_CONTRACT["profile_contracts"]
 
     assert isinstance(profile_contracts, list)
@@ -329,6 +334,7 @@ def test_capability_contract_declares_kubernetes_pod_profile_support() -> None:
                 "runtime.resources",
                 "workspace.persistent-volume",
                 "runtime.network-policy",
+                "runtime.network-policy-reconciliation",
                 "kubernetes.service-account",
                 "kubernetes.scheduling",
                 "docker.dind",

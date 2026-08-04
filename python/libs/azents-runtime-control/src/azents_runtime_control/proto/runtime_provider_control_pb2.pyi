@@ -460,6 +460,7 @@ class RuntimeProviderReport(_message.Message):
     REPORTED_AT_FIELD_NUMBER: _builtins.int
     TERMINAL_DELETE_ACKNOWLEDGED_FIELD_NUMBER: _builtins.int
     RUNTIME_CONFIGURATION_FIELD_NUMBER: _builtins.int
+    RECONCILIATION_FIELD_NUMBER: _builtins.int
     runtime_id: _builtins.str
     provider_id: _builtins.str
     provider_generation: _builtins.int
@@ -476,6 +477,8 @@ class RuntimeProviderReport(_message.Message):
     def runtime_configuration(
         self,
     ) -> _runtime_configuration_pb2.RuntimeConfigurationEvidence: ...
+    @_builtins.property
+    def reconciliation(self) -> Global___RuntimeProviderReconciliationEvidence: ...
     def __init__(
         self,
         *,
@@ -491,9 +494,15 @@ class RuntimeProviderReport(_message.Message):
         terminal_delete_acknowledged: _builtins.bool = ...,
         runtime_configuration: _runtime_configuration_pb2.RuntimeConfigurationEvidence
         | None = ...,
+        reconciliation: Global___RuntimeProviderReconciliationEvidence | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal[
-        "reported_at", b"reported_at", "runtime_configuration", b"runtime_configuration"
+        "reconciliation",
+        b"reconciliation",
+        "reported_at",
+        b"reported_at",
+        "runtime_configuration",
+        b"runtime_configuration",
     ]
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
     _ClearFieldArgType: _TypeAlias = _typing.Literal[
@@ -511,6 +520,8 @@ class RuntimeProviderReport(_message.Message):
         b"provider_runtime_id",
         "reason",
         b"reason",
+        "reconciliation",
+        b"reconciliation",
         "reported_at",
         b"reported_at",
         "runtime_configuration",
@@ -524,6 +535,95 @@ class RuntimeProviderReport(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___RuntimeProviderReport: _TypeAlias = RuntimeProviderReport
+
+@_typing.final
+class RuntimeProviderReconciliationObservation(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    @_typing.final
+    class DiagnosticEntry(_message.Message):
+        DESCRIPTOR: _descriptor.Descriptor
+
+        KEY_FIELD_NUMBER: _builtins.int
+        VALUE_FIELD_NUMBER: _builtins.int
+        key: _builtins.str
+        value: _builtins.str
+        def __init__(
+            self,
+            *,
+            key: _builtins.str = ...,
+            value: _builtins.str = ...,
+        ) -> None: ...
+        _HasFieldArgType: _TypeAlias = _Never
+        def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+        _ClearFieldArgType: _TypeAlias = _typing.Literal[
+            "key", b"key", "value", b"value"
+        ]
+        def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+        def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+    KIND_FIELD_NUMBER: _builtins.int
+    STATUS_FIELD_NUMBER: _builtins.int
+    REASON_FIELD_NUMBER: _builtins.int
+    DIAGNOSTIC_FIELD_NUMBER: _builtins.int
+    kind: _builtins.str
+    status: _builtins.str
+    reason: _builtins.str
+    @_builtins.property
+    def diagnostic(self) -> _containers.ScalarMap[_builtins.str, _builtins.str]: ...
+    def __init__(
+        self,
+        *,
+        kind: _builtins.str = ...,
+        status: _builtins.str = ...,
+        reason: _builtins.str = ...,
+        diagnostic: _abc.Mapping[_builtins.str, _builtins.str] | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal[
+        "diagnostic",
+        b"diagnostic",
+        "kind",
+        b"kind",
+        "reason",
+        b"reason",
+        "status",
+        b"status",
+    ]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___RuntimeProviderReconciliationObservation: _TypeAlias = (
+    RuntimeProviderReconciliationObservation
+)
+
+@_typing.final
+class RuntimeProviderReconciliationEvidence(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    OBSERVATIONS_FIELD_NUMBER: _builtins.int
+    @_builtins.property
+    def observations(
+        self,
+    ) -> _containers.RepeatedCompositeFieldContainer[
+        Global___RuntimeProviderReconciliationObservation
+    ]: ...
+    def __init__(
+        self,
+        *,
+        observations: _abc.Iterable[Global___RuntimeProviderReconciliationObservation]
+        | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["observations", b"observations"]
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___RuntimeProviderReconciliationEvidence: _TypeAlias = (
+    RuntimeProviderReconciliationEvidence
+)
 
 @_typing.final
 class ProviderCommandCompletion(_message.Message):
