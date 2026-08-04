@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, create_autospec
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,6 +33,7 @@ from azents.core.enums import (
 from azents.core.external_channel_session_presence import (
     build_external_channel_session_url,
 )
+from azents.repos.agent import AgentRepository
 from azents.repos.agent.data import Agent
 from azents.repos.external_channel.data import (
     ExternalChannelAgentRoute,
@@ -43,6 +44,7 @@ from azents.repos.external_channel.data import (
     ExternalChannelSetupClaim,
 )
 from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.external_channel.work import ExternalChannelWorkRepository
 from azents.repos.external_channel.work_state import ChannelWorkState
 from azents.services.external_channel.conversation import (
     ExternalChannelConversationScope,
@@ -69,6 +71,9 @@ from azents.services.external_channel.participation_state import (
     ExternalChannelSetupSourceProjection,
     projection_with_setup_source,
     setup_source_from_projection,
+)
+from azents.services.root_agent_session_creation import (
+    RootAgentSessionCreationService,
 )
 from azents.testing.external_channel import make_provider_effect_plan
 
@@ -211,18 +216,21 @@ def test_response_mode_accepts_ordinary_message_for_all_messages() -> None:
 
 def _store(
     *,
-    repository: object,
-    work_repository: object | None = None,
-    agent_repository: object | None = None,
-    root_creation_service: object | None = None,
+    repository: ExternalChannelRepository,
+    work_repository: ExternalChannelWorkRepository | None = None,
+    agent_repository: AgentRepository | None = None,
+    root_creation_service: RootAgentSessionCreationService | None = None,
 ) -> ExternalChannelMailboxIngestionStore:
     return ExternalChannelMailboxIngestionStore(
         session_manager=MagicMock(),
-        repository=cast(ExternalChannelRepository, repository),
-        work_repository=work_repository or MagicMock(),
-        agent_repository=agent_repository or MagicMock(),
+        repository=repository,
+        work_repository=work_repository
+        or create_autospec(ExternalChannelWorkRepository, instance=True),
+        agent_repository=agent_repository
+        or create_autospec(AgentRepository, instance=True),
         agent_session_repository=MagicMock(),
-        root_agent_session_creation_service=root_creation_service or MagicMock(),
+        root_agent_session_creation_service=root_creation_service
+        or create_autospec(RootAgentSessionCreationService, instance=True),
         mailbox_service=MagicMock(),
         config=Config.model_construct(
             web_url="https://azents.example/base",
@@ -545,7 +553,9 @@ async def test_session_presence_intent_replaces_open_session_control() -> None:
     )
 
     assert result == plan
-    call = work_repository.prepare_direct_control.await_args.kwargs
+    call = work_repository.prepare_direct_control.await_args
+    assert call is not None
+    call = call.kwargs
     assert call["request_payload"] == {
         "control_kind": "session_presence",
         "control_version": 2,
@@ -586,7 +596,9 @@ async def test_existing_binding_settings_intent_is_on_demand_and_versioned() -> 
     )
 
     assert result == plan
-    call = work_repository.prepare_direct_control.await_args.kwargs
+    call = work_repository.prepare_direct_control.await_args
+    assert call is not None
+    call = call.kwargs
     assert call["binding_id"] == "binding-1"
     assert call["request_payload"] == {
         "control_kind": "binding_settings_on_demand",
@@ -635,9 +647,10 @@ async def test_conversation_resolution_does_not_create_session_before_acceptance
 
 async def test_setup_required_commits_claim_without_conversation_side_effects() -> None:
     """Authorized setup admission creates no Binding, Session, mailbox, or wake."""
+    commit = AsyncMock()
     session = cast(
         AsyncSession,
-        SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock()),
+        SimpleNamespace(commit=commit, rollback=AsyncMock()),
     )
     repository = MagicMock()
     repository.get_active_block = AsyncMock(return_value=None)
@@ -716,7 +729,9 @@ async def test_setup_required_commits_claim_without_conversation_side_effects() 
     assert acceptance.session_id is None
     assert acceptance.control_plans == (plan,)
     assert acceptance.connection_id == "connection-1"
-    call = work_repository.prepare_direct_control.await_args.kwargs
+    call = work_repository.prepare_direct_control.await_args
+    assert call is not None
+    call = call.kwargs
     assert call["operation_seed"] == "setup:claim-1:1:1"
     assert call["request_payload"] == {
         "control_kind": "setup_required",
@@ -728,7 +743,7 @@ async def test_setup_required_commits_claim_without_conversation_side_effects() 
         "channel_id": "channel-1",
         "thread_ts": "1.000000",
     }
-    session.commit.assert_awaited_once()  # type: ignore[attr-defined]
+    commit.assert_awaited_once()
     repository.create_binding_idempotent.assert_not_awaited()
     work_repository.ensure_active_work.assert_not_awaited()
     root_creation_service.create_root_session.assert_not_awaited()
@@ -806,7 +821,9 @@ async def test_latest_eligible_setup_mention_replaces_continuation_source() -> N
     )
 
     assert result is replacement
-    call = repository.replace_setup_claim_source.await_args.kwargs
+    call = repository.replace_setup_claim_source.await_args
+    assert call is not None
+    call = call.kwargs
     assert call["expected_claim_generation"] == 2
     assert call["expected_source_revision"] == 3
     assert call["conversation_position_id"] == "position-new"
@@ -910,12 +927,9 @@ async def test_discord_thread_resolves_multi_default_from_parent_channel() -> No
     )
 
     assert route is selected_route
-    assert (
-        repository.lock_routable_channel_default.await_args.kwargs[
-            "provider_channel_id"
-        ]
-        == "parent-channel-1"
-    )
+    call = repository.lock_routable_channel_default.await_args
+    assert call is not None
+    assert call.kwargs["provider_channel_id"] == "parent-channel-1"
 
 
 async def test_create_binding_reports_only_the_new_root_session() -> None:

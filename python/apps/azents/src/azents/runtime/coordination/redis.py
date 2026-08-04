@@ -2,6 +2,7 @@
 
 import base64
 import dataclasses
+import inspect
 import json
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
@@ -361,13 +362,15 @@ class RedisRuntimeCoordinationStore:
         ttl_seconds: int | None,
     ) -> RuntimeOperationMetadata | None:
         """Create metadata once or return an exactly compatible existing record."""
-        raw = await self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
+        raw = self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
             _ENSURE_OPERATION_METADATA_SCRIPT,
             1,
             self._operation_key(metadata.operation_id),
             _operation_to_json(metadata),
             "" if ttl_seconds is None else str(ttl_seconds),
         )
+        if inspect.isawaitable(raw):
+            raw = await raw
         if raw is None:
             return None
         return _operation_from_json(_decode_text(raw))
@@ -392,7 +395,7 @@ class RedisRuntimeCoordinationStore:
     ) -> RuntimeOperationMetadata | None:
         """Update operation status if the operation exists and is not final."""
         key = self._operation_key(operation_id)
-        raw = await self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
+        raw = self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
             _UPDATE_OPERATION_IF_NOT_FINAL_SCRIPT,
             1,
             key,
@@ -402,6 +405,8 @@ class RedisRuntimeCoordinationStore:
             "",
             "",
         )
+        if inspect.isawaitable(raw):
+            raw = await raw
         if raw is None:
             return await self.get_operation(operation_id)
         return _operation_from_json(_decode_text(raw))
@@ -414,12 +419,14 @@ class RedisRuntimeCoordinationStore:
     ) -> RuntimeOperationMetadata | None:
         """Atomically transition an operation from ACTIVE to RUNNING."""
         key = self._operation_key(operation_id)
-        raw = await self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
+        raw = self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
             _TRY_START_OPERATION_SCRIPT,
             1,
             key,
             _datetime_to_json(updated_at) or "",
         )
+        if inspect.isawaitable(raw):
+            raw = await raw
         if raw is None:
             return None
         return _operation_from_json(_decode_text(raw))
@@ -440,7 +447,7 @@ class RedisRuntimeCoordinationStore:
         else:
             next_status = ""
             mark_final = ""
-        raw = await self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
+        raw = self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
             _APPEND_REPLY_FOR_OPERATION_SCRIPT,
             2,
             operation_key,
@@ -451,6 +458,8 @@ class RedisRuntimeCoordinationStore:
             mark_final,
             str(self._stream_ttl_seconds),
         )
+        if inspect.isawaitable(raw):
+            raw = await raw
         if raw is None:
             return None
         cursor = _decode_text(raw)
@@ -472,7 +481,7 @@ class RedisRuntimeCoordinationStore:
             return None
         if metadata.status is RuntimeOperationStatus.FINAL:
             return metadata
-        raw = await self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
+        raw = self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
             _UPDATE_OPERATION_IF_NOT_FINAL_SCRIPT,
             1,
             key,
@@ -482,6 +491,8 @@ class RedisRuntimeCoordinationStore:
             _datetime_to_json(heartbeat_at) or "",
             "",
         )
+        if inspect.isawaitable(raw):
+            raw = await raw
         if raw is None:
             return await self.get_operation(operation_id)
         return _operation_from_json(_decode_text(raw))
@@ -704,13 +715,12 @@ def _request_record_from_xautoclaim(result: object) -> RuntimeRequestRecord | No
     )
 
 
-def _payload_field(fields: Mapping[object, object]) -> str:
-    raw = fields.get(_PAYLOAD_FIELD)
-    if raw is None:
-        raw = fields.get(_PAYLOAD_FIELD.encode())
-    if raw is None:
-        raise RuntimeError("Runtime coordination stream entry is missing payload")
-    return _decode_text(raw)
+def _payload_field[KeyT](fields: Mapping[KeyT, object]) -> str:
+    for expected_key in (_PAYLOAD_FIELD, _PAYLOAD_FIELD.encode()):
+        for key, raw in fields.items():
+            if key == expected_key and raw is not None:
+                return _decode_text(raw)
+    raise RuntimeError("Runtime coordination stream entry is missing payload")
 
 
 def _decode_text(value: object) -> str:
