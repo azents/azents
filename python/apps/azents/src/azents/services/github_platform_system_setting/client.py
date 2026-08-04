@@ -2,6 +2,7 @@
 
 import secrets
 from dataclasses import dataclass
+from typing import TypeGuard
 
 import httpx
 
@@ -117,7 +118,7 @@ class PlatformGitHubAppValidationClient:
             data: object = response.json()
         except ValueError:
             return {}
-        return data if isinstance(data, dict) else {}
+        return data if _is_string_object_dict(data) else {}
 
     @staticmethod
     def _invalid(
@@ -146,3 +147,8 @@ class PlatformGitHubAppValidationClient:
             action_hint="Retry validation after GitHub recovers.",
             metadata=None,
         )
+
+
+def _is_string_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    """Return whether a value is a dictionary with string keys."""
+    return isinstance(value, dict) and all(isinstance(key, str) for key in value)

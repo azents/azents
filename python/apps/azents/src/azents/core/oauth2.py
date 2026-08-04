@@ -11,6 +11,7 @@ import json
 import os
 import secrets
 import urllib.parse
+from typing import TypeGuard
 
 import httpx
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -246,11 +247,16 @@ def _decrypt_state(state: str, secret_key: str) -> dict[str, object] | None:
         key = _derive_aes_key(secret_key)
         plaintext = AESGCM(key).decrypt(iv, ct, None)
         data: object = json.loads(plaintext)
-        if not isinstance(data, dict):
+        if not _is_string_object_dict(data):
             return None
         return data
     except Exception:  # noqa: BLE001
         return None
+
+
+def _is_string_object_dict(value: object) -> TypeGuard[dict[str, object]]:
+    """Return whether a value is a dictionary with string keys."""
+    return isinstance(value, dict) and all(isinstance(key, str) for key in value)
 
 
 def create_oauth_state(

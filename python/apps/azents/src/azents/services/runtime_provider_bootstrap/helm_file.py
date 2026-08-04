@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 import yaml
 
@@ -222,16 +222,26 @@ class HelmFileRuntimeProviderBootstrapAdapter:
 
 def _mapping(value: object, field_name: str) -> dict[str, Any]:
     """Require a mapping with string keys."""
-    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+    if not _is_string_mapping(value):
         raise ValueError(f"{field_name} must be a mapping.")
     return value
 
 
 def _list(value: object, field_name: str) -> list[object]:
     """Require a list value."""
-    if not isinstance(value, list):
+    if not _is_object_list(value):
         raise ValueError(f"{field_name} must be a list.")
     return value
+
+
+def _is_string_mapping(value: object) -> TypeGuard[dict[str, Any]]:
+    """Return whether a value is a dictionary with string keys."""
+    return isinstance(value, dict) and all(isinstance(key, str) for key in value)
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    """Return whether a value is a list."""
+    return isinstance(value, list)
 
 
 def _string(value: object, field_name: str) -> str:

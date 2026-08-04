@@ -1713,10 +1713,9 @@ def _decode_memory_stale_cursor(cursor: str) -> tuple[str, str]:
         )
     except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError("invalid stale page cursor") from exc
-    if (
-        not isinstance(value, list)
-        or len(value) != 2
-        or not all(isinstance(item, str) for item in value)
-    ):
+    if not isinstance(value, list) or len(value) != 2:
         raise ValueError("invalid stale page cursor")
-    return value[0], value[1]
+    first, second = value
+    if not isinstance(first, str) or not isinstance(second, str):
+        raise ValueError("invalid stale page cursor")
+    return first, second
