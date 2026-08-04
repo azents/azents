@@ -659,6 +659,16 @@ async def _create_agent_context(
     await session.flush()
     session.add(RDBAgentAutomaticProjectSetting(agent_id=agent.id, revision=1))
     await session.flush()
+    runtime_repository = AgentRuntimeRepository()
+    runtime = await runtime_repository.ensure_for_agent(session, agent.id)
+    await runtime_repository.record_runner_state(
+        session,
+        runtime.id,
+        RuntimeRunnerState.READY,
+        7,
+        expected_desired_generation=runtime.desired_generation,
+        workspace_path="/workspace/agent",
+    )
     return workspace_id, user.id, agent.id
 
 

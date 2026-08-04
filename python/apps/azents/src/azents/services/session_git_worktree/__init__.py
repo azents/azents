@@ -513,9 +513,24 @@ class SessionGitWorktreeService:
                 completed=True,
                 context_invalidated=False,
             )
+        runtime = await self._get_runtime(agent_id=agent_id)
+        if runtime is None:
+            await self._mark_session_working_folder_action_failed(
+                execution=execution,
+                reason_code="runtime_unavailable",
+                on_projection_updated=on_projection_updated,
+                on_history_event_appended=on_history_event_appended,
+            )
+            return GitWorktreeActionExecutionResult(
+                completed=True,
+                context_invalidated=False,
+            )
         try:
             working_folder_path = validate_session_working_folder_path(
-                context.working_folder_path
+                context.working_folder_path,
+                workspace_root=normalize_agent_workspace_root(
+                    runtime.workspace_path
+                ).as_posix(),
             )
         except ValueError:
             await self._mark_session_working_folder_action_failed(
@@ -548,8 +563,7 @@ class SessionGitWorktreeService:
             exit_code=None,
             on_projection_updated=on_projection_updated,
         )
-        runtime = await self._get_runtime(agent_id=agent_id)
-        if runtime is None or runtime.runner_state is not RuntimeRunnerState.READY:
+        if runtime.runner_state is not RuntimeRunnerState.READY:
             await self._mark_session_working_folder_action_failed(
                 execution=execution,
                 reason_code="runtime_unavailable",

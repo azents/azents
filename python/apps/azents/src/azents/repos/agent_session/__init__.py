@@ -1650,12 +1650,19 @@ class AgentSessionRepository:
         """Create the root SessionAgent and context for a root AgentSession."""
         context_id = uuid7().hex
         root_session_agent_id = uuid7().hex
-        runtime_id = await self._get_agent_runtime_id(session, agent_id=agent_id)
+        runtime = await session.scalar(
+            sa.select(RDBAgentRuntime).where(RDBAgentRuntime.agent_id == agent_id)
+        )
+        if runtime is None or runtime.workspace_path is None:
+            raise RuntimeError("Agent Runtime workspace path is unavailable")
         context = RDBSessionAgentContext(
             agent_id=agent_id,
             workspace_id=workspace_id,
-            agent_runtime_id=runtime_id,
-            working_folder_path=build_session_working_folder_path(root_session_handle),
+            agent_runtime_id=runtime.id,
+            working_folder_path=build_session_working_folder_path(
+                root_session_handle,
+                workspace_root=runtime.workspace_path,
+            ),
             working_folder_cleanup_status=(
                 SessionWorkingFolderCleanupStatus.NOT_ATTEMPTED
             ),
@@ -1711,18 +1718,6 @@ class AgentSessionRepository:
                 return rdb
 
         raise RuntimeError("AgentSession handle generation exhausted retry attempts")
-
-    async def _get_agent_runtime_id(
-        self,
-        session: AsyncSession,
-        *,
-        agent_id: str,
-    ) -> str | None:
-        """Return current runtime ID for an Agent when already provisioned."""
-        result = await session.execute(
-            sa.select(RDBAgentRuntime.id).where(RDBAgentRuntime.agent_id == agent_id)
-        )
-        return result.scalar_one_or_none()
 
     def _build_session_agent(self, rdb: RDBSessionAgent) -> SessionAgent:
         """Convert RDB SessionAgent row to domain model."""

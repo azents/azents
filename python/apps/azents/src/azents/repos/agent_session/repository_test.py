@@ -26,6 +26,7 @@ from azents.core.enums import (
     ExternalChannelRouteMode,
     ExternalChannelTransport,
     LLMProvider,
+    RuntimeRunnerState,
     SessionAgentKind,
     SessionWorkingFolderCleanupStatus,
 )
@@ -40,6 +41,7 @@ from azents.rdb.models.external_channel import (
 )
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
+from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.session_lifecycle_finalizer import (
     SessionLifecycleFinalizerRepository,
 )
@@ -96,6 +98,16 @@ async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> 
     )
     session.add(agent)
     await session.flush()
+    runtime_repository = AgentRuntimeRepository()
+    runtime = await runtime_repository.ensure_for_agent(session, agent.id)
+    await runtime_repository.record_runner_state(
+        session,
+        runtime.id,
+        RuntimeRunnerState.UNKNOWN,
+        1,
+        expected_desired_generation=runtime.desired_generation,
+        workspace_path=f"/runtime/{slug}",
+    )
     return agent.id
 
 
@@ -403,7 +415,7 @@ class TestAgentSessionRepository:
         assert context is not None
         assert (
             context.working_folder_path
-            == "/workspace/agent/.azents/sessions/cactus-river-window"
+            == "/runtime/working-folder-context/.azents/sessions/cactus-river-window"
         )
         assert (
             context.working_folder_cleanup_status
