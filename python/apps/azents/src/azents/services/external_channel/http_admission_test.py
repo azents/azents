@@ -834,14 +834,20 @@ async def test_provider_processor_runs_only_after_http_admission_returns(
 @pytest.mark.asyncio
 async def test_claim_failure_prevents_http_success_ack_result(
     codec: ExternalChannelCredentialsCodec,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A failure before the durable claim must escape rather than acknowledge."""
     admission = _AdmissionDouble()
 
-    async def fail_claim(**_: object) -> object:
+    async def fail_claim(
+        *,
+        interaction_id: str,
+        now: datetime.datetime,
+    ) -> object:
+        del interaction_id, now
         raise RuntimeError("claim failed")
 
-    admission.begin_interaction_provider_mutation = fail_claim
+    monkeypatch.setattr(admission, "begin_interaction_provider_mutation", fail_claim)
     service, _ = _service(
         configuration=_configuration(
             codec,

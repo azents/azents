@@ -3,6 +3,7 @@
 import pytest
 
 from azents.core.enums import RuntimeProviderKind
+from azents.testing.types import is_string_object_dict
 
 from .service import (
     RuntimeProfileCompatibilityService,
@@ -95,7 +96,7 @@ def test_prepare_profile_derives_capabilities_and_canonical_digest() -> None:
     )
     equivalent = _profile_payload()
     network = equivalent["network_policy"]
-    assert isinstance(network, dict)
+    assert is_string_object_dict(network)
     network["allowed_cidrs"] = ["10.0.0.0/24"]
     second = service.prepare_infrastructure_profile(
         provider_kind=RuntimeProviderKind.KUBERNETES,

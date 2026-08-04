@@ -1,8 +1,11 @@
 """AgentAdmin repository."""
 
+from typing import Any, cast
+
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
 from azcommon.sqlalchemy.postgres import is_constrained_by
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -108,13 +111,16 @@ class AgentAdminRepository:
         :param workspace_user_id: WorkspaceUser ID
         :return: True when a row was deleted
         """
-        result = await session.execute(
-            sa.delete(RDBAgentAdmin).where(
-                RDBAgentAdmin.agent_id == agent_id,
-                RDBAgentAdmin.workspace_user_id == workspace_user_id,
-            )
+        result = cast(
+            CursorResult[Any],
+            await session.execute(
+                sa.delete(RDBAgentAdmin).where(
+                    RDBAgentAdmin.agent_id == agent_id,
+                    RDBAgentAdmin.workspace_user_id == workspace_user_id,
+                )
+            ),
         )
-        return result.rowcount > 0  # type: ignore[union-attr]  # CursorResult has rowcount
+        return result.rowcount > 0
 
     def _build(self, rdb: RDBAgentAdmin) -> AgentAdmin:
         """Convert RDB model to domain model."""

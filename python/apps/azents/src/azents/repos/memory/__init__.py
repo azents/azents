@@ -1,8 +1,9 @@
 """Memory repository."""
 
-from typing import List
+from typing import Any, List, cast
 
 import sqlalchemy as sa
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.memory import RDBAgentMemory
@@ -310,10 +311,13 @@ class MemoryRepository:
         :param memory_id: Memory ID
         :return: Deletion flag (True=existed, False=absent)
         """
-        result = await session.execute(
-            sa.delete(RDBAgentMemory).where(RDBAgentMemory.id == memory_id)
+        result = cast(
+            CursorResult[Any],
+            await session.execute(
+                sa.delete(RDBAgentMemory).where(RDBAgentMemory.id == memory_id)
+            ),
         )
-        return result.rowcount > 0  # pyright: ignore[reportAttributeAccessIssue]  # SQLAlchemy CursorResult.rowcount returns int at runtime but is inferred as generic Result type
+        return result.rowcount > 0
 
     async def list_summaries(
         self,
@@ -473,8 +477,8 @@ class MemoryRepository:
         else:
             stmt = stmt.where(RDBAgentMemory.user_id == user_id)
 
-        result = await session.execute(stmt)
-        return result.rowcount > 0  # pyright: ignore[reportAttributeAccessIssue]  # SQLAlchemy CursorResult.rowcount returns int at runtime but is inferred as generic Result type
+        result = cast(CursorResult[Any], await session.execute(stmt))
+        return result.rowcount > 0
 
     async def count(
         self,

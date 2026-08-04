@@ -184,12 +184,13 @@ async def test_allow_logs_sanitized_event_only_for_new_session(
     assert "channel-secret" not in caplog.text
     assert "principal-secret" not in caplog.text
     assert "session-secret" not in caplog.text
-    created_binding = repository.create_binding_idempotent.await_args.args[1]
+    create_binding_args = repository.create_binding_idempotent.await_args
+    assert create_binding_args is not None
+    created_binding = create_binding_args.args[1]
     assert created_binding.response_mode is ExternalChannelResponseMode.MENTION_ONLY
-    assert (
-        replay.replay_access_allow.await_args.kwargs["initial_title_eligible"]
-        is created
-    )
+    replay_args = replay.replay_access_allow.await_args
+    assert replay_args is not None
+    assert replay_args.kwargs["initial_title_eligible"] is created
 
 
 async def test_setup_allow_grants_access_without_binding_session_or_replay() -> None:

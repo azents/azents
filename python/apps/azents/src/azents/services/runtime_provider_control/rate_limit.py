@@ -2,6 +2,7 @@
 
 import dataclasses
 import hashlib
+import inspect
 from typing import Protocol
 
 from redis.asyncio import Redis
@@ -44,16 +45,20 @@ class RedisRuntimeProviderEnrollmentRateLimiter:
     async def acquire(self, *, grant_id: str, source_address: str) -> None:
         """Consume one admission attempt or raise with a retry interval."""
         key = _rate_limit_key(grant_id, source_address)
-        result = await self.redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stubs omit dynamic commands.
+        result = self.redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stubs omit dynamic commands.
             _ACQUIRE_SCRIPT,
             1,
             key,
             self.window_seconds,
         )
+        if inspect.isawaitable(result):
+            result = await result
         if not isinstance(result, list) or len(result) != 2:
             raise RuntimeError("Enrollment rate limiter returned an invalid result")
-        count = int(result[0])
-        ttl = max(int(result[1]), 1)
+        count, ttl = result
+        if not isinstance(count, int) or not isinstance(ttl, int):
+            raise RuntimeError("Enrollment rate limiter returned an invalid result")
+        ttl = max(ttl, 1)
         if count > self.max_attempts:
             raise RuntimeProviderEnrollmentRateLimited(ttl)
 

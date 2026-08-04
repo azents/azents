@@ -94,6 +94,7 @@ from azents.services.artifact import ArtifactService
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_resource_authority import SessionResourceAuthority
+from azents.testing.types import is_string_object_dict
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -2201,7 +2202,7 @@ class TestProcessToolHandler:
 
         assert websocket_payloads[0]["kind"] == "client_tool_result"
         payload = websocket_payloads[0]["payload"]
-        assert isinstance(payload, dict)
+        assert is_string_object_dict(payload)
         output = payload["output"]
         assert isinstance(output, str)
         assert "stdout:" in output

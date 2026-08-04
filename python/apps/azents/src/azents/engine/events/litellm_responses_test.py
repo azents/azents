@@ -3299,9 +3299,9 @@ class TestLiteLLMResponsesModelAdapter:
 
         assert len(events) == 1
         response_payload = events[0].item["response"]
-        assert isinstance(response_payload, dict)
+        assert is_string_object_dict(response_payload)
         usage_payload = response_payload["usage"]
-        assert isinstance(usage_payload, dict)
+        assert is_string_object_dict(usage_payload)
         assert usage_payload["total_tokens"] == 8
         assert not [
             warning

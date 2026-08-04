@@ -1110,7 +1110,9 @@ async def test_recovered_no_actionable_wake_up_consumes_durable_idle_boundary() 
 
 
 @pytest.mark.asyncio
-async def test_failed_terminal_run_marks_idle_without_goal_continuation() -> None:
+async def test_failed_terminal_run_marks_idle_without_goal_continuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Failed terminal runs become idle but do not enqueue Goal continuation."""
     host = _Host()
 
@@ -1132,7 +1134,7 @@ async def test_failed_terminal_run_marks_idle_without_goal_continuation() -> Non
             terminal_run_status=AgentRunStatus.FAILED,
         )
 
-    host.process_message = failed_run
+    monkeypatch.setattr(host, "process_message", failed_run)
     runner = _start_session_runner(host)
     message = _wake_up()
 

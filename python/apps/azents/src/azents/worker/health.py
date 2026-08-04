@@ -4,6 +4,7 @@ Lightweight aiohttp server for Kubernetes liveness/readiness probe.
 Runs as separate asyncio task inside AgentWorker process.
 """
 
+import inspect
 import logging
 
 from aiohttp import web
@@ -63,7 +64,9 @@ class HealthServer:
                 status=503,
             )
         try:
-            await self._redis.ping()  # pyright: ignore[reportAttributeAccessIssue]  # redis.asyncio Redis type declaration is incomplete
+            ping = self._redis.ping()  # pyright: ignore[reportAttributeAccessIssue]  # redis.asyncio Redis type declaration is incomplete
+            if inspect.isawaitable(ping):
+                await ping
         except Exception:
             logger.warning("Readiness check failed: redis unavailable", exc_info=True)
             return web.json_response(

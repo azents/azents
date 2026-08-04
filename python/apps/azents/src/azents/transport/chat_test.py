@@ -11,6 +11,7 @@ from azents.services.chat.data import (
     PendingMailboxItem,
     PendingMailboxUserMessagePresentation,
 )
+from azents.testing.types import is_string_object_dict
 from azents.transport.chat import (
     chat_live_run_updated_dump,
     chat_mailbox_item_removed_dump,
@@ -47,7 +48,7 @@ def test_live_run_dump_exposes_minimal_operation() -> None:
     )
 
     run = dumped["run"]
-    assert isinstance(run, dict)
+    assert is_string_object_dict(run)
     assert run["operation"] == {
         "kind": "preparing_context",
         "operation_id": "run-1:preparing-context",
