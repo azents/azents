@@ -7,7 +7,6 @@ import asyncio
 import dataclasses
 from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import UTC, datetime, timedelta
-from typing import NoReturn
 
 import grpc
 import pytest
@@ -25,7 +24,7 @@ from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
     canonical_runtime_configuration_json,
 )
-from google.protobuf import timestamp_pb2
+from google.protobuf import struct_pb2, timestamp_pb2
 
 from azents.core.enums import (
     RuntimeProviderAuthMethod,
@@ -51,6 +50,7 @@ from azents.services.runtime_provider_control.data import (
     RuntimeProviderCredentialAuthentication,
     RuntimeProviderCredentialUnavailable,
 )
+from azents.testing.grpc import FakeGrpcContext as BaseFakeGrpcContext
 
 
 async def _close_stream[MessageT](stream: AsyncIterator[MessageT]) -> None:
@@ -182,35 +182,31 @@ class QueueIterator:
         return message
 
 
-class FakeGrpcContext:
+class FakeGrpcContext(
+    BaseFakeGrpcContext[
+        runtime_provider_control_pb2.ProviderMessage,
+        runtime_provider_control_pb2.ControlMessage,
+    ]
+):
     """Minimal gRPC context for tests."""
 
     def __init__(
         self,
         metadata: grpc.aio.Metadata | tuple[tuple[str, str], ...] | None = None,
     ) -> None:
-        self._metadata = (
-            metadata
-            if metadata is not None
-            else (
-                ("authorization", "Bearer provider-secret"),
-                ("x-azents-runtime-provider-auth-method", "azents_issued_token"),
+        super().__init__(
+            metadata=(
+                metadata
+                if metadata is not None
+                else (
+                    ("authorization", "Bearer provider-secret"),
+                    (
+                        "x-azents-runtime-provider-auth-method",
+                        "azents_issued_token",
+                    ),
+                )
             )
         )
-
-    def invocation_metadata(
-        self,
-    ) -> grpc.aio.Metadata | tuple[tuple[str, str], ...]:
-        """Return fake request metadata."""
-        return self._metadata
-
-    async def abort(
-        self,
-        code: grpc.StatusCode,
-        details: str,
-    ) -> NoReturn:
-        """Raise a RuntimeError instead of aborting a real RPC."""
-        raise RuntimeError(f"{code.name}: {details}")
 
 
 @pytest.mark.asyncio
@@ -565,7 +561,11 @@ def _register_message(
             capabilities=("lifecycle", "observe"),
             config_schema_version="v1",
             auth_credential_id="credential-1",
-            capability_contract={"schema_version": 1},
+            capability_contract=struct_pb2.Struct(
+                fields={
+                    "schema_version": struct_pb2.Value(number_value=1),
+                }
+            ),
         ),
     )
 

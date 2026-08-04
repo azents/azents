@@ -8,9 +8,7 @@ import dataclasses
 import inspect
 from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import UTC, datetime, timedelta
-from typing import NoReturn
 
-import grpc
 import pytest
 from azents_runtime_control.proto import (
     runtime_configuration_pb2,
@@ -39,6 +37,7 @@ from azents.runtime.control_protocol.grpc.runner_server import (
     RuntimeRunnerControlGrpcServicer,
     _runner_transfer_cancel,
     _runner_transfer_intent,
+    _RunnerOutboundItem,
 )
 from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
@@ -59,6 +58,7 @@ from azents.runtime.coordination.memory import (
 )
 from azents.runtime.transfer.data import RuntimeTransferFailure
 from azents.runtime.transfer.result_coordinator import RuntimeRunnerTransferResultSink
+from azents.testing.grpc import FakeGrpcContext as BaseFakeGrpcContext
 
 
 async def _close_stream[MessageT](stream: AsyncIterator[MessageT]) -> None:
@@ -248,15 +248,16 @@ async def test_transfer_result_delegates_only_valid_structural_result() -> None:
 async def test_transfer_result_rejects_unbounded_identity_before_store_lookup() -> None:
     """Untrusted identifiers are bounded before they can construct Redis keys."""
 
-    class _NoLookupStore:
+    class _NoLookupStore(InMemoryRuntimeCoordinationStore):
         async def get_operation(self, operation_id: str) -> RuntimeOperationMetadata:
             del operation_id
             raise AssertionError("store lookup must not run")
 
     sink = RecordingTransferResultSink()
+    store = _NoLookupStore()
     servicer = RuntimeRunnerControlGrpcServicer(
-        control_protocol=object(),
-        coordination_store=_NoLookupStore(),
+        control_protocol=RuntimeControlProtocolService(store),
+        coordination_store=store,
         state_sink=FakeStateSink(),
         owner_replica_id="control-a",
         consumer_id="consumer-1",
@@ -325,7 +326,12 @@ class QueueIterator:
         return message
 
 
-class FakeGrpcContext:
+class FakeGrpcContext(
+    BaseFakeGrpcContext[
+        runtime_runner_control_pb2.RunnerMessage,
+        runtime_runner_control_pb2.RunnerControlMessage,
+    ]
+):
     """Minimal gRPC context for tests."""
 
     def __init__(
@@ -334,19 +340,7 @@ class FakeGrpcContext:
             ("authorization", "Bearer runner-token"),
         ),
     ) -> None:
-        self._metadata = metadata
-
-    def invocation_metadata(self) -> tuple[tuple[str, str], ...]:
-        """Return fake request metadata."""
-        return self._metadata
-
-    async def abort(
-        self,
-        code: grpc.StatusCode,
-        details: str,
-    ) -> NoReturn:
-        """Raise a RuntimeError instead of aborting a real RPC."""
-        raise RuntimeError(f"{code.name}: {details}")
+        super().__init__(metadata=metadata)
 
 
 @dataclasses.dataclass
@@ -378,10 +372,11 @@ class FakeRunnerAuthenticator:
         return self.authorized and credential == self.credential
 
 
-class CountingRelayControlProtocol:
+class CountingRelayControlProtocol(RuntimeControlProtocolService):
     """Return queued envelopes while recording durable claims."""
 
     def __init__(self, envelopes: list[RuntimeRequestEnvelope]) -> None:
+        super().__init__(InMemoryRuntimeCoordinationStore())
         self.envelopes = envelopes
         self.claim_count = 0
         self.acked: list[RuntimeRequestEnvelope] = []
@@ -790,6 +785,7 @@ async def test_runner_grpc_rejects_start_for_canceled_operation() -> None:
         ),
         created_at=_now(),
     )
+    assert isinstance(result, RuntimeDispatchResult)
     await anext(stream)
     await store.update_operation_status(
         result.operation_id,
@@ -843,9 +839,9 @@ async def test_runner_operation_relay_backpressures_durable_claims() -> None:
         runner_authenticator=FakeRunnerAuthenticator(),
         transfer_result_sink=RecordingTransferResultSink(),
     )
-    outbound: asyncio.Queue[runtime_runner_control_pb2.RunnerControlMessage] = (
-        asyncio.Queue(maxsize=1)
-    )
+    outbound: asyncio.Queue[
+        runtime_runner_control_pb2.RunnerControlMessage | _RunnerOutboundItem
+    ] = asyncio.Queue(maxsize=1)
 
     task = asyncio.create_task(
         servicer._relay_runner_operations(  # Exercise relay backpressure directly.
@@ -1197,6 +1193,7 @@ async def test_runner_grpc_round_trips_file_glob_payload_and_result() -> None:
     )
 
     command = await anext(stream)
+    assert isinstance(result, RuntimeDispatchResult)
     assert command.operation_request.WhichOneof("payload") == "file_glob"
     assert command.operation_request.file_glob.pattern == ("/workspace/agent/**/*.py")
     assert list(command.operation_request.file_glob.exclude_patterns) == [
@@ -1626,6 +1623,7 @@ async def test_runner_grpc_start_claim_is_atomic() -> None:
         ),
         created_at=_now(),
     )
+    assert isinstance(result, RuntimeDispatchResult)
     await anext(stream)
 
     await inbound.put(
@@ -1735,6 +1733,7 @@ async def test_runner_grpc_rejects_late_final_after_cancel() -> None:
         ),
         created_at=_now(),
     )
+    assert isinstance(result, RuntimeDispatchResult)
     await anext(stream)
     canceled = await store.append_reply_for_operation(
         result.reply_stream_id,

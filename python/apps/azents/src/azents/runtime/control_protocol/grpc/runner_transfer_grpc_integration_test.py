@@ -1,9 +1,10 @@
 """Socket-level Runner Transfer tests with default gRPC message limits."""
 
+from __future__ import annotations
+
 # pyright: reportAttributeAccessIssue=false, reportUntypedBaseClass=false
 # Protobuf generated modules expose dynamic message/RPC attributes.
 # ruff: noqa: E501
-
 import asyncio
 import hashlib
 import inspect
@@ -17,12 +18,14 @@ from azcommon.infra.s3.service import (
     S3CompletedPart,
     S3MultipartUpload,
     S3ObjectIdentity,
+    S3ObjectMetadata,
     S3TransferObjectMetadata,
     S3VerifiedObject,
 )
 from azents_runtime_control.grpc_runner_transfer_client import (
     GrpcRunnerTransferClient,
     RunnerDownloadChunk,
+    RunnerDownloadComplete,
     RunnerUploadComplete,
 )
 from azents_runtime_control.proto import (
@@ -34,7 +37,14 @@ from azents_runtime_control.proto import runtime_runner_transfer_pb2 as transfer
 from azents_runtime_control.proto import (
     runtime_runner_transfer_pb2_grpc as transfer_grpc,
 )
-from azents_runtime_control.runner_transfer import RunnerTransferIdentity
+from azents_runtime_control.runner import RunnerStateReport
+from azents_runtime_control.runner_transfer import (
+    RunnerTransferIdentity,
+    RunnerTransferResult,
+)
+from azents_runtime_control.runtime_configuration import (
+    RuntimeConfigurationEvidence,
+)
 from azents_runtime_control.transfer import (
     MAX_TRANSFER_CHUNK_BYTES,
     MULTIPART_PART_BYTES,
@@ -48,19 +58,28 @@ from azents.core.runtime_runner_credential import (
 from azents.runtime.control_protocol.data import (
     RuntimeDispatchResult,
     RuntimeRunnerOperation,
+    RuntimeRunnerRegistration,
+)
+from azents.runtime.control_protocol.grpc.auth import (
+    RuntimeRunnerCredentialAuthenticator,
 )
 from azents.runtime.control_protocol.grpc.runner_server import (
     RuntimeRunnerControlGrpcServicer,
+    RuntimeRunnerStateSink,
 )
 from azents.runtime.control_protocol.grpc.runner_transfer_server import (
     RuntimeRunnerTransferGrpcServicer,
+    RuntimeRunnerTransferObjectStore,
+    RuntimeTransferTerminalSink,
 )
 from azents.runtime.control_protocol.service import RuntimeControlProtocolService
 from azents.runtime.coordination.data import (
+    RuntimeOperationMetadata,
     RuntimeOperationStatus,
     RuntimeReplyRecord,
 )
 from azents.runtime.coordination.memory import InMemoryRuntimeCoordinationStore
+from azents.runtime.coordination.store import RuntimeCoordinationStore
 from azents.runtime.transfer.coordinator import RuntimeTransferCoordinator
 from azents.runtime.transfer.data import (
     RuntimeTransferAdmission,
@@ -68,10 +87,12 @@ from azents.runtime.transfer.data import (
     RuntimeTransferCleanupStatus,
     RuntimeTransferConfig,
     RuntimeTransferDirection,
+    RuntimeTransferFailure,
     RuntimeTransferObject,
     RuntimeTransferOutcome,
 )
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
+from azents.runtime.transfer.store import RuntimeTransferStateStore
 
 _NOW = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
 _FRAME_BYTES = 128 * 1024
@@ -90,10 +111,13 @@ class _Authenticator:
 
 
 class _StateSink:
-    async def record_runner_state(self, report: object) -> None:
+    async def record_runner_state(self, report: RunnerStateReport) -> None:
         del report
 
-    async def validate_runner_registration(self, registration: object) -> bool:
+    async def validate_runner_registration(
+        self,
+        registration: RuntimeRunnerRegistration,
+    ) -> bool:
         del registration
         return True
 
@@ -101,14 +125,49 @@ class _StateSink:
         self,
         *,
         runtime_id: str,
-    ) -> None:
+    ) -> RuntimeConfigurationEvidence | None:
         del runtime_id
         return None
 
 
 class _TransferResultSink:
-    async def handle(self, result: object, *, request_id: str) -> None:
+    async def handle(
+        self,
+        result: RunnerTransferResult,
+        *,
+        request_id: str,
+    ) -> None:
         del result, request_id
+
+    async def handle_failure(
+        self,
+        operation: RuntimeOperationMetadata,
+        *,
+        request_id: str,
+        error_code: str,
+        failure: RuntimeTransferFailure,
+    ) -> None:
+        del operation, request_id, error_code, failure
+
+
+def _verified_object(
+    identity: S3ObjectIdentity,
+    *,
+    size: int,
+    sha256: str,
+) -> S3VerifiedObject:
+    return S3VerifiedObject(
+        metadata=S3ObjectMetadata(
+            identity=identity,
+            content_length=size,
+            content_type=None,
+            etag=None,
+            checksum_sha256=sha256,
+            user_metadata={},
+            last_modified_at=None,
+        ),
+        sha256=sha256,
+    )
 
 
 class _ObjectStore:
@@ -131,10 +190,13 @@ class _ObjectStore:
         expected_size: int,
         expected_sha256: str,
     ) -> S3VerifiedObject:
-        del identity
         assert len(self.download) == expected_size
         assert hashlib.sha256(self.download).hexdigest() == expected_sha256
-        return object()  # type: ignore[return-value]
+        return _verified_object(
+            identity,
+            size=expected_size,
+            sha256=expected_sha256,
+        )
 
     @asynccontextmanager
     async def iter_chunks(
@@ -163,6 +225,15 @@ class _ObjectStore:
     ) -> S3MultipartUpload:
         del transfer_metadata
         return S3MultipartUpload(identity=destination, upload_id="upload-1")
+
+    async def create_preparation_multipart_upload(
+        self,
+        *,
+        destination: S3ObjectIdentity,
+        content_type: str | None,
+    ) -> S3MultipartUpload:
+        del content_type
+        return S3MultipartUpload(identity=destination, upload_id="preparation-1")
 
     async def upload_part(
         self,
@@ -193,7 +264,41 @@ class _ObjectStore:
         assert len(value) == expected_size
         assert hashlib.sha256(value).hexdigest() == expected_sha256
         self.uploads[upload.identity.key] = value
-        return object()  # type: ignore[return-value]
+        return _verified_object(
+            upload.identity,
+            size=expected_size,
+            sha256=expected_sha256,
+        )
+
+    async def complete_preparation_multipart_upload(
+        self,
+        *,
+        upload: S3MultipartUpload,
+        completed_parts: tuple[S3CompletedPart, ...],
+        expected_size: int,
+    ) -> object:
+        del upload, completed_parts, expected_size
+        raise AssertionError("preparation completion is not used by this test")
+
+    async def copy_immutable(
+        self,
+        *,
+        source: S3ObjectIdentity,
+        destination: S3ObjectIdentity,
+        expected_size: int,
+        transfer_metadata: S3TransferObjectMetadata,
+        multipart_copy_threshold: int,
+        multipart_part_size: int,
+    ) -> S3VerifiedObject:
+        del (
+            source,
+            destination,
+            expected_size,
+            transfer_metadata,
+            multipart_copy_threshold,
+            multipart_part_size,
+        )
+        raise AssertionError("immutable copy is not used by this test")
 
     async def abort_multipart_upload(self, *, upload: S3MultipartUpload) -> None:
         self.aborted_upload_ids.append(upload.upload_id)
@@ -204,8 +309,11 @@ class _ObjectStore:
         destination: S3ObjectIdentity,
         transfer_metadata: S3TransferObjectMetadata,
     ) -> S3VerifiedObject:
-        del destination, transfer_metadata
-        return object()  # type: ignore[return-value]
+        return _verified_object(
+            destination,
+            size=0,
+            sha256=transfer_metadata.sha256,
+        )
 
     async def delete_verified_transfer_object(
         self,
@@ -217,11 +325,33 @@ class _ObjectStore:
         del expected_size, expected_sha256
         self.uploads.pop(identity.key, None)
 
+    async def delete(self, bucket: str, key: str) -> None:
+        del bucket
+        self.uploads.pop(key, None)
+
 
 class _RecordingRunnerServicer(RuntimeRunnerControlGrpcServicer):
-    def __init__(self, **kwargs: object) -> None:
-        kwargs["transfer_result_sink"] = _TransferResultSink()
-        super().__init__(**kwargs)  # type: ignore[arg-type]
+    def __init__(
+        self,
+        *,
+        control_protocol: RuntimeControlProtocolService,
+        coordination_store: RuntimeCoordinationStore,
+        state_sink: RuntimeRunnerStateSink,
+        owner_replica_id: str,
+        consumer_id: str,
+        runner_authenticator: RuntimeRunnerCredentialAuthenticator,
+        operation_block_ms: int,
+    ) -> None:
+        super().__init__(
+            control_protocol=control_protocol,
+            coordination_store=coordination_store,
+            state_sink=state_sink,
+            owner_replica_id=owner_replica_id,
+            consumer_id=consumer_id,
+            runner_authenticator=runner_authenticator,
+            transfer_result_sink=_TransferResultSink(),
+            operation_block_ms=operation_block_ms,
+        )
         self.peers: list[str] = []
 
     async def ConnectRunner(
@@ -238,8 +368,28 @@ class _RecordingRunnerServicer(RuntimeRunnerControlGrpcServicer):
 
 
 class _RecordingTransferServicer(RuntimeRunnerTransferGrpcServicer):
-    def __init__(self, **kwargs: object) -> None:
-        super().__init__(**kwargs)  # type: ignore[arg-type]
+    def __init__(
+        self,
+        *,
+        state_store: RuntimeTransferStateStore,
+        coordination_store: RuntimeCoordinationStore,
+        object_store: RuntimeRunnerTransferObjectStore,
+        terminal_sink: RuntimeTransferTerminalSink,
+        bucket: str,
+        owner_replica_id: str,
+        runner_authenticator: RuntimeRunnerCredentialAuthenticator,
+        clock: Callable[[], datetime],
+    ) -> None:
+        super().__init__(
+            state_store=state_store,
+            coordination_store=coordination_store,
+            object_store=object_store,
+            terminal_sink=terminal_sink,
+            bucket=bucket,
+            owner_replica_id=owner_replica_id,
+            runner_authenticator=runner_authenticator,
+            clock=clock,
+        )
         self.peers: list[str] = []
 
     async def DownloadTransfer(
@@ -264,6 +414,12 @@ class _RecordingTransferServicer(RuntimeRunnerTransferGrpcServicer):
     ) -> transfer_pb.UploadTransferResult:
         self.peers.append(context.peer())
         return await super().UploadTransfer(request_iterator, context)
+
+
+def _transfer_stub(
+    channel: grpc.aio.Channel,
+) -> transfer_grpc.RuntimeRunnerTransferAsyncStub:
+    return transfer_grpc.RuntimeRunnerTransferStub(channel)
 
 
 @pytest.mark.asyncio
@@ -338,7 +494,7 @@ async def test_default_limit_channels_keep_control_healthy_during_large_transfer
         assert heartbeat.heartbeat_ack.monotonic_sequence == 1
 
         transfer_client = GrpcRunnerTransferClient(
-            transfer_grpc.RuntimeRunnerTransferStub(transfer_channel),
+            _transfer_stub(transfer_channel),
             runner_auth_token="token",
             channel=transfer_channel,
         )
@@ -358,7 +514,9 @@ async def test_default_limit_channels_keep_control_healthy_during_large_transfer
             )
             == download
         )
-        assert download_frames[-1].actual_size == len(download)
+        download_complete = download_frames[-1]
+        assert isinstance(download_complete, RunnerDownloadComplete)
+        assert download_complete.actual_size == len(download)
         assert all(
             len(frame.data) <= MAX_TRANSFER_CHUNK_BYTES
             for frame in download_frames
@@ -465,7 +623,7 @@ async def test_backpressured_transfer_keeps_runner_operation_control_healthy() -
             state, RuntimeTransferDirection.DOWNLOAD, "paused-download", download
         )
         transfer_client = GrpcRunnerTransferClient(
-            transfer_grpc.RuntimeRunnerTransferStub(transfer_channel),
+            _transfer_stub(transfer_channel),
             runner_auth_token="token",
             channel=transfer_channel,
         )
@@ -536,7 +694,9 @@ async def test_backpressured_transfer_keeps_runner_operation_control_healthy() -
             )
             == download
         )
-        assert remainder[-1].actual_size == len(download)
+        download_complete = remainder[-1]
+        assert isinstance(download_complete, RunnerDownloadComplete)
+        assert download_complete.actual_size == len(download)
         assert runner.peers[0] != transfer.peers[0]
     finally:
         object_store.resume_download.set()
@@ -647,7 +807,7 @@ async def test_cancelled_active_upload_aborts_cleanup_and_keeps_control_healthy(
         )
 
         transfer_client = GrpcRunnerTransferClient(
-            transfer_grpc.RuntimeRunnerTransferStub(transfer_channel),
+            _transfer_stub(transfer_channel),
             runner_auth_token="token",
             channel=transfer_channel,
         )

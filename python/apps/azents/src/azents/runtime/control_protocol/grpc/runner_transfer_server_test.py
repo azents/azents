@@ -8,6 +8,7 @@ import hashlib
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from typing import NoReturn
 
 import grpc
 import pytest
@@ -15,6 +16,7 @@ from azcommon.infra.s3.service import (
     S3CompletedPart,
     S3MultipartUpload,
     S3ObjectIdentity,
+    S3ObjectMetadata,
     S3TransferObjectMetadata,
     S3VerifiedObject,
 )
@@ -51,6 +53,10 @@ from azents.runtime.transfer.data import (
     RuntimeTransferRecord,
 )
 from azents.runtime.transfer.memory import InMemoryRuntimeTransferStateStore
+from azents.testing.grpc import (
+    FakeGrpcContext,
+    GrpcMetadata,
+)
 
 _NOW = datetime(2026, 7, 25, 12, 0, tzinfo=UTC)
 _DIGEST = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
@@ -69,22 +75,45 @@ class _Abort(RuntimeError):
         self.code = code
 
 
-class _Context:
+class _Context[RequestT, ResponseT](FakeGrpcContext[RequestT, ResponseT]):
     def __init__(self, *, token: str | None = "token") -> None:
+        super().__init__(
+            metadata=(() if token is None else (("authorization", f"Bearer {token}"),))
+        )
         self.token = token
         self.is_cancelled = False
 
-    def invocation_metadata(self) -> tuple[tuple[str, str], ...]:
-        return (
-            () if self.token is None else (("authorization", f"Bearer {self.token}"),)
-        )
-
-    async def abort(self, code: grpc.StatusCode, details: str) -> None:
-        del details
+    async def abort(
+        self,
+        code: grpc.StatusCode,
+        details: str = "",
+        trailing_metadata: GrpcMetadata = (),
+    ) -> NoReturn:
+        del details, trailing_metadata
         raise _Abort(code)
 
     def cancelled(self) -> bool:
         return self.is_cancelled
+
+
+def _verified_object(
+    identity: S3ObjectIdentity,
+    *,
+    size: int,
+    sha256: str,
+) -> S3VerifiedObject:
+    return S3VerifiedObject(
+        metadata=S3ObjectMetadata(
+            identity=identity,
+            content_length=size,
+            content_type=None,
+            etag=None,
+            checksum_sha256=sha256,
+            user_metadata={},
+            last_modified_at=None,
+        ),
+        sha256=sha256,
+    )
 
 
 @pytest.mark.asyncio
@@ -154,11 +183,14 @@ class _ObjectStore:
         expected_size: int,
         expected_sha256: str,
     ) -> S3VerifiedObject:
-        del identity, expected_size, expected_sha256
         self.verify_calls += 1
         if self.verify_error:
             raise RuntimeError("verify failed")
-        return object()  # type: ignore[return-value]
+        return _verified_object(
+            identity,
+            size=expected_size,
+            sha256=expected_sha256,
+        )
 
     @asynccontextmanager
     async def iter_chunks(
@@ -218,11 +250,14 @@ class _ObjectStore:
         expected_size: int,
         expected_sha256: str,
     ) -> S3VerifiedObject:
-        del upload, expected_size, expected_sha256
         self.completed_parts = completed_parts
         if self.complete_error:
             raise RuntimeError("complete failed")
-        return object()  # type: ignore[return-value]
+        return _verified_object(
+            upload.identity,
+            size=expected_size,
+            sha256=expected_sha256,
+        )
 
     async def complete_preparation_multipart_upload(
         self,
@@ -248,14 +283,13 @@ class _ObjectStore:
         multipart_copy_threshold: int,
         multipart_part_size: int,
     ) -> S3VerifiedObject:
-        del (
-            expected_size,
-            transfer_metadata,
-            multipart_copy_threshold,
-            multipart_part_size,
-        )
+        del multipart_copy_threshold, multipart_part_size
         self.copy_calls.append((source, destination))
-        return object()  # type: ignore[return-value]
+        return _verified_object(
+            destination,
+            size=expected_size,
+            sha256=transfer_metadata.sha256,
+        )
 
     async def abort_multipart_upload(self, *, upload: S3MultipartUpload) -> None:
         del upload
@@ -269,9 +303,12 @@ class _ObjectStore:
         destination: S3ObjectIdentity,
         transfer_metadata: S3TransferObjectMetadata,
     ) -> S3VerifiedObject:
-        del destination, transfer_metadata
         self.empty_creates += 1
-        return object()  # type: ignore[return-value]
+        return _verified_object(
+            destination,
+            size=0,
+            sha256=transfer_metadata.sha256,
+        )
 
     async def delete_verified_transfer_object(
         self,
@@ -726,23 +763,22 @@ async def test_stream_lease_backend_failure_fences_and_cancels_owner(
     harness = await _harness(chunks=[b"abc"])
     record = await harness.claim()
 
-    class _FailingRenewal:
-        async def renew_stream_owner(
-            self,
-            record: RuntimeTransferRecord,
-            credential: RuntimeRunnerCredential,
-        ) -> RuntimeTransferRecord:
-            del record, credential
-            raise ConnectionError("coordination unavailable")
+    async def failing_renewal(
+        record: RuntimeTransferRecord,
+        credential: RuntimeRunnerCredential,
+    ) -> RuntimeTransferRecord:
+        del record, credential
+        raise ConnectionError("coordination unavailable")
 
     monkeypatch.setattr(
         transfer_server_module,
         "STREAM_OWNER_RENEWAL_SECONDS",
         0,
     )
+    monkeypatch.setattr(harness.servicer, "renew_stream_owner", failing_renewal)
     owner = asyncio.create_task(asyncio.sleep(3600))
     keeper = _StreamLeaseKeeper(
-        servicer=_FailingRenewal(),
+        servicer=harness.servicer,
         record=record,
         credential=RuntimeRunnerCredential("credential-1", "runtime-1", 1),
         owner_task=owner,
