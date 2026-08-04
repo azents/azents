@@ -6,10 +6,10 @@ import hashlib
 import hmac
 import json
 import secrets
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import NoReturn
+from typing import NoReturn, TypeGuard
 
 from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorCredentialRequest,
@@ -307,7 +307,7 @@ def _claims_from_encoded_payload(
 def _claims_from_value(
     value: object,
 ) -> RuntimeTransferCoordinatorCredentialClaims:
-    if not isinstance(value, dict) or not _has_exact_fields(
+    if not _has_exact_fields(
         value,
         _CLAIM_FIELDS,
     ):
@@ -315,7 +315,7 @@ def _claims_from_value(
     if value["version"] != _CREDENTIAL_VERSION:
         raise ValueError("Invalid credential payload")
     identity_value = value["identity"]
-    if not isinstance(identity_value, dict) or not _has_exact_fields(
+    if not _has_exact_fields(
         identity_value,
         _IDENTITY_FIELDS,
     ):
@@ -389,11 +389,13 @@ def _reject_duplicate_keys(
 
 
 def _has_exact_fields(
-    value: Mapping[object, object],
+    value: object,
     expected_fields: frozenset[str],
-) -> bool:
-    return len(value) == len(expected_fields) and all(
-        isinstance(key, str) and key in expected_fields for key in value
+) -> TypeGuard[dict[str, object]]:
+    return (
+        isinstance(value, dict)
+        and len(value) == len(expected_fields)
+        and all(isinstance(key, str) and key in expected_fields for key in value)
     )
 
 
