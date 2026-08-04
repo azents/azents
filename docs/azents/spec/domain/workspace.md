@@ -92,8 +92,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
-last_verified_at: 2026-08-03
-spec_version: 56
+last_verified_at: 2026-08-04
+spec_version: 57
 ---
 
 # Workspace & Membership
@@ -219,6 +219,8 @@ erDiagram
 Agent Workspace API exposes Agent-based Runtime lifecycle state to user. `GET /chat/v1/agents/{agent_id}/workspace` is a read API, so it does not automatically start Runtime start/reset. Server reads PostgreSQL Runtime state as source of truth and returns `runtime`, `workspace`, and `actions` by summarizing Provider observed state, Provider connection state, and Runner state.
 
 UI renders server-calculated summary/actions. It does not recompute availability on frontend by combining Provider/Runner raw state. Frontend-side judgment is limited to API failure and network error.
+
+The concrete-session Workspace panel requests the Project browser manifest only while the server-provided Agent Workspace state is `READY`. Manifest loading or failure does not replace lifecycle state and actions while the Agent Workspace is unavailable or transitioning.
 
 | Runtime summary | Workspace response | Behavior |
 |---|---|---|
@@ -629,6 +631,7 @@ stateDiagram-v2
 
 ## Changelog
 
+- **2026-08-04 (spec_version=57)** — Restricted concrete-session Project browser manifest loading to `READY` Agent Workspace state so unavailable and transitional Runtime lifecycle actions remain visible.
 - **2026-08-03 (spec_version=56)** — Made the current-generation Runner report authoritative for the Runtime-specific Agent Workspace root and derived Project, browser, and managed-worktree boundaries from that root without a fixed fallback.
 - **2026-08-02 (spec_version=55)** — Generalized Workspace Multi App authority to
   Slack and Discord, added provider-principal initial channel-default provenance, and

@@ -16,6 +16,7 @@ import {
   type WorkspacePanelState,
   type WorkspaceProjectPanelState,
 } from "../types";
+import { shouldQueryProjectBrowserManifest } from "../workspaceQueryPolicy";
 import type {
   ProjectDirectoryPickerEntry,
   ProjectDirectoryPickerState,
@@ -214,6 +215,9 @@ export function useWorkspacePanelContainer({
           : false,
     },
   );
+  const projectBrowserManifestEnabled = shouldQueryProjectBrowserManifest(
+    workspaceQuery.data?.workspace.type ?? null,
+  );
   const runtimeQuery = trpc.chat.getAgentRuntime.useQuery(
     { handle, agentId },
     {
@@ -229,10 +233,13 @@ export function useWorkspacePanelContainer({
     sessionId,
   });
   const projectBrowserManifestQuery =
-    trpc.chat.getSessionProjectBrowserManifest.useQuery({
-      agentId,
-      sessionId,
-    });
+    trpc.chat.getSessionProjectBrowserManifest.useQuery(
+      {
+        agentId,
+        sessionId,
+      },
+      { enabled: projectBrowserManifestEnabled },
+    );
   const gitRefsQuery = trpc.chat.previewAgentGitRefs.useQuery(
     { agentId, sourceProjectPath: registrationPath ?? "" },
     {
@@ -896,13 +903,16 @@ export function useWorkspacePanelContainer({
   }, [directoryQuery.data]);
 
   const state = useMemo<WorkspacePanelState>(() => {
-    if (workspaceQuery.isLoading || projectBrowserManifestQuery.isLoading) {
+    if (
+      workspaceQuery.isLoading ||
+      (projectBrowserManifestEnabled && projectBrowserManifestQuery.isLoading)
+    ) {
       return { type: "LOADING" };
     }
     if (workspaceQuery.isError) {
       return { type: "ERROR", message: getErrorMessage(workspaceQuery.error) };
     }
-    if (projectBrowserManifestQuery.isError) {
+    if (projectBrowserManifestEnabled && projectBrowserManifestQuery.isError) {
       return {
         type: "ERROR",
         message: getErrorMessage(projectBrowserManifestQuery.error),
@@ -1043,6 +1053,7 @@ export function useWorkspacePanelContainer({
     isManualRefreshing,
     manifest,
     projectBrowserManifest,
+    projectBrowserManifestEnabled,
     projectBrowserManifestQuery.error,
     projectBrowserManifestQuery.isError,
     projectBrowserManifestQuery.isLoading,
