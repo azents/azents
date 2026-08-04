@@ -278,7 +278,7 @@ async def _server(
         clock=lambda: _NOW,
         lifetime=timedelta(seconds=30),
     )
-    return (
+    return (  # ty: ignore[invalid-return-type]  # Generated aio stub overload is runtime-correct.
         server,
         channel,
         pb_grpc.RuntimeTransferCoordinatorStub(channel),

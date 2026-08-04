@@ -125,3 +125,29 @@ The phase reduces the current-main baseline from 913 to 862 diagnostics:
 
 The two remaining `not-subscriptable` diagnostics are production validation issues
 in `runtime_provider_contract.py` and remain outside this test-focused phase.
+
+## Phase 3: Runtime Control gRPC Test Doubles
+
+The third phase makes Runtime Control gRPC test doubles satisfy the interfaces they
+model instead of relying on checker suppressions or incomplete structural fakes.
+
+This phase:
+
+- Adds a reusable typed `grpc.aio.ServicerContext` fake for direct-call tests.
+- Completes Runner control, coordination, transfer-result, and object-store test
+  doubles against their production protocols.
+- Returns real `S3VerifiedObject` values from transfer object-store fakes.
+- Narrows dispatch and download-result unions before accessing variant fields.
+- Preserves generated protobuf/gRPC outputs and production service interfaces.
+
+### Phase 3 Result
+
+The phase reduces the baseline from 862 to 745 diagnostics:
+
+- Runtime Control gRPC test diagnostics: 117 to 0
+- Pyright: 0 errors
+- Targeted tests: 74 passed
+
+One precise `ty` suppression remains at a generated gRPC stub construction boundary.
+The generated overload correctly returns an async stub for an aio channel, which
+Pyright recognizes, while `ty` selects the synchronous overload.
