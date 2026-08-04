@@ -1519,7 +1519,8 @@ class SessionGitWorktreeService:
             raise RuntimeError("Active root Session is missing working-folder context")
         try:
             working_folder_path = validate_session_working_folder_path(
-                working_folder_context.working_folder_path
+                working_folder_context.working_folder_path,
+                workspace_root=workspace_root,
             )
         except ValueError:
             await self._mark_action_execution_failed(
@@ -2963,7 +2964,8 @@ def _cleanup_classification(
             return None, "Session working-folder context is missing."
         try:
             canonical_working_folder_path = validate_session_working_folder_path(
-                working_folder_path
+                working_folder_path,
+                workspace_root=workspace_root,
             )
         except ValueError:
             return None, "Session working-folder path is invalid."

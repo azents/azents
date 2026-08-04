@@ -1227,9 +1227,24 @@ class ChatSessionService:
         context: SessionWorkingFolderContext,
     ) -> None:
         """Delete one committed Session folder and terminalize its bounded result."""
+        async with self.session_manager() as session:
+            runtime = await self.agent_runtime_repository.get_by_agent_id(
+                session,
+                agent_id,
+            )
+        if runtime is None:
+            await self._complete_working_folder_cleanup(
+                context_id=context.id,
+                status=SessionWorkingFolderCleanupStatus.FAILED,
+                summary="Session working-folder cleanup failed: runtime_unavailable.",
+            )
+            return
         try:
             working_folder_path = validate_session_working_folder_path(
-                context.working_folder_path
+                context.working_folder_path,
+                workspace_root=normalize_agent_workspace_root(
+                    runtime.workspace_path
+                ).as_posix(),
             )
         except ValueError:
             await self._complete_working_folder_cleanup(
@@ -1239,12 +1254,7 @@ class ChatSessionService:
             )
             return
 
-        async with self.session_manager() as session:
-            runtime = await self.agent_runtime_repository.get_by_agent_id(
-                session,
-                agent_id,
-            )
-        if runtime is None or runtime.runner_state is not RuntimeRunnerState.READY:
+        if runtime.runner_state is not RuntimeRunnerState.READY:
             await self._complete_working_folder_cleanup(
                 context_id=context.id,
                 status=SessionWorkingFolderCleanupStatus.FAILED,

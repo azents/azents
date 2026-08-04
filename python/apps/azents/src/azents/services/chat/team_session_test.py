@@ -312,7 +312,7 @@ class _ArchiveCleanupService:
 
 
 class _ReadyRuntimeRepository(AgentRuntimeRepository):
-    """Return a ready Runtime for deterministic archive cleanup tests."""
+    """Return the fixture's ready Runtime for archive cleanup tests."""
 
     async def get_by_agent_id(
         self,
@@ -328,6 +328,7 @@ class _ReadyRuntimeRepository(AgentRuntimeRepository):
             agent_id=agent_id,
             runner_state=RuntimeRunnerState.READY,
             runner_generation=7,
+            workspace_path="/workspace/agent",
             created_at=now,
             updated_at=now,
         )
