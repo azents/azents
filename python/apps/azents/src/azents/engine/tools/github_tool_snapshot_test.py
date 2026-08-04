@@ -157,15 +157,19 @@ def _target(installation_id: str, account_login: str) -> GitHubInstallationTarge
     )
 
 
-def _snapshot(*tool_names: str) -> McpToolSnapshotState:
+def _snapshot(
+    *tool_names: str,
+    model_names: dict[str, str] | None = None,
+) -> McpToolSnapshotState:
     """Create MCP tool snapshot."""
+    resolved_model_names = model_names or {}
     return McpToolSnapshotState(
         server_url=_GITHUB_MCP_URL,
         tool_hash="test",
         tools=[
             McpToolSnapshotItem(
                 raw_name=name,
-                model_name=name,
+                model_name=resolved_model_names.get(name, name),
                 description=f"{name} tool",
                 input_schema={"type": "object", "properties": {}},
                 server_url=_GITHUB_MCP_URL,
@@ -252,7 +256,10 @@ async def test_multi_installation_uses_snapshot_while_lazy_mcp_is_pending() -> N
     )
     _FakeToolkitStateHandle.save_state(
         _identity(azents),
-        _snapshot("create_or_update_file"),
+        _snapshot(
+            "create_or_update_file",
+            model_names={"create_or_update_file": "create_file"},
+        ),
     )
     _FakeToolkitStateHandle.save_state(
         _identity(hardtack),
@@ -271,7 +278,7 @@ async def test_multi_installation_uses_snapshot_while_lazy_mcp_is_pending() -> N
         names = [tool.spec.name for tool in state.tools]
 
         assert names == [
-            "azents__create_or_update_file",
+            "azents__create_file",
             "hardtack__get_file_contents",
             "switch_installation",
         ]
@@ -335,7 +342,10 @@ async def test_snapshot_tool_handler_gets_installation_token_at_call_time() -> N
     )
     _FakeToolkitStateHandle.save_state(
         _identity(binding),
-        _snapshot("create_or_update_file"),
+        _snapshot(
+            "create_or_update_file",
+            model_names={"create_or_update_file": "create_file"},
+        ),
     )
     binding.lazy_mcp_task = asyncio.create_task(_never())
     toolkit = GitHubToolkit(
@@ -345,7 +355,7 @@ async def test_snapshot_tool_handler_gets_installation_token_at_call_time() -> N
 
     try:
         state = await toolkit.update_context(_make_context())
-        tool = _find_tool(state.tools, "azents__create_or_update_file")
+        tool = _find_tool(state.tools, "azents__create_file")
         assert token_calls == 0
 
         with patch(
@@ -358,5 +368,6 @@ async def test_snapshot_tool_handler_gets_installation_token_at_call_time() -> N
         assert token_calls == 1
         call_args = call_tool.call_args.args
         assert call_args[1] == {"Authorization": "Bearer ghs_snapshot"}
+        assert call_args[3] == "create_or_update_file"
     finally:
         binding.lazy_mcp_task.cancel()

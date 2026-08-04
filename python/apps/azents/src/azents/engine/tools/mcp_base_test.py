@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.tools import McpToolkitConfig, TurnContext
 from azents.engine.tooling.toolkit_state import ToolkitStateIdentity
 from azents.engine.tools.mcp import McpToolkit
+from azents.engine.tools.mcp_base import McpToolSnapshotItem, McpToolSnapshotState
 from azents.testing.types import is_object_factory
 
 
@@ -180,6 +181,51 @@ async def test_background_refresh_success_exposes_sorted_tools_next_turn() -> No
 
     assert [tool.spec.name for tool in state.tools] == ["alpha", "zeta"]
     assert (await toolkit.get_static_prompt(_context())) == ""
+
+
+async def test_stored_snapshot_restores_model_tool_name() -> None:
+    """Stored model names replace raw MCP names during reconstruction."""
+    state_name = "tool_snapshot:test"
+    input_schema: dict[str, object] = {
+        "type": "object",
+        "properties": {"value": {"type": "string"}},
+    }
+    identity = ToolkitStateIdentity(
+        agent_id="agent-1",
+        session_id="session-1",
+        toolkit_namespace="mcp",
+        state_name=state_name,
+    )
+    await _FakeToolkitStateHandle(identity).save(
+        McpToolSnapshotState(
+            server_url="https://example.com/mcp",
+            tool_hash="test",
+            tools=[
+                McpToolSnapshotItem(
+                    raw_name="raw_tool",
+                    model_name="model_tool",
+                    description="Renamed tool",
+                    input_schema=input_schema,
+                    server_url="https://example.com/mcp",
+                    use_streamable_http=False,
+                )
+            ],
+        )
+    )
+    toolkit = McpToolkit(
+        config=McpToolkitConfig(server_url="https://example.com/mcp", auth_type="none"),
+        session_manager=_session_manager,
+        agent_id="agent-1",
+        session_id="session-1",
+        state_name=state_name,
+    )
+
+    state = await toolkit.update_context(_context())
+
+    assert [tool.spec.name for tool in state.tools] == ["model_tool"]
+    assert state.tools[0].spec.description == "Renamed tool"
+    assert state.tools[0].spec.input_schema == input_schema
+    assert state.tools[0].spec.model_config.get("frozen") is True
 
 
 async def test_refresh_failure_preserves_previous_successful_snapshot() -> None:
