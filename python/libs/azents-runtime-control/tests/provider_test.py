@@ -22,6 +22,9 @@ from azents_runtime_control.provider import (
     RuntimeLifecycleResult,
     RuntimeProviderLifecycle,
     RuntimeProviderObservedState,
+    RuntimeProviderReconciliationEvidence,
+    RuntimeProviderReconciliationObservation,
+    RuntimeProviderReconciliationStatus,
     RuntimeProviderReport,
 )
 from azents_runtime_control.runtime_configuration import (
@@ -369,7 +372,53 @@ def _report(command: RuntimeLifecycleCommand) -> RuntimeProviderReport:
             command.command_type is RuntimeLifecycleCommandType.TERMINAL_DELETE
         ),
         runtime_configuration=command.runtime_configuration.evidence,
+        reconciliation=None,
     )
+
+
+def test_reconciliation_observation_rejects_unbounded_fields() -> None:
+    """One reconciliation observation keeps operator context bounded."""
+    with pytest.raises(ValueError, match="reconciliation reason must not be empty"):
+        RuntimeProviderReconciliationObservation(
+            kind="network_policy",
+            status=RuntimeProviderReconciliationStatus.DRIFTED,
+            reason="",
+            diagnostic={},
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="reconciliation diagnostic has too many entries",
+    ):
+        RuntimeProviderReconciliationObservation(
+            kind="network_policy",
+            status=RuntimeProviderReconciliationStatus.DRIFTED,
+            reason="network_policy_mismatch",
+            diagnostic={str(index): "value" for index in range(17)},
+        )
+
+    with pytest.raises(ValueError, match="reconciliation kind is unsupported"):
+        RuntimeProviderReconciliationObservation(
+            kind="unsupported",
+            status=RuntimeProviderReconciliationStatus.DRIFTED,
+            reason="network_policy_mismatch",
+            diagnostic={},
+        )
+
+
+def test_reconciliation_evidence_rejects_empty_or_duplicate_kinds() -> None:
+    """One report cannot silently carry ambiguous reconciliation authority."""
+    with pytest.raises(ValueError, match="observations must not be empty"):
+        RuntimeProviderReconciliationEvidence(observations=())
+
+    observation = RuntimeProviderReconciliationObservation(
+        kind="network_policy",
+        status=RuntimeProviderReconciliationStatus.DRIFTED,
+        reason="network_policy_mismatch",
+        diagnostic={},
+    )
+    with pytest.raises(ValueError, match="kinds must be unique"):
+        RuntimeProviderReconciliationEvidence(observations=(observation, observation))
 
 
 def _runtime_configuration() -> RuntimeConfigurationEnvelope:

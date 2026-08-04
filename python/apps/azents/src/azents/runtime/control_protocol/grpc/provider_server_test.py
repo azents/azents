@@ -42,7 +42,10 @@ from azents.runtime.control_protocol.grpc.provider_server import (
 from azents.runtime.control_protocol.service import (
     RuntimeControlProtocolService,
 )
-from azents.runtime.coordination.data import RuntimeReplyEventType
+from azents.runtime.coordination.data import (
+    RuntimeConnectionKind,
+    RuntimeReplyEventType,
+)
 from azents.runtime.coordination.memory import (
     InMemoryRuntimeCoordinationStore,
 )
@@ -529,11 +532,78 @@ async def test_provider_grpc_accepts_provider_credential_metadata() -> None:
     assert accepted.register_accepted.provider_id == "provider-1"
 
 
+@pytest.mark.asyncio
+async def test_provider_grpc_rejects_kubernetes_v1_before_registration() -> None:
+    """Kubernetes v1 does not receive a connection or command authority."""
+    store = InMemoryRuntimeCoordinationStore()
+    bridge = FakeProviderCredentialBridge(
+        authentication=dataclasses.replace(
+            FakeProviderCredentialBridge().authentication,
+            provider_kind=RuntimeProviderKind.KUBERNETES,
+        )
+    )
+    servicer = _servicer(
+        RuntimeControlProtocolService(store),
+        FakeReportSink(),
+        bridge=bridge,
+    )
+    inbound = QueueIterator()
+    await inbound.put(
+        _register_message(
+            provider_type="kubernetes",
+            protocol_version="agent-runtime-provider-kubernetes-v1",
+        )
+    )
+
+    stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
+
+    with pytest.raises(RuntimeError, match="FAILED_PRECONDITION"):
+        await anext(stream)
+    connection = await store.get_connection(
+        kind=RuntimeConnectionKind.PROVIDER,
+        subject_id="provider-1",
+    )
+
+    assert connection is None
+
+
+@pytest.mark.asyncio
+async def test_provider_grpc_accepts_kubernetes_v2_registration() -> None:
+    """Kubernetes v2 receives Provider connection authority."""
+    store = InMemoryRuntimeCoordinationStore()
+    bridge = FakeProviderCredentialBridge(
+        authentication=dataclasses.replace(
+            FakeProviderCredentialBridge().authentication,
+            provider_kind=RuntimeProviderKind.KUBERNETES,
+        )
+    )
+    servicer = _servicer(
+        RuntimeControlProtocolService(store),
+        FakeReportSink(),
+        bridge=bridge,
+    )
+    inbound = QueueIterator()
+    await inbound.put(
+        _register_message(
+            provider_type="kubernetes",
+            protocol_version="agent-runtime-provider-kubernetes-v2",
+        )
+    )
+
+    stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    await _close_stream(stream)
+
+    assert accepted.register_accepted.provider_id == "provider-1"
+
+
 def _servicer(
     service: RuntimeControlProtocolService,
     sink: FakeReportSink,
+    *,
+    bridge: FakeProviderCredentialBridge | None = None,
 ) -> RuntimeProviderControlGrpcServicer:
-    bridge = FakeProviderCredentialBridge()
+    bridge = bridge or FakeProviderCredentialBridge()
     return RuntimeProviderControlGrpcServicer(
         control_protocol=service,
         report_sink=sink,
@@ -549,15 +619,18 @@ def _servicer(
 
 def _register_message(
     connection_id: str = "connection-1",
+    *,
+    provider_type: str = "docker",
+    protocol_version: str = "agent-runtime-provider.v1",
 ) -> runtime_provider_control_pb2.ProviderMessage:
     return runtime_provider_control_pb2.ProviderMessage(
         connection_id=connection_id,
         request_id="register",
         register=runtime_provider_control_pb2.ProviderRegister(
             provider_id="provider-1",
-            provider_type="docker",
+            provider_type=provider_type,
             scope="system",
-            protocol_version="agent-runtime-provider.v1",
+            protocol_version=protocol_version,
             capabilities=("lifecycle", "observe"),
             config_schema_version="v1",
             auth_credential_id="credential-1",

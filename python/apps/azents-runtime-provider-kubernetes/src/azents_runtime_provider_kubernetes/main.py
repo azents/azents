@@ -43,7 +43,7 @@ from azents_runtime_provider_kubernetes.provider import (
     KubernetesRuntimeProviderConfig,
 )
 
-_PROTOCOL_VERSION = "agent-runtime-provider-kubernetes-v1"
+_PROTOCOL_VERSION = "agent-runtime-provider-kubernetes-v2"
 _CONFIG_SCHEMA_VERSION = "agent-runtime-provider-kubernetes-v1"
 _DEFAULT_COMMAND_BLOCK_MS = 5_000
 _CONTROL_RECONNECT_DELAY_SECONDS = 1.0
@@ -55,7 +55,7 @@ _LOGGER = logging.getLogger(__name__)
 _CAPABILITY_CONTRACT: dict[str, JsonValue] = {
     "schema_version": 1,
     "implementation_key": "kubernetes",
-    "implementation_version": "0.1.0",
+    "implementation_version": "0.2.0",
     "protocol_version": _PROTOCOL_VERSION,
     "core_lifecycle_operations": [
         "start",
@@ -65,7 +65,7 @@ _CAPABILITY_CONTRACT: dict[str, JsonValue] = {
         "observe",
         "terminal_delete",
     ],
-    "optional_capabilities": [],
+    "optional_capabilities": ["network_policy_reconciliation"],
     "persistence": {
         "kind": "persistent",
         "reset_destroys_workspace": True,
@@ -82,6 +82,7 @@ _CAPABILITY_CONTRACT: dict[str, JsonValue] = {
                 "runtime.resources",
                 "workspace.persistent-volume",
                 "runtime.network-policy",
+                "runtime.network-policy-reconciliation",
                 "kubernetes.service-account",
                 "kubernetes.scheduling",
                 "docker.dind",
@@ -173,6 +174,7 @@ async def _run_control_loop(
             "lifecycle",
             "observe",
             "pvc_persistence",
+            "network_policy_reconciliation",
         ),
         config_schema_version=_CONFIG_SCHEMA_VERSION,
         metadata={},

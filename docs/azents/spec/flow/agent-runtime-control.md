@@ -35,7 +35,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
 last_verified_at: 2026-08-04
-spec_version: 48
+spec_version: 49
 ---
 
 # Agent Runtime Control
@@ -147,6 +147,8 @@ Runtime Transfer authorization or startup input.
 - exact infrastructure Profile and Workspace Runtime Profile IDs
 - desired and applied Runtime configuration revision IDs
 - provider observed state, provider generation, provider runtime id, connection state
+- current kind-scoped Provider reconciliation status, reason, Provider and desired
+  generations, configuration revision, observation time, and repair-request time
 - runner-reported Agent Workspace path
 - runner state, runner generation, active operation ids, connection state
 - current-generation failure code/message/details
@@ -185,13 +187,17 @@ path, observed state, configuration evidence, runner availability, or current fa
 
 Provider report framing always uses the generation accepted for the current Control stream. A Provider reconnect or leader failover may observe backend resources whose labels contain an older Provider generation; those labels are historical command metadata and must be replaced with the current connection generation before initial resync reports, watch reports, or command completion reports are sent to Control.
 
-The Kubernetes Provider treats a Pod watch report as `running` only after a command for the same
-Provider generation, desired generation, configuration revision, and digest has verified the exact
-NetworkPolicy. Every later watch report re-reads that NetworkPolicy and keeps the verified state only
-while it still matches. Provider restart, configuration change, workload deletion, or policy drift
-removes that trust and reports `starting` until a command verifies the current policy again. An
-unverified watch report must not race a verified command report and leave a Ready Runtime
-indefinitely preparing.
+Kubernetes Provider lifecycle reports describe the backend Pod state directly. Process-local
+command history, verification caches, and NetworkPolicy state do not rewrite an observed running
+Pod to `starting`. Watch, initial-resync, and failover reports may omit reconciliation evidence and
+remain valid current-protocol lifecycle observations.
+
+After an explicit lifecycle or configuration command, Kubernetes Provider v2 may attach one
+structured `network_policy` reconciliation observation. `in_sync` confirms the exact expected
+NetworkPolicy; `drifted` reports bounded mismatch evidence without changing the lifecycle state.
+Runtime Control persists only current Provider-generation, desired-generation, and configuration-
+revision evidence. A complete report containing another reconciliation kind is rejected before
+persistence; kinds are never ignored or partially consumed.
 
 The Kubernetes Provider owns each Runtime-specific NetworkPolicy as one complete resource. Creation
 uses POST, while reconciliation of an existing policy uses resourceVersion-fenced PUT replacement
@@ -201,7 +207,14 @@ deleting the policy. Pods retain explicit delete-and-recreate lifecycle semantic
 mutable surface is limited by Kubernetes immutability, PVCs retain data-preserving merge updates,
 and the leader Lease retains concurrency-sensitive merge updates.
 
-Control periodically dispatches idempotent Provider `start` commands for running Runtimes and read-only Provider `observe` commands for stopped-desired Runtimes whose Provider state has not yet converged to `stopped`. Periodic `start` revalidates the desired Runner image and Provider-managed workload configuration, reuses an equivalent workload, and replaces only a drifted workload while preserving Agent Workspace storage. The live Provider connection registry, rather than a cached per-Runtime connection flag, gates dispatch; periodic attempts are durably throttled while a Provider is unavailable, and a successful dispatch refreshes the cached connection flag. Start timeout evaluation happens only after the current reconciliation pass has checked that live registry and only for a desired generation already dispatched to its Provider, so a Control rollout cannot convert a stale durable `connected` flag into a false `START_TIMEOUT`. This converges Runner image/configuration drift after deployment and closes gaps when a backend deletion event is missed during Provider reconnect or leader handoff. A current-generation Provider `stopped` report also converges durable Runner state to `disconnected`; the stopped backend is authoritative that no Runner remains available. Kubernetes Pod replacement treats deletion as asynchronous: the Provider must not apply the replacement under the same name until the old Pod is no longer observable, avoiding immutable-field PATCH failures during restart.
+NetworkPolicy drift compares the complete managed policy semantics while excluding only the
+historical `azents/provider-generation` transport label. A Provider reconnect therefore does not
+create drift by itself; desired-generation, configuration annotations, selectors, and rules remain
+exact comparison inputs.
+
+Control periodically dispatches idempotent Provider `start` commands for running Runtimes and read-only Provider `observe` commands for stopped-desired Runtimes whose Provider state has not yet converged to `stopped`. Periodic `start` revalidates the desired Runner image and Provider-managed workload configuration, reuses an equivalent workload, and replaces only a drifted workload while preserving Agent Workspace storage. Exact current `network_policy:drifted` evidence is a separate durable candidate that dispatches `UPDATE_CONFIGURATION`, never `START`. Runtime Control atomically claims one evidence snapshot, throttles retry by the command deadline, and requires the same live Provider generation before dispatch. Lifecycle and desired-configuration adoption take precedence over this repair, and the repair takes precedence over periodic `start`, so one pass does not issue competing commands for the same Runtime. A matching `in_sync` report replaces the drifted evidence and removes the repair candidate.
+
+The live Provider connection registry, rather than a cached per-Runtime connection flag, gates dispatch; periodic attempts are durably throttled while a Provider is unavailable, and a successful dispatch refreshes the cached connection flag. Start timeout evaluation happens only after the current reconciliation pass has checked that live registry and only for a desired generation already dispatched to its Provider, so a Control rollout cannot convert a stale durable `connected` flag into a false `START_TIMEOUT`. This converges Runner image/configuration drift after deployment and closes gaps when a backend deletion event is missed during Provider reconnect or leader handoff. A current-generation Provider `stopped` report also converges durable Runner state to `disconnected`; the stopped backend is authoritative that no Runner remains available. Kubernetes Pod replacement treats deletion as asynchronous: the Provider must not apply the replacement under the same name until the old Pod is no longer observable, avoiding immutable-field PATCH failures during restart.
 
 Runtime Profile reconciliation classifies one action for each candidate. A ready desired revision may
 dispatch lifecycle work, wait for Provider acknowledgement, offer exact evidence to the Runner
@@ -227,6 +240,12 @@ Every Provider stream declares exactly one authentication method in gRPC metadat
 - `kubernetes_service_account`, which verifies a Kubernetes ServiceAccount projected token and resolves its durable bootstrap-owned binding.
 
 The normalized Provider authentication result contains the durable binding ID, Provider ID, method, normalized subject, method-safe audit metadata, and evidence expiry. Control records that result on the durable Provider connection. An issued-token connection records its credential ID; a Kubernetes ServiceAccount connection has no synthetic credential or enrollment grant. A binding must be active and belong to the authenticated Provider. Registration `provider_id`, credential identifiers, scope, and generation cannot select or discover a Provider; a mismatched registration is rejected with `PERMISSION_DENIED`.
+
+Authenticated Kubernetes Provider registration requires protocol
+`agent-runtime-provider-kubernetes-v2`. Runtime Control rejects v1 and every other Kubernetes
+protocol value with `FAILED_PRECONDITION` before proposing a capability contract or registering
+connection and command authority. There is no mixed-version serving mode, legacy report parser,
+fallback, or rollback path. Docker Provider protocol admission is unchanged.
 
 For `kubernetes_service_account`, Runtime Control submits the presented projected token to Kubernetes TokenReview with the exact `azents-runtime-control` audience. It accepts only an authenticated review with that audience and an exact `system:serviceaccount:<namespace>:<name>` subject matching one active durable binding. Evidence expiry is derived only after that successful review. The Kubernetes Provider watches the projected token file and reconnects after rotation. Runtime Control, not the Provider ServiceAccount, has the narrow `create` permission on `authentication.k8s.io/tokenreviews`.
 
@@ -269,7 +288,13 @@ ACK may carry the same pending evidence; Runner adopts it locally and emits its 
 report. Control promotes the desired revision to applied only when Provider and Runner evidence both
 match. There is no separate Runner configuration-update request/ACK protocol.
 
-Provider reports backend observed state and configuration evidence without Agent Workspace metadata. Current-generation Runner registration and state reports carry the effective absolute Agent Workspace path; Control validates and stores that value in `agent_runtimes.workspace_path`.
+Provider reports backend observed state and configuration evidence without Agent Workspace metadata.
+Kubernetes Provider v2 command reports may additionally carry exactly one structured
+`network_policy` reconciliation observation. Watch, failover, and lifecycle-only reports may omit
+that field. Absence means the report supplies no actionable reconciliation evidence; it does not
+clear current evidence or invoke a compatibility fallback. Current-generation Runner registration
+and state reports carry the effective absolute Agent Workspace path; Control validates and stores
+that value in `agent_runtimes.workspace_path`.
 
 Kubernetes Runtime Pod reuse compares Provider-managed configuration while allowing additive fields injected by Kubernetes admission and defaulting. In particular, configured tolerations must remain present, but built-in `NoExecute` tolerations added by Kubernetes do not make an otherwise reusable Pod stale or trigger replacement during repeated start reconciliation.
 
@@ -440,6 +465,11 @@ Required deterministic coverage:
 - repository/service tests for desired/observed/runner state summary/actions
 - Coordination Store contract tests for in-memory and Redis implementations
 - provider/runner gRPC registration, generation fencing, request/reply/body stream tests
+- Kubernetes v1 registration rejection before contract/connection authority and Kubernetes v2
+  registration acceptance
+- strict `network_policy`-only reconciliation report decoding and sink rejection
+- durable reconciliation evidence persistence, stale generation/revision rejection, `in_sync`
+  replacement, atomic repair claim/retry, and lifecycle/configuration/repair/periodic precedence
 - Runner operation tests for process, file, Git, and strict V4A patch operations
 - Runtime Control contract tests for ordered operation cancellation, start/cancel races, terminal cursor authority, and typed patch result folding
 - Provider tests for Docker host bind mount persistence, Kubernetes PVC persistence, direct DIND socket topology, and deployment-owned NetworkPolicy hard caps
@@ -455,6 +485,9 @@ Live/provider evidence belongs in the testenv prerequisite system and must redac
 
 ## Changelog
 
+- **2026-08-04** (spec_version 49) — Made Kubernetes Provider v2 lifecycle observation independent
+  of process-local NetworkPolicy verification history, added strict structured NetworkPolicy drift
+  evidence, and moved durable fenced repair ownership to Runtime Control with v2-only admission.
 - **2026-08-04** (spec_version 48) — Added validated lexical Session-folder
   deletion: root symlinks are unlinked, descendant symlinks are not followed, and
   archive cleanup cannot expand outside the stored managed-root boundary.

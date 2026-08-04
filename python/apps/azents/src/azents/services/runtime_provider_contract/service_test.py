@@ -26,7 +26,7 @@ from .service import (
     RuntimeProviderContractUnavailable,
 )
 
-_PROTOCOL_VERSION = "agent-runtime-provider-kubernetes-v1"
+_PROTOCOL_VERSION = "agent-runtime-provider-kubernetes-v2"
 
 
 def _contract_payload() -> dict[str, object]:

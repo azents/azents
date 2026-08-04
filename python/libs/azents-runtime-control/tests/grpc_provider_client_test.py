@@ -5,13 +5,14 @@ from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime
 
 import pytest
-from google.protobuf import struct_pb2
+from google.protobuf import struct_pb2, timestamp_pb2
 
 from azents_runtime_control.grpc_provider_client import (
     PROVIDER_AUTH_METHOD_AZENTS_ISSUED_TOKEN,
     PROVIDER_AUTH_METHOD_KUBERNETES_SERVICE_ACCOUNT,
     GrpcProviderControlClient,
     RuntimeProviderControlStreamClosed,
+    provider_report_from_message,
 )
 from azents_runtime_control.proto import (
     runtime_configuration_pb2,
@@ -21,6 +22,9 @@ from azents_runtime_control.provider import (
     ProviderCommandCompletion,
     ProviderRegistration,
     RuntimeProviderObservedState,
+    RuntimeProviderReconciliationEvidence,
+    RuntimeProviderReconciliationObservation,
+    RuntimeProviderReconciliationStatus,
     RuntimeProviderReport,
 )
 from azents_runtime_control.runtime_configuration import (
@@ -151,6 +155,10 @@ async def test_grpc_client_registers_heartbeats_claims_and_completes() -> None:
     assert sent[0].WhichOneof("payload") == "register"
     assert sent[1].WhichOneof("payload") == "heartbeat"
     assert sent[2].command_completion.runtime_id == "runtime-1"
+    report = sent[2].command_completion.report
+    assert report.HasField("reconciliation")
+    assert report.reconciliation.observations[0].kind == "network_policy"
+    assert report.reconciliation.observations[0].status == "in_sync"
     await client.close()
 
 
@@ -251,6 +259,102 @@ def _registration() -> ProviderRegistration:
     )
 
 
+def test_provider_report_reconciliation_round_trip_preserves_presence() -> None:
+    """The evidence field distinguishes absent from authoritative evidence."""
+    absent = provider_report_from_message(_report_message())
+
+    assert absent.reconciliation is None
+
+    message = _report_message()
+    message.reconciliation.CopyFrom(
+        runtime_provider_control_pb2.RuntimeProviderReconciliationEvidence(
+            observations=[
+                runtime_provider_control_pb2.RuntimeProviderReconciliationObservation(
+                    kind="network_policy",
+                    status="drifted",
+                    reason="network_policy_missing",
+                    diagnostic={"source": "explicit_observe"},
+                )
+            ]
+        )
+    )
+
+    present = provider_report_from_message(message)
+
+    assert present.reconciliation == RuntimeProviderReconciliationEvidence(
+        observations=(
+            RuntimeProviderReconciliationObservation(
+                kind="network_policy",
+                status=RuntimeProviderReconciliationStatus.DRIFTED,
+                reason="network_policy_missing",
+                diagnostic={"source": "explicit_observe"},
+            ),
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("evidence", "match"),
+    [
+        (
+            runtime_provider_control_pb2.RuntimeProviderReconciliationEvidence(),
+            "observations must not be empty",
+        ),
+        (
+            runtime_provider_control_pb2.RuntimeProviderReconciliationEvidence(
+                observations=[
+                    runtime_provider_control_pb2.RuntimeProviderReconciliationObservation(
+                        kind="network_policy",
+                        status="in_sync",
+                        reason="network_policy_matches",
+                    ),
+                    runtime_provider_control_pb2.RuntimeProviderReconciliationObservation(
+                        kind="network_policy",
+                        status="drifted",
+                        reason="network_policy_mismatch",
+                    ),
+                ]
+            ),
+            "kinds must be unique",
+        ),
+        (
+            runtime_provider_control_pb2.RuntimeProviderReconciliationEvidence(
+                observations=[
+                    runtime_provider_control_pb2.RuntimeProviderReconciliationObservation(
+                        kind="unsupported",
+                        status="drifted",
+                        reason="network_policy_mismatch",
+                    )
+                ]
+            ),
+            "reconciliation kind is unsupported",
+        ),
+        (
+            runtime_provider_control_pb2.RuntimeProviderReconciliationEvidence(
+                observations=[
+                    runtime_provider_control_pb2.RuntimeProviderReconciliationObservation(
+                        kind="network_policy",
+                        status="unsupported",
+                        reason="network_policy_mismatch",
+                    )
+                ]
+            ),
+            "'unsupported' is not a valid RuntimeProviderReconciliationStatus",
+        ),
+    ],
+)
+def test_provider_report_rejects_invalid_reconciliation_wire_evidence(
+    evidence: runtime_provider_control_pb2.RuntimeProviderReconciliationEvidence,
+    match: str,
+) -> None:
+    """Malformed present evidence fails instead of silently reducing authority."""
+    message = _report_message()
+    message.reconciliation.CopyFrom(evidence)
+
+    with pytest.raises(ValueError, match=match):
+        provider_report_from_message(message)
+
+
 def _report() -> RuntimeProviderReport:
     return RuntimeProviderReport(
         runtime_id="runtime-1",
@@ -264,7 +368,43 @@ def _report() -> RuntimeProviderReport:
         reported_at=_now(),
         terminal_delete_acknowledged=False,
         runtime_configuration=_runtime_configuration_evidence(),
+        reconciliation=RuntimeProviderReconciliationEvidence(
+            observations=(
+                RuntimeProviderReconciliationObservation(
+                    kind="network_policy",
+                    status=RuntimeProviderReconciliationStatus.IN_SYNC,
+                    reason="network_policy_matches",
+                    diagnostic={"source": "explicit_observe"},
+                ),
+            )
+        ),
     )
+
+
+def _report_message() -> runtime_provider_control_pb2.RuntimeProviderReport:
+    return runtime_provider_control_pb2.RuntimeProviderReport(
+        runtime_id="runtime-1",
+        provider_id="provider-1",
+        provider_generation=3,
+        observed_state=RuntimeProviderObservedState.RUNNING.value,
+        observed_desired_generation=5,
+        provider_runtime_id="runtime-provider-id",
+        reason="container_running",
+        diagnostic={},
+        reported_at=_timestamp_message(),
+        terminal_delete_acknowledged=False,
+        runtime_configuration=runtime_configuration_pb2.RuntimeConfigurationEvidence(
+            revision_id="revision-1",
+            digest="d" * 64,
+            desired_generation=5,
+        ),
+    )
+
+
+def _timestamp_message() -> timestamp_pb2.Timestamp:
+    message = timestamp_pb2.Timestamp()
+    message.FromDatetime(_now())
+    return message
 
 
 def _runtime_configuration_evidence() -> RuntimeConfigurationEvidence:

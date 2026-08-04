@@ -35,7 +35,9 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/agent_runtime.py
   - python/apps/azents/src/azents/services/agent_runtime/**
   - python/apps/azents-runtime-provider-kubernetes/src/azents_runtime_provider_kubernetes/main.py
+  - python/apps/azents-runtime-provider-kubernetes/src/azents_runtime_provider_kubernetes/provider.py
   - python/apps/azents-runtime-provider-docker/src/azents_runtime_provider_docker/main.py
+  - python/apps/azents-runtime-provider-docker/src/azents_runtime_provider_docker/provider.py
   - python/libs/azents-runtime-control/src/azents_runtime_control/**
   - proto/azents/runtime_control/v1/runtime_provider_control.proto
   - infra/charts/azents/templates/runtime-provider-kubernetes/**
@@ -49,7 +51,7 @@ code_paths:
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
   - typescript/apps/azents-web/src/features/runtime-profiles/**
 last_verified_at: 2026-08-04
-spec_version: 15
+spec_version: 16
 ---
 
 # Runtime Provider
@@ -143,6 +145,20 @@ scoped recreation operations snapshot exact target IDs and versions, use bounded
 retries, skip stale or superseded targets, and preserve Workspace storage. PVC expansion may apply
 to the current claim; shrink waits for an explicit destructive reset or terminal delete.
 
+Kubernetes Provider v2 reports Pod lifecycle directly and does not use process-local command or
+NetworkPolicy verification history as lifecycle authority. An explicit command report may include
+one structured `network_policy` observation. Runtime Control durably stores exact-generation
+`drifted` evidence and dispatches the existing non-destructive `UPDATE_CONFIGURATION` command;
+`in_sync` evidence removes that repair candidate. Watch, failover, and lifecycle-only reports may
+omit reconciliation evidence. Policy comparison excludes the historical Provider-generation
+transport label but keeps desired-generation, configuration identity, selectors, and rules exact.
+
+The current Kubernetes protocol accepts only `network_policy` reconciliation evidence. A report
+containing any other kind is rejected as a whole, and adding a kind requires a coordinated new
+Provider protocol and development snapshot. Kubernetes v1 cannot register with current Runtime
+Control; only `agent-runtime-provider-kubernetes-v2` obtains connection and command authority.
+Docker Provider protocol behavior is unchanged.
+
 Admin/Public surfaces expose typed values, current compatibility, impact, desired/applied status,
 and bounded recreation progress. They do not expose Provider credentials, socket paths, raw
 manifests, Kubernetes resource names, or generic privileged controls.
@@ -184,6 +200,8 @@ Authentication rollout does not render, own, select, delete, rename, or recreate
 
 ## Version history
 
+- **16 (2026-08-04):** Removed Kubernetes Provider-local NetworkPolicy lifecycle authority, added
+  strict v2 structured drift evidence, and made Runtime Control the durable fenced repair owner.
 - **15 (2026-08-03):** Removed Agent Workspace metadata from Provider capability and lifecycle reports; bundled Providers now configure Runner `HOME` and working directory while Runner reports the effective path.
 - **14 (2026-07-31):** Replaced accepted-contract and hierarchical execution-policy authority with
   the authenticated current valid capability, Provider-owned typed infrastructure Profiles,

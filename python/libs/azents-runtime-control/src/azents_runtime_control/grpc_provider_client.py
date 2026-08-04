@@ -30,6 +30,9 @@ from azents_runtime_control.provider import (
     RuntimeLifecycleCommand,
     RuntimeLifecycleCommandType,
     RuntimeProviderObservedState,
+    RuntimeProviderReconciliationEvidence,
+    RuntimeProviderReconciliationObservation,
+    RuntimeProviderReconciliationStatus,
     RuntimeProviderReport,
 )
 from azents_runtime_control.runtime_configuration import (
@@ -472,6 +475,10 @@ def _report_message(
     message.runtime_configuration.CopyFrom(
         _runtime_configuration_evidence_message(report.runtime_configuration)
     )
+    if report.reconciliation is not None:
+        message.reconciliation.CopyFrom(
+            _reconciliation_evidence_message(report.reconciliation)
+        )
     return message
 
 
@@ -513,6 +520,11 @@ def provider_report_from_message(
         runtime_configuration=_runtime_configuration_evidence(
             message.runtime_configuration
         ),
+        reconciliation=(
+            _reconciliation_evidence(message.reconciliation)
+            if message.HasField("reconciliation")
+            else None
+        ),
     )
 
 
@@ -542,6 +554,38 @@ def _runtime_configuration_evidence_message(
         revision_id=evidence.revision_id,
         digest=evidence.digest,
         desired_generation=evidence.desired_generation,
+    )
+
+
+def _reconciliation_evidence(
+    message: runtime_provider_control_pb2.RuntimeProviderReconciliationEvidence,
+) -> RuntimeProviderReconciliationEvidence:
+    return RuntimeProviderReconciliationEvidence(
+        observations=tuple(
+            RuntimeProviderReconciliationObservation(
+                kind=observation.kind,
+                status=RuntimeProviderReconciliationStatus(observation.status),
+                reason=observation.reason,
+                diagnostic=dict(observation.diagnostic),
+            )
+            for observation in message.observations
+        )
+    )
+
+
+def _reconciliation_evidence_message(
+    evidence: RuntimeProviderReconciliationEvidence,
+) -> runtime_provider_control_pb2.RuntimeProviderReconciliationEvidence:
+    return runtime_provider_control_pb2.RuntimeProviderReconciliationEvidence(
+        observations=[
+            runtime_provider_control_pb2.RuntimeProviderReconciliationObservation(
+                kind=observation.kind,
+                status=observation.status.value,
+                reason=observation.reason,
+                diagnostic=dict(observation.diagnostic),
+            )
+            for observation in evidence.observations
+        ]
     )
 
 

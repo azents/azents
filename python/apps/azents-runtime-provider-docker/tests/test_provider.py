@@ -171,6 +171,7 @@ async def test_start_creates_container_with_workspace_bind(tmp_path: Path) -> No
     result = await provider.start(_command(RuntimeLifecycleCommandType.START))
 
     assert result.report.observed_state is RuntimeProviderObservedState.RUNNING
+    assert result.report.reconciliation is None
     container = docker.containers["azents-runtime-runtime-1"]
     assert container.spec.user == "1000:1000"
     assert container.spec.working_dir == "/runtime/home"

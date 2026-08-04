@@ -124,6 +124,12 @@ class RuntimeLifecycleReconciler:
                     limit=limit,
                 )
             )
+            reconciliation_runtimes = (
+                await self._runtime_repository.find_provider_reconciliation_candidates(
+                    session,
+                    limit=limit,
+                )
+            )
 
         dispatched = 0
         for runtime in runtimes:
@@ -136,10 +142,21 @@ class RuntimeLifecycleReconciler:
                 continue
             if await self._dispatch_configuration_adoption(runtime):
                 dispatched += 1
+        reconciliation_runtime_ids: set[str] = set()
+        for runtime in reconciliation_runtimes:
+            if (
+                runtime.id in lifecycle_runtime_ids
+                or runtime.id in configuration_runtime_ids
+            ):
+                continue
+            if await self._dispatch_provider_reconciliation(runtime):
+                dispatched += 1
+                reconciliation_runtime_ids.add(runtime.id)
         for runtime in reconcile_runtimes:
             if (
                 runtime.id in lifecycle_runtime_ids
                 or runtime.id in configuration_runtime_ids
+                or runtime.id in reconciliation_runtime_ids
             ):
                 continue
             if await self._dispatch_periodic_reconcile(runtime):
@@ -175,6 +192,7 @@ class RuntimeLifecycleReconciler:
             runtime,
             command_type=command_type,
             claim_lifecycle=True,
+            required_provider_generation=None,
         )
 
     async def _dispatch_periodic_reconcile(self, runtime: AgentRuntime) -> bool:
@@ -207,6 +225,7 @@ class RuntimeLifecycleReconciler:
             runtime,
             command_type=command_type,
             claim_lifecycle=False,
+            required_provider_generation=None,
         )
 
     async def _dispatch_configuration_adoption(
@@ -243,8 +262,76 @@ class RuntimeLifecycleReconciler:
                 runtime,
                 command_type=RuntimeProviderCommandType.UPDATE_CONFIGURATION,
                 claim_lifecycle=False,
+                required_provider_generation=None,
             )
         return False
+
+    async def _dispatch_provider_reconciliation(
+        self,
+        runtime: AgentRuntime,
+    ) -> bool:
+        """Repair current NetworkPolicy drift from exact Provider evidence."""
+        provider_id = runtime.runtime_provider_id
+        provider_generation = runtime.provider_reconciliation_provider_generation
+        observed_generation = runtime.provider_reconciliation_observed_generation
+        configuration_revision_id = (
+            runtime.provider_reconciliation_configuration_revision_id
+        )
+        observed_at = runtime.provider_reconciliation_observed_at
+        if (
+            provider_id is None
+            or provider_generation is None
+            or observed_generation is None
+            or configuration_revision_id is None
+            or observed_at is None
+        ):
+            return False
+        connection = await self._coordination_store.get_connection(
+            kind=RuntimeConnectionKind.PROVIDER,
+            subject_id=provider_id,
+        )
+        if connection is None:
+            async with self._session_manager() as session:
+                await self._runtime_repository.record_provider_connection_state(
+                    session,
+                    runtime.id,
+                    RuntimeProviderConnectionState.DISCONNECTED,
+                )
+            return False
+        if connection.generation != provider_generation:
+            _LOGGER.info(
+                "Runtime reconciliation repair waiting for current "
+                "Provider observation",
+                extra={
+                    "runtime_id": runtime.id,
+                    "agent_id": runtime.agent_id,
+                    "provider_id": provider_id,
+                    "evidence_provider_generation": provider_generation,
+                    "connection_provider_generation": connection.generation,
+                    "desired_generation": runtime.desired_generation,
+                    "configuration_revision_id": configuration_revision_id,
+                },
+            )
+            return False
+        async with self._session_manager() as session:
+            claim_repair = self._runtime_repository.claim_provider_reconciliation_repair
+            claimed = await claim_repair(
+                session,
+                runtime_id=runtime.id,
+                provider_generation=provider_generation,
+                observed_generation=observed_generation,
+                configuration_revision_id=configuration_revision_id,
+                observed_at=observed_at,
+                retry_delay=self._config.provider_command_deadline,
+            )
+        if claimed is None:
+            return False
+        return await self._dispatch_runtime_command(
+            claimed,
+            command_type=RuntimeProviderCommandType.UPDATE_CONFIGURATION,
+            claim_lifecycle=False,
+            required_provider_generation=provider_generation,
+        )
 
     async def _dispatch_runtime_command(
         self,
@@ -252,6 +339,7 @@ class RuntimeLifecycleReconciler:
         *,
         command_type: RuntimeProviderCommandType,
         claim_lifecycle: bool,
+        required_provider_generation: int | None,
     ) -> bool:
         provider_id = runtime.runtime_provider_id
         if provider_id is None:
@@ -290,6 +378,23 @@ class RuntimeLifecycleReconciler:
                     runtime.id,
                     RuntimeProviderConnectionState.DISCONNECTED,
                 )
+            return False
+        if (
+            required_provider_generation is not None
+            and connection.generation != required_provider_generation
+        ):
+            _LOGGER.info(
+                "Runtime lifecycle dispatch skipped after Provider generation changed",
+                extra={
+                    "runtime_id": runtime.id,
+                    "agent_id": runtime.agent_id,
+                    "provider_id": provider_id,
+                    "required_provider_generation": required_provider_generation,
+                    "connection_provider_generation": connection.generation,
+                    "desired_generation": runtime.desired_generation,
+                    "command_type": command_type.value,
+                },
+            )
             return False
 
         if claim_lifecycle:
