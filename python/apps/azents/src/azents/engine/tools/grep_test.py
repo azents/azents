@@ -1,6 +1,7 @@
 """grep tool tests."""
 
 import json
+from typing import List
 
 import pytest
 
@@ -426,9 +427,9 @@ class TestGrepErrors:
                 agent_id: str = "",
                 user_id: str = "",
                 recursive: bool = False,
-                exclude_patterns: list[str] | None = None,
+                exclude_patterns: List[str] | None = None,
                 include_directories: bool = False,
-            ) -> list[RuntimeAttachment]:
+            ) -> List[RuntimeAttachment]:
                 _ = agent_id, user_id, recursive, exclude_patterns, include_directories
                 raise FileNotFoundError(f"Directory not found: {path}")
 

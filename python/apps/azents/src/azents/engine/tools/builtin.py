@@ -15,7 +15,7 @@ from contextvars import ContextVar, Token
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from textwrap import dedent
-from typing import NoReturn, Protocol
+from typing import List, NoReturn, Protocol
 
 from azcommon.types import JSONObject
 from pydantic import BaseModel, Field, model_validator
@@ -1412,9 +1412,9 @@ class RuntimeRunnerFileStorage:
         *,
         agent_id: str,
         recursive: bool = False,
-        exclude_patterns: list[str] | None = None,
+        exclude_patterns: List[str] | None = None,
         include_directories: bool = False,
-    ) -> list[RuntimeAttachment]:
+    ) -> List[RuntimeAttachment]:
         """List file entries under a Runtime path."""
         runtime = await self._ready_runtime(agent_id)
         entries = await self._list_entries(
@@ -1447,8 +1447,8 @@ class RuntimeRunnerFileStorage:
         pattern: str,
         *,
         agent_id: str,
-        exclude_patterns: list[str] | None,
-    ) -> list[RuntimeAttachment]:
+        exclude_patterns: List[str] | None,
+    ) -> List[RuntimeAttachment]:
         """Match Runtime file entries through one native Runner operation."""
         runtime = await self._ready_runtime(agent_id)
         try:
@@ -1484,7 +1484,7 @@ class RuntimeRunnerFileStorage:
             if entry.type in {"file", "directory"}
         ]
 
-    async def list_dirs(self, path: str, *, agent_id: str) -> list[str]:
+    async def list_dirs(self, path: str, *, agent_id: str) -> List[str]:
         """List directory names below a Runtime directory."""
         runtime = await self._ready_runtime(agent_id)
         entries = await self._list_entries(runtime, path)
@@ -1501,7 +1501,7 @@ class RuntimeRunnerFileStorage:
         agent_id: str,
         pattern: str,
         recursive: bool = True,
-        exclude_patterns: list[str] | None = None,
+        exclude_patterns: List[str] | None = None,
         max_matching_files: int = 50,
         max_lines_per_file: int = 10,
         max_searched_files: int | None = None,
@@ -1579,7 +1579,7 @@ class RuntimeRunnerFileStorage:
         path: str,
         *,
         recursive: bool = False,
-        exclude_patterns: list[str] | None = None,
+        exclude_patterns: List[str] | None = None,
     ) -> tuple[RuntimeFileListEntry, ...]:
         try:
             self._count_runtime_operation()

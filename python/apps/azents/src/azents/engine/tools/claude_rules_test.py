@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import List
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -73,9 +74,9 @@ class _FailingListStorage(FakeSharedStorage):
         agent_id: str = "",
         user_id: str = "",
         recursive: bool = False,
-        exclude_patterns: list[str] | None = None,
+        exclude_patterns: List[str] | None = None,
         include_directories: bool = False,
-    ) -> list[RuntimeAttachment]:
+    ) -> List[RuntimeAttachment]:
         """Simulate runtime communication failure."""
         del path, agent_id, user_id, recursive, exclude_patterns, include_directories
         raise RuntimeStorageError("runtime disconnected")
@@ -99,9 +100,9 @@ class _CountingStorage(FakeSharedStorage):
         agent_id: str = "",
         user_id: str = "",
         recursive: bool = False,
-        exclude_patterns: list[str] | None = None,
+        exclude_patterns: List[str] | None = None,
         include_directories: bool = False,
-    ) -> list[RuntimeAttachment]:
+    ) -> List[RuntimeAttachment]:
         """Count recursive rule-root listing."""
         self.list_calls.append(path)
         return await super().list(

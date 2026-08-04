@@ -1,7 +1,7 @@
 """File storage protocol."""
 
 import dataclasses
-from typing import Protocol, runtime_checkable
+from typing import List, Protocol, runtime_checkable
 
 from azents.engine.io.attachments import RuntimeAttachment
 
@@ -79,19 +79,19 @@ class FileStorage(Protocol):
         *,
         agent_id: str,
         recursive: bool = False,
-        exclude_patterns: list[str] | None = None,
+        exclude_patterns: List[str] | None = None,
         include_directories: bool = False,
-    ) -> list[RuntimeAttachment]: ...
+    ) -> List[RuntimeAttachment]: ...
 
     async def glob(
         self,
         pattern: str,
         *,
         agent_id: str,
-        exclude_patterns: list[str] | None,
-    ) -> list[RuntimeAttachment]: ...
+        exclude_patterns: List[str] | None,
+    ) -> List[RuntimeAttachment]: ...
 
-    async def list_dirs(self, path: str, *, agent_id: str) -> list[str]: ...
+    async def list_dirs(self, path: str, *, agent_id: str) -> List[str]: ...
 
     async def grep(
         self,
@@ -100,7 +100,7 @@ class FileStorage(Protocol):
         agent_id: str,
         pattern: str,
         recursive: bool = True,
-        exclude_patterns: list[str] | None = None,
+        exclude_patterns: List[str] | None = None,
         max_matching_files: int = 50,
         max_lines_per_file: int = 10,
         max_searched_files: int | None = None,

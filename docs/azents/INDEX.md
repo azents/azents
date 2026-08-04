@@ -791,6 +791,7 @@ Design documents are accumulated records and are not listed individually in this
 ## Notes (Blueprints · Discussion Summaries)
 
 - [Agent Thread / Session Model Blueprint](notes/agent-thread-session-blueprint.md)
+- [Backend ty Migration Analysis](notes/backend-ty-migration-analysis-2026-08-04.md)
 - [Codex Goal Pursuing Research](notes/codex-goal-pursuing-research.md)
 - [E2E CI Performance and Reliability Research](notes/e2e-ci-performance-reliability-research-2026-08-03.md)
 - [Legacy DocID Migration Historical Ambiguity Manifest](notes/legacy-docid-migration-ambiguity-manifest-2026-07-21.md)
