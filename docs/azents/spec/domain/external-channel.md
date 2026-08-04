@@ -59,8 +59,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-08-03
-spec_version: 46
+last_verified_at: 2026-08-04
+spec_version: 47
 ---
 
 # External Channel
@@ -183,7 +183,9 @@ contain multiple independent bindings.
   provider-address keys only. Provider bodies enter the common Server-to-Runtime transfer path only
   after a current authorization recheck. Runtime bodies leave through one verified
   Runtime-to-provider transfer per source during the current Tool execution. Runtime
-  transfer claims follow their existing bounded coordinator lifecycle. No External
+  transfer services are required Runtime infrastructure, not connection capabilities,
+  and wait for the current Runtime only when the Tool executes. Runtime transfer claims
+  follow their existing bounded coordinator lifecycle. No External
   Channel row, event, prompt, or queue payload stores transfer bytes, provider upload
   URLs, object-store credentials, object keys, trusted object handles, or a provider
   operation history.
@@ -412,6 +414,7 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-04** (spec_version 47) — Distinguished required Runtime transfer services from provider connection capabilities and moved Runtime readiness resolution to Tool execution.
 - **2026-08-03** (spec_version 46) — Moved binding-specific Channel Work and its
   ordered current provider projection parts into one Session-bound Toolkit State
   payload with independent whole-state optimistic concurrency and a stable work-cycle

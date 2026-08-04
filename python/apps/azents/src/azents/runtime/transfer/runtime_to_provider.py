@@ -978,43 +978,6 @@ class RuntimeToProviderDeliveryService:
         await self.batch_service.recover(recoveries=recoveries)
 
 
-@dataclass(frozen=True)
-class RuntimeToProviderDeliveryCapability:
-    """Bind one trusted provider-delivery service to the current Runtime run."""
-
-    service: RuntimeToProviderDeliveryExecutor
-    target: ServerToRuntimeTarget
-    agent_id: str
-    session_id: str
-
-    async def prepare(
-        self,
-        *,
-        operation_id: str,
-        batch_id: str,
-        sources: tuple[RuntimeToProviderSource, ...],
-        before_source_admission: Callable[[], Awaitable[None]],
-    ) -> RuntimeToProviderBatch:
-        """Prepare one provider batch without exposing storage implementation data."""
-        return await self.service.prepare(
-            target=self.target,
-            agent_id=self.agent_id,
-            session_id=self.session_id,
-            operation_id=operation_id,
-            batch_id=batch_id,
-            sources=sources,
-            before_source_admission=before_source_admission,
-        )
-
-    async def recover(
-        self,
-        *,
-        recoveries: tuple[RuntimeToProviderRecovery, ...],
-    ) -> None:
-        """Settle exact persisted claims without issuing another provider request."""
-        await self.service.recover(recoveries=recoveries)
-
-
 async def _close_prepared_renewals(
     prepared: Sequence[_PreparedRuntimeSource],
 ) -> None:

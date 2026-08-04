@@ -78,8 +78,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-03
-spec_version: 145
+last_verified_at: 2026-08-04
+spec_version: 146
 ---
 
 # Agent Execution Loop
@@ -733,11 +733,12 @@ destination; it performs ownership and capability checks before provider access 
 writes only a selected file whose current metadata, HTTP declaration, and received bytes
 match that size within the 500 MiB inbound product ceiling.
 `channel_action.files` accepts up to 20 absolute Runtime paths, requires conversational
-text, and preflights all sources before the action commit. Runtime sources require the
-run-scoped trusted provider-delivery capability, which performs one verified Runtime upload
-per source and exposes only bounded provider-native streams; capability absence fails before
-provider mutation. Exchange sources retain their authority-resolved bounded stream path. The
-Agent never receives Slack credentials, private URLs, storage identity, or provider transfer
+text, and preflights all sources before the action commit. Runtime sources use the
+trusted provider-delivery service, which performs one verified Runtime upload per source
+and exposes only bounded provider-native streams. Runtime transfer services are always
+registered; their target waits for Runtime readiness only when the file-bearing Tool
+executes. Exchange sources retain their authority-resolved bounded stream path. The Agent
+never receives Slack credentials, private URLs, storage identity, or provider transfer
 procedures.
 
 GPT-compatible prepared calls may expose `apply_patch` in exactly one selected wire dialect:
@@ -1209,6 +1210,7 @@ icon.
 
 ## Changelog
 
+- **2026-08-04** (spec_version 146) — Removed optional Runtime transfer capability gating and moved Runtime readiness resolution to actual file Tool execution.
 - **2026-08-03** (spec_version 145) — Restored raw Slack and Discord reference tokens
   in model-visible bodies and moved display-name enrichment into a concise XML mapping
   appendix.

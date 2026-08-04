@@ -76,8 +76,6 @@ from azents.engine.tools.runtime_instruction_context import (
     PresentFilePublicationExecutor,
     RuntimeInstructionContext,
     RuntimeInstructionContextStore,
-    RuntimeToServerPublicationCapability,
-    RuntimeTransferCapability,
     ServerToRuntimeTransferExecutor,
 )
 from azents.engine.tools.runtime_io import (
@@ -102,7 +100,6 @@ from azents.repos.session_workspace_project import SessionWorkspaceProjectReposi
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
 from azents.runtime.transfer.runtime_image_read import RuntimeImageReadService
 from azents.runtime.transfer.runtime_to_provider import (
-    RuntimeToProviderDeliveryCapability,
     RuntimeToProviderDeliveryExecutor,
 )
 from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
@@ -573,11 +570,11 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         agent_runtime_repo: AgentRuntimeRepository,
         agent_runtime_service: AgentRuntimeService,
         project_repo: SessionWorkspaceProjectRepository,
-        server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor | None,
+        server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor,
         runtime_image_read_service: RuntimeImageReadService | None,
-        runtime_to_server_publication_service: PresentFilePublicationExecutor | None,
-        runtime_to_provider_delivery_service: RuntimeToProviderDeliveryExecutor | None,
-        import_file_staging_configuration: ImportFileStagingConfiguration | None,
+        runtime_to_server_publication_service: PresentFilePublicationExecutor,
+        runtime_to_provider_delivery_service: RuntimeToProviderDeliveryExecutor,
+        import_file_staging_configuration: ImportFileStagingConfiguration,
     ) -> None:
         self._config = config
         self.runner_operations = runner_operations
@@ -692,11 +689,18 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             runtime_agent_id=runtime_agent_id,
             owner_session_id=self._runtime_session_id,
         )
-        transfer_capability = await self._transfer_capability(runtime_agent_id)
-        publication_capability = await self._publication_capability(runtime_agent_id)
-        provider_delivery_capability = await self._provider_delivery_capability(
-            runtime_agent_id
-        )
+
+        async def resolve_runtime_target() -> ServerToRuntimeTarget:
+            runtime = await _ready_runtime_for_agent(
+                agent_runtime_repo=self.agent_runtime_repo,
+                agent_runtime_service=(self.agent_runtime_service),
+                session_manager=self.session_manager,
+                agent_id=runtime_agent_id,
+            )
+            return ServerToRuntimeTarget(
+                runtime_id=runtime.id,
+                desired_generation=runtime.desired_generation,
+            )
 
         async def resolve_patch_target() -> RuntimePatchTarget:
             runtime = await _ready_runtime_for_agent(
@@ -778,12 +782,14 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
                         artifact_service=self.artifact_service,
                         vfs_projection_service=self.vfs_projection_service,
                         authority=authority,
-                        transfer_capability=transfer_capability,
+                        transfer_service=self.server_to_runtime_transfer_service,
+                        resolve_runtime_target=resolve_runtime_target,
                         staging_configuration=self.import_file_staging_configuration,
                     ),
                     make_present_file_tool(
                         session_storage=file_ss,
-                        publication_capability=publication_capability,
+                        publication_service=self.runtime_to_server_publication_service,
+                        resolve_runtime_target=resolve_runtime_target,
                         authority=authority,
                         workspace_root=workspace_root,
                     ),
@@ -839,9 +845,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         instruction_context = await self._make_instruction_context(
             file_ss,
             workspace_root=workspace_root,
-            transfer_capability=transfer_capability,
-            publication_capability=publication_capability,
-            provider_delivery_capability=provider_delivery_capability,
+            resolve_runtime_target=resolve_runtime_target,
         )
         self.register_agents_context(instruction_context)
         if self.instruction_context_store is not None:
@@ -866,9 +870,7 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
         file_storage: FileStorage,
         *,
         workspace_root: str | None,
-        transfer_capability: RuntimeTransferCapability | None,
-        publication_capability: RuntimeToServerPublicationCapability | None,
-        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None,
+        resolve_runtime_target: Callable[[], Awaitable[ServerToRuntimeTarget]],
     ) -> RuntimeInstructionContext:
         """Build shared Runtime context for instruction appendix providers."""
         projects = sorted(
@@ -879,89 +881,10 @@ class RuntimeToolkit(AgentsAppendixMixin, Toolkit[ShellToolkitConfig]):
             file_storage=file_storage,
             workspace_root=workspace_root,
             projects=tuple(projects),
-            transfer_capability=transfer_capability,
-            publication_capability=publication_capability,
-            provider_delivery_capability=provider_delivery_capability,
-        )
-
-    async def _transfer_capability(
-        self,
-        runtime_agent_id: str,
-    ) -> RuntimeTransferCapability | None:
-        """Build one backend-only capability only when the Runtime is ready."""
-        service = self.server_to_runtime_transfer_service
-        if service is None:
-            return None
-        try:
-            runtime = await _ready_runtime_for_agent(
-                agent_runtime_repo=self.agent_runtime_repo,
-                session_manager=self.session_manager,
-                agent_runtime_service=(self.agent_runtime_service),
-                agent_id=runtime_agent_id,
-                wait_timeout_seconds=0,
-            )
-        except RuntimeStorageError:
-            return None
-        return RuntimeTransferCapability(
-            service=service,
-            target=ServerToRuntimeTarget(
-                runtime_id=runtime.id,
-                desired_generation=runtime.desired_generation,
-            ),
-        )
-
-    async def _publication_capability(
-        self,
-        runtime_agent_id: str,
-    ) -> RuntimeToServerPublicationCapability | None:
-        """Build managed publication only when the Runtime is ready."""
-        service = self.runtime_to_server_publication_service
-        if service is None:
-            return None
-        try:
-            runtime = await _ready_runtime_for_agent(
-                agent_runtime_repo=self.agent_runtime_repo,
-                session_manager=self.session_manager,
-                agent_runtime_service=(self.agent_runtime_service),
-                agent_id=runtime_agent_id,
-                wait_timeout_seconds=0,
-            )
-        except RuntimeStorageError:
-            return None
-        return RuntimeToServerPublicationCapability(
-            service=service,
-            target=ServerToRuntimeTarget(
-                runtime_id=runtime.id,
-                desired_generation=runtime.desired_generation,
-            ),
-        )
-
-    async def _provider_delivery_capability(
-        self,
-        runtime_agent_id: str,
-    ) -> RuntimeToProviderDeliveryCapability | None:
-        """Build provider delivery only when the Runtime is ready."""
-        service = self.runtime_to_provider_delivery_service
-        if service is None:
-            return None
-        try:
-            runtime = await _ready_runtime_for_agent(
-                agent_runtime_repo=self.agent_runtime_repo,
-                session_manager=self.session_manager,
-                agent_runtime_service=(self.agent_runtime_service),
-                agent_id=runtime_agent_id,
-                wait_timeout_seconds=0,
-            )
-        except RuntimeStorageError:
-            return None
-        return RuntimeToProviderDeliveryCapability(
-            service=service,
-            target=ServerToRuntimeTarget(
-                runtime_id=runtime.id,
-                desired_generation=runtime.desired_generation,
-            ),
-            agent_id=self._agent_id,
-            session_id=self._runtime_session_id,
+            transfer_service=self.server_to_runtime_transfer_service,
+            publication_service=self.runtime_to_server_publication_service,
+            provider_delivery_service=self.runtime_to_provider_delivery_service,
+            resolve_runtime_target=resolve_runtime_target,
         )
 
     async def _load_projects(
@@ -1072,11 +995,11 @@ class BuiltinToolkitProvider(ToolkitProvider[ShellToolkitConfig]):
         agent_runtime_service: AgentRuntimeService,
         runner_operations: RuntimeRunnerOperationClient,
         project_repo: SessionWorkspaceProjectRepository,
-        server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor | None,
+        server_to_runtime_transfer_service: ServerToRuntimeTransferExecutor,
         runtime_image_read_service: RuntimeImageReadService | None,
-        runtime_to_server_publication_service: PresentFilePublicationExecutor | None,
-        runtime_to_provider_delivery_service: RuntimeToProviderDeliveryExecutor | None,
-        import_file_staging_configuration: ImportFileStagingConfiguration | None,
+        runtime_to_server_publication_service: PresentFilePublicationExecutor,
+        runtime_to_provider_delivery_service: RuntimeToProviderDeliveryExecutor,
+        import_file_staging_configuration: ImportFileStagingConfiguration,
     ) -> None:
         self.exchange_file_service = exchange_file_service
         self.artifact_service = artifact_service

@@ -696,6 +696,21 @@ def _make_toolkit(
     project_repo.list_projects.return_value = projects or []
     if agents_store is None:
         agents_store = _FakeAgentsAppendixDedupeStateStore()
+    if server_to_runtime_transfer_service is None:
+        server_to_runtime_transfer_service = cast(
+            ServerToRuntimeTransferExecutor,
+            AsyncMock(),
+        )
+    if runtime_to_server_publication_service is None:
+        runtime_to_server_publication_service = cast(
+            PresentFilePublicationExecutor,
+            AsyncMock(),
+        )
+    if runtime_to_provider_delivery_service is None:
+        runtime_to_provider_delivery_service = cast(
+            RuntimeToProviderDeliveryExecutor,
+            AsyncMock(),
+        )
 
     toolkit = RuntimeToolkit(
         config=config or ShellToolkitConfig(),
@@ -714,7 +729,7 @@ def _make_toolkit(
         runtime_image_read_service=runtime_image_read_service,
         runtime_to_server_publication_service=runtime_to_server_publication_service,
         runtime_to_provider_delivery_service=runtime_to_provider_delivery_service,
-        import_file_staging_configuration=None,
+        import_file_staging_configuration=cast(Any, object()),
     )
     toolkit.set_session_id(session_id)
     cast(Any, toolkit)._test_runner_operations = runner_operations
@@ -802,11 +817,20 @@ class TestBuiltinToolkitProviderResolve:
                 ),
             ),
             project_repo=project_repo,
-            server_to_runtime_transfer_service=None,
+            server_to_runtime_transfer_service=cast(
+                ServerToRuntimeTransferExecutor,
+                AsyncMock(),
+            ),
             runtime_image_read_service=None,
-            runtime_to_server_publication_service=None,
-            runtime_to_provider_delivery_service=None,
-            import_file_staging_configuration=None,
+            runtime_to_server_publication_service=cast(
+                PresentFilePublicationExecutor,
+                AsyncMock(),
+            ),
+            runtime_to_provider_delivery_service=cast(
+                RuntimeToProviderDeliveryExecutor,
+                AsyncMock(),
+            ),
+            import_file_staging_configuration=cast(Any, object()),
         )
         toolkit = await provider.resolve(
             ShellToolkitConfig(),
@@ -928,13 +952,19 @@ class TestRuntimeToolkitUpdateContext:
         )
 
     @pytest.mark.asyncio
-    async def test_update_context_registers_instruction_context(self) -> None:
-        """Runtime instruction context is shared after update_context()."""
+    async def test_update_context_registers_required_runtime_services(self) -> None:
+        """Runtime services are registered without waiting for Runner readiness."""
+        transfer_service = cast(ServerToRuntimeTransferExecutor, AsyncMock())
+        publication_service = cast(PresentFilePublicationExecutor, AsyncMock())
+        delivery_service = cast(RuntimeToProviderDeliveryExecutor, AsyncMock())
         toolkit = _make_toolkit(
             projects=[
                 _make_project(path="/workspace/agent/zeta"),
                 _make_project(path="/workspace/agent/alpha"),
-            ]
+            ],
+            server_to_runtime_transfer_service=transfer_service,
+            runtime_to_server_publication_service=publication_service,
+            runtime_to_provider_delivery_service=delivery_service,
         )
 
         await toolkit.update_context(_make_context())
@@ -946,136 +976,25 @@ class TestRuntimeToolkitUpdateContext:
             "/workspace/agent/zeta",
         ]
         assert hasattr(instruction_context.file_storage, "get")
-        assert instruction_context.transfer_capability is None
-        assert instruction_context.publication_capability is None
-
-    @pytest.mark.asyncio
-    async def test_update_context_exposes_transfer_capability_for_current_runtime(
-        self,
-    ) -> None:
-        """Runtime transfer capability carries only the selected Runtime target."""
-        transfer_service = AsyncMock()
-        toolkit = _make_toolkit(
-            server_to_runtime_transfer_service=cast(
-                ServerToRuntimeTransferExecutor,
-                transfer_service,
-            ),
-        )
-
-        await toolkit.update_context(_make_context())
-
-        instruction_context = cast(Any, toolkit)._agents_context
-        capability = instruction_context.transfer_capability
-        assert capability is not None
-        assert capability.service is transfer_service
-        assert capability.target.runtime_id == "runtime-1"
-        assert capability.target.desired_generation == 7
-
-    @pytest.mark.asyncio
-    async def test_update_context_exposes_publication_capability_without_storage(
-        self,
-    ) -> None:
-        """Expose only the publication operation and current Runtime target."""
-        publication_service = AsyncMock()
-        toolkit = _make_toolkit(
-            runtime_to_server_publication_service=cast(
-                PresentFilePublicationExecutor,
-                publication_service,
-            ),
-        )
-
-        await toolkit.update_context(_make_context())
-
-        instruction_context = cast(Any, toolkit)._agents_context
-        capability = instruction_context.publication_capability
-        assert capability is not None
-        assert capability.target.runtime_id == "runtime-1"
-        assert capability.target.desired_generation == 7
-        assert callable(capability.publish)
-        assert set(vars(capability)) == {"_service", "target"}
-        assert not hasattr(capability, "resolver")
-        assert not hasattr(capability, "bucket")
-        assert not hasattr(capability, "key")
-
-    @pytest.mark.asyncio
-    async def test_update_context_exposes_provider_delivery_for_desired_generation(
-        self,
-    ) -> None:
-        """Provider delivery carries the Runtime lifecycle generation."""
-        delivery_service = AsyncMock()
-        toolkit = _make_toolkit(
-            runtime_to_provider_delivery_service=cast(
-                RuntimeToProviderDeliveryExecutor,
-                delivery_service,
-            ),
-        )
-
-        await toolkit.update_context(_make_context())
-
-        instruction_context = cast(Any, toolkit)._agents_context
-        capability = instruction_context.provider_delivery_capability
-        assert capability is not None
-        assert capability.service is delivery_service
-        assert capability.target.runtime_id == "runtime-1"
-        assert capability.target.desired_generation == 7
-
-    @pytest.mark.asyncio
-    async def test_update_context_withholds_publication_until_runtime_is_ready(
-        self,
-    ) -> None:
-        """An unavailable Runtime withholds managed publication capability."""
-        publication_service = AsyncMock()
-        toolkit = _make_toolkit(
-            provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
-            runner_state=RuntimeRunnerState.STARTING,
-            runtime_to_server_publication_service=cast(
-                PresentFilePublicationExecutor,
-                publication_service,
-            ),
-        )
-
-        await toolkit.update_context(_make_context())
-
-        instruction_context = cast(Any, toolkit)._agents_context
-        assert instruction_context.publication_capability is None
+        assert instruction_context.transfer_service is transfer_service
+        assert instruction_context.publication_service is publication_service
+        assert instruction_context.provider_delivery_service is delivery_service
+        assert callable(instruction_context.resolve_runtime_target)
         runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
-        assert runtime_repo.get_by_agent_id.await_count == 2
+        runtime_repo.get_by_agent_id.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_update_context_withholds_provider_delivery_until_runtime_is_ready(
-        self,
-    ) -> None:
-        """An unavailable Runtime withholds trusted provider delivery."""
-        delivery_service = AsyncMock()
+    async def test_update_context_does_not_wait_for_runtime_ready(self) -> None:
+        """A starting Runtime still exposes every required file service."""
+        transfer_service = cast(ServerToRuntimeTransferExecutor, AsyncMock())
+        publication_service = cast(PresentFilePublicationExecutor, AsyncMock())
+        delivery_service = cast(RuntimeToProviderDeliveryExecutor, AsyncMock())
         toolkit = _make_toolkit(
             provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
             runner_state=RuntimeRunnerState.STARTING,
-            runtime_to_provider_delivery_service=cast(
-                RuntimeToProviderDeliveryExecutor,
-                delivery_service,
-            ),
-        )
-
-        await toolkit.update_context(_make_context())
-
-        instruction_context = cast(Any, toolkit)._agents_context
-        assert instruction_context.provider_delivery_capability is None
-        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
-        assert runtime_repo.get_by_agent_id.await_count == 2
-
-    @pytest.mark.asyncio
-    async def test_update_context_withholds_transfer_until_runtime_is_ready(
-        self,
-    ) -> None:
-        """An unavailable Runtime does not prevent the ordinary tool catalog."""
-        transfer_service = AsyncMock()
-        toolkit = _make_toolkit(
-            provider_connection_state=RuntimeProviderConnectionState.DISCONNECTED,
-            runner_state=RuntimeRunnerState.STARTING,
-            server_to_runtime_transfer_service=cast(
-                ServerToRuntimeTransferExecutor,
-                transfer_service,
-            ),
+            server_to_runtime_transfer_service=transfer_service,
+            runtime_to_server_publication_service=publication_service,
+            runtime_to_provider_delivery_service=delivery_service,
         )
 
         state = await toolkit.update_context(_make_context())
@@ -1084,8 +1003,26 @@ class TestRuntimeToolkitUpdateContext:
             tool.spec.name for tool in state.tools
         }
         instruction_context = cast(Any, toolkit)._agents_context
-        assert instruction_context.transfer_capability is None
+        assert instruction_context.transfer_service is transfer_service
+        assert instruction_context.publication_service is publication_service
+        assert instruction_context.provider_delivery_service is delivery_service
         runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
+        runtime_repo.get_by_agent_id.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_runtime_target_waits_only_when_operation_resolves_it(self) -> None:
+        """The shared target resolver follows the ordinary tool execution lifecycle."""
+        toolkit = _make_toolkit()
+        await toolkit.update_context(_make_context())
+        runtime_repo = cast(Any, toolkit)._test_agent_runtime_repo
+        runtime_repo.get_by_agent_id.assert_awaited_once()
+
+        target = await cast(Any, toolkit)._agents_context.resolve_runtime_target()
+
+        assert target == ServerToRuntimeTarget(
+            runtime_id="runtime-1",
+            desired_generation=7,
+        )
         assert runtime_repo.get_by_agent_id.await_count == 2
 
     @pytest.mark.asyncio

@@ -22,11 +22,13 @@ from azents.engine.tooling.execution_context import (
 from azents.engine.tooling.make_tool import make_tool
 from azents.engine.tools.path_policy import RUNTIME_ACCESSIBLE_PATHS_MSG
 from azents.engine.tools.runtime_instruction_context import (
-    RuntimeToServerPublicationCapability,
+    PresentFilePublicationExecutor,
+    RuntimeTargetResolver,
 )
 from azents.runtime.transfer.present_file_publication import (
     PresentFilePublicationAccessDenied,
     PresentFilePublicationError,
+    PresentFilePublicationRequest,
 )
 from azents.runtime.transfer.runtime_to_server import RuntimeToServerTransferError
 from azents.services.file_storage import FileStorage
@@ -70,14 +72,16 @@ class PresentFileInput(BaseModel):
 def make_present_file_tool(
     *,
     session_storage: FileStorage,
-    publication_capability: RuntimeToServerPublicationCapability | None,
+    publication_service: PresentFilePublicationExecutor,
+    resolve_runtime_target: RuntimeTargetResolver,
     authority: SessionResourceAuthority,
     workspace_root: str | None,
 ) -> FunctionTool:
     """Create present_file tool.
 
     :param session_storage: runtime runner file storage
-    :param publication_capability: Runtime-to-server managed publication capability
+    :param publication_service: Runtime-to-server managed publication service
+    :param resolve_runtime_target: Resolve a ready Runtime when the tool executes
     :param authority: Validated Session/Run resource authority
     :return: present_file Tool instance
     """
@@ -86,12 +90,13 @@ def make_present_file_tool(
         """Export runtime file as Exchange artifact."""
         if not input.paths:
             raise FunctionToolError("No paths provided.")
-        if publication_capability is None or workspace_root is None:
+        if workspace_root is None:
             raise FunctionToolError("Runtime file transfer is unavailable.")
         execution = get_client_tool_execution_context()
 
         attachments: list[RuntimeAttachment] = []
         errors: list[str] = []
+        runtime_target = None
 
         for abs_path in input.paths:
             if not _is_presentable_path(abs_path, workspace_root):
@@ -142,14 +147,21 @@ def make_present_file_tool(
                 call_id=execution.call_id,
                 runtime_path=abs_path,
             )
+            target = runtime_target
             try:
-                created = await publication_capability.publish(
-                    runtime_path=abs_path,
-                    filename=file_name,
-                    media_type=media_type,
-                    expected_size=expected_size,
-                    authority=authority,
-                    publication_id=publication_id,
+                if target is None:
+                    target = await resolve_runtime_target()
+                    runtime_target = target
+                created = await publication_service.publish(
+                    PresentFilePublicationRequest(
+                        runtime_path=abs_path,
+                        filename=file_name,
+                        media_type=media_type,
+                        expected_size=expected_size,
+                        authority=authority,
+                        target=target,
+                        publication_id=publication_id,
+                    )
                 )
             except PresentFilePublicationAccessDenied:
                 errors.append("Session resource access denied while presenting file.")
@@ -158,6 +170,7 @@ def make_present_file_tool(
                 PresentFilePublicationError,
                 RuntimeToServerTransferError,
             ) as exc:
+                assert target is not None
                 logger.warning(
                     "Present file publication failed",
                     exc_info=True,
@@ -166,10 +179,8 @@ def make_present_file_tool(
                         "session_id": authority.session_id,
                         "run_id": authority.run_id,
                         "call_id": execution.call_id,
-                        "runtime_id": publication_capability.target.runtime_id,
-                        "runtime_generation": (
-                            publication_capability.target.desired_generation
-                        ),
+                        "runtime_id": target.runtime_id,
+                        "runtime_generation": target.desired_generation,
                         "publication_id": publication_id,
                         "failure_stage": (
                             "exchange_publication"

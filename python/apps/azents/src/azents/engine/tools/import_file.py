@@ -28,7 +28,8 @@ from azents.engine.tools.import_resolver import (
 )
 from azents.engine.tools.path_policy import RUNTIME_ACCESSIBLE_PATHS_MSG
 from azents.engine.tools.runtime_instruction_context import (
-    RuntimeTransferCapability,
+    RuntimeTargetResolver,
+    ServerToRuntimeTransferExecutor,
 )
 from azents.runtime.transfer.managed_source import (
     managed_source_from_artifact,
@@ -108,8 +109,9 @@ def make_import_file_tool(
     artifact_service: ArtifactService,
     vfs_projection_service: VfsProjectionService | None,
     authority: SessionResourceAuthority,
-    transfer_capability: RuntimeTransferCapability | None,
-    staging_configuration: ImportFileStagingConfiguration | None,
+    transfer_service: ServerToRuntimeTransferExecutor,
+    resolve_runtime_target: RuntimeTargetResolver,
+    staging_configuration: ImportFileStagingConfiguration,
 ) -> FunctionTool:
     """Create import_file tool."""
     resolvers: dict[str, ImportFileResolver] = {
@@ -155,18 +157,16 @@ def make_import_file_tool(
                 agent_id=authority.agent_id,
             )
 
-        if transfer_capability is None or staging_configuration is None:
-            raise FunctionToolError("Runtime file transfer service is unavailable.")
-
         source = _server_to_runtime_source(
             resolved=resolved,
             staging_configuration=staging_configuration,
         )
         try:
-            await transfer_capability.service.transfer(
+            target = await resolve_runtime_target()
+            await transfer_service.transfer(
                 ServerToRuntimeTransferRequest(
                     source=source,
-                    target=transfer_capability.target,
+                    target=target,
                     agent_id=authority.agent_id,
                     session_id=authority.session_id,
                     operation_id=authority.run_id,

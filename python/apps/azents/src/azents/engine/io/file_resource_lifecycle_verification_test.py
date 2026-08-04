@@ -41,7 +41,6 @@ from azents.engine.tools.import_file import (
     make_import_file_tool,
 )
 from azents.engine.tools.runtime_instruction_context import (
-    RuntimeTransferCapability,
     ServerToRuntimeTransferExecutor,
 )
 from azents.engine.tools.testing import FakeSharedStorage
@@ -429,19 +428,24 @@ async def test_artifact_output_import_and_expiration_e2e_path() -> None:
 
     storage = FakeSharedStorage()
     transfer_service = AsyncMock()
+
+    async def resolve_runtime_target() -> ServerToRuntimeTarget:
+        return ServerToRuntimeTarget(
+            runtime_id="runtime-1",
+            desired_generation=1,
+        )
+
     import_tool = make_import_file_tool(
         session_storage=storage,
         exchange_file_service=AsyncMock(),
         artifact_service=service,
         vfs_projection_service=None,
         authority=_authority(),
-        transfer_capability=RuntimeTransferCapability(
-            service=cast(ServerToRuntimeTransferExecutor, transfer_service),
-            target=ServerToRuntimeTarget(
-                runtime_id="runtime-1",
-                desired_generation=1,
-            ),
+        transfer_service=cast(
+            ServerToRuntimeTransferExecutor,
+            transfer_service,
         ),
+        resolve_runtime_target=resolve_runtime_target,
         staging_configuration=ImportFileStagingConfiguration(
             s3_service=cast(S3Service, s3_service),
             workspace_bucket="test-bucket",

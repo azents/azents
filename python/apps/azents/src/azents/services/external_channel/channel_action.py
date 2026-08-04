@@ -3,7 +3,7 @@
 import asyncio
 import datetime
 import logging
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Annotated, assert_never, cast
@@ -50,10 +50,11 @@ from azents.repos.external_channel.work_data import (
 from azents.runtime.transfer.runtime_to_provider import (
     RuntimeToProviderBatch,
     RuntimeToProviderCleanupError,
-    RuntimeToProviderDeliveryCapability,
+    RuntimeToProviderDeliveryExecutor,
     RuntimeToProviderSource,
     RuntimeToProviderTransferError,
 )
+from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.exchange_file import ExchangeFileService
 from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
@@ -109,9 +110,11 @@ from azents.services.external_channel.slack_settings import (
     build_slack_settings_locator,
 )
 from azents.services.file_storage import FileStorage, RangedFileStorage
+from azents.services.runtime_storage_error import RuntimeStorageError
 from azents.services.session_resource_authority import SessionResourceAuthority
 
 logger = logging.getLogger(__name__)
+RuntimeTargetResolver = Callable[[], Awaitable[ServerToRuntimeTarget]]
 
 
 async def get_slack_delivery_http_client() -> AsyncIterator[httpx.AsyncClient]:
@@ -242,7 +245,8 @@ class ExternalChannelActionService:
         files: Sequence[ExternalChannelOutboundFileManifest],
         file_storage: FileStorage | None,
         authority: SessionResourceAuthority | None = None,
-        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None = None,
+        provider_delivery_service: RuntimeToProviderDeliveryExecutor | None = None,
+        resolve_runtime_target: RuntimeTargetResolver | None = None,
     ) -> ChannelActionResult:
         """Commit canonical state, then execute ordered provider effects once."""
         async with self.session_manager() as session:
@@ -293,8 +297,10 @@ class ExternalChannelActionService:
                 effect,
                 file_storage=file_storage,
                 agent_id=agent_id,
+                session_id=session_id,
                 authority=authority,
-                provider_delivery_capability=provider_delivery_capability,
+                provider_delivery_service=provider_delivery_service,
+                resolve_runtime_target=resolve_runtime_target,
             )
             outcomes.append(outcome)
             if operation is ExternalChannelDeliveryOperation.REPLY:
@@ -312,8 +318,10 @@ class ExternalChannelActionService:
         *,
         file_storage: FileStorage | None = None,
         agent_id: str | None = None,
+        session_id: str | None = None,
         authority: SessionResourceAuthority | None = None,
-        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None = None,
+        provider_delivery_service: RuntimeToProviderDeliveryExecutor | None = None,
+        resolve_runtime_target: RuntimeTargetResolver | None = None,
     ) -> ProviderEffectOutcome:
         """Revalidate, execute, and apply one process-local provider effect."""
         async with self.session_manager() as session:
@@ -333,8 +341,10 @@ class ExternalChannelActionService:
             current,
             file_storage=file_storage,
             agent_id=agent_id,
+            session_id=session_id,
             authority=authority,
-            provider_delivery_capability=provider_delivery_capability,
+            provider_delivery_service=provider_delivery_service,
+            resolve_runtime_target=resolve_runtime_target,
         )
         async with self.session_manager() as session:
             await self.repository.apply_direct_effect_outcome(
@@ -367,8 +377,10 @@ class ExternalChannelActionService:
             current,
             file_storage=None,
             agent_id=current.target.agent_id,
+            session_id=None,
             authority=None,
-            provider_delivery_capability=None,
+            provider_delivery_service=None,
+            resolve_runtime_target=None,
         )
         work_id = current.target.request_payload.get("work_id")
         desired_revision = current.target.request_payload.get(
@@ -421,8 +433,10 @@ class ExternalChannelActionService:
             current,
             file_storage=None,
             agent_id=current.target.agent_id,
+            session_id=None,
             authority=None,
-            provider_delivery_capability=None,
+            provider_delivery_service=None,
+            resolve_runtime_target=None,
         )
         work_id = current.target.request_payload.get("work_id")
         desired_revision = current.target.request_payload.get(
@@ -454,8 +468,10 @@ class ExternalChannelActionService:
         *,
         file_storage: FileStorage | None,
         agent_id: str | None,
+        session_id: str | None,
         authority: SessionResourceAuthority | None,
-        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None,
+        provider_delivery_service: RuntimeToProviderDeliveryExecutor | None,
+        resolve_runtime_target: RuntimeTargetResolver | None,
     ) -> ProviderMutationOutcome:
         target = plan.target
         if target.encrypted_credentials is None:
@@ -475,8 +491,10 @@ class ExternalChannelActionService:
                         bot_token=credentials.bot_token,
                         file_storage=file_storage,
                         agent_id=agent_id,
+                        session_id=session_id,
                         authority=authority,
-                        provider_delivery_capability=provider_delivery_capability,
+                        provider_delivery_service=provider_delivery_service,
+                        resolve_runtime_target=resolve_runtime_target,
                     )
                 )
             case ExternalChannelProvider.DISCORD:
@@ -844,8 +862,10 @@ class ExternalChannelActionService:
         bot_token: str,
         file_storage: FileStorage | None,
         agent_id: str | None,
+        session_id: str | None,
         authority: SessionResourceAuthority | None,
-        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None,
+        provider_delivery_service: RuntimeToProviderDeliveryExecutor | None,
+        resolve_runtime_target: RuntimeTargetResolver | None,
     ) -> SlackControlMessageResult:
         payload = target.request_payload
         presentation = resolve_slack_agent_presentation(
@@ -881,7 +901,7 @@ class ExternalChannelActionService:
                 if files is None:
                     return _invalid_payload()
                 if files:
-                    del file_storage, agent_id
+                    del file_storage
                     return await self._deliver_slack_files(
                         bot_token=bot_token,
                         tenant_id=tenant_id,
@@ -890,8 +910,11 @@ class ExternalChannelActionService:
                         markdown_text=prepend_agent_markdown(presentation, text),
                         files=files,
                         operation_key=operation_key,
+                        agent_id=agent_id,
+                        session_id=session_id,
                         authority=authority,
-                        provider_delivery_capability=provider_delivery_capability,
+                        provider_delivery_service=provider_delivery_service,
+                        resolve_runtime_target=resolve_runtime_target,
                     )
                 return await self.slack_client.post_message(
                     bot_token=bot_token,
@@ -1166,8 +1189,11 @@ class ExternalChannelActionService:
         markdown_text: str,
         files: tuple[ExternalChannelOutboundFileManifest, ...],
         operation_key: ProviderOperationKey,
+        agent_id: str | None,
+        session_id: str | None,
         authority: SessionResourceAuthority | None,
-        provider_delivery_capability: RuntimeToProviderDeliveryCapability | None,
+        provider_delivery_service: RuntimeToProviderDeliveryExecutor | None,
+        resolve_runtime_target: RuntimeTargetResolver | None,
     ) -> SlackControlMessageResult:
         """Stream Runtime and Exchange files inside one direct provider call."""
         runtime_sources = tuple(
@@ -1182,7 +1208,12 @@ class ExternalChannelActionService:
         )
         batch: RuntimeToProviderBatch | None = None
         if runtime_sources:
-            if provider_delivery_capability is None:
+            if (
+                provider_delivery_service is None
+                or resolve_runtime_target is None
+                or agent_id is None
+                or session_id is None
+            ):
                 return SlackControlMessageResult(
                     status="failed",
                     provider_message_key=None,
@@ -1194,7 +1225,11 @@ class ExternalChannelActionService:
                 async def before_source_admission() -> None:
                     return None
 
-                prepared_batch = await provider_delivery_capability.prepare(
+                target = await resolve_runtime_target()
+                prepared_batch = await provider_delivery_service.prepare(
+                    target=target,
+                    agent_id=agent_id,
+                    session_id=session_id,
                     operation_id=f"external-channel:{operation_key.value}",
                     batch_id=operation_key.value,
                     sources=runtime_sources,
@@ -1202,6 +1237,13 @@ class ExternalChannelActionService:
                 )
                 await prepared_batch.ensure_active()
                 batch = prepared_batch
+            except RuntimeStorageError:
+                return SlackControlMessageResult(
+                    status="failed",
+                    provider_message_key=None,
+                    error_kind="runtime_file_source_unavailable",
+                    error_summary="The original Runtime file source is unavailable.",
+                )
             except asyncio.CancelledError:
                 if batch is not None:
                     await asyncio.shield(batch.close())

@@ -34,6 +34,7 @@ from azents.engine.tools.runtime_instruction_context import (
 )
 from azents.engine.tools.testing import FakeSharedStorage
 from azents.repos.session_workspace_project.data import SessionWorkspaceProject
+from azents.runtime.transfer.server_to_runtime import ServerToRuntimeTarget
 from azents.services.runtime_storage_error import RuntimeStorageError
 
 
@@ -212,14 +213,22 @@ def _make_toolkit(storage: FakeSharedStorage) -> ClaudeRulesToolkit:
         store=store, agent_id="agent-1", session_id="session-1"
     )
     context_store = RuntimeInstructionContextStore()
+
+    async def resolve_runtime_target() -> ServerToRuntimeTarget:
+        return ServerToRuntimeTarget(
+            runtime_id="runtime-1",
+            desired_generation=1,
+        )
+
     context_store.set(
         RuntimeInstructionContext(
             file_storage=storage,
             workspace_root="/runtime/home",
             projects=(_make_project(),),
-            transfer_capability=None,
-            publication_capability=None,
-            provider_delivery_capability=None,
+            transfer_service=AsyncMock(),
+            publication_service=AsyncMock(),
+            provider_delivery_service=AsyncMock(),
+            resolve_runtime_target=resolve_runtime_target,
         )
     )
     toolkit.set_instruction_context_store(context_store)
