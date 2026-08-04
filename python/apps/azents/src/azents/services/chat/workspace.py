@@ -5,7 +5,7 @@ import mimetypes
 import posixpath
 from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Literal, TypeVar, assert_never
+from typing import Literal, Protocol, TypeVar, assert_never
 
 from azcommon.infra.s3.service import S3Service
 from azcommon.result import Failure, Result, Success
@@ -31,10 +31,16 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.runtime.control_protocol.runner_operations import (
+    RuntimeFileBulkDeleteResult,
+    RuntimeFileBulkMoveResult,
+    RuntimeFileDeleteResult,
     RuntimeFileListEntry,
+    RuntimeFileListResult,
+    RuntimeFileMkdirResult,
     RuntimeFileMoveEntry,
+    RuntimeFileMoveResult,
     RuntimeFileStatResult,
-    RuntimeRunnerOperationClient,
+    RuntimeFileTextReadResult,
     RuntimeRunnerOperationFailedError,
     RuntimeRunnerOperationGenerationError,
     RuntimeRunnerOperationUnavailable,
@@ -497,6 +503,118 @@ def _actions_for_runtime(
             return AgentWorkspaceActions()
 
 
+class WorkspaceRunnerOperations(Protocol):
+    """Runtime file operations required by the Workspace browser."""
+
+    async def bulk_move_files(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        source_paths: list[str],
+        destination_directory: str,
+        overwrite: bool,
+        deadline_at: datetime,
+    ) -> RuntimeFileBulkMoveResult:
+        """Move multiple Workspace files."""
+        ...
+
+    async def list_files(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        recursive: bool = False,
+        exclude_patterns: list[str] | None = None,
+        deadline_at: datetime,
+    ) -> RuntimeFileListResult:
+        """List one Workspace directory."""
+        ...
+
+    async def read_text_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        offset: int,
+        max_bytes: int,
+        encoding: str,
+        deadline_at: datetime,
+    ) -> RuntimeFileTextReadResult:
+        """Read one bounded Workspace text preview."""
+        ...
+
+    async def stat_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        deadline_at: datetime,
+    ) -> RuntimeFileStatResult:
+        """Inspect one Workspace path."""
+        ...
+
+    async def delete_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        recursive: bool,
+        deadline_at: datetime,
+    ) -> RuntimeFileDeleteResult:
+        """Delete one Workspace path."""
+        ...
+
+    async def bulk_delete_files(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        paths: list[str],
+        recursive: bool,
+        deadline_at: datetime,
+    ) -> RuntimeFileBulkDeleteResult:
+        """Delete multiple Workspace paths."""
+        ...
+
+    async def mkdir_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        path: str,
+        parents: bool,
+        deadline_at: datetime,
+    ) -> RuntimeFileMkdirResult:
+        """Create one Workspace directory."""
+        ...
+
+    async def move_file(
+        self,
+        *,
+        runtime_id: str,
+        runner_generation: int,
+        owner_session_id: str | None,
+        source_path: str,
+        destination_path: str,
+        overwrite: bool,
+        deadline_at: datetime,
+    ) -> RuntimeFileMoveResult:
+        """Move one Workspace path."""
+        ...
+
+
 class AgentWorkspaceFileService:
     """Agent Workspace file fetch service."""
 
@@ -506,7 +624,7 @@ class AgentWorkspaceFileService:
         workspace_user_repository: WorkspaceUserRepository = (
             _WORKSPACE_USER_REPOSITORY_DEP
         ),
-        runner_operations: RuntimeRunnerOperationClient = _RUNNER_OPERATION_CLIENT_DEP,
+        runner_operations: WorkspaceRunnerOperations = _RUNNER_OPERATION_CLIENT_DEP,
         runtime_repository: AgentRuntimeRepository = _RUNTIME_REPOSITORY_DEP,
         session_manager: SessionManager[AsyncSession] = _SESSION_MANAGER_DEP,
         runtime_workspace_download_service: RuntimeWorkspaceDownloadService | None = (
