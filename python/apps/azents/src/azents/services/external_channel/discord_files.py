@@ -100,6 +100,30 @@ class DiscordChannelClient:
             return DiscordAttachmentDownloadInfo(metadata=metadata, download_url=url)
         raise DiscordFileNotFound("Discord no longer exposes the requested attachment.")
 
+    async def fetch_attachment_content_length(
+        self, *, download_url: str, max_bytes: int
+    ) -> int:
+        """Return the bounded final attachment response length."""
+        try:
+            response = await self.http_client.head(download_url, follow_redirects=False)
+        except httpx.RequestError as error:
+            raise DiscordFileTemporaryError(
+                "Discord attachment download is temporarily unavailable."
+            ) from error
+        if response.status_code < 200 or response.status_code >= 300:
+            raise DiscordFileRequestRejected("Discord attachment length check failed.")
+        values = response.headers.get_list("Content-Length")
+        if len(values) != 1 or not values[0].isascii() or not values[0].isdecimal():
+            raise DiscordFileRequestRejected(
+                "Discord attachment response has an invalid content length."
+            )
+        size = int(values[0])
+        if size > max_bytes:
+            raise DiscordFileTooLarge(
+                "Discord attachment exceeds the configured limit."
+            )
+        return size
+
     def open_attachment_stream(
         self,
         *,

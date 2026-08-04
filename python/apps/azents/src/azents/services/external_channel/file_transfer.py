@@ -369,7 +369,7 @@ class ExternalChannelFileTransferService:
                 provider_file_id=provider_file_id,
             )
             metadata = info.metadata
-            filename, declared_size = _validate_slack_file_metadata(
+            filename, _ = _validate_slack_file_metadata(
                 metadata=metadata,
                 provider_file_id=provider_file_id,
                 expected_size_bytes=expected_size_bytes,
@@ -380,6 +380,9 @@ class ExternalChannelFileTransferService:
                 raise ExternalChannelFileTransferError(
                     "Slack file metadata does not include a private download target."
                 )
+            transfer_size = await self.slack_client.fetch_private_file_content_length(
+                bot_token=bot_token, private_url=private_url, max_bytes=limit
+            )
             source = DeferredProviderServerToRuntimeSource(
                 metadata=ServerToRuntimeSourceMetadata(
                     canonical_uri=(
@@ -389,7 +392,7 @@ class ExternalChannelFileTransferService:
                     source_kind="external_channel_slack",
                     display_name=filename,
                     media_type=metadata.media_type or "application/octet-stream",
-                    size=declared_size,
+                    size=transfer_size,
                     sha256=None,
                     expires_at=None,
                 ),
@@ -499,7 +502,7 @@ class ExternalChannelFileTransferService:
             path=path,
             filename=filename,
             media_type=metadata.media_type,
-            bytes_written=declared_size,
+            bytes_written=transfer_size,
         )
 
     async def _download_discord(
@@ -530,15 +533,16 @@ class ExternalChannelFileTransferService:
                 message_id=message_id,
                 attachment_id=provider_file_id,
             )
-            filename, declared_size, download_url = (
-                _validate_discord_attachment_metadata(
-                    info=info,
-                    provider_file_id=provider_file_id,
-                    expected_size_bytes=expected_size_bytes,
-                    limit=limit,
-                )
+            filename, _, download_url = _validate_discord_attachment_metadata(
+                info=info,
+                provider_file_id=provider_file_id,
+                expected_size_bytes=expected_size_bytes,
+                limit=limit,
             )
             metadata = info.metadata
+            transfer_size = await self.discord_client.fetch_attachment_content_length(
+                download_url=download_url, max_bytes=limit
+            )
             source = DeferredProviderServerToRuntimeSource(
                 metadata=ServerToRuntimeSourceMetadata(
                     canonical_uri=(
@@ -548,7 +552,7 @@ class ExternalChannelFileTransferService:
                     source_kind="external_channel_discord",
                     display_name=filename,
                     media_type=metadata.media_type or "application/octet-stream",
-                    size=declared_size,
+                    size=transfer_size,
                     sha256=None,
                     expires_at=None,
                 ),
@@ -645,7 +649,7 @@ class ExternalChannelFileTransferService:
             path=path,
             filename=filename,
             media_type=metadata.media_type,
-            bytes_written=declared_size,
+            bytes_written=transfer_size,
         )
 
     async def _revalidate_discord_source(
@@ -976,10 +980,6 @@ def _validate_discord_attachment_metadata(
         raise ExternalChannelFileTransferError(
             "Discord attachment metadata does not include a valid size."
         )
-    if declared_size > limit:
-        raise ExternalChannelFileTransferError(
-            f"Discord attachment exceeds the configured inbound limit of {limit} bytes."
-        )
     if declared_size != expected_size_bytes:
         raise ExternalChannelFileTransferError(
             "Selected file size does not match current Discord attachment metadata."
@@ -1082,10 +1082,6 @@ def _validate_slack_file_metadata(
     if declared_size is None:
         raise ExternalChannelFileTransferError(
             "Slack file metadata does not include a valid size."
-        )
-    if declared_size > limit:
-        raise ExternalChannelFileTransferError(
-            f"Slack file exceeds the configured inbound limit of {limit} bytes."
         )
     if declared_size != expected_size_bytes:
         raise ExternalChannelFileTransferError(
