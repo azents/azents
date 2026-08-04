@@ -7,6 +7,7 @@ import threading
 import time
 from collections.abc import Generator
 from http.server import ThreadingHTTPServer
+from typing import cast
 
 import pytest
 import requests
@@ -31,7 +32,8 @@ def slack_fake_url() -> Generator[str, None, None]:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        host, port = server.server_address
+        host = server.server_address[0]
+        port = server.server_address[1]
         yield f"http://{host}:{port}"
     finally:
         server.shutdown()
@@ -760,7 +762,8 @@ def test_slack_fake_websocket_captures_acknowledgement_after_envelope() -> None:
     server = ThreadingSocketServer(("127.0.0.1", 0), IsolatedWebSocketHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    host, port = server.server_address
+    host = server.server_address[0]
+    port = server.server_address[1]
     try:
         with websocket_connect(f"ws://{host}:{port}/socket") as connection:
             hello = connection.recv()
@@ -784,7 +787,8 @@ def test_slack_fake_websocket_captures_acknowledgement_after_envelope() -> None:
     evidence = state.evidence()
     socket_evidence = evidence["socket"]
     assert isinstance(socket_evidence, dict)
-    assert socket_evidence["connections"] == 1
-    assert socket_evidence["envelope_ids"] == ["Env-1"]
-    assert socket_evidence["acknowledgements"] == ["Env-1"]
+    socket_evidence_object = cast(dict[str, object], socket_evidence)
+    assert socket_evidence_object["connections"] == 1
+    assert socket_evidence_object["envelope_ids"] == ["Env-1"]
+    assert socket_evidence_object["acknowledgements"] == ["Env-1"]
     assert "content excluded from evidence" not in str(evidence)

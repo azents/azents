@@ -1,6 +1,6 @@
 ---
 name: python-quality-check
-description: Run Python code quality tools (ruff, pyright, pytest) for an Azents Python subproject. Use when the user asks to check code quality, run linting, type checking, or tests for Python code.
+description: Run Python code quality tools (ruff, the configured type checker, pytest) for an Azents Python subproject. Use when the user asks to check code quality, run linting, type checking, or tests for Python code.
 ---
 
 # Python Quality Check
@@ -12,11 +12,15 @@ Run code quality tools from the relevant Python subproject directory.
 ```bash
 uv run ruff check --fix .
 uv run ruff format .
-uv run pyright
 uv run pytest
 ```
 
-Run Pyright against the whole subproject, not individual files.
+Run the subproject's configured type checker against the whole subproject:
+
+```bash
+uv run pyright                         # azents, azents-runtime-control
+uv run ty check --error-on-warning     # other maintained Python projects
+```
 
 ## Quick Reference
 
@@ -36,7 +40,7 @@ uv run pytest
 cd /path/to/azents/python/libs/az-common
 uv run ruff check --fix .
 uv run ruff format .
-uv run pyright
+uv run ty check --error-on-warning
 uv run pytest
 ```
 
@@ -46,7 +50,7 @@ uv run pytest
 cd /path/to/azents/testenv/azents/e2e
 uv run ruff check --fix .
 uv run ruff format .
-uv run pyright .
+uv run ty check --error-on-warning
 uv run pytest
 ```
 

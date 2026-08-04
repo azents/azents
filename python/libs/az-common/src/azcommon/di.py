@@ -25,7 +25,7 @@ from typing import (
 from fastapi import Depends, params
 from fastapi.dependencies.models import Dependant
 from fastapi.dependencies.utils import (
-    _solve_generator,  # pyright: ignore[reportPrivateUsage] - FastAPI 내부 API를 의도적으로 사용 (DI container 구현에 필요)
+    _solve_generator,
     get_dependant,
 )
 from starlette.concurrency import run_in_threadpool
@@ -115,8 +115,8 @@ async def solve_offline_dependencies(
         elif (
             use_sub_dependant.is_gen_callable or use_sub_dependant.is_async_gen_callable
         ):
-            # FastAPI 내부 _solve_generator는 Generator/AsyncGenerator를
-            # 처리하여 값을 반환하지만, 타입 시그니처가 이를 정확히 반영하지 못함.
+            # FastAPI's private helper resolves generator dependencies, but its
+            # annotation does not express the awaited result precisely.
             solved = await cast(
                 Coroutine[Any, Any, Any],
                 _solve_generator(
@@ -124,11 +124,11 @@ async def solve_offline_dependencies(
                 ),
             )
         elif use_sub_dependant.is_coroutine_callable:
-            # pyright가 Dependency protocol의 union 반환 타입을
-            # 런타임 분기(is_coroutine_callable)로 좁히지 못함
-            solved = await call(**sub_values)  # pyright: ignore[reportGeneralTypeIssues, reportUnknownVariableType]
+            async_call = cast(Callable[..., Awaitable[Any]], call)
+            solved = await async_call(**sub_values)
         else:
-            solved = await run_in_threadpool(call, **sub_values)  # pyright: ignore[reportGeneralTypeIssues, reportUnknownVariableType]
+            sync_call = cast(Callable[..., Any], call)
+            solved = await run_in_threadpool(sync_call, **sub_values)
         if sub_dependant.name is not None:
             values[sub_dependant.name] = solved
         if sub_dependant.cache_key not in dependency_cache:

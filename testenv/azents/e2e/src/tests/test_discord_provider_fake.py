@@ -116,8 +116,10 @@ def discord_fake_urls() -> Generator[tuple[str, str], None, None]:
     http_thread.start()
     websocket_thread.start()
     try:
-        http_host, http_port = http_server.server_address
-        websocket_host, websocket_port = websocket_server.server_address
+        http_host = http_server.server_address[0]
+        http_port = http_server.server_address[1]
+        websocket_host = websocket_server.server_address[0]
+        websocket_port = websocket_server.server_address[1]
         yield (
             f"http://{http_host}:{http_port}",
             f"ws://{websocket_host}:{websocket_port}",
@@ -369,7 +371,8 @@ def test_discord_fake_keeps_component_ids_outside_persistent_evidence(
     callback_thread = threading.Thread(target=callback.serve_forever, daemon=True)
     callback_thread.start()
     try:
-        callback_host, callback_port = callback.server_address
+        callback_host = callback.server_address[0]
+        callback_port = callback.server_address[1]
         requests.patch(
             f"{discord_fake_url}/api/v10/applications/100000000000000001",
             json={
@@ -1148,7 +1151,8 @@ def test_discord_fake_relays_a_real_signed_interaction_without_body_evidence(
     )
     callback_thread.start()
     try:
-        host, port = callback_server.server_address
+        host = callback_server.server_address[0]
+        port = callback_server.server_address[1]
         requests.patch(
             f"{discord_fake_url}/api/v10/applications/100000000000000001",
             json={"interactions_endpoint_url": f"http://{host}:{port}/callback"},
@@ -1200,7 +1204,8 @@ def test_discord_fake_keeps_selector_ids_transient_and_redacted(
     )
     callback_thread.start()
     try:
-        host, port = callback_server.server_address
+        host = callback_server.server_address[0]
+        port = callback_server.server_address[1]
         requests.patch(
             f"{discord_fake_url}/api/v10/applications/100000000000000001",
             json={"interactions_endpoint_url": f"http://{host}:{port}/callback"},

@@ -84,8 +84,14 @@ Run commands from the relevant Python subproject directory.
 ```console
 $ uv run ruff check --fix .
 $ uv run ruff format .
-$ uv run pyright
 $ uv run pytest
+```
+
+Run the configured type checker for the subproject:
+
+```console
+$ uv run pyright                         # azents, azents-runtime-control
+$ uv run ty check --error-on-warning     # other maintained Python projects
 ```
 
 Azents-specific backend commands:

@@ -62,7 +62,8 @@ Do not modify the lockfile manually. Stop and report:
 ```bash
 uv lock --check
 uv tree --package <package> --invert --no-dedupe --locked
-uv run pyright
+uv run pyright                         # azents, azents-runtime-control
+uv run ty check --error-on-warning     # other maintained Python projects
 ```
 
 Run the affected project's tests before completing an update.

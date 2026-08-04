@@ -55,10 +55,10 @@ repos:
         args: [--project, python/libs/az-common]
   - repo: local
     hooks:
-      - id: pyright-az-common
-        name: Run pyright in az-common
+      - id: ty-az-common
+        name: Run ty in az-common
         language: unsupported
-        entry: bash -c 'cd python/libs/az-common && uv run pyright'
+        entry: bash -c 'cd python/libs/az-common && uv run ty check --error-on-warning'
         files: |
           (?x)^(
             python/libs/az-common/.*|
@@ -100,10 +100,10 @@ repos:
         args: [--project, testenv/azents/e2e]
   - repo: local
     hooks:
-      - id: pyright-testenv-azents-e2e
-        name: Run pyright in testenv azents e2e
+      - id: ty-testenv-azents-e2e
+        name: Run ty in testenv azents e2e
         language: unsupported
-        entry: bash -c 'cd testenv/azents/e2e && uv run pyright .'
+        entry: bash -c 'cd testenv/azents/e2e && uv run ty check --error-on-warning'
         files: |
           (?x)^(
             testenv/azents/e2e/.*|

@@ -696,10 +696,11 @@ def _container_resources(data: object) -> ContainerResources | None:
         return None
     if not isinstance(data, dict):
         raise RuntimeError("container.resources must be an object")
+    resource_data = cast(Mapping[object, object], data)
     resources = ContainerResources(
-        requests=_resource_quantity_map(data, "requests"),
-        limits=_resource_quantity_map(data, "limits"),
-        claims=_resource_claims(data),
+        requests=_resource_quantity_map(resource_data, "requests"),
+        limits=_resource_quantity_map(resource_data, "limits"),
+        claims=_resource_claims(resource_data),
     )
     if (
         resources.requests is None

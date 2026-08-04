@@ -643,9 +643,12 @@ def _network_policy_peer(value: object, env_name: str) -> NetworkPolicyPeer:
         except_cidrs = ip_block_value.get("except", [])
         if not isinstance(cidr, str) or not cidr or not isinstance(except_cidrs, list):
             raise RuntimeError(f"{env_name}.ipBlock requires CIDR and except fields")
-        if not all(isinstance(item, str) and item for item in except_cidrs):
-            raise RuntimeError(f"{env_name}.ipBlock.except must contain CIDRs")
-        ip_block = IpBlock(cidr=cidr, except_cidrs=tuple(except_cidrs))
+        validated_except_cidrs: list[str] = []
+        for item in except_cidrs:
+            if not isinstance(item, str) or not item:
+                raise RuntimeError(f"{env_name}.ipBlock.except must contain CIDRs")
+            validated_except_cidrs.append(item)
+        ip_block = IpBlock(cidr=cidr, except_cidrs=tuple(validated_except_cidrs))
     if namespace_selector is None and pod_selector is None and ip_block is None:
         raise RuntimeError(f"{env_name}.to entries must select a destination")
     if ip_block is not None and (
@@ -665,12 +668,16 @@ def _network_policy_selector(value: object, env_name: str) -> LabelSelector | No
     if not isinstance(value, dict):
         raise RuntimeError(f"{env_name} selectors must be JSON objects")
     match_labels = value.get("matchLabels", {})
-    if not isinstance(match_labels, dict) or not all(
-        isinstance(key, str) and isinstance(item, str)
-        for key, item in match_labels.items()
-    ):
+    if not isinstance(match_labels, dict):
         raise RuntimeError(f"{env_name} selector labels must map strings to strings")
-    return LabelSelector(match_labels=dict(match_labels))
+    validated_match_labels: dict[str, str] = {}
+    for key, item in match_labels.items():
+        if not isinstance(key, str) or not isinstance(item, str):
+            raise RuntimeError(
+                f"{env_name} selector labels must map strings to strings"
+            )
+        validated_match_labels[key] = item
+    return LabelSelector(match_labels=validated_match_labels)
 
 
 def _network_policy_port(value: object, env_name: str) -> NetworkPolicyPort:

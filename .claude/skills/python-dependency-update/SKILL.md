@@ -102,9 +102,10 @@ grep -B10 '{package-name}' uv.lock
 # Confirm the target version in the lockfile
 grep -A2 'name = "{package-name}"' uv.lock
 
-# Run type checking
+# Run the subproject's configured type checker
 cd /path/to/azents/python/apps/{project-name}
-uv run pyright
+uv run pyright                         # azents, azents-runtime-control
+uv run ty check --error-on-warning     # other maintained Python projects
 ```
 
 ## Handling Dependabot security alerts in batches

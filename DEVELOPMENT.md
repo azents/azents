@@ -73,7 +73,7 @@ Python shared library:
 $ cd python/libs/az-common
 $ uv run ruff check --fix .
 $ uv run ruff format .
-$ uv run pyright
+$ uv run ty check --error-on-warning
 ```
 
 TypeScript workspace:
