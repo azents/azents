@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from azents_runtime_control.grpc_tls import GrpcClientTlsConfig
 from azents_runtime_control.grpc_transfer_coordinator_client import (
     GrpcRuntimeTransferCoordinatorClient,
 )
@@ -14,6 +15,9 @@ from azents.core.config import (
     Config,
     CredentialEncryptionConfig,
     RuntimeTransferCoordinatorConfig,
+)
+from azents.core.runtime_transfer_coordinator_credential import (
+    RuntimeTransferCoordinatorCredentialSupplier,
 )
 from azents.runtime.deps import (
     get_api_runtime_transfer_coordinator_client,
@@ -87,8 +91,15 @@ async def test_worker_coordinator_client_uses_tls_and_worker_identity(
     kwargs = cast(dict[str, object], captured["kwargs"])
     assert args == ("runtime-control:8030",)
     assert kwargs["allow_insecure"] is False
-    assert kwargs["tls"].root_certificates == b"test-ca"  # type: ignore[union-attr]
-    assert kwargs["credential_supplier"].service_identity == "azents-worker"  # type: ignore[union-attr]
+    tls = kwargs["tls"]
+    assert isinstance(tls, GrpcClientTlsConfig)
+    assert tls.root_certificates == b"test-ca"
+    credential_supplier = kwargs["credential_supplier"]
+    assert isinstance(
+        credential_supplier,
+        RuntimeTransferCoordinatorCredentialSupplier,
+    )
+    assert credential_supplier.service_identity == "azents-worker"
 
     await appctx.close()
 
@@ -124,7 +135,12 @@ async def test_api_coordinator_client_uses_explicit_api_identity(
     assert result is client
     assert captured["tls"] is None
     assert captured["allow_insecure"] is True
-    assert captured["credential_supplier"].service_identity == "azents-api"  # type: ignore[union-attr]
+    credential_supplier = captured["credential_supplier"]
+    assert isinstance(
+        credential_supplier,
+        RuntimeTransferCoordinatorCredentialSupplier,
+    )
+    assert credential_supplier.service_identity == "azents-api"
 
     await appctx.close()
 
