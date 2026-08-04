@@ -122,14 +122,18 @@ class LLM:
         candidate = models[0]
         if not isinstance(candidate, dict):
             raise RuntimeError("Dynamic listing returned an invalid candidate.")
+        provider = candidate.get("provider")
+        model_identifier = candidate.get("model_identifier")
+        if not isinstance(provider, str) or not isinstance(model_identifier, str):
+            raise RuntimeError("Dynamic listing candidate is missing model identity.")
         response = httpx.post(
             f"{self.config.public_url}/model-config/v1/workspaces/{workspace.handle}/model-configs",
             headers={"Authorization": f"Bearer {user.access_token}"},
             json={
                 "label": label if label is not None else f"Test Model {unique()}",
                 "llm_provider_integration_id": integration.id,
-                "provider": candidate["provider"],
-                "model_identifier": candidate["model_identifier"],
+                "provider": provider,
+                "model_identifier": model_identifier,
                 "default_model": default_model,
                 "default_lightweight_model": default_lightweight_model,
                 "enabled": True,

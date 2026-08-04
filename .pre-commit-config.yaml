@@ -91,6 +91,20 @@ repos:
             python/libs/az-common/.*|
             (?!)
           )$
+  # azents testenv
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.11.0
+    hooks:
+      - id: uv-lock
+        files: \/pyproject\.toml$
+        args: [--project, testenv/azents]
+  - repo: local
+    hooks:
+      - id: ty-testenv-azents
+        name: Run ty in testenv azents
+        language: unsupported
+        entry: bash -c 'cd testenv/azents && uv run ty check --error-on-warning'
+        files: ^testenv/azents/(?!e2e/)
   # azents testenv e2e
   - repo: https://github.com/astral-sh/uv-pre-commit
     rev: 0.11.0
