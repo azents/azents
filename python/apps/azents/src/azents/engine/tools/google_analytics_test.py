@@ -36,6 +36,7 @@ def _make_context() -> TurnContext:
         model="claude-sonnet-4-20250514",
         run_id="test-run",
         publish_event=AsyncMock(),
+        external_channel_continuation_binding_ids=frozenset(),
     )
 
 

@@ -826,6 +826,7 @@ class ExternalChannelWorkRepository:
         title: str | None,
         tasks: Sequence[ChannelWorkTask] | None,
         files: Sequence[ExternalChannelOutboundFileManifest],
+        ignore_eligible_binding_ids: frozenset[str],
         now: datetime.datetime,
     ) -> ChannelActionTransition:
         """Commit canonical Work and return process-local provider effects."""
@@ -833,6 +834,15 @@ class ExternalChannelWorkRepository:
         requested_tasks = list(tasks) if tasks is not None else None
         if mode is ExternalChannelActionMode.FINISH and message is None:
             raise ValueError("Finish requires a final External Channel reply.")
+        if mode is ExternalChannelActionMode.IGNORE and (
+            message is not None
+            or title is not None
+            or requested_tasks is not None
+            or bool(files)
+        ):
+            raise ValueError(
+                "Ignore does not accept a message, title, task update, or files."
+            )
         if files and message is None:
             raise ValueError("Channel file publication requires a message.")
 
@@ -892,9 +902,18 @@ class ExternalChannelWorkRepository:
         )
         if resource is None:
             raise ValueError("External Channel resource is unavailable.")
+        if (
+            mode is ExternalChannelActionMode.IGNORE
+            and binding.id not in ignore_eligible_binding_ids
+        ):
+            raise ValueError(
+                "Ignore is unavailable outside the current External Channel input."
+            )
         workspace = await session.get(RDBWorkspace, agent.workspace_id)
 
         def default_work() -> ChannelWorkState:
+            if mode is ExternalChannelActionMode.IGNORE:
+                raise ValueError("Ignore requires active Channel Work.")
             return ChannelWorkState(
                 binding_id=binding.id,
                 work_cycle_id=uuid7().hex,
@@ -911,6 +930,37 @@ class ExternalChannelWorkRepository:
         def transition(
             current: ChannelWorkState,
         ) -> ChannelWorkStateMutation[ChannelActionTransition]:
+            if mode is ExternalChannelActionMode.IGNORE:
+                if current.status is not ExternalChannelWorkStatus.ACTIVE:
+                    raise ValueError("Ignore requires active Channel Work.")
+                if any(
+                    task.status
+                    in {
+                        ExternalChannelWorkTaskStatus.PENDING,
+                        ExternalChannelWorkTaskStatus.IN_PROGRESS,
+                    }
+                    for task in current.tasks
+                ):
+                    raise ValueError(
+                        "Ignore requires every Channel Work task to be completed "
+                        "or failed."
+                    )
+                work = current.model_copy(deep=True)
+                work.status = ExternalChannelWorkStatus.FINISHED
+                work.state_revision += 1
+                work.finished_at = now
+                work.desired_progress_revision += 1
+                work.desired_progress = None
+                return ChannelWorkStateMutation(
+                    state=work,
+                    result=ChannelActionTransition(
+                        binding_id=binding.id,
+                        work_id=work.work_cycle_id,
+                        work_status=work.status,
+                        state_revision=work.state_revision,
+                        effects=(),
+                    ),
+                )
             work = (
                 default_work()
                 if current.status is ExternalChannelWorkStatus.FINISHED

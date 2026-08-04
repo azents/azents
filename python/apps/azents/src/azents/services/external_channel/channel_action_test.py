@@ -1,5 +1,7 @@
 """Focused direct provider outcome tests for External Channel actions."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -7,10 +9,13 @@ from unittest.mock import AsyncMock
 import pytest
 
 from azents.core.enums import (
+    ExternalChannelActionMode,
     ExternalChannelAppMode,
     ExternalChannelDeliveryOperation,
     ExternalChannelProvider,
+    ExternalChannelWorkStatus,
 )
+from azents.repos.external_channel.work_data import ChannelActionTransition
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
     _provider_mutation_outcome,  # pyright: ignore[reportPrivateUsage]
@@ -121,6 +126,62 @@ def test_discord_ambiguity_remains_unknown() -> None:
 
     assert outcome.status == "unknown"
     assert outcome.error_kind == "provider_timeout"
+
+
+@pytest.mark.asyncio
+async def test_ignore_transition_completes_without_provider_execution() -> None:
+    """An empty canonical effect plan returns empty outcomes without delivery."""
+    session = SimpleNamespace(commit=AsyncMock())
+    repository = SimpleNamespace(
+        commit_direct_action=AsyncMock(
+            return_value=ChannelActionTransition(
+                binding_id="binding-1",
+                work_id="work-1",
+                work_status=ExternalChannelWorkStatus.FINISHED,
+                state_revision=5,
+                effects=(),
+            )
+        )
+    )
+    execute_direct_effect = AsyncMock()
+
+    @asynccontextmanager
+    async def session_manager() -> AsyncIterator[object]:
+        yield session
+
+    service = cast(
+        ExternalChannelActionService,
+        SimpleNamespace(
+            session_manager=session_manager,
+            repository=repository,
+            execute_direct_effect=execute_direct_effect,
+        ),
+    )
+
+    result = await ExternalChannelActionService.execute(
+        service,
+        session_id="session-1",
+        agent_id="agent-1",
+        run_id="run-1",
+        client_tool_call_id="call-ignore",
+        binding_id="binding-1",
+        mode=ExternalChannelActionMode.IGNORE,
+        message=None,
+        title=None,
+        tasks=None,
+        files=(),
+        ignore_eligible_binding_ids=frozenset({"binding-1"}),
+        file_storage=None,
+        authority=None,
+        provider_delivery_service=None,
+        resolve_runtime_target=None,
+    )
+
+    assert result.work_status is ExternalChannelWorkStatus.FINISHED
+    assert result.outcomes == ()
+    repository.commit_direct_action.assert_awaited_once()
+    session.commit.assert_awaited_once()
+    execute_direct_effect.assert_not_awaited()
 
 
 @pytest.mark.asyncio

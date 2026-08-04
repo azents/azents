@@ -556,6 +556,7 @@ class AgentEngineAdapter:
             *,
             transcript: Sequence[Event],
             model: str,
+            external_channel_continuation_binding_ids: frozenset[str],
         ) -> PreparedModelCall[NativeModelRequest | OpenAIResponsesRequest]:
             model_selection = (
                 request.inference_state.model_selection
@@ -609,6 +610,7 @@ class AgentEngineAdapter:
                     tool_search_enabled=request.tool_search_enabled,
                     resource_authority=context.resource_authority,
                     publish_event=context.publish_event,
+                    external_channel_continuation_binding_ids=external_channel_continuation_binding_ids,
                     check_stop=check_stop,
                     mailbox_activity_observer=context.mailbox_activity_observer,
                 ),
@@ -1026,6 +1028,7 @@ class AgentEngineAdapter:
                     session_id=request.session_id,
                     owner_generation=context.owner_generation,
                     tool_admission_barrier=context.tool_admission_barrier,
+                    external_channel_continuation_binding_ids=context.external_channel_continuation_binding_ids,
                     run_index=run_state.run_index,
                     model=request.model,
                     max_turns=request.max_turns,
@@ -1325,6 +1328,7 @@ def _make_input_poller(
                 events=[],
                 context_invalidated=result.context_invalidated,
                 complete_run=result.complete_run,
+                external_channel_continuation_binding_ids=result.external_channel_continuation_binding_ids,
             )
         async with session_manager() as session:
             events = await _append_run_user_messages(
@@ -1337,6 +1341,7 @@ def _make_input_poller(
             events=events,
             context_invalidated=result.context_invalidated,
             complete_run=result.complete_run,
+            external_channel_continuation_binding_ids=result.external_channel_continuation_binding_ids,
         )
 
     return poll

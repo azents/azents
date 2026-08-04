@@ -188,6 +188,7 @@ class SessionRunner:
                 user_messages=[],
                 context_invalidated=False,
                 complete_run=False,
+                external_channel_continuation_binding_ids=None,
             )
 
         return poll

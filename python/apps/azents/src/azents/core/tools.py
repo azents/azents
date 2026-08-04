@@ -69,6 +69,7 @@ class TurnContext:
     model: str
     run_id: str
     publish_event: PublishEventFn
+    external_channel_continuation_binding_ids: frozenset[str]
     session_id: str = ""
     run_index: int = 1
     tool_search_enabled: bool = False

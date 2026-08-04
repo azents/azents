@@ -243,6 +243,7 @@ class ExternalChannelActionService:
         title: str | None,
         tasks: Sequence[ChannelWorkTask] | None,
         files: Sequence[ExternalChannelOutboundFileManifest],
+        ignore_eligible_binding_ids: frozenset[str],
         file_storage: FileStorage | None,
         authority: SessionResourceAuthority | None = None,
         provider_delivery_service: RuntimeToProviderDeliveryExecutor | None = None,
@@ -262,6 +263,7 @@ class ExternalChannelActionService:
                 title=title,
                 tasks=tasks,
                 files=files,
+                ignore_eligible_binding_ids=ignore_eligible_binding_ids,
                 now=datetime.datetime.now(datetime.UTC),
             )
             await session.commit()

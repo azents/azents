@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from azents.core.enums import (
+    ExternalChannelActionMode,
     ExternalChannelDeliveryOperation,
     ExternalChannelProvider,
     ExternalChannelWorkStatus,
@@ -181,7 +182,11 @@ async def _publish(event: PublishedEvent) -> None:
     del event
 
 
-def _turn_context(*, tool_search_enabled: bool = False) -> TurnContext:
+def _turn_context(
+    *,
+    tool_search_enabled: bool = False,
+    external_channel_continuation_binding_ids: frozenset[str] | None = None,
+) -> TurnContext:
     return TurnContext(
         workspace_id="workspace-1",
         model="test-model",
@@ -189,7 +194,17 @@ def _turn_context(*, tool_search_enabled: bool = False) -> TurnContext:
         publish_event=_publish,
         session_id="session-1",
         tool_search_enabled=tool_search_enabled,
+        external_channel_continuation_binding_ids=(
+            external_channel_continuation_binding_ids or frozenset()
+        ),
     )
+
+
+def _channel_action_mode_enum(schema: dict[str, object]) -> list[object]:
+    """Return the provider-facing mode enum from one object Tool schema."""
+    properties = cast(dict[str, object], schema["properties"])
+    mode = cast(dict[str, object], properties["mode"])
+    return cast(list[object], mode["enum"])
 
 
 def _before_channel_action(
@@ -313,6 +328,86 @@ async def test_channel_action_uses_durable_client_call_identity() -> None:
     assert service.calls[0]["client_tool_call_id"] == "call-42"
     assert service.calls[0]["run_id"] == "run-current"
     assert service.calls[0]["authority"] is None
+    assert service.calls[0]["ignore_eligible_binding_ids"] == frozenset()
+
+
+@pytest.mark.asyncio
+async def test_ignore_schema_is_exposed_only_for_channel_continuations() -> None:
+    """Only an External Channel continuation exposes silent completion."""
+    toolkit = _toolkit(_ActionService([_snapshot()]))
+
+    non_continuation = await toolkit.update_context(_turn_context())
+    non_continuation_schema = non_continuation.tools[0].spec.input_schema
+    assert _channel_action_mode_enum(non_continuation_schema) == [
+        "finish",
+        "continue",
+    ]
+
+    continuation = await toolkit.update_context(
+        _turn_context(
+            external_channel_continuation_binding_ids=frozenset({"binding-1"})
+        )
+    )
+    continuation_schema = continuation.tools[0].spec.input_schema
+    assert _channel_action_mode_enum(continuation_schema) == [
+        "finish",
+        "continue",
+        "ignore",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_ignore_passes_current_external_binding_scope_without_publication() -> (
+    None
+):
+    """The fieldless Tool call passes only current continuation bindings."""
+    service = _ActionService([_snapshot()])
+    toolkit = _toolkit(service)
+    state = await toolkit.update_context(
+        _turn_context(
+            external_channel_continuation_binding_ids=frozenset({"binding-1"})
+        )
+    )
+
+    with client_tool_execution_context(call_id="call-ignore", name="channel_action"):
+        await state.tools[0].handler(
+            json.dumps(
+                {
+                    "mode": "ignore",
+                    "binding": "binding-1",
+                }
+            )
+        )
+
+    assert service.calls[0]["mode"] is ExternalChannelActionMode.IGNORE
+    assert service.calls[0]["message"] is None
+    assert service.calls[0]["title"] is None
+    assert service.calls[0]["tasks"] is None
+    assert service.calls[0]["files"] == ()
+    assert service.calls[0]["ignore_eligible_binding_ids"] == frozenset({"binding-1"})
+
+
+@pytest.mark.asyncio
+async def test_ignore_rejects_every_publication_or_work_update_field() -> None:
+    """Silent completion cannot smuggle any provider or Work mutation field."""
+    toolkit = _toolkit(_ActionService([_snapshot()]))
+    state = await toolkit.update_context(
+        _turn_context(
+            external_channel_continuation_binding_ids=frozenset({"binding-1"})
+        )
+    )
+
+    with client_tool_execution_context(call_id="call-ignore", name="channel_action"):
+        with pytest.raises(FunctionToolError, match="does not accept"):
+            await state.tools[0].handler(
+                json.dumps(
+                    {
+                        "mode": "ignore",
+                        "binding": "binding-1",
+                        "message": "Do not publish this.",
+                    }
+                )
+            )
 
 
 @pytest.mark.asyncio
@@ -558,12 +653,14 @@ async def test_static_prompt_compaction_and_idle_keep_minimal_channel_context() 
     search_prompt = await toolkit.get_static_prompt(
         _turn_context(tool_search_enabled=True)
     )
-    assert "ordinary assistant output is not delivered" in direct_prompt.lower()
-    assert "current input explicitly marked" in direct_prompt
-    assert "ordinary user input" not in direct_prompt
+    normalized_prompt = " ".join(direct_prompt.split())
+    assert "ordinary assistant output is not delivered" in normalized_prompt.lower()
+    assert "`external_channel_continuation`" in normalized_prompt
+    assert "end the current Channel Work without external publication" in (
+        normalized_prompt
+    )
     assert "Tool Search" not in direct_prompt
     assert "Tool Search" not in search_prompt
-    assert "`channel_action` before completing" in search_prompt
     assert search_prompt == direct_prompt
     assert await toolkit.get_dynamic_prompt(_turn_context()) == ""
 
@@ -613,15 +710,13 @@ async def test_channel_tool_descriptions_own_post_discovery_guidance() -> None:
     state = await toolkit.update_context(_turn_context())
 
     channel_action, download_external_file = state.tools
-    assert "ordinary user explicitly requests external publication" in (
-        channel_action.spec.description
-    )
-    assert "active binding or prior External Channel history alone" in (
-        channel_action.spec.description
-    )
-    assert "answer the user normally" in channel_action.spec.description
-    assert "Use `finish`" in channel_action.spec.description
-    assert "Use `continue`" in channel_action.spec.description
+    description = " ".join(channel_action.spec.description.split())
+    assert "ordinary user explicitly requests external publication" in description
+    assert "active binding or prior External Channel history alone" in description
+    assert "answer the user normally" in description
+    assert "Use `finish`" in description
+    assert "Use `continue`" in description
+    assert "appears during an External Channel continuation" in description
     assert "opaque locator" in download_external_file.spec.description
 
     schema_text = json.dumps(channel_action.spec.input_schema)

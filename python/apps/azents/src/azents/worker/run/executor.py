@@ -240,6 +240,7 @@ class RunInputPollResult:
     user_messages: list[RunUserMessage]
     requested_inference_profile: RequestedInferenceProfile | None
     promoted_event_ids: list[str]
+    external_channel_continuation_binding_ids: frozenset[str] | None
     has_actionable_work: bool
     context_invalidated: bool
     complete_run: bool
@@ -310,6 +311,18 @@ def _refresh_runtime_peer_toolkits(toolkits: Sequence[ToolkitBinding]) -> None:
             binding.toolkit.set_peer_toolkits(
                 [toolkit for toolkit in peer_toolkits if toolkit is not binding.toolkit]
             )
+
+
+def _merge_continuation_scope(
+    current: frozenset[str] | None,
+    incoming: frozenset[str],
+) -> frozenset[str]:
+    """Merge one model boundary without lending scope across other input."""
+    if current is None:
+        return incoming
+    if not current or not incoming:
+        return frozenset()
+    return current | incoming
 
 
 @dataclasses.dataclass
@@ -706,6 +719,7 @@ class RunExecutor:
             )
         if session_state is None:
             raise ValueError("AgentSession not found")
+        external_channel_continuation_binding_ids = frozenset()
 
         if (
             recoverable_run is not None
@@ -825,6 +839,10 @@ class RunExecutor:
                 process_actions=True,
                 dispatch_event=dispatch_event,
             )
+            if initial_input.external_channel_continuation_binding_ids is not None:
+                external_channel_continuation_binding_ids = (
+                    initial_input.external_channel_continuation_binding_ids
+                )
             if initial_input.requested_inference_profile is not None:
                 selected_profile = RequestedProfileSelection(
                     profile=initial_input.requested_inference_profile,
@@ -1097,6 +1115,7 @@ class RunExecutor:
             tool_admission_barrier=tool_admission_barrier,
             model_transport_state=model_transport_state,
             publish_event=publish_event,
+            external_channel_continuation_binding_ids=external_channel_continuation_binding_ids,
             resource_authority=SessionResourceAuthority(
                 workspace_id=snapshot.workspace_id,
                 agent_id=snapshot.agent_id,
@@ -2245,6 +2264,7 @@ class RunExecutor:
                 user_messages=result.user_messages,
                 context_invalidated=result.context_invalidated,
                 complete_run=result.complete_run,
+                external_channel_continuation_binding_ids=result.external_channel_continuation_binding_ids,
             )
 
         return poll
@@ -2269,6 +2289,7 @@ class RunExecutor:
         """Consume pending run inputs and report whether a wake-up has work."""
         user_messages: list[RunUserMessage] = []
         promoted_event_ids: list[str] = []
+        external_channel_continuation_binding_ids: frozenset[str] | None = None
         selected_profile = required_inference_profile
         context_invalidated = False
         turn_eligible = initial_turn_eligible
@@ -2332,6 +2353,11 @@ class RunExecutor:
             )
             promoted_event_ids.extend(promoted.promoted_event_ids)
             user_messages.extend(promoted.user_messages)
+            if promoted.external_channel_continuation_binding_ids is not None:
+                external_channel_continuation_binding_ids = _merge_continuation_scope(
+                    external_channel_continuation_binding_ids,
+                    promoted.external_channel_continuation_binding_ids,
+                )
             action_result = (
                 await self._process_operation_actions(
                     agent_id=agent_id,
@@ -2358,9 +2384,18 @@ class RunExecutor:
                 user_messages=[],
                 context_invalidated=False,
                 complete_run=False,
+                external_channel_continuation_binding_ids=None,
             )
         )
         user_messages.extend(queued_result.user_messages)
+        queued_scope = queued_result.external_channel_continuation_binding_ids
+        if queued_result.user_messages and queued_scope is None:
+            queued_scope = frozenset()
+        if queued_scope is not None:
+            external_channel_continuation_binding_ids = _merge_continuation_scope(
+                external_channel_continuation_binding_ids,
+                queued_scope,
+            )
         context_invalidated = context_invalidated or queued_result.context_invalidated
         has_actionable_work = turn_eligible and (
             bool(user_messages) or await self._has_actionable_model_input(session_id)
@@ -2372,6 +2407,7 @@ class RunExecutor:
             user_messages=user_messages,
             requested_inference_profile=selected_profile,
             promoted_event_ids=list(dict.fromkeys(promoted_event_ids)),
+            external_channel_continuation_binding_ids=external_channel_continuation_binding_ids,
             has_actionable_work=has_actionable_work,
             context_invalidated=context_invalidated,
             complete_run=complete_run,

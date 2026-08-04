@@ -931,6 +931,7 @@ class ExternalChannelActionMode(enum.StrEnum):
 
     FINISH = "finish"
     CONTINUE = "continue"
+    IGNORE = "ignore"
 
 
 class ExternalChannelDeliveryOperation(enum.StrEnum):

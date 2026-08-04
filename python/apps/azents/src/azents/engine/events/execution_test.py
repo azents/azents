@@ -978,6 +978,7 @@ def _model_call_preparer(
     inference_state: SessionInferenceState | None = None,
     enrich_client_tool_call: Callable[[ClientToolCallPayload], ClientToolCallPayload]
     | None = None,
+    continuation_scopes: list[frozenset[str]] | None = None,
 ) -> ModelCallPreparer[NativeModelRequest]:
     """Create a turn-local model call preparer for tests."""
     resolved_lowerer = lowerer or _Lowerer()
@@ -993,7 +994,10 @@ def _model_call_preparer(
         *,
         transcript: Sequence[Event],
         model: str,
+        external_channel_continuation_binding_ids: frozenset[str],
     ) -> PreparedModelCall[NativeModelRequest]:
+        if continuation_scopes is not None:
+            continuation_scopes.append(external_channel_continuation_binding_ids)
         return PreparedModelCall(
             native_request=resolved_lowerer.lower(transcript, model=model),
             inference_state=inference_state,
@@ -1159,6 +1163,7 @@ async def test_text_run_completes() -> None:
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -1221,6 +1226,7 @@ async def test_dialect_follow_up_continues_without_tool_call() -> None:
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
 
@@ -1268,9 +1274,12 @@ async def test_external_run_callbacks_observe_no_open_db_session() -> None:
     tool_executor = AssertingToolExecutor()
 
     async def prepare_model_call(
-        *, transcript: Sequence[Event], model: str
+        *,
+        transcript: Sequence[Event],
+        model: str,
+        external_channel_continuation_binding_ids: frozenset[str],
     ) -> PreparedModelCall[NativeModelRequest]:
-        del transcript
+        del transcript, external_channel_continuation_binding_ids
         assert open_sessions == 0
 
         async def on_turn_end(reason: TurnEndReason) -> None:
@@ -1323,6 +1332,7 @@ async def test_external_run_callbacks_observe_no_open_db_session() -> None:
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
 
@@ -1367,6 +1377,7 @@ async def test_model_delta_reaches_output_sink_before_stream_completion() -> Non
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
     )
@@ -1426,6 +1437,7 @@ async def test_text_run_commits_durable_events_before_output_sink() -> None:
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -1459,6 +1471,7 @@ async def test_provider_output_shares_event_admission_transaction() -> None:
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
 
@@ -1498,6 +1511,7 @@ async def test_provider_output_cleans_up_after_event_admission_failure() -> None
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
+                external_channel_continuation_binding_ids=frozenset(),
             )
         )
 
@@ -1536,6 +1550,7 @@ async def test_provider_output_admits_terminal_turn_without_durable_event() -> N
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
 
@@ -1586,6 +1601,7 @@ async def test_output_without_usage_clears_retry_state_before_publish() -> None:
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -1635,6 +1651,7 @@ async def test_text_run_output_sink_receives_run_marker() -> None:
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -1714,6 +1731,7 @@ async def test_model_usage_is_appended_as_turn_marker(
                 session_id="session-1",
                 model="gpt-5.1",
                 run_index=7,
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
 
@@ -1793,6 +1811,7 @@ async def test_model_output_without_system_prompt_clears_session_snapshot() -> N
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
 
@@ -1827,6 +1846,7 @@ async def test_model_input_uses_session_head_event_id() -> None:
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -1862,6 +1882,7 @@ async def test_closed_admission_barrier_prevents_call_and_handler_start() -> Non
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -1899,6 +1920,7 @@ async def test_tool_run_with_turn_limit_interrupts_after_tool_result() -> None:
             session_id="session-1",
             model="gpt-5.1",
             max_turns=1,
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -1947,6 +1969,7 @@ async def test_parallel_calls_finalize_independently() -> None:
                 session_id="session-1",
                 model="gpt-5.1",
                 max_turns=1,
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
     )
@@ -2012,6 +2035,7 @@ async def test_term_after_admission_keeps_normal_result_and_run_recoverable() ->
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
+                external_channel_continuation_binding_ids=frozenset(),
             ),
             check_stop=check_stop,
         )
@@ -2067,6 +2091,7 @@ async def test_unlimited_tool_run_executes_tool_then_completes() -> None:
             session_id="session-1",
             model="gpt-5.1",
             max_turns=None,
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -2119,6 +2144,7 @@ async def test_tool_run_completes_after_empty_terminal_model_turn() -> None:
             session_id="session-1",
             model="gpt-5.1",
             max_turns=None,
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -2173,6 +2199,7 @@ async def test_final_tool_turn_executes_tool_then_completes() -> None:
             session_id="session-1",
             model="grok-4.5",
             max_turns=None,
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -2231,6 +2258,7 @@ async def test_client_tool_source_snapshot_is_shared_by_durable_and_active() -> 
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
 
@@ -2280,6 +2308,7 @@ async def test_generated_client_result_materializes_in_result_transaction() -> N
             session_id="session-1",
             model="grok-4",
             max_turns=None,
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -2343,6 +2372,7 @@ async def test_generated_client_result_cleans_up_after_admission_failure() -> No
             session_id="session-1",
             model="grok-4",
             max_turns=None,
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -2401,6 +2431,7 @@ async def test_generated_client_result_without_materializer_fails_safely(
                 session_id="session-1",
                 model="grok-4",
                 max_turns=None,
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
 
@@ -2435,8 +2466,10 @@ async def test_model_call_preparer_runs_for_each_model_turn() -> None:
         *,
         transcript: Sequence[Event],
         model: str,
+        external_channel_continuation_binding_ids: frozenset[str],
     ) -> PreparedModelCall[NativeModelRequest]:
         """Record each turn-local preparation."""
+        del external_channel_continuation_binding_ids
         prepared_transcripts.append(list(transcript))
 
         async def on_turn_end(reason: TurnEndReason) -> None:
@@ -2477,6 +2510,7 @@ async def test_model_call_preparer_runs_for_each_model_turn() -> None:
             session_id="session-1",
             model="gpt-5.1",
             max_turns=None,
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -2501,9 +2535,10 @@ async def test_model_call_preparer_turn_end_receives_error_reason() -> None:
         *,
         transcript: Sequence[Event],
         model: str,
+        external_channel_continuation_binding_ids: frozenset[str],
     ) -> PreparedModelCall[NativeModelRequest]:
         """Return a prepared failing model call."""
-        del transcript
+        del transcript, external_channel_continuation_binding_ids
 
         async def on_turn_end(reason: TurnEndReason) -> None:
             turn_end_reasons.append(reason)
@@ -2538,6 +2573,7 @@ async def test_model_call_preparer_turn_end_receives_error_reason() -> None:
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
 
@@ -2576,6 +2612,7 @@ async def test_provider_tool_call_completes_without_next_model_turn() -> None:
             session_id="session-1",
             model="gpt-5.1",
             max_turns=None,
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -2620,6 +2657,7 @@ async def test_provider_tool_call_with_message_completes_one_turn() -> None:
             session_id="session-1",
             model="gpt-5.1",
             max_turns=None,
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -2660,6 +2698,7 @@ async def test_auto_compaction_does_not_publish_phase_when_threshold_is_not_met(
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -2692,6 +2731,7 @@ async def test_auto_compaction_restores_preparing_phase_after_success() -> None:
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -2729,6 +2769,7 @@ async def test_auto_compaction_keeps_compacting_phase_after_failure() -> None:
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
 
@@ -2783,6 +2824,7 @@ async def test_compacted_run_continues_with_summary_without_terminal_marker() ->
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -2791,41 +2833,17 @@ async def test_compacted_run_continues_with_summary_without_terminal_marker() ->
     assert lowerer.transcripts == [[summary_event]]
 
 
-async def test_tool_turn_polls_input_before_next_model_call() -> None:
-    """New input after tool turn is included in next model call transcript."""
-    run_repo = _RunRepo()
-    transcript_repo = _TranscriptRepo()
-    lowerer = _RecordingLowerer()
-    poll_count = 0
+async def test_tool_follow_up_preserves_external_channel_continuation_scope() -> None:
+    """A Tool result follow-up retains its Channel continuation scope."""
+    continuation_scopes: list[frozenset[str]] = []
 
-    async def poll_input_events(
-        session_id: str,
-    ) -> InputPollResult:
-        """Append queued user input at second turn boundary."""
-        nonlocal poll_count
-        poll_count += 1
-        if poll_count != 2:
-            return InputPollResult(
-                events=[],
-                context_invalidated=False,
-                complete_run=False,
-            )
-        async with _session_context() as session:
-            event = await transcript_repo.append(
-                session,
-                EventCreate(
-                    session_id=session_id,
-                    kind=EventKind.USER_MESSAGE,
-                    payload=UserMessagePayload(
-                        sender_user_id=None,
-                        content="Is something odd with the grep tool?",
-                    ).model_dump(mode="json", exclude_none=True),
-                ),
-            )
+    async def poll_input_events(session_id: str) -> InputPollResult:
+        assert session_id == "session-1"
         return InputPollResult(
+            events=[],
             context_invalidated=False,
             complete_run=False,
-            events=[event],
+            external_channel_continuation_binding_ids=None,
         )
 
     execution = AgentRunExecution(
@@ -2843,7 +2861,91 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
             ]
         ),
         model_call_preparer=_model_call_preparer(
-            lowerer=lowerer, tool_executor=_ToolExecutor()
+            tool_executor=_ToolExecutor(),
+            continuation_scopes=continuation_scopes,
+        ),
+        run_repo=_RunRepo(),
+        transcript_repo=_TranscriptRepo(),
+    )
+
+    status = await execution.run(
+        AgentRunExecutionRequest(
+            owner_generation=1,
+            tool_admission_barrier=_OpenToolAdmissionBarrier(),
+            run_id="run-1",
+            session_id="session-1",
+            model="gpt-5.1",
+            max_turns=2,
+            external_channel_continuation_binding_ids=frozenset({"binding-1"}),
+        ),
+        poll_input_events=poll_input_events,
+    )
+
+    assert status is AgentRunStatus.COMPLETED
+    assert continuation_scopes == [
+        frozenset({"binding-1"}),
+        frozenset({"binding-1"}),
+    ]
+
+
+async def test_tool_turn_polls_input_before_next_model_call() -> None:
+    """New input after tool turn is included in next model call transcript."""
+    run_repo = _RunRepo()
+    transcript_repo = _TranscriptRepo()
+    lowerer = _RecordingLowerer()
+    continuation_scopes: list[frozenset[str]] = []
+    poll_count = 0
+
+    async def poll_input_events(
+        session_id: str,
+    ) -> InputPollResult:
+        """Append queued user input at second turn boundary."""
+        nonlocal poll_count
+        poll_count += 1
+        if poll_count != 2:
+            return InputPollResult(
+                events=[],
+                context_invalidated=False,
+                complete_run=False,
+                external_channel_continuation_binding_ids=None,
+            )
+        async with _session_context() as session:
+            event = await transcript_repo.append(
+                session,
+                EventCreate(
+                    session_id=session_id,
+                    kind=EventKind.USER_MESSAGE,
+                    payload=UserMessagePayload(
+                        sender_user_id=None,
+                        content="Is something odd with the grep tool?",
+                    ).model_dump(mode="json", exclude_none=True),
+                ),
+            )
+        return InputPollResult(
+            context_invalidated=False,
+            complete_run=False,
+            events=[event],
+            external_channel_continuation_binding_ids=frozenset(),
+        )
+
+    execution = AgentRunExecution(
+        session_manager=_session_context,
+        post_lower_filter=_PostFilter(),
+        model_stream_watchdog=make_test_model_stream_watchdog(),
+        model_stream_provider="test",
+        model_stream_provider_integration_id=None,
+        model_stream_inference_profile=None,
+        model_adapter=_ModelAdapter(),
+        output_normalizer=_SequenceNormalizer(
+            [
+                [_tool_call_event()],
+                [_assistant_event()],
+            ]
+        ),
+        model_call_preparer=_model_call_preparer(
+            lowerer=lowerer,
+            tool_executor=_ToolExecutor(),
+            continuation_scopes=continuation_scopes,
         ),
         run_repo=run_repo,
         transcript_repo=transcript_repo,
@@ -2857,6 +2959,7 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
             session_id="session-1",
             model="gpt-5.1",
             max_turns=2,
+            external_channel_continuation_binding_ids=frozenset({"binding-1"}),
         ),
         poll_input_events=poll_input_events,
     )
@@ -2874,6 +2977,10 @@ async def test_tool_turn_polls_input_before_next_model_call() -> None:
         )
         in second_turn_payloads
     )
+    assert continuation_scopes == [
+        frozenset({"binding-1"}),
+        frozenset(),
+    ]
 
 
 async def test_context_invalidation_yields_for_request_refresh() -> None:
@@ -2894,6 +3001,7 @@ async def test_context_invalidation_yields_for_request_refresh() -> None:
             events=[],
             context_invalidated=poll_count == 2,
             complete_run=False,
+            external_channel_continuation_binding_ids=None,
         )
 
     execution = AgentRunExecution(
@@ -2926,6 +3034,7 @@ async def test_context_invalidation_yields_for_request_refresh() -> None:
             session_id="session-1",
             model="gpt-5.1",
             max_turns=2,
+            external_channel_continuation_binding_ids=frozenset(),
         ),
         poll_input_events=poll_input_events,
     )
@@ -2968,6 +3077,7 @@ async def test_orphan_tool_call_without_state_is_cancelled_before_lowering() -> 
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -3024,6 +3134,7 @@ async def test_active_unresolved_tool_call_is_cancelled_before_lowering() -> Non
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -3076,6 +3187,7 @@ async def test_stale_active_entry_with_result_is_removed_without_replacement() -
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -3127,6 +3239,7 @@ async def test_active_entry_without_call_event_fails_invariant() -> None:
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
 
@@ -3168,6 +3281,7 @@ async def test_model_stream_user_stop_appends_only_assistant_text() -> None:
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -3209,6 +3323,7 @@ async def test_model_stream_user_stop_without_text_appends_only_marker() -> None
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -3247,6 +3362,7 @@ async def test_shutdown_tool_cancellation_repairs_before_reraising() -> None:
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
 
@@ -3292,6 +3408,7 @@ async def test_tool_user_stop_preserves_settled_terminal_result() -> None:
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
     )
@@ -3343,6 +3460,7 @@ async def test_tool_user_stop_appends_cancelled_result_and_interrupts() -> None:
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -3402,6 +3520,7 @@ async def test_tool_result_output_sink_receives_tool_result() -> None:
             session_id="session-1",
             model="gpt-5.1",
             max_turns=1,
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -3437,6 +3556,7 @@ async def test_tool_failure_appends_failed_tool_result() -> None:
             session_id="session-1",
             model="gpt-5.1",
             max_turns=1,
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -3483,6 +3603,7 @@ async def test_run_input_preparation_does_not_run_lifecycle_cleanup() -> None:
             model="gpt-5.1",
             run_index=7,
             max_turns=1,
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -3529,6 +3650,7 @@ async def test_pre_model_lower_hook_runs_before_lowerer() -> None:
             session_id="session-1",
             model="gpt-5.1",
             max_turns=1,
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -3565,6 +3687,7 @@ async def test_model_completion_error_propagates_for_retry() -> None:
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
 
@@ -3600,6 +3723,7 @@ async def test_empty_terminal_model_output_completes_run() -> None:
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
 
@@ -3645,6 +3769,7 @@ async def test_blank_terminal_assistant_message_completes_run() -> None:
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
 
@@ -3700,6 +3825,7 @@ async def test_empty_dialect_follow_up_continues_to_terminal_response() -> None:
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         )
     )
 
@@ -3741,6 +3867,7 @@ async def test_model_call_error_propagates_for_retry() -> None:
                 run_id="run-1",
                 session_id="session-1",
                 model="gpt-5.1",
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
 
@@ -3776,6 +3903,7 @@ async def test_execution_closes_operation_scoped_adapter() -> None:
             run_id="run-1",
             session_id="session-1",
             model="gpt-5.1",
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 

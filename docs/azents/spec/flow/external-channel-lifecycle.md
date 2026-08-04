@@ -31,8 +31,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-03
-spec_version: 30
+last_verified_at: 2026-08-04
+spec_version: 31
 ---
 
 # External Channel Lifecycle
@@ -62,6 +62,12 @@ binding. A parent Binding replacement updates the active participation setting a
 Binding atomically; a thread replacement updates only that Binding. Once
 `disconnected_at` is set, the retained final mode is read-only and the
 same mutation returns the not-found-shaped management result.
+
+An `external_channel_continuation`-scoped `channel_action ignore` is not a binding
+lifecycle transition. It silently finishes only the current Channel Work cycle, leaves
+the binding connected, and creates no leave-presence or Activity Tracker cleanup plan.
+Unfinished tasks reject the operation before Work mutation, so later idle continuation
+and normal lifecycle cleanup still observe the active cycle.
 
 Disconnecting a connection accepts every lifecycle and credential state. It
 terminalizes the connection, terminates owned active resources/bindings/work, commits
@@ -265,6 +271,8 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-08-03** (spec_version 31) — Clarified that eligible silent Work completion
+  leaves the binding lifecycle unchanged and produces no lifecycle cleanup plan.
 - **2026-08-03** (spec_version 30) — Moved Channel Work archive, restore, purge, and
   verification to binding-specific Session-bound Toolkit State and removed the
   dedicated Work table from lifecycle roots and Agent finalization.

@@ -569,6 +569,7 @@ class _Execution:
             self.prepared_model_call = await self.model_call_preparer(
                 transcript=[],
                 model=request.model,
+                external_channel_continuation_binding_ids=request.external_channel_continuation_binding_ids,
             )
         return AgentRunStatus.COMPLETED
 
@@ -967,6 +968,7 @@ async def test_event_engine_adapter_runs_execution() -> None:
                 ),
                 run_id="0" * 32,
                 publish_event=_noop_publish,
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
     ]
@@ -1208,6 +1210,7 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
                 ),
                 run_id="0" * 32,
                 publish_event=_noop_publish,
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
     ]
@@ -1257,6 +1260,7 @@ async def test_tool_search_activation_updates_the_next_prepared_call() -> None:
     second_prepared = await execution.model_call_preparer(
         transcript=[],
         model="gpt-5.1",
+        external_channel_continuation_binding_ids=frozenset(),
     )
     second_request = second_prepared.native_request
     assert isinstance(second_request, OpenAIResponsesRequest)
@@ -1452,6 +1456,7 @@ async def test_xai_image_generation_is_bound_as_client_function_tool(
                 ),
                 run_id="0" * 32,
                 publish_event=_noop_publish,
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
     ]
@@ -1552,6 +1557,7 @@ async def test_xai_oauth_refresh_updates_later_model_turn_credentials(
     second_prepared = await execution.model_call_preparer(
         transcript=[],
         model="xai/grok-4",
+        external_channel_continuation_binding_ids=frozenset(),
     )
     second_request = second_prepared.native_request
     assert isinstance(second_request, NativeModelRequest)
@@ -1668,6 +1674,7 @@ async def test_adapter_yields_model_output_before_run_completion() -> None:
             model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
             run_id="0" * 32,
             publish_event=_noop_publish,
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -1719,6 +1726,7 @@ async def test_adapter_forwards_user_stop_cancellation_to_execution() -> None:
                 ),
                 run_id="0" * 32,
                 publish_event=_noop_publish,
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         ):
             emitted.set()
@@ -1768,6 +1776,7 @@ async def test_adapter_drains_run_task_on_stream_close() -> None:
             model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
             run_id="0" * 32,
             publish_event=_noop_publish,
+            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
     assert isinstance(stream, AsyncGenerator)
@@ -1823,6 +1832,7 @@ async def test_event_engine_adapter_includes_turn_start_injected_prompts() -> No
                 ),
                 run_id="0" * 32,
                 publish_event=_noop_publish,
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
     ]
@@ -1876,6 +1886,7 @@ async def test_adapter_propagates_user_visible_model_call_error() -> None:
                 ),
                 run_id="0" * 32,
                 publish_event=_noop_publish,
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         ):
             emits.append(emit)
@@ -1941,6 +1952,7 @@ async def test_model_kwargs_routes_chatgpt_oauth_to_backend_api() -> None:
                 ),
                 run_id="0" * 32,
                 publish_event=_noop_publish,
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
     ]
@@ -2017,6 +2029,7 @@ async def test_model_kwargs_keep_openrouter_on_litellm_responses() -> None:
                 ),
                 run_id="0" * 32,
                 publish_event=_noop_publish,
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
     ]
@@ -2091,6 +2104,7 @@ async def test_adapter_wires_event_filters_and_session_head_repo() -> None:
                 ),
                 run_id="0" * 32,
                 publish_event=_noop_publish,
+                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
     ]
@@ -2572,6 +2586,7 @@ def _run_context() -> RunContext:
         model_transport_state=InMemoryModelTransportState(websocket_enabled=False),
         run_id="0" * 32,
         publish_event=_noop_publish,
+        external_channel_continuation_binding_ids=frozenset(),
     )
 
 
