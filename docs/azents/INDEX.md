@@ -25,7 +25,7 @@ Design documents are accumulated records and are not listed individually in this
 | [System Settings](spec/domain/system-settings.md) | system-settings | @Hardtack | 2026-07-30 | 5 |
 | [Toolkit](spec/domain/toolkit.md) | toolkit | @Hardtack | 2026-08-04 | 84 |
 | [User & Authentication](spec/domain/user-auth.md) | user-auth | @Hardtack | 2026-07-20 | 8 |
-| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-04 | 58 |
+| [Workspace & Membership](spec/domain/workspace.md) | workspace | @Hardtack | 2026-08-04 | 59 |
 
 ## Living Specs — Flow
 
@@ -347,6 +347,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Team Session Execution Boundaries Requirements](requirements/session-260724-team-session-execution-boundaries.md) | session-260724 | 2026-07-24 | - |
 | [Session Auto-Archive Requirements](requirements/session-260726-auto-archive.md) | session-260726 | 2026-07-26 | 2026-07-26 |
 | [Session Working Folder Requirements](requirements/session-260803-session-working-folder.md) | session-260803 | 2026-08-03 | 2026-08-04 |
+| [Session Folder Project Browser Prominence Requirements](requirements/session-260804-project-browser-session-folder-prominence.md) | session-260804 | 2026-08-04 | 2026-08-04 |
 | [Agent Settings Pages and Memory UI Historical Requirements Reconstruction](requirements/settings-260702-settings-pages-and-memory-ui.md) | settings-260702 | 2026-07-02 | - |
 | [Model-Scoped Selectable Model Settings Historical Requirements Reconstruction](requirements/settings-260716-selectable-settings.md) | settings-260716 | 2026-07-16 | - |
 | [Model Unread Run Results as Session-Shared State Historical Requirements Reconstruction](requirements/shared-260720-shared-unread-result.md) | shared-260720 | 2026-07-20 | - |
@@ -714,6 +715,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Team Session Execution Boundaries](adr/session-260724-team-session-execution-boundaries.md)
 - [Session Auto-Archive](adr/session-260726-auto-archive.md)
 - [Session Working Folder](adr/session-260803-session-working-folder.md)
+- [Session Folder Project Browser Prominence](adr/session-260804-project-browser-session-folder-prominence.md)
 - [Agent Settings Pages and Memory UI](adr/settings-260702-settings-pages-and-memory-ui.md)
 - [Model-Scoped Selectable Model Settings Historical Decision Reconstruction](adr/settings-260716-selectable-settings.md)
 - [Model Unread Run Results as Session-Shared State](adr/shared-260720-shared-unread-result.md)

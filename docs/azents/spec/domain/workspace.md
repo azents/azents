@@ -95,7 +95,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/agents
   - /external-channel/v1/workspaces/{handle}/external-channels/discord/multi/{connection_id}/channel-defaults
 last_verified_at: 2026-08-04
-spec_version: 58
+spec_version: 59
 ---
 
 # Workspace & Membership
@@ -339,9 +339,13 @@ The existing-session Project browser prepends the fixed Session-folder entry bef
 registered Project roots. It has `source.type: "session_folder"`, no Project ID,
 `prepare_session_folder: true`, and no root removal, filesystem delete, move, or
 rename capability. It remains visible when the physical directory is missing. The
-same root protection applies to direct workspace mutation surfaces, while ordinary
-descendant file operations remain available. Pre-session manifest preview remains
-Project-only.
+frontend preserves Session files before all other displayed Projects roots after
+its own entry sorting and displays the manifest-provided exact working-folder path
+as dimmed, truncatable supporting text while retaining the Session files name.
+Existing browser search continues to exclude an unmatched Session files entry, and
+All files mode keeps its independent directory ordering. The same root protection
+applies to direct workspace mutation surfaces, while ordinary descendant file
+operations remain available. Pre-session manifest preview remains Project-only.
 
 The stored path is the authority for ordinary non-Project Session work, new
 worktree allocation, root mutation protection, and archive cleanup. New worktrees
