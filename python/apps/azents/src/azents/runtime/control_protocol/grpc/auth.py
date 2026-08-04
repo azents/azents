@@ -5,9 +5,9 @@ from typing import NoReturn, Protocol
 
 import grpc
 from azents_runtime_control.grpc_transfer_coordinator_client import (
+    CoordinatorRequestMessage,
     coordinator_credential_request,
 )
-from google.protobuf.message import Message
 
 from azents.core.enums import RuntimeProviderAuthMethod
 from azents.core.runtime_runner_credential import (
@@ -104,7 +104,7 @@ class RuntimeTransferCoordinatorCredentialGrpcAuth:
         context: GrpcAbortContext,
         *,
         operation: str,
-        request: Message,
+        request: CoordinatorRequestMessage,
     ) -> RuntimeTransferCoordinatorCredentialClaims:
         """Verify one metadata bearer against the exact protobuf request.
 
@@ -152,7 +152,7 @@ class RuntimeRunnerCredentialGrpcAuth:
 
     async def authenticate(
         self,
-        context: grpc.aio.ServicerContext[object, object],
+        context: GrpcAbortContext,
     ) -> RuntimeRunnerCredential:
         """Resolve one Runner credential to current durable Runtime claims."""
         secret = _single_bearer_credential(context.invocation_metadata())
@@ -181,7 +181,7 @@ class RuntimeProviderCredentialGrpcAuth:
 
     async def authenticate(
         self,
-        context: grpc.aio.ServicerContext[object, object],
+        context: GrpcAbortContext,
     ) -> RuntimeProviderCredentialAuthentication:
         """Resolve one explicitly selected Provider authentication method."""
         method = _provider_auth_method(context.invocation_metadata())

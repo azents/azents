@@ -104,7 +104,7 @@ grep -A2 'name = "{package-name}"' uv.lock
 
 # Run the subproject's configured type checker
 cd /path/to/azents/python/apps/{project-name}
-uv run pyright                         # azents, azents-runtime-control
+uv run pyright                         # azents
 uv run ty check --error-on-warning     # other maintained Python projects
 ```
 

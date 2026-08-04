@@ -1,13 +1,10 @@
 """gRPC Provider Control client for external Runtime Providers."""
 
-# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
-# protobuf generated modules expose dynamic message attributes.
-
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterable, AsyncIterator, Mapping, Sequence
 from datetime import UTC, datetime
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 import grpc
 from google.protobuf import json_format, struct_pb2, timestamp_pb2
@@ -19,7 +16,6 @@ from azents_runtime_control.grpc_tls import (
 from azents_runtime_control.proto import (
     runtime_configuration_pb2,
     runtime_provider_control_pb2,
-    runtime_provider_control_pb2_grpc,
 )
 from azents_runtime_control.provider import (
     JsonValue,
@@ -41,6 +37,15 @@ from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEvidence,
 )
 
+if TYPE_CHECKING:
+    from azents_runtime_control.proto.runtime_provider_control_pb2_grpc import (
+        RuntimeProviderControlAsyncStub as _RuntimeProviderControlStub,
+    )
+else:
+    from azents_runtime_control.proto.runtime_provider_control_pb2_grpc import (
+        RuntimeProviderControlStub as _RuntimeProviderControlStub,
+    )
+
 
 class ProviderControlStream(Protocol):
     """Callable gRPC stream constructor."""
@@ -51,7 +56,7 @@ class ProviderControlStream(Protocol):
         /,
         *,
         metadata: Sequence[tuple[str, str]] | None = None,
-    ) -> AsyncIterator[runtime_provider_control_pb2.ControlMessage]:
+    ) -> AsyncIterable[runtime_provider_control_pb2.ControlMessage]:
         """Open a bidirectional Runtime Control stream."""
         ...
 
@@ -113,7 +118,7 @@ class GrpcProviderControlClient(ProviderControlClient):
             tls=tls,
             allow_insecure=allow_insecure,
         )
-        stub = runtime_provider_control_pb2_grpc.RuntimeProviderControlStub(channel)
+        stub = _RuntimeProviderControlStub(channel)
         return cls(
             stub.ConnectProvider,
             channel=channel,
@@ -264,7 +269,7 @@ class GrpcProviderControlClient(ProviderControlClient):
 
     async def _receive(
         self,
-        responses: AsyncIterator[runtime_provider_control_pb2.ControlMessage],
+        responses: AsyncIterable[runtime_provider_control_pb2.ControlMessage],
     ) -> None:
         try:
             async for message in responses:
@@ -300,10 +305,7 @@ class GrpcProviderControlClient(ProviderControlClient):
                 ProviderCommandEnvelope(
                     request_id=message.request_id,
                     command=command,
-                    deadline_at=_optional_datetime(
-                        message.provider_command,
-                        "deadline_at",
-                    ),
+                    deadline_at=_optional_datetime(message.provider_command),
                 )
             )
             return
@@ -543,9 +545,9 @@ def _runtime_configuration_evidence_message(
     )
 
 
-def _struct(metadata: object) -> struct_pb2.Struct:
+def _struct(metadata: Mapping[str, JsonValue]) -> struct_pb2.Struct:
     struct = struct_pb2.Struct()
-    struct.update(cast(dict[str, object], metadata))
+    struct.update(metadata)
     return struct
 
 
@@ -565,9 +567,8 @@ def _datetime(value: timestamp_pb2.Timestamp) -> datetime:
 
 def _optional_datetime(
     message: runtime_provider_control_pb2.ProviderCommand,
-    field_name: str,
 ) -> datetime | None:
-    if not message.HasField(field_name):
+    if not message.HasField("deadline_at"):
         return None
     return _datetime(message.deadline_at)
 

@@ -11,6 +11,7 @@ import grpc
 from azents_runtime_control.grpc_transfer_coordinator_client import (
     CoordinatorCancellationReason,
     CoordinatorCleanupStatus,
+    CoordinatorRequestMessage,
     CoordinatorTransferDirection,
     CoordinatorTransferFailure,
     CoordinatorTransferOutcome,
@@ -24,7 +25,6 @@ from azents_runtime_control.proto import (
 )
 from azents_runtime_control.transfer import CoordinatorTransferIdentity
 from google.protobuf import timestamp_pb2
-from google.protobuf.message import Message
 
 from azents.runtime.control_protocol.grpc.auth import (
     GrpcAbortContext,
@@ -506,7 +506,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
         self,
         context: GrpcAbortContext,
         operation: str,
-        request: Message,
+        request: CoordinatorRequestMessage,
     ) -> None:
         await self._credential_auth.authenticate(
             context,
@@ -517,7 +517,7 @@ class RuntimeTransferCoordinatorGrpcServicer(
     async def _record(
         self,
         context: GrpcAbortContext,
-        identity: Message,
+        identity: pb.CoordinatorTransferIdentity,
     ) -> RuntimeTransferRecord:
         try:
             requested = coordinator_identity_from_message(identity)
@@ -687,14 +687,16 @@ def _timestamp(value: datetime) -> timestamp_pb2.Timestamp:
     return message
 
 
-def _direction(value: RuntimeTransferDirection) -> int:
+def _direction(
+    value: RuntimeTransferDirection,
+) -> pb.CoordinatorTransferDirection.ValueType:
     return {
         RuntimeTransferDirection.DOWNLOAD: pb.COORDINATOR_TRANSFER_DIRECTION_DOWNLOAD,
         RuntimeTransferDirection.UPLOAD: pb.COORDINATOR_TRANSFER_DIRECTION_UPLOAD,
     }[value]
 
 
-def _phase(value: RuntimeTransferPhase) -> int:
+def _phase(value: RuntimeTransferPhase) -> pb.CoordinatorTransferPhase.ValueType:
     return {
         RuntimeTransferPhase.PREPARING: pb.COORDINATOR_TRANSFER_PHASE_PREPARING,
         RuntimeTransferPhase.READY: pb.COORDINATOR_TRANSFER_PHASE_READY,
@@ -708,7 +710,9 @@ def _phase(value: RuntimeTransferPhase) -> int:
     }[value]
 
 
-def _dispatch_status(value: RuntimeTransferDispatchStatus) -> int:
+def _dispatch_status(
+    value: RuntimeTransferDispatchStatus,
+) -> pb.CoordinatorDispatchStatus.ValueType:
     return {
         RuntimeTransferDispatchStatus.NOT_BOUND: pb.COORDINATOR_DISPATCH_STATUS_NOT_BOUND,
         RuntimeTransferDispatchStatus.BOUND: pb.COORDINATOR_DISPATCH_STATUS_BOUND,
@@ -717,7 +721,9 @@ def _dispatch_status(value: RuntimeTransferDispatchStatus) -> int:
     }[value]
 
 
-def _outcome(value: int) -> RuntimeTransferOutcome:
+def _outcome(
+    value: pb.CoordinatorTransferOutcome.ValueType,
+) -> RuntimeTransferOutcome:
     return RuntimeTransferOutcome(
         {
             pb.COORDINATOR_TRANSFER_OUTCOME_SUCCEEDED: CoordinatorTransferOutcome.SUCCEEDED,
@@ -729,7 +735,9 @@ def _outcome(value: int) -> RuntimeTransferOutcome:
     )
 
 
-def _outcome_to_proto(value: RuntimeTransferOutcome) -> int:
+def _outcome_to_proto(
+    value: RuntimeTransferOutcome,
+) -> pb.CoordinatorTransferOutcome.ValueType:
     return {
         RuntimeTransferOutcome.SUCCEEDED: pb.COORDINATOR_TRANSFER_OUTCOME_SUCCEEDED,
         RuntimeTransferOutcome.FAILED: pb.COORDINATOR_TRANSFER_OUTCOME_FAILED,
@@ -768,7 +776,9 @@ def _settlement_failure(
     return failure
 
 
-def _failure(value: int) -> RuntimeTransferFailure:
+def _failure(
+    value: pb.CoordinatorTransferFailure.ValueType,
+) -> RuntimeTransferFailure:
     return RuntimeTransferFailure(
         {
             pb.COORDINATOR_TRANSFER_FAILURE_ADMISSION: CoordinatorTransferFailure.ADMISSION,
@@ -782,7 +792,9 @@ def _failure(value: int) -> RuntimeTransferFailure:
     )
 
 
-def _failure_to_proto(value: RuntimeTransferFailure) -> int:
+def _failure_to_proto(
+    value: RuntimeTransferFailure,
+) -> pb.CoordinatorTransferFailure.ValueType:
     return {
         RuntimeTransferFailure.ADMISSION: pb.COORDINATOR_TRANSFER_FAILURE_ADMISSION,
         RuntimeTransferFailure.CANCELLED: pb.COORDINATOR_TRANSFER_FAILURE_CANCELLED,
@@ -794,7 +806,9 @@ def _failure_to_proto(value: RuntimeTransferFailure) -> int:
     }[value]
 
 
-def _cleanup_status(value: int) -> CoordinatorCleanupStatus:
+def _cleanup_status(
+    value: pb.CoordinatorCleanupStatus.ValueType,
+) -> CoordinatorCleanupStatus:
     return {
         pb.COORDINATOR_CLEANUP_STATUS_NOT_REQUIRED: CoordinatorCleanupStatus.NOT_REQUIRED,
         pb.COORDINATOR_CLEANUP_STATUS_PENDING: CoordinatorCleanupStatus.PENDING,
@@ -803,7 +817,9 @@ def _cleanup_status(value: int) -> CoordinatorCleanupStatus:
     }[value]
 
 
-def _cleanup_status_to_proto(value: RuntimeTransferCleanupStatus) -> int:
+def _cleanup_status_to_proto(
+    value: RuntimeTransferCleanupStatus,
+) -> pb.CoordinatorCleanupStatus.ValueType:
     return {
         RuntimeTransferCleanupStatus.NOT_REQUIRED: pb.COORDINATOR_CLEANUP_STATUS_NOT_REQUIRED,
         RuntimeTransferCleanupStatus.PENDING: pb.COORDINATOR_CLEANUP_STATUS_PENDING,
@@ -814,7 +830,7 @@ def _cleanup_status_to_proto(value: RuntimeTransferCleanupStatus) -> int:
 
 def _preparation_cleanup_state_to_proto(
     value: RuntimeTransferPreparationCleanupState,
-) -> int:
+) -> pb.CoordinatorPreparationCleanupState.ValueType:
     return {
         RuntimeTransferPreparationCleanupState.NOT_REQUIRED: (
             pb.COORDINATOR_PREPARATION_CLEANUP_STATE_NOT_REQUIRED
@@ -828,7 +844,9 @@ def _preparation_cleanup_state_to_proto(
     }[value]
 
 
-def _cancellation_reason(value: int) -> CoordinatorCancellationReason:
+def _cancellation_reason(
+    value: pb.CoordinatorCancellationReason.ValueType,
+) -> CoordinatorCancellationReason:
     return {
         pb.COORDINATOR_CANCELLATION_REASON_CALLER: CoordinatorCancellationReason.CALLER,
         pb.COORDINATOR_CANCELLATION_REASON_DEADLINE: CoordinatorCancellationReason.DEADLINE,
@@ -839,7 +857,10 @@ def _cancellation_reason(value: int) -> CoordinatorCancellationReason:
 
 async def _validate_consumer_request(
     context: GrpcAbortContext,
-    request: Message,
+    request: pb.ClaimConsumerRequest
+    | pb.RenewConsumerLeaseRequest
+    | pb.AcknowledgeConsumerRequest
+    | pb.AbandonConsumerRequest,
 ) -> None:
     try:
         _positive_revision(request.expected_revision)

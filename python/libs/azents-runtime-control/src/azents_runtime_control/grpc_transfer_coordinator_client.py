@@ -1,14 +1,11 @@
 """Typed gRPC client and values for trusted Runtime transfer coordination."""
 
-# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
-# Protobuf generated modules expose dynamic message attributes.
-
 import hashlib
 from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol, TypeAlias, TypeVar
 
 import grpc
 from google.protobuf import timestamp_pb2
@@ -20,9 +17,17 @@ from azents_runtime_control.grpc_tls import (
 )
 from azents_runtime_control.proto import (
     runtime_transfer_coordinator_pb2,
-    runtime_transfer_coordinator_pb2_grpc,
 )
 from azents_runtime_control.transfer import CoordinatorTransferIdentity
+
+if TYPE_CHECKING:
+    from azents_runtime_control.proto.runtime_transfer_coordinator_pb2_grpc import (
+        RuntimeTransferCoordinatorAsyncStub as _RuntimeTransferCoordinatorStub,
+    )
+else:
+    from azents_runtime_control.proto.runtime_transfer_coordinator_pb2_grpc import (
+        RuntimeTransferCoordinatorStub as _RuntimeTransferCoordinatorStub,
+    )
 
 COORDINATOR_OPERATION_ADMIT_TRANSFER = "RuntimeTransferCoordinator/AdmitTransfer"
 COORDINATOR_OPERATION_MARK_TRANSFER_READY = (
@@ -426,16 +431,20 @@ class CoordinatorCredentialSupplier(Protocol):
         ...
 
 
-class CoordinatorUnaryUnaryCall(Protocol):
+_RequestT_contra = TypeVar("_RequestT_contra", contravariant=True)
+_ResponseT_co = TypeVar("_ResponseT_co", covariant=True)
+
+
+class CoordinatorUnaryUnaryCall(Protocol[_RequestT_contra, _ResponseT_co]):
     """Unary coordinator RPC callable."""
 
     def __call__(
         self,
-        request: Message,
+        request: _RequestT_contra,
         /,
         *,
         metadata: Sequence[tuple[str, str]],
-    ) -> Awaitable[Message]:
+    ) -> Awaitable[_ResponseT_co]:
         """Execute one coordinator RPC."""
         ...
 
@@ -443,21 +452,152 @@ class CoordinatorUnaryUnaryCall(Protocol):
 class RuntimeTransferCoordinatorStub(Protocol):
     """Typed callable surface required from the generated coordinator stub."""
 
-    AdmitTransfer: CoordinatorUnaryUnaryCall
-    MarkTransferReady: CoordinatorUnaryUnaryCall
-    DispatchTransfer: CoordinatorUnaryUnaryCall
-    CancelTransfer: CoordinatorUnaryUnaryCall
-    GetVerifiedObject: CoordinatorUnaryUnaryCall
-    ClaimConsumer: CoordinatorUnaryUnaryCall
-    RenewConsumerLease: CoordinatorUnaryUnaryCall
-    AcknowledgeConsumer: CoordinatorUnaryUnaryCall
-    AbandonConsumer: CoordinatorUnaryUnaryCall
-    SettleTransfer: CoordinatorUnaryUnaryCall
-    RecordCleanup: CoordinatorUnaryUnaryCall
-    RegisterPreparationCleanup: CoordinatorUnaryUnaryCall
-    PromotePreparationCleanup: CoordinatorUnaryUnaryCall
-    ClearPreparationCleanup: CoordinatorUnaryUnaryCall
-    GetTransferStatus: CoordinatorUnaryUnaryCall
+    @property
+    def AdmitTransfer(
+        self,
+    ) -> CoordinatorUnaryUnaryCall[
+        runtime_transfer_coordinator_pb2.AdmitTransferRequest,
+        runtime_transfer_coordinator_pb2.AdmitTransferResponse,
+    ]: ...
+
+    @property
+    def MarkTransferReady(
+        self,
+    ) -> CoordinatorUnaryUnaryCall[
+        runtime_transfer_coordinator_pb2.MarkTransferReadyRequest,
+        runtime_transfer_coordinator_pb2.TransferStatusResponse,
+    ]: ...
+
+    @property
+    def DispatchTransfer(
+        self,
+    ) -> CoordinatorUnaryUnaryCall[
+        runtime_transfer_coordinator_pb2.DispatchTransferRequest,
+        runtime_transfer_coordinator_pb2.TransferStatusResponse,
+    ]: ...
+
+    @property
+    def CancelTransfer(
+        self,
+    ) -> CoordinatorUnaryUnaryCall[
+        runtime_transfer_coordinator_pb2.CancelTransferRequest,
+        runtime_transfer_coordinator_pb2.TransferStatusResponse,
+    ]: ...
+
+    @property
+    def GetVerifiedObject(
+        self,
+    ) -> CoordinatorUnaryUnaryCall[
+        runtime_transfer_coordinator_pb2.GetVerifiedObjectRequest,
+        runtime_transfer_coordinator_pb2.GetVerifiedObjectResponse,
+    ]: ...
+
+    @property
+    def ClaimConsumer(
+        self,
+    ) -> CoordinatorUnaryUnaryCall[
+        runtime_transfer_coordinator_pb2.ClaimConsumerRequest,
+        runtime_transfer_coordinator_pb2.TransferStatusResponse,
+    ]: ...
+
+    @property
+    def RenewConsumerLease(
+        self,
+    ) -> CoordinatorUnaryUnaryCall[
+        runtime_transfer_coordinator_pb2.RenewConsumerLeaseRequest,
+        runtime_transfer_coordinator_pb2.TransferStatusResponse,
+    ]: ...
+
+    @property
+    def AcknowledgeConsumer(
+        self,
+    ) -> CoordinatorUnaryUnaryCall[
+        runtime_transfer_coordinator_pb2.AcknowledgeConsumerRequest,
+        runtime_transfer_coordinator_pb2.TransferStatusResponse,
+    ]: ...
+
+    @property
+    def AbandonConsumer(
+        self,
+    ) -> CoordinatorUnaryUnaryCall[
+        runtime_transfer_coordinator_pb2.AbandonConsumerRequest,
+        runtime_transfer_coordinator_pb2.TransferStatusResponse,
+    ]: ...
+
+    @property
+    def SettleTransfer(
+        self,
+    ) -> CoordinatorUnaryUnaryCall[
+        runtime_transfer_coordinator_pb2.SettleTransferRequest,
+        runtime_transfer_coordinator_pb2.TransferStatusResponse,
+    ]: ...
+
+    @property
+    def RecordCleanup(
+        self,
+    ) -> CoordinatorUnaryUnaryCall[
+        runtime_transfer_coordinator_pb2.RecordCleanupRequest,
+        runtime_transfer_coordinator_pb2.TransferStatusResponse,
+    ]: ...
+
+    @property
+    def RegisterPreparationCleanup(
+        self,
+    ) -> CoordinatorUnaryUnaryCall[
+        runtime_transfer_coordinator_pb2.RegisterPreparationCleanupRequest,
+        runtime_transfer_coordinator_pb2.TransferStatusResponse,
+    ]: ...
+
+    @property
+    def PromotePreparationCleanup(
+        self,
+    ) -> CoordinatorUnaryUnaryCall[
+        runtime_transfer_coordinator_pb2.PromotePreparationCleanupRequest,
+        runtime_transfer_coordinator_pb2.TransferStatusResponse,
+    ]: ...
+
+    @property
+    def ClearPreparationCleanup(
+        self,
+    ) -> CoordinatorUnaryUnaryCall[
+        runtime_transfer_coordinator_pb2.ClearPreparationCleanupRequest,
+        runtime_transfer_coordinator_pb2.TransferStatusResponse,
+    ]: ...
+
+    @property
+    def GetTransferStatus(
+        self,
+    ) -> CoordinatorUnaryUnaryCall[
+        runtime_transfer_coordinator_pb2.GetTransferStatusRequest,
+        runtime_transfer_coordinator_pb2.TransferStatusResponse,
+    ]: ...
+
+
+CoordinatorRequestMessage: TypeAlias = (
+    runtime_transfer_coordinator_pb2.AdmitTransferRequest
+    | runtime_transfer_coordinator_pb2.MarkTransferReadyRequest
+    | runtime_transfer_coordinator_pb2.DispatchTransferRequest
+    | runtime_transfer_coordinator_pb2.CancelTransferRequest
+    | runtime_transfer_coordinator_pb2.GetVerifiedObjectRequest
+    | runtime_transfer_coordinator_pb2.ClaimConsumerRequest
+    | runtime_transfer_coordinator_pb2.RenewConsumerLeaseRequest
+    | runtime_transfer_coordinator_pb2.AcknowledgeConsumerRequest
+    | runtime_transfer_coordinator_pb2.AbandonConsumerRequest
+    | runtime_transfer_coordinator_pb2.SettleTransferRequest
+    | runtime_transfer_coordinator_pb2.RecordCleanupRequest
+    | runtime_transfer_coordinator_pb2.RegisterPreparationCleanupRequest
+    | runtime_transfer_coordinator_pb2.PromotePreparationCleanupRequest
+    | runtime_transfer_coordinator_pb2.ClearPreparationCleanupRequest
+    | runtime_transfer_coordinator_pb2.GetTransferStatusRequest
+)
+
+_ConsumerRequestMessageT = TypeVar(
+    "_ConsumerRequestMessageT",
+    runtime_transfer_coordinator_pb2.ClaimConsumerRequest,
+    runtime_transfer_coordinator_pb2.RenewConsumerLeaseRequest,
+    runtime_transfer_coordinator_pb2.AcknowledgeConsumerRequest,
+    runtime_transfer_coordinator_pb2.AbandonConsumerRequest,
+)
 
 
 class GrpcRuntimeTransferCoordinatorClient:
@@ -465,7 +605,7 @@ class GrpcRuntimeTransferCoordinatorClient:
 
     def __init__(
         self,
-        stub: object,
+        stub: RuntimeTransferCoordinatorStub,
         *,
         credential_supplier: CoordinatorCredentialSupplier,
         channel: grpc.aio.Channel | None,
@@ -502,9 +642,7 @@ class GrpcRuntimeTransferCoordinatorClient:
             tls=tls,
             allow_insecure=allow_insecure,
         )
-        stub = runtime_transfer_coordinator_pb2_grpc.RuntimeTransferCoordinatorStub(
-            channel
-        )
+        stub = _RuntimeTransferCoordinatorStub(channel)
         return cls(
             stub,
             credential_supplier=credential_supplier,
@@ -800,7 +938,7 @@ class GrpcRuntimeTransferCoordinatorClient:
     async def _metadata(
         self,
         operation: str,
-        message: Message,
+        message: CoordinatorRequestMessage,
     ) -> tuple[tuple[str, str]]:
         credential_request = coordinator_credential_request(
             operation,
@@ -825,7 +963,7 @@ def coordinator_request_sha256(message: Message) -> str:
 
 def coordinator_credential_request(
     operation: str,
-    message: Message,
+    message: CoordinatorRequestMessage,
 ) -> CoordinatorCredentialRequest:
     """Build secret-free credential values from one exact protobuf request.
 
@@ -1107,8 +1245,8 @@ def get_verified_object_request_to_message(
 def consumer_request_to_message(
     value: CoordinatorConsumerRequest,
     *,
-    request_type: type[Message],
-) -> Message:
+    request_type: type[_ConsumerRequestMessageT],
+) -> _ConsumerRequestMessageT:
     """Map typed consumer values to one of the consumer request protobufs.
 
     :param value: typed consumer request values
@@ -1215,7 +1353,7 @@ def get_transfer_status_request_to_message(
 
 
 def admit_transfer_result_from_message(
-    message: Message,
+    message: runtime_transfer_coordinator_pb2.AdmitTransferResponse,
 ) -> CoordinatorAdmitTransferResult:
     """Map a protobuf admission response to shared values.
 
@@ -1231,7 +1369,7 @@ def admit_transfer_result_from_message(
 
 
 def get_verified_object_result_from_message(
-    message: Message,
+    message: runtime_transfer_coordinator_pb2.GetVerifiedObjectResponse,
 ) -> CoordinatorGetVerifiedObjectResult:
     """Map a protobuf verified-object response to shared values.
 
@@ -1248,7 +1386,7 @@ def get_verified_object_result_from_message(
 
 
 def transfer_status_response_from_message(
-    message: Message,
+    message: runtime_transfer_coordinator_pb2.TransferStatusResponse,
 ) -> CoordinatorTransferStatus:
     """Map a protobuf status response to shared values.
 

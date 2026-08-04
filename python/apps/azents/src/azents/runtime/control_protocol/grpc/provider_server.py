@@ -9,7 +9,7 @@ import dataclasses
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Protocol, cast
+from typing import Protocol
 
 import grpc
 from azents_runtime_control.grpc_provider_client import (
@@ -814,7 +814,7 @@ def _provider_command(
         transfer_endpoint=_required_string(auth, "transfer_endpoint"),
         runner_auth_token=runner_credential.token,
     )
-    command.payload.update(cast(dict[str, object], payload))
+    command.payload.update(payload)
     runtime_configuration = _required_mapping(envelope.payload, "runtime_configuration")
     command.runtime_configuration.evidence.revision_id = _required_string(
         runtime_configuration,

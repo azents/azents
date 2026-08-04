@@ -1,10 +1,8 @@
 """Typed authenticated Runner Transfer gRPC client."""
 
-# pyright: reportAttributeAccessIssue=false, reportArgumentType=false
-# Generated protobuf modules expose dynamic message attributes.
-
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import grpc
 
@@ -14,13 +12,21 @@ from azents_runtime_control.grpc_tls import (
 )
 from azents_runtime_control.proto import (
     runtime_runner_transfer_pb2,
-    runtime_runner_transfer_pb2_grpc,
 )
 from azents_runtime_control.runner_transfer import (
     RunnerTransferFailure,
     RunnerTransferIdentity,
 )
 from azents_runtime_control.transfer import MAX_TRANSFER_CHUNK_BYTES
+
+if TYPE_CHECKING:
+    from azents_runtime_control.proto.runtime_runner_transfer_pb2_grpc import (
+        RuntimeRunnerTransferAsyncStub as _RuntimeRunnerTransferStub,
+    )
+else:
+    from azents_runtime_control.proto.runtime_runner_transfer_pb2_grpc import (
+        RuntimeRunnerTransferStub as _RuntimeRunnerTransferStub,
+    )
 
 _LOCAL_SUBCHANNEL_POOL = (("grpc.use_local_subchannel_pool", 1),)
 
@@ -62,7 +68,7 @@ class GrpcRunnerTransferClient:
 
     def __init__(
         self,
-        stub: runtime_runner_transfer_pb2_grpc.RuntimeRunnerTransferStub,
+        stub: _RuntimeRunnerTransferStub,
         *,
         runner_auth_token: str,
         channel: grpc.aio.Channel | None = None,
@@ -91,7 +97,7 @@ class GrpcRunnerTransferClient:
             options=_LOCAL_SUBCHANNEL_POOL,
         )
         return cls(
-            runtime_runner_transfer_pb2_grpc.RuntimeRunnerTransferStub(channel),
+            _RuntimeRunnerTransferStub(channel),
             runner_auth_token=runner_auth_token,
             channel=channel,
         )

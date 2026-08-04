@@ -9,18 +9,7 @@ import subprocess
 import grpc_tools
 from grpc_tools import protoc
 
-_GRPC_HEADER = (
-    "# ruff: noqa\n"
-    "# pyright: reportAttributeAccessIssue=false, reportCallIssue=false, "
-    "reportUnknownArgumentType=false, reportUnknownMemberType=false, "
-    "reportUnknownParameterType=false, reportUnknownVariableType=false\n"
-)
-_PB2_HEADER = (
-    "# ruff: noqa\n"
-    "# pyright: reportAttributeAccessIssue=false, reportCallIssue=false, "
-    "reportUnknownArgumentType=false, reportUnknownMemberType=false, "
-    "reportUnknownVariableType=false\n"
-)
+_GENERATED_HEADER = "# ruff: noqa\n"
 
 
 def main() -> None:
@@ -66,6 +55,8 @@ def main() -> None:
                 f"-I{grpc_tools_proto}",
                 f"--python_out={out_dir}",
                 f"--grpc_python_out={out_dir}",
+                f"--mypy_out={out_dir}",
+                f"--mypy_grpc_out={out_dir}",
                 str(proto_file),
             ],
         )
@@ -82,34 +73,30 @@ def main() -> None:
 def _fix_generated_imports(
     proto_file: pathlib.Path,
     out_dir: pathlib.Path,
-) -> tuple[pathlib.Path, pathlib.Path]:
+) -> tuple[pathlib.Path, pathlib.Path, pathlib.Path, pathlib.Path]:
     module_name = f"{proto_file.stem}_pb2"
     grpc_file = out_dir / f"{module_name}_grpc.py"
-    content = grpc_file.read_text()
-    content = re.sub(
-        rf"^import {re.escape(module_name)} as (.+)$",
-        rf"from . import {module_name} as \1",
-        content,
-        flags=re.MULTILINE,
-    )
-    grpc_file.write_text(_GRPC_HEADER + content)
-
     pb2_file = out_dir / f"{module_name}.py"
-    pb2_content = pb2_file.read_text()
-    pb2_content = re.sub(
-        r"^from azents\.runtime_control\.v1 import (.+)$",
-        r"from . import \1",
-        pb2_content,
-        flags=re.MULTILINE,
-    )
-    pb2_content = re.sub(
-        r"^import (\w+_pb2) as (.+)$",
-        r"from . import \1 as \2",
-        pb2_content,
-        flags=re.MULTILINE,
-    )
-    pb2_file.write_text(_PB2_HEADER + pb2_content)
-    return pb2_file, grpc_file
+    grpc_stub = out_dir / f"{module_name}_grpc.pyi"
+    pb2_stub = out_dir / f"{module_name}.pyi"
+    for generated_file in (grpc_file, pb2_file, grpc_stub, pb2_stub):
+        content = generated_file.read_text()
+        content = re.sub(
+            r"^from azents\.runtime_control\.v1 import (.+)$",
+            r"from . import \1",
+            content,
+            flags=re.MULTILINE,
+        )
+        content = re.sub(
+            r"^import (\w+_pb2) as (.+)$",
+            r"from . import \1 as \2",
+            content,
+            flags=re.MULTILINE,
+        )
+        if generated_file.suffix == ".pyi":
+            content = content.replace("  # noqa: Y015", "")
+        generated_file.write_text(_GENERATED_HEADER + content)
+    return pb2_file, grpc_file, pb2_stub, grpc_stub
 
 
 if __name__ == "__main__":

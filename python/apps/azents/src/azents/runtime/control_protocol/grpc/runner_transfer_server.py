@@ -34,6 +34,7 @@ from azents_runtime_control.transfer import (
 
 from azents.core.runtime_runner_credential import RuntimeRunnerCredential
 from azents.runtime.control_protocol.grpc.auth import (
+    GrpcAbortContext,
     RuntimeRunnerCredentialAuthenticator,
     RuntimeRunnerCredentialGrpcAuth,
 )
@@ -80,6 +81,14 @@ class _StreamTermination(StrEnum):
     CANCELLED = "cancelled"
     EXPIRED = "expired"
     FENCED = "fenced"
+
+
+class _GrpcStreamContext(GrpcAbortContext, Protocol):
+    """gRPC stream context methods needed by transfer state checks."""
+
+    def cancelled(self) -> bool:
+        """Return whether the active stream was cancelled."""
+        ...
 
 
 class _RoundRobinChunkScheduler:
@@ -1018,7 +1027,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         self,
         request: pb.DownloadTransferRequest,
         credential: RuntimeRunnerCredential,
-        context: grpc.aio.ServicerContext[object, object],
+        context: GrpcAbortContext,
     ) -> RuntimeTransferRecord:
         if not request.HasField("identity"):
             await context.abort(
@@ -1090,7 +1099,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         self,
         identity: pb.TransferIdentity,
         credential: RuntimeRunnerCredential,
-        context: grpc.aio.ServicerContext[object, object],
+        context: GrpcAbortContext,
     ) -> RuntimeTransferRecord:
         """Authorize one first-frame upload identity before state mutation."""
         if not _valid_identity(identity):
@@ -1157,7 +1166,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         self,
         record: RuntimeTransferRecord,
         credential: RuntimeRunnerCredential,
-        context: grpc.aio.ServicerContext[object, object],
+        context: _GrpcStreamContext,
     ) -> RuntimeTransferRecord:
         if context.cancelled():
             current = await self._state_store.get(record.admission.transfer_id)
@@ -1205,7 +1214,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         self,
         record: RuntimeTransferRecord,
         offset: int,
-        context: grpc.aio.ServicerContext[object, object],
+        context: GrpcAbortContext,
         *,
         force: bool,
     ) -> RuntimeTransferRecord:
@@ -1308,7 +1317,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         record: RuntimeTransferRecord,
         *,
         credential: RuntimeRunnerCredential,
-        context: grpc.aio.ServicerContext[object, object],
+        context: _GrpcStreamContext,
         keeper: _StreamLeaseKeeper,
         transfer_object: RuntimeTransferObject,
         staging_identity: S3ObjectIdentity,
@@ -1537,7 +1546,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
         self,
         record: RuntimeTransferRecord,
         credential: RuntimeRunnerCredential,
-        context: grpc.aio.ServicerContext[object, object],
+        context: _GrpcStreamContext,
         upload: S3MultipartUpload | None,
         parts: list[S3CompletedPart],
         body: bytes,
@@ -1698,7 +1707,7 @@ class RuntimeRunnerTransferGrpcServicer(pb_grpc.RuntimeRunnerTransferServicer):
     async def _abort_for_cancellation(
         self,
         record: RuntimeTransferRecord,
-        context: grpc.aio.ServicerContext[object, object],
+        context: GrpcAbortContext,
     ) -> None:
         """Settle and expose one persisted cancellation with canonical semantics."""
         reason = record.cancellation_reason or RuntimeTransferCancellationReason.CALLER
