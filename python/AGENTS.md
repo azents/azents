@@ -9,8 +9,14 @@ Run commands from the relevant subproject directory.
 ```console
 $ uv run ruff check --fix .
 $ uv run ruff format .
-$ uv run pyright
 $ uv run pytest
+```
+
+Run the configured type checker for the subproject:
+
+```console
+$ uv run pyright                         # azents, azents-runtime-control
+$ uv run ty check --error-on-warning     # other maintained Python projects
 ```
 
 Backend app:
@@ -27,13 +33,14 @@ Shared library:
 $ cd python/libs/az-common
 $ uv run ruff check --fix .
 $ uv run ruff format .
-$ uv run pyright
+$ uv run ty check --error-on-warning
 ```
 
 E2E tests:
 
 ```console
 $ cd testenv/azents/e2e
+$ uv run ty check --error-on-warning
 $ uv run pytest ./src
 ```
 
@@ -49,7 +56,8 @@ $ uv run pytest ./src
 2. Read existing code before editing.
 3. Check `.claude/rules/python-conventions.md` for applicable rules.
 4. Run quality checks after each logical unit of work.
-5. Before completing backend changes, run the relevant Ruff, Pyright, and Pytest checks.
+5. Before completing changes, run the relevant Ruff, configured type checker, and
+   Pytest checks.
 
 ## Database Migrations
 

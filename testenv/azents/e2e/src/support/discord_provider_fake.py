@@ -319,11 +319,12 @@ class FakeState:
             if len(self.guild_commands) >= _MAX_CONFIGURED_GUILD_COMMANDS:
                 raise ValueError("Discord command state exceeds its bounded size.")
             self._command_sequence += 1
+            command_id = str(self._command_sequence)
             command: dict[str, object] = {
-                "id": str(self._command_sequence),
+                "id": command_id,
                 **command_fields,
             }
-            self.guild_commands[cast(str, command["id"])] = command
+            self.guild_commands[command_id] = command
             return dict(command)
 
     def update_guild_command(
@@ -501,7 +502,7 @@ class FakeState:
                         data_object.get("content"), str
                     )
             self.interactions.append(evidence)
-        return response_status, cast(object, response_payload)
+        return response_status, response_payload
 
     def consume_transient_component_custom_id(self, scope: str) -> str | None:
         """Consume one request-local component ID without adding it to evidence."""

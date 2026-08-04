@@ -3924,8 +3924,9 @@ def test_socket_mode_recovers_then_acknowledges_and_preserves_route(
         provider_state = _provider_state(slack_provider_fake_url)
         socket_state = provider_state["socket"]
         assert isinstance(socket_state, dict)
-        assert socket_state["connections"] == 2
-        assert socket_state["configured_sessions"] == 2
+        socket_state_object = cast(dict[str, object], socket_state)
+        assert socket_state_object["connections"] == 2
+        assert socket_state_object["configured_sessions"] == 2
         assert "xapp-e2e-private" not in str(provider_state)
 
     recovered = external_api.external_channel_v1_update_slack_connection(

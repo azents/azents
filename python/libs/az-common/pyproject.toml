@@ -24,7 +24,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "ruff>=0.14.5",
-    "pyright>=1.1.400",
+    "ty>=0.0.65",
     "pytest>=9.0.3",
     "pytest-asyncio>=0.24",
     "types-pytz>=2025.2",
@@ -40,11 +40,8 @@ target-version = "py314"
 [tool.ruff.lint]
 select = ["E", "W", "F", "B", "I", "G", "PLC", "PLE", "PLW", "ANN", "T", "PGH003"]
 
-[tool.pyright]
-pythonVersion = "3.14"
-typeCheckingMode = "strict"
-venvPath = "."
-venv = ".venv"
+[tool.ty.environment]
+python-version = "3.14"
 
 [tool.uv.build-backend]
 module-name = "azcommon"

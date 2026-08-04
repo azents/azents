@@ -19,7 +19,8 @@ def github_proxy_url() -> Generator[str, None, None]:
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    host, port = server.server_address
+    host = server.server_address[0]
+    port = server.server_address[1]
     try:
         yield f"http://{host}:{port}"
     finally:
