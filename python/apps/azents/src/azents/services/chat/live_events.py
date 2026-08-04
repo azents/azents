@@ -16,7 +16,10 @@ from azents.core.inference_profile import (
     RequestedInferenceProfile,
 )
 from azents.core.redis import create_redis_client
-from azents.engine.events.action_messages import ActionMessagePayload, ChatAction
+from azents.engine.events.action_messages import (
+    ActionMessagePayload,
+    PersistedChatAction,
+)
 from azents.engine.events.provider_tool_semantics import (
     provider_tool_semantic_input_content,
 )
@@ -51,7 +54,7 @@ from azents.utils.appctx import AppContext
 
 _LIVE_EVENT_TTL_SECONDS = 300
 _live_event_adapter = TypeAdapter(Event)
-_chat_action_adapter = TypeAdapter(ChatAction)
+_chat_action_adapter = TypeAdapter(PersistedChatAction)
 _agent_message_adapter = TypeAdapter(AgentMessagePayload)
 
 

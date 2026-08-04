@@ -41,9 +41,10 @@ from azents.core.tools import (
 )
 from azents.engine.context.window import compute_auto_compaction_threshold_tokens
 from azents.engine.events.action_messages import (
-    ChatAction,
     CleanupOrphanGitWorktreesAction,
     CreateGitWorktreeAction,
+    CreateSessionWorkingFolderAction,
+    PersistedChatAction,
 )
 from azents.engine.events.builders import make_system_error_event
 from azents.engine.events.engine_adapter import AgentEngineAdapter
@@ -210,7 +211,7 @@ from azents.worker.session.mailbox_activity import MailboxActivityObserver
 from azents.worker.session.user_stop_finalizer import UserStopFinalizer
 
 logger = logging.getLogger(__name__)
-_CHAT_ACTION_ADAPTER = TypeAdapter(ChatAction)
+_PERSISTED_CHAT_ACTION_ADAPTER = TypeAdapter(PersistedChatAction)
 _INTERNAL_ERROR_MESSAGE = "An internal error occurred."
 _RUN_HEARTBEAT_INTERVAL_SECONDS = 30.0
 _FAILED_RUN_RETRY_WAIT_POLL_SECONDS = 0.2
@@ -2458,7 +2459,7 @@ class RunExecutor:
             and projection.execution.mailbox_item_id not in processed_mailbox_item_ids
         ]
         for execution in pending:
-            action = _CHAT_ACTION_ADAPTER.validate_python(execution.action)
+            action = _PERSISTED_CHAT_ACTION_ADAPTER.validate_python(execution.action)
             match action:
                 case CreateGitWorktreeAction():
                     result = await self._process_operation_action(
@@ -2470,6 +2471,15 @@ class RunExecutor:
                         tool_admission_barrier=tool_admission_barrier,
                     )
                 case CleanupOrphanGitWorktreesAction():
+                    result = await self._process_operation_action(
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        execution=execution,
+                        action=action,
+                        owner_generation=owner_generation,
+                        tool_admission_barrier=tool_admission_barrier,
+                    )
+                case CreateSessionWorkingFolderAction():
                     result = await self._process_operation_action(
                         agent_id=agent_id,
                         session_id=session_id,
@@ -2493,7 +2503,11 @@ class RunExecutor:
         agent_id: str,
         session_id: str,
         execution: ActionExecution,
-        action: CreateGitWorktreeAction | CleanupOrphanGitWorktreesAction,
+        action: (
+            CreateGitWorktreeAction
+            | CleanupOrphanGitWorktreesAction
+            | CreateSessionWorkingFolderAction
+        ),
         owner_generation: int,
         tool_admission_barrier: ToolAdmissionBarrier,
     ) -> GitWorktreeActionExecutionResult:
@@ -2581,6 +2595,17 @@ class RunExecutor:
             case CleanupOrphanGitWorktreesAction():
                 worktree_service = self.session_git_worktree_service
                 return await worktree_service.run_cleanup_orphan_git_worktrees_action(
+                    agent_id=agent_id,
+                    session_id=session_id,
+                    execution=execution,
+                    action=action,
+                    owner_generation=owner_generation,
+                    on_projection_updated=publish_projection,
+                    on_history_event_appended=publish_history_event,
+                )
+            case CreateSessionWorkingFolderAction():
+                worktree_service = self.session_git_worktree_service
+                return await worktree_service.run_create_session_working_folder_action(
                     agent_id=agent_id,
                     session_id=session_id,
                     execution=execution,

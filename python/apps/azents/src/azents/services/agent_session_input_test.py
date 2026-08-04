@@ -21,8 +21,10 @@ from azents.core.enums import (
     AgentSessionStartReason,
     AgentSessionStatus,
     LLMProvider,
+    MailboxItemKind,
     MailboxSchedulingMode,
     RuntimeRunnerState,
+    SessionWorkingFolderCleanupStatus,
     WorkspaceUserRole,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
@@ -51,7 +53,11 @@ from azents.repos.agent_project_preset import AgentProjectPresetRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.agent_session import AgentSessionRepository
-from azents.repos.agent_session.data import AgentSession
+from azents.repos.agent_session.data import (
+    AgentSession,
+    AgentSessionCreate,
+    SessionWorkingFolderContext,
+)
 from azents.repos.chat_write_request import ChatWriteRequestRepository
 from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.repos.mailbox import MailboxRepository
@@ -211,6 +217,22 @@ class _AgentSessionRepositoryDouble(AgentSessionRepository):
         del session, session_id
         self.calls.append("mark_running_for_input_wakeup")
 
+    async def get_working_folder_context_by_session_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+    ) -> SessionWorkingFolderContext:
+        """Return the stable context used by adoption enqueue tests."""
+        del session, session_id
+        return SessionWorkingFolderContext(
+            id="context-1",
+            agent_id="agent-1",
+            agent_runtime_id="runtime-1",
+            working_folder_path="/workspace/agent/.azents/sessions/test-session-handle",
+            cleanup_status=SessionWorkingFolderCleanupStatus.NOT_ATTEMPTED,
+        )
+
 
 class _MailboxServiceDouble(MailboxService):
     """MailboxService double for tests."""
@@ -258,6 +280,17 @@ class _MailboxServiceDouble(MailboxService):
         self.calls.append("move_mailbox_item")
         self.moved = (from_session_id, to_session_id)
         return 1
+
+    async def has_seen_action_type(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        action_type: str,
+    ) -> bool:
+        """Treat unit-test sessions as already initialized."""
+        del session, session_id, action_type
+        return True
 
 
 class _ExchangeFileService(ExchangeFileService):
@@ -750,7 +783,6 @@ class TestAgentSessionInputService:
                 session,
                 workspace_id,
                 "draft-session-idempotent",
-                workspace_path=None,
             )
 
         service = AgentSessionInputService(
@@ -821,7 +853,13 @@ class TestAgentSessionInputService:
                 first.value.agent_session.id,
             )
         assert len(sessions) == 2
-        assert [item.id for item in buffers] == [first.value.accepted_mailbox_item_id]
+        assert len(buffers) == 2
+        setup_buffer, user_buffer = buffers
+        assert setup_buffer.kind is MailboxItemKind.ACTION_MESSAGE
+        assert setup_buffer.scheduling_mode is MailboxSchedulingMode.QUEUE_ONLY
+        assert setup_buffer.sender_user_id is None
+        assert setup_buffer.action == {"type": "create_session_working_folder"}
+        assert user_buffer.id == first.value.accepted_mailbox_item_id
 
     async def test_new_session_retry_rejects_changed_payload(
         self,
@@ -1179,6 +1217,98 @@ class TestAgentSessionInputService:
         assert updated.run_state == AgentSessionRunState.RUNNING
         assert updated.run_heartbeat_at is not None
 
+    async def test_existing_session_input_adopts_working_folder_setup_once(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Legacy-style active Session input queues one setup action before wake."""
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(session, "folder-adoption")
+            user_id = await _create_user(session, "folder-adoption@example.com")
+            await _add_workspace_user(
+                session,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
+            agent_id = await _create_agent(session, workspace_id, "folder-adoption")
+            agent_session = await AgentSessionRepository().create(
+                session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                ),
+            )
+
+        service = AgentSessionInputService(
+            agent_repository=AgentRepository(),
+            agent_project_preset_repository=AgentProjectPresetRepository(),
+            agent_project_catalog_repository=AgentProjectCatalogRepository(),
+            agent_project_default_repository=AgentProjectDefaultRepository(),
+            agent_runtime_repository=AgentRuntimeRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            root_agent_session_creation_service=_root_agent_session_creation_service(),
+            chat_write_request_repository=ChatWriteRequestRepository(),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+            exchange_file_service=_ExchangeFileService(),
+            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
+            session_manager=rdb_session_manager,
+        )
+
+        first = await service.create_buffered_agent_input(
+            agent_id=agent_id,
+            agent_session_id=agent_session.id,
+            message=InputMessage(
+                text="first legacy input",
+                headers=[],
+                metadata={"source": "chat"},
+                attachments=[],
+            ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
+            user_id=user_id,
+            request_payload={"request": "folder-adoption-first"},
+        )
+        second = await service.create_buffered_agent_input(
+            agent_id=agent_id,
+            agent_session_id=agent_session.id,
+            message=InputMessage(
+                text="second legacy input",
+                headers=[],
+                metadata={"source": "chat"},
+                attachments=[],
+            ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
+            user_id=user_id,
+            request_payload={"request": "folder-adoption-second"},
+        )
+
+        assert isinstance(first, Success)
+        assert isinstance(second, Success)
+        async with rdb_session_manager() as session:
+            buffers = await MailboxRepository().list_by_session_id(
+                session,
+                agent_session.id,
+            )
+            context = (
+                await AgentSessionRepository().get_working_folder_context_by_session_id(
+                    session,
+                    session_id=agent_session.id,
+                )
+            )
+        assert context is not None
+        assert len(buffers) == 3
+        setup, first_input, second_input = buffers
+        assert setup.kind is MailboxItemKind.ACTION_MESSAGE
+        assert setup.scheduling_mode is MailboxSchedulingMode.QUEUE_ONLY
+        assert setup.sender_user_id is None
+        assert setup.action == {"type": "create_session_working_folder"}
+        assert setup.idempotency_key == f"session-working-folder:adoption:{context.id}"
+        assert [item.content for item in (first_input, second_input)] == [
+            "first legacy input",
+            "second legacy input",
+        ]
+
     async def test_agent_decommission_fence_wins_before_input_admission(
         self,
         rdb_engine: AsyncEngine,
@@ -1390,7 +1520,13 @@ class TestAgentSessionInputService:
             buffers = await MailboxRepository().list_by_session_id(
                 session, agent_session.id
             )
-        assert [buffer.id for buffer in buffers] == [first_value.mailbox_item.id]
+        assert len(buffers) == 2
+        setup_buffer, user_buffer = buffers
+        assert setup_buffer.kind is MailboxItemKind.ACTION_MESSAGE
+        assert setup_buffer.scheduling_mode is MailboxSchedulingMode.QUEUE_ONLY
+        assert setup_buffer.sender_user_id is None
+        assert setup_buffer.action == {"type": "create_session_working_folder"}
+        assert user_buffer.id == first_value.mailbox_item.id
 
     async def test_buffered_input_idempotency_is_scoped_to_requester(
         self,
@@ -1496,8 +1632,21 @@ class TestAgentSessionInputService:
                 agent_session.id,
             )
 
+        setup_buffers = [
+            buffer
+            for buffer in buffers
+            if buffer.kind is MailboxItemKind.ACTION_MESSAGE
+        ]
+        user_buffers = [
+            buffer
+            for buffer in buffers
+            if buffer.kind is not MailboxItemKind.ACTION_MESSAGE
+        ]
+        assert len(setup_buffers) == 1
+        assert setup_buffers[0].action == {"type": "create_session_working_folder"}
         assert {
-            (buffer.id, buffer.sender_user_id, buffer.content) for buffer in buffers
+            (buffer.id, buffer.sender_user_id, buffer.content)
+            for buffer in user_buffers
         } == {
             (
                 first.value.accepted_mailbox_item_id,
@@ -1510,7 +1659,7 @@ class TestAgentSessionInputService:
                 second_message.text,
             ),
         }
-        assert len({buffer.idempotency_key for buffer in buffers}) == 2
+        assert len({buffer.idempotency_key for buffer in user_buffers}) == 2
 
         first_retry = await service.create_buffered_agent_input(
             agent_id=agent_id,

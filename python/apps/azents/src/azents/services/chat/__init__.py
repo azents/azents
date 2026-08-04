@@ -28,7 +28,10 @@ from azents.core.session_lifecycle import (
     SessionLifecycleParticipantDefinition,
     SessionLifecycleTransitionContext,
 )
-from azents.engine.events.action_messages import CreateGitWorktreeAction
+from azents.engine.events.action_messages import (
+    CreateGitWorktreeAction,
+    CreateSessionWorkingFolderAction,
+)
 from azents.engine.events.types import AgentRunState, ClientToolCallPayload, Event
 from azents.engine.tools.goal import GoalState, GoalStateSnapshot, GoalStateStore
 from azents.engine.tools.todo import TodoStateSnapshot, TodoStateStore
@@ -934,8 +937,25 @@ class ChatSessionService:
         """Enqueue ordered setup TurnActions for a newly created session."""
         metadata = {
             "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
-            "source": "chat",
+            "source": "system",
         }
+        await self.mailbox_item_service.enqueue(
+            session,
+            MailboxEnqueue(
+                session_id=agent_session.id,
+                kind=MailboxItemKind.ACTION_MESSAGE,
+                scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                sender_user_id=None,
+                content="",
+                idempotency_key=(f"session-working-folder:initial:{agent_session.id}"),
+                metadata=metadata,
+                action=CreateSessionWorkingFolderAction().model_dump(mode="json"),
+                attachments=[],
+                file_parts=[],
+            ),
+        )
         created = False
         for item in workspace_items:
             match item:
@@ -1329,6 +1349,26 @@ class ChatSessionService:
                 ),
                 participant_operation=restore_participant,
                 transition=restore_tree,
+            )
+            await self.mailbox_item_service.enqueue(
+                session,
+                MailboxEnqueue(
+                    session_id=session_id,
+                    kind=MailboxItemKind.ACTION_MESSAGE,
+                    scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
+                    requested_model_target_label=None,
+                    requested_reasoning_effort=None,
+                    sender_user_id=None,
+                    content="",
+                    idempotency_key=(f"session-working-folder:restore:{session_id}"),
+                    metadata={
+                        "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                        "source": "system",
+                    },
+                    action=CreateSessionWorkingFolderAction().model_dump(mode="json"),
+                    attachments=[],
+                    file_parts=[],
+                ),
             )
             await session.commit()
             restored = await self.agent_session_repository.get_by_id(

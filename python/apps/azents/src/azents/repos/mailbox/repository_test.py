@@ -10,6 +10,7 @@ from azents.core.enums import (
     LLMProvider,
     MailboxItemKind,
     MailboxSchedulingMode,
+    RuntimeRunnerState,
 )
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.rdb.models.agent import RDBAgent
@@ -88,7 +89,16 @@ async def _create_agent_session(
     workspace_id = await _create_workspace(session, handle)
     user_id = await _create_user(session, f"{handle}@example.com")
     agent_id = await _create_agent(session, workspace_id, slug)
-    runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
+    runtime_repository = AgentRuntimeRepository()
+    runtime = await runtime_repository.ensure_for_agent(session, agent_id)
+    await runtime_repository.record_runner_state(
+        session,
+        runtime.id,
+        RuntimeRunnerState.UNKNOWN,
+        1,
+        expected_desired_generation=runtime.desired_generation,
+        workspace_path="/workspace/agent",
+    )
     agent_session = (
         await AgentSessionRepository().ensure_team_primary_for_agent(
             session, workspace_id=runtime.workspace_id, agent_id=runtime.agent_id

@@ -335,6 +335,29 @@ class EventTranscriptRepository:
         )
         return result.scalar_one_or_none() is not None
 
+    async def has_action_execution_result_with_type(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        action_type: str,
+    ) -> bool:
+        """Return whether a terminal action result has the requested type."""
+        result = await session.scalar(
+            sa.select(
+                sa.exists().where(
+                    RDBEvent.session_id == session_id,
+                    RDBEvent.reverted.is_(False),
+                    RDBEvent.kind == EventKind.ACTION_EXECUTION_RESULT,
+                    RDBEvent.payload["action_execution"]["execution"][
+                        "action_type"
+                    ].as_string()
+                    == action_type,
+                )
+            )
+        )
+        return bool(result)
+
     async def get_by_external_id(
         self,
         session: AsyncSession,

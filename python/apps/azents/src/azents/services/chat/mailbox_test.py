@@ -16,6 +16,7 @@ from azents.core.enums import (
     LLMProvider,
     MailboxItemKind,
     MailboxSchedulingMode,
+    RuntimeRunnerState,
     WorkspaceUserRole,
 )
 from azents.core.inference_profile import SessionInferenceState
@@ -241,7 +242,16 @@ async def _create_session_with_buffer(
     user_id = await _create_user(session, f"{handle}@example.com")
     await _add_workspace_user(session, workspace_id=workspace_id, user_id=user_id)
     agent_id = await _create_agent(session, workspace_id, slug)
-    runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
+    runtime_repository = AgentRuntimeRepository()
+    runtime = await runtime_repository.ensure_for_agent(session, agent_id)
+    await runtime_repository.record_runner_state(
+        session,
+        runtime.id,
+        RuntimeRunnerState.UNKNOWN,
+        1,
+        expected_desired_generation=runtime.desired_generation,
+        workspace_path="/workspace/agent",
+    )
     agent_session = (
         await AgentSessionRepository().ensure_team_primary_for_agent(
             session, workspace_id=runtime.workspace_id, agent_id=runtime.agent_id

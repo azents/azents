@@ -298,7 +298,7 @@ class TestChatSessionTeamSessions:
         rdb_session: AsyncSession,
         rdb_session_manager: SessionManager[AsyncSession],
     ) -> None:
-        """Project-free Session creation does not inspect Runtime paths."""
+        """Root Session creation requires a persisted Runner workspace path."""
         workspace_id = await _create_workspace(rdb_session, "team-empty-no-runtime")
         user_id = await _create_user(
             rdb_session,
@@ -317,14 +317,16 @@ class TestChatSessionTeamSessions:
         )
         await rdb_session.commit()
 
-        result = await _service(rdb_session_manager).create_team_session(
-            agent_id=agent_id,
-            user_id=user_id,
-            existing_project_paths=[],
-            setup_actions=[],
-        )
-
-        assert isinstance(result, Success)
+        with pytest.raises(
+            RuntimeError,
+            match="Agent Runtime workspace path is unavailable",
+        ):
+            await _service(rdb_session_manager).create_team_session(
+                agent_id=agent_id,
+                user_id=user_id,
+                existing_project_paths=[],
+                setup_actions=[],
+            )
 
     async def test_create_team_session_uses_explicit_projects(
         self,

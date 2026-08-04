@@ -1,6 +1,7 @@
 """AgentSession input enqueue facade."""
 
 import dataclasses
+import datetime
 import hashlib
 from typing import Annotated, assert_never
 
@@ -17,7 +18,10 @@ from azents.core.enums import (
     MailboxSchedulingMode,
 )
 from azents.core.inference_profile import RequestedInferenceProfile
-from azents.engine.events.action_messages import CreateGitWorktreeAction
+from azents.engine.events.action_messages import (
+    CreateGitWorktreeAction,
+    CreateSessionWorkingFolderAction,
+)
 from azents.engine.run.input import InputMessage
 from azents.rdb.deps import get_session_manager
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
@@ -257,6 +261,10 @@ class AgentSessionInputService:
 
             runtime = await self.agent_runtime_repository.ensure_for_agent(
                 session, agent_id
+            )
+            await self._enqueue_working_folder_adoption_if_needed(
+                session,
+                agent_session=agent_session,
             )
             canonical_request_payload = {
                 **request_payload,
@@ -615,6 +623,26 @@ class AgentSessionInputService:
         client_request_id: str | None,
     ) -> None:
         """Enqueue ordered setup TurnActions before the first user message."""
+        await self.mailbox_item_service.enqueue(
+            session,
+            MailboxEnqueue(
+                session_id=agent_session.id,
+                kind=MailboxItemKind.ACTION_MESSAGE,
+                scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                sender_user_id=None,
+                content="",
+                idempotency_key=(f"session-working-folder:initial:{agent_session.id}"),
+                metadata={
+                    "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                    "source": "system",
+                },
+                action=CreateSessionWorkingFolderAction().model_dump(mode="json"),
+                attachments=[],
+                file_parts=[],
+            ),
+        )
         for index, item in enumerate(workspace_items):
             match item:
                 case ExistingProjectWorkspaceItem():
@@ -650,6 +678,48 @@ class AgentSessionInputService:
                     )
                 case _:
                     assert_never(item)
+
+    async def _enqueue_working_folder_adoption_if_needed(
+        self,
+        session: AsyncSession,
+        *,
+        agent_session: AgentSession,
+    ) -> None:
+        """Queue one forward-adoption setup action before a human wake input."""
+        action = CreateSessionWorkingFolderAction()
+        if await self.mailbox_item_service.has_seen_action_type(
+            session,
+            session_id=agent_session.id,
+            action_type=action.type,
+        ):
+            return
+        repository = self.agent_session_repository
+        context = await repository.get_working_folder_context_by_session_id(
+            session,
+            session_id=agent_session.id,
+        )
+        if context is None:
+            raise RuntimeError("Active root Session is missing working-folder context")
+        await self.mailbox_item_service.enqueue(
+            session,
+            MailboxEnqueue(
+                session_id=agent_session.id,
+                kind=MailboxItemKind.ACTION_MESSAGE,
+                scheduling_mode=MailboxSchedulingMode.QUEUE_ONLY,
+                requested_model_target_label=None,
+                requested_reasoning_effort=None,
+                sender_user_id=None,
+                content="",
+                idempotency_key=f"session-working-folder:adoption:{context.id}",
+                metadata={
+                    "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+                    "source": "system",
+                },
+                action=action.model_dump(mode="json"),
+                attachments=[],
+                file_parts=[],
+            ),
+        )
 
     async def _enqueue_user_message(
         self,

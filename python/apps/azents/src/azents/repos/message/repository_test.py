@@ -52,7 +52,12 @@ async def _create_agent_session(session: AsyncSession) -> str:
     )
     session.add(agent)
     await session.flush()
-    session.add(RDBAgentRuntime(workspace_id=workspace_id, agent_id=agent.id))
+    runtime = RDBAgentRuntime(
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+    )
+    runtime.workspace_path = "/workspace/agent"
+    session.add(runtime)
     await session.flush()
     agent_session = await AgentSessionRepository().create(
         session,

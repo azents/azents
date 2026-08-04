@@ -409,6 +409,7 @@ Class | Method | HTTP request | Description
  - [CreateGitWorktreeAction](azentspublicclient/docs/CreateGitWorktreeAction.md)
  - [CreateInvitationRequest](azentspublicclient/docs/CreateInvitationRequest.md)
  - [CreateJoinRequestRequest](azentspublicclient/docs/CreateJoinRequestRequest.md)
+ - [CreateSessionWorkingFolderAction](azentspublicclient/docs/CreateSessionWorkingFolderAction.md)
  - [CreateWorkspaceRequest](azentspublicclient/docs/CreateWorkspaceRequest.md)
  - [CreateWorkspaceResponse](azentspublicclient/docs/CreateWorkspaceResponse.md)
  - [CurrentMemberResponse](azentspublicclient/docs/CurrentMemberResponse.md)

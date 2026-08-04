@@ -121,19 +121,19 @@ def _service() -> RootAgentSessionCreationService:
 class TestRootAgentSessionCreationService:
     """Root Session Project initialization behavior."""
 
-    async def test_empty_explicit_intent_does_not_require_workspace_path(
+    async def test_empty_explicit_intent_uses_runner_reported_workspace_path(
         self,
         rdb_session: AsyncSession,
     ) -> None:
-        """Creating a Project-free root Session does not inspect Runtime paths."""
-        workspace_id = await _create_workspace(rdb_session, "root-empty-no-runtime")
+        """Creating a Project-free root Session uses persisted workspace evidence."""
+        workspace_id = await _create_workspace(rdb_session, "root-empty-runtime")
         agent_id = await _create_agent(
             rdb_session,
             workspace_id=workspace_id,
-            slug="root-empty-no-runtime",
+            slug="root-empty-runtime",
             policy_paths=[],
             revision=1,
-            workspace_path=None,
+            workspace_path="/runtime/root-empty",
         )
 
         result = await _service().create_root_session(

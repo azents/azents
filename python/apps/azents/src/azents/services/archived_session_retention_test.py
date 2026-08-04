@@ -15,6 +15,7 @@ from azents.core.enums import (
     LLMProvider,
 )
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.archived_session_retention import (
     RDBArchivedSessionPurgeJob,
@@ -103,6 +104,13 @@ async def _create_root(
         lightweight_model_selection=model_selection,
     )
     session.add(agent)
+    await session.flush()
+    runtime = RDBAgentRuntime(
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+    )
+    runtime.workspace_path = "/workspace/agent"
+    session.add(runtime)
     await session.flush()
     created = await AgentSessionRepository().create(
         session,

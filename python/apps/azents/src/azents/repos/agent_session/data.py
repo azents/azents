@@ -14,6 +14,7 @@ from azents.core.enums import (
     AgentSessionStatus,
     AgentSessionTitleSource,
     SessionAgentKind,
+    SessionWorkingFolderCleanupStatus,
 )
 from azents.core.inference_profile import SessionInferenceState
 
@@ -180,6 +181,18 @@ class SessionAgent(BaseModel):
     )
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
+
+
+class SessionWorkingFolderContext(BaseModel):
+    """Stored Session working-folder ownership context."""
+
+    id: str = Field(description="SessionAgentContext ID")
+    agent_id: str = Field(description="Agent ID")
+    agent_runtime_id: str | None = Field(description="Current AgentRuntime ID")
+    working_folder_path: str = Field(description="Exact owned working-folder path")
+    cleanup_status: SessionWorkingFolderCleanupStatus = Field(
+        description="Latest archive cleanup state"
+    )
 
 
 class PendingSessionCommand(BaseModel):

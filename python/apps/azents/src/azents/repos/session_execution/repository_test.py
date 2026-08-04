@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import AgentRunStatus, LLMProvider
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
+from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.repos.agent_session import AgentSessionRepository
@@ -58,6 +59,13 @@ async def _create_execution_subject(
         ),
     )
     session.add(agent)
+    await session.flush()
+    runtime = RDBAgentRuntime(
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+    )
+    runtime.workspace_path = "/workspace/agent"
+    session.add(runtime)
     await session.flush()
 
     created = await AgentSessionRepository().create(

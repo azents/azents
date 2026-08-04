@@ -108,6 +108,24 @@ class ActionExecutionRepository:
         )
         return [self._build_execution(rdb) for rdb in result.scalars()]
 
+    async def has_action_type_by_session_id(
+        self,
+        session: AsyncSession,
+        *,
+        session_id: str,
+        action_type: str,
+    ) -> bool:
+        """Return whether a live operation of the requested type exists."""
+        result = await session.scalar(
+            sa.select(
+                sa.exists().where(
+                    RDBActionExecution.session_id == session_id,
+                    RDBActionExecution.action_type == action_type,
+                )
+            )
+        )
+        return bool(result)
+
     async def list_pending_or_running_by_session_id(
         self,
         session: AsyncSession,

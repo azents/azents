@@ -32,6 +32,7 @@ from azents.core.enums import (
     MailboxItemKind,
     MailboxSchedulingMode,
     ModelFileStatus,
+    RuntimeRunnerState,
 )
 from azents.core.inference_profile import (
     AppliedInferenceProfile,
@@ -195,7 +196,16 @@ async def _create_fixture(
             UserCreate(email=f"{slug}@example.com"),
         )
         agent_id = await _create_agent(session, workspace_id, slug)
-        runtime = await AgentRuntimeRepository().ensure_for_agent(session, agent_id)
+        runtime_repository = AgentRuntimeRepository()
+        runtime = await runtime_repository.ensure_for_agent(session, agent_id)
+        await runtime_repository.record_runner_state(
+            session,
+            runtime.id,
+            RuntimeRunnerState.UNKNOWN,
+            1,
+            expected_desired_generation=runtime.desired_generation,
+            workspace_path="/workspace/agent",
+        )
         agent_session = (
             await AgentSessionRepository().ensure_team_primary_for_agent(
                 session,

@@ -103,7 +103,11 @@ async def _create_agent_runtime(
     session.add(agent)
     await session.flush()
 
-    runtime = RDBAgentRuntime(workspace_id=workspace_id, agent_id=agent.id)
+    runtime = RDBAgentRuntime(
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+    )
+    runtime.workspace_path = "/workspace/agent"
     session.add(runtime)
     await session.flush()
     return workspace_id, agent.id, runtime.id

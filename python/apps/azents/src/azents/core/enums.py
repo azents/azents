@@ -187,6 +187,15 @@ class SessionGitWorktreeBranchCreatedBy(enum.StrEnum):
     AZENTS = "azents"
 
 
+class SessionWorkingFolderCleanupStatus(enum.StrEnum):
+    """Latest archive-owned Session working-folder cleanup state."""
+
+    NOT_ATTEMPTED = "not_attempted"
+    PENDING = "pending"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
 class GitWorktreePathClaimOwnerKind(enum.StrEnum):
     """Destructive operation currently reserving a managed worktree path."""
 
