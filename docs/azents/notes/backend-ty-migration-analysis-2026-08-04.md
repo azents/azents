@@ -151,3 +151,21 @@ The phase reduces the baseline from 862 to 745 diagnostics:
 One precise `ty` suppression remains at a generated gRPC stub construction boundary.
 The generated overload correctly returns an async stub for an aio channel, which
 Pyright recognizes, while `ty` selects the synchronous overload.
+
+## Phase 4: Native Request Inspection Variance
+
+The fourth phase corrects the generic upper bound used by `AgentRunExecution`.
+`NativeRequestInspection` declared `model` as writable even though execution only
+reads it and native request models expose frozen values. Declaring the inspection
+surface as a read-only property accurately models that contract.
+
+### Phase 4 Result
+
+The phase reduces the baseline from 745 to 637 diagnostics:
+
+- `execution_test.py` generic-bound diagnostics: 108 to 0
+- Pyright: 0 errors
+- Targeted tests: 54 passed
+
+The production `AgentRunExecution` generic shape and runtime behavior remain
+unchanged.
