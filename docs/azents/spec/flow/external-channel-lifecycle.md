@@ -31,8 +31,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-04
-spec_version: 31
+last_verified_at: 2026-08-05
+spec_version: 32
 ---
 
 # External Channel Lifecycle
@@ -212,8 +212,8 @@ Archive uses the explicit terminal transition policy inside the caller-owned arc
 2. set their terminal disconnect timestamps and preserve their history;
 3. end each binding's Channel Work in its Session-bound Toolkit State;
 4. preserve already projected Session history and normal mailbox lifecycle state; and
-5. capture one leave-presence plan per disconnected binding plus one cleanup plan for
-   each retained Activity Tracker.
+5. capture cleanup plans for retained Activity Trackers without creating a
+   leave-presence plan.
 
 Provider presence and cleanup effects run once after commit. Failure, ambiguity, or
 interruption does not roll back Session archive and creates no recovery work.
@@ -271,6 +271,8 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-08-05** (spec_version 32) — Kept Session archive binding termination and
+  Activity Tracker cleanup while suppressing the provider leave-presence control.
 - **2026-08-03** (spec_version 31) — Clarified that eligible silent Work completion
   leaves the binding lifecycle unchanged and produces no lifecycle cleanup plan.
 - **2026-08-03** (spec_version 30) — Moved Channel Work archive, restore, purge, and

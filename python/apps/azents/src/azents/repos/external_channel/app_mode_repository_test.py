@@ -1576,6 +1576,84 @@ async def test_manual_binding_disconnect_returns_one_leave_presence_plan(
     }
 
 
+async def test_session_archive_disconnects_binding_without_leave_presence_plan(
+    rdb_session: AsyncSession,
+) -> None:
+    """Archive terminalizes the binding without posting a leave notification."""
+    workspace_id = await _workspace(rdb_session, "archive-without-presence")
+    agent = await _agent(rdb_session, workspace_id, "archive-without-presence")
+    repository = ExternalChannelRepository()
+    lifecycle = ExternalChannelLifecycleRepository()
+    connection = RDBExternalChannelConnection(
+        **_connection_create(
+            workspace_id,
+            provider_app_id="archive-app",
+            provider_tenant_id="archive-team",
+        ).model_dump()
+    )
+    rdb_session.add(connection)
+    await rdb_session.flush()
+    route = await repository.create_agent_route(
+        rdb_session,
+        _route_create(
+            connection.id,
+            agent.id,
+            mode=ExternalChannelAppMode.SINGLE,
+        ),
+    )
+    resource = await repository.create_resource_idempotent(
+        rdb_session,
+        ExternalChannelResourceCreate(
+            connection_id=connection.id,
+            resource_type=ExternalChannelResourceType.THREAD,
+            provider_resource_key="archive-resource",
+            labels={
+                "provider": "slack",
+                "tenant_id": "archive-team",
+                "channel_id": "archive-channel",
+                "thread_ts": "1.000001",
+            },
+            status=ExternalChannelResourceStatus.ACTIVE,
+            latest_activity_at=_at(1),
+            unavailable_at=None,
+            deleted_at=None,
+        ),
+    )
+    await _add_agent_workspace_runtime(
+        rdb_session,
+        workspace_id=workspace_id,
+        agent_id=agent.id,
+    )
+    agent_session = await AgentSessionRepository().create(
+        rdb_session,
+        AgentSessionCreate(
+            workspace_id=workspace_id,
+            agent_id=agent.id,
+            title=None,
+        ),
+    )
+    binding = RDBExternalChannelBinding(
+        resource_id=resource.id,
+        route_id=route.id,
+        agent_session_id=agent_session.id,
+        response_mode=ExternalChannelResponseMode.ALL_MESSAGES,
+    )
+    rdb_session.add(binding)
+    await rdb_session.flush()
+
+    archived = await lifecycle.terminate_session_tree(
+        rdb_session,
+        session_ids=(agent_session.id,),
+        now=_at(30),
+    )
+
+    assert binding.disconnected_at == _at(30)
+    assert binding.disconnect_reason == "session_archived"
+    assert archived.disconnected_binding_count == 1
+    assert archived.direct_cleanup_count == 0
+    assert archived.cleanup_plans == ()
+
+
 async def test_multi_channel_default_transition_terminalizes_only_parent_state(
     rdb_session: AsyncSession,
 ) -> None:

@@ -35,8 +35,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/external_channel/work_state.py
   - python/apps/azents/src/azents/worker/session/idle_continuation.py
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-04
-spec_version: 37
+last_verified_at: 2026-08-05
+spec_version: 38
 ---
 
 # External Channel Delivery and Channel Work
@@ -389,22 +389,26 @@ bindings can still require continuation in the same Session.
 
 ## Lifecycle Cleanup Controls
 
-Every binding termination captures one leave-presence plan in addition to any
-required Tracker-delete plans. Slack renders `Agent name left this conversation.`
-in Block Kit and Discord renders the same statement in an Embed; both retain the
-`View session` button. Manual binding disconnect, route or connection termination,
-Session archive, and Agent decommission use this common presentation. Lifecycle
-transactions never call a provider directly. When terminal connection cleanup purges
-provider credentials, the service captures the delivery target in memory before the
-purge. Post-commit execution revalidates the durable connection, route, resource,
-binding, Session, and terminal state before using that captured target. The captured
-credential and plans remain process-local. Other cleanup paths resolve current
-credentials normally. Each captured plan is attempted at most once; failure,
-ambiguity, cancellation, or process termination does not roll back the terminal
-lifecycle transition and creates no recovery work.
+Every binding termination other than Session archive captures one leave-presence plan
+in addition to any required Tracker-delete plans. Slack renders `Agent name left this
+conversation.` in Block Kit and Discord renders the same statement in an Embed; both
+retain the `View session` button. Manual binding disconnect, route or connection
+termination, and Agent decommission use this presentation. Session archive
+terminalizes the binding and performs required Tracker cleanup without publishing a
+leave-presence control. Lifecycle transactions never call a provider directly. When
+terminal connection cleanup purges provider credentials, the service captures the
+delivery target in memory before the purge. Post-commit execution revalidates the
+durable connection, route, resource, binding, Session, and terminal state before
+using that captured target. The captured credential and plans remain process-local.
+Other cleanup paths resolve current credentials normally. Each captured plan is
+attempted at most once; failure, ambiguity, cancellation, or process termination does
+not roll back the terminal lifecycle transition and creates no recovery work.
 
 ## Changelog
 
+- **2026-08-05** (spec_version 38) — Suppressed the provider leave-presence
+  control when Session archive terminalizes a binding, while retaining the terminal
+  transition and Activity Tracker cleanup.
 - **2026-08-04** (spec_version 37) — Added continuation-only `ignore`, with
   tool-follow-up scope retention, atomic unfinished-task rejection, and zero provider
   effects.

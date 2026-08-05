@@ -142,6 +142,7 @@ class ExternalChannelLifecycleRepository:
                     resource=resource,
                     now=now,
                     reason="session_archived",
+                    emit_leave_presence=False,
                 )
             )
         return ExternalChannelArchiveTermination(
@@ -1255,6 +1256,7 @@ class ExternalChannelLifecycleRepository:
                     resource=resource,
                     now=now,
                     reason=reason,
+                    emit_leave_presence=True,
                 )
             )
         return tuple(plans)
