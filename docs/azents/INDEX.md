@@ -17,7 +17,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-03 | 63 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-03 | 140 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-04 | 49 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-05 | 50 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-07-24 | 6 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-01 | 18 |
@@ -165,6 +165,7 @@ Design documents are accumulated records and are not listed individually in this
 | [External Watch / Raw Session Event Subscription Historical Requirements Reconstruction](requirements/external-260503-external-watch-raw-subscription.md) | external-260503 | 2026-05-03 | 2026-05-03 |
 | [Discord Message Invocation Requirements](requirements/external-260726-discord-message-invocation.md) | external-260726 | 2026-07-26 | - |
 | [External Channel Activity Tracker Session Navigation Requirements](requirements/external-260803-activity-tracker-session-navigation.md) | external-260803 | 2026-08-03 | 2026-08-03 |
+| [External Channel Typed Provider Projection Requirements](requirements/external-260805-typed-provider-projections.md) | external-260805 | 2026-08-05 | 2026-08-05 |
 | [Failed-run Error Retry and Finalization Historical Requirements Reconstruction](requirements/failed-260627-failed-error-retry.md) | failed-260627 | 2026-06-27 | - |
 | [Scope Failed-run Retry to One Model Turn Historical Requirements Reconstruction](requirements/failed-260716-failed-retry-to-turn.md) | failed-260716 | 2026-07-16 | 2026-03-26 |
 | [Keep OpenAI HTTP Failure Semantics at the Azents Boundary Historical Requirements Reconstruction](requirements/failure-260716-openai-http-failure-semantics-at-the-azents-boundary.md) | failure-260716 | 2026-07-16 | - |
@@ -535,6 +536,7 @@ Design documents are accumulated records and are not listed individually in this
 - [External Watch / Raw Session Event Subscription Historical Decision Reconstruction](adr/external-260503-external-watch-raw-subscription.md)
 - [Discord Message Invocation](adr/external-260726-discord-message-invocation.md)
 - [External Channel Activity Tracker Session Navigation](adr/external-260803-activity-tracker-session-navigation.md)
+- [External Channel Typed Provider Projections](adr/external-260805-typed-provider-projections.md)
 - [Failed-run Error Retry and Finalization](adr/failed-260627-failed-error-retry.md)
 - [Scope Failed-run Retry to One Model Turn](adr/failed-260716-failed-retry-to-turn.md)
 - [Keep OpenAI HTTP Failure Semantics at the Azents Boundary](adr/failure-260716-openai-http-failure-semantics-at-the-azents-boundary.md)

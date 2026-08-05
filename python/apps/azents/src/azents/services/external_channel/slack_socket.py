@@ -6,13 +6,14 @@ import datetime
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 import aiohttp
 from slack_sdk.socket_mode.request import SocketModeRequest
 from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.web.async_client import AsyncWebClient
 
+from azents.core.external_channel_projection import is_external_channel_projection
 from azents.repos.external_channel.data import ExternalChannelTrigger
 from azents.services.external_channel.interaction import (
     ExternalChannelInteractionHandoff,
@@ -365,7 +366,7 @@ def parse_slack_socket_envelope(message: str | bytes) -> SlackSocketEnvelope:
         raise SlackSocketInvalidEnvelope(
             "Slack Socket Mode message is not valid JSON."
         ) from error
-    if not isinstance(payload, dict):
+    if not is_external_channel_projection(payload):
         raise SlackSocketInvalidEnvelope(
             "Slack Socket Mode message must be a JSON object."
         )
@@ -381,7 +382,7 @@ def parse_slack_socket_envelope(message: str | bytes) -> SlackSocketEnvelope:
             or not request.type
             or not isinstance(request.envelope_id, str)
             or not request.envelope_id
-            or not isinstance(request.payload, dict)
+            or not is_external_channel_projection(request.payload)
         ):
             raise SlackSocketInvalidEnvelope("Slack Socket Mode request is invalid.")
         return SlackSocketEnvelope(
@@ -390,19 +391,27 @@ def parse_slack_socket_envelope(message: str | bytes) -> SlackSocketEnvelope:
             payload=request.payload,
         )
     envelope_type = payload.get("type")
-    if envelope_type not in {"hello", "disconnect"}:
+    validated_type: Literal["hello", "disconnect"]
+    if envelope_type == "hello":
+        validated_type = "hello"
+    elif envelope_type == "disconnect":
+        validated_type = "disconnect"
+    else:
         raise SlackSocketInvalidEnvelope(
             "Slack Socket Mode envelope type is unsupported."
         )
     envelope_payload = payload.get("payload")
-    if envelope_payload is not None and not isinstance(envelope_payload, dict):
+    validated_payload = (
+        envelope_payload if is_external_channel_projection(envelope_payload) else None
+    )
+    if envelope_payload is not None and validated_payload is None:
         raise SlackSocketInvalidEnvelope(
             "Slack Socket Mode envelope payload must be an object."
         )
     return SlackSocketEnvelope(
         envelope_id=None,
-        type=envelope_type,
-        payload=envelope_payload,
+        type=validated_type,
+        payload=validated_payload,
     )
 
 

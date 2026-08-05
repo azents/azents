@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from azents.core.external_channel_projection import is_external_channel_projection
 from azents.services.external_channel.conversation import (
     ExternalChannelHistoryCredentialsInvalid,
     ExternalChannelHistoryDeadlineExceeded,
@@ -158,16 +159,16 @@ class DiscordConversationHistoryClient:
         messages: list[DiscordNormalizedMessage] = []
         oldest_message_id: str | None = None
         for item in payload:
-            if isinstance(item, dict):
+            if is_external_channel_projection(item):
                 self._validate_message_size(item)
-            if not isinstance(item, dict):
+            if not is_external_channel_projection(item):
                 continue
             if item.get("channel_id") != thread_channel_id:
                 raise DiscordHistoryResponseMalformed(
                     "Discord thread history item crossed the requested channel."
                 )
             raw_thread = item.get("thread")
-            if isinstance(raw_thread, dict):
+            if is_external_channel_projection(raw_thread):
                 if raw_thread.get("id") != thread_channel_id or (
                     raw_thread.get("parent_id") is not None
                     and raw_thread.get("parent_id") != source_channel_id
@@ -277,7 +278,7 @@ class DiscordConversationHistoryClient:
                 page_messages: list[DiscordNormalizedMessage] = []
                 oldest_position: str | None = None
                 for item in payload:
-                    if not isinstance(item, dict):
+                    if not is_external_channel_projection(item):
                         continue
                     self._validate_message_size(item)
                     self._validate_history_item(item, trigger=trigger)
@@ -335,13 +336,16 @@ class DiscordConversationHistoryClient:
                 if not payload or reached_start:
                     break
                 last_item = payload[-1]
-                if not isinstance(last_item, dict) or not isinstance(
-                    last_item.get("id"), str
-                ):
+                if not is_external_channel_projection(last_item):
                     raise ExternalChannelHistoryRangeIncomplete(
                         "Discord history pagination cursor is invalid."
                     )
-                cursor = last_item["id"]
+                last_item_id = last_item.get("id")
+                if not isinstance(last_item_id, str):
+                    raise ExternalChannelHistoryRangeIncomplete(
+                        "Discord history pagination cursor is invalid."
+                    )
+                cursor = last_item_id
             except DiscordHistoryCredentialsInvalid as error:
                 raise ExternalChannelHistoryCredentialsInvalid(str(error)) from error
             except DiscordHistoryPermissionDenied as error:
@@ -519,7 +523,7 @@ class DiscordConversationHistoryClient:
             )
         raw_thread = item.get("thread")
         if (
-            isinstance(raw_thread, dict)
+            is_external_channel_projection(raw_thread)
             and trigger.conversation_channel_id != trigger.source_channel_id
             and (
                 raw_thread.get("id") != trigger.conversation_channel_id
@@ -541,7 +545,7 @@ class DiscordConversationHistoryClient:
             raise DiscordHistoryTemporaryError(
                 "Discord history response was invalid."
             ) from error
-        if not isinstance(payload, dict):
+        if not is_external_channel_projection(payload):
             raise DiscordHistoryTemporaryError("Discord history response was invalid.")
         return payload
 
@@ -555,7 +559,7 @@ class DiscordConversationHistoryClient:
             ) from error
         if not isinstance(payload, list):
             raise DiscordHistoryTemporaryError("Discord history response was invalid.")
-        return payload
+        return list(payload)
 
 
 def _retry_after_seconds(response: httpx.Response) -> int:
@@ -564,7 +568,9 @@ def _retry_after_seconds(response: httpx.Response) -> int:
         payload: object = response.json()
     except ValueError:
         payload = None
-    retry_after = payload.get("retry_after") if isinstance(payload, dict) else None
+    retry_after = (
+        payload.get("retry_after") if is_external_channel_projection(payload) else None
+    )
     if isinstance(retry_after, (int, float)) and not isinstance(retry_after, bool):
         return max(1, min(int(retry_after), 300))
     header = response.headers.get("Retry-After")

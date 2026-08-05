@@ -8,6 +8,7 @@ from azents.core.external_channel_file import (
     ExternalChannelFileLocator,
     external_channel_file_metadata_items,
 )
+from azents.core.external_channel_projection import is_external_channel_projection
 from azents.core.external_channel_reference import (
     render_provider_reference_mappings,
 )
@@ -168,7 +169,7 @@ def _visible_attachment_metadata(
     """Return only bounded decision-useful attachment fields."""
     visible: dict[str, object] = {}
     blocks = attachment_metadata.get("blocks")
-    if isinstance(blocks, dict):
+    if is_external_channel_projection(blocks):
         visible_blocks = _visible_block_metadata(blocks)
         if visible_blocks:
             visible["blocks"] = visible_blocks
@@ -256,7 +257,7 @@ def _visible_embed_metadata(
         return []
     visible_embeds: list[dict[str, object]] = []
     for raw_embed in raw_embeds[:10]:
-        if not isinstance(raw_embed, dict):
+        if not is_external_channel_projection(raw_embed):
             continue
         embed: dict[str, object] = {}
         for key in ("type", "title", "description", "author_name", "footer_text"):
@@ -267,7 +268,7 @@ def _visible_embed_metadata(
         if isinstance(raw_fields, list):
             fields: list[dict[str, object]] = []
             for raw_field in raw_fields[:25]:
-                if not isinstance(raw_field, dict):
+                if not is_external_channel_projection(raw_field):
                     continue
                 field: dict[str, object] = {}
                 for key in ("name", "value"):
@@ -302,7 +303,7 @@ def _render_file_lines(
         return []
     lines = [f"{indent}Files:"]
     for index, item in enumerate(files, start=1):
-        if not isinstance(item, dict):
+        if not is_external_channel_projection(item):
             continue
         name = item.get("name") or "[unnamed]"
         title = item.get("title") or "[untitled]"
@@ -345,7 +346,7 @@ def _render_embed_lines(
         return []
     lines = [f"{indent}Embeds:"]
     for index, raw_embed in enumerate(embeds, start=1):
-        if not isinstance(raw_embed, dict):
+        if not is_external_channel_projection(raw_embed):
             continue
         lines.append(f"{indent}{index}.")
         for key, label in (
@@ -366,7 +367,7 @@ def _render_embed_lines(
         if isinstance(fields, list):
             lines.append(f"{indent}   Fields:")
             for field_index, raw_field in enumerate(fields, start=1):
-                if not isinstance(raw_field, dict):
+                if not is_external_channel_projection(raw_field):
                     continue
                 name = raw_field.get("name") or "[unnamed]"
                 value = raw_field.get("value") or "[empty]"

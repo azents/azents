@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+from azents.core.external_channel_projection import is_external_channel_projection
+
 _MAX_BLOCKS = 32
 _MAX_ELEMENTS = 512
 _MAX_DEPTH = 8
@@ -38,7 +40,7 @@ def _slack_blocks_text(
             trusted_projection=trusted_projection,
         )
         for block in value[:_MAX_BLOCKS]
-        if isinstance(block, dict)
+        if is_external_channel_projection(block)
     ]
     return _bounded("\n".join(part for part in parts if part).strip())
 
@@ -49,7 +51,7 @@ def projected_slack_blocks(value: object) -> list[dict[str, str]]:
         return []
     projected: list[dict[str, str]] = []
     for block in value[:_MAX_BLOCKS]:
-        if not isinstance(block, dict):
+        if not is_external_channel_projection(block):
             continue
         block_type = block.get("type")
         if not isinstance(block_type, str) or not block_type:
@@ -104,7 +106,7 @@ def _container_text(
     for element in value:
         if budget.remaining_elements <= 0:
             break
-        if not isinstance(element, dict):
+        if not is_external_channel_projection(element):
             continue
         budget.remaining_elements -= 1
         element_type = element.get("type")
@@ -136,7 +138,7 @@ def _container_text(
     separator = (
         "\n"
         if any(
-            isinstance(element, dict)
+            is_external_channel_projection(element)
             and element.get("type")
             in {
                 "rich_text_list",
@@ -193,7 +195,7 @@ def _rich_element_text(
 def _text_object(value: object, budget: _TraversalBudget) -> str:
     if isinstance(value, str):
         return value
-    if not isinstance(value, dict) or budget.remaining_elements <= 0:
+    if not is_external_channel_projection(value) or budget.remaining_elements <= 0:
         return ""
     budget.remaining_elements -= 1
     return _string(value.get("text"))
