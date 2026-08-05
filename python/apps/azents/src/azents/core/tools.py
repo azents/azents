@@ -417,7 +417,7 @@ class ToolkitProvider(ABC, Generic[ConfigT]):
         :param data: Config dict to validate
         :return: Validated ConfigT instance
         """
-        return cls.config_model.model_validate(data)  # pyright: ignore[reportReturnType] — Type-system limitation: TypeVar cannot be used in ClassVar; subclasses guarantee consistency with config_model = ConcreteConfig and Generic[ConcreteConfig]  # noqa: E501
+        return cls.config_model.model_validate(data)  # pyright: ignore[reportReturnType]  # ty: ignore[invalid-return-type] — TypeVar/ClassVar relation is guaranteed by each concrete ToolkitProvider subclass.  # noqa: E501
 
 
 # ---------------------------------------------------------------------------

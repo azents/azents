@@ -846,7 +846,7 @@ class AgentWorkspaceFileService:
             case Failure(error):
                 return AgentWorkspaceReadFailed(type="READ_FAILED", detail=str(error))
             case _:
-                assert_never(ready)
+                return assert_never(ready)
 
     async def read_path(
         self,
@@ -867,7 +867,7 @@ class AgentWorkspaceFileService:
             case Failure(error):
                 return Failure(error)
             case _:
-                assert_never(access)
+                return assert_never(access)
 
         try:
             path = normalize_agent_workspace_path(
@@ -884,7 +884,7 @@ class AgentWorkspaceFileService:
             case Failure(error):
                 return Failure(error)
             case _:
-                assert_never(stat_result)
+                return assert_never(stat_result)
 
         target_kind = stat.resolved_kind if stat.kind == "symlink" else stat.kind
         match target_kind:
@@ -902,7 +902,7 @@ class AgentWorkspaceFileService:
                     case Failure(error):
                         return Failure(error)
                     case _:
-                        assert_never(entries_result)
+                        return assert_never(entries_result)
             case "file":
                 read_result = await self._read_file(
                     runtime,
@@ -916,7 +916,7 @@ class AgentWorkspaceFileService:
                     case Failure(error):
                         return Failure(error)
                     case _:
-                        assert_never(read_result)
+                        return assert_never(read_result)
             case "missing":
                 return Failure(AgentWorkspaceFileNotFound())
             case "symlink" | "other" | None:
@@ -925,6 +925,11 @@ class AgentWorkspaceFileService:
                         detail=f"Unsupported Agent Workspace path type: {stat.kind}.",
                     )
                 )
+        return Failure(
+            AgentWorkspaceFileReadError(
+                detail=f"Unsupported Agent Workspace path type: {stat.kind}.",
+            )
+        )
 
     async def stat_path(
         self,

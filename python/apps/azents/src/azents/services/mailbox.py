@@ -1038,7 +1038,7 @@ class MailboxService:
                     ):
                         return _OperationActionMailboxProcessor(action)
                     case _:
-                        assert_never(action)
+                        assert_never(action)  # ty: ignore[type-assertion-failure] — persisted action validation excludes CommandAction at this mailbox boundary, but TypeAdapter retains its broader union.
             case _:
                 assert_never(buffer.kind)
 

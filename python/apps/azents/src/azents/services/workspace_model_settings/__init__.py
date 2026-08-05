@@ -157,6 +157,8 @@ class WorkspaceModelSettingsService:
                 default_lightweight_model_selection = default_model_selection
             if default_lightweight_model_selection is None:
                 default_lightweight_model_selection = default_model_selection
+            assert default_model_selection is not None
+            assert default_lightweight_model_selection is not None
             model_options = build_legacy_selectable_model_options(
                 model_selection=default_model_selection,
                 lightweight_model_selection=default_lightweight_model_selection,
@@ -232,7 +234,7 @@ class WorkspaceModelSettingsService:
                 return Success(value)
             case Failure(error):
                 if isinstance(error, list):
-                    return Failure(InvalidSelectableModelOptions(errors=error))
+                    return Failure(InvalidSelectableModelOptions(errors=error))  # ty: ignore[invalid-argument-type] — ty does not narrow the shared generic Result error to list[str] after isinstance().
                 return Failure(error)
             case _:
                 assert_never(result)
