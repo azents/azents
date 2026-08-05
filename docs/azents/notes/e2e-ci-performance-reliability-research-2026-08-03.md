@@ -635,6 +635,19 @@ The first observability phase was implemented after this research:
   comment write permission.
 - Fork pull requests remain read-only and skip comment publication.
 
+### Unit Test Separation
+
+The second implementation phase moves 24 server-free support tests from the E2E
+collection into `src/unit_tests/` and runs them in a required Docker-free Testenv unit
+job. The moved tests directly verify helper behavior with function calls, mocks,
+monkeypatches, temporary files, or injected clocks.
+
+Provider fake and proxy tests that start HTTP/WebSocket servers remain under
+`src/tests/` as E2E verification. The same boundary retains the real RustFS container
+tests and the Discord Azents-server image contract. The stable aggregate gate includes
+the unit result, while the sticky E2E observability comment continues to report only
+the three E2E lanes.
+
 ### Sticky Comment Action Selection
 
 The implementation evaluated three maintained approaches:

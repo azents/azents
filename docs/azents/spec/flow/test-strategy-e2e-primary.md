@@ -23,8 +23,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-04
-spec_version: 21
+last_verified_at: 2026-08-05
+spec_version: 22
 ---
 
 # E2E Primary Test Strategy
@@ -118,7 +118,10 @@ E2E tests reproduce product behavior through user-facing UI, public/internal tes
 Always-on required CI does not depend on external credentials.
 
 - Python lint/type/unit and other deterministic checks.
-- Deterministic E2E runs `uv run pytest -vv -m "not live_external and not runtime_provider and not web_surface" ./src` in `testenv/azents/e2e`.
+- Testenv unit runs `uv run pytest -vv ./src/unit_tests` for support behavior that
+  requires no server, network listener, container, product image, browser, Runtime
+  Provider, or external prerequisite.
+- Deterministic E2E runs `uv run pytest -vv -m "not live_external and not runtime_provider and not web_surface" ./src/tests` in `testenv/azents/e2e`.
 - Discord Single/Multi journeys use the public APIs and the deterministic provider
   fake; they do not create product rows directly. Focused fake contract tests cover
   signed interaction relay, Gateway lifecycle outcomes, nonce convergence, controlled
@@ -158,9 +161,11 @@ Always-on required CI does not depend on external credentials.
   migration coverage starts from the pre-expand schema, verifies expand backfill
   with `working_folder_path IS NULL` count zero, then verifies the non-null named
   unique contract and reversible transitional index.
-- Web Surface E2E runs in a separate parallel lane with `uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src`.
+- Web Surface E2E runs in a separate parallel lane with `uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src/tests`.
 - Web Surface journeys use a pinned remote Chromium container. Web images are built from the tested worktree, and TLS gateways reproduce production secure-cookie and path-routing behavior without external credentials.
-- The stable `ci-python-e2e` required gate aggregates the deterministic, focused Runtime Provider, and Web Surface lane results for the scopes selected by path filtering.
+- The stable `ci-python-e2e` required gate aggregates Testenv unit plus the
+  deterministic, focused Runtime Provider, and Web Surface lane results for the
+  scopes selected by path filtering.
 - Each executed required E2E lane uploads bounded observability artifacts even when
   pytest fails. The artifact contains JUnit XML, the complete pytest output, the
   slow-test report, and Docker process/storage diagnostics. Failed browser calls also
@@ -217,6 +222,9 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 - **2026-08-04** — v21. Added deterministic Session working-folder public and
   Docker Runtime E2E coverage plus PostgreSQL expand/backfill/contract migration
   evidence, including archive symlink-boundary and restore behavior.
+- **2026-08-05** — v22. Moved server-free testenv support verification into a
+  Docker-free unit job while retaining server, container, image, and product journeys
+  in the existing E2E lanes.
 - **2026-08-03** — v20. Added required-lane JUnit, pytest output, slow-test,
   Docker diagnostic, and browser failure artifacts plus the same-repository sticky PR
   observability summary.
