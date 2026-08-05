@@ -1277,6 +1277,7 @@ class ExternalChannelRepository:
                     resource=resource,
                     now=now,
                     reason=reason,
+                    emit_leave_presence=True,
                 )
             )
         await session.execute(

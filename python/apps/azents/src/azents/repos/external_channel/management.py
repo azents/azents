@@ -1846,6 +1846,7 @@ class ExternalChannelManagementRepository:
             resource=resource,
             now=now,
             reason=reason,
+            emit_leave_presence=True,
         )
 
 

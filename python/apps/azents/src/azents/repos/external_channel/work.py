@@ -1675,6 +1675,7 @@ async def terminate_binding_with_plans(
     work_state_store: ExternalChannelWorkStateStore,
     now: datetime.datetime,
     reason: str,
+    emit_leave_presence: bool,
 ) -> tuple[ProviderEffectPlan, ...]:
     """Commit one binding termination and capture bounded cleanup plans."""
     if binding.disconnected_at is not None:
@@ -1726,10 +1727,11 @@ async def terminate_binding_with_plans(
             )
         )
 
-    append_plan(
-        ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
-        session_presence_payload(resource.labels, state="left"),
-    )
+    if emit_leave_presence:
+        append_plan(
+            ExternalChannelDeliveryOperation.CONTROL_MESSAGE,
+            session_presence_payload(resource.labels, state="left"),
+        )
 
     def finish(
         current: ChannelWorkState,
