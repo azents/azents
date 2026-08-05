@@ -314,6 +314,7 @@ jobs:
         run: python testenv/azents/scripts/verify-runtime-docker.py
       - name: Run deterministic E2E
         run: |
+          set -o pipefail
           report_dir="${RUNNER_TEMP}/e2e-observability/deterministic"
           mkdir -p "$report_dir"
           cd testenv/azents/e2e
@@ -369,6 +370,7 @@ jobs:
           uv sync
       - name: Run focused runtime-provider E2E
         run: |
+          set -o pipefail
           report_dir="${RUNNER_TEMP}/e2e-observability/runtime-provider"
           mkdir -p "$report_dir"
           cd testenv/azents/e2e
@@ -426,6 +428,7 @@ jobs:
           uv sync
       - name: Run Web Surface E2E
         run: |
+          set -o pipefail
           report_dir="${RUNNER_TEMP}/e2e-observability/web-surface"
           mkdir -p "$report_dir"
           cd testenv/azents/e2e
