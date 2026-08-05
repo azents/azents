@@ -1921,16 +1921,17 @@ class ChatSessionService:
     ) -> Result[UpdateGoalResult, UpdateGoalError]:
         """Update or delete Session goal."""
         get_result = await self.get_session(session_id, user_id=user_id)
-        match get_result:
-            case Success(agent_session):
-                if agent_session.session_kind is AgentSessionKind.SUBAGENT:
-                    return Failure(SubagentSessionReadOnly())
-            case Failure(error):
-                match error:
-                    case SessionNotFound() | SessionAccessDenied():
-                        return Failure(error)
-                    case _:
-                        assert_never(error)
+        if get_result.success:
+            agent_session = get_result.value
+            if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+                return Failure(SubagentSessionReadOnly())
+        else:
+            error = get_result.error
+            match error:
+                case SessionNotFound() | SessionAccessDenied():
+                    return Failure(error)
+                case _:
+                    assert_never(error)
 
         goal_store = GoalStateStore(session_manager=self.session_manager)
         if objective is None:
@@ -1987,16 +1988,17 @@ class ChatSessionService:
     ) -> Result[UpdateGoalResult, UpdateGoalError]:
         """Pause/resume Session goal status by user control."""
         get_result = await self.get_session(session_id, user_id=user_id)
-        match get_result:
-            case Success(agent_session):
-                if agent_session.session_kind is AgentSessionKind.SUBAGENT:
-                    return Failure(SubagentSessionReadOnly())
-            case Failure(error):
-                match error:
-                    case SessionNotFound() | SessionAccessDenied():
-                        return Failure(error)
-                    case _:
-                        assert_never(error)
+        if get_result.success:
+            agent_session = get_result.value
+            if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+                return Failure(SubagentSessionReadOnly())
+        else:
+            error = get_result.error
+            match error:
+                case SessionNotFound() | SessionAccessDenied():
+                    return Failure(error)
+                case _:
+                    assert_never(error)
 
         goal_store = GoalStateStore(session_manager=self.session_manager)
         changed = False
@@ -2069,16 +2071,17 @@ class ChatSessionService:
         :return: None on success, error on failure
         """
         get_result = await self.get_session(session_id, user_id=user_id)
-        match get_result:
-            case Success(agent_session):
-                if agent_session.session_kind is AgentSessionKind.SUBAGENT:
-                    return Failure(SubagentSessionReadOnly())
-            case Failure(error):
-                match error:
-                    case SessionNotFound() | SessionAccessDenied():
-                        return Failure(error)
-                    case _:
-                        assert_never(error)
+        if get_result.success:
+            agent_session = get_result.value
+            if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+                return Failure(SubagentSessionReadOnly())
+        else:
+            error = get_result.error
+            match error:
+                case SessionNotFound() | SessionAccessDenied():
+                    return Failure(error)
+                case _:
+                    assert_never(error)
 
         async with self.session_manager() as session:
             await self.mailbox_item_service.delete_by_session_and_id(

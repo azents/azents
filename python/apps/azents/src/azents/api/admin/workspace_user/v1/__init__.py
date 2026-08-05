@@ -6,7 +6,6 @@ WorkspaceUser CRUD endpoints.
 from textwrap import dedent
 from typing import Annotated, assert_never
 
-from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.repos.workspace_user.data import NotFound, WorkspaceNotFound
@@ -35,20 +34,19 @@ async def create_workspace_user(
 ) -> WorkspaceUserResponse:
     """Create a WorkspaceUser."""
     result = await user_service.create(request)
-    match result:
-        case Success(value):
-            return WorkspaceUserResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case WorkspaceNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Workspace not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return WorkspaceUserResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case WorkspaceNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Workspace not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/workspaces/{handle}/workspace-users")
@@ -89,20 +87,19 @@ async def update_workspace_user(
 ) -> WorkspaceUserResponse:
     """Update a WorkspaceUser."""
     result = await user_service.update(workspace_user_id, request)
-    match result:
-        case Success(value):
-            return WorkspaceUserResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case NotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="WorkspaceUser not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return WorkspaceUserResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case NotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="WorkspaceUser not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.delete(
@@ -118,26 +115,26 @@ async def delete_workspace_user(
     Owners cannot be deleted. Transfer ownership first, then delete.
     """
     result = await user_service.delete_force(workspace_user_id)
-    match result:
-        case Success():
-            return None
-        case Failure(error):
-            match error:
-                case NotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="WorkspaceUser not found.",
-                    )
-                case CannotModifyOwner():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=(
-                            "Owners cannot be deleted. Transfer ownership first, "
-                            "then delete."
-                        ),
-                    )
-                case _:
-                    assert_never(error)
+    if result.success:
+        return None
+    else:
+        error = result.error
+        match error:
+            case NotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="WorkspaceUser not found.",
+                )
+            case CannotModifyOwner():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "Owners cannot be deleted. Transfer ownership first, "
+                        "then delete."
+                    ),
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post("/workspaces/{handle}/transfer-ownership")
@@ -154,30 +151,29 @@ async def transfer_workspace_ownership(
     result = await user_service.transfer_ownership_by_handle(
         handle, request.new_owner_workspace_user_id
     )
-    match result:
-        case Success(value):
-            return WorkspaceUserResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case WorkspaceNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Workspace not found.",
-                    )
-                case NotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="WorkspaceUser not found.",
-                    )
-                case NotMemberOfWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Target is not a member of that Workspace.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return WorkspaceUserResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case WorkspaceNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Workspace not found.",
+                )
+            case NotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="WorkspaceUser not found.",
+                )
+            case NotMemberOfWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Target is not a member of that Workspace.",
+                )
+            case _:
+                assert_never(error)
 
 
 def mount(mounter: RouteMounter) -> None:

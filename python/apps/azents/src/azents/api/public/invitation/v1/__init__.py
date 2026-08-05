@@ -6,7 +6,6 @@ Workspace invitation create, received-list, accept, and reject endpoints.
 from textwrap import dedent
 from typing import Annotated, assert_never
 
-from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.core.auth.deps import (
@@ -65,20 +64,19 @@ async def create_invitation(
             role=request_body.role,
         ),
     )
-    match result:
-        case Success(value):
-            return InvitationResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case AlreadyMember():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Already a workspace member.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return InvitationResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case AlreadyMember():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Already a workspace member.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/workspaces/{handle}/invitations/me")
@@ -93,22 +91,21 @@ async def get_my_invitation(
     Non-members can also call this.
     """
     result = await invitation_service.get_my_invitation(current_user, handle)
-    match result:
-        case Success(value):
-            if value is None:
-                return None
-            return InvitationResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case WorkspaceNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Workspace not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        if value is None:
+            return None
+        return InvitationResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case WorkspaceNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Workspace not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/invitations/received")
@@ -132,25 +129,24 @@ async def accept_invitation(
 ) -> AcceptDeclineResponse:
     """Accept an invitation."""
     result = await invitation_service.accept(current_user, invitation_id)
-    match result:
-        case Success(value):
-            return AcceptDeclineResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case InvitationNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Invitation not found.",
-                    )
-                case AlreadyProcessed():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Invitation is already processed.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return AcceptDeclineResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case InvitationNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Invitation not found.",
+                )
+            case AlreadyProcessed():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Invitation is already processed.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post("/invitations/{invitation_id}/decline")
@@ -162,25 +158,24 @@ async def decline_invitation(
 ) -> AcceptDeclineResponse:
     """Reject an invitation."""
     result = await invitation_service.decline(current_user, invitation_id)
-    match result:
-        case Success(value):
-            return AcceptDeclineResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case InvitationNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Invitation not found.",
-                    )
-                case AlreadyProcessed():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Invitation is already processed.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return AcceptDeclineResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case InvitationNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Invitation not found.",
+                )
+            case AlreadyProcessed():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Invitation is already processed.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/workspaces/{handle}/invitations")

@@ -6,7 +6,6 @@ Workspace invitation lookup/delete endpoints.
 from textwrap import dedent
 from typing import Annotated, assert_never
 
-from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.services.workspace_invitation import WorkspaceInvitationService
@@ -26,24 +25,21 @@ async def list_workspace_invitations(
 ) -> InvitationListResponse:
     """List workspace invitations."""
     result = await invitation_service.list_by_workspace_handle(handle)
-    match result:
-        case Success(invitations):
-            return InvitationListResponse(
-                items=[
-                    InvitationResponse.convert_from(inv) for inv in invitations.items
-                ]
-            )
-        case Failure(error):
-            match error:
-                case WorkspaceNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Workspace not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        invitations = result.value
+        return InvitationListResponse(
+            items=[InvitationResponse.convert_from(inv) for inv in invitations.items]
+        )
+    else:
+        error = result.error
+        match error:
+            case WorkspaceNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Workspace not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.delete("/invitations/{invitation_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -220,17 +220,16 @@ class SignupTokenService:
                 token_hash,
                 now=now,
             )
-            match available_result:
-                case Success(token):
-                    pass
-                case Failure(error):
-                    match error:
-                        case SignupTokenUnavailable():
-                            return Failure(InvalidSignupToken())
-                        case _:
-                            assert_never(error)
-                case _:
-                    assert_never(available_result)
+            if available_result.success:
+                token = available_result.value
+                pass
+            else:
+                error = available_result.error
+                match error:
+                    case SignupTokenUnavailable():
+                        return Failure(InvalidSignupToken())
+                    case _:
+                        assert_never(error)
 
             if token.email != email:
                 return Failure(SignupTokenEmailMismatch())
@@ -244,17 +243,16 @@ class SignupTokenService:
                 token_hash,
                 now=now,
             )
-            match claim_result:
-                case Success(token):
-                    pass
-                case Failure(error):
-                    match error:
-                        case SignupTokenUnavailable():
-                            return Failure(InvalidSignupToken())
-                        case _:
-                            assert_never(error)
-                case _:
-                    assert_never(claim_result)
+            if claim_result.success:
+                token = claim_result.value
+                pass
+            else:
+                error = claim_result.error
+                match error:
+                    case SignupTokenUnavailable():
+                        return Failure(InvalidSignupToken())
+                    case _:
+                        assert_never(error)
 
             user = await self.user_repo.create_with_verified_primary_email(
                 session,

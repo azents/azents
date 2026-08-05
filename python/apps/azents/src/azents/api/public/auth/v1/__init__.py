@@ -6,7 +6,6 @@ Authentication endpoints based on email verification codes.
 from textwrap import dedent
 from typing import Annotated, assert_never
 
-from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from azents.core.auth.deps import CurrentUser, get_current_user
@@ -96,25 +95,24 @@ async def verify_code(
         ip_address=request.client.host if request.client else None,
     )
     result = await auth_service.verify_code(input_data)
-    match result:
-        case Success(value):
-            return VerifyCodeResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case InvalidVerificationCode():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Invalid verification code.",
-                    )
-                case RegistrationRequired():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Signup token is required.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return VerifyCodeResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case InvalidVerificationCode():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid verification code.",
+                )
+            case RegistrationRequired():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Signup token is required.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/signup/status")
@@ -137,20 +135,18 @@ async def request_signup_email(
 ) -> RequestSignupEmailResponse:
     """Send a signup link by email."""
     result = await signup_token_service.create_email_delivery_token(request_body.email)
-    match result:
-        case Success():
-            return RequestSignupEmailResponse(sent=True)
-        case Failure(error):
-            match error:
-                case SignupEmailDeliveryUnavailable():
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail="Signup email delivery is not configured.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        return RequestSignupEmailResponse(sent=True)
+    else:
+        error = result.error
+        match error:
+            case SignupEmailDeliveryUnavailable():
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Signup email delivery is not configured.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post("/signup-tokens/preview")
@@ -181,35 +177,34 @@ async def redeem_signup_token(
             ip_address=request.client.host if request.client else None,
         )
     )
-    match result:
-        case Success(value):
-            return RedeemSignupTokenResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case InvalidSignupToken():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Invalid signup token.",
-                    )
-                case SignupTokenEmailMismatch():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Signup token email does not match.",
-                    )
-                case SignupTokenEmailAlreadyRegistered():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Email is already registered.",
-                    )
-                case WeakSignupPassword(message):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=message,
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return RedeemSignupTokenResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case InvalidSignupToken():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid signup token.",
+                )
+            case SignupTokenEmailMismatch():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Signup token email does not match.",
+                )
+            case SignupTokenEmailAlreadyRegistered():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Email is already registered.",
+                )
+            case WeakSignupPassword(message):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=message,
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post("/password-reset-tokens/preview")
@@ -239,25 +234,23 @@ async def redeem_password_reset_token(
             ip_address=request.client.host if request.client else None,
         )
     )
-    match result:
-        case Success():
-            return RedeemPasswordResetTokenResponse(success=True)
-        case Failure(error):
-            match error:
-                case InvalidPasswordResetToken():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Invalid password reset token.",
-                    )
-                case WeakResetPassword(message):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=message,
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        return RedeemPasswordResetTokenResponse(success=True)
+    else:
+        error = result.error
+        match error:
+            case InvalidPasswordResetToken():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid password reset token.",
+                )
+            case WeakResetPassword(message):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=message,
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post("/token/refresh")
@@ -269,20 +262,19 @@ async def refresh_token(
     result = await auth_service.refresh_token(
         RefreshTokenInput(refresh_token=request_body.refresh_token)
     )
-    match result:
-        case Success(value):
-            return RefreshTokenResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case InvalidRefreshToken():
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Invalid refresh token.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return RefreshTokenResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case InvalidRefreshToken():
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid refresh token.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -310,20 +302,19 @@ async def login_with_password(
             ip_address=request.client.host if request.client else None,
         )
     )
-    match result:
-        case Success(value):
-            return PasswordLoginResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case InvalidCredentials():
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Invalid email or password.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return PasswordLoginResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case InvalidCredentials():
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid email or password.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/login/methods")

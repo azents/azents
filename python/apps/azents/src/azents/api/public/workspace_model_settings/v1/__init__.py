@@ -2,7 +2,6 @@
 
 from typing import Annotated, assert_never
 
-from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
@@ -44,33 +43,32 @@ async def update_workspace_model_settings(
             **request_body.model_dump(exclude_unset=True)
         ),
     )
-    match result:
-        case Success(value):
-            return WorkspaceModelSettingsResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case ModelSelectionNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Selected model was not found.",
-                    )
-                case DefaultModelCannotBeCleared():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Workspace default model cannot be cleared once set.",
-                    )
-                case InvalidSelectableModelOptions(errors=errors):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail={
-                            "message": "Invalid selectable model options.",
-                            "errors": errors,
-                        },
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return WorkspaceModelSettingsResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case ModelSelectionNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Selected model was not found.",
+                )
+            case DefaultModelCannotBeCleared():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Workspace default model cannot be cleared once set.",
+                )
+            case InvalidSelectableModelOptions(errors=errors):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "message": "Invalid selectable model options.",
+                        "errors": errors,
+                    },
+                )
+            case _:
+                assert_never(error)
 
 
 def mount(mounter: RouteMounter) -> None:

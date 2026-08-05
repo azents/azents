@@ -6,7 +6,6 @@ User email management endpoints.
 from textwrap import dedent
 from typing import Annotated, assert_never
 
-from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.repos.user_email.data import DuplicateEmail, UserEmailCreate
@@ -58,20 +57,19 @@ async def create_email(
     result = await user_email_service.create(
         UserEmailCreate(user_id=user_id, email=request.email),
     )
-    match result:
-        case Success(value):
-            return UserEmailResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case DuplicateEmail():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Email is already in use.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return UserEmailResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case DuplicateEmail():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Email is already in use.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.delete("/emails/{email_id}", status_code=status.HTTP_204_NO_CONTENT)

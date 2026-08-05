@@ -6,7 +6,6 @@ Endpoint for retrieving the current user information.
 from textwrap import dedent
 from typing import Annotated, assert_never
 
-from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException
 
 from azents.core.auth.deps import CurrentUser, get_current_user
@@ -49,21 +48,20 @@ async def update_me(
         current_user.user_id,
         UserUpdate(locale=request_body.locale),
     )
-    match result:
-        case Success(user):
-            return MeResponse(
-                email=user.primary_email,
-                locale=user.locale,
-                created_at=user.created_at,
-            )
-        case Failure(error):
-            match error:
-                case NotFound():
-                    raise HTTPException(status_code=404, detail="User not found.")
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        user = result.value
+        return MeResponse(
+            email=user.primary_email,
+            locale=user.locale,
+            created_at=user.created_at,
+        )
+    else:
+        error = result.error
+        match error:
+            case NotFound():
+                raise HTTPException(status_code=404, detail="User not found.")
+            case _:
+                assert_never(error)
 
 
 @router.get("/me/system-roles")

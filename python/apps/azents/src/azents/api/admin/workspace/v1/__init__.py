@@ -6,7 +6,6 @@ Workspace CRUD endpoints.
 from textwrap import dedent
 from typing import Annotated, assert_never
 
-from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.repos.workspace.data import HandleConflict, NotFound
@@ -30,20 +29,19 @@ async def create_workspace(
 ) -> WorkspaceResponse:
     """Create a Workspace."""
     result = await workspace_service.create(request)
-    match result:
-        case Success(value):
-            return WorkspaceResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case HandleConflict():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Handle already exists.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return WorkspaceResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case HandleConflict():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Handle already exists.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/workspaces")
@@ -79,25 +77,24 @@ async def update_workspace(
 ) -> WorkspaceResponse:
     """Update a Workspace."""
     result = await workspace_service.update_by_handle(handle, request)
-    match result:
-        case Success(value):
-            return WorkspaceResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case NotFound():
-                    raise HTTPException(
-                        status_code=404,
-                        detail="Workspace not found.",
-                    )
-                case HandleConflict():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Handle already exists.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return WorkspaceResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case NotFound():
+                raise HTTPException(
+                    status_code=404,
+                    detail="Workspace not found.",
+                )
+            case HandleConflict():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Handle already exists.",
+                )
+            case _:
+                assert_never(error)
 
 
 def mount(mounter: RouteMounter) -> None:

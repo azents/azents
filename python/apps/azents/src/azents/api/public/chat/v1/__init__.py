@@ -448,21 +448,19 @@ async def chat_websocket(
     session_result = await chat_service.get_session(
         session_id, user_id=current_user.user_id
     )
-    match session_result:
-        case Failure(error):
-            match error:
-                case SessionAccessDenied():
-                    await websocket.close(code=4003, reason="Session access denied.")
-                    return
-                case SessionNotFound():
-                    await websocket.close(code=4004, reason="Session not found.")
-                    return
-                case _:
-                    assert_never(error)
-        case Success():
-            pass
-        case _:
-            assert_never(session_result)
+    if session_result.success:
+        pass
+    else:
+        error = session_result.error
+        match error:
+            case SessionAccessDenied():
+                await websocket.close(code=4003, reason="Session access denied.")
+                return
+            case SessionNotFound():
+                await websocket.close(code=4004, reason="Session not found.")
+                return
+            case _:
+                assert_never(error)
 
     await websocket.accept()
 
@@ -571,46 +569,45 @@ async def _build_chat_write_snapshot(
         user_id=user_id,
         live_event_store=live_event_store,
     )
-    match live_result:
-        case Success(live):
-            partial_history_events = [
-                ChatEventResponse.from_domain(event)
-                for event in live.partial_history_events
-            ]
-            return ChatWriteSnapshotResponse(
-                partial_history_events=partial_history_events,
-                mailbox_items=live.mailbox_items,
-                run=(
-                    ChatLiveRunStateResponse.from_domain(live.run)
-                    if live.run is not None
-                    else None
-                ),
-                session_run_state=live.session_run_state,
-                todo=(
-                    TodoStateResponse.from_domain(live.todo)
-                    if live.todo is not None
-                    else None
-                ),
-                goal=(
-                    GoalStateResponse.from_domain(live.goal)
-                    if live.goal is not None
-                    else None
-                ),
-                action_executions=[
-                    ActionExecutionProjectionResponse.from_domain(projection)
-                    for projection in live.action_executions
-                ],
-            )
-        case Failure(error):
-            match error:
-                case SessionNotFound():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(live_result)
+    if live_result.success:
+        live = live_result.value
+        partial_history_events = [
+            ChatEventResponse.from_domain(event)
+            for event in live.partial_history_events
+        ]
+        return ChatWriteSnapshotResponse(
+            partial_history_events=partial_history_events,
+            mailbox_items=live.mailbox_items,
+            run=(
+                ChatLiveRunStateResponse.from_domain(live.run)
+                if live.run is not None
+                else None
+            ),
+            session_run_state=live.session_run_state,
+            todo=(
+                TodoStateResponse.from_domain(live.todo)
+                if live.todo is not None
+                else None
+            ),
+            goal=(
+                GoalStateResponse.from_domain(live.goal)
+                if live.goal is not None
+                else None
+            ),
+            action_executions=[
+                ActionExecutionProjectionResponse.from_domain(projection)
+                for projection in live.action_executions
+            ],
+        )
+    else:
+        error = live_result.error
+        match error:
+            case SessionNotFound():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(error)
 
 
 async def _write_message_via_rest(
@@ -687,34 +684,33 @@ async def _prepare_session_working_folder_via_rest(
         user_id=user_id,
         client_request_id=request.client_request_id,
     )
-    match result:
-        case Success(admission):
-            return await _finalize_message_write_response(
-                chat_service,
-                broker,
-                broadcast,
-                live_event_store,
-                agent_id=agent_id,
-                session_id=session_id,
-                user_id=user_id,
-                client_request_id=request.client_request_id,
-                accepted_mailbox_item_id=admission.mailbox_item.id,
-                mailbox_item=admission.mailbox_item,
-                created=admission.created,
-            )
-        case Failure(error):
-            match error:
-                case SessionNotFound() | SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case SubagentSessionReadOnly():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Subagent sessions are read-only.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        admission = result.value
+        return await _finalize_message_write_response(
+            chat_service,
+            broker,
+            broadcast,
+            live_event_store,
+            agent_id=agent_id,
+            session_id=session_id,
+            user_id=user_id,
+            client_request_id=request.client_request_id,
+            accepted_mailbox_item_id=admission.mailbox_item.id,
+            mailbox_item=admission.mailbox_item,
+            created=admission.created,
+        )
+    else:
+        error = result.error
+        match error:
+            case SessionNotFound() | SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case SubagentSessionReadOnly():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Subagent sessions are read-only.",
+                )
+            case _:
+                assert_never(error)
 
 
 def _create_chat_input_message(
@@ -789,116 +785,114 @@ def _handle_created_agent_session_input_result(
     result: Result[CreatedAgentSessionInputResult, AgentSessionInputError],
 ) -> CreatedAgentSessionInputResult:
     """Convert draft session input service result to REST response semantics."""
-    match result:
-        case Success(value):
-            return value
-        case Failure(error):
-            match error:
-                case AgentSessionInputSessionNotFound():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case AgentSessionInputWrongAgent():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case AgentSessionInputInactiveSession():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Session is not active.",
-                    )
-                case AgentSessionInputSubagentReadOnly():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Subagent sessions are read-only.",
-                    )
-                case AgentSessionInputIdempotencyConflict(reason=reason):
-                    raise HTTPException(status_code=409, detail=reason)
-                case FileNotFound():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Attachment was not found.",
-                    )
-                case FileAccessDenied():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Attachment is outside this session.",
-                    )
-                case FileExpired():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Attachment has expired.",
-                    )
-                case FileUnavailable():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Attachment is unavailable.",
-                    )
-                case FileRetentionOwnerConflict():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Attachment is already used by another session.",
-                    )
-                case InvalidProjectPath():
-                    raise HTTPException(status_code=400, detail=error.reason)
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return value
+    else:
+        error = result.error
+        match error:
+            case AgentSessionInputSessionNotFound():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case AgentSessionInputWrongAgent():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case AgentSessionInputInactiveSession():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Session is not active.",
+                )
+            case AgentSessionInputSubagentReadOnly():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Subagent sessions are read-only.",
+                )
+            case AgentSessionInputIdempotencyConflict(reason=reason):
+                raise HTTPException(status_code=409, detail=reason)
+            case FileNotFound():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Attachment was not found.",
+                )
+            case FileAccessDenied():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Attachment is outside this session.",
+                )
+            case FileExpired():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Attachment has expired.",
+                )
+            case FileUnavailable():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Attachment is unavailable.",
+                )
+            case FileRetentionOwnerConflict():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Attachment is already used by another session.",
+                )
+            case InvalidProjectPath():
+                raise HTTPException(status_code=400, detail=error.reason)
+            case _:
+                assert_never(error)
 
 
 def _handle_agent_session_input_result(
     result: Result[BufferedAgentSessionInputResult, AgentSessionInputError],
 ) -> BufferedAgentSessionInputResult:
     """Convert AgentSession input service result to REST response semantics."""
-    match result:
-        case Success(value):
-            return value
-        case Failure(error):
-            match error:
-                case AgentSessionInputSessionNotFound():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case AgentSessionInputWrongAgent():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case AgentSessionInputInactiveSession():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Session is not active.",
-                    )
-                case AgentSessionInputSubagentReadOnly():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Subagent sessions are read-only.",
-                    )
-                case AgentSessionInputIdempotencyConflict(reason=reason):
-                    raise HTTPException(status_code=409, detail=reason)
-                case FileNotFound():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Attachment was not found.",
-                    )
-                case FileAccessDenied():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Attachment is outside this session.",
-                    )
-                case FileExpired():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Attachment has expired.",
-                    )
-                case FileUnavailable():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Attachment is unavailable.",
-                    )
-                case FileRetentionOwnerConflict():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Attachment is already used by another session.",
-                    )
-                case InvalidProjectPath():
-                    raise HTTPException(status_code=400, detail=error.reason)
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return value
+    else:
+        error = result.error
+        match error:
+            case AgentSessionInputSessionNotFound():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case AgentSessionInputWrongAgent():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case AgentSessionInputInactiveSession():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Session is not active.",
+                )
+            case AgentSessionInputSubagentReadOnly():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Subagent sessions are read-only.",
+                )
+            case AgentSessionInputIdempotencyConflict(reason=reason):
+                raise HTTPException(status_code=409, detail=reason)
+            case FileNotFound():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Attachment was not found.",
+                )
+            case FileAccessDenied():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Attachment is outside this session.",
+                )
+            case FileExpired():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Attachment has expired.",
+                )
+            case FileUnavailable():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Attachment is unavailable.",
+                )
+            case FileRetentionOwnerConflict():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Attachment is already used by another session.",
+                )
+            case InvalidProjectPath():
+                raise HTTPException(status_code=400, detail=error.reason)
+            case _:
+                assert_never(error)
 
 
 async def _validate_rest_session(
@@ -914,22 +908,21 @@ async def _validate_rest_session(
         session_id=session_id,
         user_id=user_id,
     )
-    match result:
-        case Success(agent_session):
-            if agent_session.session_kind is AgentSessionKind.SUBAGENT:
-                raise HTTPException(
-                    status_code=409,
-                    detail="Subagent sessions are read-only.",
-                )
-            return agent_session.id
-        case Failure(error):
-            match error:
-                case SessionNotFound():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        agent_session = result.value
+        if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+            raise HTTPException(
+                status_code=409,
+                detail="Subagent sessions are read-only.",
+            )
+        return agent_session.id
+    else:
+        error = result.error
+        match error:
+            case SessionNotFound():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(error)
 
 
 @router.patch("/sessions/{session_id}/goal")
@@ -948,37 +941,36 @@ async def update_session_goal(
         user_id=current_user.user_id,
         objective=request.objective.strip() if request.objective is not None else None,
     )
-    match result:
-        case Success(update_result):
-            if update_result.wake_up:
-                await broker.send_message(SessionWakeUp(session_id=session_id))
-            if update_result.event is not None:
-                await _publish_chat_event_best_effort(
-                    broadcast,
-                    session_id=session_id,
-                    event=chat_history_event_appended_dump(update_result.event),
+    if result.success:
+        update_result = result.value
+        if update_result.wake_up:
+            await broker.send_message(SessionWakeUp(session_id=session_id))
+        if update_result.event is not None:
+            await _publish_chat_event_best_effort(
+                broadcast,
+                session_id=session_id,
+                event=chat_history_event_appended_dump(update_result.event),
+            )
+        return GoalStateResponse.from_domain(update_result.goal)
+    else:
+        error = result.error
+        match error:
+            case SessionNotFound():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case InvalidGoalStatusTransition():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Invalid goal status transition.",
                 )
-            return GoalStateResponse.from_domain(update_result.goal)
-        case Failure(error):
-            match error:
-                case SessionNotFound():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case InvalidGoalStatusTransition():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Invalid goal status transition.",
-                    )
-                case SubagentSessionReadOnly():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Subagent sessions are read-only.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+            case SubagentSessionReadOnly():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Subagent sessions are read-only.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.patch("/sessions/{session_id}/goal/status")
@@ -1002,37 +994,36 @@ async def update_session_goal_status(
             ),
         ),
     )
-    match result:
-        case Success(update_result):
-            if update_result.wake_up:
-                await broker.send_message(SessionWakeUp(session_id=session_id))
-            if update_result.event is not None:
-                await _publish_chat_event_best_effort(
-                    broadcast,
-                    session_id=session_id,
-                    event=chat_history_event_appended_dump(update_result.event),
+    if result.success:
+        update_result = result.value
+        if update_result.wake_up:
+            await broker.send_message(SessionWakeUp(session_id=session_id))
+        if update_result.event is not None:
+            await _publish_chat_event_best_effort(
+                broadcast,
+                session_id=session_id,
+                event=chat_history_event_appended_dump(update_result.event),
+            )
+        return GoalStateResponse.from_domain(update_result.goal)
+    else:
+        error = result.error
+        match error:
+            case SessionNotFound():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case InvalidGoalStatusTransition():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Invalid goal status transition.",
                 )
-            return GoalStateResponse.from_domain(update_result.goal)
-        case Failure(error):
-            match error:
-                case SessionNotFound():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case InvalidGoalStatusTransition():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Invalid goal status transition.",
-                    )
-                case SubagentSessionReadOnly():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Subagent sessions are read-only.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+            case SubagentSessionReadOnly():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Subagent sessions are read-only.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post("/sessions/{session_id}/stop")
@@ -1049,28 +1040,25 @@ async def stop_session_run(
         session_id,
         user_id=current_user.user_id,
     )
-    match result:
-        case Success(agent_session):
-            stop_result = await chat_write_service.request_session_stop(
-                agent_id=agent_session.agent_id,
-                session_id=agent_session.id,
-                user_id=current_user.user_id,
-            )
-            for stopped_session_id in stop_result.stopped_session_ids:
-                await broker.send_message(
-                    SessionStopSignal(session_id=stopped_session_id)
-                )
-            return ChatStopResponse(session_id=agent_session.id)
-        case Failure(error):
-            match error:
-                case SessionNotFound():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        agent_session = result.value
+        stop_result = await chat_write_service.request_session_stop(
+            agent_id=agent_session.agent_id,
+            session_id=agent_session.id,
+            user_id=current_user.user_id,
+        )
+        for stopped_session_id in stop_result.stopped_session_ids:
+            await broker.send_message(SessionStopSignal(session_id=stopped_session_id))
+        return ChatStopResponse(session_id=agent_session.id)
+    else:
+        error = result.error
+        match error:
+            case SessionNotFound():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(error)
 
 
 @router.post("/sessions/{session_id}/inputs")
@@ -1598,17 +1586,16 @@ async def get_agent_session_context(
         user_id=current_user.user_id,
         limit=limit,
     )
-    match result:
-        case Success(context):
-            return SessionContextResponse.from_domain(context)
-        case Failure(error):
-            match error:
-                case SessionNotFound() | NotWorkspaceMember():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        context = result.value
+        return SessionContextResponse.from_domain(context)
+    else:
+        error = result.error
+        match error:
+            case SessionNotFound() | NotWorkspaceMember():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(error)
 
 
 @router.get("/agents/{agent_id}/team-primary-session")
@@ -1622,30 +1609,29 @@ async def get_team_primary_agent_session(
         agent_id=agent_id,
         user_id=current_user.user_id,
     )
-    match result:
-        case Success(session):
-            projection_result = (
-                await chat_service.get_agent_session_with_unread_terminal_run(
-                    agent_id=agent_id,
-                    session_id=session.id,
-                    user_id=current_user.user_id,
-                )
+    if result.success:
+        session = result.value
+        projection_result = (
+            await chat_service.get_agent_session_with_unread_terminal_run(
+                agent_id=agent_id,
+                session_id=session.id,
+                user_id=current_user.user_id,
             )
-            match projection_result:
-                case Success(projection):
-                    return AgentSessionResponse.from_projection(projection)
-                case Failure(SessionNotFound()):
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case _:
-                    assert_never(projection_result)
-        case Failure(error):
-            match error:
-                case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+        )
+        match projection_result:
+            case Success(projection):
+                return AgentSessionResponse.from_projection(projection)
+            case Failure(SessionNotFound()):
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(projection_result)
+    else:
+        error = result.error
+        match error:
+            case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(error)
 
 
 @router.get("/agents/{agent_id}/sessions")
@@ -1660,26 +1646,23 @@ async def list_agent_sessions(
         agent_id=agent_id,
         user_id=current_user.user_id,
     )
-    match result:
-        case Success(sessions):
-            settings = await retention_service.get_settings()
-            return AgentSessionListResponse(
-                items=[
-                    AgentSessionResponse.from_projection(projection)
-                    for projection in sessions
-                ],
-                current_archive_retention_days=(
-                    settings.archived_session_retention_days
-                ),
-            )
-        case Failure(error):
-            match error:
-                case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        sessions = result.value
+        settings = await retention_service.get_settings()
+        return AgentSessionListResponse(
+            items=[
+                AgentSessionResponse.from_projection(projection)
+                for projection in sessions
+            ],
+            current_archive_retention_days=(settings.archived_session_retention_days),
+        )
+    else:
+        error = result.error
+        match error:
+            case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(error)
 
 
 @router.get("/agents/{agent_id}/project-presets")
@@ -1694,21 +1677,18 @@ async def list_agent_project_presets(
         agent_id=agent_id,
         user_id=current_user.user_id,
     )
-    match result:
-        case Success(presets):
-            return AgentProjectPresetListResponse(
-                items=[
-                    AgentProjectPresetResponse.from_domain(preset) for preset in presets
-                ]
-            )
-        case Failure(error):
-            match error:
-                case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        presets = result.value
+        return AgentProjectPresetListResponse(
+            items=[AgentProjectPresetResponse.from_domain(preset) for preset in presets]
+        )
+    else:
+        error = result.error
+        match error:
+            case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(error)
 
 
 @router.get("/agents/{agent_id}/session-project-defaults")
@@ -1723,17 +1703,16 @@ async def get_agent_session_project_defaults(
         agent_id=agent_id,
         user_id=current_user.user_id,
     )
-    match result:
-        case Success(defaults):
-            return AgentSessionProjectDefaultsResponse.from_domain(defaults)
-        case Failure(error):
-            match error:
-                case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        defaults = result.value
+        return AgentSessionProjectDefaultsResponse.from_domain(defaults)
+    else:
+        error = result.error
+        match error:
+            case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(error)
 
 
 @router.get("/agents/{agent_id}/git-refs")
@@ -1750,26 +1729,25 @@ async def preview_agent_git_refs(
         user_id=current_user.user_id,
         source_project_path=source_project_path,
     )
-    match result:
-        case Success(preview):
-            return GitRefPreviewResponse.from_domain(preview)
-        case Failure(error):
-            match error:
-                case InvalidProjectPath():
-                    raise HTTPException(status_code=400, detail=error.reason)
-                case GitRefPreviewAgentNotFound():
-                    raise HTTPException(status_code=404, detail="Agent not found.")
-                case GitRefPreviewAccessDenied():
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Workspace membership required.",
-                    )
-                case GitRefPreviewRuntimeUnavailable():
-                    raise HTTPException(status_code=409, detail=error.reason)
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        preview = result.value
+        return GitRefPreviewResponse.from_domain(preview)
+    else:
+        error = result.error
+        match error:
+            case InvalidProjectPath():
+                raise HTTPException(status_code=400, detail=error.reason)
+            case GitRefPreviewAgentNotFound():
+                raise HTTPException(status_code=404, detail="Agent not found.")
+            case GitRefPreviewAccessDenied():
+                raise HTTPException(
+                    status_code=403,
+                    detail="Workspace membership required.",
+                )
+            case GitRefPreviewRuntimeUnavailable():
+                raise HTTPException(status_code=409, detail=error.reason)
+            case _:
+                assert_never(error)
 
 
 async def _run_git_worktree_cleanup_background(
@@ -1802,25 +1780,24 @@ async def create_team_agent_session(
         existing_project_paths=request.existing_project_paths,
         setup_actions=request.setup_actions,
     )
-    match result:
-        case Success(session):
-            if request.setup_actions:
-                await broker.send_message(SessionWakeUp(session_id=session.id))
-            return AgentSessionResponse.from_domain(
-                session,
-                unread_terminal_run_id=None,
-                auto_archive_after=None,
-            )
-        case Failure(error):
-            match error:
-                case InvalidProjectPath():
-                    raise HTTPException(status_code=400, detail=error.reason)
-                case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        session = result.value
+        if request.setup_actions:
+            await broker.send_message(SessionWakeUp(session_id=session.id))
+        return AgentSessionResponse.from_domain(
+            session,
+            unread_terminal_run_id=None,
+            auto_archive_after=None,
+        )
+    else:
+        error = result.error
+        match error:
+            case InvalidProjectPath():
+                raise HTTPException(status_code=400, detail=error.reason)
+            case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(error)
 
 
 @router.post("/agents/{agent_id}/sessions/{session_id}/archive", status_code=204)
@@ -1837,32 +1814,30 @@ async def archive_agent_session(
         session_id=session_id,
         user_id=current_user.user_id,
     )
-    match result:
-        case Success():
-            return
-        case Failure(error):
-            match error:
-                case SessionNotFound() | SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case SubagentSessionReadOnly():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Subagent sessions are read-only.",
-                    )
-                case PrimarySessionArchiveBlocked():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Team primary session cannot be archived.",
-                    )
-                case RunningSessionArchiveBlocked():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Running session cannot be archived.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        return
+    else:
+        error = result.error
+        match error:
+            case SessionNotFound() | SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case SubagentSessionReadOnly():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Subagent sessions are read-only.",
+                )
+            case PrimarySessionArchiveBlocked():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Team primary session cannot be archived.",
+                )
+            case RunningSessionArchiveBlocked():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Running session cannot be archived.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.patch("/agents/{agent_id}/sessions/{session_id}/pin")
@@ -1881,31 +1856,30 @@ async def update_agent_session_pin(
         user_id=current_user.user_id,
         pinned=request.pinned,
     )
-    match result:
-        case Success(session):
-            return AgentSessionResponse.from_domain(
-                session,
-                unread_terminal_run_id=None,
-                auto_archive_after=None,
-            )
-        case Failure(error):
-            match error:
-                case SessionNotFound() | SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case SubagentSessionReadOnly():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Subagent sessions are read-only.",
-                    )
-                case PrimarySessionPinBlocked():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Team primary session cannot be pinned.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        session = result.value
+        return AgentSessionResponse.from_domain(
+            session,
+            unread_terminal_run_id=None,
+            auto_archive_after=None,
+        )
+    else:
+        error = result.error
+        match error:
+            case SessionNotFound() | SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case SubagentSessionReadOnly():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Subagent sessions are read-only.",
+                )
+            case PrimarySessionPinBlocked():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Team primary session cannot be pinned.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post(
@@ -1929,38 +1903,37 @@ async def cleanup_session_git_worktree(
         user_id=current_user.user_id,
         session_workspace_project_id=request.project_id,
     )
-    match result:
-        case Success(value):
-            if value.cleanup_requested:
-                background_tasks.add_task(
-                    _run_git_worktree_cleanup_background,
-                    session_git_worktree_service,
-                    agent_id=agent_id,
-                    session_id=session_id,
-                    session_workspace_project_id=request.project_id,
+    if result.success:
+        value = result.value
+        if value.cleanup_requested:
+            background_tasks.add_task(
+                _run_git_worktree_cleanup_background,
+                session_git_worktree_service,
+                agent_id=agent_id,
+                session_id=session_id,
+                session_workspace_project_id=request.project_id,
+            )
+        return
+    else:
+        error = result.error
+        match error:
+            case GitWorktreeCleanupSessionNotFound() | GitWorktreeCleanupNotFound():
+                raise HTTPException(
+                    status_code=404,
+                    detail="Session Git worktree not found.",
                 )
-            return
-        case Failure(error):
-            match error:
-                case GitWorktreeCleanupSessionNotFound() | GitWorktreeCleanupNotFound():
-                    raise HTTPException(
-                        status_code=404,
-                        detail="Session Git worktree not found.",
-                    )
-                case GitWorktreeCleanupAccessDenied():
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Session access denied.",
-                    )
-                case GitWorktreeCleanupSubagentReadOnly():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Subagent sessions are read-only.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+            case GitWorktreeCleanupAccessDenied():
+                raise HTTPException(
+                    status_code=403,
+                    detail="Session access denied.",
+                )
+            case GitWorktreeCleanupSubagentReadOnly():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Subagent sessions are read-only.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/agents/{agent_id}/sessions/archived")
@@ -2013,35 +1986,34 @@ async def restore_agent_session(
         session_id=session_id,
         user_id=current_user.user_id,
     )
-    match result:
-        case Success(session):
-            projection_result = (
-                await chat_service.get_agent_session_with_unread_terminal_run(
-                    agent_id=agent_id,
-                    session_id=session.id,
-                    user_id=current_user.user_id,
-                )
+    if result.success:
+        session = result.value
+        projection_result = (
+            await chat_service.get_agent_session_with_unread_terminal_run(
+                agent_id=agent_id,
+                session_id=session.id,
+                user_id=current_user.user_id,
             )
-            match projection_result:
-                case Success(projection):
-                    return AgentSessionResponse.from_projection(projection)
-                case Failure(SessionNotFound()):
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case _:
-                    assert_never(projection_result)
-        case Failure(error):
-            match error:
-                case SessionNotFound() | SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case PurgeStartedRestoreBlocked():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Session deletion has already started.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+        )
+        match projection_result:
+            case Success(projection):
+                return AgentSessionResponse.from_projection(projection)
+            case Failure(SessionNotFound()):
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(projection_result)
+    else:
+        error = result.error
+        match error:
+            case SessionNotFound() | SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case PurgeStartedRestoreBlocked():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Session deletion has already started.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/agents/{agent_id}/sessions/{session_id}")
@@ -2058,17 +2030,16 @@ async def get_agent_session(
         session_id=session_id,
         user_id=current_user.user_id,
     )
-    match result:
-        case Success(projection):
-            return AgentSessionResponse.from_projection(projection)
-        case Failure(error):
-            match error:
-                case SessionNotFound():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        projection = result.value
+        return AgentSessionResponse.from_projection(projection)
+    else:
+        error = result.error
+        match error:
+            case SessionNotFound():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(error)
 
 
 @router.post("/agents/{agent_id}/sessions/{session_id}/read", status_code=204)
@@ -2088,22 +2059,20 @@ async def acknowledge_agent_session_unread_terminal_run(
         user_id=current_user.user_id,
         through_run_id=request.through_run_id,
     )
-    match result:
-        case Success():
-            return
-        case Failure(error):
-            match error:
-                case SessionNotFound():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case UnreadTerminalRunNotTerminal():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="AgentRun is not terminal.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        return
+    else:
+        error = result.error
+        match error:
+            case SessionNotFound():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case UnreadTerminalRunNotTerminal():
+                raise HTTPException(
+                    status_code=409,
+                    detail="AgentRun is not terminal.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/agents/{agent_id}/sessions/{session_id}/subagents/tree")
@@ -2121,17 +2090,16 @@ async def get_subagent_tree(
         session_id=session_id,
         user_id=current_user.user_id,
     )
-    match result:
-        case Success(tree):
-            return SubagentTreeResponse.from_domain(tree)
-        case Failure(error):
-            match error:
-                case SessionNotFound() | SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        tree = result.value
+        return SubagentTreeResponse.from_domain(tree)
+    else:
+        error = result.error
+        match error:
+            case SessionNotFound() | SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(error)
 
 
 @router.patch("/sessions/{session_id}/title")
@@ -2148,42 +2116,41 @@ async def update_agent_session_title(
         user_id=current_user.user_id,
         title=request.title,
     )
-    match result:
-        case Success(session):
-            projection_result = (
-                await chat_service.get_agent_session_with_unread_terminal_run(
-                    agent_id=session.agent_id,
-                    session_id=session.id,
-                    user_id=current_user.user_id,
-                )
+    if result.success:
+        session = result.value
+        projection_result = (
+            await chat_service.get_agent_session_with_unread_terminal_run(
+                agent_id=session.agent_id,
+                session_id=session.id,
+                user_id=current_user.user_id,
             )
-            match projection_result:
-                case Success(projection):
-                    return AgentSessionResponse.from_projection(projection)
-                case Failure(SessionNotFound()):
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case _:
-                    assert_never(projection_result)
-        case Failure(error):
-            match error:
-                case InvalidSessionTitle():
-                    raise HTTPException(status_code=400, detail=error.reason)
-                case SessionNotFound():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case SessionAccessDenied():
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Session access denied.",
-                    )
-                case SubagentSessionReadOnly():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Subagent sessions are read-only.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+        )
+        match projection_result:
+            case Success(projection):
+                return AgentSessionResponse.from_projection(projection)
+            case Failure(SessionNotFound()):
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(projection_result)
+    else:
+        error = result.error
+        match error:
+            case InvalidSessionTitle():
+                raise HTTPException(status_code=400, detail=error.reason)
+            case SessionNotFound():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case SessionAccessDenied():
+                raise HTTPException(
+                    status_code=403,
+                    detail="Session access denied.",
+                )
+            case SubagentSessionReadOnly():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Subagent sessions are read-only.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/sessions/{session_id}/actions")
@@ -2208,117 +2175,119 @@ async def list_input_actions(
         user_id=current_user.user_id,
         live_event_store=None,
     )
-    match (session_result, live_result):
-        case (Success(agent_session), Success(snapshot)):
-            goal_hint = None
-            if (
-                snapshot.goal is not None
-                and snapshot.goal.objective
-                and snapshot.goal.status in {"active", "paused", "blocked"}
-            ):
-                goal_hint = InputActionAvailabilityHintResponse(
-                    state="warning",
-                    message=(
-                        "A goal is already in progress. Manage it from the goal card."
-                    ),
-                )
-            skill_snapshot = await load_skill_projection_for_actions(
-                skill_store,
-                vfs_projection_service=vfs_projection_service,
-                agent_id=agent_session.agent_id,
-                session_id=session_id,
-                workspace_id=agent_session.workspace_id,
-                run_state=snapshot.session_run_state,
-                active_run_id=snapshot.run.run_id if snapshot.run is not None else None,
+    if session_result.success and live_result.success:
+        agent_session = session_result.value
+        snapshot = live_result.value
+        goal_hint = None
+        if (
+            snapshot.goal is not None
+            and snapshot.goal.objective
+            and snapshot.goal.status in {"active", "paused", "blocked"}
+        ):
+            goal_hint = InputActionAvailabilityHintResponse(
+                state="warning",
+                message=(
+                    "A goal is already in progress. Manage it from the goal card."
+                ),
             )
-            return InputActionListResponse(
-                items=[
-                    *[
-                        InputActionDefinitionResponse(
-                            id=f"command:{command.name}",
-                            keyword=command.name,
-                            label=command.name.capitalize(),
-                            description=command.description,
-                            action=CommandAction(name=command.name),
-                            category="command",
-                            message=InputActionMessagePolicyResponse(
-                                policy="optional",
-                                placeholder="Send to run this command.",
-                            ),
-                            attachments=InputActionAttachmentPolicyResponse(
-                                policy="unsupported"
-                            ),
-                            availability_hint=None,
-                        )
-                        for command in list_registered_commands()
-                    ],
+        skill_snapshot = await load_skill_projection_for_actions(
+            skill_store,
+            vfs_projection_service=vfs_projection_service,
+            agent_id=agent_session.agent_id,
+            session_id=session_id,
+            workspace_id=agent_session.workspace_id,
+            run_state=snapshot.session_run_state,
+            active_run_id=snapshot.run.run_id if snapshot.run is not None else None,
+        )
+        return InputActionListResponse(
+            items=[
+                *[
                     InputActionDefinitionResponse(
-                        id="goal",
-                        keyword="goal",
-                        label="Goal",
-                        description="Create a session goal.",
-                        action=GoalAction(),
-                        category="turn",
-                        message=InputActionMessagePolicyResponse(
-                            policy="required",
-                            placeholder="Describe the goal for this session.",
-                            max_length=4000,
-                        ),
-                        attachments=InputActionAttachmentPolicyResponse(
-                            policy="unsupported"
-                        ),
-                        availability_hint=goal_hint,
-                    ),
-                    InputActionDefinitionResponse(
-                        id="cleanup_orphan_git_worktrees",
-                        keyword="cleanup-worktrees",
-                        label="Clean up worktrees",
-                        description=(
-                            "Remove managed Git worktrees not connected to an "
-                            "active session. Local branches are preserved."
-                        ),
-                        action=CleanupOrphanGitWorktreesAction(),
-                        category="turn",
+                        id=f"command:{command.name}",
+                        keyword=command.name,
+                        label=command.name.capitalize(),
+                        description=command.description,
+                        action=CommandAction(name=command.name),
+                        category="command",
                         message=InputActionMessagePolicyResponse(
                             policy="optional",
-                            placeholder="Optional cleanup note.",
+                            placeholder="Send to run this command.",
                         ),
                         attachments=InputActionAttachmentPolicyResponse(
                             policy="unsupported"
                         ),
                         availability_hint=None,
+                    )
+                    for command in list_registered_commands()
+                ],
+                InputActionDefinitionResponse(
+                    id="goal",
+                    keyword="goal",
+                    label="Goal",
+                    description="Create a session goal.",
+                    action=GoalAction(),
+                    category="turn",
+                    message=InputActionMessagePolicyResponse(
+                        policy="required",
+                        placeholder="Describe the goal for this session.",
+                        max_length=4000,
                     ),
-                    *[
-                        InputActionDefinitionResponse(
-                            id=skill_action_id(item.skill_path),
-                            keyword=item.slug,
-                            label=f"/{item.slug}",
-                            description=item.description,
-                            action=SkillAction(skill_path=item.skill_path),
-                            category="turn",
-                            message=InputActionMessagePolicyResponse(
-                                policy="optional",
-                                placeholder="Describe what to do with this skill.",
-                            ),
-                            attachments=InputActionAttachmentPolicyResponse(
-                                policy="unsupported"
-                            ),
-                            availability_hint=None,
-                            source_label=item.source_label,
-                            relative_hint=item.relative_hint,
-                        )
-                        for item in skill_actions_from_snapshot(skill_snapshot)
-                    ],
-                ]
-            )
-        case (Failure(error), _) | (_, Failure(error)):
-            match error:
-                case SessionNotFound() | SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never((session_result, live_result))
+                    attachments=InputActionAttachmentPolicyResponse(
+                        policy="unsupported"
+                    ),
+                    availability_hint=goal_hint,
+                ),
+                InputActionDefinitionResponse(
+                    id="cleanup_orphan_git_worktrees",
+                    keyword="cleanup-worktrees",
+                    label="Clean up worktrees",
+                    description=(
+                        "Remove managed Git worktrees not connected to an "
+                        "active session. Local branches are preserved."
+                    ),
+                    action=CleanupOrphanGitWorktreesAction(),
+                    category="turn",
+                    message=InputActionMessagePolicyResponse(
+                        policy="optional",
+                        placeholder="Optional cleanup note.",
+                    ),
+                    attachments=InputActionAttachmentPolicyResponse(
+                        policy="unsupported"
+                    ),
+                    availability_hint=None,
+                ),
+                *[
+                    InputActionDefinitionResponse(
+                        id=skill_action_id(item.skill_path),
+                        keyword=item.slug,
+                        label=f"/{item.slug}",
+                        description=item.description,
+                        action=SkillAction(skill_path=item.skill_path),
+                        category="turn",
+                        message=InputActionMessagePolicyResponse(
+                            policy="optional",
+                            placeholder="Describe what to do with this skill.",
+                        ),
+                        attachments=InputActionAttachmentPolicyResponse(
+                            policy="unsupported"
+                        ),
+                        availability_hint=None,
+                        source_label=item.source_label,
+                        relative_hint=item.relative_hint,
+                    )
+                    for item in skill_actions_from_snapshot(skill_snapshot)
+                ],
+            ]
+        )
+    else:
+        error = (
+            session_result.error if not session_result.success else live_result.error
+        )
+        match error:
+            case SessionNotFound() | SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(error)
 
 
 @router.get(
@@ -2430,31 +2399,30 @@ async def register_agent_project(
         user_id=current_user.user_id,
         path=request.path,
     )
-    match result:
-        case Success(project):
-            return SessionWorkspaceProjectResponse.from_domain(project)
-        case Failure(error):
-            match error:
-                case InvalidProjectPath():
-                    raise HTTPException(status_code=400, detail=error.reason)
-                case ProjectPathConflict():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Project path conflicts with an existing Project.",
-                    )
-                case ProjectPathCleanupInProgress():
-                    raise HTTPException(
-                        status_code=409,
-                        detail=(
-                            "Project path is being removed by manual worktree cleanup."
-                        ),
-                    )
-                case ProjectAgentNotFound() | ProjectAccessDenied():
-                    _raise_project_access_error(error)
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        project = result.value
+        return SessionWorkspaceProjectResponse.from_domain(project)
+    else:
+        error = result.error
+        match error:
+            case InvalidProjectPath():
+                raise HTTPException(status_code=400, detail=error.reason)
+            case ProjectPathConflict():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Project path conflicts with an existing Project.",
+                )
+            case ProjectPathCleanupInProgress():
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Project path is being removed by manual worktree cleanup."
+                    ),
+                )
+            case ProjectAgentNotFound() | ProjectAccessDenied():
+                _raise_project_access_error(error)
+            case _:
+                assert_never(error)
 
 
 @router.delete(
@@ -2476,19 +2444,17 @@ async def delete_agent_project(
         user_id=current_user.user_id,
         project_id=project_id,
     )
-    match result:
-        case Success():
-            return
-        case Failure(error):
-            match error:
-                case ProjectNotFound():
-                    raise HTTPException(status_code=404, detail="Project not found.")
-                case ProjectAgentNotFound() | ProjectAccessDenied():
-                    _raise_project_access_error(error)
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        return
+    else:
+        error = result.error
+        match error:
+            case ProjectNotFound():
+                raise HTTPException(status_code=404, detail="Project not found.")
+            case ProjectAgentNotFound() | ProjectAccessDenied():
+                _raise_project_access_error(error)
+            case _:
+                assert_never(error)
 
 
 @router.get("/sessions/{session_id}/history")
@@ -2522,33 +2488,32 @@ async def list_history_events(
         before=before,
         after=after,
     )
-    match result:
-        case Success(value):
-            next_cursor: str | None = None
-            previous_cursor: str | None = None
-            if value.items:
-                next_cursor = value.items[0].id
-                previous_cursor = value.items[-1].id
-            return ChatEventPageResponse(
-                items=[ChatEventResponse.from_domain(event) for event in value.items],
-                has_more=value.has_more,
-                has_newer=value.has_newer,
-                next_cursor=next_cursor,
-                previous_cursor=previous_cursor,
-            )
-        case Failure(error):
-            match error:
-                case SessionNotFound():
-                    raise HTTPException(
-                        status_code=404,
-                        detail="Session not found.",
-                    )
-                case SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        next_cursor: str | None = None
+        previous_cursor: str | None = None
+        if value.items:
+            next_cursor = value.items[0].id
+            previous_cursor = value.items[-1].id
+        return ChatEventPageResponse(
+            items=[ChatEventResponse.from_domain(event) for event in value.items],
+            has_more=value.has_more,
+            has_newer=value.has_newer,
+            next_cursor=next_cursor,
+            previous_cursor=previous_cursor,
+        )
+    else:
+        error = result.error
+        match error:
+            case SessionNotFound():
+                raise HTTPException(
+                    status_code=404,
+                    detail="Session not found.",
+                )
+            case SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(error)
 
 
 @router.get("/sessions/{session_id}/live")
@@ -2565,50 +2530,49 @@ async def list_live_events(
         user_id=current_user.user_id,
         live_event_store=live_event_store,
     )
-    match result:
-        case Success(value):
-            partial_history = [
-                ChatEventResponse.from_domain(event)
-                for event in value.partial_history_events
-            ]
-            mailbox_items = value.mailbox_items
-            return LiveEventListResponse(
-                partial_history=PartialHistoryResponse(
-                    items=partial_history,
-                ),
-                mailbox_items=mailbox_items,
-                run=None
-                if value.run is None
-                else ChatLiveRunStateResponse.from_domain(value.run),
-                session_run_state=value.session_run_state,
-                todo=(
-                    TodoStateResponse.from_domain(value.todo)
-                    if value.todo is not None
-                    else None
-                ),
-                goal=(
-                    GoalStateResponse.from_domain(value.goal)
-                    if value.goal is not None
-                    else None
-                ),
-                action_executions=[
-                    ActionExecutionProjectionResponse.from_domain(projection)
-                    for projection in value.action_executions
-                ],
-            )
-        case Failure(error):
-            match error:
-                case SessionNotFound():
-                    raise HTTPException(
-                        status_code=404,
-                        detail="Session not found.",
-                    )
-                case SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        partial_history = [
+            ChatEventResponse.from_domain(event)
+            for event in value.partial_history_events
+        ]
+        mailbox_items = value.mailbox_items
+        return LiveEventListResponse(
+            partial_history=PartialHistoryResponse(
+                items=partial_history,
+            ),
+            mailbox_items=mailbox_items,
+            run=None
+            if value.run is None
+            else ChatLiveRunStateResponse.from_domain(value.run),
+            session_run_state=value.session_run_state,
+            todo=(
+                TodoStateResponse.from_domain(value.todo)
+                if value.todo is not None
+                else None
+            ),
+            goal=(
+                GoalStateResponse.from_domain(value.goal)
+                if value.goal is not None
+                else None
+            ),
+            action_executions=[
+                ActionExecutionProjectionResponse.from_domain(projection)
+                for projection in value.action_executions
+            ],
+        )
+    else:
+        error = result.error
+        match error:
+            case SessionNotFound():
+                raise HTTPException(
+                    status_code=404,
+                    detail="Session not found.",
+                )
+            case SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(error)
 
 
 @router.get("/agents/{agent_id}/workspace")
@@ -2653,29 +2617,27 @@ async def delete_mailbox_item(
         mailbox_item_id,
         user_id=current_user.user_id,
     )
-    match result:
-        case Success():
-            await _publish_chat_event_best_effort(
-                broadcast,
-                session_id=session_id,
-                event=chat_mailbox_item_removed_dump(session_id, mailbox_item_id),
-            )
-            return
-        case Failure(error):
-            match error:
-                case SessionNotFound():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case SessionAccessDenied():
-                    raise HTTPException(status_code=404, detail="Session not found.")
-                case SubagentSessionReadOnly():
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Subagent sessions are read-only.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        await _publish_chat_event_best_effort(
+            broadcast,
+            session_id=session_id,
+            event=chat_mailbox_item_removed_dump(session_id, mailbox_item_id),
+        )
+        return
+    else:
+        error = result.error
+        match error:
+            case SessionNotFound():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case SubagentSessionReadOnly():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Subagent sessions are read-only.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/agents/{agent_id}/workspace/files")
@@ -3013,35 +2975,34 @@ async def upload_file_for_agent(
         media_type=media_type,
         body=data,
     )
-    match result:
-        case Success(value):
-            return UploadResponse(
-                attachment_id=value.id,
-                uri=value.uri,
-                media_type=value.media_type,
-                size=value.size_bytes,
-                name=value.filename,
-            )
-        case Failure(error):
-            match error:
-                case ExchangeSessionNotFound():
-                    raise HTTPException(status_code=404, detail="Agent not found.")
-                case FileAccessDenied():
-                    logger.warning(
-                        "Chat upload denied by agent workspace access check",
-                        extra={
-                            "agent_id": agent_id,
-                            "user_id": current_user.user_id,
-                        },
-                    )
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Workspace membership required.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return UploadResponse(
+            attachment_id=value.id,
+            uri=value.uri,
+            media_type=value.media_type,
+            size=value.size_bytes,
+            name=value.filename,
+        )
+    else:
+        error = result.error
+        match error:
+            case ExchangeSessionNotFound():
+                raise HTTPException(status_code=404, detail="Agent not found.")
+            case FileAccessDenied():
+                logger.warning(
+                    "Chat upload denied by agent workspace access check",
+                    extra={
+                        "agent_id": agent_id,
+                        "user_id": current_user.user_id,
+                    },
+                )
+                raise HTTPException(
+                    status_code=403,
+                    detail="Workspace membership required.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get(

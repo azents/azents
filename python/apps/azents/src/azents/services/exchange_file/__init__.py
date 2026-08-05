@@ -732,25 +732,23 @@ class ExchangeFileService:
             retention_root_session_id=root.agent_session_id,
             bound_at=datetime.datetime.now(datetime.UTC),
         )
-        match claim:
-            case Success():
-                return Success(None)
-            case Failure(error):
-                match error:
-                    case ExchangeFileClaimNotFound():
-                        return Failure(FileNotFound())
-                    case ExchangeFileClaimWrongScope():
-                        return Failure(FileAccessDenied())
-                    case ExchangeFileClaimExpired():
-                        return Failure(FileExpired())
-                    case ExchangeFileClaimUnavailable():
-                        return Failure(FileUnavailable())
-                    case ExchangeFileClaimOwnerConflict():
-                        return Failure(FileRetentionOwnerConflict())
-                    case _:
-                        assert_never(error)
-            case _:
-                assert_never(claim)
+        if claim.success:
+            return Success(None)
+        else:
+            error = claim.error
+            match error:
+                case ExchangeFileClaimNotFound():
+                    return Failure(FileNotFound())
+                case ExchangeFileClaimWrongScope():
+                    return Failure(FileAccessDenied())
+                case ExchangeFileClaimExpired():
+                    return Failure(FileExpired())
+                case ExchangeFileClaimUnavailable():
+                    return Failure(FileUnavailable())
+                case ExchangeFileClaimOwnerConflict():
+                    return Failure(FileRetentionOwnerConflict())
+                case _:
+                    assert_never(error)
 
     async def _create_agent_file(
         self,

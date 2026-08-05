@@ -6,7 +6,6 @@ Workspace join request create, list, approve, reject, mute, and delete endpoints
 from textwrap import dedent
 from typing import Annotated, assert_never
 
-from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.core.auth.deps import (
@@ -57,30 +56,29 @@ async def create_join_request(
         workspace_handle=handle,
         message=request_body.message,
     )
-    match result:
-        case Success(value):
-            return JoinRequestResponse.model_validate(value, from_attributes=True)
-        case Failure(error):
-            match error:
-                case WorkspaceNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Workspace not found.",
-                    )
-                case AlreadyMember():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Already a workspace member.",
-                    )
-                case PendingRequestExists():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="A pending join request already exists.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return JoinRequestResponse.model_validate(value, from_attributes=True)
+    else:
+        error = result.error
+        match error:
+            case WorkspaceNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Workspace not found.",
+                )
+            case AlreadyMember():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Already a workspace member.",
+                )
+            case PendingRequestExists():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A pending join request already exists.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/workspaces/{handle}/join-requests/me")
@@ -95,22 +93,21 @@ async def get_my_join_request(
         user_id=current_user.user_id,
         workspace_handle=handle,
     )
-    match result:
-        case Success(value):
-            if value is None:
-                return None
-            return MyJoinRequestResponse.model_validate(value, from_attributes=True)
-        case Failure(error):
-            match error:
-                case WorkspaceNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Workspace not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        if value is None:
+            return None
+        return MyJoinRequestResponse.model_validate(value, from_attributes=True)
+    else:
+        error = result.error
+        match error:
+            case WorkspaceNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Workspace not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/workspaces/{handle}/join-requests")
@@ -156,20 +153,18 @@ async def approve_join_request(
         )
 
     result = await join_request_service.approve(join_request_id)
-    match result:
-        case Success():
-            return
-        case Failure(error):
-            match error:
-                case JoinRequestNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Join request not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        return
+    else:
+        error = result.error
+        match error:
+            case JoinRequestNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Join request not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post("/workspaces/{handle}/join-requests/{join_request_id}/reject")
@@ -190,20 +185,18 @@ async def reject_join_request(
         )
 
     result = await join_request_service.reject(join_request_id)
-    match result:
-        case Success():
-            return
-        case Failure(error):
-            match error:
-                case JoinRequestNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Join request not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        return
+    else:
+        error = result.error
+        match error:
+            case JoinRequestNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Join request not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post("/workspaces/{handle}/join-requests/{join_request_id}/mute")
@@ -224,20 +217,18 @@ async def mute_join_request(
         )
 
     result = await join_request_service.mute(join_request_id)
-    match result:
-        case Success():
-            return
-        case Failure(error):
-            match error:
-                case JoinRequestNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Join request not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        return
+    else:
+        error = result.error
+        match error:
+            case JoinRequestNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Join request not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.delete(
