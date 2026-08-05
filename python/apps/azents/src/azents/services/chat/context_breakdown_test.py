@@ -29,8 +29,8 @@ from azents.engine.events.types import (
 from azents.repos.agent_session.data import AgentSession
 from azents.services.chat.context import (
     SessionContextSystemPrompt,
-    _build_breakdown,  # pyright: ignore[reportPrivateUsage]
-    _build_context,  # pyright: ignore[reportPrivateUsage]
+    _build_breakdown,
+    _build_context,
 )
 
 

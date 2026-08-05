@@ -46,7 +46,7 @@ Prefer retrieval-led reasoning over pre-training-led reasoning. When a row's con
 | Always create timezone-aware datetimes via `datetime.now(timezone.utc)` — never use `datetime.now()` or `datetime.utcnow()`, which return naïve objects that compare incorrectly across boundaries. | [timezone-aware-datetimes](../conventions/python/timezone-aware-datetimes.md) |
 | Put Toolkit usage guidance in tool descriptions and schemas; reserve static prompts for pre-discovery rules and dynamic prompts for unavoidable changing state. | [toolkit-prompt-placement](../conventions/python/toolkit-prompt-placement.md) |
 | Never disguise an exception as success by stuffing the error into a response object — let it raise so monitoring sees a failure, not a 200 with an error field. | [transparent-error-handling](../conventions/python/transparent-error-handling.md) |
-| Resolve pyright errors by writing well-typed code first, avoiding `typing.cast(...)` and bare ignores; use stubs or reasoned `pyright: ignore[...]` only as a last resort. | [type-safety-order](../conventions/python/type-safety-order.md) |
+| Resolve ty errors by writing well-typed code first, avoiding `typing.cast(...)` and bare ignores; use stubs or reasoned `ty: ignore[...]` only as a last resort. | [type-safety-order](../conventions/python/type-safety-order.md) |
 | Define partial-update / patch payloads as `TypedDict` with `total=False` (or `NotRequired[...]`) so the type system distinguishes "field omitted" from "field set to null". | [typeddict-for-update-apis](../conventions/python/typeddict-for-update-apis.md) |
 
 <!-- END_TABLE -->

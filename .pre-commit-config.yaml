@@ -111,10 +111,10 @@ repos:
         args: [--project, python/apps/azents]
   - repo: local
     hooks:
-      - id: pyright-azents
-        name: Run pyright in azents
+      - id: ty-azents
+        name: Run ty in azents
         language: unsupported
-        entry: bash -c 'cd python/apps/azents && uv run pyright'
+        entry: bash -c 'cd python/apps/azents && uv run ty check --error-on-warning'
         files: |
           (?x)^(
             python/apps/azents/.*|

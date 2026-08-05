@@ -1,7 +1,7 @@
 """redis.asyncio.client stub — async 메서드 반환 타입 교정.
 
 redis-py의 async 메서드가 Awaitable[T] | T로 선언되어
-pyright에서 "int is not awaitable" 등의 에러가 발생하는 문제를 해결합니다.
+정적 타입 검사에서 "int is not awaitable" 등의 에러가 발생하는 문제를 해결합니다.
 https://github.com/redis/redis-py/issues/3107
 """
 

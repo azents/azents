@@ -4,7 +4,7 @@ title: "Write Python docstrings in Sphinx style with no type annotations inside 
 
 # Sphinx-Style Docstrings (No Types)
 
-Pyright already enforces type hints. Repeating them in the docstring duplicates the truth and lets the two drift.
+ty already enforces type hints. Repeating them in the docstring duplicates the truth and lets the two drift.
 
 - ALWAYS use Sphinx field syntax (`:param x:`, `:returns:`, `:raises:`)
 - NEVER write types in the docstring — leave that to the function signature

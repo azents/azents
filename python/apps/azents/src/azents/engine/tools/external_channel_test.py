@@ -666,7 +666,7 @@ async def test_static_prompt_compaction_and_idle_keep_minimal_channel_context() 
     assert search_prompt == direct_prompt
     assert await toolkit.get_dynamic_prompt(_turn_context()) == ""
 
-    compacted = await toolkit._on_compaction_summary(  # pyright: ignore[reportPrivateUsage]
+    compacted = await toolkit._on_compaction_summary(
         CompactionSummaryHookContext(
             workspace_id="workspace-1",
             agent_id="agent-1",
@@ -687,7 +687,7 @@ async def test_static_prompt_compaction_and_idle_keep_minimal_channel_context() 
     assert "Latest action" not in compacted.summary
     assert "Latest delivery outcomes" not in compacted.summary
 
-    idle = await toolkit._on_session_idle(  # pyright: ignore[reportPrivateUsage]
+    idle = await toolkit._on_session_idle(
         SessionIdleHookContext(
             workspace_id="workspace-1",
             agent_id="agent-1",

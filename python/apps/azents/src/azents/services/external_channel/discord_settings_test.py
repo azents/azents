@@ -33,7 +33,7 @@ from azents.repos.external_channel.repository import ExternalChannelRepository
 from azents.services.external_channel.discord_settings import (
     DiscordSettingsContext,
     DiscordSettingsResponseService,
-    _origin_matches,  # pyright: ignore[reportPrivateUsage]
+    _origin_matches,
 )
 from azents.services.external_channel.discord_settings_scope import (
     DiscordSettingsScope,

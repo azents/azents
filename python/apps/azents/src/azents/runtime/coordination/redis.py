@@ -362,7 +362,7 @@ class RedisRuntimeCoordinationStore:
         ttl_seconds: int | None,
     ) -> RuntimeOperationMetadata | None:
         """Create metadata once or return an exactly compatible existing record."""
-        raw = self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
+        raw = self._redis.eval(  # redis-py stub omits EVAL
             _ENSURE_OPERATION_METADATA_SCRIPT,
             1,
             self._operation_key(metadata.operation_id),
@@ -395,7 +395,7 @@ class RedisRuntimeCoordinationStore:
     ) -> RuntimeOperationMetadata | None:
         """Update operation status if the operation exists and is not final."""
         key = self._operation_key(operation_id)
-        raw = self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
+        raw = self._redis.eval(  # redis-py stub omits EVAL
             _UPDATE_OPERATION_IF_NOT_FINAL_SCRIPT,
             1,
             key,
@@ -419,7 +419,7 @@ class RedisRuntimeCoordinationStore:
     ) -> RuntimeOperationMetadata | None:
         """Atomically transition an operation from ACTIVE to RUNNING."""
         key = self._operation_key(operation_id)
-        raw = self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
+        raw = self._redis.eval(  # redis-py stub omits EVAL
             _TRY_START_OPERATION_SCRIPT,
             1,
             key,
@@ -447,7 +447,7 @@ class RedisRuntimeCoordinationStore:
         else:
             next_status = ""
             mark_final = ""
-        raw = self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
+        raw = self._redis.eval(  # redis-py stub omits EVAL
             _APPEND_REPLY_FOR_OPERATION_SCRIPT,
             2,
             operation_key,
@@ -481,7 +481,7 @@ class RedisRuntimeCoordinationStore:
             return None
         if metadata.status is RuntimeOperationStatus.FINAL:
             return metadata
-        raw = self._redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits EVAL
+        raw = self._redis.eval(  # redis-py stub omits EVAL
             _UPDATE_OPERATION_IF_NOT_FINAL_SCRIPT,
             1,
             key,
@@ -516,7 +516,7 @@ class RedisRuntimeCoordinationStore:
         """Register a current connection and issue a new generation."""
         generation_key = self._connection_generation_key(kind, subject_id)
         generation = int(
-            await self._redis.incr(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits INCR
+            await self._redis.incr(  # redis-py stub omits INCR
                 generation_key
             )
         )
@@ -656,7 +656,7 @@ class RedisRuntimeCoordinationStore:
         if limit <= 0:
             return []
         min_cursor = "-" if after_cursor is None else f"({after_cursor}"
-        rows = await self._redis.xrange(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits XRANGE
+        rows = await self._redis.xrange(  # redis-py stub omits XRANGE
             key, min=min_cursor, max="+", count=limit
         )
         entries = cast(list[tuple[object, Mapping[object, object]]], rows)

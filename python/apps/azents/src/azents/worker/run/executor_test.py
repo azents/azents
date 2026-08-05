@@ -2288,7 +2288,8 @@ async def test_operation_admission_closed_by_shutdown_is_cancelled() -> None:
     execution = _action_execution()
     action = CreateGitWorktreeAction.model_validate(execution.action)
 
-    result = await executor._process_operation_action(  # pyright: ignore[reportPrivateUsage]  # Pin operation admission fencing directly.
+    # Pin operation admission fencing directly.
+    result = await executor._process_operation_action(
         agent_id="agent-001",
         session_id="session-001",
         execution=execution,
@@ -2311,7 +2312,8 @@ async def test_operation_owner_generation_mismatch_is_cancelled() -> None:
     execution = _action_execution(owner_generation=2)
     action = CreateGitWorktreeAction.model_validate(execution.action)
 
-    result = await executor._process_operation_action(  # pyright: ignore[reportPrivateUsage]  # Pin operation admission fencing directly.
+    # Pin operation admission fencing directly.
+    result = await executor._process_operation_action(
         agent_id="agent-001",
         session_id="session-001",
         execution=execution,
@@ -3576,7 +3578,7 @@ async def test_run_session_heartbeat_loop_refreshes_lifecycle(
     executor = _executor(session_lifecycle=lifecycle)
 
     task = asyncio.create_task(
-        executor._run_session_heartbeat_loop(  # pyright: ignore[reportPrivateUsage]
+        executor._run_session_heartbeat_loop(
             "session-001",
             owner_generation=1,
         )
@@ -3596,7 +3598,7 @@ def test_failed_run_attempt_classifies_typed_non_retryable_model_error() -> None
     """Typed deterministic non-provider failures still finalize immediately."""
     executor = _executor()
 
-    attempt = executor._failed_run_attempt_from_user_visible_error(  # pyright: ignore[reportPrivateUsage]
+    attempt = executor._failed_run_attempt_from_user_visible_error(
         _SyntheticNonRetryableModelCallError("request rejected"),
         attempt_number=1,
         source="model",
@@ -3626,12 +3628,14 @@ async def test_provider_failure_uses_full_budget_despite_retryability() -> None:
     finalization_reasons: list[str | None] = []
 
     for attempt_number in range(1, 4):
-        attempt = executor._failed_run_attempt_from_user_visible_error(  # pyright: ignore[reportPrivateUsage]  # Exercise provider policy at the retry boundary.
+        # Exercise provider policy at the retry boundary.
+        attempt = executor._failed_run_attempt_from_user_visible_error(
             failure,
             attempt_number=attempt_number,
             source="model",
         )
-        retry_state = await executor._record_failed_run_attempt(  # pyright: ignore[reportPrivateUsage]  # Exercise durable retry policy directly.
+        # Exercise durable retry policy directly.
+        retry_state = await executor._record_failed_run_attempt(
             session_id="session-001",
             run_id="run-001",
             owner_generation=1,
@@ -3639,7 +3643,9 @@ async def test_provider_failure_uses_full_budget_despite_retryability() -> None:
             previous_retry_state=retry_state,
         )
         finalization_reasons.append(
-            run_executor_module._failed_run_finalization_reason(retry_state)  # pyright: ignore[reportPrivateUsage]  # Verify the full-budget terminal boundary.
+            run_executor_module._failed_run_finalization_reason(
+                retry_state
+            )  # Verify the full-budget terminal boundary.
         )
 
     assert retry_state is not None
@@ -3664,12 +3670,14 @@ async def test_timeout_failure_uses_full_budget_with_stable_attempt_codes() -> N
     retry_state: FailedRunRetryState | None = None
 
     for attempt_number in range(1, 5):
-        attempt = executor._failed_run_attempt_from_user_visible_error(  # pyright: ignore[reportPrivateUsage]  # Exercise timeout classification at the retry boundary.
+        # Exercise timeout classification at the retry boundary.
+        attempt = executor._failed_run_attempt_from_user_visible_error(
             failure,
             attempt_number=attempt_number,
             source="model",
         )
-        retry_state = await executor._record_failed_run_attempt(  # pyright: ignore[reportPrivateUsage]  # Exercise durable timeout history directly.
+        # Exercise durable timeout history directly.
+        retry_state = await executor._record_failed_run_attempt(
             session_id="session-001",
             run_id="run-001",
             owner_generation=1,
@@ -3684,7 +3692,9 @@ async def test_timeout_failure_uses_full_budget_with_stable_attempt_codes() -> N
     }
     assert all(attempt.retryability == "transient" for attempt in retry_state.attempts)
     assert (
-        run_executor_module._failed_run_finalization_reason(retry_state)  # pyright: ignore[reportPrivateUsage]  # Verify the terminal retry boundary.
+        run_executor_module._failed_run_finalization_reason(
+            retry_state
+        )  # Verify the terminal retry boundary.
         == "retry_exhausted"
     )
 
@@ -3968,14 +3978,16 @@ async def test_record_provider_failure_logs_safe_structured_attempt(
         provider_error_type="api_error",
         provider_error_param=None,
     )
-    attempt = executor._failed_run_attempt_from_user_visible_error(  # pyright: ignore[reportPrivateUsage]  # Exercise provider-attempt logging directly.
+    # Exercise provider-attempt logging directly.
+    attempt = executor._failed_run_attempt_from_user_visible_error(
         failure,
         attempt_number=1,
         source="model",
     )
 
     with caplog.at_level(logging.WARNING, logger=run_executor_module.__name__):
-        await executor._record_failed_run_attempt(  # pyright: ignore[reportPrivateUsage]  # Exercise provider-attempt logging directly.
+        # Exercise provider-attempt logging directly.
+        await executor._record_failed_run_attempt(
             session_id="session-001",
             run_id="run-001",
             owner_generation=1,
@@ -4026,7 +4038,8 @@ def test_chat_live_retry_state_hides_provider_diagnostic_taxonomy() -> None:
         provider_error_type="api_error",
         provider_error_param=None,
     )
-    attempt = executor._failed_run_attempt_from_user_visible_error(  # pyright: ignore[reportPrivateUsage]  # Exercise the live provider retry projection directly.
+    # Exercise the live provider retry projection directly.
+    attempt = executor._failed_run_attempt_from_user_visible_error(
         failure,
         attempt_number=1,
         source="model",
@@ -4038,9 +4051,8 @@ def test_chat_live_retry_state_hides_provider_diagnostic_taxonomy() -> None:
         next_retry_at=attempt.occurred_at + datetime.timedelta(seconds=1),
     )
 
-    projected = run_executor_module._chat_live_retry_state(  # pyright: ignore[reportPrivateUsage]  # Exercise the live provider retry projection directly.
-        retry_state
-    )
+    # Exercise the live provider retry projection directly.
+    projected = run_executor_module._chat_live_retry_state(retry_state)
 
     assert retry_state.retryability == "transient"
     assert retry_state.failure_code == "model_provider_provider_unavailable"

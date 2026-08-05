@@ -151,7 +151,7 @@ uv run alembic revision --autogenerate -m "description"
 uv run ruff check src
 
 # Type check
-uv run pyright
+uv run ty check --error-on-warning
 
 # Format
 uv run ruff format src

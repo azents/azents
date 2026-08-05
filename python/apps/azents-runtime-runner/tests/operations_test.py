@@ -24,7 +24,8 @@ from azents_runtime_control.runner import (
 
 from azents_runtime_runner.operations import (
     RunnerOperations,
-    _extract_glob_dir_prefix,  # pyright: ignore[reportPrivateUsage] -- Validate root-prefix parsing without traversing the host root.
+    # Validate root-prefix parsing without traversing the host root.
+    _extract_glob_dir_prefix,
 )
 from azents_runtime_runner.workspace import Workspace
 

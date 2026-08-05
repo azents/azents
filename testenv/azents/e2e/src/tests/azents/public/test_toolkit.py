@@ -320,7 +320,7 @@ class TestToolkitCrud:
             api.toolkit_v1_get_toolkit_config(
                 handle=handle, toolkit_config_id=toolkit_id, _headers=headers
             )
-        assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType]
+        assert exc_info.value.status == 404
 
     def test_invalid_toolkit_type_returns_400(
         self,
@@ -343,7 +343,7 @@ class TestToolkitCrud:
                 ),
                 _headers={"Authorization": f"Bearer {owner_token}"},
             )
-        assert exc_info.value.status == 400  # pyright: ignore[reportUnknownMemberType]
+        assert exc_info.value.status == 400
 
     def test_shell_toolkit_creation_blocked(
         self,
@@ -366,7 +366,7 @@ class TestToolkitCrud:
                 ),
                 _headers={"Authorization": f"Bearer {owner_token}"},
             )
-        assert exc_info.value.status == 400  # pyright: ignore[reportUnknownMemberType]
+        assert exc_info.value.status == 400
 
     def test_member_cannot_create_toolkit(
         self,
@@ -399,7 +399,7 @@ class TestToolkitCrud:
                 ),
                 _headers={"Authorization": f"Bearer {member_token}"},
             )
-        assert exc_info.value.status == 403  # pyright: ignore[reportUnknownMemberType]
+        assert exc_info.value.status == 403
 
 
 # ---------------------------------------------------------------------------
@@ -463,7 +463,7 @@ class TestToolkitScope:
                 toolkit_config_id=toolkit_id,
                 _headers=headers,
             )
-        assert exc_info.value.status == 409  # pyright: ignore[reportUnknownMemberType]
+        assert exc_info.value.status == 409
 
     def test_delete_scope(
         self,
@@ -667,7 +667,7 @@ class TestToolkitAvailableAndAttach:
                 ),
                 _headers=headers,
             )
-        assert exc_info.value.status == 409  # pyright: ignore[reportUnknownMemberType]
+        assert exc_info.value.status == 409
 
     def test_unavailable_toolkit_returns_403(
         self,
@@ -714,4 +714,4 @@ class TestToolkitAvailableAndAttach:
                 ),
                 _headers=headers,
             )
-        assert exc_info.value.status == 403  # pyright: ignore[reportUnknownMemberType]
+        assert exc_info.value.status == 403

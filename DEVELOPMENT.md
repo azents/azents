@@ -64,7 +64,7 @@ Python backend:
 $ cd python/apps/azents
 $ uv run ruff check --fix .
 $ uv run ruff format .
-$ uv run pyright
+$ uv run ty check --error-on-warning
 ```
 
 Python shared library:

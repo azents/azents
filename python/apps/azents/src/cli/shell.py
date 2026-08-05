@@ -111,7 +111,7 @@ async def _build_variables(
 
 async def run(command: str | None = None) -> None:
     """Shell main logic."""
-    settings = Settings()  # pyright: ignore[reportCallIssue] # pydantic-settings
+    settings = Settings()  # pydantic-settings
     config = Config.from_settings(settings)
     configure_logging_for_runtime(
         runtime_env=config.runtime_env,

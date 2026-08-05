@@ -15,11 +15,10 @@ uv run ruff format .
 uv run pytest
 ```
 
-Run the subproject's configured type checker against the whole subproject:
+Run the whole-subproject type checker:
 
 ```bash
-uv run pyright                         # azents
-uv run ty check --error-on-warning     # other maintained Python projects
+uv run ty check --error-on-warning
 ```
 
 ## Quick Reference
@@ -30,7 +29,7 @@ uv run ty check --error-on-warning     # other maintained Python projects
 cd /path/to/azents/python/apps/azents
 uv run ruff check --fix .
 uv run ruff format .
-uv run pyright
+uv run ty check --error-on-warning
 uv run pytest
 ```
 

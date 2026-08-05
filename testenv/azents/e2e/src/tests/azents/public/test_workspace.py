@@ -54,7 +54,7 @@ class TestWorkspaceGetByHandle:
 
         with pytest.raises(ApiException) as exc_info:
             public_api.workspace_v1_get_workspace_by_handle("nonexistent-handle")
-        assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 404  # t create API clientt t t t
 
 
 class TestWorkspaceAuthenticated:
@@ -123,7 +123,7 @@ class TestWorkspaceAuthenticated:
 
         with pytest.raises(ApiException) as exc_info:
             public_ws_api.workspace_v1_list_workspaces()
-        assert exc_info.value.status == 401  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 401  # t create API clientt t t t
 
     def test_create_workspace_without_token_returns_401(
         self,
@@ -140,4 +140,4 @@ class TestWorkspaceAuthenticated:
                     owner_name="Test Owner",
                 )
             )
-        assert exc_info.value.status == 401  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 401  # t create API clientt t t t

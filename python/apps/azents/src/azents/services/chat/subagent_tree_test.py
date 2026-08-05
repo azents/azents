@@ -50,7 +50,7 @@ from azents.testing.model_selection import make_test_model_selection_dict
 
 from . import (
     ChatSessionService,
-    _finalize_subagent_tree_nodes,  # pyright: ignore[reportPrivateUsage]
+    _finalize_subagent_tree_nodes,
 )
 from .data import SessionAccessDenied, SubagentTreeNode
 

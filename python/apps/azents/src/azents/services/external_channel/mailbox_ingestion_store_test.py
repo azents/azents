@@ -64,8 +64,8 @@ from azents.services.external_channel.ingestion import (
 )
 from azents.services.external_channel.mailbox_ingestion_store import (
     ExternalChannelMailboxIngestionStore,
-    _Conversation,  # pyright: ignore[reportPrivateUsage]
-    _response_mode_ignored_reason,  # pyright: ignore[reportPrivateUsage]
+    _Conversation,
+    _response_mode_ignored_reason,
 )
 from azents.services.external_channel.participation_state import (
     ExternalChannelSetupSourceProjection,
@@ -376,37 +376,23 @@ async def _accepted_control_plan_case(
     presence_intent = AsyncMock(return_value=presence_plan)
     settings_intent = AsyncMock(return_value=settings_plan)
 
-    store._lock_authority = AsyncMock(  # pyright: ignore[reportPrivateUsage]
-        return_value=connection
-    )
+    store._lock_authority = AsyncMock(return_value=connection)
     repository.lock_conversation_position = AsyncMock(return_value=position)
     repository.get_resource_by_provider_key = AsyncMock(return_value=resource)
-    store._replay_source_matches = MagicMock(  # pyright: ignore[reportPrivateUsage]
-        return_value=True
-    )
-    store._resolve_conversation = AsyncMock(  # pyright: ignore[reportPrivateUsage]
-        return_value=conversation
-    )
+    store._replay_source_matches = MagicMock(return_value=True)
+    store._resolve_conversation = AsyncMock(return_value=conversation)
     repository.get_active_block = AsyncMock(return_value=None)
     repository.get_active_access_grant = AsyncMock(return_value=object())
-    store._create_binding = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+    store._create_binding = AsyncMock(
         return_value=SimpleNamespace(binding=binding, session_created=True)
     )
     work_repository.ensure_active_work = AsyncMock(return_value=work)
-    store._create_session_presence_intent = (  # pyright: ignore[reportPrivateUsage]
-        presence_intent
-    )
-    store._create_binding_settings_on_demand_intent = (  # pyright: ignore[reportPrivateUsage]
-        settings_intent
-    )
-    store._create_initial_progress_intent = AsyncMock(  # pyright: ignore[reportPrivateUsage]
-        return_value=progress_plan
-    )
+    store._create_session_presence_intent = presence_intent
+    store._create_binding_settings_on_demand_intent = settings_intent
+    store._create_initial_progress_intent = AsyncMock(return_value=progress_plan)
     repository.advance_conversation_position_if_current = AsyncMock(return_value=True)
-    store._initialize_thread_position = AsyncMock(  # pyright: ignore[reportPrivateUsage]
-    )
-    store._complete_setup_replay = AsyncMock(  # pyright: ignore[reportPrivateUsage]
-    )
+    store._initialize_thread_position = AsyncMock()
+    store._complete_setup_replay = AsyncMock()
 
     acceptance: ExternalChannelIngestionAcceptance = await store.accept(
         request=request,
@@ -484,7 +470,7 @@ async def test_initial_progress_intent_uses_binding_toolkit_state_identity() -> 
     )
     session = cast(AsyncSession, MagicMock())
 
-    result = await store._create_initial_progress_intent(  # pyright: ignore[reportPrivateUsage]
+    result = await store._create_initial_progress_intent(
         session,
         agent_id="agent-1",
         binding=binding,
@@ -546,7 +532,7 @@ async def test_session_presence_intent_replaces_open_session_control() -> None:
         disconnected_at=None,
     )
 
-    result = await store._create_session_presence_intent(  # pyright: ignore[reportPrivateUsage]
+    result = await store._create_session_presence_intent(
         cast(AsyncSession, MagicMock()),
         resource=resource,
         binding=binding,
@@ -589,7 +575,7 @@ async def test_existing_binding_settings_intent_is_on_demand_and_versioned() -> 
         route_id="route-1",
     )
 
-    result = await store._create_binding_settings_on_demand_intent(  # pyright: ignore[reportPrivateUsage]
+    result = await store._create_binding_settings_on_demand_intent(
         cast(AsyncSession, MagicMock()),
         resource=resource,
         binding=binding,
@@ -622,17 +608,15 @@ async def test_conversation_resolution_does_not_create_session_before_acceptance
         repository=repository,
         root_creation_service=root_creation_service,
     )
-    store._ensure_principal = AsyncMock(  # pyright: ignore[reportPrivateUsage]
-        return_value="principal-1"
-    )
-    store._resolve_route = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+    store._ensure_principal = AsyncMock(return_value="principal-1")
+    store._resolve_route = AsyncMock(
         return_value=ExternalChannelAgentRoute.model_construct(
             id="route-1",
             agent_id="agent-1",
         )
     )
 
-    conversation = await store._resolve_conversation(  # pyright: ignore[reportPrivateUsage]
+    conversation = await store._resolve_conversation(
         cast(AsyncSession, MagicMock()),
         request=_slack_request(),
         connection=ExternalChannelConnection.model_construct(id="connection-1"),
@@ -700,11 +684,9 @@ async def test_setup_required_commits_claim_without_conversation_side_effects() 
         claim_generation=1,
         status=ExternalChannelSetupClaimStatus.PENDING_LOCATION,
     )
-    store._ensure_setup_claim = AsyncMock(  # pyright: ignore[reportPrivateUsage]
-        return_value=claim
-    )
+    store._ensure_setup_claim = AsyncMock(return_value=claim)
 
-    acceptance = await store._accept_setup_required(  # pyright: ignore[reportPrivateUsage]
+    acceptance = await store._accept_setup_required(
         session,
         request=_parent_slack_request(),
         connection=ExternalChannelConnection.model_construct(id="connection-1"),
@@ -806,7 +788,7 @@ async def test_latest_eligible_setup_mention_replaces_continuation_source() -> N
     source_resource = ExternalChannelResource.model_construct(id="source-new")
     route = ExternalChannelAgentRoute.model_construct(id="route-1")
 
-    result = await store._ensure_setup_claim(  # pyright: ignore[reportPrivateUsage]
+    result = await store._ensure_setup_claim(
         cast(AsyncSession, MagicMock()),
         request=request,
         position=position,
@@ -876,7 +858,7 @@ async def test_duplicate_slack_event_types_reuse_setup_claim_source() -> None:
     repository.replace_setup_claim_source = AsyncMock()
     store = _store(repository=repository)
 
-    result = await store._ensure_setup_claim(  # pyright: ignore[reportPrivateUsage]
+    result = await store._ensure_setup_claim(
         cast(AsyncSession, MagicMock()),
         request=request,
         position=ExternalChannelConversationPosition.model_construct(id="position-1"),
@@ -917,7 +899,7 @@ async def test_discord_thread_resolves_multi_default_from_parent_channel() -> No
         ),
     )
 
-    route = await store._resolve_route(  # pyright: ignore[reportPrivateUsage]
+    route = await store._resolve_route(
         cast(AsyncSession, MagicMock()),
         request=request,
         connection=ExternalChannelConnection.model_construct(
@@ -979,13 +961,13 @@ async def test_create_binding_reports_only_the_new_root_session() -> None:
     )
     resource = ExternalChannelResource.model_construct(id="resource-1")
 
-    first = await store._create_binding(  # pyright: ignore[reportPrivateUsage]
+    first = await store._create_binding(
         cast(AsyncSession, MagicMock()),
         route=route,
         resource=resource,
         response_mode=None,
     )
-    repeated = await store._create_binding(  # pyright: ignore[reportPrivateUsage]
+    repeated = await store._create_binding(
         cast(AsyncSession, MagicMock()),
         route=route,
         resource=resource,

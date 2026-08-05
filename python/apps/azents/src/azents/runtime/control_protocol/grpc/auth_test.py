@@ -1,6 +1,5 @@
 """Runtime Control gRPC metadata authentication tests."""
 
-# pyright: reportAttributeAccessIssue=false
 # Protobuf generated modules expose dynamic message attributes.
 
 import dataclasses

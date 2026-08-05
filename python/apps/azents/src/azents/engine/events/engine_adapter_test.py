@@ -46,9 +46,9 @@ from azents.engine.events.engine_adapter import (
     AgentEngineAdapter,
     EventEngineAdapterConfig,
     RunExecutionFactory,
-    _HookedClientToolExecutor,  # pyright: ignore[reportPrivateUsage]  # Fix Hook wrapper cancellation contract.
-    _WorkingSetClientToolExecutor,  # pyright: ignore[reportPrivateUsage]  # Verify deferred recency wrapper.
-    _xai_imagine_client_factory,  # pyright: ignore[reportPrivateUsage]  # Test-only default dependency.
+    _HookedClientToolExecutor,  # Fix Hook wrapper cancellation contract.
+    _WorkingSetClientToolExecutor,  # Verify deferred recency wrapper.
+    _xai_imagine_client_factory,  # Test-only default dependency.
 )
 from azents.engine.events.engine_events import RunComplete
 from azents.engine.events.execution import (
@@ -851,9 +851,8 @@ def test_summary_renderer_omits_plaintext_custom_tool_input() -> None:
         created_at=datetime.datetime.now(datetime.UTC),
     )
 
-    rendered = engine_adapter_module._render_events_for_summary(  # pyright: ignore[reportPrivateUsage]  # Verify compaction summary redaction.
-        [event]
-    )
+    # Verify compaction summary redaction.
+    rendered = engine_adapter_module._render_events_for_summary([event])
 
     assert omitted_input not in rendered
     assert rendered == (
@@ -1633,7 +1632,9 @@ async def test_xai_oauth_refresh_preserves_failure_classification(
         inference_state=_xai_oauth_inference_state(),
         compaction_provider_integration_id=None,
     )
-    tool = adapter._xai_image_generation_tool(request)  # pyright: ignore[reportPrivateUsage]  # Verify forced-refresh error mapping.
+    tool = adapter._xai_image_generation_tool(
+        request
+    )  # Verify forced-refresh error mapping.
 
     with pytest.raises(FunctionToolError, match=expected_message):
         await tool.handler('{"prompt":"Image"}')

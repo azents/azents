@@ -1344,7 +1344,9 @@ def test_interaction_view_rejects_oversized_private_metadata_without_request() -
     )
 
     with pytest.raises(ValueError, match="private metadata is too long"):
-        SlackConversationClient._validate_interaction_view(view)  # pyright: ignore[reportPrivateUsage]  # Validate the provider payload boundary directly.
+        SlackConversationClient._validate_interaction_view(
+            view
+        )  # Validate the provider payload boundary directly.
 
 
 async def test_missing_update_target_is_reported_as_confirmed_deletion() -> None:

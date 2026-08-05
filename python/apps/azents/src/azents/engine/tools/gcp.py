@@ -57,8 +57,8 @@ from azents.engine.tools.mcp_base import (
     McpArtifactSink,
     McpToolSnapshotItem,
     McpToolSnapshotState,
-    _extract_tool_result,  # pyright: ignore[reportPrivateUsage] -- reuse common MCP result extraction for GCP wrapper.
-    _is_http_401,  # pyright: ignore[reportPrivateUsage] -- reuse common MCP 401 retry detection.
+    _extract_tool_result,  # reuse common MCP result extraction for GCP wrapper.
+    _is_http_401,  # reuse common MCP 401 retry detection.
     build_mcp_artifact_sink,
 )
 from azents.rdb.session import SessionManager

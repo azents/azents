@@ -48,7 +48,7 @@ def _get_my_profile(
     handle: str,
 ) -> dict[str, Any]:
     """member profilet fetcht (raw HTTP use)."""
-    base_url = f"{public_api_client.configuration.host}"  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+    base_url = f"{public_api_client.configuration.host}"  # t create API clientt t t t
     response = requests.get(
         f"{base_url}/workspace-user/v1/workspaces/{handle}/me/profile",
         headers={"Authorization": f"Bearer {access_token}"},
@@ -66,7 +66,7 @@ def _update_my_profile(
     name: str | None = None,
 ) -> dict[str, Any]:
     """member profilet updatet (raw HTTP use)."""
-    base_url = f"{public_api_client.configuration.host}"  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+    base_url = f"{public_api_client.configuration.host}"  # t create API clientt t t t
     body: dict[str, str] = {}
     if name is not None:
         body["name"] = name
@@ -112,7 +112,9 @@ class TestGetMyProfile:
         admin_api_client: azentsadminclient.ApiClient,
     ) -> None:
         """token t profile fetch t 401t returnt."""
-        base_url = f"{public_api_client.configuration.host}"  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        base_url = (
+            f"{public_api_client.configuration.host}"  # t create API clientt t t t
+        )
         response = requests.get(
             f"{base_url}/workspace-user/v1/workspaces/any-handle/me/profile",
             timeout=10,
@@ -145,7 +147,9 @@ class TestUpdateMyProfile:
         public_api_client: azentspublicclient.ApiClient,
     ) -> None:
         """token t profile update t 401t returnt."""
-        base_url = f"{public_api_client.configuration.host}"  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        base_url = (
+            f"{public_api_client.configuration.host}"  # t create API clientt t t t
+        )
         response = requests.patch(
             f"{base_url}/workspace-user/v1/workspaces/any-handle/me/profile",
             json={"name": "Test"},

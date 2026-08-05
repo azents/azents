@@ -41,7 +41,7 @@ from azents.services.external_channel.ingestion import (
 from azents.services.external_channel.participation import (
     ExternalChannelParticipationError,
     ExternalChannelParticipationService,
-    _CommittedLocation,  # pyright: ignore[reportPrivateUsage]
+    _CommittedLocation,
 )
 from azents.services.external_channel.participation_state import (
     ExternalChannelSetupSourceProjection,
@@ -348,7 +348,7 @@ async def test_location_selection_resolves_explicit_target_resource(
     repository.create_resource_idempotent = AsyncMock(return_value=parent_resource)
     service = _service(repository=repository)
 
-    resolved = await service._resolve_selected_resource(  # pyright: ignore[reportPrivateUsage]
+    resolved = await service._resolve_selected_resource(
         cast(AsyncSession, SimpleNamespace()),
         claim=_claim(status=ExternalChannelSetupClaimStatus.PENDING_LOCATION),
         source=_source(),

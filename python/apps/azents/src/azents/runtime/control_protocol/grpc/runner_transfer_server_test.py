@@ -1,6 +1,5 @@
 """Bounded Runner download transfer servicer tests."""
 
-# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportPrivateUsage=false
 # ruff: noqa: E501
 
 import asyncio

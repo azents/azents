@@ -631,8 +631,8 @@ class Config(BaseModel):
         default, but pydantic-settings injects values from environment variables
         such as AZ_RDB_HOST at runtime, so Settings() works without arguments.
 
-        pyright does not understand this runtime behavior and reports missing
-        required arguments. Since pydantic pyright plugin does not support
-        BaseSettings, suppress the error only in this wrapper function.
+        Static type checkers do not understand this runtime behavior and report
+        missing required arguments. Suppress the error only in this wrapper
+        function.
         """
         return cls.from_settings(Settings())  # type: ignore[call-arg]

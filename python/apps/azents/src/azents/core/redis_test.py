@@ -11,9 +11,9 @@ def _connection_kwargs(client: Redis) -> dict[str, Any]:
     """Fetch connection_pool kwargs from Redis client.
 
     ``connection_pool`` is a public redis-py attribute, but local type stubs do
-    not declare it, so suppress pyright access error.
+    not declare it, so the test reads it through the local stub surface.
     """
-    pool = client.connection_pool  # pyright: ignore[reportAttributeAccessIssue]  # stub not declared
+    pool = client.connection_pool  # stub not declared
     return pool.connection_kwargs
 
 

@@ -1,6 +1,5 @@
 """Agent Runtime Provider Control gRPC server bridge."""
 
-# pyright: reportAttributeAccessIssue=false, reportUntypedBaseClass=false
 # protobuf generated modules expose dynamic message/RPC attributes.
 
 import asyncio

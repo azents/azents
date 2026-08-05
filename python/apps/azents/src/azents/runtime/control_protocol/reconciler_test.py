@@ -1,7 +1,5 @@
 """Runtime lifecycle reconciler tests."""
 
-# pyright: reportPrivateUsage=false
-
 import datetime
 
 import pytest

@@ -246,7 +246,7 @@ async def test_owned_socket_event_uses_lease_authority_without_legacy_admission(
         transport_ingestion_service=transport,
     )
 
-    result = await service._handle_owned_event(  # pyright: ignore[reportPrivateUsage]
+    result = await service._handle_owned_event(
         connection_id="connection-1",
         configuration=_configuration(),
         event=_event("app_mention"),
@@ -293,7 +293,7 @@ async def test_owned_socket_schedules_controls_without_waiting_for_completion() 
         provider_control=provider_control,
     )
 
-    result = await service._handle_owned_event(  # pyright: ignore[reportPrivateUsage]
+    result = await service._handle_owned_event(
         connection_id="connection-1",
         configuration=_configuration(),
         event=_event("app_mention"),
@@ -326,7 +326,7 @@ async def test_owned_socket_retryable_result_raises_before_acknowledgement() -> 
     )
 
     with pytest.raises(SlackSocketRetryableIngestion):
-        await service._handle_owned_event(  # pyright: ignore[reportPrivateUsage]
+        await service._handle_owned_event(
             connection_id="connection-1",
             configuration=_configuration(),
             event=_event("app_mention"),
@@ -348,7 +348,7 @@ async def test_owned_socket_revocation_uses_configuration_and_lease_fences() -> 
         revocation_service=revocation,
     )
 
-    await service._handle_owned_event(  # pyright: ignore[reportPrivateUsage]
+    await service._handle_owned_event(
         connection_id="connection-1",
         configuration=_configuration(),
         event=_event("tokens_revoked"),
@@ -379,7 +379,7 @@ async def test_stale_owned_socket_revocation_is_not_acknowledged() -> None:
     )
 
     with pytest.raises(SlackSocketInvalidEnvelope):
-        await service._handle_owned_event(  # pyright: ignore[reportPrivateUsage]
+        await service._handle_owned_event(
             connection_id="connection-1",
             configuration=_configuration(),
             event=_event("tokens_revoked"),
@@ -446,7 +446,7 @@ async def test_retryable_ingestion_releases_degraded_after_sdk_lifecycle(
         _RetryableRunner,
     )
 
-    await service._run_owned_connection(  # pyright: ignore[reportPrivateUsage]
+    await service._run_owned_connection(
         connection_id="connection-1",
         shutdown_event=asyncio.Event(),
     )
@@ -469,7 +469,9 @@ async def test_reconnect_required_preserves_owned_route() -> None:
     session = _SessionDouble()
     repository = _RepositoryDouble()
 
-    released = await _service(session, repository)._release(  # pyright: ignore[reportPrivateUsage]  # Exercise the terminal Socket release boundary directly.
+    released = await _service(
+        session, repository
+    )._release(  # Exercise the terminal Socket release boundary directly.
         "connection-1",
         reason="link_disabled",
         status=ExternalChannelConnectionStatus.RECONNECT_REQUIRED,
@@ -492,7 +494,9 @@ async def test_degraded_socket_release_preserves_connection_lifecycle() -> None:
     session = _SessionDouble()
     repository = _RepositoryDouble()
 
-    released = await _service(session, repository)._release(  # pyright: ignore[reportPrivateUsage]  # Exercise the terminal Socket release boundary directly.
+    released = await _service(
+        session, repository
+    )._release(  # Exercise the terminal Socket release boundary directly.
         "connection-1",
         reason="socket_transport_unavailable",
         status=ExternalChannelConnectionStatus.DEGRADED,
@@ -515,20 +519,20 @@ def test_quiesced_socket_blocks_normal_messages_but_keeps_revocations() -> None:
     config.external_channel_conversation.quiesce.slack_socket = True
     service = _service(_SessionDouble(), _RepositoryDouble(), config=config)
 
-    assert service._message_ingress_quiesced(_event("app_mention"))  # pyright: ignore[reportPrivateUsage]
-    assert service._message_ingress_quiesced(_event("message"))  # pyright: ignore[reportPrivateUsage]
-    assert not service._message_ingress_quiesced(  # pyright: ignore[reportPrivateUsage]
+    assert service._message_ingress_quiesced(_event("app_mention"))
+    assert service._message_ingress_quiesced(_event("message"))
+    assert not service._message_ingress_quiesced(
         _event("message", subtype="message_changed")
     )
-    assert not service._message_ingress_quiesced(  # pyright: ignore[reportPrivateUsage]
+    assert not service._message_ingress_quiesced(
         _event("message", subtype="message_deleted")
     )
-    assert not service._message_ingress_quiesced(_event("app_uninstalled"))  # pyright: ignore[reportPrivateUsage]
-    assert not service._message_ingress_quiesced(_event("tokens_revoked"))  # pyright: ignore[reportPrivateUsage]
+    assert not service._message_ingress_quiesced(_event("app_uninstalled"))
+    assert not service._message_ingress_quiesced(_event("tokens_revoked"))
 
 
 def test_socket_quiesce_is_disabled_by_default() -> None:
     """The default configuration preserves legacy Socket admission."""
     service = _service(_SessionDouble(), _RepositoryDouble())
 
-    assert not service._message_ingress_quiesced(_event("app_mention"))  # pyright: ignore[reportPrivateUsage]
+    assert not service._message_ingress_quiesced(_event("app_mention"))

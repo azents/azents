@@ -29,8 +29,7 @@ $ uv run pytest
 Run the subproject's configured type checker:
 
 ```console
-$ uv run pyright                         # azents
-$ uv run ty check --error-on-warning     # other maintained Python projects
+$ uv run ty check --error-on-warning
 ```
 
 Backend development server:

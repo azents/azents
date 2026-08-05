@@ -414,7 +414,7 @@ def _make_list_tool(
             end = args.offset + args.limit
             has_more = False
             async for item in client.list(
-                res_class,  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type] — lightkube overload omits the namespaced/global resource-class union returned by discovery.
+                res_class,  # ty: ignore[invalid-argument-type] — lightkube overload omits the namespaced/global resource-class union returned by discovery.
                 namespace=ns,
                 labels=labels,
                 fields=fields,
@@ -479,7 +479,7 @@ def _make_get_tool(
         try:
             res_class = cache.get_resource_class(args.api_version, args.kind)
             result = await client.get(
-                res_class,  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type] — lightkube overload omits the namespaced/global resource-class union returned by discovery.
+                res_class,  # ty: ignore[invalid-argument-type] — lightkube overload omits the namespaced/global resource-class union returned by discovery.
                 name=args.name,
                 namespace=ns,
             )
@@ -712,7 +712,7 @@ def _make_delete_tool(
         try:
             res_class = cache.get_resource_class(args.api_version, args.kind)
             await client.delete(
-                res_class,  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type] — lightkube overload omits the namespaced/global resource-class union returned by discovery.
+                res_class,  # ty: ignore[invalid-argument-type] — lightkube overload omits the namespaced/global resource-class union returned by discovery.
                 name=args.name,
                 namespace=ns,
             )
@@ -900,7 +900,7 @@ class KubernetesToolkit(Toolkit[KubernetesToolkitConfig]):
                     cluster_cred,
                     proxy_url=self._proxy_url,
                 )
-                httpx_client: httpx.AsyncClient = new_client._client._client  # pyright: ignore[reportPrivateUsage, reportAssignmentType]  # ty: ignore[invalid-assignment] — No raw HTTP access method in lightkube public API; runtime is httpx.AsyncClient but the stub declares Client.
+                httpx_client: httpx.AsyncClient = new_client._client._client  # ty: ignore[invalid-assignment] — No raw HTTP access method in lightkube public API; runtime is httpx.AsyncClient but the stub declares Client.
                 new_cache = ResourceDiscoveryCache()
                 await new_cache.discover(httpx_client)
             except asyncio.CancelledError:

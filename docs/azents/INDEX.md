@@ -409,6 +409,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Runtime Transfer Lifespan Recovery Requirements](requirements/transfer-260728-runtime-transfer-lifespan-recovery.md) | transfer-260728 | 2026-07-28 | 2026-07-28 |
 | [Continue FIFO Processing After Failed TurnActions Historical Requirements Reconstruction](requirements/turn-260708-turn-action-fifo-continuation.md) | turn-260708 | 2026-07-08 | - |
 | [Expose Typed Actionable Profile Resolution Failures Historical Requirements Reconstruction](requirements/typed-260710-typed-profile-resolution-failures.md) | typed-260710 | 2026-07-10 | - |
+| [Unified Python Type Quality Gate Requirements](requirements/typing-260805-ty-quality-gate.md) | typing-260805 | 2026-08-05 | 2026-08-05 |
 | [Unified OAuth Authentication Flow Historical Requirements Reconstruction](requirements/unified-260327-unified-oauth.md) | unified-260327 | 2026-03-27 | 2026-03-27 |
 | [Unify Subagent Communication Through Mailbox Activity Historical Requirements Reconstruction](requirements/unify-260719-unify-subagent-communication-through-mailbox-activity.md) | unify-260719 | 2026-07-19 | - |
 | [Suppress Unread Indicators While Sessions Run Historical Requirements Reconstruction](requirements/unread-260721-unread-indicators-while-sessions.md) | unread-260721 | 2026-07-21 | - |
@@ -780,6 +781,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Runtime Transfer Lifespan Recovery](adr/transfer-260728-runtime-transfer-lifespan-recovery.md)
 - [Continue FIFO Processing After Failed TurnActions](adr/turn-260708-turn-action-fifo-continuation.md)
 - [Expose Typed Actionable Profile Resolution Failures](adr/typed-260710-typed-profile-resolution-failures.md)
+- [Unified Python Type Quality Gate](adr/typing-260805-ty-quality-gate.md)
 - [Unified OAuth Authentication Flow Historical Decision Reconstruction](adr/unified-260327-unified-oauth.md)
 - [Unify Subagent Communication Through Mailbox Activity](adr/unify-260719-unify-subagent-communication-through-mailbox-activity.md)
 - [Suppress Unread Indicators While Sessions Run](adr/unread-260721-unread-indicators-while-sessions.md)

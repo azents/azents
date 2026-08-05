@@ -1,6 +1,5 @@
 """Trusted Runtime transfer coordinator gRPC servicer."""
 
-# pyright: reportAttributeAccessIssue=false, reportUntypedBaseClass=false
 # Protobuf generated modules expose dynamic message/RPC attributes.
 # ruff: noqa: E501
 
