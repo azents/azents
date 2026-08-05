@@ -210,6 +210,7 @@ def _wait_for_ws_action(
     ws: Connection,
     *,
     action_type: str,
+    mailbox_item_id: str | None = None,
     timeout: float = 10,
 ) -> dict[str, object]:
     """Wait for a canonical WebSocket action of the requested type."""
@@ -221,8 +222,12 @@ def _wait_for_ws_action(
         except TimeoutError:
             continue
         observed.append(action.get("type"))
-        if action.get("type") == action_type:
-            return action
+        if action.get("type") != action_type:
+            continue
+        if mailbox_item_id is not None:
+            if action.get("mailbox_item_id") != mailbox_item_id:
+                continue
+        return action
     raise TimeoutError(f"WebSocket action was not observed: {action_type}, {observed}")
 
 
@@ -1267,6 +1272,7 @@ class TestAgentExecutionPersistence:
             removal_action = _wait_for_ws_action(
                 ws,
                 action_type="mailbox_item_removed",
+                mailbox_item_id=mailbox_item_id,
                 timeout=120,
             )
             assert removal_action == {
