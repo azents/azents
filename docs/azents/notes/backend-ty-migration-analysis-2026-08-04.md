@@ -340,3 +340,34 @@ retention, broker, runtime-finalization, and persistent repository collaborators
 Removing those diagnostics mechanically would require either checker-only dynamic
 assignment or a new lifecycle-wide collaborator contract. That boundary requires
 separate contract review and remains outside this isolated test-double phase.
+
+## Phase 10: Agent Decommission Consumer Contracts
+
+The tenth phase completes the isolated Agent decommission test-double group after
+its lifecycle boundary review.
+
+This phase:
+
+- Declares private consumer-side Protocols for only the repository, lifecycle,
+  broker, Runtime, and file-cleanup capabilities consumed by the scheduler-owned
+  decommission coordinator.
+- Keeps concrete dependency providers and all lifecycle result records unchanged.
+- Models consumed result attributes as read-only protocol properties, so frozen
+  focused test projections remain structurally valid.
+- Replaces loose keyword sinks and namespace values in the focused tests with
+  exact keyword-compatible methods and concrete External Channel cleanup records.
+- Removes the affected fake-assignment suppressions without adding casts,
+  checker-only dynamic assignment, compatibility behavior, or lifecycle changes.
+
+### Phase 10 Result
+
+The phase reduces the backend measurement from 297 to 278 diagnostics:
+
+- Agent decommission test-double diagnostics: 19 to 0.
+- Focused Agent decommission tests: 4 passed.
+- Backend Pyright: 0 errors, 0 warnings.
+- Backend tests: 3,948 passed.
+- Remaining diagnostics are excluded from this phase: External Channel dynamic
+  payload validation, result-union narrowing, and unrelated contract families.
+
+The final backend measurement remains 278 diagnostics outside this phase.

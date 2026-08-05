@@ -129,6 +129,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Remove Percentage Rollout from Apply-Patch Custom Selection Historical Requirements Reconstruction](requirements/custom-260721-patch-custom-rollout.md) | custom-260721 | 2026-07-21 | - |
 | [nointern Daily Log Historical Requirements Reconstruction](requirements/daily-260322-daily-log.md) | daily-260322 | 2026-03-22 | 2026-03-22 |
 | [Declarative Improvements for Async Toolkit Loading State Historical Requirements Reconstruction](requirements/declarative-260331-declarative-toolkit-status.md) | declarative-260331 | 2026-03-31 | 2026-03-31 |
+| [Agent Decommission Test-Double Contracts Requirements](requirements/decommission-260804-test-double-contracts.md) | decommission-260804 | 2026-08-04 | 2026-08-05 |
 | [Deterministic Tool Catalog, MCP Tool Snapshots, and Stable Toolkit Prompts Historical Requirements Reconstruction](requirements/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md) | deterministic-260628 | 2026-06-28 | - |
 | [Full-stack Local Test Environment — Stage 1b (devserver lifecycle) Historical Requirements Reconstruction](requirements/devserver-260406-devserver-lifecycle.md) | devserver-260406 | 2026-04-06 | 2026-04-06 |
 | [Directly Promote Continuation and Agent Messages Historical Requirements Reconstruction](requirements/directly-260712-directly-promote-continuation-and-messages.md) | directly-260712 | 2026-07-12 | - |
@@ -497,6 +498,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Remove Percentage Rollout from Apply-Patch Custom Selection](adr/custom-260721-patch-custom-rollout.md)
 - [nointern Daily Log Historical Decision Reconstruction](adr/daily-260322-daily-log.md)
 - [Declarative Improvements for Async Toolkit Loading State](adr/declarative-260331-declarative-toolkit-status.md)
+- [Agent Decommission Test-Double Contracts](adr/decommission-260804-test-double-contracts.md)
 - [Deterministic Tool Catalog, MCP Tool Snapshots, and Stable Toolkit Prompts](adr/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md)
 - [Full-stack Local Test Environment — Stage 1b (devserver lifecycle) Historical Decision Reconstruction](adr/devserver-260406-devserver-lifecycle.md)
 - [Directly Promote Continuation and Agent Messages](adr/directly-260712-directly-promote-continuation-and-messages.md)
