@@ -21,6 +21,10 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
 from azentspublicclient.models.secrets import Secrets
 from pydantic import TypeAdapter, ValidationError
 
+from support.runtime_profiles import (
+    create_workspace_runtime_profile,
+    start_and_wait_for_agent_runtime,
+)
 from support.utils import authenticate_user, unique, wait_until
 
 _JSON_OBJECT = TypeAdapter(dict[str, object])
@@ -38,6 +42,8 @@ _INHERITED_DISABLED_TARGET_MESSAGE = "Subagent inherit disabled parent target"
 _INHERITED_DISABLED_TARGET_TASK = "Inherited disabled parent target task"
 _EFFORT_ONLY_DISABLED_TARGET_MESSAGE = "Subagent effort-only disabled parent target"
 _EFFORT_ONLY_DISABLED_TARGET_TASK = "Effort-only disabled parent target task"
+
+pytestmark = pytest.mark.usefixtures("azents_runtime_provider_docker_container")
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -135,6 +141,12 @@ def _setup_profile_agent(
             "model_identifier": identifier,
         }
 
+    runtime_profile_id = create_workspace_runtime_profile(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        provider_id="system-docker",
+    )
     agent_payload: dict[str, object] = {
         "name": "Per Prompt Profile QA Agent",
         "type": "public",
@@ -177,6 +189,7 @@ def _setup_profile_agent(
         ],
         "main_model_label": "Quality",
         "lightweight_model_label": "Fast",
+        "runtime_profile_id": runtime_profile_id,
     }
     created = _response_object(
         requests.post(
@@ -189,6 +202,12 @@ def _setup_profile_agent(
     agent_id = created.get("id")
     if not isinstance(agent_id, str):
         raise AssertionError(f"Agent response did not include id: {created!r}")
+    start_and_wait_for_agent_runtime(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        agent_id=agent_id,
+    )
     session = _response_object(
         requests.get(
             f"{server_url}/chat/v1/agents/{agent_id}/team-primary-session",

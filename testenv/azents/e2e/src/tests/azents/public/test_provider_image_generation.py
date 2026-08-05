@@ -33,6 +33,8 @@ from tests.azents.public.test_agent_execution_persistence import (
 )
 from tests.azents.public.test_per_prompt_inference_profile import setup_profile_agent
 
+pytestmark = pytest.mark.usefixtures("azents_runtime_provider_docker_container")
+
 _PROMPT = "Provider image generation handoff"
 _FOLLOW_UP_PROMPT = "Provider image generation follow-up"
 _FOLLOW_UP_RESPONSE = "PROVIDER_IMAGE_GENERATION_FOLLOW_UP_COMPLETED"

@@ -28,6 +28,8 @@ _UPLOAD_PROMPT = "Describe uploaded image and file"
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
+pytestmark = pytest.mark.usefixtures("azents_runtime_provider_docker_container")
+
 
 def _exchange_uri_is_file_location(uri: object) -> bool:
     """Exchange URIt opaque file-locationt verifyt."""

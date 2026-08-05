@@ -37,6 +37,8 @@ from tests.azents.public.test_agent_execution_persistence import (
     wait_for_ws_action,
 )
 
+pytestmark = pytest.mark.usefixtures("azents_runtime_provider_docker_container")
+
 _IDLE_RECOVERY_PROMPT = "Watchdog idle before first event then recover"
 _IDLE_RECOVERY_RESPONSE = "WATCHDOG_IDLE_RECOVERED"
 _IDLE_PREFIX_PROMPT = "Watchdog idle after prefix then recover"

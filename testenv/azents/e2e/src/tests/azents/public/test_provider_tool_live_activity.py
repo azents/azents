@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 import requests
 from websockets.sync.connection import Connection
 
@@ -25,6 +26,8 @@ from tests.azents.public.test_per_prompt_inference_profile import (
 
 _PROMPT = "Provider tool live activity handoff"
 _RESPONSE = "PROVIDER_TOOL_LIVE_ACTIVITY_COMPLETED"
+
+pytestmark = pytest.mark.usefixtures("azents_runtime_provider_docker_container")
 
 
 def _provider_call_event(
