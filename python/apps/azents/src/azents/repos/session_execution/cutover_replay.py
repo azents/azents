@@ -17,6 +17,23 @@ from azents.rdb.models.mailbox_item import RDBMailboxItem
 
 _MAX_BATCH_SIZE = 500
 
+type CutoverReplayCandidateProjection = tuple[
+    str,
+    int,
+    AgentSessionRunState,
+    bool,
+    str | None,
+    bool,
+    str | None,
+    bool,
+    str | None,
+    int,
+    str | None,
+    bool,
+    str | None,
+    bool,
+]
+
 
 @dataclasses.dataclass(frozen=True)
 class CutoverReplayCandidate:
@@ -129,7 +146,7 @@ class SessionCutoverReplayRepository:
                 self._candidate_statement().where(RDBAgentSession.id == session_id)
             )
         ).one_or_none()
-        return self._candidate(row) if row is not None else None
+        return self._candidate(tuple(row)) if row is not None else None
 
     async def read_candidate_batch(
         self,
@@ -152,7 +169,7 @@ class SessionCutoverReplayRepository:
         ).all()
         has_more = len(rows) > batch_size
         selected_rows = rows[:batch_size]
-        candidates = tuple(self._candidate(row) for row in selected_rows)
+        candidates = tuple(self._candidate(tuple(row)) for row in selected_rows)
         return CutoverReplayCandidateBatch(
             candidates=candidates,
             next_session_cursor=(
@@ -160,7 +177,7 @@ class SessionCutoverReplayRepository:
             ),
         )
 
-    def _candidate_statement(self) -> sa.Select[tuple[object, ...]]:
+    def _candidate_statement(self) -> sa.Select[CutoverReplayCandidateProjection]:
         """Build the content-free exact durable-work projection."""
         fifo_mailbox_item_id = (
             sa.select(RDBMailboxItem.id)
@@ -249,21 +266,39 @@ class SessionCutoverReplayRepository:
             )
         )
 
-    def _candidate(self, row: object) -> CutoverReplayCandidate:
+    def _candidate(
+        self, row: CutoverReplayCandidateProjection
+    ) -> CutoverReplayCandidate:
         """Build one typed content-free candidate row."""
+        (
+            session_id,
+            owner_generation,
+            run_state,
+            wake_input_present,
+            fifo_mailbox_item_id,
+            pending_command_present,
+            pending_command_id,
+            pending_command_complete,
+            recoverable_run_id,
+            recoverable_run_count,
+            pending_idle_continuation_run_id,
+            stop_request_present,
+            stop_request_id,
+            stop_request_complete,
+        ) = row
         return CutoverReplayCandidate(
-            session_id=row.id,  # type: ignore[attr-defined]
-            owner_generation=row.owner_generation,  # type: ignore[attr-defined]
-            run_state=row.run_state,  # type: ignore[attr-defined]
-            wake_input_present=row.wake_input_present,  # type: ignore[attr-defined]
-            fifo_mailbox_item_id=row.fifo_mailbox_item_id,  # type: ignore[attr-defined]
-            pending_command_present=row.pending_command_present,  # type: ignore[attr-defined]
-            pending_command_id=row.pending_command_id,  # type: ignore[attr-defined]
-            pending_command_complete=row.pending_command_complete,  # type: ignore[attr-defined]
-            recoverable_run_id=row.recoverable_run_id,  # type: ignore[attr-defined]
-            recoverable_run_count=row.recoverable_run_count,  # type: ignore[attr-defined]
-            pending_idle_continuation_run_id=row.pending_idle_continuation_run_id,  # type: ignore[attr-defined]
-            stop_request_present=row.stop_request_present,  # type: ignore[attr-defined]
-            stop_request_id=row.stop_request_id,  # type: ignore[attr-defined]
-            stop_request_complete=row.stop_request_complete,  # type: ignore[attr-defined]
+            session_id=session_id,
+            owner_generation=owner_generation,
+            run_state=run_state,
+            wake_input_present=wake_input_present,
+            fifo_mailbox_item_id=fifo_mailbox_item_id,
+            pending_command_present=pending_command_present,
+            pending_command_id=pending_command_id,
+            pending_command_complete=pending_command_complete,
+            recoverable_run_id=recoverable_run_id,
+            recoverable_run_count=recoverable_run_count,
+            pending_idle_continuation_run_id=pending_idle_continuation_run_id,
+            stop_request_present=stop_request_present,
+            stop_request_id=stop_request_id,
+            stop_request_complete=stop_request_complete,
         )

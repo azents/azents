@@ -1,6 +1,5 @@
 """Bounded Team Session cutover replay repository tests."""
 
-from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -10,16 +9,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import AgentSessionRunState
 
-from .cutover_replay import SessionCutoverReplayRepository
+from .cutover_replay import (
+    CutoverReplayCandidateProjection,
+    SessionCutoverReplayRepository,
+)
 
 
 class _Result:
     """SQLAlchemy result double returning configured content-free rows."""
 
-    def __init__(self, rows: list[SimpleNamespace]) -> None:
+    def __init__(self, rows: list[CutoverReplayCandidateProjection]) -> None:
         self.rows = rows
 
-    def all(self) -> list[SimpleNamespace]:
+    def all(self) -> list[CutoverReplayCandidateProjection]:
         """Return the configured row sequence."""
         return self.rows
 
@@ -27,7 +29,7 @@ class _Result:
 class _Session:
     """Async session double retaining the generated query."""
 
-    def __init__(self, rows: list[SimpleNamespace]) -> None:
+    def __init__(self, rows: list[CutoverReplayCandidateProjection]) -> None:
         self.rows = rows
         self.statement: sa.Select[Any] | None = None
 
@@ -37,23 +39,23 @@ class _Session:
         return _Result(self.rows)
 
 
-def _row(session_id: str) -> SimpleNamespace:
+def _row(session_id: str) -> CutoverReplayCandidateProjection:
     """Create one content-free candidate query row."""
-    return SimpleNamespace(
-        id=session_id,
-        owner_generation=3,
-        run_state=AgentSessionRunState.RUNNING,
-        wake_input_present=True,
-        fifo_mailbox_item_id="input-1",
-        pending_command_present=False,
-        pending_command_id=None,
-        pending_command_complete=True,
-        recoverable_run_id=None,
-        recoverable_run_count=0,
-        pending_idle_continuation_run_id=None,
-        stop_request_present=False,
-        stop_request_id=None,
-        stop_request_complete=True,
+    return (
+        session_id,
+        3,
+        AgentSessionRunState.RUNNING,
+        True,
+        "input-1",
+        False,
+        None,
+        True,
+        None,
+        0,
+        None,
+        False,
+        None,
+        True,
     )
 
 
