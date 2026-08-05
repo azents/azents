@@ -2489,7 +2489,7 @@ class RunExecutor:
                         tool_admission_barrier=tool_admission_barrier,
                     )
                 case _:
-                    assert_never(action)
+                    assert_never(action)  # ty: ignore[type-assertion-failure] — persisted action validation is broader than the operation-action execution queue.
             context_invalidated = context_invalidated or result.context_invalidated
             if context_invalidated:
                 break

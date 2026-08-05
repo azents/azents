@@ -174,7 +174,12 @@ class RuntimeNetworkPolicyModule(_FrozenProfileModel):
         """Parse and canonicalize IPv4 and IPv6 network boundaries."""
         if not isinstance(value, list | tuple):
             raise ValueError("Network CIDRs must be an array.")
-        return tuple(str(ipaddress.ip_network(item, strict=False)) for item in value)
+        cidrs: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                raise ValueError("Network CIDRs must contain strings.")
+            cidrs.append(str(ipaddress.ip_network(item, strict=False)))
+        return tuple(cidrs)
 
     @model_validator(mode="after")
     def validate_unique_cidrs(self) -> "RuntimeNetworkPolicyModule":

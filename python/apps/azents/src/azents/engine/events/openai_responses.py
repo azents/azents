@@ -15,7 +15,15 @@ from collections.abc import (
     Sequence,
 )
 from types import SimpleNamespace
-from typing import Any, Literal, Protocol, TypedDict, TypeGuard, runtime_checkable
+from typing import (
+    Any,
+    Literal,
+    Protocol,
+    TypedDict,
+    TypeGuard,
+    cast,
+    runtime_checkable,
+)
 
 from litellm import completion_cost
 from litellm.types.llms.openai import ResponsesAPIResponse
@@ -729,7 +737,7 @@ class OpenAIResponsesModelAdapter:
             )
             if not isinstance(response, AsyncIterable):
                 raise RuntimeError("OpenAI Responses call returned a non-stream")
-            async for event in response:
+            async for event in cast(AsyncIterable[ResponseStreamEvent], response):
                 if (
                     isinstance(event, ResponseOutputItemDoneEvent)
                     and event.type == "response.output_item.done"

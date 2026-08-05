@@ -409,7 +409,7 @@ class AgentEngineAdapter:
                                 "xAI OAuth is temporarily unavailable. Try again later."
                             )
                         case _ as unreachable:
-                            assert_never(unreachable)
+                            assert_never(unreachable)  # ty: ignore[type-assertion-failure] — Result's runtime error union is closed, but ty does not narrow this generic match to Never.
                     raise FunctionToolError(message)
                 case Success(refreshed):
                     if not isinstance(refreshed.secrets, XaiOAuthSecrets):

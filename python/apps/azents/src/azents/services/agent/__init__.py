@@ -224,7 +224,7 @@ class AgentService:
                 return Success(value)
             case Failure(error):
                 if isinstance(error, list):
-                    return Failure(InvalidSelectableModelOptions(errors=error))
+                    return Failure(InvalidSelectableModelOptions(errors=error))  # ty: ignore[invalid-argument-type] — ty does not narrow the shared generic Result error to list[str] after isinstance().
                 return Failure(error)
             case _:
                 assert_never(result)
@@ -630,19 +630,24 @@ class AgentService:
         if "model_parameters" in update:
             repo_update["model_parameters"] = update["model_parameters"]
 
-        for key in (
-            "system_prompt",
-            "enabled",
-            "type",
-            "shell_enabled",
-            "memory_enabled",
-            "tool_search_enabled",
-            "max_turns",
-            "auto_archive_ttl_days",
-            "subagent_settings",
-        ):
-            if key in update:
-                repo_update[key] = update[key]  # type: ignore[literal-required]
+        if "system_prompt" in update:
+            repo_update["system_prompt"] = update["system_prompt"]
+        if "enabled" in update:
+            repo_update["enabled"] = update["enabled"]
+        if "type" in update:
+            repo_update["type"] = update["type"]
+        if "shell_enabled" in update:
+            repo_update["shell_enabled"] = update["shell_enabled"]
+        if "memory_enabled" in update:
+            repo_update["memory_enabled"] = update["memory_enabled"]
+        if "tool_search_enabled" in update:
+            repo_update["tool_search_enabled"] = update["tool_search_enabled"]
+        if "max_turns" in update:
+            repo_update["max_turns"] = update["max_turns"]
+        if "auto_archive_ttl_days" in update:
+            repo_update["auto_archive_ttl_days"] = update["auto_archive_ttl_days"]
+        if "subagent_settings" in update:
+            repo_update["subagent_settings"] = update["subagent_settings"]
 
         async with self.session_manager() as session:
             if "runtime_profile_id" in update:
