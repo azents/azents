@@ -403,6 +403,7 @@ async def runtime_control_server_lifespan(
         server,
         control_protocol=control_protocol,
         report_sink=provider_sink,
+        observe_completion_handler=reconciler,
         owner_replica_id=settings.runtime_control_instance_id,
         consumer_id=f"{settings.runtime_control_instance_id}:provider",
         credential_authenticator=enrollment_service,

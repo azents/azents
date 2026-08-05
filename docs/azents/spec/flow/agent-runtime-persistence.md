@@ -21,8 +21,8 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
   - infra/charts/azents/**
-last_verified_at: 2026-08-04
-spec_version: 15
+last_verified_at: 2026-08-05
+spec_version: 17
 ---
 
 # Agent Runtime Persistence
@@ -157,11 +157,17 @@ until an explicit reset or terminal deletion recreates storage.
 
 Pod lifecycle observation is independent of NetworkPolicy verification history. Explicit command
 reports may carry exactly one structured `network_policy` result, while watch, failover, and
-lifecycle-only reports may omit it. Runtime Control persists current drift evidence with Provider
-generation, desired generation, configuration revision, observation time, and bounded reason. It
-atomically claims matching `drifted` evidence for retry-throttled non-destructive
-`UPDATE_CONFIGURATION`; stale evidence cannot dispatch, and matching `in_sync` evidence replaces the
-drift candidate. Unsupported evidence kinds reject the complete report before persistence.
+lifecycle-only reports may omit it. Runtime Control never persists drift evidence, repair claims,
+retry times, or completion history. A successful live-stream-correlated `OBSERVE` completion with
+current `drifted` evidence may make one generation- and configuration-fenced, non-destructive
+`UPDATE_CONFIGURATION` dispatch. The Reconciler locks the current Runtime row through exact
+configuration lookup and queue append, so a same-generation desired-revision replacement cannot
+apply the replaced NetworkPolicy. Pending lifecycle dispatch and terminal deletion prevent repair.
+Stale evidence cannot dispatch; a reconnect, stream/control restart, lost completion, or dispatch
+failure is discarded and can retry only after a later periodic `OBSERVE`. Unsupported evidence kinds
+reject the actionable handoff without changing Provider lifecycle authority. The current schema
+removes the obsolete reconciliation enum, columns, foreign key, and index through successor
+Alembic revision `d51acb332a07`; no Runtime row persists repair state.
 
 ## Docker Provider v1
 
@@ -204,9 +210,14 @@ Required checks:
 
 ## Changelog
 
-- **2026-08-04 (spec_version=15)** — Advanced Kubernetes Provider admission to v2, removed
-  Provider-local NetworkPolicy lifecycle authority, and persisted exact-generation reconciliation
-  evidence for Runtime Control-owned repair.
+- **2026-08-05 (spec_version=17)** — Serialized the bounded repair target with the Runtime row
+  through exact configuration lookup and Provider append, and preserved migration history through
+  successor schema removal.
+- **2026-08-05 (spec_version=16)** — Removed durable Runtime drift/repair projection and made a
+  current correlated `OBSERVE` completion the sole one-shot NetworkPolicy repair handoff; periodic
+  observation is the retry boundary.
+- **2026-08-04 (spec_version=15)** — Advanced Kubernetes Provider admission to v2 and removed
+  Provider-local NetworkPolicy lifecycle authority.
 - **2026-08-03 (spec_version=14)** — Made Runner-reported current-generation workspace evidence authoritative, retained Provider mount configuration as deployment state only, and removed fixed-path and Provider-equality fallback behavior.
 - **2026-07-31 (spec_version=13)** — Replaced Provider selection and execution-policy snapshots
   with exact Workspace Runtime Profile binding, immutable desired/applied configuration revisions,

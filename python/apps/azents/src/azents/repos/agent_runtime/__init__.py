@@ -13,7 +13,6 @@ from azents.core.enums import (
     RuntimeProviderBindingOrigin,
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
-    RuntimeProviderReconciliationStatus,
     RuntimeRunnerState,
 )
 from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
@@ -748,154 +747,6 @@ class AgentRuntimeRepository:
         await session.flush()
         return self._build(rdb)
 
-    async def record_provider_reconciliation_observation(
-        self,
-        session: AsyncSession,
-        *,
-        runtime_id: str,
-        status: RuntimeProviderReconciliationStatus,
-        kind: str,
-        reason: str,
-        provider_generation: int,
-        observed_generation: int,
-        configuration_revision_id: str,
-        observed_at: datetime.datetime,
-    ) -> AgentRuntime | None:
-        """Store current exact-generation Provider reconciliation evidence."""
-        changed = sa.or_(
-            RDBAgentRuntime.provider_reconciliation_status.is_distinct_from(status),
-            RDBAgentRuntime.provider_reconciliation_kind.is_distinct_from(kind),
-            RDBAgentRuntime.provider_reconciliation_reason.is_distinct_from(reason),
-            RDBAgentRuntime.provider_reconciliation_provider_generation.is_distinct_from(
-                provider_generation
-            ),
-            RDBAgentRuntime.provider_reconciliation_observed_generation.is_distinct_from(
-                observed_generation
-            ),
-            RDBAgentRuntime.provider_reconciliation_configuration_revision_id.is_distinct_from(
-                configuration_revision_id
-            ),
-            RDBAgentRuntime.provider_reconciliation_observed_at.is_distinct_from(
-                observed_at
-            ),
-        )
-        result = await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(
-                RDBAgentRuntime.id == runtime_id,
-                RDBAgentRuntime.desired_generation == observed_generation,
-                RDBAgentRuntime.provider_generation <= provider_generation,
-                RDBAgentRuntime.desired_runtime_configuration_revision_id
-                == configuration_revision_id,
-                RDBAgentRuntime.terminal_delete_acknowledged_generation.is_distinct_from(
-                    RDBAgentRuntime.desired_generation
-                ),
-            )
-            .values(
-                provider_reconciliation_status=status,
-                provider_reconciliation_kind=kind,
-                provider_reconciliation_reason=reason,
-                provider_reconciliation_provider_generation=provider_generation,
-                provider_reconciliation_observed_generation=observed_generation,
-                provider_reconciliation_configuration_revision_id=(
-                    configuration_revision_id
-                ),
-                provider_reconciliation_observed_at=observed_at,
-                provider_reconciliation_requested_at=sa.case(
-                    (changed, None),
-                    else_=RDBAgentRuntime.provider_reconciliation_requested_at,
-                ),
-            )
-            .returning(RDBAgentRuntime)
-        )
-        rdb = result.scalar_one_or_none()
-        if rdb is None:
-            return None
-        await session.flush()
-        return self._build(rdb)
-
-    async def find_provider_reconciliation_candidates(
-        self,
-        session: AsyncSession,
-        *,
-        limit: int,
-    ) -> list[AgentRuntime]:
-        """List current exact-revision NetworkPolicy drift observations."""
-        result = await session.execute(
-            sa.select(RDBAgentRuntime)
-            .where(
-                RDBAgentRuntime.desired_state == RuntimeDesiredState.RUNNING,
-                RDBAgentRuntime.provider_observed_state
-                == RuntimeProviderObservedState.RUNNING,
-                RDBAgentRuntime.provider_reconciliation_status
-                == RuntimeProviderReconciliationStatus.DRIFTED,
-                RDBAgentRuntime.provider_reconciliation_kind == "network_policy",
-                RDBAgentRuntime.provider_reconciliation_provider_generation.is_not(
-                    None
-                ),
-                RDBAgentRuntime.provider_reconciliation_observed_generation
-                == RDBAgentRuntime.desired_generation,
-                RDBAgentRuntime.provider_reconciliation_configuration_revision_id
-                == RDBAgentRuntime.desired_runtime_configuration_revision_id,
-                RDBAgentRuntime.provider_reconciliation_configuration_revision_id
-                == RDBAgentRuntime.applied_runtime_configuration_revision_id,
-                RDBAgentRuntime.terminal_delete_requested_generation.is_(None),
-            )
-            .order_by(RDBAgentRuntime.provider_reconciliation_observed_at.asc())
-            .limit(limit)
-        )
-        return [self._build(rdb) for rdb in result.scalars()]
-
-    async def claim_provider_reconciliation_repair(
-        self,
-        session: AsyncSession,
-        *,
-        runtime_id: str,
-        provider_generation: int,
-        observed_generation: int,
-        configuration_revision_id: str,
-        observed_at: datetime.datetime,
-        retry_delay: datetime.timedelta,
-    ) -> AgentRuntime | None:
-        """Atomically claim one current NetworkPolicy repair retry window."""
-        retry_cutoff = sa.func.clock_timestamp() - retry_delay
-        result = await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(
-                RDBAgentRuntime.id == runtime_id,
-                RDBAgentRuntime.desired_state == RuntimeDesiredState.RUNNING,
-                RDBAgentRuntime.provider_observed_state
-                == RuntimeProviderObservedState.RUNNING,
-                RDBAgentRuntime.provider_reconciliation_status
-                == RuntimeProviderReconciliationStatus.DRIFTED,
-                RDBAgentRuntime.provider_reconciliation_kind == "network_policy",
-                RDBAgentRuntime.provider_reconciliation_provider_generation
-                == provider_generation,
-                RDBAgentRuntime.provider_reconciliation_observed_generation
-                == observed_generation,
-                RDBAgentRuntime.provider_reconciliation_configuration_revision_id
-                == configuration_revision_id,
-                RDBAgentRuntime.provider_reconciliation_observed_at == observed_at,
-                RDBAgentRuntime.desired_generation == observed_generation,
-                RDBAgentRuntime.desired_runtime_configuration_revision_id
-                == configuration_revision_id,
-                RDBAgentRuntime.applied_runtime_configuration_revision_id
-                == configuration_revision_id,
-                RDBAgentRuntime.terminal_delete_requested_generation.is_(None),
-                sa.or_(
-                    RDBAgentRuntime.provider_reconciliation_requested_at.is_(None),
-                    RDBAgentRuntime.provider_reconciliation_requested_at < retry_cutoff,
-                ),
-            )
-            .values(provider_reconciliation_requested_at=sa.func.now())
-            .returning(RDBAgentRuntime)
-        )
-        rdb = result.scalar_one_or_none()
-        if rdb is None:
-            return None
-        await session.flush()
-        return self._build(rdb)
-
     async def record_provider_connection_state(
         self,
         session: AsyncSession,
@@ -1361,24 +1212,6 @@ class AgentRuntimeRepository:
             provider_observed_generation=rdb.provider_observed_generation,
             provider_observed_at=rdb.provider_observed_at,
             provider_observe_requested_at=rdb.provider_observe_requested_at,
-            provider_reconciliation_status=rdb.provider_reconciliation_status,
-            provider_reconciliation_kind=rdb.provider_reconciliation_kind,
-            provider_reconciliation_reason=rdb.provider_reconciliation_reason,
-            provider_reconciliation_provider_generation=(
-                rdb.provider_reconciliation_provider_generation
-            ),
-            provider_reconciliation_observed_generation=(
-                rdb.provider_reconciliation_observed_generation
-            ),
-            provider_reconciliation_configuration_revision_id=(
-                rdb.provider_reconciliation_configuration_revision_id
-            ),
-            provider_reconciliation_observed_at=(
-                rdb.provider_reconciliation_observed_at
-            ),
-            provider_reconciliation_requested_at=(
-                rdb.provider_reconciliation_requested_at
-            ),
             last_lifecycle_dispatch_generation=(rdb.last_lifecycle_dispatch_generation),
             provider_connection_state=rdb.provider_connection_state,
             runner_state=rdb.runner_state,

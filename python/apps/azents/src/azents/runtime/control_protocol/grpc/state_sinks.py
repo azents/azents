@@ -9,9 +9,6 @@ from azents_runtime_control.provider import (
     RuntimeProviderObservedState as SharedProviderObservedState,
 )
 from azents_runtime_control.provider import (
-    RuntimeProviderReconciliationStatus as SharedProviderReconciliationStatus,
-)
-from azents_runtime_control.provider import (
     RuntimeProviderReport as SharedRuntimeProviderReport,
 )
 from azents_runtime_control.runner import (
@@ -28,7 +25,6 @@ from azents.core.enums import (
     RuntimeDesiredState,
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
-    RuntimeProviderReconciliationStatus,
     RuntimeRunnerState,
 )
 from azents.rdb.deps import get_session_manager
@@ -117,11 +113,6 @@ class RuntimeProviderReportRepositorySink:
             )
             if persisted is None:
                 return
-            await self._record_provider_reconciliation_evidence(
-                session,
-                runtime=runtime,
-                report=report,
-            )
             await self.runtime_repository.record_provider_connection_state(
                 session,
                 report.runtime_id,
@@ -163,47 +154,6 @@ class RuntimeProviderReportRepositorySink:
                 "RUNTIME_CONFIGURATION_PROVIDER_EVIDENCE_MISMATCH",
             )
         return None
-
-    async def _record_provider_reconciliation_evidence(
-        self,
-        session: AsyncSession,
-        *,
-        runtime: AgentRuntime,
-        report: SharedRuntimeProviderReport,
-    ) -> None:
-        """Persist recognized kind-scoped Provider reconciliation evidence."""
-        evidence = report.reconciliation
-        if evidence is None:
-            return
-        provider_id = runtime.runtime_provider_resource_id
-        if provider_id is None:
-            return
-        if not await self.profile_repository.configuration_evidence_matches_current(
-            session,
-            runtime_id=runtime.id,
-            provider_id=provider_id,
-            evidence=report.runtime_configuration,
-        ):
-            return
-        if any(item.kind != "network_policy" for item in evidence.observations):
-            raise ValueError("Unsupported Runtime Provider reconciliation kind.")
-        observation = evidence.observations[0]
-        match observation.status:
-            case SharedProviderReconciliationStatus.IN_SYNC:
-                status = RuntimeProviderReconciliationStatus.IN_SYNC
-            case SharedProviderReconciliationStatus.DRIFTED:
-                status = RuntimeProviderReconciliationStatus.DRIFTED
-        await self.runtime_repository.record_provider_reconciliation_observation(
-            session,
-            runtime_id=report.runtime_id,
-            status=status,
-            kind=observation.kind,
-            reason=observation.reason,
-            provider_generation=report.provider_generation,
-            observed_generation=report.observed_desired_generation,
-            configuration_revision_id=report.runtime_configuration.revision_id,
-            observed_at=report.reported_at,
-        )
 
 
 @dataclasses.dataclass

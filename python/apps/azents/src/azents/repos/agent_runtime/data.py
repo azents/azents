@@ -11,7 +11,6 @@ from azents.core.enums import (
     RuntimeProviderBindingOrigin,
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
-    RuntimeProviderReconciliationStatus,
     RuntimeRunnerState,
     RuntimeSummary,
 )
@@ -82,33 +81,6 @@ class AgentRuntime(BaseModel):
     )
     provider_observe_requested_at: datetime.datetime | None = Field(
         default=None, description="Last Provider observe request time"
-    )
-    provider_reconciliation_status: RuntimeProviderReconciliationStatus | None = Field(
-        default=None, description="Current Provider reconciliation result"
-    )
-    provider_reconciliation_kind: str | None = Field(
-        default=None, description="Current Provider reconciliation kind"
-    )
-    provider_reconciliation_reason: str | None = Field(
-        default=None, description="Current Provider reconciliation reason"
-    )
-    provider_reconciliation_provider_generation: int | None = Field(
-        default=None,
-        description="Provider connection generation carrying reconciliation evidence",
-    )
-    provider_reconciliation_observed_generation: int | None = Field(
-        default=None,
-        description="Desired generation carrying reconciliation evidence",
-    )
-    provider_reconciliation_configuration_revision_id: str | None = Field(
-        default=None,
-        description="Exact Runtime configuration revision compared by Provider",
-    )
-    provider_reconciliation_observed_at: datetime.datetime | None = Field(
-        default=None, description="Provider reconciliation evidence time"
-    )
-    provider_reconciliation_requested_at: datetime.datetime | None = Field(
-        default=None, description="Last reconciliation repair claim time"
     )
     last_lifecycle_dispatch_generation: int = Field(
         default=0, description="Last desired generation dispatched to Provider"

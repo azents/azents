@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 from typing import cast
-from unittest.mock import ANY, AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 import sqlalchemy as sa
@@ -10,12 +10,7 @@ from azcommon.result import Success
 from azents_runtime_control.provider import (
     RuntimeProviderObservedState as SharedProviderState,
 )
-from azents_runtime_control.provider import (
-    RuntimeProviderReconciliationEvidence,
-    RuntimeProviderReconciliationObservation,
-    RuntimeProviderReconciliationStatus,
-    RuntimeProviderReport,
-)
+from azents_runtime_control.provider import RuntimeProviderReport
 from azents_runtime_control.runner import RunnerStateReport
 from azents_runtime_control.runner import RuntimeRunnerState as SharedRunnerState
 from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
@@ -265,163 +260,6 @@ async def test_provider_running_report_clears_start_timeout_failure(
     assert runtime.failure_generation is None
     assert runtime.failure_code is None
     assert runtime.failure_message is None
-
-
-async def test_provider_report_persists_network_policy_reconciliation_evidence(
-    rdb_session_manager: SessionManager[AsyncSession],
-) -> None:
-    """A recognized current report forwards reconciliation evidence to storage."""
-    runtime_repository = Mock(spec=AgentRuntimeRepository)
-    runtime = Mock(
-        id="runtime-1",
-        desired_generation=5,
-        failure_code=None,
-        runtime_provider_resource_id="provider-resource-1",
-    )
-    cast(AsyncMock, runtime_repository.get_by_id).return_value = runtime
-    cast(
-        AsyncMock, runtime_repository.provider_report_matches_binding
-    ).return_value = True
-    cast(
-        AsyncMock, runtime_repository.record_provider_observed_state
-    ).return_value = runtime
-    profile_repository = Mock(spec=RuntimeProfileRepository)
-    cast(
-        AsyncMock,
-        profile_repository.record_provider_configuration_evidence,
-    ).return_value = Mock()
-    cast(
-        AsyncMock,
-        profile_repository.configuration_evidence_matches_current,
-    ).return_value = True
-    sink = RuntimeProviderReportRepositorySink(
-        cast(AgentRuntimeRepository, runtime_repository),
-        cast(RuntimeProfileRepository, profile_repository),
-        rdb_session_manager,
-    )
-    report = RuntimeProviderReport(
-        runtime_id="runtime-1",
-        provider_id="provider-1",
-        provider_generation=3,
-        observed_state=SharedProviderState.RUNNING,
-        observed_desired_generation=5,
-        provider_runtime_id="pod-runtime",
-        reason="ready",
-        diagnostic={},
-        reported_at=datetime(2026, 8, 4, tzinfo=UTC),
-        terminal_delete_acknowledged=False,
-        runtime_configuration=RuntimeConfigurationEvidence(
-            revision_id="revision-1",
-            digest="d" * 64,
-            desired_generation=5,
-        ),
-        reconciliation=RuntimeProviderReconciliationEvidence(
-            observations=(
-                RuntimeProviderReconciliationObservation(
-                    kind="network_policy",
-                    status=RuntimeProviderReconciliationStatus.DRIFTED,
-                    reason="network_policy_mismatch",
-                    diagnostic={},
-                ),
-            )
-        ),
-    )
-
-    await sink.record_provider_report(report)
-
-    cast(
-        AsyncMock,
-        runtime_repository.record_provider_reconciliation_observation,
-    ).assert_awaited_once_with(
-        ANY,
-        runtime_id="runtime-1",
-        status=RuntimeProviderReconciliationStatus.DRIFTED,
-        kind="network_policy",
-        reason="network_policy_mismatch",
-        provider_generation=3,
-        observed_generation=5,
-        configuration_revision_id="revision-1",
-        observed_at=datetime(2026, 8, 4, tzinfo=UTC),
-    )
-
-
-async def test_provider_report_rejects_drift_from_invalid_configuration_evidence(
-    rdb_session_manager: SessionManager[AsyncSession],
-) -> None:
-    """Invalid configuration evidence cannot authorize drift repair."""
-    runtime_repository = Mock(spec=AgentRuntimeRepository)
-    runtime = Mock(
-        id="runtime-1",
-        desired_generation=5,
-        failure_code=None,
-        runtime_provider_resource_id="provider-resource-1",
-    )
-    cast(AsyncMock, runtime_repository.get_by_id).return_value = runtime
-    cast(
-        AsyncMock, runtime_repository.provider_report_matches_binding
-    ).return_value = True
-    cast(
-        AsyncMock, runtime_repository.record_provider_observed_state
-    ).return_value = runtime
-    profile_repository = Mock(spec=RuntimeProfileRepository)
-    cast(
-        AsyncMock,
-        profile_repository.record_provider_configuration_evidence,
-    ).return_value = None
-    cast(
-        AsyncMock,
-        profile_repository.configuration_evidence_matches_applied,
-    ).return_value = False
-    cast(
-        AsyncMock,
-        profile_repository.configuration_evidence_matches_current,
-    ).return_value = False
-    sink = RuntimeProviderReportRepositorySink(
-        cast(AgentRuntimeRepository, runtime_repository),
-        cast(RuntimeProfileRepository, profile_repository),
-        rdb_session_manager,
-    )
-    report = RuntimeProviderReport(
-        runtime_id="runtime-1",
-        provider_id="provider-1",
-        provider_generation=3,
-        observed_state=SharedProviderState.RUNNING,
-        observed_desired_generation=5,
-        provider_runtime_id="pod-runtime",
-        reason="ready",
-        diagnostic={},
-        reported_at=datetime(2026, 8, 4, tzinfo=UTC),
-        terminal_delete_acknowledged=False,
-        runtime_configuration=RuntimeConfigurationEvidence(
-            revision_id="revision-1",
-            digest="e" * 64,
-            desired_generation=5,
-        ),
-        reconciliation=RuntimeProviderReconciliationEvidence(
-            observations=(
-                RuntimeProviderReconciliationObservation(
-                    kind="network_policy",
-                    status=RuntimeProviderReconciliationStatus.DRIFTED,
-                    reason="network_policy_mismatch",
-                    diagnostic={},
-                ),
-            )
-        ),
-    )
-
-    await sink.record_provider_report(report)
-
-    cast(
-        AsyncMock,
-        runtime_repository.record_provider_reconciliation_observation,
-    ).assert_not_awaited()
-    observed_call = cast(
-        AsyncMock,
-        runtime_repository.record_provider_observed_state,
-    ).await_args
-    assert observed_call is not None
-    failure = observed_call.kwargs["failure"]
-    assert failure.code == "RUNTIME_CONFIGURATION_PROVIDER_EVIDENCE_MISMATCH"
 
 
 async def test_provider_starting_report_does_not_acknowledge_configuration(
