@@ -287,42 +287,39 @@ class SessionWorkspaceProjectService:
                 runtime=runtime,
                 path=normalized_path,
             )
-            match exists_result:
-                case Success():
-                    pass
-                case Failure(error):
-                    match error:
-                        case RuntimeDirectoryValidationUnavailable():
-                            return Failure(
-                                InvalidProjectPath(
-                                    path=normalized_path,
-                                    reason=(
-                                        "Project path can only be approved from a "
-                                        "ready runtime."
-                                    ),
-                                )
+            if exists_result.success:
+                pass
+            else:
+                error = exists_result.error
+                match error:
+                    case RuntimeDirectoryValidationUnavailable():
+                        return Failure(
+                            InvalidProjectPath(
+                                path=normalized_path,
+                                reason=(
+                                    "Project path can only be approved from a "
+                                    "ready runtime."
+                                ),
                             )
-                        case RuntimeDirectoryNotFound():
-                            return Failure(
-                                InvalidProjectPath(
-                                    path=normalized_path,
-                                    reason=(
-                                        "Project path must exist as a runtime "
-                                        "directory."
-                                    ),
-                                )
+                        )
+                    case RuntimeDirectoryNotFound():
+                        return Failure(
+                            InvalidProjectPath(
+                                path=normalized_path,
+                                reason=(
+                                    "Project path must exist as a runtime directory."
+                                ),
                             )
-                        case RuntimeDirectoryNotDirectory():
-                            return Failure(
-                                InvalidProjectPath(
-                                    path=normalized_path,
-                                    reason="Project path must be a runtime directory.",
-                                )
+                        )
+                    case RuntimeDirectoryNotDirectory():
+                        return Failure(
+                            InvalidProjectPath(
+                                path=normalized_path,
+                                reason="Project path must be a runtime directory.",
                             )
-                        case _:
-                            assert_never(error)
-                case _:
-                    assert_never(exists_result)
+                        )
+                    case _:
+                        assert_never(error)
             try:
                 project = await self.repository.create_project(
                     session,

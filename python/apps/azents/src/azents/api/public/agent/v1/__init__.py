@@ -6,7 +6,6 @@ Workspace-scoped Agent CRUD and Admin management endpoints.
 from textwrap import dedent
 from typing import Annotated, NoReturn, assert_never
 
-from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
@@ -103,29 +102,28 @@ async def get_automatic_session_projects(
         workspace_id=member.workspace_id,
         workspace_user_id=member.workspace_user_id,
     )
-    match result:
-        case Success(value):
-            return AutomaticSessionProjectsResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case (
-                    NotFound()
-                    | NotBelongToWorkspace()
-                    | AgentAutomaticProjectPolicyNotFound()
-                ):
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Agent not found.",
-                    )
-                case NotAdmin():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Not allowed to manage this agent.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return AutomaticSessionProjectsResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case (
+                NotFound()
+                | NotBelongToWorkspace()
+                | AgentAutomaticProjectPolicyNotFound()
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Agent not found.",
+                )
+            case NotAdmin():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not allowed to manage this agent.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.put(
@@ -166,53 +164,52 @@ async def replace_automatic_session_projects(
         expected_revision=request_body.expected_revision,
         project_paths=request_body.project_paths,
     )
-    match result:
-        case Success(value):
-            return AutomaticSessionProjectsResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case (
-                    NotFound()
-                    | NotBelongToWorkspace()
-                    | AgentAutomaticProjectPolicyNotFound()
-                ):
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Agent not found.",
-                    )
-                case NotAdmin():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Not allowed to manage this agent.",
-                    )
-                case InvalidProjectPath(path=path, reason=reason):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail={"message": reason, "path": path},
-                    )
-                case AutomaticSessionProjectsRevisionConflict():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail={
-                            "code": "automatic_session_projects_revision_conflict",
-                            "message": (
-                                "Automatic Session Projects changed elsewhere. "
-                                "Reload the latest policy and retry."
-                            ),
-                        },
-                    )
-                case AutomaticSessionProjectsRuntimeUnavailable(message=message):
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail={
-                            "code": "automatic_session_projects_runtime_unavailable",
-                            "message": message,
-                        },
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return AutomaticSessionProjectsResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case (
+                NotFound()
+                | NotBelongToWorkspace()
+                | AgentAutomaticProjectPolicyNotFound()
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Agent not found.",
+                )
+            case NotAdmin():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not allowed to manage this agent.",
+                )
+            case InvalidProjectPath(path=path, reason=reason):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={"message": reason, "path": path},
+                )
+            case AutomaticSessionProjectsRevisionConflict():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "automatic_session_projects_revision_conflict",
+                        "message": (
+                            "Automatic Session Projects changed elsewhere. "
+                            "Reload the latest policy and retry."
+                        ),
+                    },
+                )
+            case AutomaticSessionProjectsRuntimeUnavailable(message=message):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "automatic_session_projects_runtime_unavailable",
+                        "message": message,
+                    },
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post(
@@ -254,46 +251,45 @@ async def create_agent(
     result = await service.create(
         create_input, creator_workspace_user_id=member.workspace_user_id
     )
-    match result:
-        case Success(value):
-            return AgentResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case ModelRequired():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Select a model before saving this agent.",
-                    )
-                case ModelSelectionNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Selected model was not found.",
-                    )
-                case InvalidSelectableModelOptions(errors=errors):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail={
-                            "message": "Invalid selectable model options.",
-                            "errors": errors,
-                        },
-                    )
-                case InvalidModelParameters(errors=errors):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail={
-                            "message": "Invalid model parameters.",
-                            "errors": errors,
-                        },
-                    )
-                case RuntimeProfileSelectionInvalid(code=code):
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail={"code": code},
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return AgentResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case ModelRequired():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Select a model before saving this agent.",
+                )
+            case ModelSelectionNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Selected model was not found.",
+                )
+            case InvalidSelectableModelOptions(errors=errors):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "message": "Invalid selectable model options.",
+                        "errors": errors,
+                    },
+                )
+            case InvalidModelParameters(errors=errors):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "message": "Invalid model parameters.",
+                        "errors": errors,
+                    },
+                )
+            case RuntimeProfileSelectionInvalid(code=code):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"code": code},
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/workspaces/{handle}/agents")
@@ -335,20 +331,19 @@ async def get_agent(
         workspace_user_id=member.workspace_user_id,
         role=member.role,
     )
-    match result:
-        case Success(value):
-            return AgentResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Agent not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return AgentResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Agent not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 def _build_agent_update_input(
@@ -435,71 +430,70 @@ async def update_agent(
         workspace_user_id=member.workspace_user_id,
         role=member.role,
     )
-    match result:
-        case Success(value):
-            return AgentResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Agent not found.",
-                    )
-                case NotAdmin():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Not allowed to manage this agent.",
-                    )
-                case ModelRequired():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Select a model before saving this agent.",
-                    )
-                case ModelSelectionNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Selected model was not found.",
-                    )
-                case InvalidSelectableModelOptions(errors=errors):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail={
-                            "message": "Invalid selectable model options.",
-                            "errors": errors,
-                        },
-                    )
-                case InvalidModelParameters(errors=errors):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail={
-                            "message": "Invalid model parameters.",
-                            "errors": errors,
-                        },
-                    )
-                case RuntimeProfileSelectionInvalid(code=code):
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail={"code": code},
-                    )
-                case RuntimeProfileSelectionVersionRequired():
-                    raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                        detail={"code": "runtime_profile_selection_version_required"},
-                    )
-                case RuntimeProfileSelectionVersionConflict(
-                    current_version=current_version
-                ):
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail={
-                            "code": "runtime_profile_selection_version_conflict",
-                            "current_version": current_version,
-                        },
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return AgentResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Agent not found.",
+                )
+            case NotAdmin():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not allowed to manage this agent.",
+                )
+            case ModelRequired():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Select a model before saving this agent.",
+                )
+            case ModelSelectionNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Selected model was not found.",
+                )
+            case InvalidSelectableModelOptions(errors=errors):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "message": "Invalid selectable model options.",
+                        "errors": errors,
+                    },
+                )
+            case InvalidModelParameters(errors=errors):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "message": "Invalid model parameters.",
+                        "errors": errors,
+                    },
+                )
+            case RuntimeProfileSelectionInvalid(code=code):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={"code": code},
+                )
+            case RuntimeProfileSelectionVersionRequired():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={"code": "runtime_profile_selection_version_required"},
+                )
+            case RuntimeProfileSelectionVersionConflict(
+                current_version=current_version
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "runtime_profile_selection_version_conflict",
+                        "current_version": current_version,
+                    },
+                )
+            case _:
+                assert_never(error)
 
 
 @router.delete(
@@ -523,33 +517,31 @@ async def delete_agent(
         workspace_user_id=member.workspace_user_id,
         role=member.role,
     )
-    match result:
-        case Success(value):
-            return AgentDecommissionResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Agent not found.",
-                    )
-                case NotAdmin():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Not allowed to manage this agent.",
-                    )
-                case UnlimitedRetention():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail=(
-                            "Agent decommission requires finite archived-session "
-                            "retention."
-                        ),
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return AgentDecommissionResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Agent not found.",
+                )
+            case NotAdmin():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not allowed to manage this agent.",
+                )
+            case UnlimitedRetention():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "Agent decommission requires finite archived-session retention."
+                    ),
+                )
+            case _:
+                assert_never(error)
 
 
 # --- Agent Memory ---
@@ -612,19 +604,18 @@ async def list_agent_memories(
         type=type,
         query=query,
     )
-    match result:
-        case Success(value):
-            return MemoryListResponse(
-                items=[MemoryResponse.convert_from(a) for a in value.items]
-            )
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
-                    _raise_memory_agent_not_found()
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return MemoryListResponse(
+            items=[MemoryResponse.convert_from(a) for a in value.items]
+        )
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
+                _raise_memory_agent_not_found()
+            case _:
+                assert_never(error)
 
 
 @router.post(
@@ -653,27 +644,26 @@ async def create_agent_memory(
         user_id=member.user_id,
         role=member.role,
     )
-    match result:
-        case Success(value):
-            return MemoryResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
-                    _raise_memory_agent_not_found()
-                case NotAdmin():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Not allowed to manage agent-scope memory.",
-                    )
-                case DuplicateMemory():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Memory name already exists in this scope.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return MemoryResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
+                _raise_memory_agent_not_found()
+            case NotAdmin():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not allowed to manage agent-scope memory.",
+                )
+            case DuplicateMemory():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Memory name already exists in this scope.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}")
@@ -693,19 +683,18 @@ async def get_agent_memory(
         user_id=member.user_id,
         role=member.role,
     )
-    match result:
-        case Success(value):
-            return MemoryResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
-                    _raise_memory_agent_not_found()
-                case MemoryNotFound():
-                    _raise_memory_not_found()
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return MemoryResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
+                _raise_memory_agent_not_found()
+            case MemoryNotFound():
+                _raise_memory_not_found()
+            case _:
+                assert_never(error)
 
 
 @router.patch("/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}")
@@ -727,29 +716,28 @@ async def update_agent_memory(
         user_id=member.user_id,
         role=member.role,
     )
-    match result:
-        case Success(value):
-            return MemoryResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
-                    _raise_memory_agent_not_found()
-                case MemoryNotFound():
-                    _raise_memory_not_found()
-                case NotAdmin():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Not allowed to manage agent-scope memory.",
-                    )
-                case DuplicateMemory():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Memory name already exists in this scope.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return MemoryResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
+                _raise_memory_agent_not_found()
+            case MemoryNotFound():
+                _raise_memory_not_found()
+            case NotAdmin():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not allowed to manage agent-scope memory.",
+                )
+            case DuplicateMemory():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Memory name already exists in this scope.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.delete(
@@ -772,24 +760,22 @@ async def delete_agent_memory(
         user_id=member.user_id,
         role=member.role,
     )
-    match result:
-        case Success():
-            return
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
-                    _raise_memory_agent_not_found()
-                case MemoryNotFound():
-                    _raise_memory_not_found()
-                case NotAdmin():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Not allowed to manage agent-scope memory.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        return
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace() | PrivateAgentAccessDenied():
+                _raise_memory_agent_not_found()
+            case MemoryNotFound():
+                _raise_memory_not_found()
+            case NotAdmin():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not allowed to manage agent-scope memory.",
+                )
+            case _:
+                assert_never(error)
 
 
 # --- Avatar ---
@@ -819,30 +805,29 @@ async def request_avatar_upload(
         content_type=request_body.content_type,
         content_length=request_body.content_length,
     )
-    match result:
-        case Success(value):
-            return AvatarUploadTicketResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Agent not found.",
-                    )
-                case NotAdmin():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Not allowed to manage avatar.",
-                    )
-                case AvatarUploadRejected(message=message):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=message,
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return AvatarUploadTicketResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Agent not found.",
+                )
+            case NotAdmin():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not allowed to manage avatar.",
+                )
+            case AvatarUploadRejected(message=message):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=message,
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post(
@@ -869,30 +854,29 @@ async def finalize_avatar(
         upload_key=request_body.upload_key,
         filename=request_body.filename,
     )
-    match result:
-        case Success(value):
-            return AgentResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Agent not found.",
-                    )
-                case NotAdmin():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Not allowed to manage avatar.",
-                    )
-                case AvatarUploadRejected(message=message):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=message,
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return AgentResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Agent not found.",
+                )
+            case NotAdmin():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not allowed to manage avatar.",
+                )
+            case AvatarUploadRejected(message=message):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=message,
+                )
+            case _:
+                assert_never(error)
 
 
 @router.delete(
@@ -915,25 +899,24 @@ async def remove_avatar(
         workspace_user_id=member.workspace_user_id,
         role=member.role,
     )
-    match result:
-        case Success(value):
-            return AgentResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Agent not found.",
-                    )
-                case NotAdmin():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Not allowed to manage avatar.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return AgentResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Agent not found.",
+                )
+            case NotAdmin():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not allowed to manage avatar.",
+                )
+            case _:
+                assert_never(error)
 
 
 # --- Agent Admin ---
@@ -951,22 +934,21 @@ async def list_agent_admins(
     Any workspace member can view them.
     """
     result = await service.list_admins(agent_id, workspace_id=member.workspace_id)
-    match result:
-        case Success(value):
-            return AgentAdminListResponse(
-                items=[AgentAdminResponse.convert_from(a) for a in value.items]
-            )
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Agent not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return AgentAdminListResponse(
+            items=[AgentAdminResponse.convert_from(a) for a in value.items]
+        )
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Agent not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post(
@@ -991,35 +973,34 @@ async def add_agent_admin(
         workspace_user_id=member.workspace_user_id,
         role=member.role,
     )
-    match result:
-        case Success(value):
-            return AgentAdminResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Agent not found.",
-                    )
-                case NotAdmin():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Not allowed to manage this agent.",
-                    )
-                case DuplicateAdmin():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Already registered as an administrator.",
-                    )
-                case WorkspaceUserNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Workspace member not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return AgentAdminResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Agent not found.",
+                )
+            case NotAdmin():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not allowed to manage this agent.",
+                )
+            case DuplicateAdmin():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Already registered as an administrator.",
+                )
+            case WorkspaceUserNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Workspace member not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.delete(
@@ -1045,35 +1026,33 @@ async def remove_agent_admin(
         workspace_user_id=member.workspace_user_id,
         role=member.role,
     )
-    match result:
-        case Success():
-            return
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Agent not found.",
-                    )
-                case NotAdmin():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Not allowed to manage this agent.",
-                    )
-                case LastAdminCannotBeRemoved():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="The last administrator cannot be removed.",
-                    )
-                case AdminNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="That member is not an administrator.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        return
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Agent not found.",
+                )
+            case NotAdmin():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not allowed to manage this agent.",
+                )
+            case LastAdminCannotBeRemoved():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="The last administrator cannot be removed.",
+                )
+            case AdminNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="That member is not an administrator.",
+                )
+            case _:
+                assert_never(error)
 
 
 def mount(mounter: RouteMounter) -> None:

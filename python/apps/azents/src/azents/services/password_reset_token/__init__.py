@@ -206,17 +206,16 @@ class PasswordResetTokenService:
                     now=now,
                 )
             )
-            match available_result:
-                case Success(token):
-                    pass
-                case Failure(error):
-                    match error:
-                        case PasswordResetTokenUnavailable():
-                            return Failure(InvalidPasswordResetToken())
-                        case _:
-                            assert_never(error)
-                case _:
-                    assert_never(available_result)
+            if available_result.success:
+                token = available_result.value
+                pass
+            else:
+                error = available_result.error
+                match error:
+                    case PasswordResetTokenUnavailable():
+                        return Failure(InvalidPasswordResetToken())
+                    case _:
+                        assert_never(error)
 
             user = await self.user_repo.get(session, token.user_id)
             if user is None:
@@ -227,17 +226,16 @@ class PasswordResetTokenService:
                 token_hash,
                 now=now,
             )
-            match claim_result:
-                case Success(token):
-                    pass
-                case Failure(error):
-                    match error:
-                        case PasswordResetTokenUnavailable():
-                            return Failure(InvalidPasswordResetToken())
-                        case _:
-                            assert_never(error)
-                case _:
-                    assert_never(claim_result)
+            if claim_result.success:
+                token = claim_result.value
+                pass
+            else:
+                error = claim_result.error
+                match error:
+                    case PasswordResetTokenUnavailable():
+                        return Failure(InvalidPasswordResetToken())
+                    case _:
+                        assert_never(error)
 
             existing = await self.password_login_repo.get_by_user_id(
                 session,

@@ -6,7 +6,6 @@ Workspace-scoped Toolkit CRUD, scope management, and Agent Toolkit endpoints.
 from textwrap import dedent
 from typing import Annotated, Any, assert_never
 
-from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
@@ -97,35 +96,34 @@ async def create_toolkit_config(
         enabled=request_body.enabled,
     )
     result = await service.create(create_input, user_id=member.user_id)
-    match result:
-        case Success(value):
-            return ToolkitConfigResponse.model_validate(value, from_attributes=True)
-        case Failure(error):
-            match error:
-                case InvalidToolkitType():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Unknown toolkit type.",
-                    )
-                case InvalidConfig():
-                    raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail="Invalid tool config.",
-                    )
-                case DuplicateSlug():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Duplicate toolkit slug in workspace.",
-                    )
-                case InvalidCredentials(detail=detail):
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail=detail,
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return ToolkitConfigResponse.model_validate(value, from_attributes=True)
+    else:
+        error = result.error
+        match error:
+            case InvalidToolkitType():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Unknown toolkit type.",
+                )
+            case InvalidConfig():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Invalid tool config.",
+                )
+            case DuplicateSlug():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Duplicate toolkit slug in workspace.",
+                )
+            case InvalidCredentials(detail=detail):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=detail,
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/workspaces/{handle}/toolkit-configs/available")
@@ -196,20 +194,19 @@ async def get_toolkit_config(
     result = await service.get_by_id(
         toolkit_config_id, workspace_id=member.workspace_id
     )
-    match result:
-        case Success(value):
-            return ToolkitConfigResponse.model_validate(value, from_attributes=True)
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Toolkit config not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return ToolkitConfigResponse.model_validate(value, from_attributes=True)
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Toolkit config not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.patch("/workspaces/{handle}/toolkit-configs/{toolkit_config_id}")
@@ -236,35 +233,34 @@ async def update_toolkit_config(
         workspace_id=member.workspace_id,
         user_id=member.user_id,
     )
-    match result:
-        case Success(value):
-            return ToolkitConfigResponse.model_validate(value, from_attributes=True)
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Toolkit config not found.",
-                    )
-                case InvalidConfig():
-                    raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                        detail="Invalid tool config.",
-                    )
-                case DuplicateSlug():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Duplicate toolkit slug in workspace.",
-                    )
-                case InvalidCredentials(detail=detail):
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail=detail,
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return ToolkitConfigResponse.model_validate(value, from_attributes=True)
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Toolkit config not found.",
+                )
+            case InvalidConfig():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="Invalid tool config.",
+                )
+            case DuplicateSlug():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Duplicate toolkit slug in workspace.",
+                )
+            case InvalidCredentials(detail=detail):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=detail,
+                )
+            case _:
+                assert_never(error)
 
 
 @router.delete(
@@ -290,20 +286,18 @@ async def delete_toolkit_config(
     result = await service.delete_by_id(
         toolkit_config_id, workspace_id=member.workspace_id
     )
-    match result:
-        case Success():
-            return
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Toolkit config not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        return
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Toolkit config not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 # ------------------------------------------------------------------ #
@@ -333,25 +327,24 @@ async def create_toolkit_scope(
 
     create_input = ToolkitScopeCreateInput(toolkit_id=toolkit_config_id)
     result = await service.create_scope(create_input, workspace_id=member.workspace_id)
-    match result:
-        case Success(value):
-            return ToolkitScopeResponse.model_validate(value, from_attributes=True)
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Toolkit not found.",
-                    )
-                case DuplicateScope():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Scope already exists.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return ToolkitScopeResponse.model_validate(value, from_attributes=True)
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Toolkit not found.",
+                )
+            case DuplicateScope():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Scope already exists.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/workspaces/{handle}/toolkit-configs/{toolkit_config_id}/scopes")
@@ -374,25 +367,24 @@ async def list_toolkit_scopes(
     result = await service.list_scopes(
         toolkit_config_id, workspace_id=member.workspace_id
     )
-    match result:
-        case Success(value):
-            return ToolkitScopeListResponse(
-                items=[
-                    ToolkitScopeResponse.model_validate(s, from_attributes=True)
-                    for s in value.items
-                ]
-            )
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Toolkit not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return ToolkitScopeListResponse(
+            items=[
+                ToolkitScopeResponse.model_validate(s, from_attributes=True)
+                for s in value.items
+            ]
+        )
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Toolkit not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.delete(
@@ -419,25 +411,23 @@ async def delete_toolkit_scope(
     result = await service.delete_scope(
         scope_id, toolkit_id=toolkit_config_id, workspace_id=member.workspace_id
     )
-    match result:
-        case Success():
-            return
-        case Failure(error):
-            match error:
-                case (
-                    NotFound()
-                    | NotBelongToWorkspace()
-                    | ScopeNotFound()
-                    | ScopeNotBelongToToolkit()
-                ):
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Toolkit or scope not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        return
+    else:
+        error = result.error
+        match error:
+            case (
+                NotFound()
+                | NotBelongToWorkspace()
+                | ScopeNotFound()
+                | ScopeNotBelongToToolkit()
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Toolkit or scope not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 # ------------------------------------------------------------------ #
@@ -465,25 +455,24 @@ async def list_agent_toolkits(
     result = await service.list_agent_toolkits(
         agent_id, workspace_id=member.workspace_id
     )
-    match result:
-        case Success(value):
-            return AgentToolkitListResponse(
-                items=[
-                    AgentToolkitResponse.model_validate(at, from_attributes=True)
-                    for at in value.items
-                ]
-            )
-        case Failure(error):
-            match error:
-                case AgentNotBelongToWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Agent not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return AgentToolkitListResponse(
+            items=[
+                AgentToolkitResponse.model_validate(at, from_attributes=True)
+                for at in value.items
+            ]
+        )
+    else:
+        error = result.error
+        match error:
+            case AgentNotBelongToWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Agent not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post(
@@ -513,30 +502,29 @@ async def attach_toolkit_to_agent(
         workspace_id=member.workspace_id,
         user_id=member.user_id,
     )
-    match result:
-        case Success(value):
-            return AgentToolkitResponse.model_validate(value, from_attributes=True)
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace() | AgentNotBelongToWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Toolkit or agent not found.",
-                    )
-                case ToolkitNotAvailable():
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="This toolkit is not available to you.",
-                    )
-                case DuplicateAgentToolkit():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Agent already has this toolkit attached.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return AgentToolkitResponse.model_validate(value, from_attributes=True)
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace() | AgentNotBelongToWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Toolkit or agent not found.",
+                )
+            case ToolkitNotAvailable():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="This toolkit is not available to you.",
+                )
+            case DuplicateAgentToolkit():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Agent already has this toolkit attached.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.delete(
@@ -563,24 +551,22 @@ async def detach_toolkit_from_agent(
     result = await service.detach_from_agent(
         agent_toolkit_id, agent_id=agent_id, workspace_id=member.workspace_id
     )
-    match result:
-        case Success():
-            return
-        case Failure(error):
-            match error:
-                case (
-                    ScopeNotFound()
-                    | AgentToolkitNotBelongToAgent()
-                    | AgentNotBelongToWorkspace()
-                ):
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Agent toolkit not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        return
+    else:
+        error = result.error
+        match error:
+            case (
+                ScopeNotFound()
+                | AgentToolkitNotBelongToAgent()
+                | AgentNotBelongToWorkspace()
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Agent toolkit not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 # ------------------------------------------------------------------ #

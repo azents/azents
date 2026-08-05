@@ -6,7 +6,6 @@ Authentication record lookup endpoints for E2E tests.
 from textwrap import dedent
 from typing import Annotated, assert_never
 
-from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.core.auth.deps import CurrentUser, get_current_user_optional
@@ -182,24 +181,23 @@ async def create_password_reset_token(
             expires_at=None,
         )
     )
-    match result:
-        case Success(value):
-            return CreatePasswordResetTokenResponse(
-                token=PasswordResetTokenResponse.convert_from(value.token),
-                plaintext_token=value.plaintext_token,
-                reset_url=value.reset_url,
-            )
-        case Failure(error):
-            match error:
-                case PasswordResetUserNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="Password reset user not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return CreatePasswordResetTokenResponse(
+            token=PasswordResetTokenResponse.convert_from(value.token),
+            plaintext_token=value.plaintext_token,
+            reset_url=value.reset_url,
+        )
+    else:
+        error = result.error
+        match error:
+            case PasswordResetUserNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Password reset user not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/password-reset-tokens")

@@ -9,7 +9,6 @@ from email.utils import format_datetime
 from textwrap import dedent
 from typing import Annotated, assert_never
 
-from azcommon.result import Failure, Success
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
@@ -205,20 +204,19 @@ async def get_integration(
         )
 
     result = await service.get_by_id(integration_id, workspace_id=member.workspace_id)
-    match result:
-        case Success(value):
-            return LLMProviderIntegrationResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="LLM Provider Integration not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return LLMProviderIntegrationResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="LLM Provider Integration not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get(
@@ -245,27 +243,26 @@ async def get_subscription_usage(
             Permissions.LLM_INTEGRATIONS_WRITE
         ),
     )
-    match result:
-        case Success(value):
-            return convert_subscription_usage_response(value)
-        case Failure(error):
-            match error:
-                case SubscriptionUsageNotFound() | SubscriptionUsageNotInWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="LLM Provider Integration not found.",
-                    )
-                case SubscriptionUsageUnsupportedProvider():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail=(
-                            "Integration provider does not support subscription usage."
-                        ),
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return convert_subscription_usage_response(value)
+    else:
+        error = result.error
+        match error:
+            case SubscriptionUsageNotFound() | SubscriptionUsageNotInWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="LLM Provider Integration not found.",
+                )
+            case SubscriptionUsageUnsupportedProvider():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "Integration provider does not support subscription usage."
+                    ),
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get(
@@ -310,28 +307,27 @@ async def list_integration_catalog_entries(
         limit=limit,
         offset=offset,
     )
-    match result:
-        case Success(value):
-            enqueue_stale_catalog_sync(
-                background_tasks,
-                service=catalog_sync_service,
-                integration_id=integration_id,
-                workspace_id=member.workspace_id,
-                catalog_scope=value.catalog_scope,
-                stale=value.stale,
-            )
-            return ModelCatalogEntryListResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case CatalogNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="LLM model catalog was not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        enqueue_stale_catalog_sync(
+            background_tasks,
+            service=catalog_sync_service,
+            integration_id=integration_id,
+            workspace_id=member.workspace_id,
+            catalog_scope=value.catalog_scope,
+            stale=value.stale,
+        )
+        return ModelCatalogEntryListResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case CatalogNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="LLM model catalog was not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post(
@@ -356,58 +352,54 @@ async def sync_integration_catalog(
         integration_id=integration_id,
         workspace_id=member.workspace_id,
     )
-    match result:
-        case Success(value):
-            return ModelCatalogSyncResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case IntegrationCatalogSyncNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="LLM provider integration was not found.",
-                    )
-                case IntegrationCatalogSyncUnsupportedProvider():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail=(
-                            "Integration provider does not have a user catalog sync."
-                        ),
-                    )
-                case IntegrationCatalogSyncAlreadyRunning():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Integration catalog sync is already running.",
-                    )
-                case IntegrationCatalogSyncSuperseded():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail=(
-                            "Integration catalog sync was superseded by a newer "
-                            "attempt."
-                        ),
-                    )
-                case IntegrationCatalogSyncThrottled(retry_at=retry_at):
-                    raise HTTPException(
-                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        detail=(
-                            "Integration catalog sync is throttled until "
-                            f"{retry_at.isoformat()}."
-                        ),
-                        headers={
-                            "Retry-After": format_datetime(
-                                retry_at.astimezone(datetime.UTC), usegmt=True
-                            )
-                        },
-                    )
-                case (
-                    IntegrationCatalogAutomaticRetryBlocked()
-                    | IntegrationCatalogSyncNotStale()
-                ):
-                    raise RuntimeError("Explicit catalog sync was denied unexpectedly.")
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return ModelCatalogSyncResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case IntegrationCatalogSyncNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="LLM provider integration was not found.",
+                )
+            case IntegrationCatalogSyncUnsupportedProvider():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=("Integration provider does not have a user catalog sync."),
+                )
+            case IntegrationCatalogSyncAlreadyRunning():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Integration catalog sync is already running.",
+                )
+            case IntegrationCatalogSyncSuperseded():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "Integration catalog sync was superseded by a newer attempt."
+                    ),
+                )
+            case IntegrationCatalogSyncThrottled(retry_at=retry_at):
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=(
+                        "Integration catalog sync is throttled until "
+                        f"{retry_at.isoformat()}."
+                    ),
+                    headers={
+                        "Retry-After": format_datetime(
+                            retry_at.astimezone(datetime.UTC), usegmt=True
+                        )
+                    },
+                )
+            case (
+                IntegrationCatalogAutomaticRetryBlocked()
+                | IntegrationCatalogSyncNotStale()
+            ):
+                raise RuntimeError("Explicit catalog sync was denied unexpectedly.")
+            case _:
+                assert_never(error)
 
 
 @router.patch("/workspaces/{handle}/llm-provider-integrations/{integration_id}")
@@ -435,36 +427,35 @@ async def update_integration(
         convert_integration_update_request(request_body),
         workspace_id=member.workspace_id,
     )
-    match result:
-        case Success(value):
-            if value.catalog_sync_required:
-                enqueue_initial_catalog_sync(
-                    background_tasks,
-                    service=catalog_sync_service,
-                    integration_id=value.integration.id,
-                    workspace_id=member.workspace_id,
-                    provider=value.integration.provider,
-                    name=value.integration.name,
-                    enabled=value.integration.enabled,
-                    trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
+    if result.success:
+        value = result.value
+        if value.catalog_sync_required:
+            enqueue_initial_catalog_sync(
+                background_tasks,
+                service=catalog_sync_service,
+                integration_id=value.integration.id,
+                workspace_id=member.workspace_id,
+                provider=value.integration.provider,
+                name=value.integration.name,
+                enabled=value.integration.enabled,
+                trigger=IntegrationCatalogSyncTrigger.CONFIG_UPDATE,
+            )
+        return LLMProviderIntegrationResponse.convert_from(value.integration)
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="LLM Provider Integration not found.",
                 )
-            return LLMProviderIntegrationResponse.convert_from(value.integration)
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="LLM Provider Integration not found.",
-                    )
-                case InvalidProviderUpdate():
-                    raise HTTPException(
-                        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                        detail=error.reason,
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+            case InvalidProviderUpdate():
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail=error.reason,
+                )
+            case _:
+                assert_never(error)
 
 
 @router.delete(
@@ -490,20 +481,18 @@ async def delete_integration(
     result = await service.delete_by_id(
         integration_id, workspace_id=member.workspace_id
     )
-    match result:
-        case Success():
-            return
-        case Failure(error):
-            match error:
-                case NotFound() | NotBelongToWorkspace():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="LLM Provider Integration not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        return
+    else:
+        error = result.error
+        match error:
+            case NotFound() | NotBelongToWorkspace():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="LLM Provider Integration not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 def enqueue_stale_catalog_sync(

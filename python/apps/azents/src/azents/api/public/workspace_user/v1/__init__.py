@@ -6,7 +6,6 @@ Workspace member lookup, profile update, role change, and delete endpoints.
 from textwrap import dedent
 from typing import Annotated, assert_never
 
-from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.core.auth.deps import WorkspaceMember, get_workspace_member
@@ -74,20 +73,19 @@ async def update_my_profile(
         update_data["name"] = request_body.name
 
     result = await user_service.update(member.workspace_user_id, update_data)
-    match result:
-        case Success(value):
-            return WorkspaceUserResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case NotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="WorkspaceUser not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return WorkspaceUserResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case NotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="WorkspaceUser not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/workspaces/{handle}/workspace-users")
@@ -134,35 +132,34 @@ async def update_workspace_user_role(
     result = await user_service.update_role(
         member.workspace_user_id, workspace_user_id, request_body.role
     )
-    match result:
-        case Success(value):
-            return WorkspaceUserResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case NotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="WorkspaceUser not found.",
-                    )
-                case CannotModifySelf():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Cannot change your own role.",
-                    )
-                case CannotModifyOwner():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Cannot change the Owner role.",
-                    )
-                case InvalidRole():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Cannot change a role to Owner.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return WorkspaceUserResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case NotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="WorkspaceUser not found.",
+                )
+            case CannotModifySelf():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot change your own role.",
+                )
+            case CannotModifyOwner():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot change the Owner role.",
+                )
+            case InvalidRole():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot change a role to Owner.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.delete(
@@ -186,28 +183,28 @@ async def delete_workspace_user(
         )
 
     result = await user_service.delete(member.workspace_user_id, workspace_user_id)
-    match result:
-        case Success():
-            return None
-        case Failure(error):
-            match error:
-                case CannotModifySelf():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Cannot delete yourself.",
-                    )
-                case CannotModifyOwner():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Cannot delete the Owner.",
-                    )
-                case NotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="WorkspaceUser not found.",
-                    )
-                case _:
-                    assert_never(error)
+    if result.success:
+        return None
+    else:
+        error = result.error
+        match error:
+            case CannotModifySelf():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot delete yourself.",
+                )
+            case CannotModifyOwner():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot delete the Owner.",
+                )
+            case NotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="WorkspaceUser not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 def mount(mounter: RouteMounter) -> None:

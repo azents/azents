@@ -6,7 +6,6 @@ Workspace lookup/create endpoints.
 from textwrap import dedent
 from typing import Annotated, assert_never
 
-from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from azents.core.auth.deps import CurrentUser, get_current_user
@@ -65,20 +64,19 @@ async def create_workspace(
             owner_name=request_body.owner_name,
         )
     )
-    match result:
-        case Success(value):
-            return CreateWorkspaceResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case HandleConflict():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Handle already in use.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return CreateWorkspaceResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case HandleConflict():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Handle already in use.",
+                )
+            case _:
+                assert_never(error)
 
 
 def mount(mounter: RouteMounter) -> None:

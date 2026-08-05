@@ -178,30 +178,28 @@ async def revoke_system_admin(
         SystemUserRole.SYSTEM_ADMIN,
         revoked_by_user_id=system_admin.user_id,
     )
-    match result:
-        case Success():
-            return
-        case Failure(error):
-            match error:
-                case SystemRoleAssignmentNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="System role assignment not found.",
-                    )
-                case LastSystemAdmin():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail={
-                            "code": "last_system_admin",
-                            "message": (
-                                "The final system administrator cannot be revoked."
-                            ),
-                        },
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        return
+    else:
+        error = result.error
+        match error:
+            case SystemRoleAssignmentNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="System role assignment not found.",
+                )
+            case LastSystemAdmin():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "last_system_admin",
+                        "message": (
+                            "The final system administrator cannot be revoked."
+                        ),
+                    },
+                )
+            case _:
+                assert_never(error)
 
 
 def mount(mounter: RouteMounter) -> None:

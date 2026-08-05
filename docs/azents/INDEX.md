@@ -311,6 +311,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Define the OpenAI Responses WebSocket Lifecycle Historical Requirements Reconstruction](requirements/responses-260716-openai-responses-websocket-lifecycle.md) | responses-260716 | 2026-07-16 | - |
 | [Chat Writes Use REST Commit Boundary Historical Requirements Reconstruction](requirements/rest-260605-rest-chat-write-boundary.md) | rest-260605 | 2026-06-05 | - |
 | [Session-Owned REST Write Idempotency Historical Requirements Reconstruction](requirements/rest-260625-rest-write-idempotency.md) | rest-260625 | 2026-06-25 | - |
+| [Result Error Contract Exhaustiveness Requirements](requirements/result-260805-error-contract-exhaustiveness.md) | result-260805 | 2026-08-05 | 2026-08-05 |
 | [Claude Rules Loader Historical Requirements Reconstruction](requirements/rules-260702-claude-rules-loader.md) | rules-260702 | 2026-07-02 | 2026-07-02 |
 | [Session-Scoped Runner Operation Concurrency Historical Requirements Reconstruction](requirements/runner-260710-runner-operation-concurrency.md) | runner-260710 | 2026-07-10 | - |
 | [Hierarchical Runtime Execution Profiles Requirements](requirements/runtime-260726-hierarchical-execution-profiles.md) | runtime-260726 | 2026-07-26 | - |
@@ -680,6 +681,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Define the OpenAI Responses WebSocket Lifecycle](adr/responses-260716-openai-responses-websocket-lifecycle.md)
 - [Chat Writes Use REST Commit Boundary](adr/rest-260605-rest-chat-write-boundary.md)
 - [Session-Owned REST Write Idempotency](adr/rest-260625-rest-write-idempotency.md)
+- [Result Error Contract Exhaustiveness ADR](adr/result-260805-error-contract-exhaustiveness.md)
 - [Claude Rules Loader Historical Decision Reconstruction](adr/rules-260702-claude-rules-loader.md)
 - [Session-Scoped Runner Operation Concurrency](adr/runner-260710-runner-operation-concurrency.md)
 - [Hierarchical Runtime Execution Profiles](adr/runtime-260726-hierarchical-execution-profiles.md)

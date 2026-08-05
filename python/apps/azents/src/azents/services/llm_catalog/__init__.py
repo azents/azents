@@ -781,46 +781,48 @@ class IntegrationCatalogProjectionService:
                     integration_repository=self.integration_repository,
                     session_manager=self.session_manager,
                 )
-                match token_result:
-                    case Success(refreshed_integration):
-                        integration = refreshed_integration
-                    case Failure(error):
-                        match error:
-                            case ProviderRejected(reason=reason):
-                                raise ListingProviderError(
-                                    reason,
-                                    automatic_retry_blocked=True,
-                                )
-                            case ProviderUnavailable(reason=reason):
-                                raise ListingProviderError(
-                                    reason,
-                                    automatic_retry_blocked=False,
-                                )
-                            case _:
-                                assert_never(error)
+                if token_result.success:
+                    refreshed_integration = token_result.value
+                    integration = refreshed_integration
+                else:
+                    error = token_result.error
+                    match error:
+                        case ProviderRejected(reason=reason):
+                            raise ListingProviderError(
+                                reason,
+                                automatic_retry_blocked=True,
+                            )
+                        case ProviderUnavailable(reason=reason):
+                            raise ListingProviderError(
+                                reason,
+                                automatic_retry_blocked=False,
+                            )
+                        case _:
+                            assert_never(error)
             elif integration.provider == LLMProvider.KIMI_OAUTH:
                 kimi_token_result = await ensure_kimi_runtime_tokens(
                     integration=integration,
                     integration_repository=self.integration_repository,
                     session_manager=self.session_manager,
                 )
-                match kimi_token_result:
-                    case Success(refreshed_integration):
-                        integration = refreshed_integration
-                    case Failure(error):
-                        match error:
-                            case KimiProviderRejected(reason=reason):
-                                raise ListingProviderError(
-                                    reason,
-                                    automatic_retry_blocked=True,
-                                )
-                            case KimiProviderUnavailable(reason=reason):
-                                raise ListingProviderError(
-                                    reason,
-                                    automatic_retry_blocked=False,
-                                )
-                            case _:
-                                assert_never(error)
+                if kimi_token_result.success:
+                    refreshed_integration = kimi_token_result.value
+                    integration = refreshed_integration
+                else:
+                    error = kimi_token_result.error
+                    match error:
+                        case KimiProviderRejected(reason=reason):
+                            raise ListingProviderError(
+                                reason,
+                                automatic_retry_blocked=True,
+                            )
+                        case KimiProviderUnavailable(reason=reason):
+                            raise ListingProviderError(
+                                reason,
+                                automatic_retry_blocked=False,
+                            )
+                        case _:
+                            assert_never(error)
             listing = deterministic_listing or await _list_provider_visible_models(
                 integration
             )

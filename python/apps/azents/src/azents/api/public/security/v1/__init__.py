@@ -6,7 +6,6 @@ Security settings and step-up authentication endpoints.
 from textwrap import dedent
 from typing import Annotated, assert_never
 
-from azcommon.result import Failure, Success
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from azents.core.auth.deps import CurrentUser, get_current_user, get_elevated_user
@@ -48,20 +47,19 @@ async def get_auth_methods(
     result = await security_service.get_auth_methods(
         GetAuthMethodsInput(user_id=current_user.user_id)
     )
-    match result:
-        case Success(value):
-            return GetAuthMethodsResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case UserNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="User not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return GetAuthMethodsResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case UserNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.get("/elevation-methods")
@@ -73,20 +71,19 @@ async def get_elevation_methods(
     result = await security_service.get_elevation_methods(
         GetAuthMethodsInput(user_id=current_user.user_id)
     )
-    match result:
-        case Success(value):
-            return GetAuthMethodsResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case UserNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="User not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return GetAuthMethodsResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case UserNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post("/elevate/send-code")
@@ -98,20 +95,19 @@ async def send_elevation_code(
     result = await security_service.send_elevation_code(
         SendElevationCodeInput(user_id=current_user.user_id)
     )
-    match result:
-        case Success(value):
-            return SendElevationCodeResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case UserNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="User not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return SendElevationCodeResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case UserNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post("/elevate/email")
@@ -129,20 +125,19 @@ async def elevate_with_email(
             csrf_token=request_body.csrf_token,
         )
     )
-    match result:
-        case Success(value):
-            return ElevateResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case InvalidElevationCode():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Invalid elevation code.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return ElevateResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case InvalidElevationCode():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid elevation code.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post("/elevate/password")
@@ -159,25 +154,24 @@ async def elevate_with_password(
             password=request_body.password,
         )
     )
-    match result:
-        case Success(value):
-            return ElevateResponse.convert_from(value)
-        case Failure(error):
-            match error:
-                case InvalidPassword():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Invalid password.",
-                    )
-                case PasswordNotSet():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Password is not configured.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        value = result.value
+        return ElevateResponse.convert_from(value)
+    else:
+        error = result.error
+        match error:
+            case InvalidPassword():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid password.",
+                )
+            case PasswordNotSet():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Password is not configured.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.post("/password", status_code=status.HTTP_204_NO_CONTENT)
@@ -193,25 +187,23 @@ async def set_password(
             password=request_body.password,
         )
     )
-    match result:
-        case Success():
-            return Response(status_code=status.HTTP_204_NO_CONTENT)
-        case Failure(error):
-            match error:
-                case WeakPassword(message=message):
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=message,
-                    )
-                case UserNotFound():
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail="User not found.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    else:
+        error = result.error
+        match error:
+            case WeakPassword(message=message):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=message,
+                )
+            case UserNotFound():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="User not found.",
+                )
+            case _:
+                assert_never(error)
 
 
 @router.delete("/password", status_code=status.HTTP_204_NO_CONTENT)
@@ -223,25 +215,23 @@ async def remove_password(
     result = await security_service.remove_password(
         RemovePasswordInput(user_id=current_user.user_id)
     )
-    match result:
-        case Success():
-            return Response(status_code=status.HTTP_204_NO_CONTENT)
-        case Failure(error):
-            match error:
-                case PasswordNotSet():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Password is not configured.",
-                    )
-                case LastCredentialRemovalDenied():
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail="Cannot remove the last valid credential.",
-                    )
-                case _:
-                    assert_never(error)
-        case _:
-            assert_never(result)
+    if result.success:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    else:
+        error = result.error
+        match error:
+            case PasswordNotSet():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Password is not configured.",
+                )
+            case LastCredentialRemovalDenied():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Cannot remove the last valid credential.",
+                )
+            case _:
+                assert_never(error)
 
 
 def mount(mounter: RouteMounter) -> None:

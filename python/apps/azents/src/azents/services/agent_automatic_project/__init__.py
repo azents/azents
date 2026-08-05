@@ -298,36 +298,31 @@ class AgentAutomaticProjectService:
                 runtime=runtime,
                 path=path,
             )
-            match result:
-                case Success():
-                    continue
-                case Failure(error):
-                    match error:
-                        case RuntimeDirectoryValidationUnavailable(message=message):
-                            return Failure(
-                                AutomaticSessionProjectsRuntimeUnavailable(
-                                    message=message
-                                )
+            if result.success:
+                continue
+            else:
+                error = result.error
+                match error:
+                    case RuntimeDirectoryValidationUnavailable(message=message):
+                        return Failure(
+                            AutomaticSessionProjectsRuntimeUnavailable(message=message)
+                        )
+                    case RuntimeDirectoryNotFound():
+                        return Failure(
+                            InvalidProjectPath(
+                                path=path,
+                                reason=(
+                                    "Project path must exist as a runtime directory."
+                                ),
                             )
-                        case RuntimeDirectoryNotFound():
-                            return Failure(
-                                InvalidProjectPath(
-                                    path=path,
-                                    reason=(
-                                        "Project path must exist as a runtime "
-                                        "directory."
-                                    ),
-                                )
+                        )
+                    case RuntimeDirectoryNotDirectory():
+                        return Failure(
+                            InvalidProjectPath(
+                                path=path,
+                                reason="Project path must be a runtime directory.",
                             )
-                        case RuntimeDirectoryNotDirectory():
-                            return Failure(
-                                InvalidProjectPath(
-                                    path=path,
-                                    reason="Project path must be a runtime directory.",
-                                )
-                            )
-                        case _:
-                            assert_never(error)
-                case _:
-                    assert_never(result)
+                        )
+                    case _:
+                        assert_never(error)
         return Success(None)

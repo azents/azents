@@ -1958,35 +1958,34 @@ class SessionGitWorktreeService:
                 on_projection_updated=on_projection_updated,
             )
             return
-        match result:
-            case Success(entry):
-                if entry.status is AgentProjectCatalogStatus.AVAILABLE:
-                    return
-                await self._append_action_execution_event(
-                    execution=execution,
-                    kind=ActionExecutionEventKind.WARNING,
-                    step_key="refresh_project_status",
-                    command_argv=None,
-                    content=entry.status_detail or f"Project status is {entry.status}.",
-                    exit_code=None,
-                    on_projection_updated=on_projection_updated,
-                )
-            case Failure(error):
-                match error:
-                    case InvalidProjectPath():
-                        await self._append_action_execution_event(
-                            execution=execution,
-                            kind=ActionExecutionEventKind.WARNING,
-                            step_key="refresh_project_status",
-                            command_argv=None,
-                            content=error.reason,
-                            exit_code=None,
-                            on_projection_updated=on_projection_updated,
-                        )
-                    case _:
-                        assert_never(error)
-            case _:
-                assert_never(result)
+        if result.success:
+            entry = result.value
+            if entry.status is AgentProjectCatalogStatus.AVAILABLE:
+                return
+            await self._append_action_execution_event(
+                execution=execution,
+                kind=ActionExecutionEventKind.WARNING,
+                step_key="refresh_project_status",
+                command_argv=None,
+                content=entry.status_detail or f"Project status is {entry.status}.",
+                exit_code=None,
+                on_projection_updated=on_projection_updated,
+            )
+        else:
+            error = result.error
+            match error:
+                case InvalidProjectPath():
+                    await self._append_action_execution_event(
+                        execution=execution,
+                        kind=ActionExecutionEventKind.WARNING,
+                        step_key="refresh_project_status",
+                        command_argv=None,
+                        content=error.reason,
+                        exit_code=None,
+                        on_projection_updated=on_projection_updated,
+                    )
+                case _:
+                    assert_never(error)
 
     def _action_text_callback(
         self,
