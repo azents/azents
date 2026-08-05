@@ -16,7 +16,12 @@ from azents_runtime_control.proto import (
 from azents_runtime_control.provider import (
     RuntimeLifecycleCommandType as RuntimeProviderCommandType,
 )
-from azents_runtime_control.provider import RuntimeProviderReport
+from azents_runtime_control.provider import (
+    RuntimeProviderReconciliationEvidence,
+    RuntimeProviderReconciliationObservation,
+    RuntimeProviderReconciliationStatus,
+    RuntimeProviderReport,
+)
 from azents_runtime_control.runtime_configuration import (
     JsonValue,
     RuntimeConfigurationEnvelope,
@@ -70,6 +75,18 @@ class FakeReportSink:
     async def record_provider_report(self, report: RuntimeProviderReport) -> None:
         """Record one Provider report."""
         self.reports.append(report)
+
+
+@dataclasses.dataclass
+class FakeObserveCompletionHandler:
+    """Collect correlated successful OBSERVE completion reports."""
+
+    reports: list[RuntimeProviderReport] = dataclasses.field(default_factory=list)
+
+    async def reconcile_observe_completion(self, report: RuntimeProviderReport) -> bool:
+        """Record one eligible report."""
+        self.reports.append(report)
+        return True
 
 
 @dataclasses.dataclass
@@ -404,6 +421,76 @@ async def test_provider_grpc_relays_commands_and_records_completion() -> None:
 
 
 @pytest.mark.asyncio
+async def test_provider_grpc_hands_only_observe_completion_to_reconciler() -> None:
+    """A duplicate OBSERVE completion cannot enqueue duplicate drift repair."""
+    store = InMemoryRuntimeCoordinationStore()
+    service = RuntimeControlProtocolService(
+        store,
+        request_id_factory=lambda: "observe-request",
+    )
+    sink = FakeReportSink()
+    handler = FakeObserveCompletionHandler()
+    servicer = _servicer(service, sink, observe_completion_handler=handler)
+    inbound = QueueIterator()
+    await inbound.put(_register_message())
+
+    stream = servicer.ConnectProvider(inbound, FakeGrpcContext())
+    accepted = await anext(stream)
+    result = await service.dispatch_provider_command(
+        _provider_command(
+            generation=accepted.register_accepted.generation,
+            command_type=RuntimeProviderCommandType.OBSERVE,
+        ),
+        created_at=_now(),
+    )
+    command = await anext(stream)
+
+    assert isinstance(result, RuntimeDispatchResult)
+    assert command.provider_command.command_type == "observe"
+    report = _report_message()
+    report.reconciliation.CopyFrom(
+        runtime_provider_control_pb2.RuntimeProviderReconciliationEvidence(
+            observations=(
+                runtime_provider_control_pb2.RuntimeProviderReconciliationObservation(
+                    kind="network_policy",
+                    status="drifted",
+                    reason="network_policy_mismatch",
+                ),
+            )
+        )
+    )
+    completion = runtime_provider_control_pb2.ProviderMessage(
+        connection_id="connection-1",
+        request_id="observe-request",
+        generation=accepted.register_accepted.generation,
+        command_completion=runtime_provider_control_pb2.ProviderCommandCompletion(
+            request_id="observe-request",
+            runtime_id="runtime-1",
+            generation=accepted.register_accepted.generation,
+            success=True,
+            report=report,
+            completed_at=_timestamp(_now()),
+        ),
+    )
+    await inbound.put(completion)
+    await inbound.put(completion)
+    await asyncio.sleep(0)
+
+    assert len(handler.reports) == 1
+    assert handler.reports[0].reconciliation == RuntimeProviderReconciliationEvidence(
+        observations=(
+            RuntimeProviderReconciliationObservation(
+                kind="network_policy",
+                status=RuntimeProviderReconciliationStatus.DRIFTED,
+                reason="network_policy_mismatch",
+                diagnostic={},
+            ),
+        )
+    )
+    await _close_stream(stream)
+
+
+@pytest.mark.asyncio
 async def test_provider_grpc_rejects_missing_provider_credential() -> None:
     store = InMemoryRuntimeCoordinationStore()
     servicer = _servicer(RuntimeControlProtocolService(store), FakeReportSink())
@@ -601,11 +688,15 @@ def _servicer(
     sink: FakeReportSink,
     *,
     bridge: FakeProviderCredentialBridge | None = None,
+    observe_completion_handler: FakeObserveCompletionHandler | None = None,
 ) -> RuntimeProviderControlGrpcServicer:
     bridge = bridge or FakeProviderCredentialBridge()
     return RuntimeProviderControlGrpcServicer(
         control_protocol=service,
         report_sink=sink,
+        observe_completion_handler=(
+            observe_completion_handler or FakeObserveCompletionHandler()
+        ),
         owner_replica_id="control-a",
         consumer_id="provider-consumer-a",
         credential_authenticator=bridge,
@@ -613,6 +704,35 @@ def _servicer(
         contract_proposer=FakeRuntimeProviderContractProposer(),
         runner_credential_issuer=FakeRuntimeRunnerCredentialIssuer(),
         command_block_ms=1,
+    )
+
+
+def _provider_command(
+    *,
+    generation: int,
+    command_type: RuntimeProviderCommandType,
+) -> RuntimeProviderCommand:
+    return RuntimeProviderCommand(
+        provider_id="provider-1",
+        provider_generation=generation,
+        runtime_id="runtime-1",
+        desired_generation=5,
+        command_type=command_type,
+        reset_final_desired_state=None,
+        payload={
+            "identity": {
+                "agent_id": "agent-1",
+                "workspace_id": "workspace-1",
+            },
+            "runner_image": "runner:latest",
+            "auth": {
+                "control_endpoint": "runtime-control:8020",
+                "transfer_endpoint": "runtime-transfer:8030",
+                "runner_auth_credential_id": "runner-credential-1",
+            },
+        },
+        deadline_at=datetime.now(UTC) + timedelta(seconds=30),
+        runtime_configuration=_runtime_configuration(),
     )
 
 

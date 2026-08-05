@@ -1,6 +1,7 @@
 """Runtime lifecycle reconciler tests."""
 
 import datetime
+import logging
 
 import pytest
 import sqlalchemy as sa
@@ -8,6 +9,16 @@ from azcommon.result import Success
 from azents_runtime_control.provider import (
     RuntimeLifecycleCommandType as RuntimeProviderCommandType,
 )
+from azents_runtime_control.provider import (
+    RuntimeProviderObservedState as SharedProviderObservedState,
+)
+from azents_runtime_control.provider import (
+    RuntimeProviderReconciliationEvidence,
+    RuntimeProviderReconciliationObservation,
+    RuntimeProviderReconciliationStatus,
+    RuntimeProviderReport,
+)
+from azents_runtime_control.runtime_configuration import RuntimeConfigurationEvidence
 from cryptography.fernet import Fernet
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +31,6 @@ from azents.core.enums import (
     RuntimeProviderKind,
     RuntimeProviderLifecycleState,
     RuntimeProviderObservedState,
-    RuntimeProviderReconciliationStatus,
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
 )
@@ -39,6 +49,7 @@ from azents.rdb.models.runtime_provider_policy import (
 )
 from azents.rdb.session import SessionManager
 from azents.repos.agent_runtime import AgentRuntimeRepository
+from azents.repos.agent_runtime.data import AgentRuntime
 from azents.repos.runtime_profile.data import (
     RuntimeConfigurationRevision,
     RuntimeConfigurationRevisionCreate,
@@ -65,6 +76,23 @@ from azents.runtime.coordination.memory import (
     InMemoryRuntimeCoordinationStore,
 )
 from azents.testing.model_selection import make_test_model_selection_dict
+
+
+class LockTrackingAgentRuntimeRepository(AgentRuntimeRepository):
+    """Record Runtime row locks acquired by OBSERVE drift repair."""
+
+    def __init__(self) -> None:
+        """Initialize lock tracking."""
+        self.locked_runtime_ids: list[str] = []
+
+    async def get_by_id_for_update(
+        self,
+        session: AsyncSession,
+        runtime_id: str,
+    ) -> AgentRuntime | None:
+        """Record and acquire one Runtime row lock."""
+        self.locked_runtime_ids.append(runtime_id)
+        return await super().get_by_id_for_update(session, runtime_id)
 
 
 async def test_reconciler_refreshes_stale_provider_connection_before_start_timeout(
@@ -271,10 +299,11 @@ async def test_reconciler_observes_active_runtime_without_restarting_it(
 
 async def test_reconciler_repairs_current_network_policy_drift_once(
     rdb_session_manager: SessionManager[AsyncSession],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Current exact evidence dispatches one in-place configuration repair."""
-    runtime_repository = AgentRuntimeRepository()
-    observed_at = datetime.datetime.now(datetime.UTC)
+    """One current OBSERVE result dispatches one in-place configuration repair."""
+    runtime_repository = LockTrackingAgentRuntimeRepository()
+    profile_repository = RuntimeProfileRepository()
     async with rdb_session_manager() as session:
         workspace_id = await _create_workspace(session, "reconciler-drift-ws")
         agent_id = await _create_agent(
@@ -315,30 +344,6 @@ async def test_reconciler_repairs_current_network_policy_drift_once(
             command.desired_generation,
         )
         assert running is not None
-        evidence = await runtime_repository.record_provider_reconciliation_observation(
-            session,
-            runtime_id=runtime.id,
-            status=RuntimeProviderReconciliationStatus.DRIFTED,
-            kind="network_policy",
-            reason="network_policy_mismatch",
-            provider_generation=1,
-            observed_generation=command.desired_generation,
-            configuration_revision_id=revision.id,
-            observed_at=observed_at,
-        )
-        assert evidence is not None
-        stale = await runtime_repository.record_provider_reconciliation_observation(
-            session,
-            runtime_id=runtime.id,
-            status=RuntimeProviderReconciliationStatus.DRIFTED,
-            kind="network_policy",
-            reason="network_policy_mismatch",
-            provider_generation=0,
-            observed_generation=command.desired_generation,
-            configuration_revision_id=revision.id,
-            observed_at=observed_at,
-        )
-        assert stale is None
 
     store = InMemoryRuntimeCoordinationStore()
     control_protocol = RuntimeControlProtocolService(
@@ -351,7 +356,7 @@ async def test_reconciler_repairs_current_network_policy_drift_once(
     )
     reconciler = RuntimeLifecycleReconciler(
         runtime_repository=runtime_repository,
-        profile_repository=RuntimeProfileRepository(),
+        profile_repository=profile_repository,
         session_manager=rdb_session_manager,
         coordination_store=store,
         control_protocol=control_protocol,
@@ -365,63 +370,57 @@ async def test_reconciler_repairs_current_network_policy_drift_once(
         ),
     )
 
-    first_dispatched = await reconciler.reconcile_once(limit=10)
+    with caplog.at_level(
+        logging.INFO,
+        logger="azents.runtime.control_protocol.reconciler",
+    ):
+        dispatched = await reconciler.reconcile_observe_completion(
+            _network_policy_drift_report(
+                runtime_id=runtime.id,
+                desired_generation=command.desired_generation,
+                revision_id=revision.id,
+            )
+        )
     claimed = await control_protocol.claim_next_provider_request(
         provider_id="provider-1",
         generation=accepted.generation,
         consumer_id="provider-worker",
         block_ms=0,
     )
-    second_dispatched = await reconciler.reconcile_once(limit=10)
-    async with rdb_session_manager() as session:
-        await session.execute(
-            sa.update(RDBAgentRuntime)
-            .where(RDBAgentRuntime.agent_id == agent_id)
-            .values(
-                provider_reconciliation_requested_at=(
-                    datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=1)
-                )
-            )
-        )
-    retry_dispatched = await reconciler.reconcile_once(limit=10)
-    async with rdb_session_manager() as session:
-        runtime = await runtime_repository.get_by_agent_id(session, agent_id)
-        assert runtime is not None
-        in_sync = await runtime_repository.record_provider_reconciliation_observation(
-            session,
-            runtime_id=runtime.id,
-            status=RuntimeProviderReconciliationStatus.IN_SYNC,
-            kind="network_policy",
-            reason="network_policy_in_sync",
-            provider_generation=1,
-            observed_generation=command.desired_generation,
-            configuration_revision_id=revision.id,
-            observed_at=observed_at + datetime.timedelta(seconds=1),
-        )
-        assert in_sync is not None
-    in_sync_dispatched = await reconciler.reconcile_once(limit=10)
-    async with rdb_session_manager() as session:
-        updated = await runtime_repository.get_by_agent_id(session, agent_id)
+    no_retry = await reconciler.reconcile_once(limit=10)
 
-    assert first_dispatched == 1
+    assert dispatched is True
     assert claimed is not None
     assert claimed.payload["command_type"] == "update_configuration"
-    assert second_dispatched == 0
-    assert retry_dispatched == 1
-    assert in_sync_dispatched == 0
-    assert updated is not None
-    assert (
-        updated.provider_reconciliation_status
-        is RuntimeProviderReconciliationStatus.IN_SYNC
+    assert no_retry == 0
+    assert runtime_repository.locked_runtime_ids == [runtime.id]
+    handoff_log = next(
+        record
+        for record in caplog.records
+        if record.message == "Runtime NetworkPolicy drift repair handed off"
     )
-    assert updated.provider_reconciliation_requested_at is None
+    dispatch_log = next(
+        record
+        for record in caplog.records
+        if record.message == "Runtime lifecycle command dispatched"
+        and record.__dict__["command_type"] == "update_configuration"
+    )
+    for record in (handoff_log, dispatch_log):
+        assert record.__dict__["runtime_id"] == runtime.id
+        assert record.__dict__["provider_id"] == "provider-1"
+        assert record.__dict__["provider_generation"] == accepted.generation
+        assert record.__dict__["desired_generation"] == command.desired_generation
+        assert record.__dict__["configuration_revision_id"] == revision.id
+        assert record.__dict__["reconciliation_kind"] == "network_policy"
+        assert record.__dict__["reconciliation_reason"] == "network_policy_mismatch"
 
 
-async def test_reconciliation_dispatch_rechecks_provider_generation(
+async def test_reconcile_observe_completion_rejects_stale_provider_generation(
     rdb_session_manager: SessionManager[AsyncSession],
 ) -> None:
-    """A reconnect after evidence claim cannot receive the stale repair."""
+    """A reconnect requires a later current OBSERVE before it can repair drift."""
     runtime_repository = AgentRuntimeRepository()
+    profile_repository = RuntimeProfileRepository()
     async with rdb_session_manager() as session:
         workspace_id = await _create_workspace(
             session,
@@ -441,13 +440,24 @@ async def test_reconciliation_dispatch_rechecks_provider_generation(
             RuntimeDesiredState.RUNNING,
         )
         assert command is not None
-        await _attach_runtime_configuration(
+        revision = await _attach_runtime_configuration(
             session,
             runtime_id=runtime.id,
             target_desired_generation=command.desired_generation,
         )
-        runtime = await runtime_repository.get_by_id(session, runtime.id)
-        assert runtime is not None
+        await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(applied_runtime_configuration_revision_id=revision.id)
+        )
+        observed = await runtime_repository.record_provider_observed_state(
+            session,
+            runtime.id,
+            RuntimeProviderObservedState.RUNNING,
+            2,
+            command.desired_generation,
+        )
+        assert observed is not None
 
     store = InMemoryRuntimeCoordinationStore()
     control_protocol = RuntimeControlProtocolService(
@@ -464,7 +474,99 @@ async def test_reconciliation_dispatch_rechecks_provider_generation(
     )
     reconciler = RuntimeLifecycleReconciler(
         runtime_repository=runtime_repository,
-        profile_repository=RuntimeProfileRepository(),
+        profile_repository=profile_repository,
+        session_manager=rdb_session_manager,
+        coordination_store=store,
+        control_protocol=control_protocol,
+        config=RuntimeLifecycleDispatchConfig(
+            runner_image="runner:test",
+            runner_control_endpoint="runtime-control:9090",
+            runner_transfer_endpoint="runtime-transfer:9091",
+            runner_credential_identifier=_runner_credential_verifier(),
+            runner_control_tls_ca_pem=None,
+            allow_insecure_runner_control=True,
+        ),
+    )
+
+    dispatched = await reconciler.reconcile_observe_completion(
+        _network_policy_drift_report(
+            runtime_id=runtime.id,
+            provider_generation=previous.generation,
+            desired_generation=command.desired_generation,
+            revision_id=revision.id,
+        )
+    )
+    claimed = await control_protocol.claim_next_provider_request(
+        provider_id="provider-1",
+        generation=current.generation,
+        consumer_id="provider-worker",
+        block_ms=0,
+    )
+
+    assert current.generation > previous.generation
+    assert dispatched is False
+    assert claimed is None
+
+
+async def test_drift_repair_rechecks_runtime_snapshot_before_dispatch(
+    rdb_session_manager: SessionManager[AsyncSession],
+) -> None:
+    """A desired-state race cannot dispatch an old drift-repair configuration."""
+    runtime_repository = AgentRuntimeRepository()
+    profile_repository = RuntimeProfileRepository()
+    async with rdb_session_manager() as session:
+        workspace_id = await _create_workspace(session, "reconciler-drift-race-ws")
+        agent_id = await _create_agent(
+            session,
+            workspace_id,
+            "reconciler-drift-race-agent",
+        )
+        runtime = await runtime_repository.ensure_for_agent(session, agent_id)
+        await _bind_runtime_provider(session, runtime.id)
+        command = await runtime_repository.set_desired_state(
+            session,
+            runtime.id,
+            RuntimeLifecycleCommandType.START,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert command is not None
+        revision = await _attach_runtime_configuration(
+            session,
+            runtime_id=runtime.id,
+            target_desired_generation=command.desired_generation,
+        )
+        await session.execute(
+            sa.update(RDBAgentRuntime)
+            .where(RDBAgentRuntime.id == runtime.id)
+            .values(applied_runtime_configuration_revision_id=revision.id)
+        )
+        observed = await runtime_repository.record_provider_observed_state(
+            session,
+            runtime.id,
+            RuntimeProviderObservedState.RUNNING,
+            1,
+            command.desired_generation,
+        )
+        assert observed is not None
+        stale_runtime = await runtime_repository.get_by_id(session, runtime.id)
+        assert stale_runtime is not None
+        replacement = await runtime_repository.set_desired_state(
+            session,
+            runtime.id,
+            RuntimeLifecycleCommandType.RESTART,
+            RuntimeDesiredState.RUNNING,
+        )
+        assert replacement is not None
+
+    store = InMemoryRuntimeCoordinationStore()
+    control_protocol = RuntimeControlProtocolService(store)
+    accepted = await control_protocol.register_provider(
+        _provider_registration(),
+        registered_at=datetime.datetime.now(datetime.UTC),
+    )
+    reconciler = RuntimeLifecycleReconciler(
+        runtime_repository=runtime_repository,
+        profile_repository=profile_repository,
         session_manager=rdb_session_manager,
         coordination_store=store,
         control_protocol=control_protocol,
@@ -479,19 +581,20 @@ async def test_reconciliation_dispatch_rechecks_provider_generation(
     )
 
     dispatched = await reconciler._dispatch_runtime_command(
-        runtime,
+        stale_runtime,
         command_type=RuntimeProviderCommandType.UPDATE_CONFIGURATION,
         claim_lifecycle=False,
-        required_provider_generation=previous.generation,
+        required_provider_generation=accepted.generation,
+        required_observed_generation=command.desired_generation,
+        required_configuration_revision_id=revision.id,
     )
     claimed = await control_protocol.claim_next_provider_request(
         provider_id="provider-1",
-        generation=current.generation,
+        generation=accepted.generation,
         consumer_id="provider-worker",
         block_ms=0,
     )
 
-    assert current.generation > previous.generation
     assert dispatched is False
     assert claimed is None
 
@@ -559,25 +662,6 @@ async def test_reconciler_fences_adoption_then_finishes_restart_replacement(
             restart.desired_generation,
         )
         assert running is not None
-        drift = await runtime_repository.record_provider_reconciliation_observation(
-            session,
-            runtime_id=runtime.id,
-            status=RuntimeProviderReconciliationStatus.DRIFTED,
-            kind="network_policy",
-            reason="network_policy_mismatch",
-            provider_generation=1,
-            observed_generation=restart.desired_generation,
-            configuration_revision_id=desired_revision_id,
-            observed_at=datetime.datetime.now(datetime.UTC),
-        )
-        assert drift is not None
-        drift_candidates = (
-            await runtime_repository.find_provider_reconciliation_candidates(
-                session,
-                limit=10,
-            )
-        )
-        assert drift_candidates == []
         old_observe_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(
             minutes=10
         )
@@ -822,7 +906,7 @@ async def test_reconciler_rejects_mismatched_resolved_provider_reference(
     )
 
     with pytest.raises(ValueError, match="Provider reference"):
-        await reconciler._runtime_configuration(current)
+        await reconciler._runtime_configuration(current, locked_session=None)
 
 
 async def test_reconciler_observes_stopping_runtime_after_provider_reconnect(
@@ -1010,6 +1094,43 @@ async def test_reconciler_dispatches_terminal_delete_until_acknowledged(
     assert claimed.operation_type == "provider.terminal_delete"
     assert claimed.payload["command_type"] == "terminal_delete"
     assert claimed.payload["desired_generation"] == requested.desired_generation
+
+
+def _network_policy_drift_report(
+    *,
+    runtime_id: str,
+    desired_generation: int,
+    revision_id: str,
+    provider_generation: int = 1,
+) -> RuntimeProviderReport:
+    """Build one current typed NetworkPolicy drift observation."""
+    return RuntimeProviderReport(
+        runtime_id=runtime_id,
+        provider_id="provider-1",
+        provider_generation=provider_generation,
+        observed_state=SharedProviderObservedState.RUNNING,
+        observed_desired_generation=desired_generation,
+        provider_runtime_id="provider-runtime-1",
+        reason="network_policy_observed",
+        diagnostic={},
+        reported_at=datetime.datetime.now(datetime.UTC),
+        terminal_delete_acknowledged=False,
+        runtime_configuration=RuntimeConfigurationEvidence(
+            revision_id=revision_id,
+            digest="d" * 64,
+            desired_generation=desired_generation,
+        ),
+        reconciliation=RuntimeProviderReconciliationEvidence(
+            observations=(
+                RuntimeProviderReconciliationObservation(
+                    kind="network_policy",
+                    status=RuntimeProviderReconciliationStatus.DRIFTED,
+                    reason="network_policy_mismatch",
+                    diagnostic={},
+                ),
+            )
+        ),
+    )
 
 
 def _provider_registration(

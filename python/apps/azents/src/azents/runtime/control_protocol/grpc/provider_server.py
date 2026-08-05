@@ -84,6 +84,17 @@ class RuntimeProviderReportSink(Protocol):
         ...
 
 
+class RuntimeProviderObserveCompletionHandler(Protocol):
+    """Handle a correlated successful Provider OBSERVE completion."""
+
+    async def reconcile_observe_completion(
+        self,
+        report: SharedRuntimeProviderReport,
+    ) -> bool:
+        """Dispatch one bounded repair when current drift permits it."""
+        ...
+
+
 class RuntimeProviderConnectionTracker(Protocol):
     """Persist authenticated Provider stream lifecycle projections."""
 
@@ -169,6 +180,7 @@ class RuntimeProviderControlGrpcServicer(
         *,
         control_protocol: RuntimeControlProtocolService,
         report_sink: RuntimeProviderReportSink,
+        observe_completion_handler: RuntimeProviderObserveCompletionHandler,
         owner_replica_id: str,
         consumer_id: str,
         credential_authenticator: RuntimeProviderCredentialAuthenticator,
@@ -180,6 +192,7 @@ class RuntimeProviderControlGrpcServicer(
         """Initialize the Provider Control gRPC servicer."""
         self._control_protocol = control_protocol
         self._report_sink = report_sink
+        self._observe_completion_handler = observe_completion_handler
         self._owner_replica_id = owner_replica_id
         self._consumer_id = consumer_id
         self._auth = RuntimeProviderCredentialGrpcAuth(credential_authenticator)
@@ -271,6 +284,7 @@ class RuntimeProviderControlGrpcServicer(
             },
         )
         outbound: asyncio.Queue[_ProviderOutbound] = asyncio.Queue()
+        command_types_by_request_id: dict[str, RuntimeProviderCommandType] = {}
         inbound_task = asyncio.create_task(
             self._consume_provider_messages(
                 request_iterator,
@@ -279,6 +293,7 @@ class RuntimeProviderControlGrpcServicer(
                 generation=accepted.generation,
                 connection_id=accepted.connection_id,
                 authentication=authentication,
+                command_types_by_request_id=command_types_by_request_id,
             )
         )
         command_task = asyncio.create_task(
@@ -287,6 +302,7 @@ class RuntimeProviderControlGrpcServicer(
                 provider_id=accepted.provider_id,
                 generation=accepted.generation,
                 authentication=authentication,
+                command_types_by_request_id=command_types_by_request_id,
             )
         )
         yield runtime_provider_control_pb2.ControlMessage(
@@ -307,6 +323,7 @@ class RuntimeProviderControlGrpcServicer(
             ):
                 yield message
         finally:
+            command_types_by_request_id.clear()
             for task in (inbound_task, command_task):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -339,6 +356,7 @@ class RuntimeProviderControlGrpcServicer(
         generation: int,
         connection_id: str,
         authentication: RuntimeProviderCredentialAuthentication,
+        command_types_by_request_id: dict[str, RuntimeProviderCommandType],
     ) -> None:
         async for message in request_iterator:
             payload = message.WhichOneof("payload")
@@ -428,10 +446,19 @@ class RuntimeProviderControlGrpcServicer(
                     message.command_completion,
                     provider_id=provider_id,
                 )
+                command_type = command_types_by_request_id.pop(
+                    message.command_completion.request_id,
+                    None,
+                )
                 if message.command_completion.report.runtime_id:
-                    await self._report_sink.record_provider_report(
-                        _shared_report(message.command_completion.report)
-                    )
+                    report = _shared_report(message.command_completion.report)
+                    await self._report_sink.record_provider_report(report)
+                    if (
+                        command_type is RuntimeProviderCommandType.OBSERVE
+                        and message.command_completion.success
+                    ):
+                        handler = self._observe_completion_handler
+                        await handler.reconcile_observe_completion(report)
 
     async def _provider_generation_current(
         self,
@@ -468,6 +495,7 @@ class RuntimeProviderControlGrpcServicer(
         provider_id: str,
         generation: int,
         authentication: RuntimeProviderCredentialAuthentication,
+        command_types_by_request_id: dict[str, RuntimeProviderCommandType],
     ) -> None:
         while True:
             if not await self._connection_tracker.connection_active(
@@ -526,6 +554,9 @@ class RuntimeProviderControlGrpcServicer(
                     "runtime_id": envelope.runtime_id,
                     "operation_type": envelope.operation_type,
                 },
+            )
+            command_types_by_request_id[envelope.request_id] = (
+                RuntimeProviderCommandType(command.command_type)
             )
             await outbound.put(
                 _ProviderOutboundItem(
@@ -631,6 +662,7 @@ def add_runtime_provider_control_servicer(
     *,
     control_protocol: RuntimeControlProtocolService,
     report_sink: RuntimeProviderReportSink,
+    observe_completion_handler: RuntimeProviderObserveCompletionHandler,
     owner_replica_id: str,
     consumer_id: str,
     credential_authenticator: RuntimeProviderCredentialAuthenticator,
@@ -644,6 +676,7 @@ def add_runtime_provider_control_servicer(
         RuntimeProviderControlGrpcServicer(
             control_protocol=control_protocol,
             report_sink=report_sink,
+            observe_completion_handler=observe_completion_handler,
             owner_replica_id=owner_replica_id,
             consumer_id=consumer_id,
             credential_authenticator=credential_authenticator,

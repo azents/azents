@@ -463,13 +463,6 @@ class RuntimeProviderConnectionState(enum.StrEnum):
     DISCONNECTED = "disconnected"
 
 
-class RuntimeProviderReconciliationStatus(enum.StrEnum):
-    """Kind-scoped managed-resource reconciliation result from a Provider."""
-
-    IN_SYNC = "in_sync"
-    DRIFTED = "drifted"
-
-
 class RuntimeRunnerState(enum.StrEnum):
     """Runtime Runner status."""
 

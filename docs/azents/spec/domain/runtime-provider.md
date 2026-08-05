@@ -50,8 +50,8 @@ code_paths:
   - typescript/apps/azents-admin-web/src/features/runtime-providers/**
   - typescript/apps/azents-admin-web/src/trpc/routers/runtimeProvider.ts
   - typescript/apps/azents-web/src/features/runtime-profiles/**
-last_verified_at: 2026-08-04
-spec_version: 16
+last_verified_at: 2026-08-05
+spec_version: 18
 ---
 
 # Runtime Provider
@@ -146,12 +146,22 @@ retries, skip stale or superseded targets, and preserve Workspace storage. PVC e
 to the current claim; shrink waits for an explicit destructive reset or terminal delete.
 
 Kubernetes Provider v2 reports Pod lifecycle directly and does not use process-local command or
-NetworkPolicy verification history as lifecycle authority. An explicit command report may include
-one structured `network_policy` observation. Runtime Control durably stores exact-generation
-`drifted` evidence and dispatches the existing non-destructive `UPDATE_CONFIGURATION` command;
-`in_sync` evidence removes that repair candidate. Watch, failover, and lifecycle-only reports may
-omit reconciliation evidence. Policy comparison excludes the historical Provider-generation
-transport label but keeps desired-generation, configuration identity, selectors, and rules exact.
+NetworkPolicy verification history as lifecycle authority. A current `OBSERVE` completion may include
+one structured `network_policy` observation; watch, failover, lifecycle-only, and non-`OBSERVE`
+completion reports may omit it. The Provider owns only factual backend observation and the
+non-destructive configuration application. Runtime Control's report sink validates identity,
+generation, lifecycle, and configuration evidence and persists only those ordinary facts; it never
+persists drift, a repair claim, or retry state. The gRPC bridge retains command-type correlation only
+for the live stream. A valid current `OBSERVE` completion with `network_policy:drifted` is handed
+once to the Lifecycle Reconciler, which re-fences the Runtime, Provider generation, and
+desired/applied revision while holding that Runtime row through exact configuration lookup and
+`UPDATE_CONFIGURATION` append, never `START`. Pending lifecycle dispatch and terminal deletion
+block the handoff. Control logs the transient handoff and successful dispatch with Runtime/Provider
+identity, generations, revision, NetworkPolicy kind, and reason, but does not persist those fields
+as repair state. Lost completion, stream/control restart, and dispatch failure discard the handoff;
+a later periodic `OBSERVE` is the only retry mechanism. Policy comparison excludes the historical
+Provider-generation transport label but keeps desired-generation, configuration identity, selectors,
+and rules exact.
 
 The current Kubernetes protocol accepts only `network_policy` reconciliation evidence. A report
 containing any other kind is rejected as a whole, and adding a kind requires a coordinated new
@@ -200,6 +210,11 @@ Authentication rollout does not render, own, select, delete, rename, or recreate
 
 ## Version history
 
+- **18 (2026-08-05):** Serialized bounded repair configuration lookup and append with the current
+  Runtime row, added lifecycle/terminal fences, and recorded transient structured correlation logs.
+- **17 (2026-08-05):** Removed durable Runtime drift/repair projection. A live-stream-correlated
+  `OBSERVE` completion may make one fenced `UPDATE_CONFIGURATION` handoff; periodic observation is
+  the sole retry path.
 - **16 (2026-08-04):** Removed Kubernetes Provider-local NetworkPolicy lifecycle authority, added
   strict v2 structured drift evidence, and made Runtime Control the durable fenced repair owner.
 - **15 (2026-08-03):** Removed Agent Workspace metadata from Provider capability and lifecycle reports; bundled Providers now configure Runner `HOME` and working directory while Runner reports the effective path.

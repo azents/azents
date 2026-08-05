@@ -6,7 +6,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from azents_runtime_control.provider import (
+    RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_POLICY,
+    RuntimeProviderReport,
+)
+from azents_runtime_control.provider import (
     RuntimeLifecycleCommandType as RuntimeProviderCommandType,
+)
+from azents_runtime_control.provider import (
+    RuntimeProviderReconciliationStatus as SharedProviderReconciliationStatus,
 )
 from azents_runtime_control.runtime_configuration import (
     RuntimeConfigurationEnvelope,
@@ -124,12 +131,6 @@ class RuntimeLifecycleReconciler:
                     limit=limit,
                 )
             )
-            reconciliation_runtimes = (
-                await self._runtime_repository.find_provider_reconciliation_candidates(
-                    session,
-                    limit=limit,
-                )
-            )
 
         dispatched = 0
         for runtime in runtimes:
@@ -142,21 +143,10 @@ class RuntimeLifecycleReconciler:
                 continue
             if await self._dispatch_configuration_adoption(runtime):
                 dispatched += 1
-        reconciliation_runtime_ids: set[str] = set()
-        for runtime in reconciliation_runtimes:
-            if (
-                runtime.id in lifecycle_runtime_ids
-                or runtime.id in configuration_runtime_ids
-            ):
-                continue
-            if await self._dispatch_provider_reconciliation(runtime):
-                dispatched += 1
-                reconciliation_runtime_ids.add(runtime.id)
         for runtime in reconcile_runtimes:
             if (
                 runtime.id in lifecycle_runtime_ids
                 or runtime.id in configuration_runtime_ids
-                or runtime.id in reconciliation_runtime_ids
             ):
                 continue
             if await self._dispatch_periodic_reconcile(runtime):
@@ -266,72 +256,87 @@ class RuntimeLifecycleReconciler:
             )
         return False
 
-    async def _dispatch_provider_reconciliation(
+    async def reconcile_observe_completion(
         self,
-        runtime: AgentRuntime,
+        report: RuntimeProviderReport,
     ) -> bool:
-        """Repair current NetworkPolicy drift from exact Provider evidence."""
-        provider_id = runtime.runtime_provider_id
-        provider_generation = runtime.provider_reconciliation_provider_generation
-        observed_generation = runtime.provider_reconciliation_observed_generation
-        configuration_revision_id = (
-            runtime.provider_reconciliation_configuration_revision_id
-        )
-        observed_at = runtime.provider_reconciliation_observed_at
+        """Immediately repair one current NetworkPolicy drift observation.
+
+        This method is invoked only by the gRPC stream for a correlated successful
+        ``OBSERVE`` completion. It deliberately retains no repair state: lost
+        completions, restarts, and failed dispatches are retried only by a later
+        periodic observation.
+        """
+        evidence = report.reconciliation
+        if evidence is None:
+            return False
+        if len(evidence.observations) != 1:
+            return False
+        observation = evidence.observations[0]
         if (
-            provider_id is None
-            or provider_generation is None
-            or observed_generation is None
-            or configuration_revision_id is None
-            or observed_at is None
+            observation.kind != RUNTIME_PROVIDER_RECONCILIATION_KIND_NETWORK_POLICY
+            or observation.status is not SharedProviderReconciliationStatus.DRIFTED
         ):
             return False
-        connection = await self._coordination_store.get_connection(
-            kind=RuntimeConnectionKind.PROVIDER,
-            subject_id=provider_id,
-        )
-        if connection is None:
-            async with self._session_manager() as session:
-                await self._runtime_repository.record_provider_connection_state(
+        async with self._session_manager() as session:
+            runtime = await self._runtime_repository.get_by_id_for_update(
+                session,
+                report.runtime_id,
+            )
+            if (
+                runtime is None
+                or runtime.runtime_provider_id != report.provider_id
+                or runtime.runtime_provider_resource_id is None
+                or runtime.desired_state is not RuntimeDesiredState.RUNNING
+                or runtime.provider_observed_state
+                is not RuntimeProviderObservedState.RUNNING
+                or runtime.provider_generation != report.provider_generation
+                or runtime.provider_observed_generation
+                != report.observed_desired_generation
+                or runtime.desired_generation != report.observed_desired_generation
+                or runtime.desired_runtime_configuration_revision_id
+                != runtime.applied_runtime_configuration_revision_id
+                or runtime.desired_runtime_configuration_revision_id
+                != report.runtime_configuration.revision_id
+            ):
+                return False
+            evidence_matches_current = (
+                await self._profile_repository.configuration_evidence_matches_current(
                     session,
-                    runtime.id,
-                    RuntimeProviderConnectionState.DISCONNECTED,
+                    runtime_id=runtime.id,
+                    provider_id=runtime.runtime_provider_resource_id,
+                    evidence=report.runtime_configuration,
                 )
-            return False
-        if connection.generation != provider_generation:
+            )
+            if not evidence_matches_current:
+                return False
             _LOGGER.info(
-                "Runtime reconciliation repair waiting for current "
-                "Provider observation",
+                "Runtime NetworkPolicy drift repair handed off",
                 extra={
                     "runtime_id": runtime.id,
-                    "agent_id": runtime.agent_id,
-                    "provider_id": provider_id,
-                    "evidence_provider_generation": provider_generation,
-                    "connection_provider_generation": connection.generation,
-                    "desired_generation": runtime.desired_generation,
-                    "configuration_revision_id": configuration_revision_id,
+                    "provider_id": report.provider_id,
+                    "provider_generation": report.provider_generation,
+                    "desired_generation": report.observed_desired_generation,
+                    "configuration_revision_id": (
+                        report.runtime_configuration.revision_id
+                    ),
+                    "reconciliation_kind": observation.kind,
+                    "reconciliation_reason": observation.reason,
                 },
             )
-            return False
-        async with self._session_manager() as session:
-            claim_repair = self._runtime_repository.claim_provider_reconciliation_repair
-            claimed = await claim_repair(
-                session,
-                runtime_id=runtime.id,
-                provider_generation=provider_generation,
-                observed_generation=observed_generation,
-                configuration_revision_id=configuration_revision_id,
-                observed_at=observed_at,
-                retry_delay=self._config.provider_command_deadline,
+            return await self._dispatch_runtime_command(
+                runtime,
+                command_type=RuntimeProviderCommandType.UPDATE_CONFIGURATION,
+                claim_lifecycle=False,
+                required_provider_generation=report.provider_generation,
+                required_observed_generation=report.observed_desired_generation,
+                required_configuration_revision_id=(
+                    report.runtime_configuration.revision_id
+                ),
+                reconciliation_kind=observation.kind,
+                reconciliation_reason=observation.reason,
+                locked_session=session,
             )
-        if claimed is None:
-            return False
-        return await self._dispatch_runtime_command(
-            claimed,
-            command_type=RuntimeProviderCommandType.UPDATE_CONFIGURATION,
-            claim_lifecycle=False,
-            required_provider_generation=provider_generation,
-        )
 
     async def _dispatch_runtime_command(
         self,
@@ -340,6 +345,11 @@ class RuntimeLifecycleReconciler:
         command_type: RuntimeProviderCommandType,
         claim_lifecycle: bool,
         required_provider_generation: int | None,
+        required_observed_generation: int | None = None,
+        required_configuration_revision_id: str | None = None,
+        reconciliation_kind: str | None = None,
+        reconciliation_reason: str | None = None,
+        locked_session: AsyncSession | None = None,
     ) -> bool:
         provider_id = runtime.runtime_provider_id
         if provider_id is None:
@@ -355,6 +365,7 @@ class RuntimeLifecycleReconciler:
                 runtime,
                 code="PROVIDER_NOT_CONFIGURED",
                 message="Agent Runtime has no configured Runtime Provider.",
+                locked_session=locked_session,
             )
             return False
         connection = await self._coordination_store.get_connection(
@@ -372,9 +383,16 @@ class RuntimeLifecycleReconciler:
                     "command_type": command_type.value,
                 },
             )
-            async with self._session_manager() as session:
+            if locked_session is None:
+                async with self._session_manager() as session:
+                    await self._runtime_repository.record_provider_connection_state(
+                        session,
+                        runtime.id,
+                        RuntimeProviderConnectionState.DISCONNECTED,
+                    )
+            else:
                 await self._runtime_repository.record_provider_connection_state(
-                    session,
+                    locked_session,
                     runtime.id,
                     RuntimeProviderConnectionState.DISCONNECTED,
                 )
@@ -396,6 +414,27 @@ class RuntimeLifecycleReconciler:
                 },
             )
             return False
+        if (
+            required_observed_generation is not None
+            or required_configuration_revision_id is not None
+        ):
+            if locked_session is None:
+                async with self._session_manager() as session:
+                    current = await self._runtime_repository.get_by_id(
+                        session, runtime.id
+                    )
+            else:
+                current = runtime
+            if not _current_network_policy_repair_target(
+                current,
+                provider_id=provider_id,
+                provider_generation=required_provider_generation,
+                observed_generation=required_observed_generation,
+                configuration_revision_id=required_configuration_revision_id,
+            ):
+                return False
+            assert current is not None
+            runtime = current
 
         if claim_lifecycle:
             async with self._session_manager() as session:
@@ -442,6 +481,7 @@ class RuntimeLifecycleReconciler:
                     message=(
                         "Runtime lifecycle configuration evidence is unavailable."
                     ),
+                    locked_session=locked_session,
                 )
                 return False
             runtime = prepared
@@ -454,6 +494,7 @@ class RuntimeLifecycleReconciler:
         try:
             runtime_configuration = await self._runtime_configuration(
                 runtime,
+                locked_session=locked_session,
                 require_ready=command_type
                 not in {
                     RuntimeProviderCommandType.STOP,
@@ -466,6 +507,7 @@ class RuntimeLifecycleReconciler:
                 runtime,
                 code="RUNTIME_CONFIGURATION_INVALID",
                 message=str(error),
+                locked_session=locked_session,
             )
             return False
         result = await self._control_protocol.dispatch_provider_command(
@@ -499,9 +541,16 @@ class RuntimeLifecycleReconciler:
             created_at=created_at,
         )
         if isinstance(result, RuntimeDispatchResult):
-            async with self._session_manager() as session:
+            if locked_session is None:
+                async with self._session_manager() as session:
+                    await self._runtime_repository.record_provider_connection_state(
+                        session,
+                        runtime.id,
+                        RuntimeProviderConnectionState.CONNECTED,
+                    )
+            else:
                 await self._runtime_repository.record_provider_connection_state(
-                    session,
+                    locked_session,
                     runtime.id,
                     RuntimeProviderConnectionState.CONNECTED,
                 )
@@ -515,6 +564,11 @@ class RuntimeLifecycleReconciler:
                     "desired_generation": runtime.desired_generation,
                     "command_type": command_type.value,
                     "request_id": result.request_id,
+                    "configuration_revision_id": (
+                        runtime_configuration.evidence.revision_id
+                    ),
+                    "reconciliation_kind": reconciliation_kind,
+                    "reconciliation_reason": reconciliation_reason,
                 },
             )
             return True
@@ -529,9 +583,16 @@ class RuntimeLifecycleReconciler:
                     "command_type": command_type.value,
                 },
             )
-            async with self._session_manager() as session:
+            if locked_session is None:
+                async with self._session_manager() as session:
+                    await self._runtime_repository.record_provider_connection_state(
+                        session,
+                        runtime.id,
+                        RuntimeProviderConnectionState.DISCONNECTED,
+                    )
+            else:
                 await self._runtime_repository.record_provider_connection_state(
-                    session,
+                    locked_session,
                     runtime.id,
                     RuntimeProviderConnectionState.DISCONNECTED,
                 )
@@ -555,6 +616,7 @@ class RuntimeLifecycleReconciler:
         self,
         runtime: AgentRuntime,
         *,
+        locked_session: AsyncSession | None,
         require_ready: bool = True,
     ) -> RuntimeConfigurationEnvelope:
         revision_id = (
@@ -567,9 +629,15 @@ class RuntimeLifecycleReconciler:
         )
         if revision_id is None:
             raise ValueError("Runtime configuration target revision is missing.")
-        async with self._session_manager() as session:
+        if locked_session is None:
+            async with self._session_manager() as session:
+                revision = await self._profile_repository.get_configuration_revision(
+                    session,
+                    revision_id=revision_id,
+                )
+        else:
             revision = await self._profile_repository.get_configuration_revision(
-                session,
+                locked_session,
                 revision_id=revision_id,
             )
         if revision is None:
@@ -640,17 +708,29 @@ class RuntimeLifecycleReconciler:
         *,
         code: str,
         message: str,
+        locked_session: AsyncSession | None = None,
     ) -> None:
-        async with self._session_manager() as session:
-            await self._runtime_repository.record_runtime_failure(
-                session,
-                runtime.id,
-                AgentRuntimeFailurePatch(
-                    generation=runtime.desired_generation,
-                    code=code,
-                    message=message,
-                ),
-            )
+        if locked_session is None:
+            async with self._session_manager() as session:
+                await self._runtime_repository.record_runtime_failure(
+                    session,
+                    runtime.id,
+                    AgentRuntimeFailurePatch(
+                        generation=runtime.desired_generation,
+                        code=code,
+                        message=message,
+                    ),
+                )
+            return
+        await self._runtime_repository.record_runtime_failure(
+            locked_session,
+            runtime.id,
+            AgentRuntimeFailurePatch(
+                generation=runtime.desired_generation,
+                code=code,
+                message=message,
+            ),
+        )
 
 
 def _reset_final_desired_state(runtime: AgentRuntime) -> str | None:
@@ -673,3 +753,29 @@ def _provider_command_type(
     if runtime.last_lifecycle_command is None:
         return None
     return RuntimeProviderCommandType(runtime.last_lifecycle_command.value)
+
+
+def _current_network_policy_repair_target(
+    runtime: AgentRuntime | None,
+    *,
+    provider_id: str,
+    provider_generation: int | None,
+    observed_generation: int | None,
+    configuration_revision_id: str | None,
+) -> bool:
+    """Return whether one drift-repair snapshot remains current at dispatch."""
+    return (
+        runtime is not None
+        and runtime.runtime_provider_id == provider_id
+        and runtime.desired_state is RuntimeDesiredState.RUNNING
+        and runtime.provider_observed_state is RuntimeProviderObservedState.RUNNING
+        and runtime.provider_generation == provider_generation
+        and runtime.provider_observed_generation == observed_generation
+        and runtime.desired_generation == observed_generation
+        and runtime.last_lifecycle_dispatch_generation >= runtime.desired_generation
+        and runtime.terminal_delete_requested_generation is None
+        and runtime.desired_runtime_configuration_revision_id
+        == configuration_revision_id
+        and runtime.applied_runtime_configuration_revision_id
+        == configuration_revision_id
+    )
