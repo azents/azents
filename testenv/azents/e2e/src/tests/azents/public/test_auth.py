@@ -50,7 +50,7 @@ class TestUnifiedAuth:
                     email=email, code=verification.code, csrf_token=csrf_token
                 )
             )
-        assert exc_info.value.status == 403  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 403  # t create API clientt t t t
 
     def test_verify_code_existing_user(
         self,
@@ -100,7 +100,7 @@ class TestUnifiedAuth:
                     csrf_token=send_response.csrf_token,
                 )
             )
-        assert exc_info.value.status == 400  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 400  # t create API clientt t t t
 
     def test_verify_code_wrong_csrf_returns_400(
         self,
@@ -120,7 +120,7 @@ class TestUnifiedAuth:
                     csrf_token="invalid-csrf-token",
                 )
             )
-        assert exc_info.value.status == 400  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 400  # t create API clientt t t t
 
     def test_refresh_token_success(
         self,

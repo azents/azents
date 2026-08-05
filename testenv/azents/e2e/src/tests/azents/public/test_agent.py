@@ -362,7 +362,7 @@ class TestAgentCrud:
                 handle=handle,
                 _headers={"Authorization": f"Bearer {owner_token}"},
             )
-        assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 404  # t create API clientt t t t
 
 
 # ---------------------------------------------------------------------------
@@ -432,7 +432,7 @@ class TestAgentAdminPermission:
                 agent_update_request=AgentUpdateRequest(name="Hacked"),
                 _headers={"Authorization": f"Bearer {member_token}"},
             )
-        assert exc_info.value.status == 403  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 403  # t create API clientt t t t
 
     def test_non_admin_cannot_delete(
         self,
@@ -465,7 +465,7 @@ class TestAgentAdminPermission:
                 handle=handle,
                 _headers={"Authorization": f"Bearer {member_token}"},
             )
-        assert exc_info.value.status == 403  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 403  # t create API clientt t t t
 
     def test_workspace_owner_can_update_any_agent(
         self,
@@ -646,7 +646,7 @@ class TestAgentAdminManagement:
                 handle=handle,
                 _headers=headers,
             )
-        assert exc_info.value.status == 400  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 400  # t create API clientt t t t
 
     def test_duplicate_admin_returns_409(
         self,
@@ -700,7 +700,7 @@ class TestAgentAdminManagement:
                 ),
                 _headers=headers,
             )
-        assert exc_info.value.status == 409  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 409  # t create API clientt t t t
 
     def test_non_admin_cannot_add_admin(
         self,
@@ -742,7 +742,7 @@ class TestAgentAdminManagement:
                 ),
                 _headers={"Authorization": f"Bearer {member_token}"},
             )
-        assert exc_info.value.status == 403  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 403  # t create API clientt t t t
 
 
 # ---------------------------------------------------------------------------
@@ -821,7 +821,7 @@ class TestAgentVisibility:
                 handle=handle,
                 _headers={"Authorization": f"Bearer {member_token}"},
             )
-        assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 404  # t create API clientt t t t
 
     def test_private_agent_visible_to_admin(
         self,

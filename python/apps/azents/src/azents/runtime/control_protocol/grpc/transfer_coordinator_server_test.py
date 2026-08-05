@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-# pyright: reportAttributeAccessIssue=false
 # Protobuf generated modules expose dynamic message/RPC attributes.
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta

@@ -1,9 +1,5 @@
 """Real-browser E2E coverage for Main Web and Admin Web auth boundaries."""
 
-# pyright: reportMissingTypeArgument=false, reportUnknownLambdaType=false
-# pyright: reportUnknownMemberType=false, reportUnknownParameterType=false
-# pyright: reportUnknownVariableType=false
-
 import time
 from typing import Any, cast
 

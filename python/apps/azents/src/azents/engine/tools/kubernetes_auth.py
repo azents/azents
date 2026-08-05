@@ -334,7 +334,8 @@ async def _create_eks_client(
         new_token = _generate_eks_token(session, cluster_name, region)
         config.api_key["BearerToken"] = f"Bearer {new_token}"
 
-    configuration.refresh_api_key_hook = _refresh_eks_token  # pyright: ignore[reportAttributeAccessIssue]  # kubernetes_asyncio library actually passes Configuration, but stub declares ApiClient
+    # Runtime passes Configuration, although the stub declares ApiClient.
+    configuration.refresh_api_key_hook = _refresh_eks_token
 
     if proxy_url:
         configuration.proxy = proxy_url

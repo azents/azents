@@ -45,7 +45,7 @@ class RedisRuntimeProviderEnrollmentRateLimiter:
     async def acquire(self, *, grant_id: str, source_address: str) -> None:
         """Consume one admission attempt or raise with a retry interval."""
         key = _rate_limit_key(grant_id, source_address)
-        result = self.redis.eval(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stubs omit dynamic commands.
+        result = self.redis.eval(  # redis-py stubs omit dynamic commands.
             _ACQUIRE_SCRIPT,
             1,
             key,

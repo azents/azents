@@ -92,7 +92,7 @@ def test_attachment_preview_does_not_advertise_withheld_resource_tools() -> None
         created_at=_NOW,
     )
 
-    preview = resolve_module._attachment_text_preview(  # pyright: ignore[reportPrivateUsage]
+    preview = resolve_module._attachment_text_preview(
         file,
         availability="available",
     )
@@ -257,19 +257,19 @@ def test_auto_toolkit_revision_changes_with_canonical_scope() -> None:
     config = _TestToolkitConfig(value="same")
     context = _make_toolkit_context()
 
-    initial = resolve_module._auto_toolkit_source_revision(  # pyright: ignore[reportPrivateUsage]
+    initial = resolve_module._auto_toolkit_source_revision(
         slug="skill",
         config=config,
         execution_mode=ToolkitExecutionMode.ROOT,
         context=context,
     )
-    changed_workspace = resolve_module._auto_toolkit_source_revision(  # pyright: ignore[reportPrivateUsage]
+    changed_workspace = resolve_module._auto_toolkit_source_revision(
         slug="skill",
         config=config,
         execution_mode=ToolkitExecutionMode.ROOT,
         context=dataclasses.replace(context, workspace_id="ws-2"),
     )
-    changed_session = resolve_module._auto_toolkit_source_revision(  # pyright: ignore[reportPrivateUsage]
+    changed_session = resolve_module._auto_toolkit_source_revision(
         slug="skill",
         config=config,
         execution_mode=ToolkitExecutionMode.ROOT,

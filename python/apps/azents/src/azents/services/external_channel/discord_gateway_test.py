@@ -14,7 +14,7 @@ from azents.services.external_channel.discord_gateway import (
     DiscordGatewayError,
     DiscordGatewayMessageEvent,
     DiscordGatewayTerminalError,
-    _DiscordLibraryClient,  # pyright: ignore[reportPrivateUsage]
+    _DiscordLibraryClient,
 )
 
 

@@ -64,7 +64,7 @@ class _FakeToolkitStateStore:
 
 
 @pytest.fixture(autouse=True)
-def _toolkit_state_store(  # pyright: ignore[reportUnusedFunction] -- pytest autouse fixture
+def _toolkit_state_store(  # pytest autouse fixture
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Patch Toolkit State to an in-memory store."""
@@ -122,7 +122,7 @@ async def _publish(_event: object) -> None:
 
 async def _wait_refresh(toolkit: McpToolkit) -> None:
     """Wait for MCP background refresh task."""
-    task = toolkit._bg_task  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+    task = toolkit._bg_task  # noqa: SLF001
     if task is not None:
         await task
 

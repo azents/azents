@@ -18,7 +18,7 @@ from azents.core.enums import (
 from azents.repos.external_channel.work_data import ChannelActionTransition
 from azents.services.external_channel.channel_action import (
     ExternalChannelActionService,
-    _provider_mutation_outcome,  # pyright: ignore[reportPrivateUsage]
+    _provider_mutation_outcome,
 )
 from azents.services.external_channel.discord_delivery import DiscordDeliveryResult
 from azents.services.external_channel.provider_effect import (
@@ -209,7 +209,7 @@ async def test_slack_tracker_delivery_includes_session_navigation(
         update_message=method if method_name == "update_message" else AsyncMock(),
     )
 
-    await ExternalChannelActionService._deliver_slack(  # pyright: ignore[reportPrivateUsage]
+    await ExternalChannelActionService._deliver_slack(
         _service(slack_client=slack_client),
         _target(provider=ExternalChannelProvider.SLACK, operation=operation),
         operation_key=ProviderOperationKey.from_seed("slack-progress"),
@@ -263,7 +263,7 @@ async def test_discord_tracker_delivery_includes_session_navigation(
         update_message=method if method_name == "update_message" else AsyncMock(),
     )
 
-    await ExternalChannelActionService._deliver_discord(  # pyright: ignore[reportPrivateUsage]
+    await ExternalChannelActionService._deliver_discord(
         _service(discord_client=discord_client),
         _target(provider=ExternalChannelProvider.DISCORD, operation=operation),
         operation_key=ProviderOperationKey.from_seed("discord-progress"),

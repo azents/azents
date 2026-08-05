@@ -11,15 +11,16 @@ from fastapi import BackgroundTasks, HTTPException
 from pydantic import ValidationError
 
 from azents.api.public.chat.v1 import (
-    _prepare_session_working_folder_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin Session-folder retry finalization behavior directly.
-    _run_session_receive_loop,  # pyright: ignore[reportPrivateUsage]  # Pin health-check generation behavior.
-    _SubscriptionRegistration,  # pyright: ignore[reportPrivateUsage]  # Pin subscription generation semantics.
-    _validate_rest_session,  # pyright: ignore[reportPrivateUsage]  # Pin the REST session validation helper directly.
-    _write_command_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
-    _write_edit_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
-    _write_input_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
-    _write_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
-    _write_new_session_message_via_rest,  # pyright: ignore[reportPrivateUsage]  # Pin the REST write boundary helper directly.
+    # Pin Session-folder retry finalization behavior directly.
+    _prepare_session_working_folder_via_rest,
+    _run_session_receive_loop,  # Pin health-check generation behavior.
+    _SubscriptionRegistration,  # Pin subscription generation semantics.
+    _validate_rest_session,  # Pin the REST session validation helper directly.
+    _write_command_via_rest,  # Pin the REST write boundary helper directly.
+    _write_edit_message_via_rest,  # Pin the REST write boundary helper directly.
+    _write_input_via_rest,  # Pin the REST write boundary helper directly.
+    _write_message_via_rest,  # Pin the REST write boundary helper directly.
+    _write_new_session_message_via_rest,  # Pin the REST write boundary helper directly.
     archive_agent_session,
     cleanup_session_git_worktree,
     create_team_agent_session,

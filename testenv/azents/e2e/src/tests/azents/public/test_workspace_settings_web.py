@@ -1,10 +1,5 @@
 """Workspace settings hub Web Surface E2E tests."""
 
-# pyright: reportMissingTypeStubs=false
-# pyright: reportUnknownArgumentType=false
-# pyright: reportUnknownMemberType=false
-# pyright: reportUnknownVariableType=false
-
 from typing import Any, cast
 
 import azentsadminclient

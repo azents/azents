@@ -802,7 +802,8 @@ class TestChatWriteService:
 
         try:
             async with rdb_session_manager() as session:
-                await service._create_idempotent_record(  # pyright: ignore[reportPrivateUsage]  # Pin explicit-session idempotency guard directly.
+                # Pin explicit-session idempotency guard directly.
+                await service._create_idempotent_record(
                     session,
                     session_id="3333456789abcdef0123456789abcdef",
                     user_id="user-1",

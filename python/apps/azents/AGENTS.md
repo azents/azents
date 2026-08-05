@@ -12,7 +12,7 @@ cd python/apps/azents && uv run python -m azents
 cd python/apps/azents && uv run pytest
 
 # Quality checks
-cd python/apps/azents && uv run ruff check --fix . && uv run ruff format . && uv run pyright
+cd python/apps/azents && uv run ruff check --fix . && uv run ruff format . && uv run ty check --error-on-warning
 ```
 
 ## Database Migrations

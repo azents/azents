@@ -1,18 +1,18 @@
 ---
-title: "Resolve pyright errors by writing well-typed code first, avoiding `typing.cast(...)` and bare ignores; use stubs or reasoned `pyright: ignore[...]` only as a last resort."
+title: "Resolve ty errors by writing well-typed code first, avoiding `typing.cast(...)` and bare ignores; use stubs or reasoned `ty: ignore[...]` only as a last resort."
 ---
 
 # Type Safety Resolution Order
 
 `# type: ignore` and `typing.cast(...)` are the wrong first moves. They silence
-pyright but offer no signal to anyone reading the code about *why* the type
+the type checker but offer no signal to anyone reading the code about *why* the type
 system is wrong.
 
 1. **Well-typed code first** — narrow with `isinstance`, use generics/protocols, typed wrappers, typed fakes, or validation helpers such as Pydantic `TypeAdapter`. No `hasattr` tricks.
 2. **External package issues** — write a stub file in the project's `typings/` directory.
-3. **Type-system limitation** — `# pyright: ignore[specificRuleName]  # short reason this can't be expressed in types`
+3. **Type-system limitation** — `# ty: ignore[specific-diagnostic]  # short reason this can't be expressed in types`
 
-- ALWAYS specify the rule name in the ignore comment (`pyright: ignore[reportUnknownMemberType]`)
+- ALWAYS specify the diagnostic in the ignore comment (`ty: ignore[invalid-argument-type]`)
 - ALWAYS include a short reason after `#`
 - AVOID bare `# type: ignore`
 - AVOID `typing.cast(...)` in production and test code
@@ -30,7 +30,7 @@ assert payload.status == "failed"
 
 ```python
 # Library returns Any; the actual schema is documented at https://...
-result: ResultDict = library_call()  # pyright: ignore[reportUnknownVariableType]
+result: ResultDict = library_call()  # ty: ignore[invalid-assignment]
 
 payload = event.payload
 assert isinstance(payload, ClientToolResultPayload)

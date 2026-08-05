@@ -111,7 +111,7 @@ class TestCreateInvitation:
                 "any-handle",
                 CreateInvitationRequest(email="test@example.com"),
             )
-        assert exc_info.value.status == 401  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 401  # t create API clientt t t t
 
     def test_reinvite_after_decline(
         self,
@@ -211,7 +211,7 @@ class TestListReceivedInvitations:
 
         with pytest.raises(ApiException) as exc_info:
             inv_api.invitation_v1_list_received_invitations()
-        assert exc_info.value.status == 401  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 401  # t create API clientt t t t
 
     def test_list_received_invitations_shows_pending(
         self,
@@ -305,7 +305,7 @@ class TestAcceptInvitation:
                 "nonexistent_id_12345678",
                 _headers={"Authorization": f"Bearer {access_token}"},
             )
-        assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 404  # t create API clientt t t t
 
     def test_accept_other_users_invitation_returns_404(
         self,
@@ -340,7 +340,7 @@ class TestAcceptInvitation:
                 created.id,
                 _headers={"Authorization": f"Bearer {other_token}"},
             )
-        assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 404  # t create API clientt t t t
 
 
 class TestDeclineInvitation:
@@ -415,7 +415,7 @@ class TestDeclineInvitation:
                 created.id,
                 _headers={"Authorization": f"Bearer {other_token}"},
             )
-        assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 404  # t create API clientt t t t
 
 
 class TestInvitationFullFlow:

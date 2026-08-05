@@ -4230,7 +4230,9 @@ def test_connection_management_web_surface_uses_redacted_operational_state(
         main_web_url=azents_main_web_url,
         email=email,
     )
-    browser_driver.set_window_size(390, 844)  # pyright: ignore[reportUnknownMemberType] # Selenium stub leaves window dimensions untyped
+    browser_driver.set_window_size(
+        390, 844
+    )  # Selenium stub leaves window dimensions untyped
     browser_driver.get(
         f"{azents_main_web_url}/w/{handle}/agents/{agent_id}/settings/channels"
     )

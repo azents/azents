@@ -1,6 +1,5 @@
 """Agent Runtime Runner Control gRPC server tests."""
 
-# pyright: reportAttributeAccessIssue=false, reportArgumentType=false, reportPrivateUsage=false
 # protobuf generated modules expose dynamic message attributes.
 
 import asyncio

@@ -21,12 +21,12 @@ from azents.runtime.transfer.data import (
     terminal_expiry,
 )
 from azents.runtime.transfer.redis import (
-    _MAX_SERIALIZED_RECORD_BYTES,  # pyright: ignore[reportPrivateUsage]  # Private test seam.
-    _decode_record_envelope,  # pyright: ignore[reportPrivateUsage]  # Private test seam.
-    _encode_record_envelope,  # pyright: ignore[reportPrivateUsage]  # Private test seam.
-    _RedisTransferKeys,  # pyright: ignore[reportPrivateUsage]  # Private test seam.
-    _RedisTransferRecordEnvelope,  # pyright: ignore[reportPrivateUsage]  # Private test seam.
-    _terminal_bucket_epochs,  # pyright: ignore[reportPrivateUsage]  # Private test seam.
+    _MAX_SERIALIZED_RECORD_BYTES,  # Private test seam.
+    _decode_record_envelope,  # Private test seam.
+    _encode_record_envelope,  # Private test seam.
+    _RedisTransferKeys,  # Private test seam.
+    _RedisTransferRecordEnvelope,  # Private test seam.
+    _terminal_bucket_epochs,  # Private test seam.
 )
 from azents.testing.types import is_string_object_dict
 

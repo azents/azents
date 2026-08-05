@@ -1,7 +1,5 @@
 """Runtime Provider settings tests."""
 
-# pyright: reportPrivateUsage=false
-
 import asyncio
 import dataclasses
 from datetime import datetime

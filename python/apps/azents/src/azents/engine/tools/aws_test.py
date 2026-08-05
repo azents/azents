@@ -88,7 +88,7 @@ _session_manager = _FakeSessionManager()
 
 
 @pytest.fixture(autouse=True)
-def _toolkit_state_store(  # pyright: ignore[reportUnusedFunction] -- pytest autouse fixture
+def _toolkit_state_store(  # pytest autouse fixture
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Patch Toolkit State to an in-memory store."""
@@ -198,7 +198,7 @@ class TestAwsToolkitUpdateContext:
             new_callable=AsyncMock,
             return_value=(mock_tools, False),
         ):
-            await toolkit._refresh_tool_snapshot()  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+            await toolkit._refresh_tool_snapshot()  # noqa: SLF001
             state = await toolkit.update_context(ctx)
 
         assert len(state.tools) == 2
@@ -304,8 +304,8 @@ class TestAwsToolkitBackgroundConnect:
 
                 # connection complete
                 connect_event.set()
-                assert toolkit._bg_task is not None  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] -- directly validate background task status in tests
-                await toolkit._bg_task  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] -- wait for background task completion in tests
+                assert toolkit._bg_task is not None  # noqa: SLF001  # directly validate background task status in tests
+                await toolkit._bg_task  # noqa: SLF001  # wait for background task completion in tests
 
                 # ready status
                 state = await toolkit.update_context(ctx)
@@ -329,8 +329,8 @@ class TestAwsToolkitBackgroundConnect:
             side_effect=failing_list_tools,
         ):
             async with toolkit:
-                assert toolkit._bg_task is not None  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] -- directly validate background task status in tests
-                await toolkit._bg_task  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] -- wait for background task completion in tests
+                assert toolkit._bg_task is not None  # noqa: SLF001  # directly validate background task status in tests
+                await toolkit._bg_task  # noqa: SLF001  # wait for background task completion in tests
 
                 state = await toolkit.update_context(ctx)
                 assert state.tools == []
@@ -354,10 +354,10 @@ class TestAwsToolkitBackgroundConnect:
             side_effect=forever_list_tools,
         ):
             async with toolkit:
-                assert toolkit._bg_task is not None  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] -- directly validate background task status in tests
-                assert not toolkit._bg_task.done()  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] -- directly validate background task status in tests
+                assert toolkit._bg_task is not None  # noqa: SLF001  # directly validate background task status in tests
+                assert not toolkit._bg_task.done()  # noqa: SLF001  # directly validate background task status in tests
 
-        assert toolkit._bg_task is None  # noqa: SLF001  # pyright: ignore[reportPrivateUsage] -- directly validate background task cleanup in tests
+        assert toolkit._bg_task is None  # noqa: SLF001  # directly validate background task cleanup in tests
 
     @pytest.mark.asyncio
     async def test_without_aenter_does_not_sync_discover_tools(self) -> None:

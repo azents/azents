@@ -58,7 +58,7 @@ from azents.engine.tools.mcp_base import (
     McpArtifactSink,
     McpToolSnapshotItem,
     McpToolSnapshotState,
-    _extract_tool_result,  # pyright: ignore[reportPrivateUsage] -- reuse common MCP result extraction for AWS wrapper.
+    _extract_tool_result,  # reuse common MCP result extraction for AWS wrapper.
     build_mcp_artifact_sink,
 )
 from azents.rdb.session import SessionManager

@@ -318,7 +318,7 @@ def _service(
 ) -> DiscordGatewayManagerService:
     return DiscordGatewayManagerService(
         session_manager=sessions,
-        repository=repository,  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type] — test fake exposes only the lease-fenced repository surface exercised by this manager.
+        repository=repository,  # ty: ignore[invalid-argument-type] — test fake exposes only the lease-fenced repository surface exercised by this manager.
         credentials_codec=(
             credentials_codec if credentials_codec is not None else MagicMock()
         ),  # ty: ignore[invalid-argument-type] — test fake supplies only the codec calls exercised by this manager.
@@ -372,7 +372,7 @@ async def test_admits_typed_event_under_current_lease() -> None:
     repository = _Repository(admission=object())
     service = _service(repository=repository, sessions=sessions)
 
-    await service._admit_gateway_event(  # pyright: ignore[reportPrivateUsage]
+    await service._admit_gateway_event(
         connection_id="connection-1",
         lease=_lease(),
         provider_app_id="app-1",
@@ -416,7 +416,7 @@ async def test_gateway_schedules_every_control_without_waiting_for_completion() 
         provider_control=provider_control,
     )
 
-    await service._admit_gateway_event(  # pyright: ignore[reportPrivateUsage]
+    await service._admit_gateway_event(
         connection_id="connection-1",
         lease=_lease(),
         provider_app_id="app-1",
@@ -451,7 +451,7 @@ async def test_retries_same_typed_event_before_later_callback_can_advance(
         sleep,
     )
 
-    await service._admit_gateway_event(  # pyright: ignore[reportPrivateUsage]
+    await service._admit_gateway_event(
         connection_id="connection-1",
         lease=_lease(),
         provider_app_id="app-1",
@@ -477,7 +477,7 @@ async def test_quiesced_gateway_rejects_message_create() -> None:
     service = _service(repository=repository, sessions=sessions, config=config)
 
     with pytest.raises(DiscordGatewayError, match="temporarily quiesced"):
-        await service._admit_gateway_event(  # pyright: ignore[reportPrivateUsage]
+        await service._admit_gateway_event(
             connection_id="connection-1",
             lease=_lease(),
             provider_app_id="app-1",
@@ -495,7 +495,7 @@ async def test_cross_guild_event_is_not_admitted() -> None:
     repository = _Repository(admission=object())
     service = _service(repository=repository, sessions=_SessionManager())
 
-    await service._admit_gateway_event(  # pyright: ignore[reportPrivateUsage]
+    await service._admit_gateway_event(
         connection_id="connection-1",
         lease=_lease(),
         provider_app_id="app-1",
@@ -515,7 +515,7 @@ async def test_stale_lease_stops_typed_event_admission() -> None:
     service = _service(repository=repository, sessions=sessions)
 
     with pytest.raises(DiscordGatewayLeaseLost):
-        await service._admit_gateway_event(  # pyright: ignore[reportPrivateUsage]
+        await service._admit_gateway_event(
             connection_id="connection-1",
             lease=_lease(),
             provider_app_id="app-1",
@@ -531,12 +531,12 @@ async def test_sdk_lifecycle_updates_fenced_gap_and_active_state() -> None:
     repository = _Repository(admission=object())
     service = _service(repository=repository, sessions=_SessionManager())
 
-    await service._handle_gateway_lifecycle(  # pyright: ignore[reportPrivateUsage]
+    await service._handle_gateway_lifecycle(
         connection_id="connection-1",
         lease=_lease(),
         state="disconnected",
     )
-    await service._handle_gateway_lifecycle(  # pyright: ignore[reportPrivateUsage]
+    await service._handle_gateway_lifecycle(
         connection_id="connection-1",
         lease=_lease(),
         state="resumed",
@@ -558,7 +558,7 @@ async def test_invalid_persisted_credential_terminalizes_connection() -> None:
         credentials_codec=credentials_codec,
     )
 
-    await service._run_owned_connection(  # pyright: ignore[reportPrivateUsage]
+    await service._run_owned_connection(
         connection_id="connection-1",
         shutdown_event=asyncio.Event(),
     )
@@ -581,7 +581,7 @@ async def test_library_intent_rejection_terminalizes_connection() -> None:
         gateway_client=_IntentsFailureRunner(),
     )
 
-    await service._run_owned_connection(  # pyright: ignore[reportPrivateUsage]
+    await service._run_owned_connection(
         connection_id="connection-1",
         shutdown_event=asyncio.Event(),
     )
@@ -604,7 +604,7 @@ async def test_sdk_terminal_close_terminalizes_connection() -> None:
         gateway_client=_TerminalFailureRunner(),
     )
 
-    await service._run_owned_connection(  # pyright: ignore[reportPrivateUsage]
+    await service._run_owned_connection(
         connection_id="connection-1",
         shutdown_event=asyncio.Event(),
     )
@@ -624,7 +624,7 @@ async def test_manager_passes_typed_lifecycle_and_event_handlers_to_sdk() -> Non
     )
 
     with pytest.raises(DiscordGatewayTerminalError):
-        await service._run_connection_with_lease(  # pyright: ignore[reportPrivateUsage]
+        await service._run_connection_with_lease(
             connection_id="connection-1",
             lease=_lease(),
             bot_token="test-token",
@@ -653,7 +653,7 @@ async def test_active_sdk_lifecycle_renews_gateway_lease() -> None:
     service.renew_interval = datetime.timedelta(milliseconds=1)
     shutdown = asyncio.Event()
     task = asyncio.create_task(
-        service._run_connection_with_lease(  # pyright: ignore[reportPrivateUsage]
+        service._run_connection_with_lease(
             connection_id="connection-1",
             lease=_lease(),
             bot_token="test-token",

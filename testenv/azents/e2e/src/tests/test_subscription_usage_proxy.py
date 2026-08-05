@@ -1,7 +1,5 @@
 """Direct deterministic subscription usage proxy contract tests."""
 
-# pyright: reportPrivateUsage=false
-
 import json
 import threading
 from collections.abc import Generator

@@ -103,4 +103,4 @@ class TestUserEmailCrud:
             email_api.useremail_v1_create_email(
                 user_id, UserEmailCreateRequest(email=dup_email)
             )
-        assert exc_info.value.status == 409  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 409  # t create API clientt t t t

@@ -484,7 +484,7 @@ def s3_bucket_name(
     rustfs_host = rustfs_container.get_container_host_ip()
     rustfs_port = rustfs_container.get_exposed_port(9000)
 
-    s3_client: S3Client = boto3.client(  # pyright: ignore[reportUnknownMemberType] # boto3.clientt overload return t t Unknown
+    s3_client: S3Client = boto3.client(  # boto3.clientt overload return t t Unknown
         "s3",
         endpoint_url=f"http://{rustfs_host}:{rustfs_port}",
         aws_access_key_id=rustfs_access_key,

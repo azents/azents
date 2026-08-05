@@ -31,7 +31,7 @@ class Success(Generic[S]):
     def error(self) -> NoReturn:
         """
         Success에는 error가 없으므로 접근 시 AttributeError 발생.
-        pyright의 union 타입 narrowing 지원을 위해 정의됨.
+        정적 타입 검사의 union 타입 narrowing 지원을 위해 정의됨.
         """
         raise AttributeError("Success has no error")
 
@@ -62,7 +62,7 @@ class Failure(Generic[F]):
     def value(self) -> NoReturn:
         """
         Failure에는 value가 없으므로 접근 시 AttributeError 발생.
-        pyright의 union 타입 narrowing 지원을 위해 정의됨.
+        정적 타입 검사의 union 타입 narrowing 지원을 위해 정의됨.
         """
         raise AttributeError("Failure has no value")
 

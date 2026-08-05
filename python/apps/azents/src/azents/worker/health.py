@@ -64,7 +64,9 @@ class HealthServer:
                 status=503,
             )
         try:
-            ping = self._redis.ping()  # pyright: ignore[reportAttributeAccessIssue]  # redis.asyncio Redis type declaration is incomplete
+            ping = (
+                self._redis.ping()
+            )  # redis.asyncio Redis type declaration is incomplete
             if inspect.isawaitable(ping):
                 await ping
         except Exception:

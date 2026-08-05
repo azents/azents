@@ -1,7 +1,5 @@
 """Runtime Runner entrypoint configuration tests."""
 
-# pyright: reportPrivateUsage=false
-
 import json
 import logging
 

@@ -246,7 +246,7 @@ class RedisBroker:
         try:
             await self._publish_wake_up(message.session_id)
         except RedisError:
-            removed = self._redis.lrem(  # pyright: ignore[reportAttributeAccessIssue]  # redis-py stub omits LREM.
+            removed = self._redis.lrem(  # redis-py stub omits LREM.
                 msg_key,
                 1,
                 encoded.decode(),

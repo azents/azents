@@ -15,7 +15,7 @@ from azents.core.enums import (
 from azents.engine.run.types import FunctionTool, FunctionToolError, FunctionToolResult
 from azents.engine.tooling.execution_context import client_tool_execution_context
 from azents.engine.tools.present_file import (
-    _is_presentable_path,  # pyright: ignore[reportPrivateUsage]  # Exercise root containment directly.
+    _is_presentable_path,  # Exercise root containment directly.
     make_present_file_tool,
 )
 from azents.engine.tools.testing import FakeSharedStorage

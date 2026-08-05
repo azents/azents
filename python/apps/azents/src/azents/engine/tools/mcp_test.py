@@ -130,7 +130,7 @@ async def test_oauth_refresh_closes_db_session_during_http(
     monkeypatch.setattr(mcp_module, "refresh_access_token", refresh_access_token)
     repository = _ConnectionRepository(_connection(access_token="access-1"), active)
 
-    refreshed = await mcp_module._ensure_oauth_connection_token(  # pyright: ignore[reportPrivateUsage]
+    refreshed = await mcp_module._ensure_oauth_connection_token(
         connection_repo=cast(Any, repository),
         session_manager=session_manager,
         toolkit_id="toolkit-1",
@@ -182,7 +182,7 @@ async def test_oauth_refresh_keeps_concurrent_newer_credentials(
 
     monkeypatch.setattr(mcp_module, "refresh_access_token", refresh_access_token)
 
-    refreshed = await mcp_module._ensure_oauth_connection_token(  # pyright: ignore[reportPrivateUsage]
+    refreshed = await mcp_module._ensure_oauth_connection_token(
         connection_repo=cast(Any, repository),
         session_manager=session_manager,
         toolkit_id="toolkit-1",

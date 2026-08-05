@@ -938,7 +938,7 @@ async def test_receive_returns_broker_messages() -> None:
     """Normal broker activity returns the received Worker signals."""
     worker = AgentWorker.__new__(AgentWorker)
     worker.broker = cast(SessionBroker, _ReceiveBroker([_wake_up()]))
-    messages = await worker._receive_or_shutdown(  # pyright: ignore[reportPrivateUsage]
+    messages = await worker._receive_or_shutdown(
         asyncio.Event(),
     )
 

@@ -68,7 +68,7 @@ class TestSecurityElevation:
             security_api.security_v1_get_auth_methods(
                 _headers={"Authorization": f"Bearer {access_token}"},
             )
-        assert exc_info.value.status == 403  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 403  # t create API clientt t t t
 
     def test_elevate_with_email_and_get_auth_methods(
         self,
@@ -119,7 +119,7 @@ class TestSecurityElevation:
                 ),
                 _headers={"Authorization": f"Bearer {access_token}"},
             )
-        assert exc_info.value.status == 400  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 400  # t create API clientt t t t
 
     def test_elevation_stripped_on_refresh(
         self,
@@ -154,7 +154,7 @@ class TestSecurityElevation:
             security_api.security_v1_get_auth_methods(
                 _headers={"Authorization": f"Bearer {new_access_token}"},
             )
-        assert exc_info.value.status == 403  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 403  # t create API clientt t t t
 
 
 class TestPasswordManagement:
@@ -200,7 +200,7 @@ class TestPasswordManagement:
                 SetPasswordRequest(password="StrongP@ss1!"),
                 _headers={"Authorization": f"Bearer {access_token}"},
             )
-        assert exc_info.value.status == 403  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 403  # t create API clientt t t t
 
     def test_remove_password(
         self,
@@ -226,7 +226,7 @@ class TestPasswordManagement:
             security_api.security_v1_remove_password(
                 _headers={"Authorization": f"Bearer {elevated_token}"},
             )
-        assert exc_info.value.status == 409  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 409  # t create API clientt t t t
 
         # auth t passwordt t valid credential t t
         response = security_api.security_v1_get_auth_methods(
@@ -252,7 +252,7 @@ class TestPasswordManagement:
             security_api.security_v1_remove_password(
                 _headers={"Authorization": f"Bearer {elevated_token}"},
             )
-        assert exc_info.value.status == 409  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 409  # t create API clientt t t t
 
         response = security_api.security_v1_get_auth_methods(
             _headers={"Authorization": f"Bearer {elevated_token}"},
@@ -321,7 +321,7 @@ class TestPasswordManagement:
                 ElevateWithPasswordRequest(password="WrongPassword!"),
                 _headers={"Authorization": f"Bearer {access_token}"},
             )
-        assert exc_info.value.status == 400  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 400  # t create API clientt t t t
 
 
 class TestPasswordLogin:
@@ -417,7 +417,7 @@ class TestPasswordLogin:
             pub_auth.auth_v1_login_with_password(
                 PasswordLoginRequest(email=email, password="WrongPassword!"),
             )
-        assert exc_info.value.status == 401  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 401  # t create API clientt t t t
 
     def test_login_with_password_unknown_email_returns_401(
         self,
@@ -431,7 +431,7 @@ class TestPasswordLogin:
             pub_auth.auth_v1_login_with_password(
                 PasswordLoginRequest(email=email, password="SomePassword1!"),
             )
-        assert exc_info.value.status == 401  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 401  # t create API clientt t t t
 
     def test_login_methods_unknown_email(
         self,

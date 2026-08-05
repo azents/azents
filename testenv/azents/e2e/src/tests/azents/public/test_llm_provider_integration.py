@@ -189,7 +189,7 @@ class TestCreateIntegration:
                 ),
                 _headers={"Authorization": f"Bearer {access_token}"},
             )
-        assert exc_info.value.status == 422  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 422  # t create API clientt t t t
 
 
 class TestXaiApiKeyIntegrationLifecycle:
@@ -274,7 +274,7 @@ class TestXaiApiKeyIntegrationLifecycle:
                 handle=handle,
                 _headers=headers,
             )
-        assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType]
+        assert exc_info.value.status == 404
 
 
 class TestOpenRouterIntegrationLifecycle:
@@ -354,7 +354,7 @@ class TestOpenRouterIntegrationLifecycle:
                 handle=handle,
                 _headers=headers,
             )
-        assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType]
+        assert exc_info.value.status == 404
 
 
 class TestListIntegrations:
@@ -465,7 +465,7 @@ class TestGetIntegration:
                 handle=handle,
                 _headers=headers,
             )
-        assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 404  # t create API clientt t t t
 
 
 class TestUpdateIntegration:
@@ -630,4 +630,4 @@ class TestDeleteIntegration:
                 handle=handle,
                 _headers=headers,
             )
-        assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 404  # t create API clientt t t t

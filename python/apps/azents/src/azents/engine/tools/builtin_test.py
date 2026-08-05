@@ -50,7 +50,7 @@ from azents.engine.tools.builtin import (
 )
 from azents.engine.tools.builtin_agents import (
     AgentsAppendixDedupeState,
-    _agents_appendix_candidates_for_path,  # pyright: ignore[reportPrivateUsage]  # Exercise root containment directly.
+    _agents_appendix_candidates_for_path,  # Exercise root containment directly.
 )
 from azents.engine.tools.read_text import make_read_text_tool
 from azents.engine.tools.runtime_instruction_context import (

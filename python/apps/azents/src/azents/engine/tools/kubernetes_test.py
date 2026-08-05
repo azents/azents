@@ -24,7 +24,7 @@ from azents.engine.tools.kubernetes import (
     K8sExecInput,
     KubernetesToolkit,
     KubernetesToolkitProvider,
-    _ConfiguredWsApiClient,  # pyright: ignore[reportPrivateUsage] — verify transport settings
+    _ConfiguredWsApiClient,  # verify transport settings
     check_access,
     resolve_namespace,
 )
@@ -907,9 +907,13 @@ class TestKubernetesToolkitLifecycle:
 
         lightkube_client.close.assert_awaited_once()
         exec_client.close.assert_awaited_once()
-        assert toolkit._clients == {}  # pyright: ignore[reportPrivateUsage] — validate internal state after close in tests
-        assert toolkit._exec_clients == {}  # pyright: ignore[reportPrivateUsage] — validate internal state after close in tests
-        assert toolkit._discovery_caches == {}  # pyright: ignore[reportPrivateUsage] — validate internal state after close in tests
+        assert toolkit._clients == {}  # validate internal state after close in tests
+        assert (
+            toolkit._exec_clients == {}
+        )  # validate internal state after close in tests
+        assert (
+            toolkit._discovery_caches == {}
+        )  # validate internal state after close in tests
 
     @pytest.mark.asyncio
     async def test_aexit_closes_remaining_clients_when_one_close_fails(self) -> None:
@@ -932,8 +936,10 @@ class TestKubernetesToolkitLifecycle:
 
         lightkube_client.close.assert_awaited_once()
         exec_client.close.assert_awaited_once()
-        assert toolkit._clients == {}  # pyright: ignore[reportPrivateUsage] — validate internal state after close in tests
-        assert toolkit._exec_clients == {}  # pyright: ignore[reportPrivateUsage] — validate internal state after close in tests
+        assert toolkit._clients == {}  # validate internal state after close in tests
+        assert (
+            toolkit._exec_clients == {}
+        )  # validate internal state after close in tests
 
     @pytest.mark.asyncio
     async def test_lazy_load_closes_clients_when_cancelled_mid_discovery(
@@ -975,7 +981,9 @@ class TestKubernetesToolkitLifecycle:
             toolkit = await provider.resolve(config, context)
             assert isinstance(toolkit, KubernetesToolkit)
             with pytest.raises(asyncio.CancelledError):
-                await toolkit._ensure_cluster_clients("staging")  # pyright: ignore[reportPrivateUsage] — directly validate lazy load cancellation path
+                await toolkit._ensure_cluster_clients(
+                    "staging"
+                )  # directly validate lazy load cancellation path
 
         staging_lightkube.close.assert_awaited_once()
         staging_exec.close.assert_awaited_once()
@@ -1011,8 +1019,12 @@ class TestKubernetesToolkitLifecycle:
             ),
         ):
             first, second = await asyncio.gather(
-                toolkit._ensure_cluster_clients("prod"),  # pyright: ignore[reportPrivateUsage] — directly validate lock concurrency path
-                toolkit._ensure_cluster_clients("prod"),  # pyright: ignore[reportPrivateUsage] — directly validate lock concurrency path
+                toolkit._ensure_cluster_clients(
+                    "prod"
+                ),  # directly validate lock concurrency path
+                toolkit._ensure_cluster_clients(
+                    "prod"
+                ),  # directly validate lock concurrency path
             )
 
         assert first == second
@@ -1109,7 +1121,9 @@ class TestRenderConfigPrompt:
             exec_clients={"prod": MagicMock()},
             discovery_caches={"prod": MagicMock()},
         )
-        prompt = toolkit._render_config_prompt()  # pyright: ignore[reportPrivateUsage] — directly validate internal method in tests
+        prompt = (
+            toolkit._render_config_prompt()
+        )  # directly validate internal method in tests
         assert "prod" in prompt
         assert "staging" in prompt
         assert "read-only" in prompt
@@ -1127,7 +1141,9 @@ class TestRenderConfigPrompt:
             exec_clients={"prod": MagicMock()},
             discovery_caches={"prod": MagicMock()},
         )
-        prompt = toolkit._render_config_prompt()  # pyright: ignore[reportPrivateUsage] — directly validate internal method in tests
+        prompt = (
+            toolkit._render_config_prompt()
+        )  # directly validate internal method in tests
         assert "read-write" in prompt
 
     def test_allowed_namespaces_in_prompt(self) -> None:
@@ -1142,7 +1158,9 @@ class TestRenderConfigPrompt:
             exec_clients={"prod": MagicMock()},
             discovery_caches={"prod": MagicMock()},
         )
-        prompt = toolkit._render_config_prompt()  # pyright: ignore[reportPrivateUsage] — directly validate internal method in tests
+        prompt = (
+            toolkit._render_config_prompt()
+        )  # directly validate internal method in tests
         assert "app" in prompt
         assert "monitoring" in prompt
         assert "Allowed namespaces" in prompt
@@ -1263,7 +1281,9 @@ class TestKubernetesToolHandlers:
 
         # Mock get_resource_class of discovery cache
         mock_res_class = MagicMock()
-        k8s_toolkit._discovery_caches["prod"].get_resource_class = MagicMock(  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
+        k8s_toolkit._discovery_caches[
+            "prod"
+        ].get_resource_class = MagicMock(  # directly set internal attribute in tests
             return_value=mock_res_class
         )
         monkeypatch.setattr(k8s_toolkit.test_client(), "list", _mock_list)
@@ -1298,7 +1318,9 @@ class TestKubernetesToolHandlers:
                 yield {"metadata": {"name": f"pod-{i}"}}
 
         mock_res_class = MagicMock()
-        k8s_toolkit._discovery_caches["prod"].get_resource_class = MagicMock(  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
+        k8s_toolkit._discovery_caches[
+            "prod"
+        ].get_resource_class = MagicMock(  # directly set internal attribute in tests
             return_value=mock_res_class
         )
         monkeypatch.setattr(k8s_toolkit.test_client(), "list", _mock_list)
@@ -1338,7 +1360,9 @@ class TestKubernetesToolHandlers:
                 yield {"metadata": {"name": f"pod-{i}"}}
 
         mock_res_class = MagicMock()
-        k8s_toolkit._discovery_caches["prod"].get_resource_class = MagicMock(  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
+        k8s_toolkit._discovery_caches[
+            "prod"
+        ].get_resource_class = MagicMock(  # directly set internal attribute in tests
             return_value=mock_res_class
         )
         monkeypatch.setattr(k8s_toolkit.test_client(), "list", _mock_list)
@@ -1375,10 +1399,14 @@ class TestKubernetesToolHandlers:
         mock_result = {"metadata": {"name": "my-deploy"}, "spec": {}}
         mock_res_class = MagicMock()
 
-        k8s_toolkit._discovery_caches["prod"].get_resource_class = MagicMock(  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
+        k8s_toolkit._discovery_caches[
+            "prod"
+        ].get_resource_class = MagicMock(  # directly set internal attribute in tests
             return_value=mock_res_class
         )
-        k8s_toolkit._clients["prod"].get = AsyncMock(return_value=mock_result)  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
+        k8s_toolkit._clients["prod"].get = AsyncMock(
+            return_value=mock_result
+        )  # directly set internal attribute in tests
 
         result = await tool.handler(
             json.dumps(
@@ -1551,7 +1579,9 @@ class TestKubernetesToolHandlers:
             }
 
         mock_res_class = MagicMock()
-        k8s_toolkit._discovery_caches["prod"].get_resource_class = MagicMock(  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
+        k8s_toolkit._discovery_caches[
+            "prod"
+        ].get_resource_class = MagicMock(  # directly set internal attribute in tests
             return_value=mock_res_class
         )
         monkeypatch.setattr(k8s_toolkit.test_client(), "list", _mock_list)
@@ -1598,7 +1628,9 @@ class TestKubernetesToolHandlers:
             }
 
         mock_res_class = MagicMock()
-        k8s_toolkit._discovery_caches["prod"].get_resource_class = MagicMock(  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
+        k8s_toolkit._discovery_caches[
+            "prod"
+        ].get_resource_class = MagicMock(  # directly set internal attribute in tests
             return_value=mock_res_class
         )
         monkeypatch.setattr(k8s_toolkit.test_client(), "list", _mock_list)
@@ -1631,7 +1663,9 @@ class TestKubernetesToolHandlers:
             yield {"metadata": {"name": "pod-a"}}
 
         mock_res_class = MagicMock()
-        k8s_toolkit._discovery_caches["prod"].get_resource_class = MagicMock(  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
+        k8s_toolkit._discovery_caches[
+            "prod"
+        ].get_resource_class = MagicMock(  # directly set internal attribute in tests
             return_value=mock_res_class
         )
         monkeypatch.setattr(k8s_toolkit.test_client(), "list", _mock_list)
@@ -1663,10 +1697,14 @@ class TestKubernetesToolHandlers:
             "status": {"readyReplicas": 2},
         }
         mock_res_class = MagicMock()
-        k8s_toolkit._discovery_caches["prod"].get_resource_class = MagicMock(  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
+        k8s_toolkit._discovery_caches[
+            "prod"
+        ].get_resource_class = MagicMock(  # directly set internal attribute in tests
             return_value=mock_res_class
         )
-        k8s_toolkit._clients["prod"].get = AsyncMock(return_value=mock_result)  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
+        k8s_toolkit._clients["prod"].get = AsyncMock(
+            return_value=mock_result
+        )  # directly set internal attribute in tests
 
         result = await tool.handler(
             json.dumps(
@@ -1705,10 +1743,14 @@ class TestKubernetesToolHandlers:
             "spec": {},
         }
         mock_res_class = MagicMock()
-        k8s_toolkit._discovery_caches["prod"].get_resource_class = MagicMock(  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
+        k8s_toolkit._discovery_caches[
+            "prod"
+        ].get_resource_class = MagicMock(  # directly set internal attribute in tests
             return_value=mock_res_class
         )
-        k8s_toolkit._clients["prod"].get = AsyncMock(return_value=mock_result)  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
+        k8s_toolkit._clients["prod"].get = AsyncMock(
+            return_value=mock_result
+        )  # directly set internal attribute in tests
 
         result = await tool.handler(
             json.dumps(
@@ -1777,7 +1819,9 @@ class TestKubernetesToolHandlers:
         tool = _find_tool(state.tools, "k8s_list")
 
         mock_res_class = MagicMock()
-        k8s_toolkit._discovery_caches["prod"].get_resource_class = MagicMock(  # pyright: ignore[reportPrivateUsage] — directly set internal attribute in tests
+        k8s_toolkit._discovery_caches[
+            "prod"
+        ].get_resource_class = MagicMock(  # directly set internal attribute in tests
             return_value=mock_res_class
         )
 

@@ -449,10 +449,12 @@ async def test_retire_tree_terminates_external_channel_before_archive() -> None:
     service.decommission_repository = _DecommissionStatusRepositoryDouble()
     service.broker = _BrokerDouble()
 
-    retired = await service._retire_root_tree(  # pyright: ignore[reportPrivateUsage]  # Pin transaction-bound participant dispatch.
-        job=_job(job_id="decommission"),
-        lease_owner="scheduler-1",
-        root_session_id="root-session-1",
+    retired = (
+        await service._retire_root_tree(  # Pin transaction-bound participant dispatch.
+            job=_job(job_id="decommission"),
+            lease_owner="scheduler-1",
+            root_session_id="root-session-1",
+        )
     )
 
     assert retired is True
@@ -685,7 +687,7 @@ async def test_decommission_cleanup_removes_external_agent_roots_first() -> None
     service.runtime_repository = _RuntimeRepositoryDouble()
     service.decommission_repository = _DecommissionStatusRepositoryDouble()
 
-    await service._cleanup_agent_external_roots(  # pyright: ignore[reportPrivateUsage]  # Pin finalizer precondition cleanup.
+    await service._cleanup_agent_external_roots(  # Pin finalizer precondition cleanup.
         job=_job(job_id="decommission"),
         lease_owner="scheduler-1",
     )
@@ -713,7 +715,7 @@ async def test_decommission_targets_terminal_delete_from_resource_binding() -> N
     service.agent_runtime_service = runtime_service
     service.decommission_repository = _DecommissionStatusRepositoryDouble()
 
-    await service._cleanup_agent_external_roots(  # pyright: ignore[reportPrivateUsage]  # Pin terminal deletion fencing.
+    await service._cleanup_agent_external_roots(  # Pin terminal deletion fencing.
         job=_job(job_id="decommission"),
         lease_owner="scheduler-1",
     )

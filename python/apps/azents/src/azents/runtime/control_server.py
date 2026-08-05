@@ -823,7 +823,7 @@ def _session_manager(engine: AsyncEngine) -> SessionManager[AsyncSession]:
 
 async def run_runtime_control_server() -> None:
     """Run the runtime-control server."""
-    settings = RuntimeControlSettings()  # pyright: ignore[reportCallIssue]  # env supplies required deployment settings.
+    settings = RuntimeControlSettings()  # env supplies required deployment settings.
     configure_logging_for_runtime(
         runtime_env=settings.runtime_env,
         inhouse_name="azents",

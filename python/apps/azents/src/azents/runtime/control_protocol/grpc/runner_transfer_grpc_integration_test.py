@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-# pyright: reportAttributeAccessIssue=false, reportUntypedBaseClass=false
 # Protobuf generated modules expose dynamic message/RPC attributes.
 # ruff: noqa: E501
 import asyncio

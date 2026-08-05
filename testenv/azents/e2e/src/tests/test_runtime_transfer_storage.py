@@ -28,7 +28,7 @@ async def _service(
         f"http://{rustfs_container.get_container_host_ip()}:"
         f"{rustfs_container.get_exposed_port(9000)}"
     )
-    async with session.client(  # pyright: ignore[reportUnknownMemberType] # aioboto3 generated overload returns Unknown
+    async with session.client(  # aioboto3 generated overload returns Unknown
         "s3",
         endpoint_url=endpoint_url,
         aws_access_key_id=access_key,

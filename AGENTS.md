@@ -90,8 +90,7 @@ $ uv run pytest
 Run the configured type checker for the subproject:
 
 ```console
-$ uv run pyright                         # azents
-$ uv run ty check --error-on-warning     # other maintained Python projects
+$ uv run ty check --error-on-warning
 ```
 
 Azents-specific backend commands:

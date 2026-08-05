@@ -111,7 +111,7 @@ class _FakeSelectedInstallationStore:
 
 
 @pytest.fixture(autouse=True)
-def _toolkit_state_store(  # pyright: ignore[reportUnusedFunction] -- pytest fixture
+def _toolkit_state_store(  # pytest fixture
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Patch Toolkit State to an in-memory store."""

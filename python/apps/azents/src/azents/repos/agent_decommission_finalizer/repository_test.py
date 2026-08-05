@@ -1,7 +1,5 @@
 """Agent decommission finalizer lifecycle-root tests."""
 
-# pyright: reportPrivateUsage=false
-
 from types import SimpleNamespace
 from typing import cast
 

@@ -921,7 +921,8 @@ async def test_prepare_attachment_creates_model_file_part_before_fifo_lock() -> 
         vfs_projection_service=None,
     )
 
-    prepared = await service._prepare_mailbox_item_attachments(  # pyright: ignore[reportPrivateUsage]  # Verify the pre-lock attachment preparation boundary directly.
+    # Verify the pre-lock attachment preparation boundary directly.
+    prepared = await service._prepare_mailbox_item_attachments(
         session_id=session_id,
         expected_buffer_id=buffer.id,
         include_action_messages=True,
@@ -1051,7 +1052,8 @@ async def test_prepare_skips_deferred_action_attachment_materialization() -> Non
         vfs_projection_service=None,
     )
 
-    prepared = await service._prepare_mailbox_item_attachments(  # pyright: ignore[reportPrivateUsage]  # Verify deferred actions skip external preparation.
+    # Verify deferred actions skip external preparation.
+    prepared = await service._prepare_mailbox_item_attachments(
         session_id=session_id,
         expected_buffer_id=buffer.id,
         include_action_messages=False,
@@ -1088,9 +1090,8 @@ async def test_cancelled_promotion_discards_prepared_model_files() -> None:
     )
 
     with pytest.raises(asyncio.CancelledError):
-        async with service._discard_prepared_model_files_on_failure(  # pyright: ignore[reportPrivateUsage]  # Verify cancellation compensation directly.
-            prepared
-        ):
+        # Verify cancellation compensation directly.
+        async with service._discard_prepared_model_files_on_failure(prepared):
             raise asyncio.CancelledError
 
     assert model_file_service.discarded_model_file_ids == ["model-file-1"]

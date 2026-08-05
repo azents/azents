@@ -1,6 +1,5 @@
 """Bounded S3-backed Runtime Runner transfer service."""
 
-# pyright: reportAttributeAccessIssue=false, reportUntypedBaseClass=false
 # Protobuf generated modules expose dynamic message/RPC attributes.
 # ruff: noqa: E501, B904
 

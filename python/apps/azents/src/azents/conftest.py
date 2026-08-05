@@ -130,7 +130,7 @@ async def rdb_session_manager(
                 nested: AsyncTransaction = await connection.begin_nested()
 
                 @event.listens_for(async_session.sync_session, "after_transaction_end")
-                def end_savepoint(  # pyright: ignore[reportUnusedFunction]
+                def end_savepoint(
                     _session: Any,  # noqa: ANN401
                     _transaction: Any,  # noqa: ANN401
                 ) -> None:

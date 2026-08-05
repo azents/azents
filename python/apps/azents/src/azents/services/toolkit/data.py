@@ -38,7 +38,7 @@ class ToolkitOutput(ToolkitConfig):
         description="Redacted provider authorization state",
     )
 
-    # pyright cannot infer type for Pydantic computed_field + property combination
+    # The type checker cannot infer the Pydantic computed_field/property combination.
     @computed_field
     @property
     def has_credentials(self) -> bool:

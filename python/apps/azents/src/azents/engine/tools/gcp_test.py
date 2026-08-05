@@ -22,8 +22,8 @@ from azents.engine.tooling.toolkit_state import ToolkitStateIdentity
 from azents.engine.tools.gcp import (
     GcpAccessTokenProvider,
     GcpToolkit,
-    _GcpServerConfig,  # pyright: ignore[reportPrivateUsage] — directly configure internal server settings in tests
-    _is_read_only_tool,  # pyright: ignore[reportPrivateUsage] — directly validate internal utility function in tests
+    _GcpServerConfig,  # directly configure internal server settings in tests
+    _is_read_only_tool,  # directly validate internal utility function in tests
 )
 from azents.testing.types import is_object_factory
 
@@ -97,7 +97,7 @@ _session_manager = _FakeSessionManager()
 
 
 @pytest.fixture(autouse=True)
-def _toolkit_state_store(  # pyright: ignore[reportUnusedFunction] -- pytest autouse fixture
+def _toolkit_state_store(  # pytest autouse fixture
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Patch Toolkit State to an in-memory store."""
@@ -447,7 +447,7 @@ def _make_call_tool_result(text: str) -> MagicMock:
 
 async def _wait_gcp_tasks(toolkit: GcpToolkit) -> None:
     """Wait for background GCP MCP discovery task."""
-    task = toolkit._bg_task  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+    task = toolkit._bg_task  # noqa: SLF001
     if task is not None:
         await task
 
@@ -629,10 +629,10 @@ class TestGcpToolkitBackgroundConnect:
             side_effect=forever_list_tools,
         ):
             async with toolkit:
-                assert toolkit._bg_task is not None  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
-                assert not toolkit._bg_task.done()  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+                assert toolkit._bg_task is not None  # noqa: SLF001
+                assert not toolkit._bg_task.done()  # noqa: SLF001
 
-        assert toolkit._bg_task is None  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+        assert toolkit._bg_task is None  # noqa: SLF001
 
     @pytest.mark.asyncio
     async def test_without_aenter_does_not_sync_discover_tools(self) -> None:

@@ -73,7 +73,7 @@ class TestUserCrud:
         # delete check
         with pytest.raises(azentsadminclient.ApiException) as exc_info:
             user_api.user_v1_get_user(user_id)
-        assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 404  # t create API clientt t t t
 
 
 class TestUserValidation:
@@ -88,4 +88,4 @@ class TestUserValidation:
 
         with pytest.raises(azentsadminclient.ApiException) as exc_info:
             user_api.user_v1_get_user("00000000-0000-0000-0000-000000000000")
-        assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 404  # t create API clientt t t t

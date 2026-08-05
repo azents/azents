@@ -330,7 +330,9 @@ class TestSessionTitleHelpers:
             generate,
         )
 
-        result = await _title_service(capability)._generate_title(  # pyright: ignore[reportPrivateUsage]  # Exercise the operation-local mode selection.
+        result = await _title_service(
+            capability
+        )._generate_title(  # Exercise the operation-local mode selection.
             agent_id="agent-001",
             session_id="session-001",
             generation_event_id="0" * 32,
@@ -372,7 +374,9 @@ class TestSessionTitleHelpers:
             generate,
         )
 
-        result = await _title_service(capability)._generate_title(  # pyright: ignore[reportPrivateUsage]  # Exercise the bounded compatibility transition.
+        result = await _title_service(
+            capability
+        )._generate_title(  # Exercise the bounded compatibility transition.
             agent_id="agent-001",
             session_id="session-001",
             generation_event_id="0" * 32,
@@ -425,7 +429,9 @@ class TestSessionTitleHelpers:
             generate,
         )
 
-        result = await _title_service(None, max_retries=1)._generate_title(  # pyright: ignore[reportPrivateUsage]  # Exercise retry interaction with the active mode.
+        result = await _title_service(
+            None, max_retries=1
+        )._generate_title(  # Exercise retry interaction with the active mode.
             agent_id="agent-001",
             session_id="session-001",
             generation_event_id="0" * 32,
@@ -478,7 +484,9 @@ class TestSessionTitleHelpers:
             generate,
         )
 
-        result = await _title_service(None, max_retries=1)._generate_title(  # pyright: ignore[reportPrivateUsage]  # Exercise retry after the one-way transition.
+        result = await _title_service(
+            None, max_retries=1
+        )._generate_title(  # Exercise retry after the one-way transition.
             agent_id="agent-001",
             session_id="session-001",
             generation_event_id="0" * 32,
@@ -516,7 +524,9 @@ class TestSessionTitleHelpers:
             generate,
         )
 
-        result = await _title_service(capability)._generate_title(  # pyright: ignore[reportPrivateUsage]  # Exercise schema-decode transition policy.
+        result = await _title_service(
+            capability
+        )._generate_title(  # Exercise schema-decode transition policy.
             agent_id="agent-001",
             session_id="session-001",
             generation_event_id="0" * 32,
@@ -718,7 +728,8 @@ class TestSessionTitleHelpers:
         caplog.set_level(logging.WARNING, logger=session_title_module.logger.name)
 
         with pytest.raises(UnclassifiedModelProviderError):
-            await service._generate_title(  # pyright: ignore[reportPrivateUsage]  # Exercise the standalone retry boundary directly.
+            # Exercise the standalone retry boundary directly.
+            await service._generate_title(
                 agent_id="agent-001",
                 session_id="session-001",
                 generation_event_id="0" * 32,
@@ -793,11 +804,13 @@ class TestSessionTitleHelpers:
             fail_after_manual_update,
         )
 
-        result = await service._generate_title(  # pyright: ignore[reportPrivateUsage]  # Exercise retry ownership revalidation.
-            agent_id="agent-001",
-            session_id="session-001",
-            generation_event_id="0" * 32,
-            context="Compare two insurance options",
+        result = (
+            await service._generate_title(  # Exercise retry ownership revalidation.
+                agent_id="agent-001",
+                session_id="session-001",
+                generation_event_id="0" * 32,
+                context="Compare two insurance options",
+            )
         )
 
         assert result is None

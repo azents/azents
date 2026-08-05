@@ -58,7 +58,7 @@ def _create_engine_with_iam_auth(
 
     # Dynamically inject the IAM token when opening each connection.
     @event.listens_for(engine.sync_engine, "do_connect")
-    def _provide_token(  # pyright: ignore[reportUnusedFunction]
+    def _provide_token(
         # listens_for requires any
         dialect: Any,  # noqa: ANN401
         conn_rec: Any,  # noqa: ANN401

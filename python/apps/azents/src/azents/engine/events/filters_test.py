@@ -1910,12 +1910,8 @@ def test_external_message_is_visible_to_tokens_and_continuity() -> None:
         _external_payload(),
     )
 
-    value = filters._model_visible_event_value(  # pyright: ignore[reportPrivateUsage]
-        event
-    )
-    text = filters._model_visible_event_text(  # pyright: ignore[reportPrivateUsage]
-        event
-    )
+    value = filters._model_visible_event_value(event)
+    text = filters._model_visible_event_text(event)
 
     assert is_string_object_dict(value)
     assert value["message_type"] == "external_channel_message"
@@ -1928,9 +1924,7 @@ def test_external_message_is_visible_to_tokens_and_continuity() -> None:
     assert is_string_object_dict(files[0])
     assert files[0]["file"] == "external-file:v1:slack:binding-1:::F123"
     assert "secret-download" not in str(value)
-    visible_bytes = filters._estimate_event_visible_bytes(  # pyright: ignore[reportPrivateUsage]
-        event
-    )
+    visible_bytes = filters._estimate_event_visible_bytes(event)
     without_files = event.model_copy(
         update={
             "payload": event.payload.model_copy(
@@ -1938,9 +1932,7 @@ def test_external_message_is_visible_to_tokens_and_continuity() -> None:
             )
         }
     )
-    assert visible_bytes > filters._estimate_event_visible_bytes(  # pyright: ignore[reportPrivateUsage]
-        without_files
-    )
+    assert visible_bytes > filters._estimate_event_visible_bytes(without_files)
     assert text is not None
     assert "Provider: slack" in text
     assert "Authorization: context_only" in text

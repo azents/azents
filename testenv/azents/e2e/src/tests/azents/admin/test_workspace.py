@@ -54,7 +54,7 @@ class TestWorkspaceCrud:
             api.workspace_v1_create_workspace(
                 WorkspaceCreateRequest(name="Second", handle=handle)
             )
-        assert exc_info.value.status == 409  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 409  # t create API clientt t t t
 
     def test_list_workspaces_includes_created_workspace(
         self,
@@ -88,4 +88,4 @@ class TestWorkspaceValidation:
         api = WorkspaceV1Api(admin_api_client)
         with pytest.raises(ApiException) as exc_info:
             api.workspace_v1_get_workspace(handle)
-        assert exc_info.value.status == 404  # pyright: ignore[reportUnknownMemberType] # t create API clientt t t t
+        assert exc_info.value.status == 404  # t create API clientt t t t
