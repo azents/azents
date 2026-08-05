@@ -14,7 +14,7 @@ Create Date: 2026-03-18 00:10:00.000000
 
 import json
 import logging
-from typing import Any, Sequence
+from typing import Any, Sequence, TypeGuard
 
 import sqlalchemy as sa
 from alembic import op
@@ -28,16 +28,20 @@ depends_on: str | Sequence[str] | None = None
 logger = logging.getLogger(__name__)
 
 
+def _is_tool_call_list(value: object) -> TypeGuard[list[dict[str, Any]]]:
+    return isinstance(value, list)
+
+
 def _parse_tool_calls(raw: object) -> list[dict[str, Any]] | None:
     """Safely parse the tool_calls column. Return None when it is not an array."""
     if raw is None:
         return None
-    if isinstance(raw, list):
+    if _is_tool_call_list(raw):
         return raw
     if isinstance(raw, str):
         try:
             parsed = json.loads(raw)
-            if isinstance(parsed, list):
+            if _is_tool_call_list(parsed):
                 return parsed
         except json.JSONDecodeError, TypeError:
             pass

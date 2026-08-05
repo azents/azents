@@ -1185,13 +1185,17 @@ def _migration_description(
     return f"{_MIGRATION_DESCRIPTION_PREFIX}{_canonical_json(provenance)}"
 
 
+def _is_mapping(value: object) -> TypeGuard[Mapping[str, Any]]:
+    return isinstance(value, Mapping)
+
+
 def _as_object(value: object) -> dict[str, Any]:
     if value is None:
         return {}
     if isinstance(value, str):
         decoded = json.loads(value)
-        return dict(decoded) if isinstance(decoded, Mapping) else {}
-    if isinstance(value, Mapping):
+        return dict(decoded) if _is_mapping(decoded) else {}
+    if _is_mapping(value):
         return dict(value)
     return {}
 

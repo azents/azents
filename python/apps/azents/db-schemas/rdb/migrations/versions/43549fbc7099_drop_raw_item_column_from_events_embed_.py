@@ -10,6 +10,7 @@ from typing import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "43549fbc7099"
@@ -134,7 +135,7 @@ def downgrade() -> None:
         "events",
         sa.Column(
             "raw_item",
-            sa.dialects.postgresql.JSONB(),  # type: ignore[attr-defined]
+            postgresql.JSONB(),
             nullable=True,
         ),
     )

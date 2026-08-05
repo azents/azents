@@ -66,7 +66,7 @@ def _drop_enum_types() -> None:
 
 def _expand_existing_enum_types() -> None:
     """Add read-compatible values to enum types owned by earlier migrations."""
-    op.sync_enum_values(  # pyright: ignore[reportAttributeAccessIssue] # alembic_postgresql_enum extension
+    op.sync_enum_values(  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]  # alembic_postgresql_enum dynamically registers this Alembic operation.
         enum_schema="public",
         enum_name="external_channel_resource_type",
         new_values=["parent_channel", "thread"],
@@ -79,7 +79,7 @@ def _expand_existing_enum_types() -> None:
         ],
         enum_values_to_rename=[],
     )
-    op.sync_enum_values(  # pyright: ignore[reportAttributeAccessIssue] # alembic_postgresql_enum extension
+    op.sync_enum_values(  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]  # alembic_postgresql_enum dynamically registers this Alembic operation.
         enum_schema="public",
         enum_name="external_channel_delivery_origin_type",
         new_values=[
@@ -104,7 +104,7 @@ def _expand_existing_enum_types() -> None:
 
 def _restore_existing_enum_types() -> None:
     """Restore enum types owned by earlier migrations after absence checks."""
-    op.sync_enum_values(  # pyright: ignore[reportAttributeAccessIssue] # alembic_postgresql_enum extension
+    op.sync_enum_values(  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]  # alembic_postgresql_enum dynamically registers this Alembic operation.
         enum_schema="public",
         enum_name="external_channel_delivery_origin_type",
         new_values=[
@@ -123,7 +123,7 @@ def _restore_existing_enum_types() -> None:
         ],
         enum_values_to_rename=[],
     )
-    op.sync_enum_values(  # pyright: ignore[reportAttributeAccessIssue] # alembic_postgresql_enum extension
+    op.sync_enum_values(  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]  # alembic_postgresql_enum dynamically registers this Alembic operation.
         enum_schema="public",
         enum_name="external_channel_resource_type",
         new_values=["thread"],
