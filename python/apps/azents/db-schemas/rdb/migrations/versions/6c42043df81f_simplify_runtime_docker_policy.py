@@ -3,7 +3,7 @@
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, TypeGuard
 
 import sqlalchemy as sa
 from alembic import op
@@ -197,6 +197,10 @@ def _transform_restriction(document: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _is_mapping(value: object) -> TypeGuard[Mapping[str, Any]]:
+    return isinstance(value, Mapping)
+
+
 def _resource_values(resources: Mapping[str, Any]) -> dict[str, Any]:
     return {
         field: resources.get(field)
@@ -212,4 +216,4 @@ def _resource_values(resources: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _mapping(value: object) -> Mapping[str, Any]:
-    return value if isinstance(value, Mapping) else {}
+    return value if _is_mapping(value) else {}

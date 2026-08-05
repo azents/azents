@@ -147,7 +147,7 @@ def upgrade() -> None:
             name="uq_discord_user_links_installation_discord_user",
         ),
     )
-    op.sync_enum_values(  # pyright: ignore[reportAttributeAccessIssue] # alembic_postgresql_enum extension
+    op.sync_enum_values(  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]  # alembic_postgresql_enum dynamically registers this Alembic operation.
         enum_schema="public",
         enum_name="conversation_session_type",
         new_values=["user", "system", "subagent", "slack", "discord"],
@@ -164,7 +164,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.sync_enum_values(  # pyright: ignore[reportAttributeAccessIssue] # alembic_postgresql_enum extension
+    op.sync_enum_values(  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[unresolved-attribute]  # alembic_postgresql_enum dynamically registers this Alembic operation.
         enum_schema="public",
         enum_name="conversation_session_type",
         new_values=["user", "system", "subagent", "slack"],

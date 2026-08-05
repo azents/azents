@@ -3,7 +3,7 @@
 import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import Any, TypeGuard
 
 import sqlalchemy as sa
 from alembic import op
@@ -74,12 +74,16 @@ def _transform_document(
     return transformed
 
 
+def _is_document(value: object) -> TypeGuard[Mapping[str, Any]]:
+    return isinstance(value, Mapping)
+
+
 def _transform_optional_document(
     document: object,
     transform: Callable[[Mapping[str, Any]], dict[str, Any]],
 ) -> dict[str, Any] | None:
     """Transform JSON policy objects while preserving JSON null snapshots."""
-    if not isinstance(document, Mapping):
+    if not _is_document(document):
         return None
     return _transform_document(document, transform)
 
