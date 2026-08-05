@@ -16,6 +16,7 @@ from azents.core.enums import (
     ExternalChannelProvider,
     ExternalChannelTransport,
 )
+from azents.core.external_channel_projection import is_external_channel_projection
 from azents.repos.external_channel.data import (
     ExternalChannelInteractionCreate,
     ExternalChannelPrincipalCreate,
@@ -289,7 +290,7 @@ def parse_discord_interaction(raw_body: bytes) -> DiscordInteractionEnvelope:
         raise DiscordInteractionInvalidPayload(
             "Discord interaction is not valid JSON."
         ) from error
-    if not isinstance(payload, dict):
+    if not is_external_channel_projection(payload):
         raise DiscordInteractionInvalidPayload("Discord interaction must be an object.")
     interaction_id = payload.get("id")
     interaction_type = payload.get("type")
@@ -352,18 +353,20 @@ def parse_discord_interaction(raw_body: bytes) -> DiscordInteractionEnvelope:
 def _actor_user_id(payload: dict[str, object]) -> str | None:
     """Extract one authenticated Discord actor without retaining profile details."""
     member = payload.get("member")
-    if member is not None and not isinstance(member, dict):
+    if member is not None and not is_external_channel_projection(member):
         raise DiscordInteractionInvalidPayload("Discord interaction member is invalid.")
-    member_user = member.get("user") if isinstance(member, dict) else None
-    if member_user is not None and not isinstance(member_user, dict):
+    member_user = member.get("user") if is_external_channel_projection(member) else None
+    if member_user is not None and not is_external_channel_projection(member_user):
         raise DiscordInteractionInvalidPayload(
             "Discord interaction member user is invalid."
         )
-    member_user_id = member_user.get("id") if isinstance(member_user, dict) else None
+    member_user_id = (
+        member_user.get("id") if is_external_channel_projection(member_user) else None
+    )
     user = payload.get("user")
-    if user is not None and not isinstance(user, dict):
+    if user is not None and not is_external_channel_projection(user):
         raise DiscordInteractionInvalidPayload("Discord interaction user is invalid.")
-    user_id = user.get("id") if isinstance(user, dict) else None
+    user_id = user.get("id") if is_external_channel_projection(user) else None
     actor_user_id = member_user_id if member_user_id is not None else user_id
     if actor_user_id is not None and (
         not isinstance(actor_user_id, str) or not actor_user_id
@@ -385,7 +388,7 @@ def _channel_scope(
     channel = payload.get("channel")
     if channel is None:
         return None, None
-    if not isinstance(channel, dict):
+    if not is_external_channel_projection(channel):
         raise DiscordInteractionInvalidPayload(
             "Discord interaction channel is invalid."
         )
@@ -418,7 +421,7 @@ def _application_command(
     if interaction_type not in {2, 4}:
         return None
     data = payload.get("data")
-    if not isinstance(data, dict):
+    if not is_external_channel_projection(data):
         raise DiscordInteractionInvalidPayload(
             "Discord application command is invalid."
         )
@@ -457,7 +460,7 @@ def _message_command_source(
     if command is None or command.command_type != _DISCORD_MESSAGE_COMMAND_TYPE:
         return None
     data = payload.get("data")
-    if not isinstance(data, dict):
+    if not is_external_channel_projection(data):
         return None
     target_id = data.get("target_id")
     resolved = data.get("resolved")
@@ -466,7 +469,7 @@ def _message_command_source(
     if (
         not isinstance(target_id, str)
         or not target_id
-        or not isinstance(resolved, dict)
+        or not is_external_channel_projection(resolved)
         or not isinstance(guild_id, str)
         or not guild_id
         or not isinstance(channel_id, str)
@@ -476,8 +479,10 @@ def _message_command_source(
             "Discord Message Command source is invalid."
         )
     messages = resolved.get("messages")
-    source = messages.get(target_id) if isinstance(messages, dict) else None
-    if not isinstance(source, dict):
+    source = (
+        messages.get(target_id) if is_external_channel_projection(messages) else None
+    )
+    if not is_external_channel_projection(source):
         raise DiscordInteractionInvalidPayload(
             "Discord Message Command source is unavailable."
         )
@@ -509,7 +514,7 @@ def _component(
     if interaction_type != 3:
         return None, None
     data = payload.get("data")
-    if not isinstance(data, dict):
+    if not is_external_channel_projection(data):
         raise DiscordInteractionInvalidPayload("Discord component is invalid.")
     custom_id = data.get("custom_id")
     if not isinstance(custom_id, str) or not custom_id or len(custom_id) > 100:
@@ -537,7 +542,7 @@ def _modal_custom_id(
     if interaction_type != 5:
         return None
     data = payload.get("data")
-    if not isinstance(data, dict):
+    if not is_external_channel_projection(data):
         raise DiscordInteractionInvalidPayload("Discord modal submission is invalid.")
     custom_id = data.get("custom_id")
     if not isinstance(custom_id, str) or not custom_id or len(custom_id) > 100:

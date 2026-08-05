@@ -377,9 +377,10 @@ class _OutboundStorage:
         metadata: dict[str, dict[str, object]] | None = None,
     ) -> None:
         self.files = files
-        self.metadata = metadata or {
+        default_metadata: dict[str, dict[str, object]] = {
             path: {"is_file": True, "size": len(body)} for path, body in files.items()
         }
+        self.metadata = metadata if metadata is not None else default_metadata
         self.stat_calls: list[tuple[str, str]] = []
         self.read_calls: list[tuple[str, str, int, int]] = []
 

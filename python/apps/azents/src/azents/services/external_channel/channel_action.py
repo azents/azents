@@ -28,6 +28,7 @@ from azents.core.external_channel_file import (
     ExternalChannelOutboundFileManifest,
     ExternalChannelOutboundFileSource,
 )
+from azents.core.external_channel_projection import is_external_channel_projection
 from azents.core.external_channel_session_presence import (
     ExternalChannelSessionPresenceState,
     build_external_channel_session_url,
@@ -1654,10 +1655,10 @@ async def _discord_outbound_content(
 def _blocks(value: object) -> list[dict[str, object]] | None:
     """Validate one persisted Slack Block Kit list."""
     if not isinstance(value, list) or not all(
-        isinstance(block, dict) for block in value
+        is_external_channel_projection(block) for block in value
     ):
         return None
-    return [block for block in value if isinstance(block, dict)]
+    return [block for block in value if is_external_channel_projection(block)]
 
 
 def _discord_components(value: object) -> list[dict[str, object]] | None:
@@ -1669,15 +1670,14 @@ def _discord_components(value: object) -> list[dict[str, object]] | None:
     rows: list[dict[str, object]] = []
     for row in value:
         if (
-            not isinstance(row, dict)
+            not is_external_channel_projection(row)
             or row.get("type") != 1
             or set(row) != {"type", "components"}
-            or not isinstance(row.get("components"), list)
-            or not row["components"]
-            or len(row["components"]) > 5
         ):
             return None
-        components = row["components"]
+        components = row.get("components")
+        if not isinstance(components, list) or not components or len(components) > 5:
+            return None
         if not all(_discord_button(component) for component in components):
             return None
         rows.append(row)
@@ -1686,7 +1686,7 @@ def _discord_components(value: object) -> list[dict[str, object]] | None:
 
 def _discord_button(value: object) -> bool:
     """Permit the generated Button forms without accepting raw provider JSON."""
-    if not isinstance(value, dict) or value.get("type") != 2:
+    if not is_external_channel_projection(value) or value.get("type") != 2:
         return False
     label = value.get("label")
     style = value.get("style")
@@ -1724,7 +1724,7 @@ def _discord_embeds(value: object) -> list[dict[str, object]] | None:
         return None
     embeds: list[dict[str, object]] = []
     for embed in value:
-        if not isinstance(embed, dict) or set(embed) - {
+        if not is_external_channel_projection(embed) or set(embed) - {
             "title",
             "description",
             "color",

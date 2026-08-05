@@ -4,7 +4,7 @@ import dataclasses
 import datetime
 import hashlib
 import logging
-from typing import Annotated
+from typing import Annotated, Literal
 from urllib.parse import quote, urlparse, urlunparse
 
 from fastapi import Depends
@@ -2002,10 +2002,10 @@ def _position_mismatch() -> ExternalChannelIngestionAcceptance:
 def _rejected(
     reason: ExternalChannelIngestionReason,
     *,
-    status: str = "terminal_rejection",
+    status: Literal["position_mismatch", "terminal_rejection"] = "terminal_rejection",
 ) -> ExternalChannelIngestionAcceptance:
     return ExternalChannelIngestionAcceptance(
-        status=status,  # type: ignore[arg-type]
+        status=status,
         reason=reason,
         mailbox_item_id=None,
         session_id=None,

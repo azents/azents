@@ -318,10 +318,10 @@ def _service(
 ) -> DiscordGatewayManagerService:
     return DiscordGatewayManagerService(
         session_manager=sessions,
-        repository=repository,  # type: ignore[arg-type]
+        repository=repository,  # pyright: ignore[reportArgumentType]  # ty: ignore[invalid-argument-type] — test fake exposes only the lease-fenced repository surface exercised by this manager.
         credentials_codec=(
             credentials_codec if credentials_codec is not None else MagicMock()
-        ),
+        ),  # ty: ignore[invalid-argument-type] — test fake supplies only the codec calls exercised by this manager.
         transport_ingestion_service=cast(
             ExternalChannelTransportIngestionService,
             repository,
@@ -331,7 +331,7 @@ def _service(
             provider_control if provider_control is not None else MagicMock(),
         ),
         manager_id="manager-1",
-        gateway_client=(gateway_client if gateway_client is not None else MagicMock()),
+        gateway_client=(gateway_client if gateway_client is not None else MagicMock()),  # ty: ignore[invalid-argument-type] — test fixture supplies the public runner methods exercised by the manager.
         config=config,
     )
 
@@ -357,7 +357,9 @@ async def test_gateway_manager_dependency_graph_is_resolvable() -> None:
         ExternalChannelTransportIngestionService: _mock_dependency,
         get_external_channel_provider_control_service: _mock_dependency,
     }
-    async with Container(dependency_overrides=overrides) as container:
+    async with Container(
+        dependency_overrides=overrides  # ty: ignore[invalid-argument-type] — dynamic DI override map intentionally substitutes narrow deterministic test fakes.
+    ) as container:
         service = await container.solve(DiscordGatewayManagerService)
 
     assert service.gateway_client is not None

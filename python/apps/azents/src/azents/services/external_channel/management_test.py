@@ -20,6 +20,7 @@ from azents.core.enums import (
     ExternalChannelRouteCatalogStatus,
     ExternalChannelTransport,
 )
+from azents.core.external_channel_projection import is_external_channel_projection
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAgentRoute,
     RDBExternalChannelConnection,
@@ -916,9 +917,9 @@ def test_socket_manifest_keeps_required_bot_events_without_callback() -> None:
     )
 
     settings = guidance.manifest["settings"]
-    assert isinstance(settings, dict)
+    assert is_external_channel_projection(settings)
     subscriptions = settings["event_subscriptions"]
-    assert isinstance(subscriptions, dict)
+    assert is_external_channel_projection(subscriptions)
     assert subscriptions["bot_events"] == list(guidance.event_subscriptions)
     assert "channels:read" in guidance.bot_scopes
     assert "groups:read" in guidance.bot_scopes
@@ -928,7 +929,7 @@ def test_socket_manifest_keeps_required_bot_events_without_callback() -> None:
     assert "request_url" not in subscriptions
     assert settings["interactivity"] == {"is_enabled": True}
     features = guidance.manifest["features"]
-    assert isinstance(features, dict)
+    assert is_external_channel_projection(features)
     assert features["slash_commands"] == [
         {
             "command": "/azents",
@@ -940,7 +941,9 @@ def test_socket_manifest_keeps_required_bot_events_without_callback() -> None:
     shortcuts = features["shortcuts"]
     assert isinstance(shortcuts, list)
     assert [
-        shortcut["callback_id"] for shortcut in shortcuts if isinstance(shortcut, dict)
+        shortcut["callback_id"]
+        for shortcut in shortcuts
+        if is_external_channel_projection(shortcut)
     ] == [
         "azents_ask_agent",
         "azents_conversation_settings",
@@ -960,15 +963,15 @@ def test_http_manifest_routes_commands_interactivity_and_events_to_callback() ->
 
     features = guidance.manifest["features"]
     settings = guidance.manifest["settings"]
-    assert isinstance(features, dict)
-    assert isinstance(settings, dict)
+    assert is_external_channel_projection(features)
+    assert is_external_channel_projection(settings)
     slash_commands = features["slash_commands"]
     interactivity = settings["interactivity"]
     subscriptions = settings["event_subscriptions"]
     assert isinstance(slash_commands, list)
-    assert isinstance(slash_commands[0], dict)
-    assert isinstance(interactivity, dict)
-    assert isinstance(subscriptions, dict)
+    assert is_external_channel_projection(slash_commands[0])
+    assert is_external_channel_projection(interactivity)
+    assert is_external_channel_projection(subscriptions)
     assert slash_commands[0]["url"] == callback_url
     assert interactivity["request_url"] == callback_url
     assert subscriptions["request_url"] == callback_url

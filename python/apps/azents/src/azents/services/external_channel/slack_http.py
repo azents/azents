@@ -27,6 +27,7 @@ from azents.core.external_channel_file import (
     MAX_EXTERNAL_CHANNEL_FILE_TEXT_LENGTH,
     MAX_EXTERNAL_CHANNEL_FILES,
 )
+from azents.core.external_channel_projection import is_external_channel_projection
 from azents.repos.external_channel.data import (
     ExternalChannelInteractionCreate,
     ExternalChannelPrincipalCreate,
@@ -125,7 +126,9 @@ def slack_event_is_normal_message_ingress(
     if event.event_type != "message":
         return False
     payload = event.envelope.get("event")
-    subtype = payload.get("subtype") if isinstance(payload, dict) else None
+    subtype = (
+        payload.get("subtype") if is_external_channel_projection(payload) else None
+    )
     return subtype not in {"message_changed", "message_deleted"}
 
 
@@ -351,7 +354,7 @@ def parse_slack_callback(
     app_id = _required_string(payload, "api_app_id")
     tenant_id = _required_string(payload, "team_id")
     event_payload = payload.get("event")
-    if not isinstance(event_payload, dict):
+    if not is_external_channel_projection(event_payload):
         raise SlackHTTPInvalidPayload(
             "Slack event callback is missing its event object."
         )
@@ -421,12 +424,14 @@ def parse_slack_interaction_payload(
     selector_view = payload.get("view")
     selector_view_id = (
         _optional_string(selector_view, "id")
-        if isinstance(selector_view, dict) and selector_navigation is not None
+        if is_external_channel_projection(selector_view)
+        and selector_navigation is not None
         else None
     )
     selector_view_hash = (
         _optional_string(selector_view, "hash")
-        if isinstance(selector_view, dict) and selector_navigation is not None
+        if is_external_channel_projection(selector_view)
+        and selector_navigation is not None
         else None
     )
     provider_parent_channel_id = _interaction_parent_channel_id(payload)
@@ -504,7 +509,9 @@ def project_slack_shortcut_source_event(
     actor_user_id = _required_nested_string(payload, "user", "id")
     channel = payload.get("channel")
     message = payload.get("message")
-    if not isinstance(channel, dict) or not isinstance(message, dict):
+    if not is_external_channel_projection(
+        channel
+    ) or not is_external_channel_projection(message):
         raise SlackHTTPInvalidPayload("Slack shortcut source is missing.")
     channel_id = _required_string(channel, "id")
     message_ts = _required_string(message, "ts")
@@ -605,7 +612,7 @@ def _parse_interaction_form_payload(
             raise SlackHTTPInvalidPayload(
                 "Slack interaction callback payload is not valid JSON."
             ) from error
-        if not isinstance(payload, dict):
+        if not is_external_channel_projection(payload):
             raise SlackHTTPInvalidPayload(
                 "Slack interaction callback payload must be a JSON object."
             )
@@ -633,7 +640,7 @@ def _parse_payload(raw_body: bytes) -> dict[str, object]:
         raise SlackHTTPInvalidPayload(
             "Slack callback body is not valid JSON."
         ) from error
-    if not isinstance(payload, dict):
+    if not is_external_channel_projection(payload):
         raise SlackHTTPInvalidPayload("Slack callback body must be a JSON object.")
     return payload
 
@@ -776,7 +783,7 @@ class SlackWebAPIClient:
         if bot_payload is None:
             return self._unavailable(code="slack_bot_identity_response_invalid")
         bot = bot_payload.get("bot")
-        if not isinstance(bot, dict):
+        if not is_external_channel_projection(bot):
             return self._unavailable(code="slack_bot_identity_response_invalid")
         actual_app_id = bot.get("app_id")
         if not isinstance(actual_app_id, str) or not actual_app_id:
@@ -842,7 +849,7 @@ def _slack_response_payload(
     response: AsyncSlackResponse,
 ) -> dict[str, object] | None:
     data = response.data
-    return data if isinstance(data, dict) else None
+    return data if is_external_channel_projection(data) else None
 
 
 def _slack_api_error_code(error: SlackApiError) -> str | None:
@@ -885,7 +892,7 @@ def _required_nested_string(
 ) -> str:
     """Read one required bounded nested Slack identifier."""
     parent = payload.get(parent_key)
-    if not isinstance(parent, dict):
+    if not is_external_channel_projection(parent):
         raise SlackHTTPInvalidPayload(
             f"Slack callback field '{parent_key}.{key}' is missing."
         )
@@ -900,7 +907,7 @@ def _first_optional_string(
     for path in paths:
         current: object = payload
         for key in path:
-            if not isinstance(current, dict):
+            if not is_external_channel_projection(current):
                 break
             current = current.get(key)
         if isinstance(current, str) and current:
@@ -988,7 +995,11 @@ def _interaction_action_id(payload: dict[str, object]) -> str | None:
     if not isinstance(actions, list) or len(actions) != 1:
         return None
     action = actions[0]
-    return _optional_string(action, "action_id") if isinstance(action, dict) else None
+    return (
+        _optional_string(action, "action_id")
+        if is_external_channel_projection(action)
+        else None
+    )
 
 
 def _interaction_action_value(payload: dict[str, object]) -> str | None:
@@ -997,7 +1008,7 @@ def _interaction_action_value(payload: dict[str, object]) -> str | None:
     if not isinstance(actions, list) or len(actions) != 1:
         return None
     action = actions[0]
-    if not isinstance(action, dict):
+    if not is_external_channel_projection(action):
         return None
     value = _optional_string(action, "value")
     if value is None:
@@ -1019,7 +1030,7 @@ def _interaction_selector_interaction_id(
     if not isinstance(actions, list) or len(actions) != 1:
         return None
     action = actions[0]
-    if not isinstance(action, dict):
+    if not is_external_channel_projection(action):
         return None
     value = _optional_string(action, "value")
     return value if value is not None and len(value) <= 64 else None
@@ -1046,7 +1057,7 @@ def _interaction_selector_metadata(
     if not selector_submission and not selector_navigation:
         return None
     view = payload.get("view")
-    if not isinstance(view, dict):
+    if not is_external_channel_projection(view):
         raise SlackHTTPInvalidPayload("Slack selector submission view is missing.")
     if _optional_string(view, "callback_id") != SLACK_SELECTOR_VIEW_CALLBACK_ID:
         return None
@@ -1081,15 +1092,19 @@ def _interaction_selector_search(
     if navigation is None:
         return None
     view = payload.get("view")
-    state = view.get("state") if isinstance(view, dict) else None
-    values = state.get("values") if isinstance(state, dict) else None
+    state = view.get("state") if is_external_channel_projection(view) else None
+    values = state.get("values") if is_external_channel_projection(state) else None
     block = (
-        values.get("azents_agent_selector_search") if isinstance(values, dict) else None
+        values.get("azents_agent_selector_search")
+        if is_external_channel_projection(values)
+        else None
     )
     action = (
-        block.get("azents_agent_selector_search") if isinstance(block, dict) else None
+        block.get("azents_agent_selector_search")
+        if is_external_channel_projection(block)
+        else None
     )
-    value = action.get("value") if isinstance(action, dict) else None
+    value = action.get("value") if is_external_channel_projection(action) else None
     if value is None:
         return None
     if not isinstance(value, str) or len(value) > 100:
@@ -1107,20 +1122,28 @@ def _interaction_selected_route_id(
     if interaction_type is not ExternalChannelInteractionType.VIEW_SUBMISSION:
         return None
     view = payload.get("view")
-    if not isinstance(view, dict):
+    if not is_external_channel_projection(view):
         raise SlackHTTPInvalidPayload("Slack selector submission view is missing.")
     if _optional_string(view, "callback_id") != SLACK_SELECTOR_VIEW_CALLBACK_ID:
         return None
     state = view.get("state")
-    values = state.get("values") if isinstance(state, dict) else None
-    if not isinstance(values, dict):
+    values = state.get("values") if is_external_channel_projection(state) else None
+    if not is_external_channel_projection(values):
         raise SlackHTTPInvalidPayload("Slack selector submission state is missing.")
     block = values.get("azents_agent_selector_route")
     action = (
-        block.get("azents_agent_selector_route") if isinstance(block, dict) else None
+        block.get("azents_agent_selector_route")
+        if is_external_channel_projection(block)
+        else None
     )
-    selected = action.get("selected_option") if isinstance(action, dict) else None
-    route_id = selected.get("value") if isinstance(selected, dict) else None
+    selected = (
+        action.get("selected_option")
+        if is_external_channel_projection(action)
+        else None
+    )
+    route_id = (
+        selected.get("value") if is_external_channel_projection(selected) else None
+    )
     if not isinstance(route_id, str) or not route_id or len(route_id) > 64:
         raise SlackHTTPInvalidPayload("Slack selector route selection is invalid.")
     return route_id
@@ -1170,7 +1193,7 @@ def _interaction_settings_metadata(
     if handler != "settings_submission":
         return None
     view = payload.get("view")
-    if not isinstance(view, dict):
+    if not is_external_channel_projection(view):
         raise SlackHTTPInvalidPayload("Slack settings submission view is missing.")
     value = _optional_string(view, "private_metadata")
     if value is None or len(value) > 3_000:
@@ -1232,12 +1255,16 @@ def _interaction_modal_selected_value(
 ) -> str | None:
     """Read one bounded static-select value from a known modal field."""
     view = payload.get("view")
-    state = view.get("state") if isinstance(view, dict) else None
-    values = state.get("values") if isinstance(state, dict) else None
-    block = values.get(block_id) if isinstance(values, dict) else None
-    action = block.get(action_id) if isinstance(block, dict) else None
-    selected = action.get("selected_option") if isinstance(action, dict) else None
-    value = selected.get("value") if isinstance(selected, dict) else None
+    state = view.get("state") if is_external_channel_projection(view) else None
+    values = state.get("values") if is_external_channel_projection(state) else None
+    block = values.get(block_id) if is_external_channel_projection(values) else None
+    action = block.get(action_id) if is_external_channel_projection(block) else None
+    selected = (
+        action.get("selected_option")
+        if is_external_channel_projection(action)
+        else None
+    )
+    value = selected.get("value") if is_external_channel_projection(selected) else None
     if value is None:
         return None
     if not isinstance(value, str) or not value or len(value) > 64:
@@ -1294,9 +1321,9 @@ def _resource_correlation_key(event: dict[str, object]) -> str | None:
     previous_message = event.get("previous_message")
     nested = (
         message
-        if isinstance(message, dict)
+        if is_external_channel_projection(message)
         else previous_message
-        if isinstance(previous_message, dict)
+        if is_external_channel_projection(previous_message)
         else None
     )
     timestamp = event.get("thread_ts") or event.get("ts")
@@ -1360,7 +1387,7 @@ def _project_envelope(
         )
     for key in ("message", "previous_message"):
         value = event.get(key)
-        if isinstance(value, dict):
+        if is_external_channel_projection(value):
             projected_event[key] = _project_slack_message(value)
     projected["event"] = projected_event
     serialized = json.dumps(projected, separators=(",", ":")).encode()
@@ -1377,7 +1404,7 @@ def _project_slack_authorizations(value: object) -> list[dict[str, object]]:
         return []
     projected: list[dict[str, object]] = []
     for item in value[:_MAX_SLACK_AUTHORIZATIONS]:
-        if not isinstance(item, dict):
+        if not is_external_channel_projection(item):
             continue
         authorization: dict[str, object] = {}
         is_bot = item.get("is_bot")
@@ -1436,7 +1463,7 @@ def _project_slack_files(value: object) -> list[dict[str, object]]:
         "file_access",
     )
     for item in value[:MAX_EXTERNAL_CHANNEL_FILES]:
-        if not isinstance(item, dict):
+        if not is_external_channel_projection(item):
             continue
         file_projection: dict[str, object] = {}
         for key in string_keys:

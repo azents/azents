@@ -14,6 +14,7 @@ from azents.core.external_channel_file import (
     ExternalChannelFileMetadata,
     ExternalChannelFileUnsupportedReason,
 )
+from azents.core.external_channel_projection import is_external_channel_projection
 from azents.runtime.transfer.provider_source import ProviderByteStreamResponse
 from azents.services.external_channel.discord_endpoint import (
     discord_api_base_url,
@@ -89,7 +90,7 @@ class DiscordChannelClient:
             )
         for attachment in attachments:
             if (
-                not isinstance(attachment, dict)
+                not is_external_channel_projection(attachment)
                 or attachment.get("id") != attachment_id
             ):
                 continue
@@ -263,7 +264,7 @@ class DiscordChannelClient:
             raise DiscordFileTemporaryError(
                 "Discord source message response was invalid."
             ) from error
-        if not isinstance(payload, dict):
+        if not is_external_channel_projection(payload):
             raise DiscordFileTemporaryError(
                 "Discord source message response was invalid."
             )

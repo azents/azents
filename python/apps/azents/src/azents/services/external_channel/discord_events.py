@@ -2,6 +2,7 @@
 
 import datetime
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import discord
@@ -17,6 +18,9 @@ from azents.core.external_channel_file import (
     MAX_EXTERNAL_CHANNEL_FILES,
     ExternalChannelFileMetadata,
     ExternalChannelFileUnsupportedReason,
+)
+from azents.core.external_channel_projection import (
+    is_external_channel_projection,
 )
 from azents.core.external_channel_reference import (
     provider_reference_mappings_size,
@@ -287,7 +291,7 @@ def project_discord_message(
             raise ValueError("Discord message content exceeds the size limit.")
         projection["content"] = content
     author = message.get("author")
-    if isinstance(author, dict):
+    if is_external_channel_projection(author):
         projected_author = _project_author(author)
         if projected_author:
             projection["author"] = projected_author
@@ -305,7 +309,7 @@ def project_discord_message(
         projection["embeds"] = _project_embeds(embeds)
         projection["embeds_truncated"] = len(embeds) > _MAX_DISCORD_EMBEDS
     thread = message.get("thread")
-    if isinstance(thread, dict):
+    if is_external_channel_projection(thread):
         projected_thread = _project_thread(thread)
         if projected_thread:
             projection["thread"] = projected_thread
@@ -333,7 +337,7 @@ def normalize_projected_discord_event(
             "Discord event type is outside the configured scope."
         )
     raw_message = envelope.get("message")
-    if not isinstance(raw_message, dict):
+    if not is_external_channel_projection(raw_message):
         raise DiscordEventNormalizationError("Discord projected message is missing.")
     guild_id = _required_string(raw_message, "guild_id")
     if guild_id != tenant_id:
@@ -423,11 +427,11 @@ def _project_thread(thread: dict[str, object]) -> dict[str, object]:
     return projected
 
 
-def _project_mentions(mentions: list[object]) -> list[dict[str, object]]:
+def _project_mentions(mentions: Sequence[object]) -> list[dict[str, object]]:
     """Retain bounded mentioned-user identities without profile URLs."""
     projected: list[dict[str, object]] = []
     for mention in mentions[:MAX_EXTERNAL_CHANNEL_FILES]:
-        if not isinstance(mention, dict):
+        if not is_external_channel_projection(mention):
             continue
         mention_id = _bounded_string(mention.get("id"))
         if mention_id is not None:
@@ -441,12 +445,12 @@ def _project_mentions(mentions: list[object]) -> list[dict[str, object]]:
 
 
 def _project_managed_bot_role_mentions(
-    mentions: list[object],
+    mentions: Sequence[object],
 ) -> list[dict[str, object]]:
     """Retain bounded role and owning Bot identities without role metadata."""
     projected: list[dict[str, object]] = []
     for mention in mentions:
-        if not isinstance(mention, dict):
+        if not is_external_channel_projection(mention):
             continue
         role_id = _bounded_string(mention.get("id"))
         bot_user_id = _bounded_string(mention.get("bot_user_id"))
@@ -463,14 +467,14 @@ def _project_managed_bot_role_mentions(
 
 
 def _project_attachments(
-    attachments: list[object],
+    attachments: Sequence[object],
     *,
     source_channel_id: str,
 ) -> dict[str, object]:
     """Persist bounded provider-neutral metadata without Discord CDN or proxy URLs."""
     files: list[dict[str, object]] = []
     for attachment in attachments[:MAX_EXTERNAL_CHANNEL_FILES]:
-        if not isinstance(attachment, dict):
+        if not is_external_channel_projection(attachment):
             continue
         provider_file_id = _bounded_string(attachment.get("id"))
         raw_declared_size = attachment.get("size")
@@ -525,11 +529,11 @@ def _sdk_embed(embed: discord.Embed) -> dict[str, object]:
     }
 
 
-def _project_embeds(embeds: list[object]) -> list[dict[str, object]]:
+def _project_embeds(embeds: Sequence[object]) -> list[dict[str, object]]:
     """Retain bounded visible Discord embed semantics without any URLs."""
     projected: list[dict[str, object]] = []
     for embed in embeds[:_MAX_DISCORD_EMBEDS]:
-        if not isinstance(embed, dict):
+        if not is_external_channel_projection(embed):
             continue
         item: dict[str, object] = {}
         for key in ("type", "title", "description"):
@@ -541,7 +545,7 @@ def _project_embeds(embeds: list[object]) -> list[dict[str, object]]:
             ("footer", "footer_text", "text"),
         ):
             source = embed.get(source_key)
-            if not isinstance(source, dict):
+            if not is_external_channel_projection(source):
                 continue
             value = _bounded_string(source.get(text_key))
             if value is not None:
@@ -550,7 +554,7 @@ def _project_embeds(embeds: list[object]) -> list[dict[str, object]]:
         if isinstance(fields, list):
             projected_fields: list[dict[str, object]] = []
             for field in fields[:_MAX_DISCORD_EMBED_FIELDS]:
-                if not isinstance(field, dict):
+                if not is_external_channel_projection(field):
                     continue
                 name = _bounded_string(field.get("name"))
                 value = _bounded_string(field.get("value"))
@@ -569,7 +573,7 @@ def _project_embeds(embeds: list[object]) -> list[dict[str, object]]:
                     item["fields_truncated"] = True
         for key in ("image", "thumbnail"):
             source = embed.get(key)
-            if isinstance(source, dict) and (
+            if is_external_channel_projection(source) and (
                 source.get("present") is True
                 or isinstance(source.get("url"), str)
                 or isinstance(source.get("proxy_url"), str)
@@ -589,7 +593,7 @@ def _bounded_string(value: object) -> str | None:
 def _author(
     value: object,
 ) -> tuple[ExternalChannelPrincipalAuthorType, str | None, str | None]:
-    if not isinstance(value, dict):
+    if not is_external_channel_projection(value):
         return ExternalChannelPrincipalAuthorType.SYSTEM, None, None
     provider_user_id = _bounded_string(value.get("id"))
     display_name = _discord_display_name(value)
@@ -611,7 +615,7 @@ def _reference_mappings(
     users: dict[str, str] = {}
     channels: dict[str, str] = {}
     author = message.get("author")
-    if isinstance(author, dict):
+    if is_external_channel_projection(author):
         author_id = _bounded_string(author.get("id"))
         display_name = _discord_display_name(author)
         if author_id is not None and display_name is not None:
@@ -619,7 +623,7 @@ def _reference_mappings(
     mentions = message.get("mentions")
     if isinstance(mentions, list):
         for mention in mentions:
-            if not isinstance(mention, dict):
+            if not is_external_channel_projection(mention):
                 continue
             mention_id = _bounded_string(mention.get("id"))
             display_name = _discord_display_name(mention)
@@ -630,7 +634,7 @@ def _reference_mappings(
     if channel_id is not None and channel_name is not None:
         channels[channel_id] = channel_name
     thread = message.get("thread")
-    if isinstance(thread, dict):
+    if is_external_channel_projection(thread):
         thread_id = _bounded_string(thread.get("id"))
         thread_name = _bounded_string(thread.get("name"))
         if thread_id is not None and thread_name is not None:
@@ -675,11 +679,11 @@ def _attachment_metadata(message: dict[str, object]) -> dict[str, object] | None
     if attachments is None and embeds is None:
         return None
     metadata: dict[str, object] = {}
-    if attachments is not None and not isinstance(attachments, dict):
+    if attachments is not None and not is_external_channel_projection(attachments):
         raise DiscordEventNormalizationError(
             "Discord attachment projection is invalid."
         )
-    if isinstance(attachments, dict):
+    if is_external_channel_projection(attachments):
         files = attachments.get("files")
         if not isinstance(files, list):
             raise DiscordEventNormalizationError("Discord attachment list is invalid.")
@@ -697,7 +701,7 @@ def _attachment_metadata(message: dict[str, object]) -> dict[str, object] | None
 
 def _thread_identity(message: dict[str, object]) -> tuple[str | None, str | None]:
     raw_thread = message.get("thread")
-    if not isinstance(raw_thread, dict):
+    if not is_external_channel_projection(raw_thread):
         return None, None
     thread_id = _bounded_string(raw_thread.get("id"))
     parent_channel_id = _bounded_string(raw_thread.get("parent_id"))
@@ -714,7 +718,7 @@ def _mentions_connected_bot(
     if connected_bot_user_id is None or not isinstance(value, list):
         return False
     return any(
-        isinstance(item, dict) and item.get("id") == connected_bot_user_id
+        is_external_channel_projection(item) and item.get("id") == connected_bot_user_id
         for item in value
     )
 
@@ -727,7 +731,8 @@ def _managed_role_mentions_connected_bot(
     if connected_bot_user_id is None or not isinstance(value, list):
         return False
     return any(
-        isinstance(item, dict) and item.get("bot_user_id") == connected_bot_user_id
+        is_external_channel_projection(item)
+        and item.get("bot_user_id") == connected_bot_user_id
         for item in value
     )
 

@@ -442,14 +442,17 @@ class ExternalChannelWorkRepository:
         )
         if plan is None:
             return None
+        assert work is not None
+        expected_work_cycle_id = work.work_cycle_id
+        expected_progress_revision = work.desired_progress_revision
 
         def claim(
             current: ChannelWorkState,
         ) -> ChannelWorkStateMutation[bool]:
             if (
                 current.status is not ExternalChannelWorkStatus.ACTIVE
-                or current.work_cycle_id != work.work_cycle_id
-                or current.desired_progress_revision != work.desired_progress_revision
+                or current.work_cycle_id != expected_work_cycle_id
+                or current.desired_progress_revision != expected_progress_revision
                 or current.desired_progress is None
                 or any(part.part_ordinal == 0 for part in current.projection_parts)
             ):

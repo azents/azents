@@ -29,6 +29,7 @@ from azents.core.external_channel_file import (
     ExternalChannelFileMetadata,
     ExternalChannelFileUnsupportedReason,
 )
+from azents.core.external_channel_projection import is_external_channel_projection
 from azents.runtime.transfer.provider_source import ProviderByteStreamResponse
 from azents.services.external_channel.conversation import (
     ExternalChannelHistoryCredentialsInvalid,
@@ -328,7 +329,7 @@ def _normalize_slack_event(
         raise SlackEventExcluded("Slack event type is outside the configured scope.")
 
     event = envelope.get("event")
-    if not isinstance(event, dict):
+    if not is_external_channel_projection(event):
         raise SlackEventNormalizationError("Slack event object is missing.")
     if event.get("is_ext_shared_channel") is True:
         raise SlackEventExcluded("Slack Connect conversations are not supported.")
@@ -352,7 +353,8 @@ def _normalize_slack_event(
         raw_message = event.get("message")
         message = (
             raw_message
-            if _optional_string(event, "ts") is None and isinstance(raw_message, dict)
+            if _optional_string(event, "ts") is None
+            and is_external_channel_projection(raw_message)
             else event
         )
         revision_kind = ExternalChannelMessageRevisionKind.ORIGINAL
@@ -543,7 +545,7 @@ class SlackConversationClient:
             ),
         )
         channel = payload.get("channel")
-        if not isinstance(channel, dict):
+        if not is_external_channel_projection(channel):
             raise SlackProviderTemporaryError(
                 "Slack conversation response is malformed."
             )
@@ -578,7 +580,7 @@ class SlackConversationClient:
             ),
         )
         channel = payload.get("channel")
-        if not isinstance(channel, dict):
+        if not is_external_channel_projection(channel):
             raise SlackProviderTemporaryError(
                 "Slack conversation response is malformed."
             )
@@ -601,7 +603,7 @@ class SlackConversationClient:
                 ),
             )
             bot = payload.get("bot")
-            if not isinstance(bot, dict):
+            if not is_external_channel_projection(bot):
                 raise SlackProviderTemporaryError("Slack bot response is malformed.")
             name = bot.get("name")
             return name if isinstance(name, str) and name else None
@@ -616,10 +618,10 @@ class SlackConversationClient:
             ),
         )
         user = payload.get("user")
-        if not isinstance(user, dict):
+        if not is_external_channel_projection(user):
             raise SlackProviderTemporaryError("Slack user response is malformed.")
         profile = user.get("profile")
-        profile_values = profile if isinstance(profile, dict) else {}
+        profile_values = profile if is_external_channel_projection(profile) else {}
         for value in (
             profile_values.get("display_name"),
             user.get("real_name"),
@@ -660,7 +662,7 @@ class SlackConversationClient:
             )
         messages: list[SlackNormalizedMessage] = []
         for item in raw_messages:
-            if isinstance(item, dict):
+            if is_external_channel_projection(item):
                 try:
                     normalized = normalize_slack_history_message(
                         tenant_id=tenant_id,
@@ -673,7 +675,7 @@ class SlackConversationClient:
                 messages.append(normalized)
         metadata = payload.get("response_metadata")
         next_cursor = None
-        if isinstance(metadata, dict):
+        if is_external_channel_projection(metadata):
             raw_cursor = metadata.get("next_cursor")
             if isinstance(raw_cursor, str) and raw_cursor:
                 next_cursor = raw_cursor
@@ -809,7 +811,7 @@ class SlackConversationClient:
                 )
             page_messages: list[SlackNormalizedMessage] = []
             for raw_message in raw_messages:
-                if not isinstance(raw_message, dict):
+                if not is_external_channel_projection(raw_message):
                     continue
                 try:
                     message_size = len(
@@ -890,7 +892,7 @@ class SlackConversationClient:
                 break
             metadata = payload.get("response_metadata")
             next_cursor = None
-            if isinstance(metadata, dict):
+            if is_external_channel_projection(metadata):
                 value = metadata.get("next_cursor")
                 if isinstance(value, str) and value:
                     next_cursor = value
@@ -982,7 +984,7 @@ class SlackConversationClient:
             ),
         )
         raw_file = payload.get("file")
-        if not isinstance(raw_file, dict):
+        if not is_external_channel_projection(raw_file):
             raise SlackProviderTemporaryError("Slack file response is malformed.")
         if raw_file.get("deleted") is True:
             raise SlackProviderFileNotFound(
@@ -1167,13 +1169,18 @@ class SlackConversationClient:
         blocks = message.get("blocks")
         if not isinstance(text, str) or not isinstance(blocks, list):
             raise ValueError("Slack approval message projection is invalid.")
+        projected_blocks: list[dict[str, object]] = []
+        for block in blocks:
+            if not is_external_channel_projection(block):
+                raise ValueError("Slack approval message projection is invalid.")
+            projected_blocks.append(block)
 
         async def request(include_icon: bool) -> AsyncSlackResponse:
             return await self.web_client.chat_postMessage(
                 channel=channel_id,
                 thread_ts=thread_ts,
                 text=text,
-                blocks=blocks,
+                blocks=projected_blocks,
                 icon_url=icon_url if include_icon else None,
                 unfurl_links=False,
                 unfurl_media=False,
@@ -1908,7 +1915,7 @@ class SlackConversationClient:
                 },
             ) from error
         payload = response.data
-        if not isinstance(payload, dict):
+        if not is_external_channel_projection(payload):
             raise SlackProviderTemporaryError(
                 "Slack response body is malformed.",
                 diagnostics=_slack_sdk_response_diagnostics(
@@ -2061,7 +2068,7 @@ def _slack_sdk_response_header(
 
 def _diagnostic_argument_names(response_metadata: object) -> list[str]:
     """Extract known parameter names from Slack diagnostics without their values."""
-    if not isinstance(response_metadata, dict):
+    if not is_external_channel_projection(response_metadata):
         return []
     messages = response_metadata.get("messages")
     if not isinstance(messages, list):
@@ -2186,7 +2193,7 @@ def _connected_slack_bot_user_ids(
         return user_ids
     for authorization in authorizations:
         if (
-            isinstance(authorization, dict)
+            is_external_channel_projection(authorization)
             and authorization.get("is_bot") is True
             and authorization.get("team_id") == tenant_id
         ):
@@ -2303,7 +2310,7 @@ def _block_attachment_metadata(value: object) -> dict[str, object] | None:
     block_types = [
         block.get("type")
         for block in value[:_MAX_ATTACHMENT_TYPES]
-        if isinstance(block, dict) and isinstance(block.get("type"), str)
+        if is_external_channel_projection(block) and isinstance(block.get("type"), str)
     ]
     return {
         "block_count": len(value),
@@ -2317,7 +2324,7 @@ def _file_attachment_metadata(value: object) -> list[dict[str, object]]:
         return []
     metadata: list[dict[str, object]] = []
     for raw_file in value[:MAX_EXTERNAL_CHANNEL_FILES]:
-        if not isinstance(raw_file, dict):
+        if not is_external_channel_projection(raw_file):
             continue
         metadata.append(normalize_slack_file_metadata(raw_file).model_dump(mode="json"))
     return metadata

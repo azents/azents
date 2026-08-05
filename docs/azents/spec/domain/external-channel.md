@@ -10,6 +10,7 @@ code_paths:
   - python/apps/azents/db-schemas/rdb/migrations/versions/*channel_work*.py
   - python/apps/azents/src/azents/core/external_channel.py
   - python/apps/azents/src/azents/core/external_channel_file.py
+  - python/apps/azents/src/azents/core/external_channel_projection.py
   - python/apps/azents/src/azents/core/external_channel_progress.py
   - python/apps/azents/src/azents/core/external_channel_reference.py
   - python/apps/azents/src/azents/core/external_channel_session_presence.py
@@ -59,8 +60,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-08-04
-spec_version: 49
+last_verified_at: 2026-08-05
+spec_version: 50
 ---
 
 # External Channel
@@ -92,6 +93,10 @@ contain multiple independent bindings.
 - Provider history is the inbound content authority. One accepted history range becomes
   one canonical mailbox item and then contiguous Session events with provider, resource,
   sender, author type, authorization, and message identity attribution.
+- Bounded Slack and Discord provider projections are decoded and encoded through
+  Azents-owned typed contracts at the durable JSON boundary. SDK objects, signed raw
+  bodies, SDK private state, and Gateway frames remain process-local and are never
+  reconstructed or persisted for replay.
 - Slack and Discord model input preserves provider-native user and channel reference
   tokens in the source body. Resolved display names appear separately after the message
   batch in one XML provider-reference mapping block, so readability enrichment does not
@@ -428,6 +433,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-05** (spec_version 50) — Added Azents-owned typed Slack and Discord
+  projection decoding at durable JSON boundaries while retaining request-local signed
+  bodies and public SDK object ownership.
 - **2026-08-04** (spec_version 49) — Removed `expected_size_bytes` and provider
   metadata-size gating from Slack and Discord downloads. The authenticated final URL
   `Content-Length` now exclusively declares transfer size and must match the streamed
