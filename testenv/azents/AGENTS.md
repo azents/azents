@@ -42,9 +42,14 @@ uv run pytest ./src/tests/azents/public/test_health.py
 
 E2E is the primary location for product behavior verification. `testenv` is the fixture/prerequisite support layer that makes E2E execution possible.
 
-Required CI runs three credential-free E2E lanes from `testenv/azents/e2e`. Deterministic E2E uses `uv run pytest -vv -m "not live_external and not runtime_provider and not web_surface" ./src`. Focused Runtime Provider E2E runs selected Docker Provider journeys. Web Surface E2E runs separately with `uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src` and exercises worktree-built web applications through a real browser and gateway.
+Required CI runs one Docker-free Testenv unit job and three credential-free E2E lanes from `testenv/azents/e2e`. Testenv unit uses `uv run pytest -vv ./src/unit_tests`. Deterministic E2E uses `uv run pytest -vv -m "not live_external and not runtime_provider and not web_surface" ./src/tests`. Focused Runtime Provider E2E runs selected Docker Provider journeys. Web Surface E2E runs separately with `uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src/tests` and exercises worktree-built web applications through a real browser and gateway.
 
 Each executed lane uploads JUnit XML, pytest output, slow-test timing, and Docker diagnostics even when pytest fails. Failed browser tests also capture a screenshot and page HTML when the browser session is available. Same-repository pull requests receive one sticky E2E observability comment that links to the workflow artifacts and summarizes each executed lane. Fork pull requests remain read-only and do not publish the comment.
+
+Tests under `src/unit_tests/` must not start an HTTP/WebSocket server, open a network
+listener, use Docker, build a product image, or depend on browser, Runtime Provider, or
+external prerequisite state. Tests requiring any of those boundaries remain under
+`src/tests/` as E2E verification.
 
 Live/external verification runs only with the `azents-live-e2e` PR label, a maintainer comment on same-repository PRs, a manual workflow, or a nightly workflow. Live workflows run E2E tests marked `live_external`. Requested live verification fails when credentials are missing; nightly optional verification records prerequisite-not-ready as a skip summary.
 

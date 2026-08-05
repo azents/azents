@@ -255,6 +255,29 @@ jobs:
           echo "Python scope changed but results were: app=$result migrations=$migrations_result"
           exit 1
 
+  ci_testenv_unit_run:
+    name: ci-testenv-unit-run
+    needs: changes
+    if: needs.changes.outputs.python_e2e == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.14"
+      - name: Install dependencies
+        run: |
+          cd testenv/azents/e2e
+          uv sync
+      - name: Run testenv unit tests
+        run: |
+          cd testenv/azents/e2e
+          uv run pytest -vv ./src/unit_tests
+
   ci_python_e2e_run:
     name: ci-deterministic-e2e-run
     needs: changes
@@ -299,7 +322,7 @@ jobs:
             --durations=30 \
             --durations-min=0.25 \
             -m "not live_external and not runtime_provider and not web_surface" \
-            ./src 2>&1 | tee "$report_dir/pytest.log"
+            ./src/tests 2>&1 | tee "$report_dir/pytest.log"
       - name: Capture deterministic E2E diagnostics
         if: always()
         run: |
@@ -411,7 +434,7 @@ jobs:
             --durations=30 \
             --durations-min=0.25 \
             -m "web_surface and not live_external and not runtime_provider" \
-            ./src 2>&1 | tee "$report_dir/pytest.log"
+            ./src/tests 2>&1 | tee "$report_dir/pytest.log"
       - name: Capture Web Surface E2E diagnostics
         if: always()
         run: |
@@ -439,6 +462,7 @@ jobs:
     name: ci-python-e2e
     needs:
       - changes
+      - ci_testenv_unit_run
       - ci_python_e2e_run
       - ci_tool_search_runtime_provider_e2e_run
       - ci_web_surface_e2e_run
@@ -448,6 +472,8 @@ jobs:
       - name: Gate E2E results
         run: |
           changes_result='${{ needs.changes.result }}'
+          unit_changed='${{ needs.changes.outputs.python_e2e }}'
+          unit_result='${{ needs.ci_testenv_unit_run.result }}'
           deterministic_changed='${{ needs.changes.outputs.python_e2e }}'
           deterministic_result='${{ needs.ci_python_e2e_run.result }}'
           tool_search_runtime_provider_changed='${{ needs.changes.outputs.tool_search_runtime_provider_e2e }}'
@@ -456,6 +482,11 @@ jobs:
           web_surface_result='${{ needs.ci_web_surface_e2e_run.result }}'
           if [ "$changes_result" != 'success' ]; then
             echo "changes job failed or was skipped: $changes_result"
+            exit 1
+          fi
+          if [ "$unit_changed" = 'true' ] \
+            && [ "$unit_result" != 'success' ]; then
+            echo "Testenv unit result was: $unit_result"
             exit 1
           fi
           if [ "$deterministic_changed" = 'true' ] \

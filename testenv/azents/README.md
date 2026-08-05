@@ -23,8 +23,9 @@ Required CI uses separate credential-free lanes for deterministic product behavi
 
 ```bash
 cd testenv/azents/e2e
-uv run pytest -vv -m "not live_external and not runtime_provider and not web_surface" ./src
-uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src
+uv run pytest -vv ./src/unit_tests
+uv run pytest -vv -m "not live_external and not runtime_provider and not web_surface" ./src/tests
+uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src/tests
 ```
 
 Live/external verifytranslated deterministic CI translated translated translated. PR translated `azents-live-e2e` label translated
