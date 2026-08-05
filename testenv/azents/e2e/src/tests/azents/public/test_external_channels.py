@@ -14,7 +14,6 @@ import azentsadminclient
 import azentspublicclient
 import pytest
 import requests
-from azentspublicclient.api.agent_runtime_v1_api import AgentRuntimeV1Api
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.chat_v1_api import ChatV1Api
 from azentspublicclient.api.external_channel_v1_api import ExternalChannelV1Api
@@ -97,7 +96,10 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import WebDriverWait
 
-from support.runtime_profiles import create_workspace_runtime_profile
+from support.runtime_profiles import (
+    create_workspace_runtime_profile,
+    start_and_wait_for_agent_runtime,
+)
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
@@ -117,12 +119,15 @@ _DISCORD_GUILD_ID = "200000000000000001"
 _DISCORD_BOT_USER_ID = "300000000000000001"
 _DISCORD_CHANNEL_ID = "400000000000000001"
 _DISCORD_BOT_TOKEN = "discord-e2e-private"
+_RUNTIME_PROVIDER_ID = "system-docker"
 _DISCORD_COMMAND_CONTRACTS = {
     "message_action": ("Ask an Azents Agent", 3),
     "azents_settings": ("Azents settings", 1),
     "conversation_settings": ("Conversation settings", 3),
 }
 _EXTERNAL_CHANNEL_LARGE_FILE_BYTES = 6 * 1024 * 1024
+
+pytestmark = pytest.mark.usefixtures("azents_runtime_provider_docker_container")
 
 
 def _create_agent(
@@ -153,26 +158,12 @@ def _wait_for_runtime_runner_ready(
     agent_id: str,
 ) -> None:
     """Start and wait for the Agent Runtime Runner required by file transfer."""
-    api = AgentRuntimeV1Api(public_api_client)
-    headers = {"Authorization": f"Bearer {token}"}
-    api.agent_runtime_v1_start_agent_runtime(
+    start_and_wait_for_agent_runtime(
+        public_api_client,
+        token=token,
+        workspace_handle=workspace_handle,
         agent_id=agent_id,
-        handle=workspace_handle,
-        _headers=headers,
     )
-    deadline = time.monotonic() + 120
-    last_state: object | None = None
-    while time.monotonic() < deadline:
-        state = api.agent_runtime_v1_observe_agent_runtime(
-            agent_id=agent_id,
-            handle=workspace_handle,
-            _headers=headers,
-        )
-        last_state = state
-        if state.state.actions.use_runner:
-            return
-        time.sleep(1)
-    raise AssertionError(f"Runtime Runner did not become ready: {last_state!r}")
 
 
 def _create_workspace_agents(
@@ -220,15 +211,11 @@ def _create_workspace_agents(
         handle,
         integration.id,
     )
-    runtime_profile_id = (
-        create_workspace_runtime_profile(
-            public_api_client,
-            token=token,
-            workspace_handle=handle,
-            provider_id=runtime_profile_provider_id,
-        )
-        if runtime_profile_provider_id is not None
-        else None
+    runtime_profile_id = create_workspace_runtime_profile(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        provider_id=runtime_profile_provider_id or _RUNTIME_PROVIDER_ID,
     )
     agent_api = AgentV1Api(public_api_client)
     agent_ids = [
@@ -246,6 +233,13 @@ def _create_workspace_agents(
         ).id
         for index in range(agent_count)
     ]
+    for agent_id in agent_ids:
+        _wait_for_runtime_runner_ready(
+            public_api_client,
+            token=token,
+            workspace_handle=handle,
+            agent_id=agent_id,
+        )
     return token, email, handle, agent_ids
 
 

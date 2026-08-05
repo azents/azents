@@ -35,7 +35,10 @@ from azentspublicclient.models.toolkit_config_create_request import (
 from pydantic import TypeAdapter
 from testcontainers.core.container import DockerContainer
 
-from support.runtime_profiles import create_workspace_runtime_profile
+from support.runtime_profiles import (
+    create_workspace_runtime_profile,
+    start_and_wait_for_agent_runtime,
+)
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
@@ -504,6 +507,12 @@ def _create_agent_with_runtime_hook_toolkit(
             tool_search_enabled=tool_search_enabled,
         ),
         _headers=headers,
+    )
+    start_and_wait_for_agent_runtime(
+        public_api_client,
+        token=workspace.token,
+        workspace_handle=workspace.handle,
+        agent_id=agent.id,
     )
     toolkit_api.toolkit_v1_attach_toolkit_to_agent(
         handle=workspace.handle,

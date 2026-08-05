@@ -6,6 +6,7 @@ from typing import cast
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 import requests
 
 from support.utils import unique
@@ -33,6 +34,8 @@ _PROXY_JOURNAL_PATH = "/v1/_image_generation_requests"
 _COMPACTION_SYSTEM_PREFIX = (
     "You are a context compaction engine for a long-running agent."
 )
+
+pytestmark = pytest.mark.usefixtures("azents_runtime_provider_docker_container")
 
 
 def _submit(

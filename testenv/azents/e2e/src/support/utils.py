@@ -36,6 +36,11 @@ from azentspublicclient.models.llm_provider_integration_create_request import (
 )
 from azentspublicclient.models.secrets import Secrets
 
+from support.runtime_profiles import (
+    create_workspace_runtime_profile,
+    start_and_wait_for_agent_runtime,
+)
+
 T = TypeVar("T")
 
 
@@ -320,6 +325,12 @@ def create_chat_session_with_agent(
         handle,
         integration.id,
     )
+    runtime_profile_id = create_workspace_runtime_profile(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        provider_id="system-docker",
+    )
 
     # Agent create
     agent_api = AgentV1Api(public_api_client)
@@ -330,8 +341,15 @@ def create_chat_session_with_agent(
             model_selection=model_selection,
             lightweight_model_selection=model_selection,
             type=AgentType.PUBLIC,
+            runtime_profile_id=runtime_profile_id,
         ),
         _headers={"Authorization": f"Bearer {token}"},
+    )
+    start_and_wait_for_agent_runtime(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        agent_id=agent.id,
     )
 
     session_response = http_requests.get(
@@ -435,6 +453,12 @@ def create_two_member_team_session(
         handle,
         integration.id,
     )
+    runtime_profile_id = create_workspace_runtime_profile(
+        public_api_client,
+        token=owner_token,
+        workspace_handle=handle,
+        provider_id="system-docker",
+    )
     agent = AgentV1Api(public_api_client).agent_v1_create_agent(
         handle=handle,
         agent_create_request=AgentCreateRequest(
@@ -442,8 +466,15 @@ def create_two_member_team_session(
             model_selection=model_selection,
             lightweight_model_selection=model_selection,
             type=AgentType.PUBLIC,
+            runtime_profile_id=runtime_profile_id,
         ),
         _headers=owner_headers,
+    )
+    start_and_wait_for_agent_runtime(
+        public_api_client,
+        token=owner_token,
+        workspace_handle=handle,
+        agent_id=agent.id,
     )
     session_response = http_requests.get(
         f"{server_url}/chat/v1/agents/{agent.id}/team-primary-session",

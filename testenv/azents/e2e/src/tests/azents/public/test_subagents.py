@@ -36,6 +36,10 @@ from azentspublicclient.models.toolkit_config_create_request import (
 from pydantic import TypeAdapter, ValidationError
 from testcontainers.core.container import DockerContainer
 
+from support.runtime_profiles import (
+    create_workspace_runtime_profile,
+    start_and_wait_for_agent_runtime,
+)
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
@@ -81,6 +85,8 @@ _FAILED_INTERNAL_MARKER = "SUBAGENT_INTERNAL_PROVIDER_FAILURE_MARKER"
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
 
+pytestmark = pytest.mark.usefixtures("azents_runtime_provider_docker_container")
+
 
 @dataclass(frozen=True)
 class _Workspace:
@@ -89,6 +95,7 @@ class _Workspace:
     token: str
     handle: str
     model_selection: AgentModelSelectionInput
+    runtime_profile_id: str
 
 
 @dataclass(frozen=True)
@@ -178,6 +185,12 @@ def _setup_workspace(
             handle,
             integration.id,
         ),
+        runtime_profile_id=create_workspace_runtime_profile(
+            public_api_client,
+            token=token,
+            workspace_handle=handle,
+            provider_id="system-docker",
+        ),
     )
 
 
@@ -193,6 +206,7 @@ def _create_agent(
         model_selection=workspace.model_selection,
         lightweight_model_selection=workspace.model_selection,
         type=AgentType.PUBLIC,
+        runtime_profile_id=workspace.runtime_profile_id,
         shell_enabled=True,
     )
     if release_file_path is not None:
@@ -227,6 +241,12 @@ def _create_agent(
             ),
             _headers=_headers(workspace.token),
         )
+    start_and_wait_for_agent_runtime(
+        public_api_client,
+        token=workspace.token,
+        workspace_handle=workspace.handle,
+        agent_id=agent.id,
+    )
     return agent.id
 
 

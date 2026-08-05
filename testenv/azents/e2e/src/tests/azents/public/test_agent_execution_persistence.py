@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 import requests
 from azentspublicclient.api.agent_v1_api import AgentV1Api
 from azentspublicclient.api.chat_v1_api import ChatV1Api
@@ -36,11 +37,17 @@ from pydantic import TypeAdapter, ValidationError
 from websockets.sync.client import connect as ws_connect
 from websockets.sync.connection import Connection
 
+from support.runtime_profiles import (
+    create_workspace_runtime_profile,
+    start_and_wait_for_agent_runtime,
+)
 from support.utils import (
     authenticate_user,
     model_selection_from_first_candidate,
     unique,
 )
+
+pytestmark = pytest.mark.usefixtures("azents_runtime_provider_docker_container")
 
 _HELLO = "Event durable hello"
 _HELLO_RESPONSE = "Event durable hello response."
@@ -101,6 +108,7 @@ class _Workspace:
     email: str
     handle: str
     model_selection: AgentModelSelectionInput
+    runtime_profile_id: str
 
 
 @dataclass(frozen=True)
@@ -202,6 +210,7 @@ def _wait_for_ws_action(
     ws: Connection,
     *,
     action_type: str,
+    mailbox_item_id: str | None = None,
     timeout: float = 10,
 ) -> dict[str, object]:
     """Wait for a canonical WebSocket action of the requested type."""
@@ -213,8 +222,12 @@ def _wait_for_ws_action(
         except TimeoutError:
             continue
         observed.append(action.get("type"))
-        if action.get("type") == action_type:
-            return action
+        if action.get("type") != action_type:
+            continue
+        if mailbox_item_id is not None:
+            if action.get("mailbox_item_id") != mailbox_item_id:
+                continue
+        return action
     raise TimeoutError(f"WebSocket action was not observed: {action_type}, {observed}")
 
 
@@ -338,6 +351,12 @@ def _setup_workspace(
             handle,
             integration.id,
         ),
+        runtime_profile_id=create_workspace_runtime_profile(
+            public_api_client,
+            token=token,
+            workspace_handle=handle,
+            provider_id="system-docker",
+        ),
     )
 
 
@@ -371,6 +390,7 @@ def _create_agent(
             model_selection=workspace.model_selection,
             lightweight_model_selection=workspace.model_selection,
             type=AgentType.PUBLIC,
+            runtime_profile_id=workspace.runtime_profile_id,
             shell_enabled=True,
         ),
         _headers=headers,
@@ -384,6 +404,12 @@ def _create_agent(
             ),
             _headers=headers,
         )
+    start_and_wait_for_agent_runtime(
+        public_api_client,
+        token=workspace.token,
+        workspace_handle=workspace.handle,
+        agent_id=agent.id,
+    )
     return agent.id
 
 
@@ -1246,6 +1272,7 @@ class TestAgentExecutionPersistence:
             removal_action = _wait_for_ws_action(
                 ws,
                 action_type="mailbox_item_removed",
+                mailbox_item_id=mailbox_item_id,
                 timeout=120,
             )
             assert removal_action == {

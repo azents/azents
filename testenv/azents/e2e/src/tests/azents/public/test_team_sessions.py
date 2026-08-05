@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 import requests
 from pydantic import TypeAdapter, ValidationError
 
@@ -16,6 +17,8 @@ from support.utils import (
 
 _JSON_OBJECT = TypeAdapter(dict[str, object])
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
+
+pytestmark = pytest.mark.usefixtures("azents_runtime_provider_docker_container")
 
 
 @dataclass(frozen=True)

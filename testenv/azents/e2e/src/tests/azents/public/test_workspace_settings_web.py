@@ -147,7 +147,6 @@ def test_workspace_settings_hub_owner_and_member_flows(
     _wait(browser_driver).until(ec.url_contains("/settings/runtime-profiles"))
     _assert_visible_text(browser_driver, workspace_name)
     _assert_visible_text(browser_driver, "Runtime profiles")
-    _assert_visible_text(browser_driver, "No Provider profiles available")
     _assert_visible_text(browser_driver, "Add profile")
     _wait(browser_driver).until(
         ec.element_to_be_clickable((By.LINK_TEXT, "Back to settings"))

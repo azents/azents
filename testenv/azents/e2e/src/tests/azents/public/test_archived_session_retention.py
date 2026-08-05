@@ -4,6 +4,7 @@ from typing import Any, cast
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 import requests
 from azentsadminclient.api.system_v1_api import SystemV1Api
 from azentsadminclient.models.file_lifecycle_settings_update_request import (
@@ -13,6 +14,8 @@ from azentspublicclient.api.chat_v1_api import ChatV1Api
 from testcontainers.core.container import DockerContainer
 
 from support.utils import create_chat_session_with_agent
+
+pytestmark = pytest.mark.usefixtures("azents_runtime_provider_docker_container")
 
 
 def _headers(token: str) -> dict[str, str]:

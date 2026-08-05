@@ -8,6 +8,7 @@ from typing import cast
 
 import azentsadminclient
 import azentspublicclient
+import pytest
 import requests
 from azentsadminclient.api.model_catalog_v1_api import ModelCatalogV1Api
 from azentsadminclient.models.system_catalog_provider import SystemCatalogProvider
@@ -26,6 +27,10 @@ from pydantic import TypeAdapter
 
 from support.consts import REPOSITORY_ROOT
 from support.oauth_connections import connect_xai_oauth
+from support.runtime_profiles import (
+    create_workspace_runtime_profile,
+    start_and_wait_for_agent_runtime,
+)
 from support.utils import authenticate_user, unique, wait_until
 from tests.azents.public.test_agent_execution_persistence import (
     auth_headers,
@@ -55,6 +60,8 @@ _IMAGE_PATH = (
 _IMAGE_BYTES = _IMAGE_PATH.read_bytes()
 _IMAGE_SHA256 = hashlib.sha256(_IMAGE_BYTES).hexdigest()
 _JSON_OBJECT_LIST = TypeAdapter(list[dict[str, object]])
+
+pytestmark = pytest.mark.usefixtures("azents_runtime_provider_docker_container")
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -189,6 +196,12 @@ def _setup_xai_agent(
         [{"name": "image_generation"}] if enabled else []
     )
     no_builtin_tools: list[dict[str, str]] = []
+    runtime_profile_id = create_workspace_runtime_profile(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        provider_id="system-docker",
+    )
     created = _response_object(
         requests.post(
             f"{server_url}/agent/v1/workspaces/{handle}/agents",
@@ -222,6 +235,7 @@ def _setup_xai_agent(
                 ],
                 "main_model_label": "Quality",
                 "lightweight_model_label": "Fast",
+                "runtime_profile_id": runtime_profile_id,
             },
             timeout=10,
         )
@@ -229,6 +243,12 @@ def _setup_xai_agent(
     agent_id = created.get("id")
     if not isinstance(agent_id, str):
         raise AssertionError(f"Agent response did not include id: {created!r}")
+    start_and_wait_for_agent_runtime(
+        public_api_client,
+        token=token,
+        workspace_handle=handle,
+        agent_id=agent_id,
+    )
     session = _response_object(
         requests.get(
             f"{server_url}/chat/v1/agents/{agent_id}/team-primary-session",
