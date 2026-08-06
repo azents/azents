@@ -1,8 +1,12 @@
 """MailboxRepository tests."""
 
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 import sqlalchemy as sa
 from azcommon.result import Success
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -133,6 +137,24 @@ def _create_payload(
 
 class TestMailboxRepository:
     """MailboxRepository tests."""
+
+    async def test_detach_sender_user_id_clears_retained_rows(self) -> None:
+        """Detach one deleted User from retained MailboxItems."""
+        session = MagicMock(spec=AsyncSession)
+        session.execute = AsyncMock(return_value=SimpleNamespace(rowcount=3))
+        session.flush = AsyncMock()
+
+        detached = await MailboxRepository().detach_sender_user_id(
+            session,
+            sender_user_id="user-1",
+        )
+
+        assert detached == 3
+        statement = session.execute.await_args_list[0].args[0]
+        sql = str(statement.compile(dialect=postgresql.dialect()))
+        assert "mailbox_items" in sql
+        assert "sender_user_id" in sql
+        session.flush.assert_awaited_once()
 
     async def test_create_round_trips_jsonb_fields(
         self,

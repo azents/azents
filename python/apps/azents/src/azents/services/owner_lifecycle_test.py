@@ -75,6 +75,7 @@ class _Root:
     status: AgentSessionStatus = AgentSessionStatus.ACTIVE
     run_state: AgentSessionRunState = AgentSessionRunState.IDLE
     product_mode: AgentSessionProductMode | None = AgentSessionProductMode.USER
+    archived_at: datetime.datetime | None = None
 
 
 class _OwnerLifecycleRepositoryDouble:
@@ -201,6 +202,9 @@ class _SessionRepositoryDouble:
         del session
         if not self.tree_active:
             return []
+        for root in self.all_roots:
+            if root.id == root_session_id:
+                return [root]
         return [
             _Root(
                 id=root_session_id,
@@ -324,6 +328,59 @@ class _UserRepositoryDouble:
         self.deleted.append(user_id)
 
 
+class _RetainedReferenceRepositoryDouble:
+    """Retained-reference cleanup double."""
+
+    def __init__(self) -> None:
+        self.chat_write_users: list[str] = []
+        self.mailbox_users: list[str] = []
+        self.exchange_file_users: list[str] = []
+        self.external_channel_users: list[str] = []
+
+    async def delete_by_requester_user_id(
+        self,
+        session: AsyncSession,
+        *,
+        requester_user_id: str,
+    ) -> int:
+        """Record ChatWriteRequest cleanup."""
+        del session
+        self.chat_write_users.append(requester_user_id)
+        return 1
+
+    async def detach_sender_user_id(
+        self,
+        session: AsyncSession,
+        *,
+        sender_user_id: str,
+    ) -> int:
+        """Record MailboxItem cleanup."""
+        del session
+        self.mailbox_users.append(sender_user_id)
+        return 1
+
+    async def detach_source_user_id(
+        self,
+        session: AsyncSession,
+        *,
+        source_user_id: str,
+    ) -> int:
+        """Record ExchangeFile cleanup."""
+        del session
+        self.exchange_file_users.append(source_user_id)
+        return 1
+
+    async def detach_user_references(
+        self,
+        session: AsyncSession,
+        *,
+        user_id: str,
+    ) -> None:
+        """Record External Channel cleanup."""
+        del session
+        self.external_channel_users.append(user_id)
+
+
 class _OrchestratorDouble:
     """Lifecycle orchestrator double."""
 
@@ -381,6 +438,7 @@ def _service(
     retention: _RetentionRepositoryDouble | None = None,
     memory: _MemoryRepositoryDouble | None = None,
     users: _UserRepositoryDouble | None = None,
+    retained_references: _RetainedReferenceRepositoryDouble | None = None,
 ) -> tuple[
     OwnerLifecycleService,
     _OwnerLifecycleRepositoryDouble,
@@ -394,6 +452,7 @@ def _service(
     retention_repo = retention or _RetentionRepositoryDouble()
     memory_repo = memory or _MemoryRepositoryDouble()
     user_repo = users or _UserRepositoryDouble()
+    retained_repo = retained_references or _RetainedReferenceRepositoryDouble()
     broker = _BrokerDouble()
     service = OwnerLifecycleService(
         session_manager=_session_manager,
@@ -403,6 +462,10 @@ def _service(
         retention_repository=retention_repo,
         memory_repository=memory_repo,
         user_repository=user_repo,
+        chat_write_request_repository=retained_repo,
+        mailbox_repository=retained_repo,
+        exchange_file_repository=retained_repo,
+        external_channel_repository=retained_repo,
         lifecycle_orchestrator=_OrchestratorDouble(),
         external_channel_lifecycle_service=_ExternalChannelDouble(),
         broker=broker,
@@ -510,9 +573,11 @@ async def test_account_purge_finalizes_user_after_sessions_gone() -> None:
         workspace_id=None,
     )
     sessions = _SessionRepositoryDouble(active_roots=[], all_roots=[], remaining=False)
+    retained_references = _RetainedReferenceRepositoryDouble()
     service, lifecycle_repo, _, memory, users, _ = _service(
         jobs=[job],
         sessions=sessions,
+        retained_references=retained_references,
     )
 
     summary = await service.process_once(
@@ -524,6 +589,52 @@ async def test_account_purge_finalizes_user_after_sessions_gone() -> None:
     assert memory.deleted_users == [job.user_id]
     assert users.deleted == [job.user_id]
     assert lifecycle_repo.completed == ["p2"]
+    assert retained_references.chat_write_users == [job.user_id]
+    assert retained_references.mailbox_users == [job.user_id]
+    assert retained_references.exchange_file_users == [job.user_id]
+    assert retained_references.external_channel_users == [job.user_id]
+
+
+@pytest.mark.asyncio
+async def test_account_purge_accelerates_already_archived_user_roots() -> None:
+    """Account purge forces immediate eligibility for previously archived roots."""
+    job = _job(
+        job_id="p3",
+        kind=OwnerLifecycleKind.ACCOUNT_PURGE,
+        workspace_id=None,
+    )
+    archived_at = datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=3)
+    sessions = _SessionRepositoryDouble(
+        all_roots=[
+            _Root(
+                id="root-archived",
+                status=AgentSessionStatus.ARCHIVED,
+                archived_at=archived_at,
+            )
+        ],
+        remaining=True,
+    )
+    service, lifecycle_repo, retention, memory, users, _ = _service(
+        jobs=[job],
+        sessions=sessions,
+    )
+
+    summary = await service.process_once(
+        lease_owner="worker-1",
+        deadline=datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=5),
+    )
+
+    assert summary.waiting_purge_count == 1
+    assert sessions.archived == ["root-archived"]
+    assert retention.scheduled
+    assert retention.scheduled[0][0] == "root-archived"
+    assert retention.scheduled[0][1] <= datetime.datetime.now(
+        datetime.UTC
+    ) + datetime.timedelta(seconds=5)
+    assert memory.deleted_users == []
+    assert users.deleted == []
+    assert lifecycle_repo.retries
+    assert lifecycle_repo.retries[0][1] == "WaitingPurge"
 
 
 @pytest.mark.asyncio

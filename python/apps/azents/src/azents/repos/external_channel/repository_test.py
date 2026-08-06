@@ -119,6 +119,33 @@ def _connection_create(workspace_id: str) -> ExternalChannelConnectionCreate:
 
 
 @pytest.mark.asyncio
+async def test_detach_user_references_preserves_external_channel_invariants() -> None:
+    """Detach retained audit references without violating configured-actor checks."""
+    repository = ExternalChannelRepository()
+    session = MagicMock(spec=AsyncSession)
+    session.execute = AsyncMock(
+        side_effect=[SimpleNamespace(rowcount=1) for _ in range(10)]
+    )
+    session.flush = AsyncMock()
+
+    await repository.detach_user_references(session, user_id="user-1")
+
+    assert session.execute.await_count == 10
+    sql = "\n".join(
+        str(call.args[0].compile(dialect=postgresql.dialect()))
+        for call in session.execute.await_args_list
+    )
+    assert "external_channel_agent_routes" in sql
+    assert "external_channel_channel_defaults" in sql
+    assert "external_channel_participation_settings" in sql
+    assert "external_channel_access_requests" in sql
+    assert "external_channel_access_grants" in sql
+    assert "external_channel_blocks" in sql
+    assert "configured_by_principal_id" in sql
+    session.flush.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_conversation_position_lock_and_compare_and_set_are_fenced(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

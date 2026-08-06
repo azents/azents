@@ -30,6 +30,10 @@ from azents.rdb.deps import get_session_manager
 from azents.repos.agent_execution import AgentRunRepository
 from azents.repos.agent_session import AgentSessionRepository
 from azents.repos.archived_session_retention import ArchivedSessionRetentionRepository
+from azents.repos.chat_write_request import ChatWriteRequestRepository
+from azents.repos.exchange_file import ExchangeFileRepository
+from azents.repos.external_channel.repository import ExternalChannelRepository
+from azents.repos.mailbox import MailboxRepository
 from azents.repos.memory import MemoryRepository
 from azents.repos.owner_lifecycle import OwnerLifecycleRepository
 from azents.repos.owner_lifecycle.data import OwnerLifecycleJob
@@ -76,6 +80,11 @@ class OwnerLifecycleRootSession(Protocol):
     @property
     def product_mode(self) -> AgentSessionProductMode | None:
         """Return the root product mode."""
+        ...
+
+    @property
+    def archived_at(self) -> datetime.datetime | None:
+        """Return the archive boundary timestamp when already archived."""
         ...
 
 
@@ -307,6 +316,58 @@ class OwnerLifecycleUserRepositoryProtocol(Protocol):
         ...
 
 
+class OwnerLifecycleChatWriteRequestRepositoryProtocol(Protocol):
+    """Chat write request cleanup consumed during account finalization."""
+
+    async def delete_by_requester_user_id(
+        self,
+        session: AsyncSession,
+        *,
+        requester_user_id: str,
+    ) -> int:
+        """Delete retained idempotency rows for one User."""
+        ...
+
+
+class OwnerLifecycleMailboxRepositoryProtocol(Protocol):
+    """Mailbox cleanup consumed during account finalization."""
+
+    async def detach_sender_user_id(
+        self,
+        session: AsyncSession,
+        *,
+        sender_user_id: str,
+    ) -> int:
+        """Detach one User from retained MailboxItem rows."""
+        ...
+
+
+class OwnerLifecycleExchangeFileRepositoryProtocol(Protocol):
+    """ExchangeFile cleanup consumed during account finalization."""
+
+    async def detach_source_user_id(
+        self,
+        session: AsyncSession,
+        *,
+        source_user_id: str,
+    ) -> int:
+        """Detach one User from retained ExchangeFile provenance."""
+        ...
+
+
+class OwnerLifecycleExternalChannelRepositoryProtocol(Protocol):
+    """External Channel cleanup consumed during account finalization."""
+
+    async def detach_user_references(
+        self,
+        session: AsyncSession,
+        *,
+        user_id: str,
+    ) -> None:
+        """Detach or remove retained rows referencing one User."""
+        ...
+
+
 @dataclasses.dataclass(frozen=True)
 class OwnerLifecycleSummary:
     """Result of one scheduler owner-lifecycle pass."""
@@ -345,6 +406,22 @@ class OwnerLifecycleService:
     ]
     user_repository: Annotated[
         OwnerLifecycleUserRepositoryProtocol, Depends(UserRepository)
+    ]
+    chat_write_request_repository: Annotated[
+        OwnerLifecycleChatWriteRequestRepositoryProtocol,
+        Depends(ChatWriteRequestRepository),
+    ]
+    mailbox_repository: Annotated[
+        OwnerLifecycleMailboxRepositoryProtocol,
+        Depends(MailboxRepository),
+    ]
+    exchange_file_repository: Annotated[
+        OwnerLifecycleExchangeFileRepositoryProtocol,
+        Depends(ExchangeFileRepository),
+    ]
+    external_channel_repository: Annotated[
+        OwnerLifecycleExternalChannelRepositoryProtocol,
+        Depends(ExternalChannelRepository.create),
     ]
     lifecycle_orchestrator: Annotated[
         OwnerLifecycleOrchestratorProtocol,
@@ -506,17 +583,14 @@ class OwnerLifecycleService:
                 associated_user_id=job.user_id,
             )
 
-        active_roots = [
-            root for root in roots if root.status is AgentSessionStatus.ACTIVE
-        ]
-        if active_roots:
+        if roots:
             await self._set_status(
                 job_id=job.id,
                 lease_owner=lease_owner,
                 status=OwnerLifecycleStatus.RETIRING_SESSIONS,
             )
             waiting_for_active_run = False
-            for root in active_roots:
+            for root in roots:
                 if root.product_mode is not AgentSessionProductMode.USER:
                     raise RuntimeError("Owner lifecycle saw a non-User root")
                 retired = await self._retire_root_tree(
@@ -557,19 +631,23 @@ class OwnerLifecycleService:
         )
         now = datetime.datetime.now(datetime.UTC)
         async with self.session_manager() as session:
-            await self.memory_repository.delete_all_for_user(
-                session,
-                user_id=job.user_id,
-            )
-            await self.user_repository.delete(session, job.user_id)
             completed = await self.owner_lifecycle_repository.mark_completed(
                 session,
                 job_id=job.id,
                 lease_owner=lease_owner,
                 now=now,
             )
-        if not completed:
-            raise RuntimeError("Owner lifecycle lease was lost before finalization")
+            if not completed:
+                raise RuntimeError("Owner lifecycle lease was lost before finalization")
+            await self._detach_retained_user_references(
+                session,
+                user_id=job.user_id,
+            )
+            await self.memory_repository.delete_all_for_user(
+                session,
+                user_id=job.user_id,
+            )
+            await self.user_repository.delete(session, job.user_id)
         logger.info(
             "Owner lifecycle account purge finalized User deletion",
             extra={
@@ -599,7 +677,40 @@ class OwnerLifecycleService:
             if not tree:
                 return True
             if any(item.status is not AgentSessionStatus.ACTIVE for item in tree):
-                # Already archived or transitional; let the next pass observe state.
+                if immediate_purge and all(
+                    item.status is AgentSessionStatus.ARCHIVED for item in tree
+                ):
+                    # Account purge must not wait on prior retention schedules.
+                    archived_at = datetime.datetime.now(datetime.UTC)
+                    settings = await self.retention_repository.lock_settings(session)
+                    await self.agent_session_repository.archive_tree(
+                        session,
+                        root_session_id=root_session_id,
+                        session_ids=[item.id for item in tree],
+                        archived_at=tree[0].archived_at or archived_at,
+                        purge_after=archived_at,
+                        policy_revision=settings.revision,
+                        retention_days=0,
+                    )
+                    await self.retention_repository.schedule_purge_job(
+                        session,
+                        root_session_id=root_session_id,
+                        eligible_at=archived_at,
+                        policy_revision=settings.revision,
+                        now=archived_at,
+                    )
+                    owned = await self.owner_lifecycle_repository.set_status(
+                        session,
+                        job_id=job.id,
+                        lease_owner=lease_owner,
+                        status=OwnerLifecycleStatus.WAITING_PURGE,
+                        now=archived_at,
+                    )
+                    if not owned:
+                        raise RuntimeError("Owner lifecycle lease was lost")
+                    await session.commit()
+                    return True
+                # Transitional states; let the next pass observe progress.
                 return True
             session_ids = [item.id for item in tree]
             for session_id in session_ids:
@@ -694,6 +805,35 @@ class OwnerLifecycleService:
         for session_id in stop_session_ids:
             await self.broker.send_message(SessionStopSignal(session_id=session_id))
         return not active
+
+    async def _detach_retained_user_references(
+        self,
+        session: AsyncSession,
+        *,
+        user_id: str,
+    ) -> None:
+        """Clear retained Team-side foreign keys that would block User deletion.
+
+        Account purge keeps Team Sessions and shared artifacts. Those rows may still
+        reference the deleted User through RESTRICT foreign keys, so detach them
+        before the final User row delete.
+        """
+        await self.chat_write_request_repository.delete_by_requester_user_id(
+            session,
+            requester_user_id=user_id,
+        )
+        await self.mailbox_repository.detach_sender_user_id(
+            session,
+            sender_user_id=user_id,
+        )
+        await self.exchange_file_repository.detach_source_user_id(
+            session,
+            source_user_id=user_id,
+        )
+        await self.external_channel_repository.detach_user_references(
+            session,
+            user_id=user_id,
+        )
 
     async def _set_status(
         self,
