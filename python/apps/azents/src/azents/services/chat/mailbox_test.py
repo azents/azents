@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
-    AgentSessionKind,
     AgentSessionRunState,
     AgentSessionStatus,
     LLMProvider,
@@ -687,7 +686,7 @@ class TestChatSessionMailboxItem:
             for mailbox_item in live_result.value.mailbox_items
         )
         assert isinstance(denied, Failure)
-        assert isinstance(denied.error, SessionAccessDenied)
+        assert isinstance(denied.error, SessionNotFound)
         assert isinstance(wrong_agent, Failure)
         assert isinstance(wrong_agent.error, SessionNotFound)
 
@@ -710,23 +709,29 @@ class TestChatSessionMailboxItem:
                 .values(status=AgentSessionStatus.ARCHIVED)
             )
 
-            subagent_id, subagent_user_id, _ = await _create_session_with_buffer(
+            root_id, subagent_user_id, _ = await _create_session_with_buffer(
                 session,
                 handle="chat-folder-prepare-subagent",
                 slug="chat-folder-prepare-subagent",
             )
+            root = await AgentSessionRepository().get_by_id(session, root_id)
+            assert root is not None
+            root_agent = await AgentSessionRepository().get_session_agent_by_session_id(
+                session,
+                root_id,
+            )
+            assert root_agent is not None
+            child = await AgentSessionRepository().create_child_session_agent(
+                session,
+                parent_session_agent_id=root_agent.id,
+                name="folder-retry-child",
+                agent_type="default",
+                title="Folder retry child",
+                last_task_message=None,
+            )
+            subagent_id = child.agent_session_id
             subagent = await AgentSessionRepository().get_by_id(session, subagent_id)
             assert subagent is not None
-            await session.execute(
-                sa.update(RDBAgentSession)
-                .where(RDBAgentSession.id == subagent_id)
-                .values(
-                    session_kind=AgentSessionKind.SUBAGENT,
-                    product_mode=None,
-                    associated_user_id=None,
-                    primary_kind=None,
-                )
-            )
 
         service = _service(rdb_session_manager)
         inactive_result = await service.prepare_session_working_folder(

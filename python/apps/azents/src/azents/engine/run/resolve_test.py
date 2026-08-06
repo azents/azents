@@ -346,13 +346,15 @@ def _make_turn_context() -> TurnContext:
 
 def _make_builtin_provider() -> BuiltinToolkitProvider:
     """Create BuiltinToolkitProvider for resolve_agent_tools tests."""
+    session = AsyncMock(spec=AsyncSession)
+    session.get = AsyncMock(return_value=None)
     return BuiltinToolkitProvider(
         exchange_file_service=AsyncMock(),
         artifact_service=AsyncMock(),
         model_file_service=AsyncMock(),
         vfs_projection_service=None,
         agents_store=_FakeAgentsAppendixDedupeStateStore(),
-        session_manager=AsyncMock(),
+        session_manager=_session_manager_for(session),
         memory_repo=AsyncMock(),
         agent_runtime_repo=AsyncMock(),
         agent_runtime_service=AsyncMock(),
