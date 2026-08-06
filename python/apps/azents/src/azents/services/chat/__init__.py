@@ -936,16 +936,6 @@ class ChatSessionService:
         :param denied_as_not_found: When true, private denials collapse to not-found
         :return: Error instance when denied, otherwise None
         """
-        workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
-            session,
-            workspace_id=agent_session.workspace_id,
-            user_id=user_id,
-        )
-        if workspace_user is None:
-            if denied_as_not_found:
-                return SessionNotFound()
-            return SessionAccessDenied()
-
         root_session = agent_session
         if agent_session.session_kind is AgentSessionKind.SUBAGENT:
             root_agent = await (
@@ -965,6 +955,20 @@ class ChatSessionService:
             root_session = loaded_root
         elif agent_session.session_kind is not AgentSessionKind.ROOT:
             return SessionNotFound()
+
+        workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
+            session,
+            workspace_id=agent_session.workspace_id,
+            user_id=user_id,
+        )
+        if workspace_user is None:
+            # User Sessions are always not-found-safe, including for non-members.
+            if (
+                denied_as_not_found
+                or root_session.product_mode is AgentSessionProductMode.USER
+            ):
+                return SessionNotFound()
+            return SessionAccessDenied()
 
         if root_session.product_mode is AgentSessionProductMode.TEAM:
             return None

@@ -463,6 +463,16 @@ class AgentSessionInputService:
                             "Session creation idempotency record resolved outside "
                             "its Agent boundary"
                         )
+                    if (
+                        agent_session.product_mode is not AgentSessionProductMode.TEAM
+                        or agent_session.associated_user_id is not None
+                    ):
+                        return Failure(
+                            AgentSessionInputIdempotencyConflict(
+                                "Client request ID already used for another "
+                                "session product mode"
+                            )
+                        )
                     runtime = await self.agent_runtime_repository.get_by_agent_id(
                         session,
                         agent_id,
@@ -684,6 +694,16 @@ class AgentSessionInputService:
                         raise RuntimeError(
                             "Session creation idempotency record resolved outside "
                             "its Agent boundary"
+                        )
+                    if (
+                        agent_session.product_mode is not AgentSessionProductMode.USER
+                        or agent_session.associated_user_id != user_id
+                    ):
+                        return Failure(
+                            AgentSessionInputIdempotencyConflict(
+                                "Client request ID already used for another "
+                                "session product mode"
+                            )
                         )
                     runtime = await self.agent_runtime_repository.get_by_agent_id(
                         session,

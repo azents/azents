@@ -182,8 +182,14 @@ async def collect_memory_prompt(
     session: AsyncSession,
     agent_id: str,
     rules_prompt: str,
+    *,
+    user_id: str | None = None,
 ) -> str:
-    """Look up Agent-scope Memory summaries for Team execution."""
+    """Look up Memory summaries for the current Session product mode.
+
+    Team execution includes only Agent-scope summaries. User Sessions also
+    include the associated User's private Memory summaries.
+    """
     parts: list[str] = [
         "## Memories",
         "",
@@ -204,6 +210,22 @@ async def collect_memory_prompt(
                 "Consider cleaning up old memories with delete_memory.)"
             )
         parts.append("")
+
+    if user_id is not None:
+        user_summaries = await repo.list_summaries(
+            session,
+            agent_id=agent_id,
+            user_id=user_id,
+        )
+        if user_summaries:
+            parts.extend(["### User Memories (private to the current user)", ""])
+            parts.extend(_format_summaries(user_summaries))
+            if len(user_summaries) >= _MAX_MEMORY_SUMMARIES:
+                parts.append(
+                    f"(Showing {_MAX_MEMORY_SUMMARIES} memories. "
+                    "Consider cleaning up old memories with delete_memory.)"
+                )
+            parts.append("")
 
     parts.append(rules_prompt)
     return "\n".join(parts)
@@ -435,12 +457,17 @@ class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
         """Return dynamic memory read prompt for the current turn."""
         if not self._config.memory_enabled:
             return ""
+        associated_user_id = await _resolve_associated_user_id(
+            session_manager=self.session_manager,
+            session_id=self._session_id,
+        )
         async with self.session_manager() as mem_session:
             return await collect_memory_prompt(
                 self.memory_repo,
                 mem_session,
                 self._agent_id,
                 _MEMORY_READ_RULES_PROMPT,
+                user_id=associated_user_id,
             )
 
 
