@@ -720,7 +720,12 @@ class TestChatSessionMailboxItem:
             await session.execute(
                 sa.update(RDBAgentSession)
                 .where(RDBAgentSession.id == subagent_id)
-                .values(session_kind=AgentSessionKind.SUBAGENT)
+                .values(
+                    session_kind=AgentSessionKind.SUBAGENT,
+                    product_mode=None,
+                    associated_user_id=None,
+                    primary_kind=None,
+                )
             )
 
         service = _service(rdb_session_manager)
