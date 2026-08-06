@@ -199,6 +199,15 @@ export const RunningWithUnreadBoundary = {
 
 export const Loaded = {} satisfies Story;
 
+export const AgentProfileLinksToDirectory = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("link", { name: /Release Operator/i }),
+    ).toHaveAttribute("href", "/w/engineering/agents/agent_01/sessions");
+  },
+} satisfies Story;
+
 export const UserMenuOpen = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);

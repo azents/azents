@@ -259,9 +259,10 @@ User Session identifiers return not-found-safe responses without revealing priva
 
 azents-web Agent detail routes surface Team and My Sessions tabs in the Agent rail. The Team tab uses the
 bounded pinned/recent sidebar summary and exposes an All sessions link to the paginated active/archived
-Team directory; the My tab uses the owner-scoped active User Session list. Team mutations invalidate the
-paginated directory and bounded sidebar summary, while My mutations invalidate the owner-scoped User
-Session list. Selected sessions navigate through `/w/{handle}/agents/{agent_id}/sessions/{session_id}`.
+Team directory; the Agent profile link opens that same Team directory, while the My tab uses the
+owner-scoped active User Session list. Team mutations invalidate the paginated directory and bounded
+sidebar summary, while My mutations invalidate the owner-scoped User Session list. Selected sessions
+navigate through `/w/{handle}/agents/{agent_id}/sessions/{session_id}`.
 Team create navigates to `/w/{handle}/agents/{agent_id}/sessions/new`. My create navigates to
 `/w/{handle}/agents/{agent_id}/sessions/new?scope=user`. Both draft routes must not create an
 `AgentSession` row until the first accepted message. The draft route renders the Agent top bar plus the
@@ -386,10 +387,13 @@ menu. The action is available only for inactive non-primary roots. Main Web labe
 trash icon, and confirms only that the session will be removed from the list; the confirmation omits
 retention, preservation, restoration, and permanent-deletion claims. The mutation still archives the
 root tree. The bounded sidebar renders separate Pinned and Recent groups from the sidebar summary,
-never requests archived rows, and exposes an All sessions link to
+never requests archived rows, visually treats those groups as subordinate to the Sessions section,
+and exposes an All sessions link to
 `/w/{handle}/agents/{agent_id}/sessions`. The directory supports `?status=active|archived&page=N`,
-page navigation, direct session links, and Restore on archived rows. If the selected session is
-archived, Main Web navigates to `/w/{handle}/agents/{agent_id}/sessions/new`.
+page navigation through Mantine's Pagination control, direct session links, and Restore on archived
+rows. It shares the Agent context header and content inset used by other Agent detail screens. If the
+selected session is archived, Main Web navigates to
+`/w/{handle}/agents/{agent_id}/sessions/new`.
 
 The public `DELETE /chat/v1/sessions/{session_id}` route is absent. Permanent database deletion is
 owned only by durable purge after fencing. Purge deletes subtree ModelFile, Artifact, bound
@@ -1122,6 +1126,7 @@ participant.
 
 ## 12. Changelog
 
+- **2026-08-06** — v144. Aligned the Agent session directory with the shared Agent detail header and content layout, standardized pagination, and made the Agent profile link open the Team directory.
 - **2026-08-06** — v143. Added root product mode to authorized session detail responses so direct
   session URLs can resolve Team/My navigation scope without broad User Session reads.
 - **2026-08-06** — v142. Added User Session list/admission routes to the API inventory.
