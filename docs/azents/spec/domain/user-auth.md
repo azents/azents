@@ -4,7 +4,7 @@ spec_type: domain
 domain: user-auth
 owner: "@Hardtack"
 created: 2026-04-20
-updated: 2026-07-20
+updated: 2026-08-06
 tags: [backend, security, api]
 code_paths:
   - python/apps/azents/src/azents/core/auth/**
@@ -25,6 +25,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/signup_token.py
   - python/apps/azents/src/azents/rdb/models/password_reset_token.py
   - python/apps/azents/src/azents/rdb/models/system_user_role.py
+  - python/apps/azents/src/azents/rdb/models/owner_lifecycle.py
+  - python/apps/azents/src/azents/rdb/models/workspace_user.py
   - python/apps/azents/src/azents/repos/user/**
   - python/apps/azents/src/azents/repos/user_email/**
   - python/apps/azents/src/azents/repos/session/**
@@ -34,6 +36,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/password_reset_token/**
   - python/apps/azents/src/azents/repos/system_user_role/**
   - python/apps/azents/src/azents/repos/system_bootstrap/**
+  - python/apps/azents/src/azents/repos/owner_lifecycle/**
   - python/apps/azents/src/azents/services/auth/**
   - python/apps/azents/src/azents/services/email_verification/**
   - python/apps/azents/src/azents/services/signup_token/**
@@ -46,6 +49,9 @@ code_paths:
   - python/apps/azents/src/azents/services/user_email/**
   - python/apps/azents/src/azents/services/workspace/**
   - python/apps/azents/src/azents/services/workspace_invitation/**
+  - python/apps/azents/src/azents/services/workspace_user/**
+  - python/apps/azents/src/azents/services/owner_lifecycle.py
+  - python/apps/azents/src/azents/scheduler/registry.py
   - python/apps/azents/src/cli/system_admin.py
   - typescript/apps/azents-admin-web/src/app/api/session/**
   - typescript/apps/azents-admin-web/src/config.ts
@@ -75,8 +81,8 @@ api_routes:
   - /system/v1
   - /system-setting/v1
   - /debug/v1
-last_verified_at: 2026-07-20
-spec_version: 8
+last_verified_at: 2026-08-06
+spec_version: 10
 ---
 
 # User & Authentication
@@ -272,7 +278,14 @@ All Admin routers are protected by this dependency except health probes and the 
 
 Adding System Settings does not alter bootstrap or role lifecycle behavior. Bootstrap still creates only the first persisted `system_admin`, the exact-email CLI remains the only later promotion/recovery path, and System Settings mutations cannot revoke roles or bypass the final-admin invariant.
 
-Role revoke and User deletion share one serialized transaction boundary. An operation that would remove the final `system_admin` fails with stable `409 Conflict`, while deleting a non-final administrator cascades that user's assignment. `GET /user/v1/me/system-roles` exposes only the authenticated user's current roles for Main Web navigation. UI visibility is not an authorization control.
+Role revoke and User deletion share one serialized transaction boundary. An operation that would remove the final `system_admin` fails with stable `409 Conflict`, while deleting a non-final administrator cascades that user's assignment.
+
+Private User Session owner lifecycle is coordinated with account and membership changes. Membership
+loss immediately revokes access to owned User Sessions and schedules asynchronous archive after a safe
+stop. Account deletion immediately disables access and revokes live auth Sessions; final User row
+removal waits until owned private User Session purge and private User Memory cleanup complete. Team
+Sessions, Agent Memory, and Workspace-owned Toolkits are not purged by User Session owner cleanup.
+`GET /user/v1/me/system-roles` exposes only the authenticated user's current roles for Main Web navigation. UI visibility is not an authorization control.
 
 The operator CLI grants `system_admin` to one normalized exact email. It is the only initial-promotion and recovery path after users exist. It neither creates a user nor issues a session, and migrations, startup, Workspace ownership, and environment configuration do not auto-promote users.
 
@@ -431,6 +444,8 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
+- **2026-08-06** — v10. Added owner-lifecycle persistence and integration paths to the spec authority inventory.
+- **2026-08-06** — v9. Documented User Session owner lifecycle on membership loss and account deletion.
 - **2026-07-20** (v8) — Confirmed that System Settings inventory, mutation, health, and audit operations reuse the live persisted `system_admin` boundary without changing bootstrap, promotion, or final-admin invariants.
 - **2026-07-13** (v7) — Replaced public first-owner Workspace bootstrap with one-time Admin bootstrap, added persisted live system-administrator authorization and CLI recovery, and documented independent Admin Web user sessions.
 - **2026-04-20** (v1) — Initial living spec.

@@ -15,6 +15,7 @@ from azents.core.enums import (
     ActionExecutionStatus,
     AgentProjectCatalogStatus,
     AgentSessionKind,
+    AgentSessionProductMode,
     AgentSessionStartReason,
     AgentSessionStatus,
     EventKind,
@@ -135,6 +136,8 @@ class _ReadonlyAgentSessionRepository(AgentSessionRepository):
             agent_id="agent-1",
             handle="subagent-session",
             session_kind=AgentSessionKind.SUBAGENT,
+            product_mode=None,
+            associated_user_id=None,
             status=AgentSessionStatus.ACTIVE,
             start_reason=AgentSessionStartReason.INITIAL,
             title=None,
@@ -893,6 +896,8 @@ class TestSessionGitWorktreeService:
                 session,
                 AgentSessionCreate(
                     workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                     agent_id=agent_id,
                     title=None,
                 ),
@@ -969,6 +974,8 @@ class TestSessionGitWorktreeService:
                 session,
                 AgentSessionCreate(
                     workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                     agent_id=agent_id,
                     title=None,
                 ),
@@ -1036,6 +1043,8 @@ class TestSessionGitWorktreeService:
                 session,
                 AgentSessionCreate(
                     workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                     agent_id=agent_id,
                     title=None,
                 ),
@@ -1102,6 +1111,8 @@ class TestSessionGitWorktreeService:
                 session,
                 AgentSessionCreate(
                     workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                     agent_id=agent_id,
                     title=None,
                 ),
@@ -1177,6 +1188,8 @@ class TestSessionGitWorktreeService:
                 session,
                 AgentSessionCreate(
                     workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                     agent_id=agent_id,
                     title=None,
                 ),
@@ -1259,6 +1272,8 @@ class TestSessionGitWorktreeService:
                 session,
                 AgentSessionCreate(
                     workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                     agent_id=agent_id,
                     title=None,
                 ),
@@ -1458,6 +1473,8 @@ class TestSessionGitWorktreeService:
                 session,
                 AgentSessionCreate(
                     workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                     agent_id=agent_id,
                     title=None,
                 ),
@@ -1577,6 +1594,8 @@ class TestSessionGitWorktreeService:
                 session,
                 AgentSessionCreate(
                     workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                     agent_id=agent_id,
                     title=None,
                 ),

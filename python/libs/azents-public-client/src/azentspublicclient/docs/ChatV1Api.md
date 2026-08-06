@@ -13,6 +13,7 @@ Method | HTTP request | Description
 [**chat_v1_create_input**](ChatV1Api.md#chat_v1_create_input) | **POST** /chat/v1/sessions/{session_id}/inputs | Create Input
 [**chat_v1_create_team_agent_session**](ChatV1Api.md#chat_v1_create_team_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions | Create Team Agent Session
 [**chat_v1_create_team_agent_session_message**](ChatV1Api.md#chat_v1_create_team_agent_session_message) | **POST** /chat/v1/agents/{agent_id}/sessions/messages | Create Team Agent Session Message
+[**chat_v1_create_user_agent_session_message**](ChatV1Api.md#chat_v1_create_user_agent_session_message) | **POST** /chat/v1/agents/{agent_id}/user-sessions/messages | Create User Agent Session Message
 [**chat_v1_delete_agent_project**](ChatV1Api.md#chat_v1_delete_agent_project) | **DELETE** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id} | Delete Agent Project
 [**chat_v1_delete_agent_workspace_path**](ChatV1Api.md#chat_v1_delete_agent_workspace_path) | **DELETE** /chat/v1/agents/{agent_id}/workspace/files | Delete Agent Workspace Path
 [**chat_v1_delete_exchange_file**](ChatV1Api.md#chat_v1_delete_exchange_file) | **DELETE** /chat/v1/exchange-files/{file_id} | Delete Exchange File
@@ -31,6 +32,7 @@ Method | HTTP request | Description
 [**chat_v1_list_agent_project_presets**](ChatV1Api.md#chat_v1_list_agent_project_presets) | **GET** /chat/v1/agents/{agent_id}/project-presets | List Agent Project Presets
 [**chat_v1_list_agent_projects**](ChatV1Api.md#chat_v1_list_agent_projects) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects | List Agent Projects
 [**chat_v1_list_agent_sessions**](ChatV1Api.md#chat_v1_list_agent_sessions) | **GET** /chat/v1/agents/{agent_id}/sessions | List Agent Sessions
+[**chat_v1_list_agent_user_sessions**](ChatV1Api.md#chat_v1_list_agent_user_sessions) | **GET** /chat/v1/agents/{agent_id}/user-sessions | List Agent User Sessions
 [**chat_v1_list_archived_agent_sessions**](ChatV1Api.md#chat_v1_list_archived_agent_sessions) | **GET** /chat/v1/agents/{agent_id}/sessions/archived | List Archived Agent Sessions
 [**chat_v1_list_history_events**](ChatV1Api.md#chat_v1_list_history_events) | **GET** /chat/v1/sessions/{session_id}/history | List History Events
 [**chat_v1_list_input_actions**](ChatV1Api.md#chat_v1_list_input_actions) | **GET** /chat/v1/sessions/{session_id}/actions | List Input Actions
@@ -754,6 +756,90 @@ with azentspublicclient.ApiClient(configuration) as api_client:
         pprint(api_response)
     except Exception as e:
         print("Exception when calling ChatV1Api->chat_v1_create_team_agent_session_message: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+ **chat_session_create_message_write_request** | [**ChatSessionCreateMessageWriteRequest**](ChatSessionCreateMessageWriteRequest.md)|  | 
+ **timezone** | **str**|  | [optional] 
+
+### Return type
+
+[**ChatWriteResponse**](ChatWriteResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **chat_v1_create_user_agent_session_message**
+> ChatWriteResponse chat_v1_create_user_agent_session_message(agent_id, chat_session_create_message_write_request, timezone=timezone)
+
+Create User Agent Session Message
+
+Create a User AgentSession and accept its first message.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.chat_session_create_message_write_request import ChatSessionCreateMessageWriteRequest
+from azentspublicclient.models.chat_write_response import ChatWriteResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ChatV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+    chat_session_create_message_write_request = azentspublicclient.ChatSessionCreateMessageWriteRequest() # ChatSessionCreateMessageWriteRequest | 
+    timezone = 'timezone_example' # str |  (optional)
+
+    try:
+        # Create User Agent Session Message
+        api_response = api_instance.chat_v1_create_user_agent_session_message(agent_id, chat_session_create_message_write_request, timezone=timezone)
+        print("The response of ChatV1Api->chat_v1_create_user_agent_session_message:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ChatV1Api->chat_v1_create_user_agent_session_message: %s\n" % e)
 ```
 
 
@@ -2193,6 +2279,85 @@ with azentspublicclient.ApiClient(configuration) as api_client:
         pprint(api_response)
     except Exception as e:
         print("Exception when calling ChatV1Api->chat_v1_list_agent_sessions: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+
+### Return type
+
+[**AgentSessionListResponse**](AgentSessionListResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **chat_v1_list_agent_user_sessions**
+> AgentSessionListResponse chat_v1_list_agent_user_sessions(agent_id)
+
+List Agent User Sessions
+
+List active User Sessions owned by the current requester for an Agent.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.agent_session_list_response import AgentSessionListResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ChatV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+
+    try:
+        # List Agent User Sessions
+        api_response = api_instance.chat_v1_list_agent_user_sessions(agent_id)
+        print("The response of ChatV1Api->chat_v1_list_agent_user_sessions:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ChatV1Api->chat_v1_list_agent_user_sessions: %s\n" % e)
 ```
 
 

@@ -113,16 +113,16 @@ async def _seed_binding(engine: AsyncEngine, *, suffix: str) -> _SeededBinding:
                 """
                 INSERT INTO agent_sessions (
                     id, workspace_id, agent_id, handle, status, start_reason,
-                    session_kind
+                    session_kind, product_mode
                 )
                 VALUES
                     (
                         :owner_session_id, :workspace_id, :owner_agent_id,
-                        :owner_session_id, 'active', 'external_channel', 'root'
+                        :owner_session_id, 'active', 'external_channel', 'root', 'team'
                     ),
                     (
                         :other_session_id, :workspace_id, :other_agent_id,
-                        :other_session_id, 'active', 'external_channel', 'root'
+                        :other_session_id, 'active', 'external_channel', 'root', 'team'
                     )
                 """
             ),

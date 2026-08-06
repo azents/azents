@@ -18,6 +18,7 @@ from azents.core.credentials import ApiKeySecrets
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionKind,
+    AgentSessionProductMode,
     AgentSessionStartReason,
     AgentSessionStatus,
     AgentSessionTitleSource,
@@ -1126,6 +1127,8 @@ class _AgentSessionRepository:
             agent_id="agent-001",
             handle="test-session-handle",
             session_kind=AgentSessionKind.ROOT,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
             status=AgentSessionStatus.ACTIVE,
             start_reason=AgentSessionStartReason.INITIAL,
             title="Compare two insurance options",

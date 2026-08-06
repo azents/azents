@@ -1,11 +1,14 @@
 """ChatWriteRequestRepository tests."""
 
 import datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 from azcommon.result import Success
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import LLMProvider
+from azents.core.enums import AgentSessionProductMode, LLMProvider
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
@@ -123,6 +126,24 @@ def _create_payload(
 class TestChatWriteRequestRepository:
     """ChatWriteRequestRepository tests."""
 
+    async def test_delete_by_requester_user_id_deletes_retained_rows(self) -> None:
+        """Delete retained idempotency rows for one requester User."""
+        session = MagicMock(spec=AsyncSession)
+        session.execute = AsyncMock(return_value=SimpleNamespace(rowcount=2))
+        session.flush = AsyncMock()
+
+        deleted = await ChatWriteRequestRepository().delete_by_requester_user_id(
+            session,
+            requester_user_id="user-1",
+        )
+
+        assert deleted == 2
+        statement = session.execute.await_args_list[0].args[0]
+        sql = str(statement.compile(dialect=postgresql.dialect()))
+        assert "chat_write_requests" in sql
+        assert "requester_user_id" in sql
+        session.flush.assert_awaited_once()
+
     async def test_create_idempotent_returns_created_record(
         self,
         rdb_session: AsyncSession,
@@ -193,6 +214,8 @@ class TestChatWriteRequestRepository:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),

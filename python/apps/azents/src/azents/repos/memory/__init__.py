@@ -509,6 +509,26 @@ class MemoryRepository:
         result = await session.execute(stmt)
         return result.scalar_one()
 
+    async def delete_all_for_user(
+        self,
+        session: AsyncSession,
+        *,
+        user_id: str,
+    ) -> int:
+        """Delete every User-scope Memory row for one User across Agents.
+
+        :param session: Database session
+        :param user_id: Associated User ID
+        :return: Deleted row count
+        """
+        result = cast(
+            CursorResult[Any],
+            await session.execute(
+                sa.delete(RDBAgentMemory).where(RDBAgentMemory.user_id == user_id)
+            ),
+        )
+        return int(result.rowcount or 0)
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------

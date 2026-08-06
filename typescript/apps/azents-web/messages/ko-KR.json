@@ -880,7 +880,12 @@
           "retentionSnapshotDays": "{days}일 보관",
           "purgeScheduled": "{date}에 삭제 예정",
           "purgeUnscheduled": "삭제 예정 없음",
-          "restore": "복원"
+          "restore": "복원",
+          "teamTab": "팀",
+          "myTab": "내 세션",
+          "scopeTabs": "세션 목록",
+          "newUser": "새 개인 세션",
+          "userEmpty": "아직 개인 세션이 없습니다."
         },
         "subagents": {
           "title": "서브에이전트",

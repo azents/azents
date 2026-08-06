@@ -163,8 +163,10 @@ def test_live_role_grant_revoke_and_final_admin_invariants(
     system_api.system_v1_grant_system_admin(deletable_user_id)
     admin_user_api.user_v1_delete_user(deletable_user_id)
 
-    with pytest.raises(azentsadminclient.ApiException) as deleted_user:
-        admin_user_api.user_v1_get_user(deletable_user_id)
-    _assert_api_status(deleted_user.value, 404)
+    # Account deletion keeps the User row until purge finalization and only
+    # disables access immediately (roles already dropped above).
+    deleted_user = admin_user_api.user_v1_get_user(deletable_user_id)
+    assert deleted_user.id == deletable_user_id
+    assert deleted_user.access_disabled_at is not None
     assignments = system_api.system_v1_list_system_role_assignments(limit=100)
     assert all(item.user_id != deletable_user_id for item in assignments.items)

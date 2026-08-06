@@ -18,6 +18,7 @@ import {
   chatV1CreateInput,
   chatV1CreateTeamAgentSession,
   chatV1CreateTeamAgentSessionMessage,
+  chatV1CreateUserAgentSessionMessage,
   chatV1DeleteAgentProject,
   chatV1DeleteAgentWorkspacePath,
   chatV1DeleteMailboxItem,
@@ -32,6 +33,7 @@ import {
   chatV1ListAgentProjectPresets,
   chatV1ListAgentProjects,
   chatV1ListAgentSessions,
+  chatV1ListAgentUserSessions,
   chatV1ListArchivedAgentSessions,
   chatV1ListHistoryEvents,
   chatV1ListInputActions,
@@ -251,6 +253,63 @@ export const chatRouter = router({
     .mutation(async ({ ctx, input }) => {
       try {
         const { data } = await chatV1CreateTeamAgentSessionMessage({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId },
+          body: {
+            client_request_id: input.clientRequestId,
+            message: input.message,
+            inference_profile: input.inferenceProfile,
+            existing_project_paths: input.existingProjectPaths,
+            setup_actions: input.setupActions,
+            attachments: input.attachments,
+          },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          400: "BAD_REQUEST",
+          401: "UNAUTHORIZED",
+          403: "FORBIDDEN",
+          404: "NOT_FOUND",
+          409: "CONFLICT",
+        });
+      }
+    }),
+
+  listAgentUserSessions: publicProcedure
+    .input(z.object({ agentId: z.string().min(1) }))
+    .query(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1ListAgentUserSessions({
+          client: ctx.apiClient,
+          path: { agent_id: input.agentId },
+          throwOnError: true,
+        });
+        return data;
+      } catch (e) {
+        throw mapExpectedError(e, {
+          401: "UNAUTHORIZED",
+          404: "NOT_FOUND",
+        });
+      }
+    }),
+
+  createUserAgentSessionMessage: publicProcedure
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        clientRequestId: z.string().min(1).max(64),
+        message: z.string().min(1),
+        inferenceProfile: inferenceProfileSchema,
+        attachments: z.array(z.string().min(1)).optional(),
+        existingProjectPaths: z.array(z.string().min(1)),
+        setupActions: z.array(setupActionSchema),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const { data } = await chatV1CreateUserAgentSessionMessage({
           client: ctx.apiClient,
           path: { agent_id: input.agentId },
           body: {

@@ -140,6 +140,24 @@ class AgentDecommissionStatus(enum.StrEnum):
     COMPLETED = "completed"
 
 
+class OwnerLifecycleKind(enum.StrEnum):
+    """Durable owner-lifecycle operation kind."""
+
+    MEMBERSHIP_ARCHIVE = "membership_archive"
+    ACCOUNT_PURGE = "account_purge"
+
+
+class OwnerLifecycleStatus(enum.StrEnum):
+    """Durable owner-lifecycle job state."""
+
+    PENDING = "pending"
+    RETIRING_SESSIONS = "retiring_sessions"
+    WAITING_PURGE = "waiting_purge"
+    FINALIZING = "finalizing"
+    RETRY_WAIT = "retry_wait"
+    COMPLETED = "completed"
+
+
 class AgentSessionRunState(enum.StrEnum):
     """Engine execution status of AgentSession."""
 
@@ -368,6 +386,13 @@ class AgentSessionPrimaryKind(enum.StrEnum):
     """AgentSession primary role."""
 
     TEAM_PRIMARY = "team_primary"
+
+
+class AgentSessionProductMode(enum.StrEnum):
+    """Root AgentSession product mode."""
+
+    TEAM = "team"
+    USER = "user"
 
 
 class AgentSessionStartReason(enum.StrEnum):

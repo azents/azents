@@ -147,6 +147,7 @@ export function AgentSessionHeader({
     await Promise.all([
       utils.chat.getAgentSession.invalidate({ agentId: agent.id, sessionId }),
       utils.chat.listAgentSessions.invalidate({ agentId: agent.id }),
+      utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id }),
     ]);
     handleCloseRename();
   }, [
@@ -158,6 +159,7 @@ export function AgentSessionHeader({
     updateTitleMutation,
     utils.chat.getAgentSession,
     utils.chat.listAgentSessions,
+    utils.chat.listAgentUserSessions,
   ]);
 
   const handleClearTitle = useCallback(async (): Promise<void> => {
@@ -170,6 +172,7 @@ export function AgentSessionHeader({
     await Promise.all([
       utils.chat.getAgentSession.invalidate({ agentId: agent.id, sessionId }),
       utils.chat.listAgentSessions.invalidate({ agentId: agent.id }),
+      utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id }),
     ]);
     handleCloseRename();
   }, [
@@ -180,6 +183,7 @@ export function AgentSessionHeader({
     updateTitleMutation,
     utils.chat.getAgentSession,
     utils.chat.listAgentSessions,
+    utils.chat.listAgentUserSessions,
   ]);
 
   const renameBusy = updateTitleMutation.isPending;

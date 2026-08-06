@@ -13,6 +13,7 @@ import azents.repos.agent_session as agent_session_repo
 from azents.core.enums import (
     AgentSessionKind,
     AgentSessionPrimaryKind,
+    AgentSessionProductMode,
     AgentSessionStartReason,
     AgentSessionStatus,
     AgentSessionTitleSource,
@@ -45,6 +46,8 @@ from azents.repos.agent_runtime import AgentRuntimeRepository
 from azents.repos.session_lifecycle_finalizer import (
     SessionLifecycleFinalizerRepository,
 )
+from azents.repos.user import UserRepository
+from azents.repos.user.data import UserCreate
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace.data import WorkspaceCreate
 from azents.testing.model_selection import (
@@ -67,6 +70,12 @@ async def _create_workspace(session: AsyncSession, handle: str) -> str:
     workspace_id = await repo.resolve_id(session, handle)
     assert workspace_id is not None
     return workspace_id
+
+
+async def _create_user(session: AsyncSession, email: str) -> str:
+    """Create User for tests."""
+    user = await UserRepository().create(session, UserCreate(email=email))
+    return user.id
 
 
 async def _create_agent(session: AsyncSession, workspace_id: str, slug: str) -> str:
@@ -126,6 +135,8 @@ class TestAgentSessionRepository:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -150,6 +161,8 @@ class TestAgentSessionRepository:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -208,6 +221,8 @@ class TestAgentSessionRepository:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -263,6 +278,8 @@ class TestAgentSessionRepository:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -355,6 +372,8 @@ class TestAgentSessionRepository:
                 agent_id=agent_id,
                 title=None,
                 primary_kind=None,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 start_reason=AgentSessionStartReason.INITIAL,
             ),
         )
@@ -365,6 +384,8 @@ class TestAgentSessionRepository:
                 agent_id=agent_id,
                 title=None,
                 primary_kind=None,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 start_reason=AgentSessionStartReason.INITIAL,
             ),
         )
@@ -398,6 +419,8 @@ class TestAgentSessionRepository:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -443,6 +466,8 @@ class TestAgentSessionRepository:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -504,6 +529,8 @@ class TestAgentSessionRepository:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -542,6 +569,8 @@ class TestAgentSessionRepository:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -755,6 +784,8 @@ class TestAgentSessionRepository:
                 agent_id=agent_id,
                 title=None,
                 primary_kind=None,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 start_reason=AgentSessionStartReason.INITIAL,
             ),
         )
@@ -857,6 +888,8 @@ class TestAgentSessionRepository:
                 agent_id=agent_id,
                 title=None,
                 primary_kind=None,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 start_reason=AgentSessionStartReason.INITIAL,
             ),
         )
@@ -891,6 +924,8 @@ class TestAgentSessionRepository:
                 agent_id=agent_id,
                 title=None,
                 primary_kind=None,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 start_reason=AgentSessionStartReason.INITIAL,
             ),
         )
@@ -937,6 +972,8 @@ class TestAgentSessionRepository:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -986,6 +1023,8 @@ class TestAgentSessionRepository:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1038,6 +1077,8 @@ class TestAgentSessionRepository:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1089,6 +1130,8 @@ class TestAgentSessionRepository:
                 setup_session,
                 AgentSessionCreate(
                     workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                     agent_id=agent_id,
                     title=None,
                 ),
@@ -1165,6 +1208,8 @@ class TestAgentSessionRepository:
                 setup_session,
                 AgentSessionCreate(
                     workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                     agent_id=agent_id,
                     title=None,
                 ),
@@ -1235,6 +1280,8 @@ class TestAgentSessionRepository:
                 agent_id=agent_id,
                 title=None,
                 primary_kind=None,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 start_reason=AgentSessionStartReason.INITIAL,
             ),
         )
@@ -1245,6 +1292,8 @@ class TestAgentSessionRepository:
                 agent_id=agent_id,
                 title=None,
                 primary_kind=None,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 start_reason=AgentSessionStartReason.INITIAL,
             ),
         )
@@ -1291,6 +1340,8 @@ class TestAgentSessionRepository:
                 agent_id=agent_id,
                 title=None,
                 primary_kind=None,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 start_reason=AgentSessionStartReason.INITIAL,
             ),
         )
@@ -1333,6 +1384,8 @@ class TestAgentSessionRepository:
                 agent_id=agent_id,
                 title=None,
                 primary_kind=None,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 start_reason=AgentSessionStartReason.INITIAL,
             ),
         )
@@ -1394,6 +1447,8 @@ class TestAgentSessionRepository:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1444,3 +1499,129 @@ class TestAgentSessionRepository:
 
         remaining = await session_repository.get_by_id(rdb_session, agent_session.id)
         assert remaining is not None
+
+    async def test_create_team_root_sets_product_mode(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Team roots persist explicit product mode without an associated user."""
+        workspace_id = await _create_workspace(rdb_session, "product-mode-team-ws")
+        agent_id = await _create_agent(rdb_session, workspace_id, "product-mode-team")
+        repo = AgentSessionRepository()
+        created = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title=None,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+            ),
+        )
+        assert created.product_mode is AgentSessionProductMode.TEAM
+        assert created.associated_user_id is None
+
+    async def test_create_user_root_and_list_predicates(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """User roots are excluded from Team lists and visible in owner lists."""
+        workspace_id = await _create_workspace(rdb_session, "product-mode-user-ws")
+        agent_id = await _create_agent(rdb_session, workspace_id, "product-mode-user")
+        owner_id = await _create_user(rdb_session, "owner@example.com")
+        other_id = await _create_user(rdb_session, "other@example.com")
+        repo = AgentSessionRepository()
+        team = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title="team",
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+            ),
+        )
+        user_session = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title="mine",
+                product_mode=AgentSessionProductMode.USER,
+                associated_user_id=owner_id,
+            ),
+        )
+        team_list = await repo.list_active_by_agent_id(rdb_session, agent_id)
+        assert [item.id for item in team_list] == [team.id]
+        owner_list = await repo.list_active_user_by_agent_and_user(
+            rdb_session,
+            agent_id=agent_id,
+            associated_user_id=owner_id,
+        )
+        assert [item.id for item in owner_list] == [user_session.id]
+        other_list = await repo.list_active_user_by_agent_and_user(
+            rdb_session,
+            agent_id=agent_id,
+            associated_user_id=other_id,
+        )
+        assert other_list == []
+
+    async def test_create_rejects_invalid_product_mode_combinations(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Invalid root/subagent ownership combinations fail closed."""
+        workspace_id = await _create_workspace(rdb_session, "product-mode-invalid-ws")
+        agent_id = await _create_agent(
+            rdb_session,
+            workspace_id,
+            "product-mode-invalid",
+        )
+        owner_id = await _create_user(rdb_session, "invalid-owner@example.com")
+        repo = AgentSessionRepository()
+        with pytest.raises(ValueError, match="associated user"):
+            await repo.create(
+                rdb_session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=owner_id,
+                ),
+            )
+        with pytest.raises(ValueError, match="require an associated user"):
+            await repo.create(
+                rdb_session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                    product_mode=AgentSessionProductMode.USER,
+                    associated_user_id=None,
+                ),
+            )
+        with pytest.raises(ValueError, match="primary kind"):
+            await repo.create(
+                rdb_session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                    primary_kind=AgentSessionPrimaryKind.TEAM_PRIMARY,
+                    product_mode=AgentSessionProductMode.USER,
+                    associated_user_id=owner_id,
+                ),
+            )
+        with pytest.raises(ValueError, match="Subagent sessions"):
+            await repo.create(
+                rdb_session,
+                AgentSessionCreate(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    title=None,
+                    session_kind=AgentSessionKind.SUBAGENT,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
+                ),
+            )

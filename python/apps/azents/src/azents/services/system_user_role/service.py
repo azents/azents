@@ -109,7 +109,7 @@ class SystemUserRoleService:
         async with self.session_manager() as session:
             await self.system_role_repository.acquire_mutation_lock(session)
             user = await self.user_repository.get(session, user_id)
-            if user is None:
+            if user is None or user.access_disabled_at is not None:
                 return Failure(SystemUserNotFound(user_id=user_id))
 
             existing = await self.system_role_repository.get(session, user_id, role)

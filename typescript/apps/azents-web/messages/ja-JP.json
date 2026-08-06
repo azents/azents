@@ -880,7 +880,12 @@
           "retentionSnapshotDays": "保持期間{days}日",
           "purgeScheduled": "{date}に削除予定",
           "purgeUnscheduled": "削除予定なし",
-          "restore": "復元"
+          "restore": "復元",
+          "teamTab": "チーム",
+          "myTab": "自分",
+          "scopeTabs": "セッション一覧",
+          "newUser": "新しいプライベートセッション",
+          "userEmpty": "プライベートセッションはまだありません。"
         },
         "subagents": {
           "title": "サブエージェント",

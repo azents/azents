@@ -19,7 +19,7 @@ import json
 
 from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -31,10 +31,11 @@ class UserResponse(BaseModel):
     primary_email_id: StrictStr = Field(description="Primary email ID")
     primary_email: StrictStr = Field(description="Primary email address")
     locale: StrictStr = Field(description="Account locale (BCP 47)")
+    access_disabled_at: Optional[datetime] = None
     created_at: datetime = Field(description="Created time")
     updated_at: datetime = Field(description="Updated time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "primary_email_id", "primary_email", "locale", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "primary_email_id", "primary_email", "locale", "access_disabled_at", "created_at", "updated_at"]
 
     @field_validator('locale')
     def locale_validate_enum(cls, value):
@@ -89,6 +90,11 @@ class UserResponse(BaseModel):
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if access_disabled_at (nullable) is None
+        # and model_fields_set contains the field
+        if self.access_disabled_at is None and "access_disabled_at" in self.model_fields_set:
+            _dict['access_disabled_at'] = None
+
         return _dict
 
     @classmethod
@@ -105,6 +111,7 @@ class UserResponse(BaseModel):
             "primary_email_id": obj.get("primary_email_id"),
             "primary_email": obj.get("primary_email"),
             "locale": obj.get("locale"),
+            "access_disabled_at": obj.get("access_disabled_at"),
             "created_at": obj.get("created_at"),
             "updated_at": obj.get("updated_at")
         })

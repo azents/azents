@@ -1,6 +1,7 @@
 """User service."""
 
 import dataclasses
+import datetime
 import logging
 from typing import Annotated
 
@@ -11,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import SystemUserRole
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.owner_lifecycle import OwnerLifecycleRepository
+from azents.repos.session import SessionRepository
 from azents.repos.system_user_role.data import LastSystemAdmin
 from azents.repos.system_user_role.repository import SystemUserRoleRepository
 from azents.repos.user import UserRepository
@@ -27,6 +30,8 @@ class UserService:
 
     user_repository: Annotated[UserRepository, Depends()]
     system_role_repository: Annotated[SystemUserRoleRepository, Depends()]
+    session_repository: Annotated[SessionRepository, Depends()]
+    owner_lifecycle_repository: Annotated[OwnerLifecycleRepository, Depends()]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -94,11 +99,15 @@ class UserService:
         )
 
     async def delete(self, user_id: str) -> Result[None, LastSystemAdmin]:
-        """Delete User while preserving the final system administrator.
+        """Disable User access and enqueue durable account-purge lifecycle.
+
+        The User row remains until owned User Session purge and private User
+        Memory cleanup complete in the owner-lifecycle worker.
 
         :param user_id: User ID
         :return: Success or final-admin invariant error
         """
+        now = datetime.datetime.now(datetime.UTC)
         async with self.session_manager() as session:
             await self.system_role_repository.acquire_mutation_lock(session)
             system_admin = await self.system_role_repository.get(
@@ -117,5 +126,25 @@ class UserService:
                         extra={"target_user_id": user_id},
                     )
                     return Failure(LastSystemAdmin(user_id=user_id))
-            await self.user_repository.delete(session, user_id)
+            user = await self.user_repository.get(session, user_id)
+            if user is None:
+                return Success(None)
+            await self.user_repository.disable_access(
+                session,
+                user_id,
+                disabled_at=now,
+            )
+            # Drop system roles immediately so final-admin accounting stays current
+            # while the User row waits for owned Session purge finalization.
+            for role in SystemUserRole:
+                await self.system_role_repository.delete(session, user_id, role)
+            await self.session_repository.revoke_all_by_user(session, user_id)
+            await self.owner_lifecycle_repository.create_or_get_account_purge(
+                session,
+                user_id=user_id,
+            )
+        logger.info(
+            "User account deletion accepted; purge lifecycle enqueued",
+            extra={"target_user_id": user_id},
+        )
         return Success(None)
