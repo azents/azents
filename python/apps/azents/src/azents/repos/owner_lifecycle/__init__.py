@@ -49,7 +49,19 @@ class OwnerLifecycleRepository:
             )
         if rdb is None:
             raise RuntimeError("Owner lifecycle membership archive job creation failed")
-        await session.flush()
+        if rdb.status is OwnerLifecycleStatus.COMPLETED:
+            now = datetime.datetime.now(datetime.UTC)
+            rdb.status = OwnerLifecycleStatus.PENDING
+            rdb.attempt_count = 0
+            rdb.lease_owner = None
+            rdb.lease_until = None
+            rdb.next_attempt_at = None
+            rdb.last_error_kind = None
+            rdb.last_error_summary = None
+            rdb.started_at = None
+            rdb.completed_at = None
+            rdb.updated_at = now
+            await session.flush()
         return self._build(rdb)
 
     async def create_or_get_account_purge(

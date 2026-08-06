@@ -15,6 +15,8 @@ from azents.core.deps import get_auth_config
 from azents.core.enums import WorkspaceUserRole
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.session import SessionRepository
+from azents.repos.user import UserRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.services.system_user_role.service import SystemUserRoleService
@@ -56,9 +58,53 @@ class WorkspaceMember:
         return has_permission(self.permissions, required)
 
 
+async def _require_active_user_session(
+    *,
+    session_manager: SessionManager[AsyncSession],
+    user_repository: UserRepository,
+    session_repository: SessionRepository,
+    user_id: str,
+    session_id: str,
+) -> None:
+    """Reject disabled accounts and revoked/expired auth sessions.
+
+    :param session_manager: Database session manager
+    :param user_repository: User repository
+    :param session_repository: Auth session repository
+    :param user_id: Authenticated user ID from JWT
+    :param session_id: Auth session ID from JWT
+    :raises HTTPException: 401 when the account or auth session is not active
+    """
+    async with session_manager() as session:
+        user = await user_repository.get(session, user_id)
+        if user is None or user.access_disabled_at is not None:
+            raise HTTPException(
+                status_code=401,
+                detail="Not authenticated",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        auth_session = await session_repository.get(session, session_id)
+        if (
+            auth_session is None
+            or auth_session.user_id != user_id
+            or auth_session.is_revoked
+            or auth_session.is_expired
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Not authenticated",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+
 async def get_current_user(
     auth_config: Annotated[AuthConfig, Depends(get_auth_config)],
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    session_manager: Annotated[
+        SessionManager[AsyncSession], Depends(get_session_manager)
+    ],
+    user_repository: Annotated[UserRepository, Depends()],
+    session_repository: Annotated[SessionRepository, Depends()],
 ) -> CurrentUser:
     """Return the current authenticated user.
 
@@ -80,6 +126,13 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         ) from None
 
+    await _require_active_user_session(
+        session_manager=session_manager,
+        user_repository=user_repository,
+        session_repository=session_repository,
+        user_id=payload.user_id,
+        session_id=payload.session_id,
+    )
     return CurrentUser(
         user_id=payload.user_id,
         session_id=payload.session_id,
@@ -90,6 +143,11 @@ async def get_current_user(
 async def get_current_user_optional(
     auth_config: Annotated[AuthConfig, Depends(get_auth_config)],
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    session_manager: Annotated[
+        SessionManager[AsyncSession], Depends(get_session_manager)
+    ],
+    user_repository: Annotated[UserRepository, Depends()],
+    session_repository: Annotated[SessionRepository, Depends()],
 ) -> CurrentUser | None:
     """Return the current authenticated user, or None when unauthenticated.
 
@@ -101,6 +159,17 @@ async def get_current_user_optional(
     try:
         payload = decode_access_token(auth_config.jwt, credentials.credentials)
     except InvalidTokenError:
+        return None
+
+    try:
+        await _require_active_user_session(
+            session_manager=session_manager,
+            user_repository=user_repository,
+            session_repository=session_repository,
+            user_id=payload.user_id,
+            session_id=payload.session_id,
+        )
+    except HTTPException:
         return None
 
     return CurrentUser(
