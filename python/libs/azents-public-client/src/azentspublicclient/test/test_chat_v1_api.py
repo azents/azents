@@ -89,6 +89,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_create_user_agent_session_message(self) -> None:
+        """Test case for chat_v1_create_user_agent_session_message
+
+        Create User Agent Session Message
+        """
+        pass
+
     def test_chat_v1_delete_agent_project(self) -> None:
         """Test case for chat_v1_delete_agent_project
 
@@ -212,6 +219,13 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_list_agent_sessions
 
         List Agent Sessions
+        """
+        pass
+
+    def test_chat_v1_list_agent_user_sessions(self) -> None:
+        """Test case for chat_v1_list_agent_user_sessions
+
+        List Agent User Sessions
         """
         pass
 

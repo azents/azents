@@ -26,7 +26,7 @@ class SessionWorkspaceProjectRegisterRequest(BaseModel):
     """
     Existing Agent Workspace folder Project registration payload.
     """ # noqa: E501
-    path: StrictStr = Field(description="Existing directory path under /workspace/agent")
+    path: StrictStr = Field(description="Existing directory path under the Agent Workspace")
     additional_properties: Dict[str, Any] = {}
     __properties: ClassVar[List[str]] = ["path"]
 

@@ -457,15 +457,14 @@ class ChatSessionService:
                 or agent_session.status != AgentSessionStatus.ACTIVE
             ):
                 return Failure(SessionNotFound())
-            workspace_user = (
-                await self.workspace_user_repository.get_by_workspace_and_user(
-                    session,
-                    workspace_id=agent_session.workspace_id,
-                    user_id=user_id,
-                )
+            authorized = await self._authorize_public_session(
+                session,
+                agent_session=agent_session,
+                user_id=user_id,
+                denied_as_not_found=False,
             )
-            if workspace_user is None:
-                return Failure(SessionAccessDenied())
+            if authorized is not None:
+                return Failure(authorized)
             return Success(agent_session)
 
     async def get_agent_session(
@@ -487,14 +486,13 @@ class ChatSessionService:
                 or agent_session.status != AgentSessionStatus.ACTIVE
             ):
                 return Failure(SessionNotFound())
-            workspace_user = (
-                await self.workspace_user_repository.get_by_workspace_and_user(
-                    session,
-                    workspace_id=agent_session.workspace_id,
-                    user_id=user_id,
-                )
+            authorized = await self._authorize_public_session(
+                session,
+                agent_session=agent_session,
+                user_id=user_id,
+                denied_as_not_found=True,
             )
-            if workspace_user is None:
+            if authorized is not None:
                 return Failure(SessionNotFound())
             return Success(agent_session)
 
@@ -519,14 +517,13 @@ class ChatSessionService:
                 or projection.session.status != AgentSessionStatus.ACTIVE
             ):
                 return Failure(SessionNotFound())
-            workspace_user = (
-                await self.workspace_user_repository.get_by_workspace_and_user(
-                    session,
-                    workspace_id=projection.session.workspace_id,
-                    user_id=user_id,
-                )
+            authorized = await self._authorize_public_session(
+                session,
+                agent_session=projection.session,
+                user_id=user_id,
+                denied_as_not_found=True,
             )
-            if workspace_user is None:
+            if authorized is not None:
                 return Failure(SessionNotFound())
             return Success(projection)
 
@@ -599,15 +596,14 @@ class ChatSessionService:
                 or agent_session.status != AgentSessionStatus.ACTIVE
             ):
                 return Failure(SessionNotFound())
-            workspace_user = (
-                await self.workspace_user_repository.get_by_workspace_and_user(
-                    session,
-                    workspace_id=agent_session.workspace_id,
-                    user_id=user_id,
-                )
+            authorized = await self._authorize_public_session(
+                session,
+                agent_session=agent_session,
+                user_id=user_id,
+                denied_as_not_found=False,
             )
-            if workspace_user is None:
-                return Failure(SessionAccessDenied())
+            if authorized is not None:
+                return Failure(authorized)
             current_agent = (
                 await self.agent_session_repository.get_session_agent_by_session_id(
                     session,
@@ -723,6 +719,35 @@ class ChatSessionService:
                     session,
                     agent_id,
                     auto_archive_ttl_days=agent.auto_archive_ttl_days,
+                )
+            )
+            return Success(sessions)
+
+    async def list_agent_user_sessions(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
+    ) -> Result[list[AgentSession], EnsureSessionError]:
+        """Fetch active User Sessions owned by the requester for an Agent."""
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            if agent is None:
+                return Failure(AgentNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=agent.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(NotWorkspaceMember())
+            sessions = (
+                await self.agent_session_repository.list_active_user_by_agent_and_user(
+                    session,
+                    agent_id=agent_id,
+                    associated_user_id=user_id,
                 )
             )
             return Success(sessions)
@@ -895,6 +920,60 @@ class ChatSessionService:
                     source=NewSessionProjectDefaultsSource(type="last_created_session"),
                 )
             )
+
+    async def _authorize_public_session(
+        self,
+        session: AsyncSession,
+        *,
+        agent_session: AgentSession,
+        user_id: str,
+        denied_as_not_found: bool,
+    ) -> SessionAccessDenied | SessionNotFound | None:
+        """Authorize public access for Team and User Session roots/subagents.
+
+        :param session: Database session
+        :param agent_session: Loaded AgentSession row
+        :param user_id: Authenticated requester
+        :param denied_as_not_found: When true, private denials collapse to not-found
+        :return: Error instance when denied, otherwise None
+        """
+        workspace_user = await self.workspace_user_repository.get_by_workspace_and_user(
+            session,
+            workspace_id=agent_session.workspace_id,
+            user_id=user_id,
+        )
+        if workspace_user is None:
+            if denied_as_not_found:
+                return SessionNotFound()
+            return SessionAccessDenied()
+
+        root_session = agent_session
+        if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+            root_agent = await (
+                self.agent_session_repository.get_root_session_agent_by_session_id(
+                    session,
+                    agent_session.id,
+                )
+            )
+            if root_agent is None:
+                return SessionNotFound()
+            loaded_root = await self.agent_session_repository.get_by_id(
+                session,
+                root_agent.agent_session_id,
+            )
+            if loaded_root is None:
+                return SessionNotFound()
+            root_session = loaded_root
+        elif agent_session.session_kind is not AgentSessionKind.ROOT:
+            return SessionNotFound()
+
+        if root_session.product_mode is AgentSessionProductMode.TEAM:
+            return None
+        if root_session.product_mode is AgentSessionProductMode.USER:
+            if root_session.associated_user_id == user_id:
+                return None
+            return SessionNotFound()
+        return SessionNotFound()
 
     async def _create_session_workspace_items(
         self,
@@ -1704,15 +1783,14 @@ class ChatSessionService:
                 or agent_session.status != AgentSessionStatus.ACTIVE
             ):
                 return Failure(SessionNotFound())
-            workspace_user = (
-                await self.workspace_user_repository.get_by_workspace_and_user(
-                    session,
-                    workspace_id=agent_session.workspace_id,
-                    user_id=user_id,
-                )
+            authorized = await self._authorize_public_session(
+                session,
+                agent_session=agent_session,
+                user_id=user_id,
+                denied_as_not_found=False,
             )
-            if workspace_user is None:
-                return Failure(SessionAccessDenied())
+            if authorized is not None:
+                return Failure(authorized)
             list_events = self.message_repository.list_events_by_session_id_paginated
             items, has_more, has_newer = await list_events(
                 session,

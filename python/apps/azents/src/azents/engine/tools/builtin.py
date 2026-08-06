@@ -22,6 +22,8 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentSessionKind,
+    AgentSessionProductMode,
     RuntimeDesiredState,
     RuntimeProviderConnectionState,
     RuntimeProviderObservedState,
@@ -332,6 +334,41 @@ class WriteStdinInput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+async def _resolve_associated_user_id(
+    *,
+    session_manager: SessionManager[AsyncSession],
+    session_id: str,
+) -> str | None:
+    """Resolve root User Session associated user for Memory capability projection."""
+    if not session_id:
+        return None
+    agent_session_repository = AgentSessionRepository()
+    async with session_manager() as session:
+        agent_session = await agent_session_repository.get_by_id(session, session_id)
+        if agent_session is None:
+            return None
+        root_session = agent_session
+        if agent_session.session_kind is AgentSessionKind.SUBAGENT:
+            root_agent = (
+                await agent_session_repository.get_root_session_agent_by_session_id(
+                    session,
+                    session_id,
+                )
+            )
+            if root_agent is None:
+                return None
+            loaded_root = await agent_session_repository.get_by_id(
+                session,
+                root_agent.agent_session_id,
+            )
+            if loaded_root is None:
+                return None
+            root_session = loaded_root
+        if root_session.product_mode is AgentSessionProductMode.USER:
+            return root_session.associated_user_id
+    return None
+
+
 class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
     """Auto-bound memory read capability."""
 
@@ -366,22 +403,29 @@ class MemoryReadToolkit(Toolkit[ShellToolkitConfig]):
         """Return memory read tools."""
         tools: list[FunctionTool] = []
         if self._config.memory_enabled:
+            associated_user_id = await _resolve_associated_user_id(
+                session_manager=self.session_manager,
+                session_id=self._session_id,
+            )
             tools.extend(
                 [
                     make_list_memories_tool(
                         self.memory_repo,
                         self._agent_id,
                         self.session_manager,
+                        associated_user_id=associated_user_id,
                     ),
                     make_get_memory_tool(
                         self.memory_repo,
                         self._agent_id,
                         self.session_manager,
+                        associated_user_id=associated_user_id,
                     ),
                     make_search_memories_tool(
                         self.memory_repo,
                         self._agent_id,
                         self.session_manager,
+                        associated_user_id=associated_user_id,
                     ),
                 ]
             )
@@ -434,17 +478,23 @@ class MemoryWriteToolkit(Toolkit[ShellToolkitConfig]):
         """Return memory write tools."""
         tools: list[FunctionTool] = []
         if self._config.memory_enabled:
+            associated_user_id = await _resolve_associated_user_id(
+                session_manager=self.session_manager,
+                session_id=self._session_id,
+            )
             tools.extend(
                 [
                     make_save_memory_tool(
                         self.memory_repo,
                         self._agent_id,
                         self.session_manager,
+                        associated_user_id=associated_user_id,
                     ),
                     make_delete_memory_tool(
                         self.memory_repo,
                         self._agent_id,
                         self.session_manager,
+                        associated_user_id=associated_user_id,
                     ),
                 ]
             )
