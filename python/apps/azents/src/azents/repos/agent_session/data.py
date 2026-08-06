@@ -29,6 +29,30 @@ class AgentSessionUnreadTerminalRunProjection:
 
 
 @dataclasses.dataclass(frozen=True)
+class AgentSessionPage:
+    """One bounded AgentSession page."""
+
+    items: list["AgentSession"]
+    total_count: int
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentSessionProjectionPage:
+    """One bounded AgentSession projection page."""
+
+    items: list[AgentSessionUnreadTerminalRunProjection]
+    total_count: int
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentSessionSidebarSummary:
+    """Bounded sidebar projections for one Agent."""
+
+    pinned: list[AgentSessionUnreadTerminalRunProjection]
+    recent: list[AgentSessionUnreadTerminalRunProjection]
+
+
+@dataclasses.dataclass(frozen=True)
 class AgentSessionEnsureTeamPrimaryResult:
     """Race-aware team-primary ensure result."""
 

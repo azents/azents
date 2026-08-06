@@ -17,18 +17,20 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, ClassVar, Dict, List
+from azentspublicclient.models.agent_session_response import AgentSessionResponse
 from typing import Optional, Set
 from typing_extensions import Self
 
-class SessionWorkspaceProjectRegisterRequest(BaseModel):
+class AgentSessionSidebarResponse(BaseModel):
     """
-    Existing Agent Workspace folder Project registration payload.
+    Bounded Agent sidebar session response.
     """ # noqa: E501
-    path: StrictStr = Field(description="Existing directory path under the Agent Workspace")
+    pinned: List[AgentSessionResponse] = Field(description="All pinned active root sessions")
+    recent: List[AgentSessionResponse] = Field(description="Distinct recent non-pinned active root sessions")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["path"]
+    __properties: ClassVar[List[str]] = ["pinned", "recent"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -48,7 +50,7 @@ class SessionWorkspaceProjectRegisterRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of SessionWorkspaceProjectRegisterRequest from a JSON string"""
+        """Create an instance of AgentSessionSidebarResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -71,6 +73,20 @@ class SessionWorkspaceProjectRegisterRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of each item in pinned (list)
+        _items = []
+        if self.pinned:
+            for _item_pinned in self.pinned:
+                if _item_pinned:
+                    _items.append(_item_pinned.to_dict())
+            _dict['pinned'] = _items
+        # override the default output from pydantic by calling `to_dict()` of each item in recent (list)
+        _items = []
+        if self.recent:
+            for _item_recent in self.recent:
+                if _item_recent:
+                    _items.append(_item_recent.to_dict())
+            _dict['recent'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
@@ -80,7 +96,7 @@ class SessionWorkspaceProjectRegisterRequest(BaseModel):
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of SessionWorkspaceProjectRegisterRequest from a dict"""
+        """Create an instance of AgentSessionSidebarResponse from a dict"""
         if obj is None:
             return None
 
@@ -88,7 +104,8 @@ class SessionWorkspaceProjectRegisterRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "path": obj.get("path")
+            "pinned": [AgentSessionResponse.from_dict(_item) for _item in obj["pinned"]] if obj.get("pinned") is not None else None,
+            "recent": [AgentSessionResponse.from_dict(_item) for _item in obj["recent"]] if obj.get("recent") is not None else None
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

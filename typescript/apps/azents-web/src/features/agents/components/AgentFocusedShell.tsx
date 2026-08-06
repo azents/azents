@@ -64,7 +64,7 @@ export function AgentFocusedShell({
     [pathname, agent.id],
   );
 
-  const sessionsQuery = trpc.chat.listAgentSessions.useQuery(
+  const sessionSidebarQuery = trpc.chat.getAgentSessionSidebar.useQuery(
     {
       agentId: agent.id,
     },
@@ -72,10 +72,6 @@ export function AgentFocusedShell({
       refetchInterval: 5_000,
       staleTime: 0,
     },
-  );
-  const archivedSessionsQuery = trpc.chat.listArchivedAgentSessions.useQuery(
-    { agentId: agent.id },
-    { staleTime: 5_000 },
   );
   const meQuery = trpc.user.me.useQuery(void 0, { retry: false });
   const profileQuery = trpc.memberProfile.getMyProfile.useQuery(
@@ -93,6 +89,7 @@ export function AgentFocusedShell({
   const updatePinMutation = trpc.chat.updateAgentSessionPin.useMutation({
     onSuccess: (_result, variables) => {
       void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
+      void utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id });
       void utils.chat.getAgentSession.invalidate({
         agentId: agent.id,
         sessionId: variables.sessionId,
@@ -102,32 +99,13 @@ export function AgentFocusedShell({
   const archiveSessionMutation = trpc.chat.archiveAgentSession.useMutation({
     onSuccess: (_result, variables) => {
       void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
-      void utils.chat.listArchivedAgentSessions.invalidate({
-        agentId: agent.id,
-      });
+      void utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id });
       closeDrawer();
       if (activeSessionId === variables.sessionId) {
         router.replace(`/w/${handle}/agents/${agent.id}/sessions/new`);
       }
     },
   });
-  const restoreSessionMutation = trpc.chat.restoreAgentSession.useMutation({
-    onSuccess: (_result, variables) => {
-      void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
-      void utils.chat.listArchivedAgentSessions.invalidate({
-        agentId: agent.id,
-      });
-      void utils.chat.getAgentSession.invalidate({
-        agentId: agent.id,
-        sessionId: variables.sessionId,
-      });
-      closeDrawer();
-      router.push(
-        `/w/${handle}/agents/${agent.id}/sessions/${variables.sessionId}`,
-      );
-    },
-  });
-
   const handleCreateSession = useCallback((): void => {
     closeDrawer();
     router.push(`/w/${handle}/agents/${agent.id}/sessions/new`);
@@ -141,6 +119,7 @@ export function AgentFocusedShell({
         title,
       });
       void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
+      void utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id });
       void utils.chat.getAgentSession.invalidate({
         agentId: agent.id,
         sessionId,
@@ -150,6 +129,7 @@ export function AgentFocusedShell({
       agent.id,
       updateTitleMutation,
       utils.chat.getAgentSession,
+      utils.chat.getAgentSessionSidebar,
       utils.chat.listAgentSessions,
     ],
   );
@@ -168,14 +148,6 @@ export function AgentFocusedShell({
       updatePinMutation.mutate({ agentId: agent.id, sessionId, pinned });
     },
     [agent.id, updatePinMutation],
-  );
-
-  const handleRestoreSession = useCallback(
-    (sessionId: string): void => {
-      restoreSessionMutation.reset();
-      restoreSessionMutation.mutate({ agentId: agent.id, sessionId });
-    },
-    [restoreSessionMutation, agent.id],
   );
 
   const handleLogout = useCallback((): void => {
@@ -215,19 +187,13 @@ export function AgentFocusedShell({
           adminAccessUrl={adminAccessQuery.data?.url ?? null}
           loggingOut={logoutMutation.isPending}
           onLogout={handleLogout}
-          sessions={sessionsQuery.data?.items ?? []}
-          sessionsLoading={sessionsQuery.isPending}
+          pinnedSessions={sessionSidebarQuery.data?.pinned ?? []}
+          recentSessions={sessionSidebarQuery.data?.recent ?? []}
+          sessionsLoading={sessionSidebarQuery.isPending}
           sessionsError={
-            sessionsQuery.error?.message ??
+            sessionSidebarQuery.error?.message ??
             updatePinMutation.error?.message ??
             archiveSessionMutation.error?.message ??
-            null
-          }
-          archivedSessions={archivedSessionsQuery.data?.items ?? []}
-          archivedSessionsLoading={archivedSessionsQuery.isPending}
-          archivedSessionsError={
-            archivedSessionsQuery.error?.message ??
-            restoreSessionMutation.error?.message ??
             null
           }
           activeSessionId={activeSessionId}
@@ -247,16 +213,10 @@ export function AgentFocusedShell({
               ? updatePinMutation.variables.sessionId
               : null
           }
-          restoringSessionId={
-            restoreSessionMutation.isPending
-              ? restoreSessionMutation.variables.sessionId
-              : null
-          }
           onCreateSession={handleCreateSession}
           onRenameSession={handleRenameSession}
           onArchiveSession={handleArchiveSession}
           onSetSessionPinned={handleSetSessionPinned}
-          onRestoreSession={handleRestoreSession}
           onNavigate={closeDrawer}
         />
       </Drawer>
@@ -277,19 +237,13 @@ export function AgentFocusedShell({
             adminAccessUrl={adminAccessQuery.data?.url ?? null}
             loggingOut={logoutMutation.isPending}
             onLogout={handleLogout}
-            sessions={sessionsQuery.data?.items ?? []}
-            sessionsLoading={sessionsQuery.isPending}
+            pinnedSessions={sessionSidebarQuery.data?.pinned ?? []}
+            recentSessions={sessionSidebarQuery.data?.recent ?? []}
+            sessionsLoading={sessionSidebarQuery.isPending}
             sessionsError={
-              sessionsQuery.error?.message ??
+              sessionSidebarQuery.error?.message ??
               updatePinMutation.error?.message ??
               archiveSessionMutation.error?.message ??
-              null
-            }
-            archivedSessions={archivedSessionsQuery.data?.items ?? []}
-            archivedSessionsLoading={archivedSessionsQuery.isPending}
-            archivedSessionsError={
-              archivedSessionsQuery.error?.message ??
-              restoreSessionMutation.error?.message ??
               null
             }
             activeSessionId={activeSessionId}
@@ -309,16 +263,10 @@ export function AgentFocusedShell({
                 ? updatePinMutation.variables.sessionId
                 : null
             }
-            restoringSessionId={
-              restoreSessionMutation.isPending
-                ? restoreSessionMutation.variables.sessionId
-                : null
-            }
             onCreateSession={handleCreateSession}
             onRenameSession={handleRenameSession}
             onArchiveSession={handleArchiveSession}
             onSetSessionPinned={handleSetSessionPinned}
-            onRestoreSession={handleRestoreSession}
           />
         </Box>
         <Box

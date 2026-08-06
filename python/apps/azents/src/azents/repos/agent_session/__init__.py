@@ -40,6 +40,9 @@ from .data import (
     AgentSession,
     AgentSessionCreate,
     AgentSessionEnsureTeamPrimaryResult,
+    AgentSessionPage,
+    AgentSessionProjectionPage,
+    AgentSessionSidebarSummary,
     AgentSessionUnreadTerminalRunProjection,
     PendingSessionCommand,
     SessionAgent,
@@ -665,6 +668,27 @@ class AgentSessionRepository:
         auto_archive_ttl_days: int,
     ) -> list[AgentSessionUnreadTerminalRunProjection]:
         """Fetch active roots with unread state and tree archive deadlines."""
+        page = await self._list_active_unread_page_by_agent_id(
+            session,
+            agent_id,
+            auto_archive_ttl_days=auto_archive_ttl_days,
+            pinned=None,
+            offset=0,
+            limit=None,
+        )
+        return page.items
+
+    async def _list_active_unread_page_by_agent_id(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        *,
+        auto_archive_ttl_days: int,
+        pinned: bool | None,
+        offset: int,
+        limit: int | None,
+    ) -> AgentSessionProjectionPage:
+        """Fetch an active-root projection page with optional pin filtering."""
         primary_order = sa.case(
             (RDBAgentSession.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY, 0),
             else_=1,
@@ -684,7 +708,17 @@ class AgentSessionRepository:
             .group_by(RDBSessionAgent.root_session_agent_id)
             .subquery()
         )
-        result = await session.execute(
+        filters = [
+            RDBAgentSession.agent_id == agent_id,
+            RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+            RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+        ]
+        if pinned is not None:
+            filters.append(RDBAgentSession.pinned.is_(pinned))
+        total_count = await session.scalar(
+            sa.select(sa.func.count()).select_from(RDBAgentSession).where(*filters)
+        )
+        query = (
             sa.select(
                 RDBAgentSession,
                 RDBAgentSessionUnreadRun.run_id,
@@ -703,36 +737,89 @@ class AgentSessionRepository:
                 tree_activity.c.root_session_agent_id
                 == RDBSessionAgent.root_session_agent_id,
             )
-            .where(
-                RDBAgentSession.agent_id == agent_id,
-                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
-                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
-            )
+            .where(*filters)
             .order_by(
                 primary_order,
                 RDBAgentSession.last_user_input_at.desc(),
                 RDBAgentSession.updated_at.desc(),
+                RDBAgentSession.id.asc(),
             )
+            .offset(offset)
         )
-        return [
-            AgentSessionUnreadTerminalRunProjection(
-                session=self._build(agent_session),
-                unread_terminal_run_id=unread_terminal_run_id,
-                auto_archive_after=(
-                    None
-                    if agent_session.primary_kind
-                    == AgentSessionPrimaryKind.TEAM_PRIMARY
-                    or agent_session.pinned
-                    else (latest_activity_at or agent_session.last_activity_at)
-                    + datetime.timedelta(days=auto_archive_ttl_days)
-                ),
-            )
-            for (
-                agent_session,
-                unread_terminal_run_id,
-                latest_activity_at,
-            ) in result.tuples()
-        ]
+        if limit is not None:
+            query = query.limit(limit)
+        result = await session.execute(query)
+        return AgentSessionProjectionPage(
+            items=[
+                AgentSessionUnreadTerminalRunProjection(
+                    session=self._build(agent_session),
+                    unread_terminal_run_id=unread_terminal_run_id,
+                    auto_archive_after=(
+                        None
+                        if agent_session.primary_kind
+                        == AgentSessionPrimaryKind.TEAM_PRIMARY
+                        or agent_session.pinned
+                        else (latest_activity_at or agent_session.last_activity_at)
+                        + datetime.timedelta(days=auto_archive_ttl_days)
+                    ),
+                )
+                for (
+                    agent_session,
+                    unread_terminal_run_id,
+                    latest_activity_at,
+                ) in result.tuples()
+            ],
+            total_count=total_count or 0,
+        )
+
+    async def list_active_unread_page_by_agent_id(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        *,
+        auto_archive_ttl_days: int,
+        offset: int,
+        limit: int,
+    ) -> AgentSessionProjectionPage:
+        """Fetch one ordered active-root page with list projections."""
+        return await self._list_active_unread_page_by_agent_id(
+            session,
+            agent_id,
+            auto_archive_ttl_days=auto_archive_ttl_days,
+            pinned=None,
+            offset=offset,
+            limit=limit,
+        )
+
+    async def list_active_sidebar_summary_by_agent_id(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        *,
+        auto_archive_ttl_days: int,
+        recent_limit: int,
+    ) -> AgentSessionSidebarSummary:
+        """Fetch pinned and bounded recent active-root sidebar projections."""
+        pinned = await self._list_active_unread_page_by_agent_id(
+            session,
+            agent_id,
+            auto_archive_ttl_days=auto_archive_ttl_days,
+            pinned=True,
+            offset=0,
+            limit=None,
+        )
+        recent = await self._list_active_unread_page_by_agent_id(
+            session,
+            agent_id,
+            auto_archive_ttl_days=auto_archive_ttl_days,
+            pinned=False,
+            offset=0,
+            limit=recent_limit,
+        )
+        return AgentSessionSidebarSummary(
+            pinned=pinned.items,
+            recent=recent.items,
+        )
 
     async def get_with_unread_terminal_run_by_id(
         self,
@@ -779,6 +866,41 @@ class AgentSessionRepository:
             )
         ).scalars()
         return [self._build(row) for row in rows]
+
+    async def list_archived_page_by_agent_id(
+        self,
+        session: AsyncSession,
+        agent_id: str,
+        *,
+        offset: int,
+        limit: int,
+    ) -> AgentSessionPage:
+        """Fetch one latest-archive-first root-session page."""
+        filters = [
+            RDBAgentSession.agent_id == agent_id,
+            RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+            RDBAgentSession.status == AgentSessionStatus.ARCHIVED,
+        ]
+        total_count = await session.scalar(
+            sa.select(sa.func.count()).select_from(RDBAgentSession).where(*filters)
+        )
+        rows = (
+            await session.execute(
+                sa.select(RDBAgentSession)
+                .where(*filters)
+                .order_by(
+                    RDBAgentSession.archived_at.desc(),
+                    RDBAgentSession.updated_at.desc(),
+                    RDBAgentSession.id.asc(),
+                )
+                .offset(offset)
+                .limit(limit)
+            )
+        ).scalars()
+        return AgentSessionPage(
+            items=[self._build(row) for row in rows],
+            total_count=total_count or 0,
+        )
 
     async def list_auto_archive_candidates(
         self,

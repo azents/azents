@@ -2076,6 +2076,29 @@ class AgentSessionListResponse(BaseModel):
     )
 
 
+class AgentSessionPageResponse(BaseModel):
+    """Bounded Agent session directory response."""
+
+    items: list[AgentSessionResponse] = Field(description="Session page items")
+    total_count: int = Field(ge=0, description="Matching root-session count")
+    offset: int = Field(ge=0, description="Zero-based item offset")
+    limit: int = Field(ge=1, description="Requested page size")
+    current_archive_retention_days: int | None = Field(
+        description="Current whole-day archive retention, or null for Unlimited",
+    )
+
+
+class AgentSessionSidebarResponse(BaseModel):
+    """Bounded Agent sidebar session response."""
+
+    pinned: list[AgentSessionResponse] = Field(
+        description="All pinned active root sessions",
+    )
+    recent: list[AgentSessionResponse] = Field(
+        description="Distinct recent non-pinned active root sessions",
+    )
+
+
 class WsTicketResponse(BaseModel):
     """Short-lived ticket response for WebSocket connection."""
 

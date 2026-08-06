@@ -21,6 +21,7 @@ from azents.engine.run.failure import (
 from azents.engine.tools.goal import GoalStateSnapshot, GoalStatus
 from azents.engine.tools.todo import TodoStateSnapshot
 from azents.repos.action_execution.data import ActionExecutionProjection
+from azents.repos.agent_session.data import AgentSessionUnreadTerminalRunProjection
 
 
 class PendingMailboxUserMessagePresentation(BaseModel):
@@ -132,6 +133,22 @@ class PaginatedEvents:
     items: list[Event]
     has_more: bool
     has_newer: bool = False
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentSessionDirectoryPage:
+    """One authorized Agent session directory page."""
+
+    items: list[AgentSessionUnreadTerminalRunProjection]
+    total_count: int
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentSessionSidebarSummary:
+    """Bounded authorized Agent sidebar session projections."""
+
+    pinned: list[AgentSessionUnreadTerminalRunProjection]
+    recent: list[AgentSessionUnreadTerminalRunProjection]
 
 
 @dataclasses.dataclass(frozen=True)

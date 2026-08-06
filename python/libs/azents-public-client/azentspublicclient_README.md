@@ -132,6 +132,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_get_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id} | Get Agent Session
 *ChatV1Api* | [**chat_v1_get_agent_session_context**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_context) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/context | Get Agent Session Context
 *ChatV1Api* | [**chat_v1_get_agent_session_project_defaults**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_project_defaults) | **GET** /chat/v1/agents/{agent_id}/session-project-defaults | Get Agent Session Project Defaults
+*ChatV1Api* | [**chat_v1_get_agent_session_sidebar**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_session_sidebar) | **GET** /chat/v1/agents/{agent_id}/sessions/sidebar | Get Agent Session Sidebar
 *ChatV1Api* | [**chat_v1_get_agent_workspace**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_agent_workspace) | **GET** /chat/v1/agents/{agent_id}/workspace | Get Agent Workspace
 *ChatV1Api* | [**chat_v1_get_session_project_browser_manifest**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_session_project_browser_manifest) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/workspace/project-browser-manifest | Get Session Project Browser Manifest
 *ChatV1Api* | [**chat_v1_get_subagent_tree**](azentspublicclient/docs/ChatV1Api.md#chat_v1_get_subagent_tree) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/subagents/tree | Get Subagent Tree
@@ -140,7 +141,6 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_list_agent_project_presets**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_project_presets) | **GET** /chat/v1/agents/{agent_id}/project-presets | List Agent Project Presets
 *ChatV1Api* | [**chat_v1_list_agent_projects**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_projects) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects | List Agent Projects
 *ChatV1Api* | [**chat_v1_list_agent_sessions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_sessions) | **GET** /chat/v1/agents/{agent_id}/sessions | List Agent Sessions
-*ChatV1Api* | [**chat_v1_list_archived_agent_sessions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_archived_agent_sessions) | **GET** /chat/v1/agents/{agent_id}/sessions/archived | List Archived Agent Sessions
 *ChatV1Api* | [**chat_v1_list_history_events**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_history_events) | **GET** /chat/v1/sessions/{session_id}/history | List History Events
 *ChatV1Api* | [**chat_v1_list_input_actions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_input_actions) | **GET** /chat/v1/sessions/{session_id}/actions | List Input Actions
 *ChatV1Api* | [**chat_v1_list_live_events**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_live_events) | **GET** /chat/v1/sessions/{session_id}/live | List Live Events
@@ -327,6 +327,7 @@ Class | Method | HTTP request | Description
  - [AgentRuntimeSummaryResponse](azentspublicclient/docs/AgentRuntimeSummaryResponse.md)
  - [AgentSessionCreateRequest](azentspublicclient/docs/AgentSessionCreateRequest.md)
  - [AgentSessionListResponse](azentspublicclient/docs/AgentSessionListResponse.md)
+ - [AgentSessionPageResponse](azentspublicclient/docs/AgentSessionPageResponse.md)
  - [AgentSessionPinUpdateRequest](azentspublicclient/docs/AgentSessionPinUpdateRequest.md)
  - [AgentSessionPrimaryKind](azentspublicclient/docs/AgentSessionPrimaryKind.md)
  - [AgentSessionProjectDefaultsResponse](azentspublicclient/docs/AgentSessionProjectDefaultsResponse.md)
@@ -334,6 +335,7 @@ Class | Method | HTTP request | Description
  - [AgentSessionProjectDefaultsSourceResponse](azentspublicclient/docs/AgentSessionProjectDefaultsSourceResponse.md)
  - [AgentSessionResponse](azentspublicclient/docs/AgentSessionResponse.md)
  - [AgentSessionRunState](azentspublicclient/docs/AgentSessionRunState.md)
+ - [AgentSessionSidebarResponse](azentspublicclient/docs/AgentSessionSidebarResponse.md)
  - [AgentSessionStatus](azentspublicclient/docs/AgentSessionStatus.md)
  - [AgentSessionTitleSource](azentspublicclient/docs/AgentSessionTitleSource.md)
  - [AgentSessionTitleUpdateRequest](azentspublicclient/docs/AgentSessionTitleUpdateRequest.md)

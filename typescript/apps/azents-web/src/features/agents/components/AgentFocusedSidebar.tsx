@@ -13,7 +13,6 @@ import {
   Box,
   Button,
   Center,
-  Collapse,
   Divider,
   Group,
   Loader,
@@ -31,21 +30,19 @@ import {
 } from "@mantine/core";
 import {
   IconAlertCircle,
-  IconArchive,
   IconBrightnessAuto,
   IconCheck,
-  IconChevronDown,
   IconChevronLeft,
   IconChevronRight,
   IconDots,
   IconExternalLink,
   IconLayoutGrid,
+  IconListDetails,
   IconLogout,
   IconMoon,
   IconPencil,
   IconPin,
   IconPlus,
-  IconRefresh,
   IconSettings,
   IconShieldLock,
   IconSun,
@@ -81,23 +78,19 @@ interface AgentFocusedSidebarProps {
   adminAccessUrl: string | null;
   loggingOut: boolean;
   onLogout: () => void;
-  sessions?: AgentSessionResponse[];
+  pinnedSessions?: AgentSessionResponse[];
+  recentSessions?: AgentSessionResponse[];
   sessionsLoading?: boolean;
   sessionsError?: string | null;
-  archivedSessions?: AgentSessionResponse[];
-  archivedSessionsLoading?: boolean;
-  archivedSessionsError?: string | null;
   activeSessionId?: string | null;
   creatingSession?: boolean;
   renamingSessionId?: string | null;
   archivingSessionId?: string | null;
   pinningSessionId?: string | null;
-  restoringSessionId?: string | null;
   onCreateSession?: () => void;
   onRenameSession?: (sessionId: string, title: string | null) => Promise<void>;
   onArchiveSession?: (sessionId: string) => void;
   onSetSessionPinned?: (sessionId: string, pinned: boolean) => void;
-  onRestoreSession?: (sessionId: string) => void;
   onNavigate?: () => void;
   nowMs?: number;
 }
@@ -201,23 +194,19 @@ export function AgentFocusedSidebar({
   adminAccessUrl,
   loggingOut,
   onLogout,
-  sessions = [],
+  pinnedSessions = [],
+  recentSessions = [],
   sessionsLoading = false,
   sessionsError = null,
-  archivedSessions = [],
-  archivedSessionsLoading = false,
-  archivedSessionsError = null,
   activeSessionId = null,
   creatingSession = false,
   renamingSessionId = null,
   archivingSessionId = null,
   pinningSessionId = null,
-  restoringSessionId = null,
   onCreateSession,
   onRenameSession,
   onArchiveSession,
   onSetSessionPinned,
-  onRestoreSession,
   onNavigate,
   nowMs = Date.now(),
 }: AgentFocusedSidebarProps): React.ReactElement {
@@ -239,7 +228,6 @@ export function AgentFocusedSidebar({
   const [editingTitle, setEditingTitle] = useState("");
   const [archiveTarget, setArchiveTarget] =
     useState<AgentSessionResponse | null>(null);
-  const [archivedOpened, setArchivedOpened] = useState(false);
 
   const handleSelectColorMode = useCallback(
     (newPreference: ColorModePreference): void => {
@@ -301,6 +289,174 @@ export function AgentFocusedSidebar({
 
   const renameBusy =
     editingSession !== null && renamingSessionId === editingSession.id;
+  const sessionsDirectoryHref = `${basePath}/sessions`;
+  const isSessionsDirectoryActive = pathname === sessionsDirectoryHref;
+
+  const renderSession = (session: AgentSessionResponse): React.ReactElement => {
+    const href = `${basePath}/sessions/${session.id}`;
+    const isPrimary = session.primary_kind === "team_primary";
+    const running = session.run_state === "running";
+    const showUnreadIndicator =
+      !running && session.unread_terminal_run_id !== null;
+    const autoArchiveDueSoon = isAutoArchiveDueSoon(
+      session.auto_archive_after,
+      agent.auto_archive_ttl_days,
+      nowMs,
+    );
+    const archiving = archivingSessionId === session.id;
+    const pinning = pinningSessionId === session.id;
+    const showActions =
+      onRenameSession != null ||
+      (!isPrimary && onSetSessionPinned != null) ||
+      (!running && !isPrimary && onArchiveSession != null);
+
+    return (
+      <NavLink
+        key={session.id}
+        component={Link}
+        href={href}
+        active={activeSessionId === session.id}
+        label={
+          <Group gap="xs" wrap="nowrap">
+            <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
+              {getSessionDisplayTitle(session, t)}
+            </Text>
+            {autoArchiveDueSoon && session.auto_archive_after && (
+              <Tooltip
+                label={t("sessions.autoArchiveScheduled", {
+                  date: formatTimestamp(session.auto_archive_after, locale),
+                })}
+              >
+                <Badge size="xs" variant="light" color="orange">
+                  {t("sessions.autoArchiveDueSoonBadge")}
+                </Badge>
+              </Tooltip>
+            )}
+            {showUnreadIndicator && (
+              <Box
+                component="span"
+                w={rem(8)}
+                h={rem(8)}
+                bg="var(--mantine-primary-color-filled)"
+                style={{ borderRadius: "50%", flexShrink: 0 }}
+                role="img"
+                aria-label={t("sessions.unreadTerminalRun")}
+              />
+            )}
+            {running && (
+              <Tooltip label={t("sessions.running")}>
+                <Loader size="xs" aria-label={t("sessions.running")} />
+              </Tooltip>
+            )}
+            {isPrimary && (
+              <Badge size="xs" variant="light">
+                {t("sessions.primaryBadge")}
+              </Badge>
+            )}
+            {session.pinned && (
+              <Tooltip label={t("sessions.pinned")}>
+                <IconPin
+                  size={rem(16)}
+                  aria-label={t("sessions.pinned")}
+                  style={{ flexShrink: 0 }}
+                />
+              </Tooltip>
+            )}
+            {showActions && (
+              <Menu shadow="md" width={rem(160)} position="bottom-end">
+                <Menu.Target>
+                  <ActionIcon
+                    component="button"
+                    type="button"
+                    variant="subtle"
+                    size="sm"
+                    aria-label={t("sessions.actions")}
+                    loading={
+                      renamingSessionId === session.id || archiving || pinning
+                    }
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                  >
+                    <IconDots size={rem(16)} />
+                  </ActionIcon>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  {onRenameSession && (
+                    <Menu.Item
+                      leftSection={<IconPencil size={rem(16)} />}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        handleOpenRename(session);
+                      }}
+                    >
+                      {t("sessions.rename")}
+                    </Menu.Item>
+                  )}
+                  {!isPrimary && onSetSessionPinned && (
+                    <Menu.Item
+                      leftSection={<IconPin size={rem(16)} />}
+                      disabled={pinning}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onSetSessionPinned(session.id, !session.pinned);
+                      }}
+                    >
+                      {session.pinned ? t("sessions.unpin") : t("sessions.pin")}
+                    </Menu.Item>
+                  )}
+                  {!running && !isPrimary && onArchiveSession && (
+                    <Menu.Item
+                      color="red"
+                      leftSection={<IconTrash size={rem(16)} />}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setArchiveTarget(session);
+                      }}
+                    >
+                      {t("sessions.archive")}
+                    </Menu.Item>
+                  )}
+                </Menu.Dropdown>
+              </Menu>
+            )}
+          </Group>
+        }
+        description={formatSessionTimestamp(session, locale)}
+        onClick={onNavigate}
+        className={styles.sessionItem}
+      />
+    );
+  };
+
+  const renderSessionGroup = (
+    label: string,
+    groupSessions: AgentSessionResponse[],
+  ): React.ReactElement | null => {
+    if (groupSessions.length === 0) {
+      return null;
+    }
+    return (
+      <Box>
+        <Text
+          px="md"
+          pt="sm"
+          pb="xs"
+          size="xs"
+          fw={700}
+          tt="uppercase"
+          c="dimmed"
+        >
+          {label}
+        </Text>
+        {groupSessions.map(renderSession)}
+      </Box>
+    );
+  };
 
   return (
     <>
@@ -505,271 +661,27 @@ export function AgentFocusedSidebar({
                 <Text size="xs">{sessionsError}</Text>
               </Group>
             )}
-            {!sessionsLoading && !sessionsError && sessions.length === 0 && (
-              <Text px="md" py="sm" size="xs" c="dimmed">
-                {t("sessions.empty")}
-              </Text>
+            {!sessionsLoading &&
+              !sessionsError &&
+              pinnedSessions.length === 0 &&
+              recentSessions.length === 0 && (
+                <Text px="md" py="sm" size="xs" c="dimmed">
+                  {t("sessions.empty")}
+                </Text>
+              )}
+            {renderSessionGroup(t("sessions.pinnedTitle"), pinnedSessions)}
+            {renderSessionGroup(t("sessions.recentTitle"), recentSessions)}
+            {(pinnedSessions.length > 0 || recentSessions.length > 0) && (
+              <Divider my="xs" />
             )}
-            {sessions.map((session) => {
-              const href = `${basePath}/sessions/${session.id}`;
-              const isPrimary = session.primary_kind === "team_primary";
-              const running = session.run_state === "running";
-              const showUnreadIndicator =
-                !running && session.unread_terminal_run_id !== null;
-              const autoArchiveDueSoon = isAutoArchiveDueSoon(
-                session.auto_archive_after,
-                agent.auto_archive_ttl_days,
-                nowMs,
-              );
-              const archiving = archivingSessionId === session.id;
-              const pinning = pinningSessionId === session.id;
-              const showActions =
-                onRenameSession != null ||
-                (!isPrimary && onSetSessionPinned != null) ||
-                (!running && !isPrimary && onArchiveSession != null);
-              return (
-                <NavLink
-                  key={session.id}
-                  component={Link}
-                  href={href}
-                  active={activeSessionId === session.id}
-                  label={
-                    <Group gap="xs" wrap="nowrap">
-                      <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
-                        {getSessionDisplayTitle(session, t)}
-                      </Text>
-                      {autoArchiveDueSoon && session.auto_archive_after && (
-                        <Tooltip
-                          label={t("sessions.autoArchiveScheduled", {
-                            date: formatTimestamp(
-                              session.auto_archive_after,
-                              locale,
-                            ),
-                          })}
-                        >
-                          <Badge size="xs" variant="light" color="orange">
-                            {t("sessions.autoArchiveDueSoonBadge")}
-                          </Badge>
-                        </Tooltip>
-                      )}
-                      {showUnreadIndicator && (
-                        <Box
-                          component="span"
-                          w={rem(8)}
-                          h={rem(8)}
-                          bg="var(--mantine-primary-color-filled)"
-                          style={{ borderRadius: "50%", flexShrink: 0 }}
-                          role="img"
-                          aria-label={t("sessions.unreadTerminalRun")}
-                        />
-                      )}
-                      {running && (
-                        <Tooltip label={t("sessions.running")}>
-                          <Loader
-                            size="xs"
-                            aria-label={t("sessions.running")}
-                          />
-                        </Tooltip>
-                      )}
-                      {isPrimary && (
-                        <Badge size="xs" variant="light">
-                          {t("sessions.primaryBadge")}
-                        </Badge>
-                      )}
-                      {session.pinned && (
-                        <Tooltip label={t("sessions.pinned")}>
-                          <IconPin
-                            size={rem(16)}
-                            aria-label={t("sessions.pinned")}
-                            style={{ flexShrink: 0 }}
-                          />
-                        </Tooltip>
-                      )}
-                      {showActions && (
-                        <Menu
-                          shadow="md"
-                          width={rem(160)}
-                          position="bottom-end"
-                        >
-                          <Menu.Target>
-                            <ActionIcon
-                              component="button"
-                              type="button"
-                              variant="subtle"
-                              size="sm"
-                              aria-label={t("sessions.actions")}
-                              loading={
-                                renamingSessionId === session.id ||
-                                archiving ||
-                                pinning
-                              }
-                              onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                              }}
-                            >
-                              <IconDots size={rem(16)} />
-                            </ActionIcon>
-                          </Menu.Target>
-                          <Menu.Dropdown>
-                            {onRenameSession && (
-                              <Menu.Item
-                                leftSection={<IconPencil size={rem(16)} />}
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  handleOpenRename(session);
-                                }}
-                              >
-                                {t("sessions.rename")}
-                              </Menu.Item>
-                            )}
-                            {!isPrimary && onSetSessionPinned && (
-                              <Menu.Item
-                                leftSection={<IconPin size={rem(16)} />}
-                                disabled={pinning}
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  onSetSessionPinned(
-                                    session.id,
-                                    !session.pinned,
-                                  );
-                                }}
-                              >
-                                {session.pinned
-                                  ? t("sessions.unpin")
-                                  : t("sessions.pin")}
-                              </Menu.Item>
-                            )}
-                            {!running && !isPrimary && onArchiveSession && (
-                              <Menu.Item
-                                color="red"
-                                leftSection={<IconTrash size={rem(16)} />}
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  setArchiveTarget(session);
-                                }}
-                              >
-                                {t("sessions.archive")}
-                              </Menu.Item>
-                            )}
-                          </Menu.Dropdown>
-                        </Menu>
-                      )}
-                    </Group>
-                  }
-                  description={formatSessionTimestamp(session, locale)}
-                  onClick={onNavigate}
-                  className={styles.sessionItem}
-                />
-              );
-            })}
-
-            <Divider my="xs" />
-            <UnstyledButton
-              px="md"
-              py="xs"
-              onClick={() => setArchivedOpened((opened) => !opened)}
-              aria-expanded={archivedOpened}
-              className={styles.archivedSectionToggle}
-            >
-              <Group justify="space-between" wrap="nowrap">
-                <Group gap="xs" wrap="nowrap">
-                  <IconArchive size={rem(15)} />
-                  <Text size="xs" fw={700} tt="uppercase" c="dimmed">
-                    {t("sessions.archivedTitle")}
-                  </Text>
-                  {!archivedSessionsLoading && !archivedSessionsError && (
-                    <Badge size="xs" variant="light" color="gray">
-                      {archivedSessions.length}
-                    </Badge>
-                  )}
-                </Group>
-                <IconChevronDown
-                  size={rem(15)}
-                  style={{
-                    transform: archivedOpened ? "rotate(180deg)" : "none",
-                    transition: "transform 150ms ease",
-                  }}
-                />
-              </Group>
-            </UnstyledButton>
-            <Collapse expanded={archivedOpened}>
-              <Stack gap={0} pb="xs">
-                {archivedSessionsLoading && (
-                  <Center py="md">
-                    <Loader size="sm" />
-                  </Center>
-                )}
-                {archivedSessionsError && (
-                  <Group px="md" py="sm" gap="xs" wrap="nowrap" c="red">
-                    <IconAlertCircle size={rem(16)} />
-                    <Text size="xs">{archivedSessionsError}</Text>
-                  </Group>
-                )}
-                {!archivedSessionsLoading &&
-                  !archivedSessionsError &&
-                  archivedSessions.length === 0 && (
-                    <Text px="md" py="sm" size="xs" c="dimmed">
-                      {t("sessions.archivedEmpty")}
-                    </Text>
-                  )}
-                {archivedSessions.map((session) => {
-                  const restoring = restoringSessionId === session.id;
-                  const archivedAt = session.archived_at ?? session.updated_at;
-                  const retentionLabel =
-                    session.archive_retention_days_snapshot === null
-                      ? t("sessions.retentionSnapshotUnlimited")
-                      : t("sessions.retentionSnapshotDays", {
-                          days: session.archive_retention_days_snapshot,
-                        });
-                  const purgeLabel = session.purge_after
-                    ? t("sessions.purgeScheduled", {
-                        date: formatTimestamp(session.purge_after, locale),
-                      })
-                    : t("sessions.purgeUnscheduled");
-                  return (
-                    <Box
-                      key={session.id}
-                      px="md"
-                      py="sm"
-                      className={styles.archivedSessionItem}
-                    >
-                      <Group gap="xs" wrap="nowrap" align="flex-start">
-                        <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
-                          <Text size="sm" truncate>
-                            {getSessionDisplayTitle(session, t)}
-                          </Text>
-                          <Text size="xs" c="dimmed">
-                            {t("sessions.archivedAt", {
-                              date: formatTimestamp(archivedAt, locale),
-                            })}
-                          </Text>
-                          <Text size="xs" c="dimmed">
-                            {retentionLabel} · {purgeLabel}
-                          </Text>
-                        </Stack>
-                        {onRestoreSession && (
-                          <Tooltip label={t("sessions.restore")}>
-                            <ActionIcon
-                              variant="subtle"
-                              size="sm"
-                              aria-label={t("sessions.restore")}
-                              loading={restoring}
-                              onClick={() => onRestoreSession(session.id)}
-                            >
-                              <IconRefresh size={rem(16)} />
-                            </ActionIcon>
-                          </Tooltip>
-                        )}
-                      </Group>
-                    </Box>
-                  );
-                })}
-              </Stack>
-            </Collapse>
+            <NavLink
+              component={Link}
+              href={sessionsDirectoryHref}
+              active={isSessionsDirectoryActive}
+              label={t("sessions.allSessions")}
+              leftSection={<IconListDetails size={rem(16)} />}
+              onClick={onNavigate}
+            />
           </Stack>
         </ScrollArea>
 

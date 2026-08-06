@@ -25,6 +25,7 @@ import {
   chatV1GetAgentSession,
   chatV1GetAgentSessionContext,
   chatV1GetAgentSessionProjectDefaults,
+  chatV1GetAgentSessionSidebar,
   chatV1GetAgentWorkspace,
   chatV1GetSessionProjectBrowserManifest,
   chatV1GetSubagentTree,
@@ -32,7 +33,6 @@ import {
   chatV1ListAgentProjectPresets,
   chatV1ListAgentProjects,
   chatV1ListAgentSessions,
-  chatV1ListArchivedAgentSessions,
   chatV1ListHistoryEvents,
   chatV1ListInputActions,
   chatV1ListLiveEvents,
@@ -147,12 +147,24 @@ export const chatRouter = router({
     }),
 
   listAgentSessions: publicProcedure
-    .input(z.object({ agentId: z.string().min(1) }))
+    .input(
+      z.object({
+        agentId: z.string().min(1),
+        status: z.enum(["active", "archived"]).default("active"),
+        offset: z.number().int().min(0).default(0),
+        limit: z.number().int().min(1).max(100).default(25),
+      }),
+    )
     .query(async ({ ctx, input }) => {
       try {
         const { data } = await chatV1ListAgentSessions({
           client: ctx.apiClient,
           path: { agent_id: input.agentId },
+          query: {
+            status: input.status,
+            offset: input.offset,
+            limit: input.limit,
+          },
           throwOnError: true,
         });
         return data;
@@ -164,11 +176,11 @@ export const chatRouter = router({
       }
     }),
 
-  listArchivedAgentSessions: publicProcedure
+  getAgentSessionSidebar: publicProcedure
     .input(z.object({ agentId: z.string().min(1) }))
     .query(async ({ ctx, input }) => {
       try {
-        const { data } = await chatV1ListArchivedAgentSessions({
+        const { data } = await chatV1GetAgentSessionSidebar({
           client: ctx.apiClient,
           path: { agent_id: input.agentId },
           throwOnError: true,

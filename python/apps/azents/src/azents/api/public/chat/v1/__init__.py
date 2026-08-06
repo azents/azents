@@ -11,7 +11,7 @@ import re
 from collections.abc import AsyncIterator
 from datetime import datetime
 from textwrap import dedent
-from typing import Annotated, NoReturn, assert_never
+from typing import Annotated, Literal, NoReturn, assert_never
 from urllib.parse import quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -53,7 +53,7 @@ from azents.core.auth.jwt import (
 )
 from azents.core.config import AuthConfig, Config
 from azents.core.deps import get_appctx, get_auth_config
-from azents.core.enums import AgentSessionKind
+from azents.core.enums import AgentSessionKind, AgentSessionStatus
 from azents.core.redis import create_redis_client
 from azents.engine.events.action_messages import (
     CleanupOrphanGitWorktreesAction,
@@ -188,9 +188,11 @@ from .data import (
     AgentProjectPresetResponse,
     AgentSessionCreateRequest,
     AgentSessionListResponse,
+    AgentSessionPageResponse,
     AgentSessionPinUpdateRequest,
     AgentSessionProjectDefaultsResponse,
     AgentSessionResponse,
+    AgentSessionSidebarResponse,
     AgentSessionTitleUpdateRequest,
     AgentSessionUnreadTerminalRunAcknowledgeRequest,
     AgentWorkspaceActionResponse,
@@ -1640,29 +1642,68 @@ async def list_agent_sessions(
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
     chat_service: Annotated[ChatSessionService, Depends()],
     retention_service: Annotated[ArchivedSessionRetentionService, Depends()],
-) -> AgentSessionListResponse:
-    """List active team sessions for an Agent with team primary first."""
-    result = await chat_service.list_agent_sessions_with_unread_terminal_run(
+    status: Annotated[Literal["active", "archived"], Query()] = "active",
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 25,
+) -> AgentSessionPageResponse:
+    """List one active or archived root-session directory page."""
+    result = await chat_service.list_agent_session_directory(
         agent_id=agent_id,
         user_id=current_user.user_id,
+        status=AgentSessionStatus(status),
+        offset=offset,
+        limit=limit,
     )
     if result.success:
-        sessions = result.value
+        page = result.value
         settings = await retention_service.get_settings()
-        return AgentSessionListResponse(
+        return AgentSessionPageResponse(
             items=[
                 AgentSessionResponse.from_projection(projection)
-                for projection in sessions
+                for projection in page.items
             ],
+            total_count=page.total_count,
+            offset=offset,
+            limit=limit,
             current_archive_retention_days=(settings.archived_session_retention_days),
         )
-    else:
-        error = result.error
-        match error:
-            case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
-                raise HTTPException(status_code=404, detail="Session not found.")
-            case _:
-                assert_never(error)
+    error = result.error
+    match error:
+        case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
+            raise HTTPException(status_code=404, detail="Session not found.")
+        case _:
+            assert_never(error)
+
+
+@router.get("/agents/{agent_id}/sessions/sidebar")
+async def get_agent_session_sidebar(
+    agent_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+) -> AgentSessionSidebarResponse:
+    """Fetch the bounded active-root sidebar projection for an Agent."""
+    result = await chat_service.get_agent_session_sidebar_summary(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        recent_limit=20,
+    )
+    if result.success:
+        return AgentSessionSidebarResponse(
+            pinned=[
+                AgentSessionResponse.from_projection(projection)
+                for projection in result.value.pinned
+            ],
+            recent=[
+                AgentSessionResponse.from_projection(projection)
+                for projection in result.value.recent
+            ],
+        )
+    error = result.error
+    match error:
+        case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
+            raise HTTPException(status_code=404, detail="Session not found.")
+        case _:
+            assert_never(error)
 
 
 @router.get("/agents/{agent_id}/project-presets")
@@ -1934,41 +1975,6 @@ async def cleanup_session_git_worktree(
                 )
             case _:
                 assert_never(error)
-
-
-@router.get("/agents/{agent_id}/sessions/archived")
-async def list_archived_agent_sessions(
-    agent_id: str,
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-    chat_service: Annotated[ChatSessionService, Depends()],
-    retention_service: Annotated[ArchivedSessionRetentionService, Depends()],
-) -> AgentSessionListResponse:
-    """List archived root sessions for an accessible Agent."""
-    _validate_uuid7_hex(agent_id, label="agent ID")
-    result = await chat_service.list_archived_agent_sessions(
-        agent_id=agent_id,
-        user_id=current_user.user_id,
-    )
-    match result:
-        case Success(items):
-            settings = await retention_service.get_settings()
-            return AgentSessionListResponse(
-                items=[
-                    AgentSessionResponse.from_domain(
-                        item,
-                        unread_terminal_run_id=None,
-                        auto_archive_after=None,
-                    )
-                    for item in items
-                ],
-                current_archive_retention_days=(
-                    settings.archived_session_retention_days
-                ),
-            )
-        case Failure(SessionNotFound()):
-            raise HTTPException(status_code=404, detail="Agent not found.")
-        case _:
-            assert_never(result)
 
 
 @router.post("/agents/{agent_id}/sessions/{session_id}/restore")

@@ -55,6 +55,7 @@ azentspublicclient/docs/AgentRuntimeSummaryResponse.md
 azentspublicclient/docs/AgentRuntimeV1Api.md
 azentspublicclient/docs/AgentSessionCreateRequest.md
 azentspublicclient/docs/AgentSessionListResponse.md
+azentspublicclient/docs/AgentSessionPageResponse.md
 azentspublicclient/docs/AgentSessionPinUpdateRequest.md
 azentspublicclient/docs/AgentSessionPrimaryKind.md
 azentspublicclient/docs/AgentSessionProjectDefaultsResponse.md
@@ -62,6 +63,7 @@ azentspublicclient/docs/AgentSessionProjectDefaultsResponseItemsInner.md
 azentspublicclient/docs/AgentSessionProjectDefaultsSourceResponse.md
 azentspublicclient/docs/AgentSessionResponse.md
 azentspublicclient/docs/AgentSessionRunState.md
+azentspublicclient/docs/AgentSessionSidebarResponse.md
 azentspublicclient/docs/AgentSessionStatus.md
 azentspublicclient/docs/AgentSessionTitleSource.md
 azentspublicclient/docs/AgentSessionTitleUpdateRequest.md
@@ -481,6 +483,7 @@ azentspublicclient/models/agent_runtime_response.py
 azentspublicclient/models/agent_runtime_summary_response.py
 azentspublicclient/models/agent_session_create_request.py
 azentspublicclient/models/agent_session_list_response.py
+azentspublicclient/models/agent_session_page_response.py
 azentspublicclient/models/agent_session_pin_update_request.py
 azentspublicclient/models/agent_session_primary_kind.py
 azentspublicclient/models/agent_session_project_defaults_response.py
@@ -488,6 +491,7 @@ azentspublicclient/models/agent_session_project_defaults_response_items_inner.py
 azentspublicclient/models/agent_session_project_defaults_source_response.py
 azentspublicclient/models/agent_session_response.py
 azentspublicclient/models/agent_session_run_state.py
+azentspublicclient/models/agent_session_sidebar_response.py
 azentspublicclient/models/agent_session_status.py
 azentspublicclient/models/agent_session_title_source.py
 azentspublicclient/models/agent_session_title_update_request.py
@@ -887,6 +891,7 @@ azentspublicclient/test/test_agent_runtime_summary_response.py
 azentspublicclient/test/test_agent_runtime_v1_api.py
 azentspublicclient/test/test_agent_session_create_request.py
 azentspublicclient/test/test_agent_session_list_response.py
+azentspublicclient/test/test_agent_session_page_response.py
 azentspublicclient/test/test_agent_session_pin_update_request.py
 azentspublicclient/test/test_agent_session_primary_kind.py
 azentspublicclient/test/test_agent_session_project_defaults_response.py
@@ -894,6 +899,7 @@ azentspublicclient/test/test_agent_session_project_defaults_response_items_inner
 azentspublicclient/test/test_agent_session_project_defaults_source_response.py
 azentspublicclient/test/test_agent_session_response.py
 azentspublicclient/test/test_agent_session_run_state.py
+azentspublicclient/test/test_agent_session_sidebar_response.py
 azentspublicclient/test/test_agent_session_status.py
 azentspublicclient/test/test_agent_session_title_source.py
 azentspublicclient/test/test_agent_session_title_update_request.py

@@ -109,6 +109,8 @@ from azents.services.session_workspace_project import (
 from .data import (
     AcknowledgeUnreadTerminalRunError,
     AgentNotFound,
+    AgentSessionDirectoryPage,
+    AgentSessionSidebarSummary,
     ArchiveSessionError,
     ArchiveSessionResult,
     ChatLiveRunOperation,
@@ -725,6 +727,113 @@ class ChatSessionService:
                 )
             )
             return Success(sessions)
+
+    async def list_agent_session_directory(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
+        status: AgentSessionStatus,
+        offset: int,
+        limit: int,
+    ) -> Result[AgentSessionDirectoryPage, EnsureSessionError]:
+        """Fetch one authorized active or archived root-session directory page."""
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            if agent is None:
+                return Failure(AgentNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=agent.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(NotWorkspaceMember())
+            if status is AgentSessionStatus.ACTIVE:
+                await self.root_agent_session_creation_service.ensure_team_primary(
+                    session,
+                    workspace_id=agent.workspace_id,
+                    agent_id=agent_id,
+                )
+                list_active_page = (
+                    self.agent_session_repository.list_active_unread_page_by_agent_id
+                )
+                page = await list_active_page(
+                    session,
+                    agent_id,
+                    auto_archive_ttl_days=agent.auto_archive_ttl_days,
+                    offset=offset,
+                    limit=limit,
+                )
+                return Success(
+                    AgentSessionDirectoryPage(
+                        items=page.items,
+                        total_count=page.total_count,
+                    )
+                )
+            page = await self.agent_session_repository.list_archived_page_by_agent_id(
+                session,
+                agent_id,
+                offset=offset,
+                limit=limit,
+            )
+            return Success(
+                AgentSessionDirectoryPage(
+                    items=[
+                        AgentSessionUnreadTerminalRunProjection(
+                            session=item,
+                            unread_terminal_run_id=None,
+                            auto_archive_after=None,
+                        )
+                        for item in page.items
+                    ],
+                    total_count=page.total_count,
+                )
+            )
+
+    async def get_agent_session_sidebar_summary(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
+        recent_limit: int,
+    ) -> Result[AgentSessionSidebarSummary, EnsureSessionError]:
+        """Fetch bounded authorized sidebar session projections."""
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            if agent is None:
+                return Failure(AgentNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=agent.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(NotWorkspaceMember())
+            await self.root_agent_session_creation_service.ensure_team_primary(
+                session,
+                workspace_id=agent.workspace_id,
+                agent_id=agent_id,
+            )
+            get_sidebar_summary = (
+                self.agent_session_repository.list_active_sidebar_summary_by_agent_id
+            )
+            summary = await get_sidebar_summary(
+                session,
+                agent_id,
+                auto_archive_ttl_days=agent.auto_archive_ttl_days,
+                recent_limit=recent_limit,
+            )
+            return Success(
+                AgentSessionSidebarSummary(
+                    pinned=summary.pinned,
+                    recent=summary.recent,
+                )
+            )
 
     async def create_team_session(
         self,

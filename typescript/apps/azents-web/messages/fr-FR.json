@@ -880,7 +880,19 @@
           "retentionSnapshotDays": "Conservation de {days, plural, =0 {0 jour} one {# jour} other {# jours}}",
           "purgeScheduled": "Suppression le {date}",
           "purgeUnscheduled": "Aucune suppression planifiée",
-          "restore": "Restaurer"
+          "restore": "Restaurer",
+          "pinnedTitle": "Épinglées",
+          "recentTitle": "Récentes",
+          "allSessions": "Toutes les sessions",
+          "directoryTitle": "Répertoire des sessions",
+          "directoryDescription": "Parcourez les sessions actives et archivées.",
+          "active": "Actives",
+          "archived": "Archivées",
+          "previous": "Précédent",
+          "next": "Suivant",
+          "pageStatus": "Page {page} sur {pages}",
+          "currentRetentionUnlimited": "Conservation actuelle : illimitée",
+          "currentRetentionDays": "Conservation actuelle : {days, plural, =0 {0 jour} one {# jour} other {# jours}}"
         },
         "subagents": {
           "title": "Sous-agents",

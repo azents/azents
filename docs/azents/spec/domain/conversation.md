@@ -92,7 +92,7 @@ api_routes:
   - /chat/v1/agents/{agent_id}/sessions/{session_id}
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/archive
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/pin
-  - /chat/v1/agents/{agent_id}/sessions/archived
+  - /chat/v1/agents/{agent_id}/sessions/sidebar
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/restore
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/git-worktree/cleanup
   - /chat/v1/agents/{agent_id}/git-refs
@@ -109,8 +109,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-08-03
-spec_version: 140
+last_verified_at: 2026-08-06
+spec_version: 141
 ---
 
 # Conversation & Events
@@ -201,13 +201,20 @@ creates duplicate Project rows independently.
 
 Only one team primary session may exist per agent in the current product state. Additional active
 non-primary team sessions may exist under the same agent with `primary_kind = null`.
-`GET /chat/v1/agents/{agent_id}/sessions` lists active agent sessions with the team primary session
-first and the remaining sessions ordered by persisted `last_user_input_at`, the timestamp of the
-most recent non-reverted `user_message` event or the session creation time when no user input exists.
-This lets newly created sessions appear naturally in the active list before their first message. Each
-session item includes `run_state` so azents-web can mark running sessions in the Agent rail session
-list. `POST /chat/v1/agents/{agent_id}/sessions` creates an active non-primary team session. The
-current request shape is `existing_project_paths` plus ordered `setup_actions`.
+`GET /chat/v1/agents/{agent_id}/sessions` is the bounded Agent session directory read. Its
+`status=active|archived`, `offset`, and `limit` query parameters select one root-session page and
+return `items`, `total_count`, `offset`, `limit`, and current archive-retention policy metadata.
+Active rows place the team primary session first and order remaining sessions by persisted
+`last_user_input_at`, then `updated_at`, with a stable session-id tie breaker. Archived rows order by
+`archived_at`, then `updated_at`, with the same tie breaker. Active rows retain unread terminal-run
+and automatic-archive projections; archived rows retain archive time, purge deadline, and the
+immutable retention snapshot. `GET /chat/v1/agents/{agent_id}/sessions/sidebar` returns every pinned
+active root session plus at most 20 distinct recent non-pinned active root sessions in separate
+`pinned` and `recent` arrays; it never returns archived or subagent sessions. Both reads validate
+Agent membership, and active reads retain Team-primary ensure behavior. Each session item includes
+`run_state` so azents-web can mark running sessions in the Agent rail session list. `POST
+/chat/v1/agents/{agent_id}/sessions` creates an active non-primary team session. The current request
+shape is `existing_project_paths` plus ordered `setup_actions`.
 `existing_project_paths` registers explicit Project paths supplied by the client and does not copy
 Projects from the team primary session. Each `create_git_worktree` setup action is stored as an
 ordered `action_message` input before the first user message; the action execution creates an
@@ -248,9 +255,8 @@ worktrees remain registered in the session where they are selected but are exclu
 Project defaults and presets. Explicit new-worktree items persist their source Project and mode as the
 reusable default. The worktree base branch picker refreshes Git refs when mounted, selects the source
 Project's currently checked-out local branch by default, supports branch-name search, and shows local
-branches only. On first-message
-success, azents-web replaces the draft
-URL with the created session URL and invalidates the Agent session list cache.
+branches only. On first-message success, azents-web replaces the draft URL with the created session
+URL and invalidates both the paginated Agent directory and bounded sidebar summary caches.
 
 The draft and concrete-session headers project subscription usage for the currently selected
 Agent-owned model option when its provider is `chatgpt_oauth`, `xai_oauth`, `openrouter`, or
@@ -350,10 +356,9 @@ cleanup failure is logged and may remain in allocation state, but it does not ro
 change the successful response, or create retention retry work. A crash or cancellation after commit
 may skip the attempt. Restore does not recreate a worktree removed during archive.
 
-`GET /chat/v1/agents/{agent_id}/sessions/archived` returns archived roots separately from the active
-session list. Each item includes `archived_at`, `purge_after`, and the immutable retention snapshot;
-the list response also includes the current instance retention value as policy metadata. Main Web does
-not expose that value in session-removal confirmation copy.
+`GET /chat/v1/agents/{agent_id}/sessions?status=archived` returns archived roots as one paginated
+directory status. Each item includes `archived_at`, `purge_after`, and the immutable retention
+snapshot; the page response also includes the current instance retention value as policy metadata.
 `POST /chat/v1/agents/{agent_id}/sessions/{session_id}/restore` restores the complete tree only while
 the root purge job has not started fencing. Restore cancels eligible unstarted purge work, clears the
 root archive snapshot, marks every linked session active, and returns the root session. A root that
@@ -363,10 +368,11 @@ The Agent rail keeps rename and the archive-backed removal action in the existin
 menu. The action is available only for inactive non-primary roots. Main Web labels it Delete, uses a
 trash icon, and confirms only that the session will be removed from the list; the confirmation omits
 retention, preservation, restoration, and permanent-deletion claims. The mutation still archives the
-root tree. If the selected session is archived, Main Web navigates to
-`/w/{handle}/agents/{agent_id}/sessions/new`. The collapsible Archived section shows title fallback,
-archive time, immutable retention snapshot, scheduled deletion or Unlimited state, and Restore. It
-exposes no permanent-delete action.
+root tree. The bounded sidebar renders separate Pinned and Recent groups from the sidebar summary,
+never requests archived rows, and exposes an All sessions link to
+`/w/{handle}/agents/{agent_id}/sessions`. The directory supports `?status=active|archived&page=N`,
+page navigation, direct session links, and Restore on archived rows. If the selected session is
+archived, Main Web navigates to `/w/{handle}/agents/{agent_id}/sessions/new`.
 
 The public `DELETE /chat/v1/sessions/{session_id}` route is absent. Permanent database deletion is
 owned only by durable purge after fencing. Purge deletes subtree ModelFile, Artifact, bound
@@ -1097,6 +1103,7 @@ participant.
 
 ## 12. Changelog
 
+- **2026-08-06** — v141. Replaced unbounded active/archived session reads with a status-paginated directory and a server-composed pinned/recent sidebar summary; added the Agent session directory route and coherent sidebar/directory invalidation.
 - **2026-08-03** — v140. Normalized session Project inputs against the current Runner-reported Agent Workspace and derived generated worktree allocation and cleanup ownership from that Runtime-specific root.
 - **2026-08-03** — v139. Added saved-capability-directed Structured Output and plain-text automatic
   title envelopes, one bounded unknown-capability compatibility transition, and prompt-only

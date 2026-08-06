@@ -17,18 +17,24 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
-from typing import Any, ClassVar, Dict, List
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from typing import Any, ClassVar, Dict, List, Optional
+from typing_extensions import Annotated
+from azentspublicclient.models.agent_session_response import AgentSessionResponse
 from typing import Optional, Set
 from typing_extensions import Self
 
-class SessionWorkspaceProjectRegisterRequest(BaseModel):
+class AgentSessionPageResponse(BaseModel):
     """
-    Existing Agent Workspace folder Project registration payload.
+    Bounded Agent session directory response.
     """ # noqa: E501
-    path: StrictStr = Field(description="Existing directory path under the Agent Workspace")
+    items: List[AgentSessionResponse] = Field(description="Session page items")
+    total_count: Annotated[int, Field(strict=True, ge=0)] = Field(description="Matching root-session count")
+    offset: Annotated[int, Field(strict=True, ge=0)] = Field(description="Zero-based item offset")
+    limit: Annotated[int, Field(strict=True, ge=1)] = Field(description="Requested page size")
+    current_archive_retention_days: Optional[StrictInt]
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["path"]
+    __properties: ClassVar[List[str]] = ["items", "total_count", "offset", "limit", "current_archive_retention_days"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -48,7 +54,7 @@ class SessionWorkspaceProjectRegisterRequest(BaseModel):
 
     @classmethod
     def from_json(cls, json_str: str) -> Optional[Self]:
-        """Create an instance of SessionWorkspaceProjectRegisterRequest from a JSON string"""
+        """Create an instance of AgentSessionPageResponse from a JSON string"""
         return cls.from_dict(json.loads(json_str))
 
     def to_dict(self) -> Dict[str, Any]:
@@ -71,16 +77,28 @@ class SessionWorkspaceProjectRegisterRequest(BaseModel):
             exclude=excluded_fields,
             exclude_none=True,
         )
+        # override the default output from pydantic by calling `to_dict()` of each item in items (list)
+        _items = []
+        if self.items:
+            for _item_items in self.items:
+                if _item_items:
+                    _items.append(_item_items.to_dict())
+            _dict['items'] = _items
         # puts key-value pairs in additional_properties in the top level
         if self.additional_properties is not None:
             for _key, _value in self.additional_properties.items():
                 _dict[_key] = _value
 
+        # set to None if current_archive_retention_days (nullable) is None
+        # and model_fields_set contains the field
+        if self.current_archive_retention_days is None and "current_archive_retention_days" in self.model_fields_set:
+            _dict['current_archive_retention_days'] = None
+
         return _dict
 
     @classmethod
     def from_dict(cls, obj: Optional[Dict[str, Any]]) -> Optional[Self]:
-        """Create an instance of SessionWorkspaceProjectRegisterRequest from a dict"""
+        """Create an instance of AgentSessionPageResponse from a dict"""
         if obj is None:
             return None
 
@@ -88,7 +106,11 @@ class SessionWorkspaceProjectRegisterRequest(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "path": obj.get("path")
+            "items": [AgentSessionResponse.from_dict(_item) for _item in obj["items"]] if obj.get("items") is not None else None,
+            "total_count": obj.get("total_count"),
+            "offset": obj.get("offset"),
+            "limit": obj.get("limit"),
+            "current_archive_retention_days": obj.get("current_archive_retention_days")
         })
         # store additional fields in additional_properties
         for _key in obj.keys():

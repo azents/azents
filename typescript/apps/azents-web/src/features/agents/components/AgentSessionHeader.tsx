@@ -147,6 +147,7 @@ export function AgentSessionHeader({
     await Promise.all([
       utils.chat.getAgentSession.invalidate({ agentId: agent.id, sessionId }),
       utils.chat.listAgentSessions.invalidate({ agentId: agent.id }),
+      utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id }),
     ]);
     handleCloseRename();
   }, [
@@ -157,6 +158,7 @@ export function AgentSessionHeader({
     sessionId,
     updateTitleMutation,
     utils.chat.getAgentSession,
+    utils.chat.getAgentSessionSidebar,
     utils.chat.listAgentSessions,
   ]);
 
@@ -170,6 +172,7 @@ export function AgentSessionHeader({
     await Promise.all([
       utils.chat.getAgentSession.invalidate({ agentId: agent.id, sessionId }),
       utils.chat.listAgentSessions.invalidate({ agentId: agent.id }),
+      utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id }),
     ]);
     handleCloseRename();
   }, [
@@ -179,6 +182,7 @@ export function AgentSessionHeader({
     sessionId,
     updateTitleMutation,
     utils.chat.getAgentSession,
+    utils.chat.getAgentSessionSidebar,
     utils.chat.listAgentSessions,
   ]);
 
