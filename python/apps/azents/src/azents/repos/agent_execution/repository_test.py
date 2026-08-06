@@ -14,6 +14,7 @@ from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
     AgentSessionEndReason,
+    AgentSessionProductMode,
     AgentSessionStatus,
     EventKind,
     ExternalChannelPrincipalAuthorType,
@@ -170,6 +171,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -232,6 +235,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -295,6 +300,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -331,6 +338,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -388,6 +397,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -454,6 +465,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -503,6 +516,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -545,6 +560,8 @@ class TestEventExecutionRepositories:
                 setup_session,
                 AgentSessionCreate(
                     workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                     agent_id=agent_id,
                     title=None,
                 ),
@@ -624,6 +641,8 @@ class TestEventExecutionRepositories:
                 setup_session,
                 AgentSessionCreate(
                     workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                     agent_id=agent_id,
                     title=None,
                 ),
@@ -708,6 +727,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -774,6 +795,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -826,6 +849,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -834,6 +859,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -893,6 +920,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -901,6 +930,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -947,6 +978,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1022,6 +1055,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1052,6 +1087,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1139,6 +1176,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1178,6 +1217,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1228,6 +1269,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1236,6 +1279,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1285,6 +1330,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1337,6 +1384,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1375,6 +1424,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1427,6 +1478,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1492,6 +1545,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1535,6 +1590,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1574,6 +1631,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1616,6 +1675,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1655,6 +1716,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1706,6 +1769,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1759,6 +1824,8 @@ class TestEventExecutionRepositories:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),
@@ -1770,6 +1837,8 @@ class TestEventExecutionRepositories:
                 agent_id=agent_id,
                 title=None,
                 primary_kind=None,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
             ),
         )
         await _agent_session_repository().archive(

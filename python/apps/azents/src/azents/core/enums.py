@@ -370,6 +370,13 @@ class AgentSessionPrimaryKind(enum.StrEnum):
     TEAM_PRIMARY = "team_primary"
 
 
+class AgentSessionProductMode(enum.StrEnum):
+    """Root AgentSession product mode."""
+
+    TEAM = "team"
+    USER = "user"
+
+
 class AgentSessionStartReason(enum.StrEnum):
     """AgentSession start reason."""
 

@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import (
     AgentLifecycleStatus,
     AgentSessionKind,
+    AgentSessionProductMode,
     AgentSessionStartReason,
     AgentSessionStatus,
     AgentType,
@@ -447,6 +448,8 @@ def _make_agent_session() -> AgentSession:
         agent_id="agent-1",
         handle="test-session-handle",
         session_kind=AgentSessionKind.ROOT,
+        product_mode=AgentSessionProductMode.TEAM,
+        associated_user_id=None,
         status=AgentSessionStatus.ACTIVE,
         start_reason=AgentSessionStartReason.INITIAL,
         title=None,

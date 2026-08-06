@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentSessionProductMode,
     LLMProvider,
     MailboxItemKind,
     MailboxSchedulingMode,
@@ -420,6 +421,8 @@ class TestMailboxRepository:
                 agent_id=from_session.agent_id,
                 title=None,
                 primary_kind=None,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
             ),
         )
         other_session_id, _, _ = await _create_agent_session(

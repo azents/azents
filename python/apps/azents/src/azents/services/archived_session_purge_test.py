@@ -15,6 +15,7 @@ from azents.broker.types import SessionBroker, SessionStopSignal
 from azents.core.config import Config
 from azents.core.enums import (
     AgentSessionKind,
+    AgentSessionProductMode,
     AgentSessionStartReason,
     AgentSessionStatus,
     ArchivedSessionPurgeParticipantPhase,
@@ -761,6 +762,8 @@ def _agent_session(
         handle=session_id,
         inference_state=None,
         session_kind=kind,
+        product_mode=AgentSessionProductMode.TEAM,
+        associated_user_id=None,
         status=AgentSessionStatus.ARCHIVED,
         start_reason=AgentSessionStartReason.INITIAL,
         title=None,

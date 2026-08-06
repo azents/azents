@@ -199,6 +199,8 @@ def _agent_session(
         session_kind=AgentSessionKind.SUBAGENT,
         status=AgentSessionStatus.ACTIVE,
         primary_kind=None,
+        product_mode=None,
+        associated_user_id=None,
         start_reason=AgentSessionStartReason.INITIAL,
         title=None,
         title_source=None,

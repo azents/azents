@@ -5,7 +5,7 @@ import datetime
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import LLMProvider
+from azents.core.enums import AgentSessionProductMode, LLMProvider
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.chat_write_request import ChatWriteRequestType
@@ -193,6 +193,8 @@ class TestChatWriteRequestRepository:
             rdb_session,
             AgentSessionCreate(
                 workspace_id=workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent_id,
                 title=None,
             ),

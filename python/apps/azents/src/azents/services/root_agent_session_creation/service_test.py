@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from azents.core.enums import LLMProvider, RuntimeRunnerState
+from azents.core.enums import AgentSessionProductMode, LLMProvider, RuntimeRunnerState
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_automatic_project_item import (
     RDBAgentAutomaticProjectItem,
@@ -143,6 +143,8 @@ class TestRootAgentSessionCreationService:
                 agent_id=agent_id,
                 title=None,
                 primary_kind=None,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
             ),
             workspace_intent=ExplicitRootWorkspaceIntent(existing_project_paths=[]),
         )
@@ -171,6 +173,8 @@ class TestRootAgentSessionCreationService:
                 agent_id=agent_id,
                 title=None,
                 primary_kind=None,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
             ),
             workspace_intent=ExplicitRootWorkspaceIntent(
                 existing_project_paths=[
@@ -186,6 +190,8 @@ class TestRootAgentSessionCreationService:
                 agent_id=agent_id,
                 title=None,
                 primary_kind=None,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
             ),
             workspace_intent=ExplicitRootWorkspaceIntent(existing_project_paths=[]),
         )
@@ -451,6 +457,8 @@ class TestRootAgentSessionCreationService:
                         agent_id=agent_id,
                         title=None,
                         primary_kind=None,
+                        product_mode=AgentSessionProductMode.TEAM,
+                        associated_user_id=None,
                     ),
                     workspace_intent=AgentDefaultRootWorkspaceIntent(),
                 )

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentSessionProductMode,
     ExternalChannelAppMode,
     ExternalChannelChannelDefaultStatus,
     ExternalChannelConnectionStatus,
@@ -632,6 +633,8 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
         rdb_session,
         AgentSessionCreate(
             workspace_id=workspace_id,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
             agent_id=first_agent.id,
             title=None,
         ),
@@ -640,6 +643,8 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
         rdb_session,
         AgentSessionCreate(
             workspace_id=workspace_id,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
             agent_id=second_agent.id,
             title=None,
         ),
@@ -673,6 +678,8 @@ async def test_internal_multi_fixture_proves_route_cardinality_defaults_and_bind
         rdb_session,
         AgentSessionCreate(
             workspace_id=workspace_id,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
             agent_id=first_agent.id,
             title=None,
         ),
@@ -1238,6 +1245,8 @@ async def test_binding_creation_serializes_on_resource_lock(
                 setup,
                 AgentSessionCreate(
                     workspace_id=workspace_id,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                     agent_id=agent.id,
                     title=None,
                 ),
@@ -1425,6 +1434,8 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
         rdb_session,
         AgentSessionCreate(
             workspace_id=workspace_id,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
             agent_id=first_agent.id,
             title=None,
         ),
@@ -1433,6 +1444,8 @@ async def test_resource_wide_binding_unique_index_rejects_second_route(
         rdb_session,
         AgentSessionCreate(
             workspace_id=workspace_id,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
             agent_id=second_agent.id,
             title=None,
         ),
@@ -1529,6 +1542,8 @@ async def test_manual_binding_disconnect_returns_one_leave_presence_plan(
         rdb_session,
         AgentSessionCreate(
             workspace_id=workspace_id,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
             agent_id=agent.id,
             title=None,
         ),
@@ -1628,6 +1643,8 @@ async def test_session_archive_disconnects_binding_without_leave_presence_plan(
         rdb_session,
         AgentSessionCreate(
             workspace_id=workspace_id,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
             agent_id=agent.id,
             title=None,
         ),
@@ -1751,6 +1768,8 @@ async def test_multi_channel_default_transition_terminalizes_only_parent_state(
         rdb_session,
         AgentSessionCreate(
             workspace_id=workspace_id,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
             agent_id=first_agent.id,
             title=None,
         ),
@@ -1759,6 +1778,8 @@ async def test_multi_channel_default_transition_terminalizes_only_parent_state(
         rdb_session,
         AgentSessionCreate(
             workspace_id=workspace_id,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
             agent_id=first_agent.id,
             title=None,
         ),
@@ -2013,6 +2034,8 @@ async def test_multi_channel_default_transition_terminalizes_only_parent_state(
         rdb_session,
         AgentSessionCreate(
             workspace_id=workspace_id,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
             agent_id=second_agent.id,
             title=None,
         ),
@@ -2248,6 +2271,8 @@ async def test_multi_route_removal_captures_leave_presence_before_detach(
         rdb_session,
         AgentSessionCreate(
             workspace_id=workspace_id,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
             agent_id=agent.id,
             title=None,
         ),
@@ -2455,6 +2480,8 @@ async def test_provider_uninstall_captures_one_leave_presence(
         rdb_session,
         AgentSessionCreate(
             workspace_id=workspace_id,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
             agent_id=agent.id,
             title=None,
         ),

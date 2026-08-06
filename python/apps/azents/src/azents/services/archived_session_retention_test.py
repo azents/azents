@@ -8,6 +8,7 @@ from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
+    AgentSessionProductMode,
     AgentSessionStatus,
     ArchivedSessionPurgeParticipantPhase,
     ArchivedSessionPurgeStatus,
@@ -116,6 +117,8 @@ async def _create_root(
         session,
         AgentSessionCreate(
             workspace_id=workspace_id,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
             agent_id=agent.id,
             title=None,
         ),

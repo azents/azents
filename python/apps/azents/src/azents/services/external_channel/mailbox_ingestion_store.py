@@ -14,6 +14,7 @@ from azents.core.config import Config
 from azents.core.deps import get_config
 from azents.core.enums import (
     AgentLifecycleStatus,
+    AgentSessionProductMode,
     AgentSessionStartReason,
     ExternalChannelAccessRequestStatus,
     ExternalChannelAppMode,
@@ -1413,6 +1414,8 @@ class ExternalChannelMailboxIngestionStore:
             session,
             create=AgentSessionCreate(
                 workspace_id=agent.workspace_id,
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
                 agent_id=agent.id,
                 title=None,
                 start_reason=AgentSessionStartReason.EXTERNAL_CHANNEL,
