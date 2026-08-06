@@ -1120,6 +1120,35 @@ async def create_team_agent_session_message(
         agent_id=agent_id,
         user_id=current_user.user_id,
         tz=_parse_timezone(timezone),
+        product_mode="team",
+    )
+
+
+@router.post("/agents/{agent_id}/user-sessions/messages")
+async def create_user_agent_session_message(
+    agent_id: str,
+    request: ChatSessionCreateMessageWriteRequest,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+    agent_session_input_service: Annotated[AgentSessionInputService, Depends()],
+    broker: Annotated[SessionBroker, Depends(get_broker)],
+    broadcast: Annotated[WebSocketBroadcast, Depends(get_ws_broadcast)],
+    live_event_store: Annotated[LiveEventStore, Depends(get_live_event_store)],
+    timezone: str | None = None,
+) -> ChatWriteResponse:
+    """Create a User AgentSession and accept its first message."""
+    _validate_uuid7_hex(agent_id, label="agent ID")
+    return await _write_new_session_message_via_rest(
+        chat_service,
+        agent_session_input_service,
+        broker,
+        broadcast,
+        live_event_store,
+        request,
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+        tz=_parse_timezone(timezone),
+        product_mode="user",
     )
 
 
@@ -1162,6 +1191,7 @@ async def _write_new_session_message_via_rest(
     agent_id: str,
     user_id: str,
     tz: ZoneInfo,
+    product_mode: str = "team",
 ) -> ChatWriteResponse:
     """Handle first-message writes that create the AgentSession boundary."""
     message = _create_chat_input_message(
@@ -1171,18 +1201,32 @@ async def _write_new_session_message_via_rest(
         attachments=request.attachments or [],
         file_parts=[],
     )
-    input_result = (
-        await agent_session_input_service.create_team_session_with_buffered_input(
-            agent_id=agent_id,
-            message=message,
-            inference_profile=request.inference_profile,
-            user_id=user_id,
-            existing_project_paths=request.existing_project_paths,
-            setup_actions=request.setup_actions,
-            request_payload=request.model_dump(mode="json"),
-            client_request_id=request.client_request_id,
+    if product_mode == "user":
+        input_result = (
+            await agent_session_input_service.create_user_session_with_buffered_input(
+                agent_id=agent_id,
+                message=message,
+                inference_profile=request.inference_profile,
+                user_id=user_id,
+                existing_project_paths=request.existing_project_paths,
+                setup_actions=request.setup_actions,
+                request_payload=request.model_dump(mode="json"),
+                client_request_id=request.client_request_id,
+            )
         )
-    )
+    else:
+        input_result = (
+            await agent_session_input_service.create_team_session_with_buffered_input(
+                agent_id=agent_id,
+                message=message,
+                inference_profile=request.inference_profile,
+                user_id=user_id,
+                existing_project_paths=request.existing_project_paths,
+                setup_actions=request.setup_actions,
+                request_payload=request.model_dump(mode="json"),
+                client_request_id=request.client_request_id,
+            )
+        )
     result = _handle_created_agent_session_input_result(input_result)
     return await _finalize_message_write_response(
         chat_service,
@@ -1704,6 +1748,41 @@ async def get_agent_session_sidebar(
             raise HTTPException(status_code=404, detail="Session not found.")
         case _:
             assert_never(error)
+
+
+@router.get("/agents/{agent_id}/user-sessions")
+async def list_agent_user_sessions(
+    agent_id: str,
+    current_user: Annotated[CurrentUser, Depends(get_current_user)],
+    chat_service: Annotated[ChatSessionService, Depends()],
+    retention_service: Annotated[ArchivedSessionRetentionService, Depends()],
+) -> AgentSessionListResponse:
+    """List active User Sessions owned by the current requester for an Agent."""
+    result = await chat_service.list_agent_user_sessions(
+        agent_id=agent_id,
+        user_id=current_user.user_id,
+    )
+    if result.success:
+        sessions = result.value
+        settings = await retention_service.get_settings()
+        return AgentSessionListResponse(
+            items=[
+                AgentSessionResponse.from_domain(
+                    session,
+                    unread_terminal_run_id=None,
+                    auto_archive_after=None,
+                )
+                for session in sessions
+            ],
+            current_archive_retention_days=(settings.archived_session_retention_days),
+        )
+    else:
+        error = result.error
+        match error:
+            case AgentNotFound() | NotWorkspaceMember() | SessionAccessDenied():
+                raise HTTPException(status_code=404, detail="Session not found.")
+            case _:
+                assert_never(error)
 
 
 @router.get("/agents/{agent_id}/project-presets")

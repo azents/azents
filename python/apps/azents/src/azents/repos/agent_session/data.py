@@ -9,6 +9,7 @@ from azents.core.enums import (
     AgentSessionEndReason,
     AgentSessionKind,
     AgentSessionPrimaryKind,
+    AgentSessionProductMode,
     AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
@@ -75,6 +76,12 @@ class AgentSession(BaseModel):
     primary_kind: AgentSessionPrimaryKind | None = Field(
         default=None,
         description="Primary session role",
+    )
+    product_mode: AgentSessionProductMode | None = Field(
+        description="Root product mode; null for subagent rows",
+    )
+    associated_user_id: str | None = Field(
+        description="Durable associated User for root User Sessions",
     )
     start_reason: AgentSessionStartReason = Field(description="Start reason")
     title: str | None = Field(description="User-facing session title")
@@ -242,6 +249,12 @@ class AgentSessionCreate(BaseModel):
     primary_kind: AgentSessionPrimaryKind | None = Field(
         default=None,
         description="Primary session role",
+    )
+    product_mode: AgentSessionProductMode | None = Field(
+        description="Root product mode; null for subagent rows",
+    )
+    associated_user_id: str | None = Field(
+        description="Durable associated User for root User Sessions",
     )
     start_reason: AgentSessionStartReason = Field(
         default=AgentSessionStartReason.INITIAL,

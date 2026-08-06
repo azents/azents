@@ -16,12 +16,12 @@ Details of all living specs. Synchronized from frontmatter.
 | conversation | [Conversation & Events](domain/conversation.md) | @Hardtack | 2026-08-06 | 141 |
 | external-channel | [External Channel](domain/external-channel.md) | @Hardtack | 2026-08-05 | 50 |
 | goal | [Goal Domain Spec](domain/goal.md) | - | 2026-07-31 | 14 |
-| memory | [Memory](domain/memory.md) | @Hardtack | 2026-07-24 | 6 |
+| memory | [Memory](domain/memory.md) | @Hardtack | 2026-08-06 | 7 |
 | model-catalog | [Model Catalog Domain Spec](domain/model-catalog.md) | - | 2026-08-01 | 18 |
 | runtime-provider | [Runtime Provider](domain/runtime-provider.md) | - | 2026-08-05 | 18 |
 | system-settings | [System Settings](domain/system-settings.md) | @Hardtack | 2026-07-30 | 5 |
 | toolkit | [Toolkit](domain/toolkit.md) | @Hardtack | 2026-08-04 | 84 |
-| user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-07-20 | 8 |
+| user-auth | [User & Authentication](domain/user-auth.md) | @Hardtack | 2026-08-06 | 10 |
 | workspace | [Workspace & Membership](domain/workspace.md) | @Hardtack | 2026-08-04 | 59 |
 
 ## Flow Specs

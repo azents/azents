@@ -222,3 +222,72 @@ export const EmptySessions = {
     recentSessions: [],
   },
 } satisfies Story;
+
+const userSessions: AgentSessionResponse[] = [
+  {
+    id: "sess_private_notes",
+    agent_id: "agent_01",
+    current_model_target_label: null,
+    current_reasoning_effort: null,
+    title: "Private release notes",
+    title_source: "manual",
+    status: "active",
+    archived_at: null,
+    purge_after: null,
+    archive_retention_days_snapshot: null,
+    primary_kind: null,
+    run_state: "idle",
+    pinned: false,
+    unread_terminal_run_id: null,
+    auto_archive_after: "2026-08-12T09:00:00Z",
+    created_at: "2026-06-26T08:00:00Z",
+    updated_at: "2026-06-26T09:00:00Z",
+  },
+  {
+    id: "sess_private_draft_followup",
+    agent_id: "agent_01",
+    current_model_target_label: null,
+    current_reasoning_effort: null,
+    title: null,
+    title_source: null,
+    status: "active",
+    archived_at: null,
+    purge_after: null,
+    archive_retention_days_snapshot: null,
+    primary_kind: null,
+    run_state: "running",
+    pinned: true,
+    unread_terminal_run_id: null,
+    auto_archive_after: null,
+    created_at: "2026-06-27T08:00:00Z",
+    updated_at: "2026-06-27T10:15:00Z",
+  },
+];
+
+export const MySessionsTab = {
+  args: {
+    sessionListScope: "user",
+    sessions: userSessions,
+    showArchivedSection: false,
+    activeSessionId: "sess_private_notes",
+    onSessionListScopeChange: () => {},
+  },
+} satisfies Story;
+
+export const MySessionsEmpty = {
+  args: {
+    sessionListScope: "user",
+    sessions: [],
+    showArchivedSection: false,
+    onSessionListScopeChange: () => {},
+  },
+} satisfies Story;
+
+export const TeamSessionsTab = {
+  args: {
+    sessionListScope: "team",
+    sessions,
+    showArchivedSection: true,
+    onSessionListScopeChange: () => {},
+  },
+} satisfies Story;

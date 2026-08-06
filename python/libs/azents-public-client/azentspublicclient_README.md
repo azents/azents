@@ -122,6 +122,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_create_input**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_input) | **POST** /chat/v1/sessions/{session_id}/inputs | Create Input
 *ChatV1Api* | [**chat_v1_create_team_agent_session**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_team_agent_session) | **POST** /chat/v1/agents/{agent_id}/sessions | Create Team Agent Session
 *ChatV1Api* | [**chat_v1_create_team_agent_session_message**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_team_agent_session_message) | **POST** /chat/v1/agents/{agent_id}/sessions/messages | Create Team Agent Session Message
+*ChatV1Api* | [**chat_v1_create_user_agent_session_message**](azentspublicclient/docs/ChatV1Api.md#chat_v1_create_user_agent_session_message) | **POST** /chat/v1/agents/{agent_id}/user-sessions/messages | Create User Agent Session Message
 *ChatV1Api* | [**chat_v1_delete_agent_project**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_agent_project) | **DELETE** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects/{project_id} | Delete Agent Project
 *ChatV1Api* | [**chat_v1_delete_agent_workspace_path**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_agent_workspace_path) | **DELETE** /chat/v1/agents/{agent_id}/workspace/files | Delete Agent Workspace Path
 *ChatV1Api* | [**chat_v1_delete_exchange_file**](azentspublicclient/docs/ChatV1Api.md#chat_v1_delete_exchange_file) | **DELETE** /chat/v1/exchange-files/{file_id} | Delete Exchange File

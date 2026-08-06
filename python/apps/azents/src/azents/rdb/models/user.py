@@ -42,6 +42,11 @@ class RDBUser(RDBModel):
         nullable=False,
         server_default="en-US",
     )
+    access_disabled_at: Mapped[datetime.datetime | None] = mapped_column(
+        TimeZoneDateTime,
+        nullable=True,
+        default=None,
+    )
 
     created_at: Mapped[datetime.datetime] = mapped_column(
         TimeZoneDateTime,

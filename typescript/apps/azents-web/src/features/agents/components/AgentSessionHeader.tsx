@@ -160,6 +160,7 @@ export function AgentSessionHeader({
     utils.chat.getAgentSession,
     utils.chat.getAgentSessionSidebar,
     utils.chat.listAgentSessions,
+    utils.chat.listAgentUserSessions,
   ]);
 
   const handleClearTitle = useCallback(async (): Promise<void> => {
@@ -184,6 +185,7 @@ export function AgentSessionHeader({
     utils.chat.getAgentSession,
     utils.chat.getAgentSessionSidebar,
     utils.chat.listAgentSessions,
+    utils.chat.listAgentUserSessions,
   ]);
 
   const renameBusy = updateTitleMutation.isPending;

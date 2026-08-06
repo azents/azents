@@ -7,11 +7,12 @@
  * work a dedicated left rail plus mobile drawer entry point.
  */
 import { Box, Drawer, Group, rem } from "@mantine/core";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -19,6 +20,7 @@ import { trpc } from "@/trpc/client";
 import {
   AgentFocusedSidebar,
   type AgentFocusedSidebarUser,
+  type AgentSessionListScope,
 } from "./AgentFocusedSidebar";
 import type { AgentResponse } from "@azents/public-client";
 import type { ReactNode } from "react";
@@ -48,6 +50,15 @@ function extractSessionId(pathname: string, agentId: string): string | null {
   return tail.split("/")[0] ?? null;
 }
 
+function parseSessionListScope(
+  value: string | null,
+): AgentSessionListScope | null {
+  if (value === "team" || value === "user") {
+    return value;
+  }
+  return null;
+}
+
 export function AgentFocusedShell({
   handle,
   agent,
@@ -55,14 +66,23 @@ export function AgentFocusedShell({
 }: AgentFocusedShellProps): React.ReactElement {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const utils = trpc.useUtils();
   const [drawerOpened, setDrawerOpened] = useState(false);
+  const [sessionListScope, setSessionListScope] =
+    useState<AgentSessionListScope>("team");
   const closeDrawer = (): void => setDrawerOpened(false);
   const openDrawer = useCallback((): void => setDrawerOpened(true), []);
   const activeSessionId = useMemo(
     () => extractSessionId(pathname, agent.id),
     [pathname, agent.id],
   );
+  const draftScope = useMemo(() => {
+    if (activeSessionId !== "new") {
+      return null;
+    }
+    return parseSessionListScope(searchParams.get("scope"));
+  }, [activeSessionId, searchParams]);
 
   const sessionSidebarQuery = trpc.chat.getAgentSessionSidebar.useQuery(
     {
@@ -102,14 +122,29 @@ export function AgentFocusedShell({
       void utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id });
       closeDrawer();
       if (activeSessionId === variables.sessionId) {
-        router.replace(`/w/${handle}/agents/${agent.id}/sessions/new`);
+        const draftPath =
+          sessionListScope === "user"
+            ? `/w/${handle}/agents/${agent.id}/sessions/new?scope=user`
+            : `/w/${handle}/agents/${agent.id}/sessions/new`;
+        router.replace(draftPath);
       }
     },
   });
   const handleCreateSession = useCallback((): void => {
     closeDrawer();
+    if (sessionListScope === "user") {
+      router.push(`/w/${handle}/agents/${agent.id}/sessions/new?scope=user`);
+      return;
+    }
     router.push(`/w/${handle}/agents/${agent.id}/sessions/new`);
-  }, [agent.id, handle, router]);
+  }, [agent.id, handle, router, sessionListScope]);
+
+  const handleSessionListScopeChange = useCallback(
+    (scope: AgentSessionListScope): void => {
+      setSessionListScope(scope);
+    },
+    [],
+  );
 
   const handleRenameSession = useCallback(
     async (sessionId: string, title: string | null): Promise<void> => {
@@ -127,10 +162,12 @@ export function AgentFocusedShell({
     },
     [
       agent.id,
+      sessionListScope,
       updateTitleMutation,
       utils.chat.getAgentSession,
       utils.chat.getAgentSessionSidebar,
       utils.chat.listAgentSessions,
+      utils.chat.listAgentUserSessions,
     ],
   );
 
@@ -169,6 +206,67 @@ export function AgentFocusedShell({
     () => ({ openAgentNavigation: openDrawer }),
     [openDrawer],
   );
+
+  const teamSessions = teamSessionsQuery.data?.items ?? [];
+  const userSessions = userSessionsQuery.data?.items ?? [];
+  const sessions = sessionListScope === "user" ? userSessions : teamSessions;
+  const sessionsLoading =
+    sessionListScope === "user"
+      ? userSessionsQuery.isPending
+      : teamSessionsQuery.isPending;
+  const sessionsError =
+    (sessionListScope === "user"
+      ? userSessionsQuery.error?.message
+      : teamSessionsQuery.error?.message) ??
+    updatePinMutation.error?.message ??
+    archiveSessionMutation.error?.message ??
+    null;
+  const showArchivedSection = sessionListScope === "team";
+
+  const sidebarProps = {
+    handle,
+    agent,
+    currentUser,
+    adminAccessUrl: adminAccessQuery.data?.url ?? null,
+    loggingOut: logoutMutation.isPending,
+    onLogout: handleLogout,
+    sessionListScope,
+    onSessionListScopeChange: handleSessionListScopeChange,
+    sessions,
+    sessionsLoading,
+    sessionsError,
+    archivedSessions: showArchivedSection
+      ? (archivedSessionsQuery.data?.items ?? [])
+      : [],
+    archivedSessionsLoading: showArchivedSection
+      ? archivedSessionsQuery.isPending
+      : false,
+    archivedSessionsError: showArchivedSection
+      ? (archivedSessionsQuery.error?.message ??
+        restoreSessionMutation.error?.message ??
+        null)
+      : null,
+    showArchivedSection,
+    activeSessionId,
+    creatingSession: false,
+    renamingSessionId: updateTitleMutation.isPending
+      ? updateTitleMutation.variables.sessionId
+      : null,
+    archivingSessionId: archiveSessionMutation.isPending
+      ? archiveSessionMutation.variables.sessionId
+      : null,
+    pinningSessionId: updatePinMutation.isPending
+      ? updatePinMutation.variables.sessionId
+      : null,
+    restoringSessionId: restoreSessionMutation.isPending
+      ? restoreSessionMutation.variables.sessionId
+      : null,
+    onCreateSession: handleCreateSession,
+    onRenameSession: handleRenameSession,
+    onArchiveSession: handleArchiveSession,
+    onSetSessionPinned: handleSetSessionPinned,
+    onRestoreSession: handleRestoreSession,
+  };
 
   return (
     <AgentFocusedShellMobileNavContext.Provider value={mobileNavContext}>

@@ -145,6 +145,63 @@ class ExternalChannelRepository:
         """Create the repository."""
         self.work_state_store = work_state_store or ExternalChannelWorkStateStore()
 
+    async def detach_user_references(
+        self,
+        session: AsyncSession,
+        *,
+        user_id: str,
+    ) -> None:
+        """Detach or remove retained External Channel rows owned by a User."""
+        await session.execute(
+            sa.update(RDBExternalChannelAgentRoute)
+            .where(RDBExternalChannelAgentRoute.catalog_removed_by_user_id == user_id)
+            .values(catalog_removed_by_user_id=None)
+        )
+        for model in (
+            RDBExternalChannelChannelDefault,
+            RDBExternalChannelParticipationSetting,
+        ):
+            await session.execute(
+                sa.delete(model).where(
+                    model.configured_by_user_id == user_id,
+                    model.configured_by_principal_id.is_(None),
+                )
+            )
+            await session.execute(
+                sa.update(model)
+                .where(
+                    model.configured_by_user_id == user_id,
+                    model.configured_by_principal_id.is_not(None),
+                )
+                .values(configured_by_user_id=None)
+            )
+        await session.execute(
+            sa.update(RDBExternalChannelAccessRequest)
+            .where(RDBExternalChannelAccessRequest.decided_by_user_id == user_id)
+            .values(decided_by_user_id=None)
+        )
+        await session.execute(
+            sa.delete(RDBExternalChannelAccessGrant).where(
+                RDBExternalChannelAccessGrant.granted_by_user_id == user_id
+            )
+        )
+        await session.execute(
+            sa.update(RDBExternalChannelAccessGrant)
+            .where(RDBExternalChannelAccessGrant.revoked_by_user_id == user_id)
+            .values(revoked_by_user_id=None)
+        )
+        await session.execute(
+            sa.delete(RDBExternalChannelBlock).where(
+                RDBExternalChannelBlock.blocked_by_user_id == user_id
+            )
+        )
+        await session.execute(
+            sa.update(RDBExternalChannelBlock)
+            .where(RDBExternalChannelBlock.removed_by_user_id == user_id)
+            .values(removed_by_user_id=None)
+        )
+        await session.flush()
+
     async def create_conversation_position_idempotent(
         self,
         session: AsyncSession,

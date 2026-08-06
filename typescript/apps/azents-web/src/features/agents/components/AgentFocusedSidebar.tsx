@@ -21,6 +21,7 @@ import {
   NavLink,
   rem,
   ScrollArea,
+  SegmentedControl,
   Stack,
   Text,
   TextInput,
@@ -71,6 +72,8 @@ export interface AgentFocusedSidebarUser {
   email: string;
 }
 
+export type AgentSessionListScope = "team" | "user";
+
 interface AgentFocusedSidebarProps {
   handle: string;
   agent: AgentResponse;
@@ -93,6 +96,13 @@ interface AgentFocusedSidebarProps {
   onSetSessionPinned?: (sessionId: string, pinned: boolean) => void;
   onNavigate?: () => void;
   nowMs?: number;
+}
+
+function parseSessionListScope(value: string): AgentSessionListScope {
+  if (value === "user") {
+    return "user";
+  }
+  return "team";
 }
 
 function formatTimestamp(value: string, locale: SupportedLocale): string {
@@ -629,24 +639,49 @@ export function AgentFocusedSidebar({
 
         <Divider />
 
-        <Group px="md" py="sm" justify="space-between" wrap="nowrap">
-          <Text size="xs" fw={700} tt="uppercase" c="dimmed">
-            {t("sessions.title")}
-          </Text>
-          {onCreateSession && (
-            <Tooltip label={t("sessions.new")}>
-              <ActionIcon
-                variant="subtle"
-                size="sm"
-                aria-label={t("sessions.new")}
-                loading={creatingSession}
-                onClick={onCreateSession}
+        <Stack px="md" pt="sm" pb="xs" gap="xs">
+          <Group justify="space-between" wrap="nowrap">
+            <Text size="xs" fw={700} tt="uppercase" c="dimmed">
+              {t("sessions.title")}
+            </Text>
+            {onCreateSession && (
+              <Tooltip
+                label={
+                  sessionListScope === "user"
+                    ? t("sessions.newUser")
+                    : t("sessions.new")
+                }
               >
-                <IconPlus size={rem(16)} />
-              </ActionIcon>
-            </Tooltip>
-          )}
-        </Group>
+                <ActionIcon
+                  variant="subtle"
+                  size="sm"
+                  aria-label={
+                    sessionListScope === "user"
+                      ? t("sessions.newUser")
+                      : t("sessions.new")
+                  }
+                  loading={creatingSession}
+                  onClick={onCreateSession}
+                >
+                  <IconPlus size={rem(16)} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+          </Group>
+          <SegmentedControl
+            size="xs"
+            fullWidth
+            value={sessionListScope}
+            onChange={(value) =>
+              onSessionListScopeChange?.(parseSessionListScope(value))
+            }
+            data={[
+              { label: t("sessions.teamTab"), value: "team" },
+              { label: t("sessions.myTab"), value: "user" },
+            ]}
+            aria-label={t("sessions.scopeTabs")}
+          />
+        </Stack>
 
         <ScrollArea flex={1} mih={0}>
           <Stack gap={0} pb="sm">

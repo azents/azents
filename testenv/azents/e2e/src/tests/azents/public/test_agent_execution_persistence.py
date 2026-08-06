@@ -889,9 +889,10 @@ def _wait_for_completed_rest_contents(
     token: str,
     session_id: str,
     expected: list[str],
+    minimum_completed_runs: int = 1,
     timeout: float = 90,
 ) -> dict[str, object]:
-    """Wait for expected content and its durable completed run boundary."""
+    """Wait for expected content and the required completed run boundaries."""
     deadline = time.monotonic() + timeout
     last_payload: dict[str, object] | None = None
     while time.monotonic() < deadline:
@@ -905,14 +906,14 @@ def _wait_for_completed_rest_contents(
         contents = [
             content for item in items if isinstance(content := item.get("content"), str)
         ]
-        completed_run = any(
+        completed_run_count = sum(
             item.get("role") == "run_complete" and item.get("status") == "completed"
             for item in items
         )
         if (
             all(item in contents for item in expected)
             and any(item.get("role") == "turn_complete" for item in items)
-            and completed_run
+            and completed_run_count >= minimum_completed_runs
         ):
             return payload
         time.sleep(0.5)
@@ -1660,11 +1661,12 @@ class TestAgentExecutionPersistence:
             agent_id=agent_id,
             message=_HELLO,
         )
-        _wait_for_rest_contents(
+        _wait_for_completed_rest_contents(
             server_url=azents_public_server_url,
             token=workspace.token,
             session_id=first.session_id,
             expected=[_HELLO, _HELLO_RESPONSE],
+            minimum_completed_runs=1,
         )
         _run_message(
             public_api_client=public_api_client,
@@ -1674,11 +1676,12 @@ class TestAgentExecutionPersistence:
             message=_SECOND,
             session_id=first.session_id,
         )
-        before_edit = _wait_for_rest_contents(
+        before_edit = _wait_for_completed_rest_contents(
             server_url=azents_public_server_url,
             token=workspace.token,
             session_id=first.session_id,
             expected=[_HELLO, _HELLO_RESPONSE, _SECOND, _SECOND_RESPONSE],
+            minimum_completed_runs=2,
         )
         second_message_id = _message_id_for_content(before_edit, _SECOND)
 

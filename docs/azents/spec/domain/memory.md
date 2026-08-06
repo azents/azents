@@ -22,8 +22,8 @@ code_paths:
 api_routes:
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories
   - /agent/v1/workspaces/{handle}/agents/{agent_id}/memories/{memory_id}
-last_verified_at: 2026-07-24
-spec_version: 6
+last_verified_at: 2026-08-06
+spec_version: 7
 ---
 
 # Memory
@@ -37,11 +37,12 @@ Memory belongs to Agent. Even within same Workspace, Memory is not shared when A
 - `agent` scope — team/project knowledge shared with all users of that Agent.
 - `user` scope — personal preferences/feedback visible only to specific user. Cannot be read or stored in executions without user context.
 
-Every currently implemented AgentSession is a Team Session. Team execution projects only Agent-scope
-Memory and always uses `user_id = null` for those repository operations. User-scope Memory remains a
-requester-authorized management/API concern for a future User Session capability boundary; it is not
-selected from the current requester, message sender, broker wake-up, or any other Team execution
-input.
+Team Sessions project only Agent-scope Memory and always use `user_id = null` for those repository
+operations. User Sessions project Agent-scope Memory plus the associated User's User-scope Memory for
+that Agent through a dedicated capability resolver. Memory scope is never selected from the current
+requester, message sender, broker wake-up, viewer, or any other non-root identity. Team Sessions still
+reject User-scope Memory tool arguments. User-scope Memory remains requester-authorized in the Agent
+Memory settings API for the authenticated user.
 
 ## Domain Model
 
@@ -82,13 +83,18 @@ Main constraints of `agent_memories` are:
 During Team Session resolve, an Agent with `memory_enabled` enabled receives the five shared
 Agent-scope Memory tools and an Agent Memory index prompt. User-scope arguments are rejected with a
 tool error, and no generic execution context contains a User identity from which they could be
-resolved. If `memory_enabled=false`, neither Memory tools nor prompt are exposed.
+resolved.
+
+During User Session resolve, the same Agent with `memory_enabled` enabled receives Agent-scope and
+associated-User Memory tools/index projection for that root's associated User only. Memory tools never
+read another user's User-scope rows. If `memory_enabled=false`, neither Memory tools nor prompt are
+exposed in either product mode.
 
 ### Save / upsert
 
 `save_memory` uses `name` as upsert key within Agent scope. If an existing Agent-scope row exists,
 it updates `description`, `content`, and `type`; otherwise it creates one. A `scope=user` request is
-rejected because User-scope Memory is unavailable in Team Sessions.
+rejected because User-scope Memory is unavailable in Team Sessions and available only in User Sessions for the associated User.
 
 ### Tool list / get / search / delete
 
@@ -132,6 +138,7 @@ The Agent Memory settings page exposes the Agent `memory_enabled` toggle and man
 
 | Date | Version | Change |
 |---|---:|---|
+| 2026-08-06 | 7 | Documented User Session Agent+User Memory capability projection while Team Sessions remain Agent-scope only |
 | 2026-07-24 | 6 | Restricted current Team Session runtime projection to shared Agent Memory and made User-scope Memory unavailable without a separate User Session capability boundary |
 | 2026-07-17 | 5 | Added runtime exact-to-partial lexical search fallback and index-first duplicate prevention guidance |
 | 2026-07-09 | 3 | Clarified model-facing Memory search guidance to use short keyword queries instead of full sentences |

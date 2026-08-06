@@ -11,6 +11,7 @@ from azents.core.enums import (
     AgentSessionEndReason,
     AgentSessionKind,
     AgentSessionPrimaryKind,
+    AgentSessionProductMode,
     AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
@@ -47,6 +48,13 @@ def _agent_session_primary_kind_values(
     enum_cls: type[AgentSessionPrimaryKind],
 ) -> list[str]:
     """Return AgentSessionPrimaryKind enum values stored in the DB."""
+    return [v.value for v in enum_cls]
+
+
+def _agent_session_product_mode_values(
+    enum_cls: type[AgentSessionProductMode],
+) -> list[str]:
+    """Return AgentSessionProductMode enum values stored in the DB."""
     return [v.value for v in enum_cls]
 
 
@@ -94,6 +102,12 @@ agent_session_primary_kind_enum = ENUM(
     name="agent_session_primary_kind",
     create_type=False,
     values_callable=_agent_session_primary_kind_values,
+)
+agent_session_product_mode_enum = ENUM(
+    AgentSessionProductMode,
+    name="agent_session_product_mode",
+    create_type=False,
+    values_callable=_agent_session_product_mode_values,
 )
 agent_session_start_reason_enum = ENUM(
     AgentSessionStartReason,
@@ -200,7 +214,43 @@ class RDBAgentSession(RDBModel):
         "uq_agent_sessions_agent_active_team_primary",
         "agent_id",
         unique=True,
-        postgresql_where=sa.text("status = 'active' AND primary_kind = 'team_primary'"),
+        postgresql_where=sa.text(
+            "status = 'active' "
+            "AND primary_kind = 'team_primary' "
+            "AND product_mode = 'team'"
+        ),
+    )
+    CK_PRODUCT_MODE_OWNERSHIP = sa.CheckConstraint(
+        "("
+        "session_kind = 'root' "
+        "AND product_mode IS NOT NULL "
+        "AND ("
+        "("
+        "product_mode = 'team' "
+        "AND associated_user_id IS NULL"
+        ") OR ("
+        "product_mode = 'user' "
+        "AND associated_user_id IS NOT NULL "
+        "AND primary_kind IS NULL"
+        ")"
+        ")"
+        ") OR ("
+        "session_kind = 'subagent' "
+        "AND product_mode IS NULL "
+        "AND associated_user_id IS NULL "
+        "AND primary_kind IS NULL"
+        ")",
+        name="ck_agent_sessions_product_mode_ownership",
+    )
+    IX_AGENT_ASSOCIATED_USER_STATUS = sa.Index(
+        "ix_agent_sessions_agent_associated_user_status",
+        "agent_id",
+        "associated_user_id",
+        "status",
+    )
+    IX_ASSOCIATED_USER_ID = sa.Index(
+        "ix_agent_sessions_associated_user_id",
+        "associated_user_id",
     )
 
     id: Mapped[str] = mapped_column(
@@ -262,6 +312,17 @@ class RDBAgentSession(RDBModel):
     )
     primary_kind: Mapped[AgentSessionPrimaryKind | None] = mapped_column(
         agent_session_primary_kind_enum,
+        nullable=True,
+        default=None,
+    )
+    product_mode: Mapped[AgentSessionProductMode | None] = mapped_column(
+        agent_session_product_mode_enum,
+        nullable=True,
+        default=None,
+    )
+    associated_user_id: Mapped[str | None] = mapped_column(
+        sa.String(32),
+        sa.ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=True,
         default=None,
     )
@@ -475,6 +536,7 @@ class RDBAgentSession(RDBModel):
         CK_CURRENT_INFERENCE_STATE,
         CK_CURRENT_CONTEXT_WINDOW,
         CK_CURRENT_COMPACTION_THRESHOLD,
+        CK_PRODUCT_MODE_OWNERSHIP,
         UQ_HANDLE,
         IX_WORKSPACE_ID,
         IX_AGENT_ID,
@@ -488,4 +550,6 @@ class RDBAgentSession(RDBModel):
         IX_ARCHIVED_PURGE_AFTER,
         IX_ACTIVE_AUTO_ARCHIVE,
         UQ_AGENT_ACTIVE_TEAM_PRIMARY,
+        IX_AGENT_ASSOCIATED_USER_STATUS,
+        IX_ASSOCIATED_USER_ID,
     )

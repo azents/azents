@@ -37,6 +37,10 @@ from testcontainers.postgres import PostgresContainer
 from types_boto3_s3.client import S3Client
 
 from support.consts import REPOSITORY_ROOT
+from support.container_logs import (
+    read_sanitized_container_logs,
+    write_sanitized_container_logs_artifact,
+)
 from support.runtime_provider_auth import (
     RuntimeProviderAuthenticationError,
     issue_runtime_provider_credential,
@@ -859,12 +863,26 @@ def _read_sanitized_container_logs(
     secret_values: tuple[str, ...],
 ) -> str:
     """Read container logs while guaranteeing supplied secrets remain redacted."""
-    stdout, stderr = container.get_logs()
-    logs = stdout.decode(errors="replace") + stderr.decode(errors="replace")
-    for secret_value in secret_values:
-        if secret_value:
-            logs = logs.replace(secret_value, "<redacted>")
-    return logs
+    return read_sanitized_container_logs(
+        container,
+        secret_values=secret_values,
+    )
+
+
+def _write_sanitized_server_log_artifact(
+    container: DockerContainer,
+    server_name: str,
+    *,
+    secret_values: tuple[str, ...],
+) -> None:
+    """Write sanitized server output to the configured E2E artifact directory."""
+    artifact_dir = os.environ.get(_E2E_ARTIFACT_DIR_ENV)
+    write_sanitized_container_logs_artifact(
+        container,
+        server_name=server_name,
+        artifact_root=Path(artifact_dir) if artifact_dir else None,
+        secret_values=secret_values,
+    )
 
 
 def _log_server_output(container: DockerContainer, server_name: str) -> None:
@@ -961,8 +979,21 @@ def azents_public_server_container(
 
     with container:
         wait_for_server_ready(container, 8010, "azents-public-server")
-        yield container
-        _log_server_output(container, "azents-public-server")
+        try:
+            yield container
+        finally:
+            _write_sanitized_server_log_artifact(
+                container,
+                "azents-public-server",
+                secret_values=(
+                    rustfs_access_key,
+                    rustfs_secret_key,
+                    auth_jwt_secret_key,
+                    credential_encryption_key,
+                    system_bootstrap_setup_token,
+                ),
+            )
+            _log_server_output(container, "azents-public-server")
 
 
 @pytest.fixture(scope="session")
@@ -1029,8 +1060,21 @@ def azents_admin_server_container(
 
     with container:
         wait_for_server_ready(container, 8011, "azents-admin-server")
-        yield container
-        _log_server_output(container, "azents-admin-server")
+        try:
+            yield container
+        finally:
+            _write_sanitized_server_log_artifact(
+                container,
+                "azents-admin-server",
+                secret_values=(
+                    rustfs_access_key,
+                    rustfs_secret_key,
+                    auth_jwt_secret_key,
+                    credential_encryption_key,
+                    system_bootstrap_setup_token,
+                ),
+            )
+            _log_server_output(container, "azents-admin-server")
 
 
 @pytest.fixture(scope="session")
@@ -1114,6 +1158,17 @@ def azents_engine_worker_container(
         try:
             yield container
         finally:
+            _write_sanitized_server_log_artifact(
+                container,
+                "azents-engine-worker",
+                secret_values=(
+                    rustfs_access_key,
+                    rustfs_secret_key,
+                    auth_jwt_secret_key,
+                    credential_encryption_key,
+                    system_bootstrap_setup_token,
+                ),
+            )
             _log_server_output(container, "azents-engine-worker")
             _remove_agent_runtime_containers(container_network.name)
 
