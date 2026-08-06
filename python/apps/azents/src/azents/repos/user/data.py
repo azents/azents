@@ -16,6 +16,10 @@ class User(BaseModel):
     primary_email_id: str = Field(description="Primary email ID")
     primary_email: str = Field(description="Primary email address")
     locale: SupportedLocale = Field(description="Account locale (BCP 47)")
+    access_disabled_at: datetime.datetime | None = Field(
+        default=None,
+        description="When account access was disabled for deletion lifecycle",
+    )
     created_at: datetime.datetime = Field(description="Created time")
     updated_at: datetime.datetime = Field(description="Updated time")
 

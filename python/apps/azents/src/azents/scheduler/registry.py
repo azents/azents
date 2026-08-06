@@ -18,6 +18,7 @@ from azents.services.archived_session_retention import (
 from azents.services.chat import ChatSessionService
 from azents.services.file_lifecycle_cleanup import FileLifecycleCleanupService
 from azents.services.llm_catalog import SystemCatalogProjectionService
+from azents.services.owner_lifecycle import OwnerLifecycleService
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,23 @@ async def agent_decommission_handler(context: TaskContext) -> TaskResult:
     """Advance durable Agent decommission jobs without owning session purge."""
     service = await context.container.solve(AgentDecommissionService)
     summary = await service.decommission_once(
+        lease_owner=context.lease_owner,
+        deadline=context.deadline,
+    )
+    return TaskResult(
+        summary={
+            "task_key": context.task_key,
+            "attempt_started_at": context.attempt_started_at.isoformat(),
+            "manual_triggered": context.manual_triggered,
+            **dataclasses.asdict(summary),
+        }
+    )
+
+
+async def owner_lifecycle_handler(context: TaskContext) -> TaskResult:
+    """Advance durable User Session owner-lifecycle archive/purge jobs."""
+    service = await context.container.solve(OwnerLifecycleService)
+    summary = await service.process_once(
         lease_owner=context.lease_owner,
         deadline=context.deadline,
     )
@@ -223,6 +241,20 @@ AGENT_DECOMMISSION_TASK = ScheduledTaskDefinition(
     enabled_by_default=True,
 )
 
+OWNER_LIFECYCLE_TASK = ScheduledTaskDefinition(
+    key="owner_lifecycle",
+    description="Archive/purge User Sessions for membership loss and account deletion.",
+    interval=datetime.timedelta(minutes=1),
+    timeout=datetime.timedelta(minutes=10),
+    retry_policy=RetryPolicy(
+        kind="bounded_backoff",
+        min_delay=datetime.timedelta(minutes=1),
+        max_delay=datetime.timedelta(minutes=30),
+    ),
+    handler=owner_lifecycle_handler,
+    enabled_by_default=True,
+)
+
 FILE_LIFECYCLE_CLEANUP_TASK = ScheduledTaskDefinition(
     key="file_lifecycle_cleanup",
     description="Expire TTL-owned files and collect head-pruned ModelFiles.",
@@ -244,6 +276,7 @@ SCHEDULED_TASK_DEFINITIONS: tuple[ScheduledTaskDefinition, ...] = (
     ARCHIVED_SESSION_PURGE_TASK,
     SESSION_AUTO_ARCHIVE_TASK,
     AGENT_DECOMMISSION_TASK,
+    OWNER_LIFECYCLE_TASK,
     FILE_LIFECYCLE_CLEANUP_TASK,
 )
 
