@@ -797,6 +797,7 @@ class AgentSessionRepository:
         filters = [
             RDBAgentSession.agent_id == agent_id,
             RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+            RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
             RDBAgentSession.status == AgentSessionStatus.ACTIVE,
         ]
         if pinned is not None:
@@ -966,6 +967,7 @@ class AgentSessionRepository:
         filters = [
             RDBAgentSession.agent_id == agent_id,
             RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+            RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
             RDBAgentSession.status == AgentSessionStatus.ARCHIVED,
         ]
         total_count = await session.scalar(

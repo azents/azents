@@ -229,6 +229,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_list_agent_user_sessions(self) -> None:
+        """Test case for chat_v1_list_agent_user_sessions
+
+        List Agent User Sessions
+        """
+        pass
+
     def test_chat_v1_list_history_events(self) -> None:
         """Test case for chat_v1_list_history_events
 

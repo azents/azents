@@ -33,6 +33,7 @@ Method | HTTP request | Description
 [**chat_v1_list_agent_project_presets**](ChatV1Api.md#chat_v1_list_agent_project_presets) | **GET** /chat/v1/agents/{agent_id}/project-presets | List Agent Project Presets
 [**chat_v1_list_agent_projects**](ChatV1Api.md#chat_v1_list_agent_projects) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects | List Agent Projects
 [**chat_v1_list_agent_sessions**](ChatV1Api.md#chat_v1_list_agent_sessions) | **GET** /chat/v1/agents/{agent_id}/sessions | List Agent Sessions
+[**chat_v1_list_agent_user_sessions**](ChatV1Api.md#chat_v1_list_agent_user_sessions) | **GET** /chat/v1/agents/{agent_id}/user-sessions | List Agent User Sessions
 [**chat_v1_list_history_events**](ChatV1Api.md#chat_v1_list_history_events) | **GET** /chat/v1/sessions/{session_id}/history | List History Events
 [**chat_v1_list_input_actions**](ChatV1Api.md#chat_v1_list_input_actions) | **GET** /chat/v1/sessions/{session_id}/actions | List Input Actions
 [**chat_v1_list_live_events**](ChatV1Api.md#chat_v1_list_live_events) | **GET** /chat/v1/sessions/{session_id}/live | List Live Events
@@ -2377,6 +2378,85 @@ Name | Type | Description  | Notes
 ### Return type
 
 [**AgentSessionPageResponse**](AgentSessionPageResponse.md)
+
+### Authorization
+
+[HTTPBearer](../README.md#HTTPBearer)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Successful Response |  -  |
+**422** | Validation Error |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **chat_v1_list_agent_user_sessions**
+> AgentSessionListResponse chat_v1_list_agent_user_sessions(agent_id)
+
+List Agent User Sessions
+
+List active User Sessions owned by the current requester for an Agent.
+
+### Example
+
+* Bearer Authentication (HTTPBearer):
+
+```python
+import azentspublicclient
+from azentspublicclient.models.agent_session_list_response import AgentSessionListResponse
+from azentspublicclient.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://localhost
+# See configuration.py for a list of all supported configuration parameters.
+configuration = azentspublicclient.Configuration(
+    host = "http://localhost"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: HTTPBearer
+configuration = azentspublicclient.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with azentspublicclient.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = azentspublicclient.ChatV1Api(api_client)
+    agent_id = 'agent_id_example' # str | 
+
+    try:
+        # List Agent User Sessions
+        api_response = api_instance.chat_v1_list_agent_user_sessions(agent_id)
+        print("The response of ChatV1Api->chat_v1_list_agent_user_sessions:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling ChatV1Api->chat_v1_list_agent_user_sessions: %s\n" % e)
+```
+
+
+
+### Parameters
+
+
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+ **agent_id** | **str**|  | 
+
+### Return type
+
+[**AgentSessionListResponse**](AgentSessionListResponse.md)
 
 ### Authorization
 

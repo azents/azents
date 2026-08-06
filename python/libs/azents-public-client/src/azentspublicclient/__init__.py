@@ -81,6 +81,7 @@ __all__ = [
     "AgentSessionPageResponse",
     "AgentSessionPinUpdateRequest",
     "AgentSessionPrimaryKind",
+    "AgentSessionProductMode",
     "AgentSessionProjectDefaultsResponse",
     "AgentSessionProjectDefaultsResponseItemsInner",
     "AgentSessionProjectDefaultsSourceResponse",
@@ -524,6 +525,7 @@ from azentspublicclient.models.agent_session_list_response import AgentSessionLi
 from azentspublicclient.models.agent_session_page_response import AgentSessionPageResponse as AgentSessionPageResponse
 from azentspublicclient.models.agent_session_pin_update_request import AgentSessionPinUpdateRequest as AgentSessionPinUpdateRequest
 from azentspublicclient.models.agent_session_primary_kind import AgentSessionPrimaryKind as AgentSessionPrimaryKind
+from azentspublicclient.models.agent_session_product_mode import AgentSessionProductMode as AgentSessionProductMode
 from azentspublicclient.models.agent_session_project_defaults_response import AgentSessionProjectDefaultsResponse as AgentSessionProjectDefaultsResponse
 from azentspublicclient.models.agent_session_project_defaults_response_items_inner import AgentSessionProjectDefaultsResponseItemsInner as AgentSessionProjectDefaultsResponseItemsInner
 from azentspublicclient.models.agent_session_project_defaults_source_response import AgentSessionProjectDefaultsSourceResponse as AgentSessionProjectDefaultsSourceResponse

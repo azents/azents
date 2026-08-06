@@ -6,13 +6,13 @@ implemented: 2026-08-06
 tags: [session, frontend, api]
 document_role: primary
 document_type: requirements
-snapshot_id: session-260806
+snapshot_id: directory-260806
 ---
 
 # Session Directory Requirements
 
-- Snapshot: `session-260806`
-- Document reference: `session-260806/REQ`
+- Snapshot: `directory-260806`
+- Document reference: `directory-260806/REQ`
 
 ## Problem
 

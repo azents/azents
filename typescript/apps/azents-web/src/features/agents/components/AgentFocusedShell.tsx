@@ -93,6 +93,24 @@ export function AgentFocusedShell({
       staleTime: 0,
     },
   );
+  const activeSessionQuery = trpc.chat.getAgentSession.useQuery(
+    {
+      agentId: agent.id,
+      sessionId: activeSessionId ?? "",
+    },
+    {
+      enabled: activeSessionId !== null && activeSessionId !== "new",
+      staleTime: 0,
+    },
+  );
+  const userSessionsQuery = trpc.chat.listAgentUserSessions.useQuery(
+    { agentId: agent.id },
+    {
+      enabled: sessionListScope === "user",
+      refetchInterval: sessionListScope === "user" ? 5_000 : false,
+      staleTime: 0,
+    },
+  );
   const meQuery = trpc.user.me.useQuery(void 0, { retry: false });
   const profileQuery = trpc.memberProfile.getMyProfile.useQuery(
     { handle },
@@ -110,6 +128,7 @@ export function AgentFocusedShell({
     onSuccess: (_result, variables) => {
       void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
       void utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id });
+      void utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id });
       void utils.chat.getAgentSession.invalidate({
         agentId: agent.id,
         sessionId: variables.sessionId,
@@ -120,6 +139,7 @@ export function AgentFocusedShell({
     onSuccess: (_result, variables) => {
       void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
       void utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id });
+      void utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id });
       closeDrawer();
       if (activeSessionId === variables.sessionId) {
         const draftPath =
@@ -146,6 +166,23 @@ export function AgentFocusedShell({
     [],
   );
 
+  useEffect(() => {
+    if (draftScope !== null) {
+      setSessionListScope(draftScope);
+      return;
+    }
+    if (activeSessionId === null || activeSessionId === "new") {
+      return;
+    }
+    if (activeSessionQuery.data?.product_mode === "user") {
+      setSessionListScope("user");
+      return;
+    }
+    if (activeSessionQuery.data?.product_mode === "team") {
+      setSessionListScope("team");
+    }
+  }, [activeSessionId, activeSessionQuery.data?.product_mode, draftScope]);
+
   const handleRenameSession = useCallback(
     async (sessionId: string, title: string | null): Promise<void> => {
       await updateTitleMutation.mutateAsync({
@@ -153,8 +190,14 @@ export function AgentFocusedShell({
         sessionId,
         title,
       });
-      void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
-      void utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id });
+      if (sessionListScope === "user") {
+        void utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id });
+      } else {
+        void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
+        void utils.chat.getAgentSessionSidebar.invalidate({
+          agentId: agent.id,
+        });
+      }
       void utils.chat.getAgentSession.invalidate({
         agentId: agent.id,
         sessionId,
@@ -207,22 +250,20 @@ export function AgentFocusedShell({
     [openDrawer],
   );
 
-  const teamSessions = teamSessionsQuery.data?.items ?? [];
+  const teamPinnedSessions = sessionSidebarQuery.data?.pinned ?? [];
+  const teamRecentSessions = sessionSidebarQuery.data?.recent ?? [];
   const userSessions = userSessionsQuery.data?.items ?? [];
-  const sessions = sessionListScope === "user" ? userSessions : teamSessions;
   const sessionsLoading =
     sessionListScope === "user"
       ? userSessionsQuery.isPending
-      : teamSessionsQuery.isPending;
+      : sessionSidebarQuery.isPending;
   const sessionsError =
     (sessionListScope === "user"
       ? userSessionsQuery.error?.message
-      : teamSessionsQuery.error?.message) ??
+      : sessionSidebarQuery.error?.message) ??
     updatePinMutation.error?.message ??
     archiveSessionMutation.error?.message ??
     null;
-  const showArchivedSection = sessionListScope === "team";
-
   const sidebarProps = {
     handle,
     agent,
@@ -232,21 +273,11 @@ export function AgentFocusedShell({
     onLogout: handleLogout,
     sessionListScope,
     onSessionListScopeChange: handleSessionListScopeChange,
-    sessions,
+    sessions: sessionListScope === "user" ? userSessions : [],
+    pinnedSessions: sessionListScope === "team" ? teamPinnedSessions : [],
+    recentSessions: sessionListScope === "team" ? teamRecentSessions : [],
     sessionsLoading,
     sessionsError,
-    archivedSessions: showArchivedSection
-      ? (archivedSessionsQuery.data?.items ?? [])
-      : [],
-    archivedSessionsLoading: showArchivedSection
-      ? archivedSessionsQuery.isPending
-      : false,
-    archivedSessionsError: showArchivedSection
-      ? (archivedSessionsQuery.error?.message ??
-        restoreSessionMutation.error?.message ??
-        null)
-      : null,
-    showArchivedSection,
     activeSessionId,
     creatingSession: false,
     renamingSessionId: updateTitleMutation.isPending
@@ -258,14 +289,10 @@ export function AgentFocusedShell({
     pinningSessionId: updatePinMutation.isPending
       ? updatePinMutation.variables.sessionId
       : null,
-    restoringSessionId: restoreSessionMutation.isPending
-      ? restoreSessionMutation.variables.sessionId
-      : null,
     onCreateSession: handleCreateSession,
     onRenameSession: handleRenameSession,
     onArchiveSession: handleArchiveSession,
     onSetSessionPinned: handleSetSessionPinned,
-    onRestoreSession: handleRestoreSession,
   };
 
   return (
@@ -278,45 +305,7 @@ export function AgentFocusedShell({
         padding={0}
         size={`min(85vw, ${rem(352)})`}
       >
-        <AgentFocusedSidebar
-          handle={handle}
-          agent={agent}
-          currentUser={currentUser}
-          adminAccessUrl={adminAccessQuery.data?.url ?? null}
-          loggingOut={logoutMutation.isPending}
-          onLogout={handleLogout}
-          pinnedSessions={sessionSidebarQuery.data?.pinned ?? []}
-          recentSessions={sessionSidebarQuery.data?.recent ?? []}
-          sessionsLoading={sessionSidebarQuery.isPending}
-          sessionsError={
-            sessionSidebarQuery.error?.message ??
-            updatePinMutation.error?.message ??
-            archiveSessionMutation.error?.message ??
-            null
-          }
-          activeSessionId={activeSessionId}
-          creatingSession={false}
-          renamingSessionId={
-            updateTitleMutation.isPending
-              ? updateTitleMutation.variables.sessionId
-              : null
-          }
-          archivingSessionId={
-            archiveSessionMutation.isPending
-              ? archiveSessionMutation.variables.sessionId
-              : null
-          }
-          pinningSessionId={
-            updatePinMutation.isPending
-              ? updatePinMutation.variables.sessionId
-              : null
-          }
-          onCreateSession={handleCreateSession}
-          onRenameSession={handleRenameSession}
-          onArchiveSession={handleArchiveSession}
-          onSetSessionPinned={handleSetSessionPinned}
-          onNavigate={closeDrawer}
-        />
+        <AgentFocusedSidebar {...sidebarProps} onNavigate={closeDrawer} />
       </Drawer>
       <Group h="100%" mih={0} gap={0} align="stretch" wrap="nowrap">
         <Box
@@ -328,44 +317,7 @@ export function AgentFocusedShell({
             overflow: "hidden",
           }}
         >
-          <AgentFocusedSidebar
-            handle={handle}
-            agent={agent}
-            currentUser={currentUser}
-            adminAccessUrl={adminAccessQuery.data?.url ?? null}
-            loggingOut={logoutMutation.isPending}
-            onLogout={handleLogout}
-            pinnedSessions={sessionSidebarQuery.data?.pinned ?? []}
-            recentSessions={sessionSidebarQuery.data?.recent ?? []}
-            sessionsLoading={sessionSidebarQuery.isPending}
-            sessionsError={
-              sessionSidebarQuery.error?.message ??
-              updatePinMutation.error?.message ??
-              archiveSessionMutation.error?.message ??
-              null
-            }
-            activeSessionId={activeSessionId}
-            creatingSession={false}
-            renamingSessionId={
-              updateTitleMutation.isPending
-                ? updateTitleMutation.variables.sessionId
-                : null
-            }
-            archivingSessionId={
-              archiveSessionMutation.isPending
-                ? archiveSessionMutation.variables.sessionId
-                : null
-            }
-            pinningSessionId={
-              updatePinMutation.isPending
-                ? updatePinMutation.variables.sessionId
-                : null
-            }
-            onCreateSession={handleCreateSession}
-            onRenameSession={handleRenameSession}
-            onArchiveSession={handleArchiveSession}
-            onSetSessionPinned={handleSetSessionPinned}
-          />
+          <AgentFocusedSidebar {...sidebarProps} />
         </Box>
         <Box
           h="100%"

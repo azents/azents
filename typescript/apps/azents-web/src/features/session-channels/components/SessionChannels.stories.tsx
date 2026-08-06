@@ -49,6 +49,7 @@ const session: AgentSessionResponse = {
   title_source: "manual",
   status: "active",
   primary_kind: null,
+  product_mode: "team",
   run_state: "idle",
   pinned: false,
   unread_terminal_run_id: null,

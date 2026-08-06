@@ -1429,7 +1429,27 @@ class TestAgentSessionRoutes:
         assert response.id == "1123456789abcdef0123456789abcdef"
         assert response.agent_id == "agent-1"
         assert response.title is None
+        assert response.product_mode == AgentSessionProductMode.TEAM
         assert chat_service.agent_id == "agent-1"
+
+    async def test_get_agent_session_returns_user_product_mode(self) -> None:
+        """Session detail exposes User mode for direct-link scope resolution."""
+        chat_service = _AgentSessionRouteChatService()
+        chat_service.secondary_session = chat_service.secondary_session.model_copy(
+            update={
+                "product_mode": AgentSessionProductMode.USER,
+                "associated_user_id": "user-1",
+            }
+        )
+
+        response = await get_agent_session(
+            agent_id="agent-1",
+            session_id="2123456789abcdef0123456789abcdef",
+            current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+            chat_service=chat_service,
+        )
+
+        assert response.product_mode == AgentSessionProductMode.USER
 
     async def test_list_agent_sessions_returns_primary_metadata(self) -> None:
         """Agent session list preserves primary metadata for the UI contract."""

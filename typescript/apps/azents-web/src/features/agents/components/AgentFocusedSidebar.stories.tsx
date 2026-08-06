@@ -52,6 +52,7 @@ const sessions: AgentSessionResponse[] = [
     purge_after: null,
     archive_retention_days_snapshot: null,
     primary_kind: "team_primary",
+    product_mode: "team",
     run_state: "idle",
     pinned: false,
     unread_terminal_run_id: null,
@@ -71,6 +72,7 @@ const sessions: AgentSessionResponse[] = [
     purge_after: null,
     archive_retention_days_snapshot: null,
     primary_kind: null,
+    product_mode: "team",
     run_state: "running",
     pinned: false,
     unread_terminal_run_id: null,
@@ -90,6 +92,7 @@ const sessions: AgentSessionResponse[] = [
     purge_after: null,
     archive_retention_days_snapshot: null,
     primary_kind: null,
+    product_mode: "team",
     run_state: "idle",
     pinned: false,
     unread_terminal_run_id: null,
@@ -236,6 +239,7 @@ const userSessions: AgentSessionResponse[] = [
     purge_after: null,
     archive_retention_days_snapshot: null,
     primary_kind: null,
+    product_mode: "user",
     run_state: "idle",
     pinned: false,
     unread_terminal_run_id: null,
@@ -255,6 +259,7 @@ const userSessions: AgentSessionResponse[] = [
     purge_after: null,
     archive_retention_days_snapshot: null,
     primary_kind: null,
+    product_mode: "user",
     run_state: "running",
     pinned: true,
     unread_terminal_run_id: null,
@@ -268,7 +273,6 @@ export const MySessionsTab = {
   args: {
     sessionListScope: "user",
     sessions: userSessions,
-    showArchivedSection: false,
     activeSessionId: "sess_private_notes",
     onSessionListScopeChange: () => {},
   },
@@ -278,7 +282,6 @@ export const MySessionsEmpty = {
   args: {
     sessionListScope: "user",
     sessions: [],
-    showArchivedSection: false,
     onSessionListScopeChange: () => {},
   },
 } satisfies Story;
@@ -286,8 +289,10 @@ export const MySessionsEmpty = {
 export const TeamSessionsTab = {
   args: {
     sessionListScope: "team",
-    sessions,
-    showArchivedSection: true,
+    pinnedSessions: sessions.filter(
+      (session) => session.primary_kind === "team_primary",
+    ),
+    recentSessions: sessions.filter((session) => session.primary_kind === null),
     onSessionListScopeChange: () => {},
   },
 } satisfies Story;

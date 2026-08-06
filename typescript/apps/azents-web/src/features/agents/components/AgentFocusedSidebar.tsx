@@ -81,6 +81,9 @@ interface AgentFocusedSidebarProps {
   adminAccessUrl: string | null;
   loggingOut: boolean;
   onLogout: () => void;
+  sessionListScope?: AgentSessionListScope;
+  onSessionListScopeChange?: (scope: AgentSessionListScope) => void;
+  sessions?: AgentSessionResponse[];
   pinnedSessions?: AgentSessionResponse[];
   recentSessions?: AgentSessionResponse[];
   sessionsLoading?: boolean;
@@ -204,6 +207,9 @@ export function AgentFocusedSidebar({
   adminAccessUrl,
   loggingOut,
   onLogout,
+  sessionListScope = "team",
+  onSessionListScopeChange,
+  sessions = [],
   pinnedSessions = [],
   recentSessions = [],
   sessionsLoading = false,
@@ -698,25 +704,34 @@ export function AgentFocusedSidebar({
             )}
             {!sessionsLoading &&
               !sessionsError &&
-              pinnedSessions.length === 0 &&
-              recentSessions.length === 0 && (
+              (sessionListScope === "user"
+                ? sessions.length === 0
+                : pinnedSessions.length === 0 &&
+                  recentSessions.length === 0) && (
                 <Text px="md" py="sm" size="xs" c="dimmed">
-                  {t("sessions.empty")}
+                  {sessionListScope === "user"
+                    ? t("sessions.userEmpty")
+                    : t("sessions.empty")}
                 </Text>
               )}
-            {renderSessionGroup(t("sessions.pinnedTitle"), pinnedSessions)}
-            {renderSessionGroup(t("sessions.recentTitle"), recentSessions)}
-            {(pinnedSessions.length > 0 || recentSessions.length > 0) && (
-              <Divider my="xs" />
+            {sessionListScope === "user" && sessions.map(renderSession)}
+            {sessionListScope === "team" && (
+              <>
+                {renderSessionGroup(t("sessions.pinnedTitle"), pinnedSessions)}
+                {renderSessionGroup(t("sessions.recentTitle"), recentSessions)}
+                {(pinnedSessions.length > 0 || recentSessions.length > 0) && (
+                  <Divider my="xs" />
+                )}
+                <NavLink
+                  component={Link}
+                  href={sessionsDirectoryHref}
+                  active={isSessionsDirectoryActive}
+                  label={t("sessions.allSessions")}
+                  leftSection={<IconListDetails size={rem(16)} />}
+                  onClick={onNavigate}
+                />
+              </>
             )}
-            <NavLink
-              component={Link}
-              href={sessionsDirectoryHref}
-              active={isSessionsDirectoryActive}
-              label={t("sessions.allSessions")}
-              leftSection={<IconListDetails size={rem(16)} />}
-              onClick={onNavigate}
-            />
           </Stack>
         </ScrollArea>
 

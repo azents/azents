@@ -4,13 +4,13 @@ created: 2026-08-06
 tags: [session, api, frontend, architecture]
 document_role: primary
 document_type: adr
-snapshot_id: session-260806
+snapshot_id: directory-260806
 ---
 
 # Session Directory Decisions
 
-- Snapshot: `session-260806`
-- Requirements: [session-260806/REQ](../requirements/session-260806-session-directory.md)
+- Snapshot: `directory-260806`
+- Requirements: [directory-260806/REQ](../requirements/directory-260806-session-directory.md)
 
 ## Context
 
@@ -18,11 +18,11 @@ The confirmed requirements establish two different read models for root sessions
 
 ## Decision Log
 
-### session-260806/ADR-D1 — Separate session directory and sidebar-summary read contracts
+### directory-260806/ADR-D1 — Separate session directory and sidebar-summary read contracts
 
 **Status:** Accepted on 2026-08-06.
 
-**Requirements:** session-260806/REQ-1, session-260806/REQ-2, session-260806/REQ-3, session-260806/REQ-4.
+**Requirements:** directory-260806/REQ-1, directory-260806/REQ-2, directory-260806/REQ-3, directory-260806/REQ-4.
 
 **Decision**
 
@@ -44,11 +44,11 @@ The two surfaces have different boundedness, ordering, and composition requireme
 - Existing unbounded active and archived list contracts are replaced at their current consumers rather than retained as compatibility fallbacks.
 - The next decision defines the directory pagination and addressability contract.
 
-### session-260806/ADR-D2 — Offset pagination with page-addressable directory state
+### directory-260806/ADR-D2 — Offset pagination with page-addressable directory state
 
 **Status:** Accepted on 2026-08-06.
 
-**Requirements:** session-260806/REQ-1, session-260806/REQ-2, session-260806/REQ-4.
+**Requirements:** directory-260806/REQ-1, directory-260806/REQ-2, directory-260806/REQ-4.
 
 **Decision**
 

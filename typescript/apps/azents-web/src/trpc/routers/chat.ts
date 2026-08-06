@@ -34,6 +34,7 @@ import {
   chatV1ListAgentProjectPresets,
   chatV1ListAgentProjects,
   chatV1ListAgentSessions,
+  chatV1ListAgentUserSessions,
   chatV1ListHistoryEvents,
   chatV1ListInputActions,
   chatV1ListLiveEvents,

@@ -6,14 +6,14 @@ implemented: 2026-08-06
 tags: [session, api, frontend, backend]
 document_role: primary
 document_type: design
-snapshot_id: session-260806
+snapshot_id: directory-260806
 ---
 
 # Session Directory Design
 
-- Snapshot: `session-260806`
-- Requirements: [session-260806/REQ](../requirements/session-260806-session-directory.md)
-- Decisions: [session-260806/ADR](../adr/session-260806-session-directory.md)
+- Snapshot: `directory-260806`
+- Requirements: [directory-260806/REQ](../requirements/directory-260806-session-directory.md)
+- Decisions: [directory-260806/ADR](../adr/directory-260806-session-directory.md)
 
 ## 1. Current Behavior and Requirement Gap
 
@@ -25,10 +25,10 @@ This violates the bounded-navigation goal and provides no page-addressable compl
 
 | Requirement | Design mechanisms | Decision authority |
 | --- | --- | --- |
-| session-260806/REQ-1 | M1, M2, M3 | session-260806/ADR-D1, session-260806/ADR-D2 |
-| session-260806/REQ-2 | M1, M2, M3, M6 | session-260806/ADR-D1, session-260806/ADR-D2 |
-| session-260806/REQ-3 | M1, M4 | session-260806/ADR-D1 |
-| session-260806/REQ-4 | M5, M6 | session-260806/ADR-D1, session-260806/ADR-D2 |
+| directory-260806/REQ-1 | M1, M2, M3 | directory-260806/ADR-D1, directory-260806/ADR-D2 |
+| directory-260806/REQ-2 | M1, M2, M3, M6 | directory-260806/ADR-D1, directory-260806/ADR-D2 |
+| directory-260806/REQ-3 | M1, M4 | directory-260806/ADR-D1 |
+| directory-260806/REQ-4 | M5, M6 | directory-260806/ADR-D1, directory-260806/ADR-D2 |
 
 ## 3. Architecture and Ownership
 
@@ -190,10 +190,10 @@ Run backend targeted tests, TypeScript format/lint/typecheck, generated-client v
 
 | Requirement | Status | Evidence |
 | --- | --- | --- |
-| session-260806/REQ-1 | Feasible | Existing root active query, Agent shell, direct session route, tRPC layer, and offset-list patterns are present. |
-| session-260806/REQ-2 | Feasible | Existing archived root query, retention projection, restore route, and archived UI behavior are present. |
-| session-260806/REQ-3 | Feasible | Current sidebar owns the relevant navigation/actions; backend already stores pin and activity fields needed for a summary query. |
-| session-260806/REQ-4 | Feasible | Current mutations already use tRPC invalidation; directory/sidebar query keys can be invalidated together. |
+| directory-260806/REQ-1 | Feasible | Existing root active query, Agent shell, direct session route, tRPC layer, and offset-list patterns are present. |
+| directory-260806/REQ-2 | Feasible | Existing archived root query, retention projection, restore route, and archived UI behavior are present. |
+| directory-260806/REQ-3 | Feasible | Current sidebar owns the relevant navigation/actions; backend already stores pin and activity fields needed for a summary query. |
+| directory-260806/REQ-4 | Feasible | Current mutations already use tRPC invalidation; directory/sidebar query keys can be invalidated together. |
 
 No requirement blocker was found. The only material API choices were accepted in ADR-D1 and ADR-D2.
 
@@ -209,20 +209,20 @@ Offset pages can move while a user views a mutable list. Deterministic ordering,
 
 | ID | Material design mechanism | Authority | Classification |
 | --- | --- | --- | --- |
-| M1 | Separate directory-page and sidebar-summary session read contracts | session-260806/ADR-D1 | decided |
-| M2 | Offset page metadata and page-addressable directory URL state | session-260806/ADR-D2 | decided |
-| M3 | Agent-scoped active/archived directory route and status-separated page experience | session-260806/REQ-1, session-260806/REQ-2, session-260806/ADR-D1, session-260806/ADR-D2 | derived |
-| M4 | Sidebar renders only server-composed pinned and bounded recent active projections, with no archived query or section | session-260806/REQ-3, session-260806/ADR-D1 | derived |
-| M5 | Shared invalidation and out-of-range-page recovery after session mutations | session-260806/REQ-4, session-260806/ADR-D1, session-260806/ADR-D2 | derived |
-| M6 | Retain current authorization, root-only visibility, pin/archive semantics, retention metadata, and direct session navigation | session-260806/REQ-2, session-260806/REQ-4, docs/azents/spec/domain/conversation.md | existing |
+| M1 | Separate directory-page and sidebar-summary session read contracts | directory-260806/ADR-D1 | decided |
+| M2 | Offset page metadata and page-addressable directory URL state | directory-260806/ADR-D2 | decided |
+| M3 | Agent-scoped active/archived directory route and status-separated page experience | directory-260806/REQ-1, directory-260806/REQ-2, directory-260806/ADR-D1, directory-260806/ADR-D2 | derived |
+| M4 | Sidebar renders only server-composed pinned and bounded recent active projections, with no archived query or section | directory-260806/REQ-3, directory-260806/ADR-D1 | derived |
+| M5 | Shared invalidation and out-of-range-page recovery after session mutations | directory-260806/REQ-4, directory-260806/ADR-D1, directory-260806/ADR-D2 | derived |
+| M6 | Retain current authorization, root-only visibility, pin/archive semantics, retention metadata, and direct session navigation | directory-260806/REQ-2, directory-260806/REQ-4, docs/azents/spec/domain/conversation.md | existing |
 
 ## 12. Removal and Replacement
 
 | Existing unit or behavior | Removal authority | Replacement or remaining authority | Removal boundary | Absence verification |
 | --- | --- | --- | --- | --- |
-| Unbounded active-session list consumption in `AgentFocusedShell` | session-260806/ADR-D1 | Directory page query and sidebar-summary query | Agent shell and related tRPC consumer paths | No shell consumer requests unbounded active rows. |
-| Unbounded archived-session list consumption and sidebar archived section | session-260806/REQ-3, session-260806/ADR-D1 | Archived directory page query and directory restore UI | Sidebar props, archived query wiring, controls, and rendering | No sidebar archived query, loading/error state, or archived section remains. |
-| Current active/archived unbounded route response contracts at current consumers | session-260806/ADR-D1 | Paginated directory and sidebar-summary contracts | API route schemas, generated clients, tRPC routers, tests | No current web consumer expects an unbounded session-list response. |
+| Unbounded active-session list consumption in `AgentFocusedShell` | directory-260806/ADR-D1 | Directory page query and sidebar-summary query | Agent shell and related tRPC consumer paths | No shell consumer requests unbounded active rows. |
+| Unbounded archived-session list consumption and sidebar archived section | directory-260806/REQ-3, directory-260806/ADR-D1 | Archived directory page query and directory restore UI | Sidebar props, archived query wiring, controls, and rendering | No sidebar archived query, loading/error state, or archived section remains. |
+| Current active/archived unbounded route response contracts at current consumers | directory-260806/ADR-D1 | Paginated directory and sidebar-summary contracts | API route schemas, generated clients, tRPC routers, tests | No current web consumer expects an unbounded session-list response. |
 | Persistent data, archive retention policy, session ownership, and subagent visibility model | None; retained | Existing sources remain authoritative | Not applicable | Schema and existing domain invariants remain unchanged. |
 
 ## 13. Design Approval

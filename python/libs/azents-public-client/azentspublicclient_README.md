@@ -142,6 +142,7 @@ Class | Method | HTTP request | Description
 *ChatV1Api* | [**chat_v1_list_agent_project_presets**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_project_presets) | **GET** /chat/v1/agents/{agent_id}/project-presets | List Agent Project Presets
 *ChatV1Api* | [**chat_v1_list_agent_projects**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_projects) | **GET** /chat/v1/agents/{agent_id}/sessions/{session_id}/projects | List Agent Projects
 *ChatV1Api* | [**chat_v1_list_agent_sessions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_sessions) | **GET** /chat/v1/agents/{agent_id}/sessions | List Agent Sessions
+*ChatV1Api* | [**chat_v1_list_agent_user_sessions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_agent_user_sessions) | **GET** /chat/v1/agents/{agent_id}/user-sessions | List Agent User Sessions
 *ChatV1Api* | [**chat_v1_list_history_events**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_history_events) | **GET** /chat/v1/sessions/{session_id}/history | List History Events
 *ChatV1Api* | [**chat_v1_list_input_actions**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_input_actions) | **GET** /chat/v1/sessions/{session_id}/actions | List Input Actions
 *ChatV1Api* | [**chat_v1_list_live_events**](azentspublicclient/docs/ChatV1Api.md#chat_v1_list_live_events) | **GET** /chat/v1/sessions/{session_id}/live | List Live Events
@@ -331,6 +332,7 @@ Class | Method | HTTP request | Description
  - [AgentSessionPageResponse](azentspublicclient/docs/AgentSessionPageResponse.md)
  - [AgentSessionPinUpdateRequest](azentspublicclient/docs/AgentSessionPinUpdateRequest.md)
  - [AgentSessionPrimaryKind](azentspublicclient/docs/AgentSessionPrimaryKind.md)
+ - [AgentSessionProductMode](azentspublicclient/docs/AgentSessionProductMode.md)
  - [AgentSessionProjectDefaultsResponse](azentspublicclient/docs/AgentSessionProjectDefaultsResponse.md)
  - [AgentSessionProjectDefaultsResponseItemsInner](azentspublicclient/docs/AgentSessionProjectDefaultsResponseItemsInner.md)
  - [AgentSessionProjectDefaultsSourceResponse](azentspublicclient/docs/AgentSessionProjectDefaultsSourceResponse.md)

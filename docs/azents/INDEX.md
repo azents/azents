@@ -16,7 +16,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-03 | 63 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-06 | 141 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-06 | 143 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-05 | 50 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-06 | 7 |
@@ -134,6 +134,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Deterministic Tool Catalog, MCP Tool Snapshots, and Stable Toolkit Prompts Historical Requirements Reconstruction](requirements/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md) | deterministic-260628 | 2026-06-28 | - |
 | [Full-stack Local Test Environment — Stage 1b (devserver lifecycle) Historical Requirements Reconstruction](requirements/devserver-260406-devserver-lifecycle.md) | devserver-260406 | 2026-04-06 | 2026-04-06 |
 | [Directly Promote Continuation and Agent Messages Historical Requirements Reconstruction](requirements/directly-260712-directly-promote-continuation-and-messages.md) | directly-260712 | 2026-07-12 | - |
+| [Session Directory Requirements](requirements/directory-260806-session-directory.md) | directory-260806 | 2026-08-06 | 2026-08-06 |
 | [Discord Toolkit Historical Requirements Reconstruction](requirements/discord-260312-discord-toolkit.md) | discord-260312 | 2026-03-12 | 2026-03-23 |
 | [Discord Gateway HA Historical Requirements Reconstruction](requirements/discord-260327-discord-gateway.md) | discord-260327 | 2026-03-27 | 2026-03-27 |
 | [Discord Agent App Routing Requirements](requirements/discord-260726-agent-app-routing.md) | discord-260726 | 2026-07-26 | - |
@@ -353,7 +354,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Session Auto-Archive Requirements](requirements/session-260726-auto-archive.md) | session-260726 | 2026-07-26 | 2026-07-26 |
 | [Session Working Folder Requirements](requirements/session-260803-session-working-folder.md) | session-260803 | 2026-08-03 | 2026-08-04 |
 | [Session Folder Project Browser Prominence Requirements](requirements/session-260804-project-browser-session-folder-prominence.md) | session-260804 | 2026-08-04 | 2026-08-04 |
-| [Session Directory Requirements](requirements/session-260806-session-directory.md) | session-260806 | 2026-08-06 | 2026-08-06 |
+| [Private User Sessions Requirements](requirements/session-260806-user-sessions.md) | session-260806 | 2026-08-06 | - |
 | [Agent Settings Pages and Memory UI Historical Requirements Reconstruction](requirements/settings-260702-settings-pages-and-memory-ui.md) | settings-260702 | 2026-07-02 | - |
 | [Model-Scoped Selectable Model Settings Historical Requirements Reconstruction](requirements/settings-260716-selectable-settings.md) | settings-260716 | 2026-07-16 | - |
 | [Model Unread Run Results as Session-Shared State Historical Requirements Reconstruction](requirements/shared-260720-shared-unread-result.md) | shared-260720 | 2026-07-20 | - |
@@ -509,6 +510,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Deterministic Tool Catalog, MCP Tool Snapshots, and Stable Toolkit Prompts](adr/deterministic-260628-deterministic-catalog-and-mcp-snapshots.md)
 - [Full-stack Local Test Environment — Stage 1b (devserver lifecycle) Historical Decision Reconstruction](adr/devserver-260406-devserver-lifecycle.md)
 - [Directly Promote Continuation and Agent Messages](adr/directly-260712-directly-promote-continuation-and-messages.md)
+- [Session Directory Decisions](adr/directory-260806-session-directory.md)
 - [Discord Toolkit Historical Decision Reconstruction](adr/discord-260312-discord-toolkit.md)
 - [Discord Gateway HA Historical Decision Reconstruction](adr/discord-260327-discord-gateway.md)
 - [Discord Agent App Routing](adr/discord-260726-agent-app-routing.md)
@@ -728,7 +730,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Session Auto-Archive](adr/session-260726-auto-archive.md)
 - [Session Working Folder](adr/session-260803-session-working-folder.md)
 - [Session Folder Project Browser Prominence](adr/session-260804-project-browser-session-folder-prominence.md)
-- [Session Directory Decisions](adr/session-260806-session-directory.md)
+- [Private User Sessions](adr/session-260806-user-sessions.md)
 - [Agent Settings Pages and Memory UI](adr/settings-260702-settings-pages-and-memory-ui.md)
 - [Model-Scoped Selectable Model Settings Historical Decision Reconstruction](adr/settings-260716-selectable-settings.md)
 - [Model Unread Run Results as Session-Shared State](adr/shared-260720-shared-unread-result.md)

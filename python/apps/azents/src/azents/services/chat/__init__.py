@@ -724,6 +724,35 @@ class ChatSessionService:
             )
             return Success(sessions)
 
+    async def list_agent_user_sessions(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
+    ) -> Result[list[AgentSession], EnsureSessionError]:
+        """Fetch active User Sessions owned by the requester for an Agent."""
+        async with self.session_manager() as session:
+            agent = await self.agent_repository.get_by_id(session, agent_id)
+            if agent is None:
+                return Failure(AgentNotFound())
+            workspace_user = (
+                await self.workspace_user_repository.get_by_workspace_and_user(
+                    session,
+                    workspace_id=agent.workspace_id,
+                    user_id=user_id,
+                )
+            )
+            if workspace_user is None:
+                return Failure(NotWorkspaceMember())
+            sessions = (
+                await self.agent_session_repository.list_active_user_by_agent_and_user(
+                    session,
+                    agent_id=agent_id,
+                    associated_user_id=user_id,
+                )
+            )
+            return Success(sessions)
+
     async def list_agent_session_directory(
         self,
         *,

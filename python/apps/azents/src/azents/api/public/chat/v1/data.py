@@ -11,6 +11,7 @@ from azents.core.enums import (
     AgentRunPhase,
     AgentRunStatus,
     AgentSessionPrimaryKind,
+    AgentSessionProductMode,
     AgentSessionRunState,
     AgentSessionStatus,
     AgentSessionTitleSource,
@@ -1990,6 +1991,9 @@ class AgentSessionResponse(BaseModel):
         default=None,
         description="Primary session role",
     )
+    product_mode: AgentSessionProductMode | None = Field(
+        description="Root product mode, or null for subagent sessions",
+    )
     run_state: AgentSessionRunState = Field(
         description="Session execution state",
     )
@@ -2043,6 +2047,7 @@ class AgentSessionResponse(BaseModel):
             title_source=session.title_source,
             status=session.status,
             primary_kind=session.primary_kind,
+            product_mode=session.product_mode,
             run_state=session.run_state,
             pinned=session.pinned,
             unread_terminal_run_id=unread_terminal_run_id,

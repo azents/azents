@@ -3147,6 +3147,54 @@
         }
       }
     },
+    "/chat/v1/agents/{agent_id}/user-sessions": {
+      "get": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "List Agent User Sessions",
+        "description": "List active User Sessions owned by the current requester for an Agent.",
+        "operationId": "chat_v1_list_agent_user_sessions",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/chat/v1/agents/{agent_id}/project-presets": {
       "get": {
         "tags": [
@@ -14150,6 +14198,15 @@
         "title": "AgentSessionPrimaryKind",
         "description": "AgentSession primary role."
       },
+      "AgentSessionProductMode": {
+        "type": "string",
+        "enum": [
+          "team",
+          "user"
+        ],
+        "title": "AgentSessionProductMode",
+        "description": "Root AgentSession product mode."
+      },
       "AgentSessionProjectDefaultsResponse": {
         "properties": {
           "project_paths": {
@@ -14293,6 +14350,17 @@
             ],
             "description": "Primary session role"
           },
+          "product_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentSessionProductMode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Root product mode, or null for subagent sessions"
+          },
           "run_state": {
             "$ref": "#/components/schemas/AgentSessionRunState",
             "description": "Session execution state"
@@ -14387,6 +14455,7 @@
           "title",
           "title_source",
           "status",
+          "product_mode",
           "run_state",
           "pinned",
           "unread_terminal_run_id",
