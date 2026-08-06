@@ -4,7 +4,7 @@ spec_type: domain
 domain: user-auth
 owner: "@Hardtack"
 created: 2026-04-20
-updated: 2026-07-20
+updated: 2026-08-06
 tags: [backend, security, api]
 code_paths:
   - python/apps/azents/src/azents/core/auth/**
@@ -25,6 +25,8 @@ code_paths:
   - python/apps/azents/src/azents/rdb/models/signup_token.py
   - python/apps/azents/src/azents/rdb/models/password_reset_token.py
   - python/apps/azents/src/azents/rdb/models/system_user_role.py
+  - python/apps/azents/src/azents/rdb/models/owner_lifecycle.py
+  - python/apps/azents/src/azents/rdb/models/workspace_user.py
   - python/apps/azents/src/azents/repos/user/**
   - python/apps/azents/src/azents/repos/user_email/**
   - python/apps/azents/src/azents/repos/session/**
@@ -34,6 +36,7 @@ code_paths:
   - python/apps/azents/src/azents/repos/password_reset_token/**
   - python/apps/azents/src/azents/repos/system_user_role/**
   - python/apps/azents/src/azents/repos/system_bootstrap/**
+  - python/apps/azents/src/azents/repos/owner_lifecycle/**
   - python/apps/azents/src/azents/services/auth/**
   - python/apps/azents/src/azents/services/email_verification/**
   - python/apps/azents/src/azents/services/signup_token/**
@@ -46,6 +49,9 @@ code_paths:
   - python/apps/azents/src/azents/services/user_email/**
   - python/apps/azents/src/azents/services/workspace/**
   - python/apps/azents/src/azents/services/workspace_invitation/**
+  - python/apps/azents/src/azents/services/workspace_user/**
+  - python/apps/azents/src/azents/services/owner_lifecycle.py
+  - python/apps/azents/src/azents/scheduler/registry.py
   - python/apps/azents/src/cli/system_admin.py
   - typescript/apps/azents-admin-web/src/app/api/session/**
   - typescript/apps/azents-admin-web/src/config.ts
@@ -76,7 +82,7 @@ api_routes:
   - /system-setting/v1
   - /debug/v1
 last_verified_at: 2026-08-06
-spec_version: 9
+spec_version: 10
 ---
 
 # User & Authentication
@@ -279,7 +285,7 @@ loss immediately revokes access to owned User Sessions and schedules asynchronou
 stop. Account deletion immediately disables access and revokes live auth Sessions; final User row
 removal waits until owned private User Session purge and private User Memory cleanup complete. Team
 Sessions, Agent Memory, and Workspace-owned Toolkits are not purged by User Session owner cleanup.
- `GET /user/v1/me/system-roles` exposes only the authenticated user's current roles for Main Web navigation. UI visibility is not an authorization control.
+`GET /user/v1/me/system-roles` exposes only the authenticated user's current roles for Main Web navigation. UI visibility is not an authorization control.
 
 The operator CLI grants `system_admin` to one normalized exact email. It is the only initial-promotion and recovery path after users exist. It neither creates a user nor issues a session, and migrations, startup, Workspace ownership, and environment configuration do not auto-promote users.
 
@@ -438,6 +444,7 @@ Admin-issued signup/password-reset token management and other instance-wide oper
 
 ## 9. Changelog
 
+- **2026-08-06** — v10. Added owner-lifecycle persistence and integration paths to the spec authority inventory.
 - **2026-08-06** — v9. Documented User Session owner lifecycle on membership loss and account deletion.
 - **2026-07-20** (v8) — Confirmed that System Settings inventory, mutation, health, and audit operations reuse the live persisted `system_admin` boundary without changing bootstrap, promotion, or final-admin invariants.
 - **2026-07-13** (v7) — Replaced public first-owner Workspace bootstrap with one-time Admin bootstrap, added persisted live system-administrator authorization and CLI recovery, and documented independent Admin Web user sessions.

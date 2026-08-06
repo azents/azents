@@ -89,6 +89,8 @@ api_routes:
   - /chat/v1/agents/{agent_id}/team-primary-session
   - /chat/v1/agents/{agent_id}/sessions
   - /chat/v1/agents/{agent_id}/sessions/messages
+  - /chat/v1/agents/{agent_id}/user-sessions
+  - /chat/v1/agents/{agent_id}/user-sessions/messages
   - /chat/v1/agents/{agent_id}/sessions/{session_id}
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/archive
   - /chat/v1/agents/{agent_id}/sessions/{session_id}/pin
@@ -110,7 +112,7 @@ api_routes:
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
 last_verified_at: 2026-08-06
-spec_version: 141
+spec_version: 142
 ---
 
 # Conversation & Events
@@ -1117,6 +1119,7 @@ participant.
 
 ## 12. Changelog
 
+- **2026-08-06** — v142. Added User Session list/admission routes to the API inventory.
 - **2026-08-06** — v141. Added root Team/User product mode, private User Session list/admission surfaces, owner-safe public boundaries, and Agent rail Team/My draft tabs.
 - **2026-08-03** — v140. Normalized session Project inputs against the current Runner-reported Agent Workspace and derived generated worktree allocation and cleanup ownership from that Runtime-specific root.
 - **2026-08-03** — v139. Added saved-capability-directed Structured Output and plain-text automatic
