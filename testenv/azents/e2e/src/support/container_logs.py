@@ -1,6 +1,6 @@
-"""Sanitized container-log capture helpers for E2E diagnostics."""
+"""Container-log capture helpers for E2E diagnostics."""
 
-from pathlib import Path
+from collections.abc import Callable
 from typing import Protocol
 
 
@@ -11,38 +11,24 @@ class ContainerLogs(Protocol):
         """Return container stdout and stderr."""
 
 
-def read_sanitized_container_logs(
-    container: ContainerLogs,
-    *,
-    secret_values: tuple[str, ...],
-) -> str:
-    """Read container output while redacting every supplied secret value."""
+def read_container_logs(container: ContainerLogs) -> str:
+    """Read the complete container stdout and stderr."""
     stdout, stderr = container.get_logs()
-    logs = stdout.decode(errors="replace") + stderr.decode(errors="replace")
-    for secret_value in secret_values:
-        if secret_value:
-            logs = logs.replace(secret_value, "<redacted>")
-    return logs
+    return stdout.decode(errors="replace") + stderr.decode(errors="replace")
 
 
-def write_sanitized_container_logs_artifact(
+def emit_container_logs(
     container: ContainerLogs,
     *,
     server_name: str,
-    artifact_root: Path | None,
-    secret_values: tuple[str, ...],
+    write_line: Callable[[str], None],
 ) -> None:
-    """Best-effort write sanitized server logs to the configured E2E artifact."""
-    if artifact_root is None:
-        return
+    """Best-effort emit complete server logs to the active test terminal."""
     try:
-        logs = read_sanitized_container_logs(
-            container,
-            secret_values=secret_values,
-        )
-        destination = artifact_root / "server-logs" / f"{server_name}.log"
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(logs, encoding="utf-8")
+        logs = read_container_logs(container)
+        write_line(f"=== {server_name} logs ===")
+        for line in logs.splitlines():
+            write_line(line)
     except Exception:
         # Diagnostic capture must never conceal the original test outcome.
         return

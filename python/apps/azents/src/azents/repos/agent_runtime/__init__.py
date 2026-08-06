@@ -134,7 +134,10 @@ class AgentRuntimeRepository:
         result = await session.execute(
             sa.select(RDBAgentRuntime)
             .where(RDBAgentRuntime.agent_id == agent_id)
-            .with_for_update()
+            # This lock serializes Runtime binding updates without blocking the
+            # FK KEY SHARE lock used when a SessionAgentContext references the
+            # Runtime. PostgreSQL renders key_share=True as FOR NO KEY UPDATE.
+            .with_for_update(key_share=True)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:

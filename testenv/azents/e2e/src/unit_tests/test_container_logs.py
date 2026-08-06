@@ -1,11 +1,15 @@
-"""Tests for sanitized E2E container-log artifacts."""
+"""Tests for E2E container-log diagnostics."""
 
-from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
+
+import pytest
 
 from support.container_logs import (
-    read_sanitized_container_logs,
-    write_sanitized_container_logs_artifact,
+    emit_container_logs,
+    read_container_logs,
 )
+from tests import conftest as e2e_conftest
 
 
 class _Container:
@@ -20,36 +24,61 @@ class _Container:
         return self.stdout, self.stderr
 
 
-def test_read_sanitized_container_logs_redacts_supplied_values() -> None:
-    """Redaction applies to both container output streams."""
-    logs = read_sanitized_container_logs(
-        _Container(b"stdout secret-value", b"stderr secret-value"),
-        secret_values=("secret-value",),
+def test_read_container_logs_returns_both_container_output_streams() -> None:
+    """Diagnostic output retains both stdout and stderr without modification."""
+    logs = read_container_logs(_Container(b"stdout token-value", b"stderr token-value"))
+
+    assert logs == "stdout token-valuestderr token-value"
+
+
+def test_emit_container_logs_writes_complete_terminal_output() -> None:
+    """Terminal diagnostics retain the server name and complete server output."""
+    lines: list[str] = []
+
+    emit_container_logs(
+        _Container(b"token-value\nnext line", b""),
+        server_name="azents-public-server",
+        write_line=lines.append,
     )
 
-    assert logs == "stdout <redacted>stderr <redacted>"
+    assert lines == [
+        "=== azents-public-server logs ===",
+        "token-value",
+        "next line",
+    ]
 
 
-def test_write_sanitized_container_logs_artifact_writes_named_log(
-    tmp_path: Path,
+def test_failed_report_emits_active_server_logs_to_terminal_reporter(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Configured artifacts retain only sanitized named server logs."""
-    write_sanitized_container_logs_artifact(
-        _Container(b"authorization token-value", b""),
-        server_name="azents-public-server",
-        artifact_root=tmp_path,
-        secret_values=("token-value",),
+    """A failed test report prints complete active server logs to CI stdout."""
+    lines: list[str] = []
+    terminal_reporter = SimpleNamespace(write_line=lines.append)
+    config = SimpleNamespace(
+        pluginmanager=SimpleNamespace(
+            get_plugin=lambda name: (
+                terminal_reporter if name == "terminalreporter" else None
+            )
+        )
+    )
+    item = cast(pytest.Item, SimpleNamespace(config=config, stash={}))
+    monkeypatch.setattr(e2e_conftest, "_SERVER_LOG_CAPTURES", {})
+    e2e_conftest._register_server_log_capture(  # pyright: ignore[reportPrivateUsage]
+        "azents-public-server",
+        _Container(b"public stdout", b"public stderr"),
     )
 
-    artifact = tmp_path / "server-logs" / "azents-public-server.log"
-    assert artifact.read_text() == "authorization <redacted>"
-
-
-def test_write_sanitized_container_logs_artifact_is_a_noop_without_root() -> None:
-    """Local runs without an artifact root do not write diagnostics."""
-    write_sanitized_container_logs_artifact(
-        _Container(b"output", b""),
-        server_name="azents-public-server",
-        artifact_root=None,
-        secret_values=(),
+    hook = e2e_conftest.pytest_runtest_makereport(
+        item,
+        cast(pytest.CallInfo[None], None),
     )
+    assert next(hook) is None
+    report = cast(pytest.TestReport, SimpleNamespace(when="call", failed=True))
+    with pytest.raises(StopIteration) as stopped:
+        hook.send(report)
+
+    assert stopped.value.value is report
+    assert lines == [
+        "=== azents-public-server logs ===",
+        "public stdoutpublic stderr",
+    ]

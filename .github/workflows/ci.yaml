@@ -330,7 +330,7 @@ jobs:
             --durations=30 \
             --durations-min=0.25 \
             -m "not live_external and not runtime_provider and not web_surface" \
-            ./src/tests 2>&1 | tee "$report_dir/pytest.log"
+            ./src/tests
       - name: Capture deterministic E2E diagnostics
         if: always()
         run: |
@@ -396,8 +396,7 @@ jobs:
             src/tests/azents/public/test_runtime_hooks.py::TestRuntimeHooks::test_runtime_hooks_execute_through_public_chat_path \
             src/tests/azents/public/test_runtime_hooks.py::TestRuntimeHooks::test_tool_search_persists_deferred_probe_across_runs \
             src/tests/azents/public/test_external_channels.py::test_provider_native_channel_work_progress_journey \
-            src/tests/azents/public/test_runtime_profiles.py::test_runtime_profile_precedence_applied_evidence_and_recreation \
-            2>&1 | tee "$report_dir/pytest.log"
+            src/tests/azents/public/test_runtime_profiles.py::test_runtime_profile_precedence_applied_evidence_and_recreation
       - name: Capture runtime-provider E2E diagnostics
         if: always()
         run: |
@@ -460,7 +459,7 @@ jobs:
             --durations=30 \
             --durations-min=0.25 \
             -m "web_surface and not live_external and not runtime_provider" \
-            ./src/tests 2>&1 | tee "$report_dir/pytest.log"
+            ./src/tests
       - name: Capture Web Surface E2E diagnostics
         if: always()
         run: |
