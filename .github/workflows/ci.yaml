@@ -293,7 +293,10 @@ jobs:
         with:
           python-version: "3.14"
       - name: Setup Docker Buildx
+        id: buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - name: Expose GitHub Actions runtime
+        uses: ./.github/actions/expose-github-runtime
       - name: Install dependencies
         run: |
           cd testenv/azents/e2e
@@ -318,7 +321,11 @@ jobs:
           report_dir="${RUNNER_TEMP}/e2e-observability/deterministic"
           mkdir -p "$report_dir"
           cd testenv/azents/e2e
-          AZENTS_E2E_ARTIFACT_DIR="$report_dir" uv run pytest -vv \
+          AZENTS_E2E_ARTIFACT_DIR="$report_dir" \
+            AZENTS_E2E_DOCKER_BUILDER="${{ steps.buildx.outputs.name }}" \
+            AZENTS_E2E_DOCKER_GHA_CACHE_SCOPE_PREFIX="azents-e2e-v1" \
+            AZENTS_E2E_DOCKER_GHA_CACHE_WRITE_REPOSITORIES="${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'azents-server' || '' }}" \
+            uv run pytest -vv \
             --junitxml="$report_dir/junit.xml" \
             --durations=30 \
             --durations-min=0.25 \
@@ -332,6 +339,7 @@ jobs:
           timeout 30s docker ps -a --no-trunc > "$report_dir/docker-ps.txt" 2>&1 || true
           timeout 30s docker stats --all --no-stream > "$report_dir/docker-stats.txt" 2>&1 || true
           timeout 30s docker system df > "$report_dir/docker-system-df.txt" 2>&1 || true
+          timeout 30s docker buildx du --builder "${{ steps.buildx.outputs.name }}" > "$report_dir/docker-buildx-du.txt" 2>&1 || true
           python testenv/azents/e2e/src/support/ci_observability.py summarize \
             --lane "Deterministic E2E" \
             --job-result "${{ job.status }}" \
@@ -363,7 +371,10 @@ jobs:
         with:
           python-version: "3.14"
       - name: Setup Docker Buildx
+        id: buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - name: Expose GitHub Actions runtime
+        uses: ./.github/actions/expose-github-runtime
       - name: Install dependencies
         run: |
           cd testenv/azents/e2e
@@ -374,7 +385,11 @@ jobs:
           report_dir="${RUNNER_TEMP}/e2e-observability/runtime-provider"
           mkdir -p "$report_dir"
           cd testenv/azents/e2e
-          AZENTS_E2E_ARTIFACT_DIR="$report_dir" uv run pytest -vv -s \
+          AZENTS_E2E_ARTIFACT_DIR="$report_dir" \
+            AZENTS_E2E_DOCKER_BUILDER="${{ steps.buildx.outputs.name }}" \
+            AZENTS_E2E_DOCKER_GHA_CACHE_SCOPE_PREFIX="azents-e2e-v1" \
+            AZENTS_E2E_DOCKER_GHA_CACHE_WRITE_REPOSITORIES="${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'azents-runtime-runner,azents-runtime-provider-docker' || '' }}" \
+            uv run pytest -vv -s \
             --junitxml="$report_dir/junit.xml" \
             --durations=30 \
             --durations-min=0.25 \
@@ -391,6 +406,7 @@ jobs:
           timeout 30s docker ps -a --no-trunc > "$report_dir/docker-ps.txt" 2>&1 || true
           timeout 30s docker stats --all --no-stream > "$report_dir/docker-stats.txt" 2>&1 || true
           timeout 30s docker system df > "$report_dir/docker-system-df.txt" 2>&1 || true
+          timeout 30s docker buildx du --builder "${{ steps.buildx.outputs.name }}" > "$report_dir/docker-buildx-du.txt" 2>&1 || true
           python testenv/azents/e2e/src/support/ci_observability.py summarize \
             --lane "Focused Runtime Provider E2E" \
             --job-result "${{ job.status }}" \
@@ -421,7 +437,10 @@ jobs:
         with:
           python-version: "3.14"
       - name: Setup Docker Buildx
+        id: buildx
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - name: Expose GitHub Actions runtime
+        uses: ./.github/actions/expose-github-runtime
       - name: Install dependencies
         run: |
           cd testenv/azents/e2e
@@ -432,7 +451,11 @@ jobs:
           report_dir="${RUNNER_TEMP}/e2e-observability/web-surface"
           mkdir -p "$report_dir"
           cd testenv/azents/e2e
-          AZENTS_E2E_ARTIFACT_DIR="$report_dir" uv run pytest -vv \
+          AZENTS_E2E_ARTIFACT_DIR="$report_dir" \
+            AZENTS_E2E_DOCKER_BUILDER="${{ steps.buildx.outputs.name }}" \
+            AZENTS_E2E_DOCKER_GHA_CACHE_SCOPE_PREFIX="azents-e2e-v1" \
+            AZENTS_E2E_DOCKER_GHA_CACHE_WRITE_REPOSITORIES="${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'azents-web,azents-admin-web' || '' }}" \
+            uv run pytest -vv \
             --junitxml="$report_dir/junit.xml" \
             --durations=30 \
             --durations-min=0.25 \
@@ -446,6 +469,7 @@ jobs:
           timeout 30s docker ps -a --no-trunc > "$report_dir/docker-ps.txt" 2>&1 || true
           timeout 30s docker stats --all --no-stream > "$report_dir/docker-stats.txt" 2>&1 || true
           timeout 30s docker system df > "$report_dir/docker-system-df.txt" 2>&1 || true
+          timeout 30s docker buildx du --builder "${{ steps.buildx.outputs.name }}" > "$report_dir/docker-buildx-du.txt" 2>&1 || true
           python testenv/azents/e2e/src/support/ci_observability.py summarize \
             --lane "Web Surface E2E" \
             --job-result "${{ job.status }}" \

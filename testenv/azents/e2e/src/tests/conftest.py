@@ -2,6 +2,7 @@
 
 import base64
 import datetime
+import json
 import os
 import re
 import secrets
@@ -72,8 +73,13 @@ _RUNTIME_PROVIDER_BOOTSTRAP_SOURCE_CONTAINER_PATH = (
 )
 _RUNTIME_CONTAINER_NAME_RE = re.compile(r"^azents-runtime-[0-9a-f]{32}$")
 _DOCKER_BUILDER_ENV = "AZENTS_E2E_DOCKER_BUILDER"
+_GHA_DOCKER_CACHE_SCOPE_PREFIX_ENV = "AZENTS_E2E_DOCKER_GHA_CACHE_SCOPE_PREFIX"
+_GHA_DOCKER_CACHE_WRITE_REPOSITORIES_ENV = (
+    "AZENTS_E2E_DOCKER_GHA_CACHE_WRITE_REPOSITORIES"
+)
 _LOCAL_DOCKER_CACHE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_ROOT"
 _LOCAL_DOCKER_CACHE_WRITE_ROOT_ENV = "AZENTS_E2E_DOCKER_CACHE_WRITE_ROOT"
+_E2E_ARTIFACT_DIR_ENV = "AZENTS_E2E_ARTIFACT_DIR"
 _SELENIUM_IMAGE = "selenium/standalone-chromium:4.45.0-20260606"
 _MAIN_WEB_UPSTREAM_URL = "http://azents-web:3000"
 _ADMIN_WEB_UPSTREAM_URL = "http://azents-admin-web:3000"
@@ -600,11 +606,72 @@ def _build_e2e_image(
     cache_repository: str,
     build_contexts: dict[str, str] | None = None,
 ) -> None:
-    """E2E container image t registry/local cache t t t."""
+    """Build one E2E product image with an optional BuildKit cache backend."""
+    cache_from, cache_to, cache_backend, cache_scope = _get_e2e_image_cache_options(
+        cache_repository
+    )
+    builder = os.environ.get(_DOCKER_BUILDER_ENV)
+    started_at = time.monotonic()
+    completed = False
+
+    try:
+        pow_docker.build(
+            context_path=str(REPOSITORY_ROOT),
+            file=str(dockerfile),
+            tags=[image_tag],
+            builder=builder,
+            cache_from=cache_from or None,
+            cache_to=cache_to,
+            build_contexts=cast(Any, build_contexts or {}),
+            load=True,
+        )
+        completed = True
+    finally:
+        _write_e2e_image_build_observability(
+            cache_repository=cache_repository,
+            cache_backend=cache_backend,
+            cache_scope=cache_scope,
+            cache_export_enabled=cache_to is not None,
+            completed=completed,
+            duration_seconds=time.monotonic() - started_at,
+        )
+
+
+def _get_e2e_image_cache_options(
+    cache_repository: str,
+) -> tuple[list[dict[str, str]], dict[str, str] | None, str, str | None]:
+    """Return cache import/export settings for one E2E product image."""
+    builder = os.environ.get(_DOCKER_BUILDER_ENV)
+    gha_scope_prefix = os.environ.get(_GHA_DOCKER_CACHE_SCOPE_PREFIX_ENV)
+    if gha_scope_prefix:
+        if not builder:
+            raise RuntimeError(
+                f"{_GHA_DOCKER_CACHE_SCOPE_PREFIX_ENV} requires {_DOCKER_BUILDER_ENV}."
+            )
+
+        cache_scope = f"{gha_scope_prefix}-{cache_repository}"
+        cache_from = [{"type": "gha", "scope": cache_scope}]
+        write_repositories = frozenset(
+            repository.strip()
+            for repository in os.environ.get(
+                _GHA_DOCKER_CACHE_WRITE_REPOSITORIES_ENV, ""
+            ).split(",")
+            if repository.strip()
+        )
+        cache_to = (
+            {
+                "type": "gha",
+                "scope": cache_scope,
+                "mode": "max",
+                "ignore-error": "true",
+            }
+            if cache_repository in write_repositories
+            else None
+        )
+        return cache_from, cache_to, "gha", cache_scope
+
     cache_from: list[dict[str, str]] = []
     cache_to: dict[str, str] | None = None
-    builder = os.environ.get(_DOCKER_BUILDER_ENV)
-
     if builder:
         local_cache_root = os.environ.get(_LOCAL_DOCKER_CACHE_ROOT_ENV)
         if local_cache_root:
@@ -622,16 +689,36 @@ def _build_e2e_image(
                 "mode": "min",
             }
 
-    pow_docker.build(
-        context_path=str(REPOSITORY_ROOT),
-        file=str(dockerfile),
-        tags=[image_tag],
-        builder=builder,
-        cache_from=cache_from or None,
-        cache_to=cache_to,
-        build_contexts=cast(Any, build_contexts or {}),
-        load=True,
-    )
+    return cache_from, cache_to, "local" if cache_from or cache_to else "none", None
+
+
+def _write_e2e_image_build_observability(
+    *,
+    cache_repository: str,
+    cache_backend: str,
+    cache_scope: str | None,
+    cache_export_enabled: bool,
+    completed: bool,
+    duration_seconds: float,
+) -> None:
+    """Append safe per-image build timing evidence to the CI artifact directory."""
+    artifact_root = os.environ.get(_E2E_ARTIFACT_DIR_ENV)
+    if not artifact_root:
+        return
+
+    artifact_path = Path(artifact_root) / "image-build-timings.jsonl"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_record = {
+        "image": cache_repository,
+        "cache_backend": cache_backend,
+        "cache_scope": cache_scope,
+        "cache_export_enabled": cache_export_enabled,
+        "completed": completed,
+        "duration_seconds": round(duration_seconds, 3),
+    }
+    with artifact_path.open("a", encoding="utf-8") as artifact_file:
+        artifact_file.write(json.dumps(artifact_record, sort_keys=True))
+        artifact_file.write("\n")
 
 
 @pytest.fixture(scope="session")

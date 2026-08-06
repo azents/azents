@@ -8,6 +8,7 @@ touches_domains: []
 code_paths:
   - .claude/skills/feature-design/SKILL.md
   - .claude/skills/ship-feature/SKILL.md
+  - .github/actions/expose-github-runtime/**
   - .github/workflows/ci.yaml
   - docs/azents/AGENTS.md
   - testenv/azents/AGENTS.md
@@ -23,8 +24,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
-last_verified_at: 2026-08-05
-spec_version: 22
+last_verified_at: 2026-08-06
+spec_version: 23
 ---
 
 # E2E Primary Test Strategy
@@ -151,6 +152,13 @@ Always-on required CI does not depend on external credentials.
   the PostgreSQL position fence; Redis replicas serialize the same scope; unavailable
   Redis remains a surfaced retryable failure with no memory fallback.
 - Focused Runtime Provider E2E uses a locally bootstrapped and API-enrolled Docker Provider to run selected `runtime_provider` journeys, including Tool Search Runtime Hooks, provider-native External Channel progress, and the External Channel file-transfer journey.
+- Worktree-built Server, Runtime Runner, Docker Runtime Provider, Main Web, and
+  Admin Web E2E images import image-specific BuildKit GitHub Actions cache scopes.
+  Only `main` push jobs export cache, with one existing lane owning each scope;
+  pull request jobs import without exporting. E2E artifacts include safe per-image
+  build timing metadata and Buildx cache disk usage, but never cache credentials or
+  cache URLs. Testcontainers-managed Selenium remains an external image pull rather
+  than an Actions-cached Docker archive.
 - Session working-folder coverage uses public API and the focused Docker Runtime
   Provider without direct product-database writes. Project Browser verifies that a
   Runner-ready Session exposes its Session folder first, retains it after registered
