@@ -51,7 +51,7 @@ class TestUserCrud:
         admin_api_client: azentsadminclient.ApiClient,
         public_api_client: azentspublicclient.ApiClient,
     ) -> None:
-        """Usert deletet 404t returnt."""
+        """Account deletion disables access while the User row remains."""
         user_api = UserV1Api(admin_api_client)
         email = f"delete-{unique()}@example.com"
 
@@ -67,13 +67,13 @@ class TestUserCrud:
                 break
         assert user_id is not None
 
-        # delete
+        # delete accepts immediately and enqueues durable account purge
         user_api.user_v1_delete_user(user_id)
 
-        # delete check
-        with pytest.raises(azentsadminclient.ApiException) as exc_info:
-            user_api.user_v1_get_user(user_id)
-        assert exc_info.value.status == 404  # t create API clientt t t t
+        # User row remains until purge finalization; access is disabled now.
+        deleted_user = user_api.user_v1_get_user(user_id)
+        assert deleted_user.id == user_id
+        assert deleted_user.access_disabled_at is not None
 
 
 class TestUserValidation:
