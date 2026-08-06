@@ -1,8 +1,11 @@
 """ChatWriteRequest repository."""
 
+from typing import Any, cast
+
 import sqlalchemy as sa
 from azcommon.uuid import uuid7
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.rdb.models.chat_write_request import RDBChatWriteRequest
@@ -131,6 +134,24 @@ class ChatWriteRequestRepository:
         if rdb is None:
             return None
         return self._build(rdb)
+
+    async def delete_by_requester_user_id(
+        self,
+        session: AsyncSession,
+        *,
+        requester_user_id: str,
+    ) -> int:
+        """Delete retained idempotency records owned by one User."""
+        result = cast(
+            CursorResult[Any],
+            await session.execute(
+                sa.delete(RDBChatWriteRequest).where(
+                    RDBChatWriteRequest.requester_user_id == requester_user_id
+                )
+            ),
+        )
+        await session.flush()
+        return result.rowcount or 0
 
     def _build(self, rdb: RDBChatWriteRequest) -> ChatWriteRequest:
         """Convert RDB model to domain model."""

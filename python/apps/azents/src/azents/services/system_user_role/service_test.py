@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from azents.core.enums import SystemUserRole
 from azents.rdb.session import SessionManager
+from azents.repos.owner_lifecycle import OwnerLifecycleRepository
+from azents.repos.session import SessionRepository
 from azents.repos.system_user_role.data import (
     LastSystemAdmin,
     SystemRoleAssignmentNotFound,
@@ -28,6 +30,19 @@ def _make_role_service(
     return SystemUserRoleService(
         system_role_repository=SystemUserRoleRepository(),
         user_repository=UserRepository(),
+        session_manager=session_manager,
+    )
+
+
+def _make_user_service(
+    session_manager: SessionManager[AsyncSession],
+) -> UserService:
+    """Create a UserService with owner-lifecycle collaborators for tests."""
+    return UserService(
+        user_repository=UserRepository(),
+        system_role_repository=SystemUserRoleRepository(),
+        session_repository=SessionRepository(),
+        owner_lifecycle_repository=OwnerLifecycleRepository(),
         session_manager=session_manager,
     )
 
@@ -175,11 +190,7 @@ class TestSystemUserRoleService:
         role_service = _make_role_service(rdb_session_manager)
         user_repo = UserRepository()
         role_repo = SystemUserRoleRepository()
-        user_service = UserService(
-            user_repository=user_repo,
-            system_role_repository=role_repo,
-            session_manager=rdb_session_manager,
-        )
+        user_service = _make_user_service(rdb_session_manager)
         async with rdb_session_manager() as session:
             first_user = await user_repo.create(
                 session,
@@ -215,13 +226,23 @@ class TestSystemUserRoleService:
         result = await user_service.delete(first_user.id)
         assert isinstance(result, Success)
         async with rdb_session_manager() as session:
-            assert await user_repo.get(session, first_user.id) is None
+            deleted_user = await user_repo.get(session, first_user.id)
+            assert deleted_user is not None
+            assert deleted_user.access_disabled_at is not None
             assert (
                 await role_repo.count_by_role(
                     session,
                     SystemUserRole.SYSTEM_ADMIN,
                 )
                 == 1
+            )
+            assert (
+                await role_repo.get(
+                    session,
+                    first_user.id,
+                    SystemUserRole.SYSTEM_ADMIN,
+                )
+                is None
             )
 
     async def test_concurrent_revoke_and_delete_preserve_one_system_admin(
@@ -235,11 +256,7 @@ class TestSystemUserRoleService:
         user_repo = UserRepository()
         role_repo = SystemUserRoleRepository()
         role_service = _make_role_service(session_manager)
-        user_service = UserService(
-            user_repository=user_repo,
-            system_role_repository=role_repo,
-            session_manager=session_manager,
-        )
+        user_service = _make_user_service(session_manager)
         async with session_manager() as session:
             revoked_user = await user_repo.create(
                 session,

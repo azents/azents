@@ -655,6 +655,62 @@ class AgentSessionRepository:
         )
         return [self._build(rdb) for rdb in result.scalars()]
 
+    async def list_active_user_roots_by_workspace_and_user(
+        self,
+        session: AsyncSession,
+        *,
+        workspace_id: str,
+        associated_user_id: str,
+    ) -> list[AgentSession]:
+        """Fetch active User root Sessions for one Workspace member."""
+        result = await session.execute(
+            sa.select(RDBAgentSession)
+            .where(
+                RDBAgentSession.workspace_id == workspace_id,
+                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.product_mode == AgentSessionProductMode.USER,
+                RDBAgentSession.associated_user_id == associated_user_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+            )
+            .order_by(RDBAgentSession.created_at, RDBAgentSession.id)
+        )
+        return [self._build(rdb) for rdb in result.scalars()]
+
+    async def list_user_roots_by_user(
+        self,
+        session: AsyncSession,
+        *,
+        associated_user_id: str,
+    ) -> list[AgentSession]:
+        """Fetch all User root Sessions owned by one User."""
+        result = await session.execute(
+            sa.select(RDBAgentSession)
+            .where(
+                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.product_mode == AgentSessionProductMode.USER,
+                RDBAgentSession.associated_user_id == associated_user_id,
+            )
+            .order_by(RDBAgentSession.created_at, RDBAgentSession.id)
+        )
+        return [self._build(rdb) for rdb in result.scalars()]
+
+    async def has_any_for_associated_user(
+        self,
+        session: AsyncSession,
+        *,
+        associated_user_id: str,
+    ) -> bool:
+        """Return whether any Session rows remain for an associated User."""
+        return bool(
+            await session.scalar(
+                sa.select(
+                    sa.exists().where(
+                        RDBAgentSession.associated_user_id == associated_user_id
+                    )
+                )
+            )
+        )
+
     async def list_root_trees_by_agent_id(
         self,
         session: AsyncSession,

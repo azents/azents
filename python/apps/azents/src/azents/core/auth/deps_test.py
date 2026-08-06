@@ -1,13 +1,21 @@
 """Authentication dependency tests."""
 
+import datetime
+
 import pytest
 from azcommon.result import Success
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.auth.deps import CurrentUser, get_system_admin
+from azents.core.auth.deps import (
+    CurrentUser,
+    _require_active_user_session,
+    get_system_admin,
+)
 from azents.core.enums import SystemUserRole
 from azents.rdb.session import SessionManager
+from azents.repos.session import SessionRepository
+from azents.repos.session.data import SessionCreate
 from azents.repos.system_user_role.repository import SystemUserRoleRepository
 from azents.repos.user import UserRepository
 from azents.repos.user.data import UserCreate
@@ -132,3 +140,77 @@ class TestGetSystemAdmin:
             await get_system_admin(current_user, service)
 
         assert exception.value.status_code == 403
+
+
+class TestRequireActiveUserSession:
+    """Account-disable and auth-session admission tests."""
+
+    async def test_rejects_access_disabled_user(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Reject JWT subjects whose account is marked access-disabled."""
+        user_repo = UserRepository()
+        session_repo = SessionRepository()
+        async with rdb_session_manager() as session:
+            user = await user_repo.create(
+                session,
+                UserCreate(email="disabled-access-user@example.com"),
+            )
+            auth_session = await session_repo.create(
+                session,
+                SessionCreate(
+                    user_id=user.id,
+                    refresh_token="refresh-disabled-user",
+                    expires_at=datetime.datetime.now(datetime.UTC)
+                    + datetime.timedelta(hours=1),
+                ),
+            )
+            await user_repo.disable_access(
+                session,
+                user.id,
+                disabled_at=datetime.datetime.now(datetime.UTC),
+            )
+
+        with pytest.raises(HTTPException) as exception:
+            await _require_active_user_session(
+                session_manager=rdb_session_manager,
+                user_repository=user_repo,
+                session_repository=session_repo,
+                user_id=user.id,
+                session_id=auth_session.id,
+            )
+        assert exception.value.status_code == 401
+
+    async def test_rejects_revoked_auth_session(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Reject JWT subjects whose auth session was revoked."""
+        user_repo = UserRepository()
+        session_repo = SessionRepository()
+        async with rdb_session_manager() as session:
+            user = await user_repo.create(
+                session,
+                UserCreate(email="revoked-session-user@example.com"),
+            )
+            auth_session = await session_repo.create(
+                session,
+                SessionCreate(
+                    user_id=user.id,
+                    refresh_token="refresh-revoked-session",
+                    expires_at=datetime.datetime.now(datetime.UTC)
+                    + datetime.timedelta(hours=1),
+                ),
+            )
+            await session_repo.revoke(session, auth_session.id)
+
+        with pytest.raises(HTTPException) as exception:
+            await _require_active_user_session(
+                session_manager=rdb_session_manager,
+                user_repository=user_repo,
+                session_repository=session_repo,
+                user_id=user.id,
+                session_id=auth_session.id,
+            )
+        assert exception.value.status_code == 401

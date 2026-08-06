@@ -172,6 +172,9 @@ class AuthService:
                 user_id = user.id
             else:
                 user_id = user_email.user_id
+                user = await self.user_repo.get(session, user_id)
+                if user is not None and user.access_disabled_at is not None:
+                    return Failure(InvalidVerificationCode())
 
         # Create session
         refresh_token = generate_refresh_token()
@@ -233,6 +236,10 @@ class AuthService:
 
             # Expired session
             if db_session.is_expired:
+                return Failure(InvalidRefreshToken())
+
+            user = await self.user_repo.get(session, db_session.user_id)
+            if user is None or user.access_disabled_at is not None:
                 return Failure(InvalidRefreshToken())
 
             # Check grace period for previous token
@@ -334,6 +341,8 @@ class AuthService:
         async with self.session_manager() as session:
             user = await self.user_repo.get_by_email(session, input.email)
             if user is None:
+                return Failure(InvalidCredentials())
+            if user.access_disabled_at is not None:
                 return Failure(InvalidCredentials())
 
             # Check password

@@ -10,6 +10,7 @@ Name | Type | Description | Notes
 **primary_email_id** | **str** | Primary email ID | 
 **primary_email** | **str** | Primary email address | 
 **locale** | **str** | Account locale (BCP 47) | 
+**access_disabled_at** | **datetime** |  | [optional] 
 **created_at** | **datetime** | Created time | 
 **updated_at** | **datetime** | Updated time | 
 

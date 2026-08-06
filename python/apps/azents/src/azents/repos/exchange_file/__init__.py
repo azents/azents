@@ -2,9 +2,11 @@
 
 import datetime
 from collections.abc import Sequence
+from typing import Any, cast
 
 import sqlalchemy as sa
 from azcommon.result import Failure, Result, Success
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import ExchangeFileStatus
@@ -124,6 +126,24 @@ class ExchangeFileRepository:
             sa.delete(RDBExchangeFile).where(RDBExchangeFile.id == file_id)
         )
         await session.flush()
+
+    async def detach_source_user_id(
+        self,
+        session: AsyncSession,
+        *,
+        source_user_id: str,
+    ) -> int:
+        """Detach a deleted User from retained ExchangeFile provenance."""
+        result = cast(
+            CursorResult[Any],
+            await session.execute(
+                sa.update(RDBExchangeFile)
+                .where(RDBExchangeFile.source_user_id == source_user_id)
+                .values(source_user_id=None)
+            ),
+        )
+        await session.flush()
+        return result.rowcount or 0
 
     async def set_preview_thumbnail_file_id(
         self,

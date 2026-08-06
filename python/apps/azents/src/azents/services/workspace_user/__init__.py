@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.core.enums import WorkspaceUserRole
 from azents.rdb.deps import get_session_manager
 from azents.rdb.session import SessionManager
+from azents.repos.owner_lifecycle import OwnerLifecycleRepository
 from azents.repos.workspace import WorkspaceRepository
 from azents.repos.workspace_user import WorkspaceUserRepository
 from azents.repos.workspace_user.data import (
@@ -36,6 +37,7 @@ class WorkspaceUserService:
 
     user_repository: Annotated[WorkspaceUserRepository, Depends()]
     workspace_repository: Annotated[WorkspaceRepository, Depends()]
+    owner_lifecycle_repository: Annotated[OwnerLifecycleRepository, Depends()]
     session_manager: Annotated[
         SessionManager[AsyncSession], Depends(get_session_manager)
     ]
@@ -191,6 +193,11 @@ class WorkspaceUserService:
                 return Failure(CannotModifyOwner())
 
             await self.user_repository.delete(session, workspace_user_id)
+            await self.owner_lifecycle_repository.create_or_get_membership_archive(
+                session,
+                workspace_id=target.workspace_id,
+                user_id=target.user_id,
+            )
         return Success(None)
 
     async def delete_force(
@@ -211,6 +218,11 @@ class WorkspaceUserService:
                 return Failure(CannotModifyOwner())
 
             await self.user_repository.delete(session, workspace_user_id)
+            await self.owner_lifecycle_repository.create_or_get_membership_archive(
+                session,
+                workspace_id=target.workspace_id,
+                user_id=target.user_id,
+            )
         return Success(None)
 
     async def transfer_ownership(

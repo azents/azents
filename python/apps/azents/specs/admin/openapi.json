@@ -7811,6 +7811,19 @@
             "title": "Locale",
             "description": "Account locale (BCP 47)"
           },
+          "access_disabled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Disabled At",
+            "description": "When account access was disabled for deletion lifecycle"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",

@@ -145,6 +145,35 @@ class UserRepository:
             total=total,
         )
 
+    async def disable_access(
+        self,
+        session: AsyncSession,
+        user_id: str,
+        *,
+        disabled_at: datetime.datetime,
+    ) -> User | None:
+        """Mark a User unavailable for authentication and public access.
+
+        :param session: Database session
+        :param user_id: User ID
+        :param disabled_at: Access disable timestamp
+        :return: Updated User or None when missing
+        """
+        result = await session.execute(
+            sa.update(RDBUser)
+            .where(
+                RDBUser.id == user_id,
+                RDBUser.access_disabled_at.is_(None),
+            )
+            .values(access_disabled_at=disabled_at)
+            .returning(RDBUser.id)
+        )
+        if result.scalar_one_or_none() is None:
+            # Already disabled or missing; return current projection when present.
+            return await self.get(session, user_id)
+        await session.flush()
+        return await self.get(session, user_id)
+
     async def delete(self, session: AsyncSession, user_id: str) -> None:
         """Delete User.
 
@@ -192,6 +221,7 @@ class UserRepository:
             primary_email_id=rdb_user.primary_email_id,
             primary_email=primary_email,
             locale=rdb_user.locale,
+            access_disabled_at=rdb_user.access_disabled_at,
             created_at=rdb_user.created_at,
             updated_at=rdb_user.updated_at,
         )

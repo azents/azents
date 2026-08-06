@@ -267,6 +267,24 @@ class MailboxRepository:
         await session.flush()
         return result.rowcount == 1
 
+    async def detach_sender_user_id(
+        self,
+        session: AsyncSession,
+        *,
+        sender_user_id: str,
+    ) -> int:
+        """Detach a deleted User from retained MailboxItem rows."""
+        result = cast(
+            CursorResult[Any],
+            await session.execute(
+                sa.update(RDBMailboxItem)
+                .where(RDBMailboxItem.sender_user_id == sender_user_id)
+                .values(sender_user_id=None)
+            ),
+        )
+        await session.flush()
+        return result.rowcount or 0
+
     async def delete_by_session_id(
         self,
         session: AsyncSession,

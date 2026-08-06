@@ -763,6 +763,100 @@ class TestAgentSessionInputService:
         assert updated is not None
         assert updated.run_state == AgentSessionRunState.RUNNING
 
+    async def test_create_two_user_sessions_with_buffered_input(
+        self,
+        rdb_session_manager: SessionManager[AsyncSession],
+    ) -> None:
+        """Owner can admit multiple User Sessions on one Agent."""
+        async with rdb_session_manager() as session:
+            workspace_id = await _create_workspace(session, "user-session-multi")
+            user_id = await _create_user(session, "user-session-multi@example.com")
+            await _add_workspace_user(
+                session,
+                workspace_id=workspace_id,
+                user_id=user_id,
+            )
+            agent_id = await _create_agent(session, workspace_id, "user-session-multi")
+            await AgentSessionRepository().ensure_team_primary_for_agent(
+                session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+
+        service = AgentSessionInputService(
+            agent_repository=AgentRepository(),
+            agent_project_preset_repository=AgentProjectPresetRepository(),
+            agent_project_catalog_repository=AgentProjectCatalogRepository(),
+            agent_project_default_repository=AgentProjectDefaultRepository(),
+            agent_runtime_repository=AgentRuntimeRepository(),
+            agent_session_repository=AgentSessionRepository(),
+            root_agent_session_creation_service=_root_agent_session_creation_service(),
+            chat_write_request_repository=ChatWriteRequestRepository(),
+            session_workspace_project_repository=SessionWorkspaceProjectRepository(),
+            workspace_user_repository=WorkspaceUserRepository(),
+            exchange_file_service=_ExchangeFileService(),
+            mailbox_item_service=_mailbox_item_service(rdb_session_manager),
+            session_manager=rdb_session_manager,
+        )
+
+        first = await service.create_user_session_with_buffered_input(
+            agent_id=agent_id,
+            message=InputMessage(
+                text="first private",
+                headers=[],
+                metadata={"source": "chat"},
+                attachments=[],
+            ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+            request_payload={"request": "user-1"},
+            client_request_id="user-1",
+        )
+        second = await service.create_user_session_with_buffered_input(
+            agent_id=agent_id,
+            message=InputMessage(
+                text="second private",
+                headers=[],
+                metadata={"source": "chat"},
+                attachments=[],
+            ),
+            inference_profile=_TEST_INFERENCE_PROFILE,
+            user_id=user_id,
+            existing_project_paths=[],
+            setup_actions=[],
+            request_payload={"request": "user-2"},
+            client_request_id="user-2",
+        )
+
+        assert isinstance(first, Success), first
+        assert isinstance(second, Success), second
+        assert first.value.agent_session.id != second.value.agent_session.id
+        assert first.value.agent_session.product_mode is AgentSessionProductMode.USER
+        assert second.value.agent_session.product_mode is AgentSessionProductMode.USER
+        assert first.value.agent_session.associated_user_id == user_id
+        assert second.value.agent_session.associated_user_id == user_id
+        async with rdb_session_manager() as session:
+            owner_list = (
+                await AgentSessionRepository().list_active_user_by_agent_and_user(
+                    session,
+                    agent_id=agent_id,
+                    associated_user_id=user_id,
+                )
+            )
+            team_list = await AgentSessionRepository().list_active_by_agent_id(
+                session,
+                agent_id,
+            )
+        assert {item.id for item in owner_list} == {
+            first.value.agent_session.id,
+            second.value.agent_session.id,
+        }
+        assert all(
+            item.product_mode is AgentSessionProductMode.TEAM for item in team_list
+        )
+
     async def test_new_session_retry_reuses_admitted_session_and_input(
         self,
         rdb_session_manager: SessionManager[AsyncSession],
