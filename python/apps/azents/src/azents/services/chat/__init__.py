@@ -550,14 +550,13 @@ class ChatSessionService:
                 or projection.session.session_kind != AgentSessionKind.ROOT
             ):
                 return Failure(SessionNotFound())
-            workspace_user = (
-                await self.workspace_user_repository.get_by_workspace_and_user(
-                    session,
-                    workspace_id=projection.session.workspace_id,
-                    user_id=user_id,
-                )
+            authorized = await self._authorize_public_session(
+                session,
+                agent_session=projection.session,
+                user_id=user_id,
+                denied_as_not_found=True,
             )
-            if workspace_user is None:
+            if authorized is not None:
                 return Failure(SessionNotFound())
             run = await self.agent_run_repository.acknowledge_unread_terminal_run(
                 session,
@@ -1153,15 +1152,14 @@ class ChatSessionService:
             ):
                 return Failure(SessionNotFound())
             if user_id is not None:
-                workspace_user = (
-                    await self.workspace_user_repository.get_by_workspace_and_user(
-                        session,
-                        workspace_id=agent_session.workspace_id,
-                        user_id=user_id,
-                    )
+                authorized = await self._authorize_public_session(
+                    session,
+                    agent_session=agent_session,
+                    user_id=user_id,
+                    denied_as_not_found=True,
                 )
-                if workspace_user is None:
-                    return Failure(SessionAccessDenied())
+                if authorized is not None:
+                    return Failure(authorized)
             if agent_session.session_kind is AgentSessionKind.SUBAGENT:
                 return Failure(SubagentSessionReadOnly())
             if agent_session.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY:
@@ -1525,15 +1523,14 @@ class ChatSessionService:
                 or agent_session.status is not AgentSessionStatus.ACTIVE
             ):
                 return Failure(SessionNotFound())
-            workspace_user = (
-                await self.workspace_user_repository.get_by_workspace_and_user(
-                    session,
-                    workspace_id=agent_session.workspace_id,
-                    user_id=user_id,
-                )
+            authorized = await self._authorize_public_session(
+                session,
+                agent_session=agent_session,
+                user_id=user_id,
+                denied_as_not_found=True,
             )
-            if workspace_user is None:
-                return Failure(SessionAccessDenied())
+            if authorized is not None:
+                return Failure(authorized)
             if agent_session.session_kind is AgentSessionKind.SUBAGENT:
                 return Failure(SubagentSessionReadOnly())
             if agent_session.primary_kind is AgentSessionPrimaryKind.TEAM_PRIMARY:
@@ -1598,15 +1595,14 @@ class ChatSessionService:
                 or agent.lifecycle_status is not AgentLifecycleStatus.ACTIVE
             ):
                 return Failure(SessionNotFound())
-            workspace_user = (
-                await self.workspace_user_repository.get_by_workspace_and_user(
-                    session,
-                    workspace_id=root.workspace_id,
-                    user_id=user_id,
-                )
+            authorized = await self._authorize_public_session(
+                session,
+                agent_session=root,
+                user_id=user_id,
+                denied_as_not_found=True,
             )
-            if workspace_user is None:
-                return Failure(SessionAccessDenied())
+            if authorized is not None:
+                return Failure(authorized)
             tree = await self.agent_session_repository.lock_root_tree_sessions(
                 session,
                 root_session_id=session_id,
@@ -1717,15 +1713,14 @@ class ChatSessionService:
                 or agent_session.status != AgentSessionStatus.ACTIVE
             ):
                 return Failure(SessionNotFound())
-            workspace_user = (
-                await self.workspace_user_repository.get_by_workspace_and_user(
-                    session,
-                    workspace_id=agent_session.workspace_id,
-                    user_id=user_id,
-                )
+            authorized = await self._authorize_public_session(
+                session,
+                agent_session=agent_session,
+                user_id=user_id,
+                denied_as_not_found=True,
             )
-            if workspace_user is None:
-                return Failure(SessionAccessDenied())
+            if authorized is not None:
+                return Failure(authorized)
             if agent_session.session_kind is AgentSessionKind.SUBAGENT:
                 return Failure(SubagentSessionReadOnly())
             updated = await self.agent_session_repository.update_title(
@@ -1824,15 +1819,14 @@ class ChatSessionService:
                 or agent_session.status != AgentSessionStatus.ACTIVE
             ):
                 return Failure(SessionNotFound())
-            workspace_user = (
-                await self.workspace_user_repository.get_by_workspace_and_user(
-                    session,
-                    workspace_id=agent_session.workspace_id,
-                    user_id=user_id,
-                )
+            authorized = await self._authorize_public_session(
+                session,
+                agent_session=agent_session,
+                user_id=user_id,
+                denied_as_not_found=False,
             )
-            if workspace_user is None:
-                return Failure(SessionAccessDenied())
+            if authorized is not None:
+                return Failure(authorized)
             mailbox_items = await self.mailbox_item_service.list_by_session_id(
                 session, session_id
             )
@@ -2192,15 +2186,14 @@ class ChatSessionService:
                 or agent_session.status != AgentSessionStatus.ACTIVE
             ):
                 return Failure(SessionNotFound())
-            workspace_user = (
-                await self.workspace_user_repository.get_by_workspace_and_user(
-                    session,
-                    workspace_id=agent_session.workspace_id,
-                    user_id=user_id,
-                )
+            authorized = await self._authorize_public_session(
+                session,
+                agent_session=agent_session,
+                user_id=user_id,
+                denied_as_not_found=True,
             )
-            if workspace_user is None:
-                return Failure(SessionAccessDenied())
+            if authorized is not None:
+                return Failure(authorized)
             if agent_session.session_kind is AgentSessionKind.SUBAGENT:
                 return Failure(SubagentSessionReadOnly())
             admission = await self.mailbox_item_service.enqueue(
