@@ -1,0 +1,6 @@
+name: Expose GitHub Actions runtime
+description: Expose only BuildKit cache runtime variables to later shell steps.
+
+runs:
+  using: node20
+  main: index.js
