@@ -687,9 +687,10 @@ def _wait_for_failed_run_error(
     expected_attempts: int,
     timeout: float = 30,
 ) -> dict[str, object]:
-    """Wait until terminal failed-run system_error appears in history."""
+    """Wait until a terminal failed-run error is eligible for idle-only controls."""
     deadline = time.monotonic() + timeout
     last_payload: dict[str, object] | None = None
+    last_live_payload: dict[str, object] | None = None
     while time.monotonic() < deadline:
         payload = _list_history(
             server_url=server_url,
@@ -712,9 +713,19 @@ def _wait_for_failed_run_error(
                 label="failed-run attempts",
             )
             if len(attempts) == expected_attempts:
-                return payload
+                live_payload = _list_live(
+                    server_url=server_url,
+                    token=token,
+                    session_id=session_id,
+                )
+                last_live_payload = live_payload
+                if live_payload.get("session_run_state") == "idle":
+                    return payload
         time.sleep(0.5)
-    raise TimeoutError(f"failed-run error was not observed: {last_payload!r}")
+    raise TimeoutError(
+        "failed-run error was not eligible for idle-only controls: "
+        f"history={last_payload!r}, live={last_live_payload!r}"
+    )
 
 
 def _message_item_from_event(event: dict[str, object]) -> dict[str, object]:
