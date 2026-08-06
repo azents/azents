@@ -25,7 +25,7 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
 last_verified_at: 2026-08-06
-spec_version: 24
+spec_version: 23
 ---
 
 # E2E Primary Test Strategy
@@ -118,16 +118,11 @@ E2E tests reproduce product behavior through user-facing UI, public/internal tes
 
 Always-on required CI does not depend on external credentials.
 
-- Python lint/type and other deterministic checks.
-- Testenv module runs `uv run pytest -vv ./src/module_tests` for behavior that imports
-  Azents modules or their local dependency contracts without building an Azents
-  application image. Module tests may use local HTTP, WebSocket, Docker, or storage
-  dependencies, but not a built Azents application image, browser, Runtime Provider,
-  or external prerequisite state.
-- Deterministic application-image E2E runs `uv run pytest -vv -m "not live_external and not runtime_provider and not web_surface" ./src/tests` in `testenv/azents/e2e`.
-- The first module/application-image boundary correction keeps the Discord provider
-  fake packaging assertion in application-image coverage while moving the fake,
-  proxy, RustFS transfer-storage, and existing module contracts to `src/module_tests`.
+- Python lint/type/unit and other deterministic checks.
+- Testenv unit runs `uv run pytest -vv ./src/unit_tests` for support behavior that
+  requires no server, network listener, container, product image, browser, Runtime
+  Provider, or external prerequisite.
+- Deterministic E2E runs `uv run pytest -vv -m "not live_external and not runtime_provider and not web_surface" ./src/tests` in `testenv/azents/e2e`.
 - Discord Single/Multi journeys use the public APIs and the deterministic provider
   fake; they do not create product rows directly. Focused fake contract tests cover
   signed interaction relay, Gateway lifecycle outcomes, nonce convergence, controlled
@@ -176,8 +171,8 @@ Always-on required CI does not depend on external credentials.
   unique contract and reversible transitional index.
 - Web Surface E2E runs in a separate parallel lane with `uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src/tests`.
 - Web Surface journeys use a pinned remote Chromium container. Web images are built from the tested worktree, and TLS gateways reproduce production secure-cookie and path-routing behavior without external credentials.
-- The stable `ci-python-e2e` required gate aggregates Testenv module plus the
-  deterministic application-image, focused Runtime Provider, and Web Surface lane results for the
+- The stable `ci-python-e2e` required gate aggregates Testenv unit plus the
+  deterministic, focused Runtime Provider, and Web Surface lane results for the
   scopes selected by path filtering.
 - Each executed required E2E lane uploads bounded observability artifacts even when
   pytest fails. The artifact contains JUnit XML, the complete pytest output, the
@@ -190,7 +185,7 @@ Always-on required CI does not depend on external credentials.
   receives `pull-requests: write`. Fork pull requests remain read-only and skip comment
   publication.
 - Web Surface path filtering includes backend/E2E dependencies, both web Dockerfiles, and the TypeScript workspace.
-- testenv fixture/prerequisite module, contract lint.
+- testenv fixture/prerequisite unit, contract lint.
 
 Live/external verification runs only conditionally.
 
@@ -238,10 +233,6 @@ Local/PR environment without live substrate does not fake live PASS. Instead, se
 - **2026-08-05** — v22. Moved server-free testenv support verification into a
   Docker-free unit job while retaining server, container, image, and product journeys
   in the existing E2E lanes.
-- **2026-08-06** — v24. Replaced the separate Testenv unit ownership category with
-  module tests, moved non-image fake/proxy/RustFS contracts to that suite, and
-  retained the Discord provider-fake built-image packaging assertion in deterministic
-  application-image coverage.
 - **2026-08-03** — v20. Added required-lane JUnit, pytest output, slow-test,
   Docker diagnostic, and browser failure artifacts plus the same-repository sticky PR
   observability summary.

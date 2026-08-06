@@ -49,7 +49,7 @@ select = ["E", "W", "F", "B", "I", "G", "PLC", "PLE", "PLW", "T", "PGH003"]
 python-version = "3.14"
 
 [tool.pytest.ini_options]
-testpaths = ["src/module_tests", "src/tests"]
+testpaths = ["src/unit_tests", "src/tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]

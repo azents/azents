@@ -255,8 +255,8 @@ jobs:
           echo "Python scope changed but results were: app=$result migrations=$migrations_result"
           exit 1
 
-  ci_testenv_module_run:
-    name: ci-testenv-module-run
+  ci_testenv_unit_run:
+    name: ci-testenv-unit-run
     needs: changes
     if: needs.changes.outputs.python_e2e == 'true'
     runs-on: ubuntu-latest
@@ -273,10 +273,10 @@ jobs:
         run: |
           cd testenv/azents/e2e
           uv sync
-      - name: Run testenv module tests
+      - name: Run testenv unit tests
         run: |
           cd testenv/azents/e2e
-          uv run pytest -vv ./src/module_tests
+          uv run pytest -vv ./src/unit_tests
 
   ci_python_e2e_run:
     name: ci-deterministic-e2e-run
@@ -489,7 +489,7 @@ jobs:
     name: ci-python-e2e
     needs:
       - changes
-      - ci_testenv_module_run
+      - ci_testenv_unit_run
       - ci_python_e2e_run
       - ci_tool_search_runtime_provider_e2e_run
       - ci_web_surface_e2e_run
@@ -499,8 +499,8 @@ jobs:
       - name: Gate E2E results
         run: |
           changes_result='${{ needs.changes.result }}'
-          module_changed='${{ needs.changes.outputs.python_e2e }}'
-          module_result='${{ needs.ci_testenv_module_run.result }}'
+          unit_changed='${{ needs.changes.outputs.python_e2e }}'
+          unit_result='${{ needs.ci_testenv_unit_run.result }}'
           deterministic_changed='${{ needs.changes.outputs.python_e2e }}'
           deterministic_result='${{ needs.ci_python_e2e_run.result }}'
           tool_search_runtime_provider_changed='${{ needs.changes.outputs.tool_search_runtime_provider_e2e }}'
@@ -511,9 +511,9 @@ jobs:
             echo "changes job failed or was skipped: $changes_result"
             exit 1
           fi
-          if [ "$module_changed" = 'true' ] \
-            && [ "$module_result" != 'success' ]; then
-            echo "Testenv module result was: $module_result"
+          if [ "$unit_changed" = 'true' ] \
+            && [ "$unit_result" != 'success' ]; then
+            echo "Testenv unit result was: $unit_result"
             exit 1
           fi
           if [ "$deterministic_changed" = 'true' ] \
