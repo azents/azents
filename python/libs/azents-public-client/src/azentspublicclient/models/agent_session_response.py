@@ -21,6 +21,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from azentspublicclient.models.agent_session_primary_kind import AgentSessionPrimaryKind
+from azentspublicclient.models.agent_session_product_mode import AgentSessionProductMode
 from azentspublicclient.models.agent_session_run_state import AgentSessionRunState
 from azentspublicclient.models.agent_session_status import AgentSessionStatus
 from azentspublicclient.models.agent_session_title_source import AgentSessionTitleSource
@@ -40,6 +41,7 @@ class AgentSessionResponse(BaseModel):
     title_source: Optional[AgentSessionTitleSource]
     status: AgentSessionStatus = Field(description="Session status")
     primary_kind: Optional[AgentSessionPrimaryKind] = None
+    product_mode: Optional[AgentSessionProductMode]
     run_state: AgentSessionRunState = Field(description="Session execution state")
     pinned: StrictBool = Field(description="Whether automatic archive is disabled for this Session")
     unread_terminal_run_id: Optional[StrictStr]
@@ -50,7 +52,7 @@ class AgentSessionResponse(BaseModel):
     created_at: datetime = Field(description="Created time")
     updated_at: datetime = Field(description="Updated time")
     additional_properties: Dict[str, Any] = {}
-    __properties: ClassVar[List[str]] = ["id", "agent_id", "current_model_target_label", "current_reasoning_effort", "title", "title_source", "status", "primary_kind", "run_state", "pinned", "unread_terminal_run_id", "auto_archive_after", "archived_at", "purge_after", "archive_retention_days_snapshot", "created_at", "updated_at"]
+    __properties: ClassVar[List[str]] = ["id", "agent_id", "current_model_target_label", "current_reasoning_effort", "title", "title_source", "status", "primary_kind", "product_mode", "run_state", "pinned", "unread_terminal_run_id", "auto_archive_after", "archived_at", "purge_after", "archive_retention_days_snapshot", "created_at", "updated_at"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -123,6 +125,11 @@ class AgentSessionResponse(BaseModel):
         if self.primary_kind is None and "primary_kind" in self.model_fields_set:
             _dict['primary_kind'] = None
 
+        # set to None if product_mode (nullable) is None
+        # and model_fields_set contains the field
+        if self.product_mode is None and "product_mode" in self.model_fields_set:
+            _dict['product_mode'] = None
+
         # set to None if unread_terminal_run_id (nullable) is None
         # and model_fields_set contains the field
         if self.unread_terminal_run_id is None and "unread_terminal_run_id" in self.model_fields_set:
@@ -168,6 +175,7 @@ class AgentSessionResponse(BaseModel):
             "title_source": obj.get("title_source"),
             "status": obj.get("status"),
             "primary_kind": obj.get("primary_kind"),
+            "product_mode": obj.get("product_mode"),
             "run_state": obj.get("run_state"),
             "pinned": obj.get("pinned"),
             "unread_terminal_run_id": obj.get("unread_terminal_run_id"),

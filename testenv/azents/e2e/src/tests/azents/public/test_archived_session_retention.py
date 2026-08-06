@@ -121,8 +121,9 @@ def test_archive_list_restore_and_hard_delete_absence(
     )
 
     active = chat_api.chat_v1_list_agent_sessions(agent_id, _headers=headers)
-    archived = chat_api.chat_v1_list_archived_agent_sessions(
+    archived = chat_api.chat_v1_list_agent_sessions(
         agent_id,
+        status="archived",
         _headers=headers,
     )
     assert all(item.id != session_id for item in active.items)
@@ -152,8 +153,9 @@ def test_archive_list_restore_and_hard_delete_absence(
         agent_id,
         _headers=headers,
     )
-    archived_after_restore = chat_api.chat_v1_list_archived_agent_sessions(
+    archived_after_restore = chat_api.chat_v1_list_agent_sessions(
         agent_id,
+        status="archived",
         _headers=headers,
     )
     assert any(item.id == session_id for item in active_after_restore.items)
@@ -188,8 +190,9 @@ def test_zero_day_archive_waits_for_scheduler_purge(
             session_id,
             _headers=headers,
         )
-        archived_before_purge = chat_api.chat_v1_list_archived_agent_sessions(
+        archived_before_purge = chat_api.chat_v1_list_agent_sessions(
             agent_id,
+            status="archived",
             _headers=headers,
         )
         archived_item = next(
@@ -203,8 +206,9 @@ def test_zero_day_archive_waits_for_scheduler_purge(
             task_key="archived_session_purge",
         )
 
-        archived_after_purge = chat_api.chat_v1_list_archived_agent_sessions(
+        archived_after_purge = chat_api.chat_v1_list_agent_sessions(
             agent_id,
+            status="archived",
             _headers=headers,
         )
         assert all(item.id != session_id for item in archived_after_purge.items)

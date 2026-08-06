@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentspublicclient.models.agent_session_list_response import AgentSessionListResponse
+from azentspublicclient.models.agent_session_page_response import AgentSessionPageResponse
 
-class TestAgentSessionListResponse(unittest.TestCase):
-    """AgentSessionListResponse unit test stubs"""
+class TestAgentSessionPageResponse(unittest.TestCase):
+    """AgentSessionPageResponse unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,16 +25,16 @@ class TestAgentSessionListResponse(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> AgentSessionListResponse:
-        """Test AgentSessionListResponse
+    def make_instance(self, include_optional) -> AgentSessionPageResponse:
+        """Test AgentSessionPageResponse
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `AgentSessionListResponse`
+        # uncomment below to create an instance of `AgentSessionPageResponse`
         """
-        model = AgentSessionListResponse()
+        model = AgentSessionPageResponse()
         if include_optional:
-            return AgentSessionListResponse(
+            return AgentSessionPageResponse(
                 items = [
                     azentspublicclient.models.agent_session_response.AgentSessionResponse(
                         id = '', 
@@ -56,10 +56,13 @@ class TestAgentSessionListResponse(unittest.TestCase):
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
+                total_count = 0.0,
+                offset = 0.0,
+                limit = 1.0,
                 current_archive_retention_days = 56
             )
         else:
-            return AgentSessionListResponse(
+            return AgentSessionPageResponse(
                 items = [
                     azentspublicclient.models.agent_session_response.AgentSessionResponse(
                         id = '', 
@@ -81,12 +84,15 @@ class TestAgentSessionListResponse(unittest.TestCase):
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
+                total_count = 0.0,
+                offset = 0.0,
+                limit = 1.0,
                 current_archive_retention_days = 56,
         )
         """
 
-    def testAgentSessionListResponse(self):
-        """Test AgentSessionListResponse"""
+    def testAgentSessionPageResponse(self):
+        """Test AgentSessionPageResponse"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 

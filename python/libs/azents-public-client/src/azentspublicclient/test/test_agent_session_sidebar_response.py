@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentspublicclient.models.agent_session_list_response import AgentSessionListResponse
+from azentspublicclient.models.agent_session_sidebar_response import AgentSessionSidebarResponse
 
-class TestAgentSessionListResponse(unittest.TestCase):
-    """AgentSessionListResponse unit test stubs"""
+class TestAgentSessionSidebarResponse(unittest.TestCase):
+    """AgentSessionSidebarResponse unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,17 +25,17 @@ class TestAgentSessionListResponse(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> AgentSessionListResponse:
-        """Test AgentSessionListResponse
+    def make_instance(self, include_optional) -> AgentSessionSidebarResponse:
+        """Test AgentSessionSidebarResponse
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `AgentSessionListResponse`
+        # uncomment below to create an instance of `AgentSessionSidebarResponse`
         """
-        model = AgentSessionListResponse()
+        model = AgentSessionSidebarResponse()
         if include_optional:
-            return AgentSessionListResponse(
-                items = [
+            return AgentSessionSidebarResponse(
+                pinned = [
                     azentspublicclient.models.agent_session_response.AgentSessionResponse(
                         id = '', 
                         agent_id = '', 
@@ -56,11 +56,31 @@ class TestAgentSessionListResponse(unittest.TestCase):
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
-                current_archive_retention_days = 56
+                recent = [
+                    azentspublicclient.models.agent_session_response.AgentSessionResponse(
+                        id = '', 
+                        agent_id = '', 
+                        current_model_target_label = '', 
+                        current_reasoning_effort = 'none', 
+                        title = '', 
+                        title_source = 'manual', 
+                        status = 'active', 
+                        primary_kind = 'team_primary', 
+                        product_mode = 'team', 
+                        run_state = 'idle', 
+                        pinned = True, 
+                        unread_terminal_run_id = '', 
+                        auto_archive_after = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        archived_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        purge_after = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        archive_retention_days_snapshot = 56, 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
+                    ]
             )
         else:
-            return AgentSessionListResponse(
-                items = [
+            return AgentSessionSidebarResponse(
+                pinned = [
                     azentspublicclient.models.agent_session_response.AgentSessionResponse(
                         id = '', 
                         agent_id = '', 
@@ -81,12 +101,32 @@ class TestAgentSessionListResponse(unittest.TestCase):
                         created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                         updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
                     ],
-                current_archive_retention_days = 56,
+                recent = [
+                    azentspublicclient.models.agent_session_response.AgentSessionResponse(
+                        id = '', 
+                        agent_id = '', 
+                        current_model_target_label = '', 
+                        current_reasoning_effort = 'none', 
+                        title = '', 
+                        title_source = 'manual', 
+                        status = 'active', 
+                        primary_kind = 'team_primary', 
+                        product_mode = 'team', 
+                        run_state = 'idle', 
+                        pinned = True, 
+                        unread_terminal_run_id = '', 
+                        auto_archive_after = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        archived_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        purge_after = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        archive_retention_days_snapshot = 56, 
+                        created_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                        updated_at = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), )
+                    ],
         )
         """
 
-    def testAgentSessionListResponse(self):
-        """Test AgentSessionListResponse"""
+    def testAgentSessionSidebarResponse(self):
+        """Test AgentSessionSidebarResponse"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 

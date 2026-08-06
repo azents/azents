@@ -26,10 +26,10 @@ from azents.api.public.chat.v1 import (
     create_team_agent_session,
     delete_mailbox_item,
     get_agent_session,
+    get_agent_session_sidebar,
     get_subagent_tree,
     get_team_primary_agent_session,
     list_agent_sessions,
-    list_archived_agent_sessions,
     list_history_events,
     list_input_actions,
     list_live_events,
@@ -110,6 +110,8 @@ from azents.services.agent_session_input import (
 )
 from azents.services.chat import ChatSessionService
 from azents.services.chat.data import (
+    AgentSessionDirectoryPage,
+    AgentSessionSidebarSummary,
     ArchiveSessionError,
     ArchiveSessionResult,
     ChatLiveRunState,
@@ -1171,6 +1173,74 @@ class _AgentSessionRouteChatService(ChatSessionService):
             ]
         )
 
+    async def list_agent_session_directory(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
+        status: AgentSessionStatus,
+        offset: int,
+        limit: int,
+    ) -> Result[AgentSessionDirectoryPage, EnsureSessionError]:
+        """Return one directory page result."""
+        del user_id, offset, limit
+        self.agent_id = agent_id
+        items = (
+            [
+                AgentSessionUnreadTerminalRunProjection(
+                    session=self.primary_session,
+                    unread_terminal_run_id=None,
+                    auto_archive_after=None,
+                ),
+                AgentSessionUnreadTerminalRunProjection(
+                    session=self.secondary_session,
+                    unread_terminal_run_id="3123456789abcdef0123456789abcdef",
+                    auto_archive_after=datetime.datetime(
+                        2026, 7, 31, tzinfo=datetime.UTC
+                    ),
+                ),
+            ]
+            if status is AgentSessionStatus.ACTIVE
+            else [
+                AgentSessionUnreadTerminalRunProjection(
+                    session=self.archived_session,
+                    unread_terminal_run_id=None,
+                    auto_archive_after=None,
+                )
+            ]
+        )
+        return Success(AgentSessionDirectoryPage(items=items, total_count=len(items)))
+
+    async def get_agent_session_sidebar_summary(
+        self,
+        *,
+        agent_id: str,
+        user_id: str,
+        recent_limit: int,
+    ) -> Result[AgentSessionSidebarSummary, EnsureSessionError]:
+        """Return bounded sidebar projections."""
+        del user_id, recent_limit
+        self.agent_id = agent_id
+        return Success(
+            AgentSessionSidebarSummary(
+                pinned=[],
+                recent=[
+                    AgentSessionUnreadTerminalRunProjection(
+                        session=self.primary_session,
+                        unread_terminal_run_id=None,
+                        auto_archive_after=None,
+                    ),
+                    AgentSessionUnreadTerminalRunProjection(
+                        session=self.secondary_session,
+                        unread_terminal_run_id="3123456789abcdef0123456789abcdef",
+                        auto_archive_after=datetime.datetime(
+                            2026, 7, 31, tzinfo=datetime.UTC
+                        ),
+                    ),
+                ],
+            )
+        )
+
     async def list_archived_agent_sessions(
         self,
         *,
@@ -1359,7 +1429,27 @@ class TestAgentSessionRoutes:
         assert response.id == "1123456789abcdef0123456789abcdef"
         assert response.agent_id == "agent-1"
         assert response.title is None
+        assert response.product_mode == AgentSessionProductMode.TEAM
         assert chat_service.agent_id == "agent-1"
+
+    async def test_get_agent_session_returns_user_product_mode(self) -> None:
+        """Session detail exposes User mode for direct-link scope resolution."""
+        chat_service = _AgentSessionRouteChatService()
+        chat_service.secondary_session = chat_service.secondary_session.model_copy(
+            update={
+                "product_mode": AgentSessionProductMode.USER,
+                "associated_user_id": "user-1",
+            }
+        )
+
+        response = await get_agent_session(
+            agent_id="agent-1",
+            session_id="2123456789abcdef0123456789abcdef",
+            current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+            chat_service=chat_service,
+        )
+
+        assert response.product_mode == AgentSessionProductMode.USER
 
     async def test_list_agent_sessions_returns_primary_metadata(self) -> None:
         """Agent session list preserves primary metadata for the UI contract."""
@@ -1377,6 +1467,9 @@ class TestAgentSessionRoutes:
         )
 
         assert response.current_archive_retention_days == 30
+        assert response.total_count == 2
+        assert response.offset == 0
+        assert response.limit == 25
         assert [item.id for item in response.items] == [
             "1123456789abcdef0123456789abcdef",
             "2123456789abcdef0123456789abcdef",
@@ -1389,28 +1482,52 @@ class TestAgentSessionRoutes:
             2026, 7, 31, tzinfo=datetime.UTC
         )
 
-    async def test_list_archived_agent_sessions_returns_deadline_snapshot(self) -> None:
-        """Archived list exposes immutable retention snapshot and deadline metadata."""
+    async def test_list_agent_sessions_archived_status_returns_deadline_snapshot(
+        self,
+    ) -> None:
+        """Archived directory pages expose retention metadata."""
         chat_service = _AgentSessionRouteChatService()
         retention_service = cast(Any, Mock())
         retention_service.get_settings = AsyncMock(
             return_value=Mock(archived_session_retention_days=14)
         )
 
-        response = await list_archived_agent_sessions(
+        response = await list_agent_sessions(
             agent_id="3123456789abcdef0123456789abcdef",
             current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
             chat_service=chat_service,
             retention_service=retention_service,
+            status="archived",
+            offset=0,
+            limit=25,
         )
 
         assert response.current_archive_retention_days == 14
+        assert response.total_count == 1
+        assert response.offset == 0
+        assert response.limit == 25
         assert len(response.items) == 1
         assert response.items[0].status == AgentSessionStatus.ARCHIVED
         assert response.items[0].archive_retention_days_snapshot == 30
         assert response.items[0].purge_after == datetime.datetime(
             2026, 8, 17, tzinfo=datetime.UTC
         )
+
+    async def test_get_agent_session_sidebar_returns_bounded_projection(self) -> None:
+        """Sidebar route exposes separate pinned and recent projections."""
+        chat_service = _AgentSessionRouteChatService()
+
+        response = await get_agent_session_sidebar(
+            agent_id="agent-1",
+            current_user=CurrentUser(user_id="user-1", session_id="auth-session"),
+            chat_service=chat_service,
+        )
+
+        assert response.pinned == []
+        assert [item.id for item in response.recent] == [
+            "1123456789abcdef0123456789abcdef",
+            "2123456789abcdef0123456789abcdef",
+        ]
 
     async def test_restore_agent_session_returns_active_session(self) -> None:
         """Restore route returns the root session after clearing archive metadata."""

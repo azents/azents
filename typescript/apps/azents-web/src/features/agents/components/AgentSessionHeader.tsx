@@ -148,6 +148,7 @@ export function AgentSessionHeader({
       utils.chat.getAgentSession.invalidate({ agentId: agent.id, sessionId }),
       utils.chat.listAgentSessions.invalidate({ agentId: agent.id }),
       utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id }),
+      utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id }),
     ]);
     handleCloseRename();
   }, [
@@ -158,6 +159,7 @@ export function AgentSessionHeader({
     sessionId,
     updateTitleMutation,
     utils.chat.getAgentSession,
+    utils.chat.getAgentSessionSidebar,
     utils.chat.listAgentSessions,
     utils.chat.listAgentUserSessions,
   ]);
@@ -173,6 +175,7 @@ export function AgentSessionHeader({
       utils.chat.getAgentSession.invalidate({ agentId: agent.id, sessionId }),
       utils.chat.listAgentSessions.invalidate({ agentId: agent.id }),
       utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id }),
+      utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id }),
     ]);
     handleCloseRename();
   }, [
@@ -182,6 +185,7 @@ export function AgentSessionHeader({
     sessionId,
     updateTitleMutation,
     utils.chat.getAgentSession,
+    utils.chat.getAgentSessionSidebar,
     utils.chat.listAgentSessions,
     utils.chat.listAgentUserSessions,
   ]);

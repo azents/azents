@@ -885,7 +885,19 @@
           "myTab": "Moi",
           "scopeTabs": "Listes de sessions",
           "newUser": "Nouvelle session privée",
-          "userEmpty": "Aucune session privée pour le moment."
+          "userEmpty": "Aucune session privée pour le moment.",
+          "pinnedTitle": "Épinglées",
+          "recentTitle": "Récentes",
+          "allSessions": "Toutes les sessions",
+          "directoryTitle": "Répertoire des sessions",
+          "directoryDescription": "Parcourez les sessions actives et archivées.",
+          "active": "Actives",
+          "archived": "Archivées",
+          "previous": "Précédent",
+          "next": "Suivant",
+          "pageStatus": "Page {page} sur {pages}",
+          "currentRetentionUnlimited": "Conservation actuelle : illimitée",
+          "currentRetentionDays": "Conservation actuelle : {days, plural, =0 {0 jour} one {# jour} other {# jours}}"
         },
         "subagents": {
           "title": "Sous-agents",

@@ -885,7 +885,19 @@
           "myTab": "自分",
           "scopeTabs": "セッション一覧",
           "newUser": "新しいプライベートセッション",
-          "userEmpty": "プライベートセッションはまだありません。"
+          "userEmpty": "プライベートセッションはまだありません。",
+          "pinnedTitle": "固定済み",
+          "recentTitle": "最近のセッション",
+          "allSessions": "すべてのセッション",
+          "directoryTitle": "セッションディレクトリ",
+          "directoryDescription": "アクティブとアーカイブ済みのセッションを参照します。",
+          "active": "アクティブ",
+          "archived": "アーカイブ済み",
+          "previous": "前へ",
+          "next": "次へ",
+          "pageStatus": "{pages}ページ中 {page}ページ",
+          "currentRetentionUnlimited": "現在の保持期間: 無期限",
+          "currentRetentionDays": "現在の保持期間: {days}日"
         },
         "subagents": {
           "title": "サブエージェント",

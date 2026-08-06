@@ -2185,6 +2185,9 @@ export function useChatSessionContainer(
         });
         void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
         void utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id });
+        void utils.chat.getAgentSessionSidebar.invalidate({
+          agentId: agent.id,
+        });
       },
     });
 
@@ -2195,6 +2198,7 @@ export function useChatSessionContainer(
     });
     void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
     void utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id });
+    void utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id });
   }, [agent.id, sessionId, sessionRunState, utils.chat]);
 
   useEffect(() => {

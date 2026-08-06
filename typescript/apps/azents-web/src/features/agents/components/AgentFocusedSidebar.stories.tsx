@@ -52,6 +52,7 @@ const sessions: AgentSessionResponse[] = [
     purge_after: null,
     archive_retention_days_snapshot: null,
     primary_kind: "team_primary",
+    product_mode: "team",
     run_state: "idle",
     pinned: false,
     unread_terminal_run_id: null,
@@ -71,6 +72,7 @@ const sessions: AgentSessionResponse[] = [
     purge_after: null,
     archive_retention_days_snapshot: null,
     primary_kind: null,
+    product_mode: "team",
     run_state: "running",
     pinned: false,
     unread_terminal_run_id: null,
@@ -90,53 +92,13 @@ const sessions: AgentSessionResponse[] = [
     purge_after: null,
     archive_retention_days_snapshot: null,
     primary_kind: null,
+    product_mode: "team",
     run_state: "idle",
     pinned: false,
     unread_terminal_run_id: null,
     auto_archive_after: "2026-08-02T03:10:00Z",
     created_at: "2026-06-25T01:00:00Z",
     updated_at: "2026-06-25T03:10:00Z",
-  },
-];
-
-const archivedSessions: AgentSessionResponse[] = [
-  {
-    id: "sess_archived",
-    agent_id: "agent_01",
-    current_model_target_label: null,
-    current_reasoning_effort: null,
-    title: "Investigate flaky deployment",
-    title_source: "manual",
-    status: "archived",
-    primary_kind: null,
-    run_state: "idle",
-    pinned: false,
-    unread_terminal_run_id: null,
-    auto_archive_after: null,
-    archived_at: "2026-07-18T04:30:00Z",
-    purge_after: "2026-08-17T04:30:00Z",
-    archive_retention_days_snapshot: 30,
-    created_at: "2026-07-12T08:00:00Z",
-    updated_at: "2026-07-18T04:30:00Z",
-  },
-  {
-    id: "sess_archived_unlimited",
-    agent_id: "agent_01",
-    current_model_target_label: null,
-    current_reasoning_effort: null,
-    title: null,
-    title_source: null,
-    status: "archived",
-    primary_kind: null,
-    run_state: "idle",
-    pinned: false,
-    unread_terminal_run_id: null,
-    auto_archive_after: null,
-    archived_at: "2026-07-10T01:00:00Z",
-    purge_after: null,
-    archive_retention_days_snapshot: null,
-    created_at: "2026-07-09T01:00:00Z",
-    updated_at: "2026-07-10T01:00:00Z",
   },
 ];
 
@@ -161,14 +123,13 @@ const meta = {
     adminAccessUrl: "https://admin.example.com",
     loggingOut: false,
     onLogout: () => {},
-    sessions,
-    archivedSessions,
+    pinnedSessions: [],
+    recentSessions: sessions,
     activeSessionId: "sess_primary",
     onCreateSession: () => {},
     onRenameSession: async () => {},
     onArchiveSession: () => {},
     onSetSessionPinned: () => {},
-    onRestoreSession: () => {},
     nowMs: Date.parse("2026-07-29T12:00:00Z"),
   },
 } satisfies Meta<typeof AgentFocusedSidebar>;
@@ -179,13 +140,13 @@ type Story = StoryObj<typeof meta>;
 
 export const Read = {
   args: {
-    sessions: sessions.filter((session) => session.id === "sess_primary"),
+    recentSessions: sessions.filter((session) => session.id === "sess_primary"),
   },
 } satisfies Story;
 
 export const Unread = {
   args: {
-    sessions: sessions
+    recentSessions: sessions
       .filter((session) => session.id === "sess_primary")
       .map((session) => ({
         ...session,
@@ -196,13 +157,13 @@ export const Unread = {
 
 export const Running = {
   args: {
-    sessions: sessions.filter((session) => session.id === "sess_release"),
+    recentSessions: sessions.filter((session) => session.id === "sess_release"),
   },
 } satisfies Story;
 
 export const Pinned = {
   args: {
-    sessions: sessions
+    pinnedSessions: sessions
       .filter((session) => session.id === "sess_ci")
       .map((session) => ({
         ...session,
@@ -214,13 +175,13 @@ export const Pinned = {
 
 export const AutoArchiveDueSoon = {
   args: {
-    sessions: sessions.filter((session) => session.id === "sess_ci"),
+    recentSessions: sessions.filter((session) => session.id === "sess_ci"),
   },
 } satisfies Story;
 
 export const RunningWithUnreadBoundary = {
   args: {
-    sessions: sessions
+    recentSessions: sessions
       .filter((session) => session.id === "sess_release")
       .map((session) => ({
         ...session,
@@ -247,28 +208,21 @@ export const UserMenuOpen = {
 
 export const LoadingSessions = {
   args: {
-    sessions: [],
+    recentSessions: [],
     sessionsLoading: true,
   },
 } satisfies Story;
 
 export const SessionLoadError = {
   args: {
-    sessions: [],
+    recentSessions: [],
     sessionsError: "Failed to load sessions",
   },
 } satisfies Story;
 
 export const EmptySessions = {
   args: {
-    sessions: [],
-  },
-} satisfies Story;
-
-export const ArchivedSessionsExpanded = {
-  play: async ({ canvasElement }) => {
-    const canvas = within(canvasElement);
-    await userEvent.click(canvas.getByRole("button", { name: /Archived/i }));
+    recentSessions: [],
   },
 } satisfies Story;
 
@@ -285,6 +239,7 @@ const userSessions: AgentSessionResponse[] = [
     purge_after: null,
     archive_retention_days_snapshot: null,
     primary_kind: null,
+    product_mode: "user",
     run_state: "idle",
     pinned: false,
     unread_terminal_run_id: null,
@@ -304,6 +259,7 @@ const userSessions: AgentSessionResponse[] = [
     purge_after: null,
     archive_retention_days_snapshot: null,
     primary_kind: null,
+    product_mode: "user",
     run_state: "running",
     pinned: true,
     unread_terminal_run_id: null,
@@ -317,7 +273,6 @@ export const MySessionsTab = {
   args: {
     sessionListScope: "user",
     sessions: userSessions,
-    showArchivedSection: false,
     activeSessionId: "sess_private_notes",
     onSessionListScopeChange: () => {},
   },
@@ -327,7 +282,6 @@ export const MySessionsEmpty = {
   args: {
     sessionListScope: "user",
     sessions: [],
-    showArchivedSection: false,
     onSessionListScopeChange: () => {},
   },
 } satisfies Story;
@@ -335,8 +289,10 @@ export const MySessionsEmpty = {
 export const TeamSessionsTab = {
   args: {
     sessionListScope: "team",
-    sessions,
-    showArchivedSection: true,
+    pinnedSessions: sessions.filter(
+      (session) => session.primary_kind === "team_primary",
+    ),
+    recentSessions: sessions.filter((session) => session.primary_kind === null),
     onSessionListScopeChange: () => {},
   },
 } satisfies Story;

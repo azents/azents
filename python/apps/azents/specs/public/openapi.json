@@ -2964,7 +2964,7 @@
           "Chat v1"
         ],
         "summary": "List Agent Sessions",
-        "description": "List active team sessions for an Agent with team primary first.",
+        "description": "List one active or archived root-session directory page.",
         "operationId": "chat_v1_list_agent_sessions",
         "security": [
           {
@@ -2980,6 +2980,43 @@
               "type": "string",
               "title": "Agent Id"
             }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "active",
+                "archived"
+              ],
+              "type": "string",
+              "default": "active",
+              "title": "Status"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
           }
         ],
         "responses": {
@@ -2988,7 +3025,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AgentSessionListResponse"
+                  "$ref": "#/components/schemas/AgentSessionPageResponse"
                 }
               }
             }
@@ -3045,6 +3082,54 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AgentSessionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat/v1/agents/{agent_id}/sessions/sidebar": {
+      "get": {
+        "tags": [
+          "Chat v1"
+        ],
+        "summary": "Get Agent Session Sidebar",
+        "description": "Fetch the bounded active-root sidebar projection for an Agent.",
+        "operationId": "chat_v1_get_agent_session_sidebar",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentSessionSidebarResponse"
                 }
               }
             }
@@ -3426,54 +3511,6 @@
         "responses": {
           "204": {
             "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/chat/v1/agents/{agent_id}/sessions/archived": {
-      "get": {
-        "tags": [
-          "Chat v1"
-        ],
-        "summary": "List Archived Agent Sessions",
-        "description": "List archived root sessions for an accessible Agent.",
-        "operationId": "chat_v1_list_archived_agent_sessions",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "agent_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Agent Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentSessionListResponse"
-                }
-              }
-            }
           },
           "422": {
             "description": "Validation Error",
@@ -14086,6 +14123,58 @@
         "title": "AgentSessionListResponse",
         "description": "Conversation session list response."
       },
+      "AgentSessionPageResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentSessionResponse"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Session page items"
+          },
+          "total_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total Count",
+            "description": "Matching root-session count"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Offset",
+            "description": "Zero-based item offset"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Limit",
+            "description": "Requested page size"
+          },
+          "current_archive_retention_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Archive Retention Days",
+            "description": "Current whole-day archive retention, or null for Unlimited"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total_count",
+          "offset",
+          "limit",
+          "current_archive_retention_days"
+        ],
+        "title": "AgentSessionPageResponse",
+        "description": "Bounded Agent session directory response."
+      },
       "AgentSessionPinUpdateRequest": {
         "properties": {
           "pinned": {
@@ -14108,6 +14197,15 @@
         ],
         "title": "AgentSessionPrimaryKind",
         "description": "AgentSession primary role."
+      },
+      "AgentSessionProductMode": {
+        "type": "string",
+        "enum": [
+          "team",
+          "user"
+        ],
+        "title": "AgentSessionProductMode",
+        "description": "Root AgentSession product mode."
       },
       "AgentSessionProjectDefaultsResponse": {
         "properties": {
@@ -14252,6 +14350,17 @@
             ],
             "description": "Primary session role"
           },
+          "product_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AgentSessionProductMode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Root product mode, or null for subagent sessions"
+          },
           "run_state": {
             "$ref": "#/components/schemas/AgentSessionRunState",
             "description": "Session execution state"
@@ -14346,6 +14455,7 @@
           "title",
           "title_source",
           "status",
+          "product_mode",
           "run_state",
           "pinned",
           "unread_terminal_run_id",
@@ -14367,6 +14477,33 @@
         ],
         "title": "AgentSessionRunState",
         "description": "Engine execution status of AgentSession."
+      },
+      "AgentSessionSidebarResponse": {
+        "properties": {
+          "pinned": {
+            "items": {
+              "$ref": "#/components/schemas/AgentSessionResponse"
+            },
+            "type": "array",
+            "title": "Pinned",
+            "description": "All pinned active root sessions"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/AgentSessionResponse"
+            },
+            "type": "array",
+            "title": "Recent",
+            "description": "Distinct recent non-pinned active root sessions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pinned",
+          "recent"
+        ],
+        "title": "AgentSessionSidebarResponse",
+        "description": "Bounded Agent sidebar session response."
       },
       "AgentSessionStatus": {
         "type": "string",

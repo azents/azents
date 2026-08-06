@@ -78,13 +78,16 @@ __all__ = [
     "AgentRuntimeSummaryResponse",
     "AgentSessionCreateRequest",
     "AgentSessionListResponse",
+    "AgentSessionPageResponse",
     "AgentSessionPinUpdateRequest",
     "AgentSessionPrimaryKind",
+    "AgentSessionProductMode",
     "AgentSessionProjectDefaultsResponse",
     "AgentSessionProjectDefaultsResponseItemsInner",
     "AgentSessionProjectDefaultsSourceResponse",
     "AgentSessionResponse",
     "AgentSessionRunState",
+    "AgentSessionSidebarResponse",
     "AgentSessionStatus",
     "AgentSessionTitleSource",
     "AgentSessionTitleUpdateRequest",
@@ -519,13 +522,16 @@ from azentspublicclient.models.agent_runtime_response import AgentRuntimeRespons
 from azentspublicclient.models.agent_runtime_summary_response import AgentRuntimeSummaryResponse as AgentRuntimeSummaryResponse
 from azentspublicclient.models.agent_session_create_request import AgentSessionCreateRequest as AgentSessionCreateRequest
 from azentspublicclient.models.agent_session_list_response import AgentSessionListResponse as AgentSessionListResponse
+from azentspublicclient.models.agent_session_page_response import AgentSessionPageResponse as AgentSessionPageResponse
 from azentspublicclient.models.agent_session_pin_update_request import AgentSessionPinUpdateRequest as AgentSessionPinUpdateRequest
 from azentspublicclient.models.agent_session_primary_kind import AgentSessionPrimaryKind as AgentSessionPrimaryKind
+from azentspublicclient.models.agent_session_product_mode import AgentSessionProductMode as AgentSessionProductMode
 from azentspublicclient.models.agent_session_project_defaults_response import AgentSessionProjectDefaultsResponse as AgentSessionProjectDefaultsResponse
 from azentspublicclient.models.agent_session_project_defaults_response_items_inner import AgentSessionProjectDefaultsResponseItemsInner as AgentSessionProjectDefaultsResponseItemsInner
 from azentspublicclient.models.agent_session_project_defaults_source_response import AgentSessionProjectDefaultsSourceResponse as AgentSessionProjectDefaultsSourceResponse
 from azentspublicclient.models.agent_session_response import AgentSessionResponse as AgentSessionResponse
 from azentspublicclient.models.agent_session_run_state import AgentSessionRunState as AgentSessionRunState
+from azentspublicclient.models.agent_session_sidebar_response import AgentSessionSidebarResponse as AgentSessionSidebarResponse
 from azentspublicclient.models.agent_session_status import AgentSessionStatus as AgentSessionStatus
 from azentspublicclient.models.agent_session_title_source import AgentSessionTitleSource as AgentSessionTitleSource
 from azentspublicclient.models.agent_session_title_update_request import AgentSessionTitleUpdateRequest as AgentSessionTitleUpdateRequest

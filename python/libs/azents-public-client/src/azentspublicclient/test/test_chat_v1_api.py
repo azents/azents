@@ -166,6 +166,13 @@ class TestChatV1Api(unittest.TestCase):
         """
         pass
 
+    def test_chat_v1_get_agent_session_sidebar(self) -> None:
+        """Test case for chat_v1_get_agent_session_sidebar
+
+        Get Agent Session Sidebar
+        """
+        pass
+
     def test_chat_v1_get_agent_workspace(self) -> None:
         """Test case for chat_v1_get_agent_workspace
 
@@ -226,13 +233,6 @@ class TestChatV1Api(unittest.TestCase):
         """Test case for chat_v1_list_agent_user_sessions
 
         List Agent User Sessions
-        """
-        pass
-
-    def test_chat_v1_list_archived_agent_sessions(self) -> None:
-        """Test case for chat_v1_list_archived_agent_sessions
-
-        List Archived Agent Sessions
         """
         pass
 

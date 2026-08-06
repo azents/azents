@@ -885,7 +885,19 @@
           "myTab": "내 세션",
           "scopeTabs": "세션 목록",
           "newUser": "새 개인 세션",
-          "userEmpty": "아직 개인 세션이 없습니다."
+          "userEmpty": "아직 개인 세션이 없습니다.",
+          "pinnedTitle": "고정됨",
+          "recentTitle": "최근",
+          "allSessions": "전체 세션",
+          "directoryTitle": "세션 디렉터리",
+          "directoryDescription": "활성 세션과 보관된 세션을 확인하세요.",
+          "active": "활성",
+          "archived": "보관됨",
+          "previous": "이전",
+          "next": "다음",
+          "pageStatus": "{pages}페이지 중 {page}페이지",
+          "currentRetentionUnlimited": "현재 보관 기간: 무제한",
+          "currentRetentionDays": "현재 보관 기간: {days}일"
         },
         "subagents": {
           "title": "서브에이전트",

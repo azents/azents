@@ -84,27 +84,32 @@ export function AgentFocusedShell({
     return parseSessionListScope(searchParams.get("scope"));
   }, [activeSessionId, searchParams]);
 
-  const teamSessionsQuery = trpc.chat.listAgentSessions.useQuery(
+  const sessionSidebarQuery = trpc.chat.getAgentSessionSidebar.useQuery(
     {
       agentId: agent.id,
     },
     {
       refetchInterval: 5_000,
+      staleTime: 0,
+    },
+  );
+  const activeSessionQuery = trpc.chat.getAgentSession.useQuery(
+    {
+      agentId: agent.id,
+      sessionId: activeSessionId ?? "",
+    },
+    {
+      enabled: activeSessionId !== null && activeSessionId !== "new",
       staleTime: 0,
     },
   );
   const userSessionsQuery = trpc.chat.listAgentUserSessions.useQuery(
+    { agentId: agent.id },
     {
-      agentId: agent.id,
-    },
-    {
-      refetchInterval: 5_000,
+      enabled: sessionListScope === "user",
+      refetchInterval: sessionListScope === "user" ? 5_000 : false,
       staleTime: 0,
     },
-  );
-  const archivedSessionsQuery = trpc.chat.listArchivedAgentSessions.useQuery(
-    { agentId: agent.id },
-    { staleTime: 5_000 },
   );
   const meQuery = trpc.user.me.useQuery(void 0, { retry: false });
   const profileQuery = trpc.memberProfile.getMyProfile.useQuery(
@@ -122,6 +127,7 @@ export function AgentFocusedShell({
   const updatePinMutation = trpc.chat.updateAgentSessionPin.useMutation({
     onSuccess: (_result, variables) => {
       void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
+      void utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id });
       void utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id });
       void utils.chat.getAgentSession.invalidate({
         agentId: agent.id,
@@ -132,10 +138,8 @@ export function AgentFocusedShell({
   const archiveSessionMutation = trpc.chat.archiveAgentSession.useMutation({
     onSuccess: (_result, variables) => {
       void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
+      void utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id });
       void utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id });
-      void utils.chat.listArchivedAgentSessions.invalidate({
-        agentId: agent.id,
-      });
       closeDrawer();
       if (activeSessionId === variables.sessionId) {
         const draftPath =
@@ -146,54 +150,6 @@ export function AgentFocusedShell({
       }
     },
   });
-  const restoreSessionMutation = trpc.chat.restoreAgentSession.useMutation({
-    onSuccess: (_result, variables) => {
-      void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
-      void utils.chat.listArchivedAgentSessions.invalidate({
-        agentId: agent.id,
-      });
-      void utils.chat.getAgentSession.invalidate({
-        agentId: agent.id,
-        sessionId: variables.sessionId,
-      });
-      closeDrawer();
-      setSessionListScope("team");
-      router.push(
-        `/w/${handle}/agents/${agent.id}/sessions/${variables.sessionId}`,
-      );
-    },
-  });
-
-  useEffect(() => {
-    if (draftScope !== null) {
-      setSessionListScope(draftScope);
-      return;
-    }
-    if (activeSessionId === null || activeSessionId === "new") {
-      return;
-    }
-    const inUserList =
-      userSessionsQuery.data?.items.some(
-        (session) => session.id === activeSessionId,
-      ) ?? false;
-    if (inUserList) {
-      setSessionListScope("user");
-      return;
-    }
-    const inTeamList =
-      teamSessionsQuery.data?.items.some(
-        (session) => session.id === activeSessionId,
-      ) ?? false;
-    if (inTeamList) {
-      setSessionListScope("team");
-    }
-  }, [
-    activeSessionId,
-    draftScope,
-    teamSessionsQuery.data?.items,
-    userSessionsQuery.data?.items,
-  ]);
-
   const handleCreateSession = useCallback((): void => {
     closeDrawer();
     if (sessionListScope === "user") {
@@ -210,6 +166,23 @@ export function AgentFocusedShell({
     [],
   );
 
+  useEffect(() => {
+    if (draftScope !== null) {
+      setSessionListScope(draftScope);
+      return;
+    }
+    if (activeSessionId === null || activeSessionId === "new") {
+      return;
+    }
+    if (activeSessionQuery.data?.product_mode === "user") {
+      setSessionListScope("user");
+      return;
+    }
+    if (activeSessionQuery.data?.product_mode === "team") {
+      setSessionListScope("team");
+    }
+  }, [activeSessionId, activeSessionQuery.data?.product_mode, draftScope]);
+
   const handleRenameSession = useCallback(
     async (sessionId: string, title: string | null): Promise<void> => {
       await updateTitleMutation.mutateAsync({
@@ -221,6 +194,9 @@ export function AgentFocusedShell({
         void utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id });
       } else {
         void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
+        void utils.chat.getAgentSessionSidebar.invalidate({
+          agentId: agent.id,
+        });
       }
       void utils.chat.getAgentSession.invalidate({
         agentId: agent.id,
@@ -232,6 +208,7 @@ export function AgentFocusedShell({
       sessionListScope,
       updateTitleMutation,
       utils.chat.getAgentSession,
+      utils.chat.getAgentSessionSidebar,
       utils.chat.listAgentSessions,
       utils.chat.listAgentUserSessions,
     ],
@@ -251,14 +228,6 @@ export function AgentFocusedShell({
       updatePinMutation.mutate({ agentId: agent.id, sessionId, pinned });
     },
     [agent.id, updatePinMutation],
-  );
-
-  const handleRestoreSession = useCallback(
-    (sessionId: string): void => {
-      restoreSessionMutation.reset();
-      restoreSessionMutation.mutate({ agentId: agent.id, sessionId });
-    },
-    [restoreSessionMutation, agent.id],
   );
 
   const handleLogout = useCallback((): void => {
@@ -281,22 +250,20 @@ export function AgentFocusedShell({
     [openDrawer],
   );
 
-  const teamSessions = teamSessionsQuery.data?.items ?? [];
+  const teamPinnedSessions = sessionSidebarQuery.data?.pinned ?? [];
+  const teamRecentSessions = sessionSidebarQuery.data?.recent ?? [];
   const userSessions = userSessionsQuery.data?.items ?? [];
-  const sessions = sessionListScope === "user" ? userSessions : teamSessions;
   const sessionsLoading =
     sessionListScope === "user"
       ? userSessionsQuery.isPending
-      : teamSessionsQuery.isPending;
+      : sessionSidebarQuery.isPending;
   const sessionsError =
     (sessionListScope === "user"
       ? userSessionsQuery.error?.message
-      : teamSessionsQuery.error?.message) ??
+      : sessionSidebarQuery.error?.message) ??
     updatePinMutation.error?.message ??
     archiveSessionMutation.error?.message ??
     null;
-  const showArchivedSection = sessionListScope === "team";
-
   const sidebarProps = {
     handle,
     agent,
@@ -306,21 +273,11 @@ export function AgentFocusedShell({
     onLogout: handleLogout,
     sessionListScope,
     onSessionListScopeChange: handleSessionListScopeChange,
-    sessions,
+    sessions: sessionListScope === "user" ? userSessions : [],
+    pinnedSessions: sessionListScope === "team" ? teamPinnedSessions : [],
+    recentSessions: sessionListScope === "team" ? teamRecentSessions : [],
     sessionsLoading,
     sessionsError,
-    archivedSessions: showArchivedSection
-      ? (archivedSessionsQuery.data?.items ?? [])
-      : [],
-    archivedSessionsLoading: showArchivedSection
-      ? archivedSessionsQuery.isPending
-      : false,
-    archivedSessionsError: showArchivedSection
-      ? (archivedSessionsQuery.error?.message ??
-        restoreSessionMutation.error?.message ??
-        null)
-      : null,
-    showArchivedSection,
     activeSessionId,
     creatingSession: false,
     renamingSessionId: updateTitleMutation.isPending
@@ -332,14 +289,10 @@ export function AgentFocusedShell({
     pinningSessionId: updatePinMutation.isPending
       ? updatePinMutation.variables.sessionId
       : null,
-    restoringSessionId: restoreSessionMutation.isPending
-      ? restoreSessionMutation.variables.sessionId
-      : null,
     onCreateSession: handleCreateSession,
     onRenameSession: handleRenameSession,
     onArchiveSession: handleArchiveSession,
     onSetSessionPinned: handleSetSessionPinned,
-    onRestoreSession: handleRestoreSession,
   };
 
   return (

@@ -478,6 +478,8 @@ export function useAgentDraftChatContainer(
             : utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
         await Promise.all([
           listInvalidation,
+          utils.chat.listAgentSessions.invalidate({ agentId: agent.id }),
+          utils.chat.getAgentSessionSidebar.invalidate({ agentId: agent.id }),
           utils.chat.listAgentProjectPresets.invalidate({ agentId: agent.id }),
         ]);
         router.replace(
@@ -497,9 +499,10 @@ export function useAgentDraftChatContainer(
       createUserMessageMutation,
       handle,
       router,
+      utils.chat.getAgentSessionSidebar,
+      utils.chat.listAgentProjectPresets,
       selectedProjectPaths,
       sessionScope,
-      utils.chat.listAgentProjectPresets,
       utils.chat.listAgentSessions,
       utils.chat.listAgentUserSessions,
       workspaceItems,
