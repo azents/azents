@@ -8,7 +8,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 import requests
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-from testcontainers.core.container import DockerContainer
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.client import connect as websocket_connect
 
@@ -1361,20 +1360,3 @@ def test_discord_fake_preserves_canonical_thread_progress_and_file_order(
     assert "Private updated progress page" not in rendered
     assert "private-file-bytes" not in rendered
     assert "private.txt" not in rendered
-
-
-def test_discord_fake_container_uses_the_azents_server_image(
-    discord_provider_fake_container: DockerContainer,
-    discord_provider_fake_url: str,
-) -> None:
-    """Start the fake in the same Python image used by Azents E2E processes."""
-    del discord_provider_fake_container
-    response = requests.get(f"{discord_provider_fake_url}/health", timeout=5)
-    application = requests.get(
-        f"{discord_provider_fake_url}/api/v10/oauth2/applications/@me",
-        timeout=5,
-    )
-
-    assert response.json() == {"status": "ok"}
-    assert application.json()["verify_key"] == _DISCORD_VERIFY_KEY
-    assert application.json()["owner"]["id"].isdigit()

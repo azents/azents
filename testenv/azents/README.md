@@ -19,11 +19,11 @@ cd testenv/azents/e2e
 uv run pytest ./src/tests/azents/public/test_health.py
 ```
 
-Required CI uses separate credential-free lanes for deterministic product behavior and deployed web surfaces.
+Required CI uses separate credential-free module and application-image lanes.
 
 ```bash
 cd testenv/azents/e2e
-uv run pytest -vv ./src/unit_tests
+uv run pytest -vv ./src/module_tests
 uv run pytest -vv -m "not live_external and not runtime_provider and not web_surface" ./src/tests
 uv run pytest -vv -m "web_surface and not live_external and not runtime_provider" ./src/tests
 ```
