@@ -22,6 +22,7 @@ import {
   NavLink,
   rem,
   ScrollArea,
+  SegmentedControl,
   Stack,
   Text,
   TextInput,
@@ -74,6 +75,8 @@ export interface AgentFocusedSidebarUser {
   email: string;
 }
 
+export type AgentSessionListScope = "team" | "user";
+
 interface AgentFocusedSidebarProps {
   handle: string;
   agent: AgentResponse;
@@ -81,12 +84,15 @@ interface AgentFocusedSidebarProps {
   adminAccessUrl: string | null;
   loggingOut: boolean;
   onLogout: () => void;
+  sessionListScope?: AgentSessionListScope;
+  onSessionListScopeChange?: (scope: AgentSessionListScope) => void;
   sessions?: AgentSessionResponse[];
   sessionsLoading?: boolean;
   sessionsError?: string | null;
   archivedSessions?: AgentSessionResponse[];
   archivedSessionsLoading?: boolean;
   archivedSessionsError?: string | null;
+  showArchivedSection?: boolean;
   activeSessionId?: string | null;
   creatingSession?: boolean;
   renamingSessionId?: string | null;
@@ -100,6 +106,13 @@ interface AgentFocusedSidebarProps {
   onRestoreSession?: (sessionId: string) => void;
   onNavigate?: () => void;
   nowMs?: number;
+}
+
+function parseSessionListScope(value: string): AgentSessionListScope {
+  if (value === "user") {
+    return "user";
+  }
+  return "team";
 }
 
 function formatTimestamp(value: string, locale: SupportedLocale): string {
@@ -201,12 +214,15 @@ export function AgentFocusedSidebar({
   adminAccessUrl,
   loggingOut,
   onLogout,
+  sessionListScope = "team",
+  onSessionListScopeChange,
   sessions = [],
   sessionsLoading = false,
   sessionsError = null,
   archivedSessions = [],
   archivedSessionsLoading = false,
   archivedSessionsError = null,
+  showArchivedSection = true,
   activeSessionId = null,
   creatingSession = false,
   renamingSessionId = null,
@@ -473,24 +489,49 @@ export function AgentFocusedSidebar({
 
         <Divider />
 
-        <Group px="md" py="sm" justify="space-between" wrap="nowrap">
-          <Text size="xs" fw={700} tt="uppercase" c="dimmed">
-            {t("sessions.title")}
-          </Text>
-          {onCreateSession && (
-            <Tooltip label={t("sessions.new")}>
-              <ActionIcon
-                variant="subtle"
-                size="sm"
-                aria-label={t("sessions.new")}
-                loading={creatingSession}
-                onClick={onCreateSession}
+        <Stack px="md" pt="sm" pb="xs" gap="xs">
+          <Group justify="space-between" wrap="nowrap">
+            <Text size="xs" fw={700} tt="uppercase" c="dimmed">
+              {t("sessions.title")}
+            </Text>
+            {onCreateSession && (
+              <Tooltip
+                label={
+                  sessionListScope === "user"
+                    ? t("sessions.newUser")
+                    : t("sessions.new")
+                }
               >
-                <IconPlus size={rem(16)} />
-              </ActionIcon>
-            </Tooltip>
-          )}
-        </Group>
+                <ActionIcon
+                  variant="subtle"
+                  size="sm"
+                  aria-label={
+                    sessionListScope === "user"
+                      ? t("sessions.newUser")
+                      : t("sessions.new")
+                  }
+                  loading={creatingSession}
+                  onClick={onCreateSession}
+                >
+                  <IconPlus size={rem(16)} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+          </Group>
+          <SegmentedControl
+            size="xs"
+            fullWidth
+            value={sessionListScope}
+            onChange={(value) =>
+              onSessionListScopeChange?.(parseSessionListScope(value))
+            }
+            data={[
+              { label: t("sessions.teamTab"), value: "team" },
+              { label: t("sessions.myTab"), value: "user" },
+            ]}
+            aria-label={t("sessions.scopeTabs")}
+          />
+        </Stack>
 
         <ScrollArea flex={1} mih={0}>
           <Stack gap={0} pb="sm">
@@ -507,7 +548,9 @@ export function AgentFocusedSidebar({
             )}
             {!sessionsLoading && !sessionsError && sessions.length === 0 && (
               <Text px="md" py="sm" size="xs" c="dimmed">
-                {t("sessions.empty")}
+                {sessionListScope === "user"
+                  ? t("sessions.userEmpty")
+                  : t("sessions.empty")}
               </Text>
             )}
             {sessions.map((session) => {
@@ -667,109 +710,114 @@ export function AgentFocusedSidebar({
               );
             })}
 
-            <Divider my="xs" />
-            <UnstyledButton
-              px="md"
-              py="xs"
-              onClick={() => setArchivedOpened((opened) => !opened)}
-              aria-expanded={archivedOpened}
-              className={styles.archivedSectionToggle}
-            >
-              <Group justify="space-between" wrap="nowrap">
-                <Group gap="xs" wrap="nowrap">
-                  <IconArchive size={rem(15)} />
-                  <Text size="xs" fw={700} tt="uppercase" c="dimmed">
-                    {t("sessions.archivedTitle")}
-                  </Text>
-                  {!archivedSessionsLoading && !archivedSessionsError && (
-                    <Badge size="xs" variant="light" color="gray">
-                      {archivedSessions.length}
-                    </Badge>
-                  )}
-                </Group>
-                <IconChevronDown
-                  size={rem(15)}
-                  style={{
-                    transform: archivedOpened ? "rotate(180deg)" : "none",
-                    transition: "transform 150ms ease",
-                  }}
-                />
-              </Group>
-            </UnstyledButton>
-            <Collapse expanded={archivedOpened}>
-              <Stack gap={0} pb="xs">
-                {archivedSessionsLoading && (
-                  <Center py="md">
-                    <Loader size="sm" />
-                  </Center>
-                )}
-                {archivedSessionsError && (
-                  <Group px="md" py="sm" gap="xs" wrap="nowrap" c="red">
-                    <IconAlertCircle size={rem(16)} />
-                    <Text size="xs">{archivedSessionsError}</Text>
+            {showArchivedSection && (
+              <>
+                <Divider my="xs" />
+                <UnstyledButton
+                  px="md"
+                  py="xs"
+                  onClick={() => setArchivedOpened((opened) => !opened)}
+                  aria-expanded={archivedOpened}
+                  className={styles.archivedSectionToggle}
+                >
+                  <Group justify="space-between" wrap="nowrap">
+                    <Group gap="xs" wrap="nowrap">
+                      <IconArchive size={rem(15)} />
+                      <Text size="xs" fw={700} tt="uppercase" c="dimmed">
+                        {t("sessions.archivedTitle")}
+                      </Text>
+                      {!archivedSessionsLoading && !archivedSessionsError && (
+                        <Badge size="xs" variant="light" color="gray">
+                          {archivedSessions.length}
+                        </Badge>
+                      )}
+                    </Group>
+                    <IconChevronDown
+                      size={rem(15)}
+                      style={{
+                        transform: archivedOpened ? "rotate(180deg)" : "none",
+                        transition: "transform 150ms ease",
+                      }}
+                    />
                   </Group>
-                )}
-                {!archivedSessionsLoading &&
-                  !archivedSessionsError &&
-                  archivedSessions.length === 0 && (
-                    <Text px="md" py="sm" size="xs" c="dimmed">
-                      {t("sessions.archivedEmpty")}
-                    </Text>
-                  )}
-                {archivedSessions.map((session) => {
-                  const restoring = restoringSessionId === session.id;
-                  const archivedAt = session.archived_at ?? session.updated_at;
-                  const retentionLabel =
-                    session.archive_retention_days_snapshot === null
-                      ? t("sessions.retentionSnapshotUnlimited")
-                      : t("sessions.retentionSnapshotDays", {
-                          days: session.archive_retention_days_snapshot,
-                        });
-                  const purgeLabel = session.purge_after
-                    ? t("sessions.purgeScheduled", {
-                        date: formatTimestamp(session.purge_after, locale),
-                      })
-                    : t("sessions.purgeUnscheduled");
-                  return (
-                    <Box
-                      key={session.id}
-                      px="md"
-                      py="sm"
-                      className={styles.archivedSessionItem}
-                    >
-                      <Group gap="xs" wrap="nowrap" align="flex-start">
-                        <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
-                          <Text size="sm" truncate>
-                            {getSessionDisplayTitle(session, t)}
-                          </Text>
-                          <Text size="xs" c="dimmed">
-                            {t("sessions.archivedAt", {
-                              date: formatTimestamp(archivedAt, locale),
-                            })}
-                          </Text>
-                          <Text size="xs" c="dimmed">
-                            {retentionLabel} · {purgeLabel}
-                          </Text>
-                        </Stack>
-                        {onRestoreSession && (
-                          <Tooltip label={t("sessions.restore")}>
-                            <ActionIcon
-                              variant="subtle"
-                              size="sm"
-                              aria-label={t("sessions.restore")}
-                              loading={restoring}
-                              onClick={() => onRestoreSession(session.id)}
-                            >
-                              <IconRefresh size={rem(16)} />
-                            </ActionIcon>
-                          </Tooltip>
-                        )}
+                </UnstyledButton>
+                <Collapse expanded={archivedOpened}>
+                  <Stack gap={0} pb="xs">
+                    {archivedSessionsLoading && (
+                      <Center py="md">
+                        <Loader size="sm" />
+                      </Center>
+                    )}
+                    {archivedSessionsError && (
+                      <Group px="md" py="sm" gap="xs" wrap="nowrap" c="red">
+                        <IconAlertCircle size={rem(16)} />
+                        <Text size="xs">{archivedSessionsError}</Text>
                       </Group>
-                    </Box>
-                  );
-                })}
-              </Stack>
-            </Collapse>
+                    )}
+                    {!archivedSessionsLoading &&
+                      !archivedSessionsError &&
+                      archivedSessions.length === 0 && (
+                        <Text px="md" py="sm" size="xs" c="dimmed">
+                          {t("sessions.archivedEmpty")}
+                        </Text>
+                      )}
+                    {archivedSessions.map((session) => {
+                      const restoring = restoringSessionId === session.id;
+                      const archivedAt =
+                        session.archived_at ?? session.updated_at;
+                      const retentionLabel =
+                        session.archive_retention_days_snapshot === null
+                          ? t("sessions.retentionSnapshotUnlimited")
+                          : t("sessions.retentionSnapshotDays", {
+                              days: session.archive_retention_days_snapshot,
+                            });
+                      const purgeLabel = session.purge_after
+                        ? t("sessions.purgeScheduled", {
+                            date: formatTimestamp(session.purge_after, locale),
+                          })
+                        : t("sessions.purgeUnscheduled");
+                      return (
+                        <Box
+                          key={session.id}
+                          px="md"
+                          py="sm"
+                          className={styles.archivedSessionItem}
+                        >
+                          <Group gap="xs" wrap="nowrap" align="flex-start">
+                            <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+                              <Text size="sm" truncate>
+                                {getSessionDisplayTitle(session, t)}
+                              </Text>
+                              <Text size="xs" c="dimmed">
+                                {t("sessions.archivedAt", {
+                                  date: formatTimestamp(archivedAt, locale),
+                                })}
+                              </Text>
+                              <Text size="xs" c="dimmed">
+                                {retentionLabel} · {purgeLabel}
+                              </Text>
+                            </Stack>
+                            {onRestoreSession && (
+                              <Tooltip label={t("sessions.restore")}>
+                                <ActionIcon
+                                  variant="subtle"
+                                  size="sm"
+                                  aria-label={t("sessions.restore")}
+                                  loading={restoring}
+                                  onClick={() => onRestoreSession(session.id)}
+                                >
+                                  <IconRefresh size={rem(16)} />
+                                </ActionIcon>
+                              </Tooltip>
+                            )}
+                          </Group>
+                        </Box>
+                      );
+                    })}
+                  </Stack>
+                </Collapse>
+              </>
+            )}
           </Stack>
         </ScrollArea>
 
