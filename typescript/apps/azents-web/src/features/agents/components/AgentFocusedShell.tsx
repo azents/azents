@@ -7,11 +7,12 @@
  * work a dedicated left rail plus mobile drawer entry point.
  */
 import { Box, Drawer, Group, rem } from "@mantine/core";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -19,6 +20,7 @@ import { trpc } from "@/trpc/client";
 import {
   AgentFocusedSidebar,
   type AgentFocusedSidebarUser,
+  type AgentSessionListScope,
 } from "./AgentFocusedSidebar";
 import type { AgentResponse } from "@azents/public-client";
 import type { ReactNode } from "react";
@@ -48,6 +50,15 @@ function extractSessionId(pathname: string, agentId: string): string | null {
   return tail.split("/")[0] ?? null;
 }
 
+function parseSessionListScope(
+  value: string | null,
+): AgentSessionListScope | null {
+  if (value === "team" || value === "user") {
+    return value;
+  }
+  return null;
+}
+
 export function AgentFocusedShell({
   handle,
   agent,
@@ -55,16 +66,34 @@ export function AgentFocusedShell({
 }: AgentFocusedShellProps): React.ReactElement {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const utils = trpc.useUtils();
   const [drawerOpened, setDrawerOpened] = useState(false);
+  const [sessionListScope, setSessionListScope] =
+    useState<AgentSessionListScope>("team");
   const closeDrawer = (): void => setDrawerOpened(false);
   const openDrawer = useCallback((): void => setDrawerOpened(true), []);
   const activeSessionId = useMemo(
     () => extractSessionId(pathname, agent.id),
     [pathname, agent.id],
   );
+  const draftScope = useMemo(() => {
+    if (activeSessionId !== "new") {
+      return null;
+    }
+    return parseSessionListScope(searchParams.get("scope"));
+  }, [activeSessionId, searchParams]);
 
-  const sessionsQuery = trpc.chat.listAgentSessions.useQuery(
+  const teamSessionsQuery = trpc.chat.listAgentSessions.useQuery(
+    {
+      agentId: agent.id,
+    },
+    {
+      refetchInterval: 5_000,
+      staleTime: 0,
+    },
+  );
+  const userSessionsQuery = trpc.chat.listAgentUserSessions.useQuery(
     {
       agentId: agent.id,
     },
@@ -93,6 +122,7 @@ export function AgentFocusedShell({
   const updatePinMutation = trpc.chat.updateAgentSessionPin.useMutation({
     onSuccess: (_result, variables) => {
       void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
+      void utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id });
       void utils.chat.getAgentSession.invalidate({
         agentId: agent.id,
         sessionId: variables.sessionId,
@@ -102,12 +132,17 @@ export function AgentFocusedShell({
   const archiveSessionMutation = trpc.chat.archiveAgentSession.useMutation({
     onSuccess: (_result, variables) => {
       void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
+      void utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id });
       void utils.chat.listArchivedAgentSessions.invalidate({
         agentId: agent.id,
       });
       closeDrawer();
       if (activeSessionId === variables.sessionId) {
-        router.replace(`/w/${handle}/agents/${agent.id}/sessions/new`);
+        const draftPath =
+          sessionListScope === "user"
+            ? `/w/${handle}/agents/${agent.id}/sessions/new?scope=user`
+            : `/w/${handle}/agents/${agent.id}/sessions/new`;
+        router.replace(draftPath);
       }
     },
   });
@@ -122,16 +157,58 @@ export function AgentFocusedShell({
         sessionId: variables.sessionId,
       });
       closeDrawer();
+      setSessionListScope("team");
       router.push(
         `/w/${handle}/agents/${agent.id}/sessions/${variables.sessionId}`,
       );
     },
   });
 
+  useEffect(() => {
+    if (draftScope !== null) {
+      setSessionListScope(draftScope);
+      return;
+    }
+    if (activeSessionId === null || activeSessionId === "new") {
+      return;
+    }
+    const inUserList =
+      userSessionsQuery.data?.items.some(
+        (session) => session.id === activeSessionId,
+      ) ?? false;
+    if (inUserList) {
+      setSessionListScope("user");
+      return;
+    }
+    const inTeamList =
+      teamSessionsQuery.data?.items.some(
+        (session) => session.id === activeSessionId,
+      ) ?? false;
+    if (inTeamList) {
+      setSessionListScope("team");
+    }
+  }, [
+    activeSessionId,
+    draftScope,
+    teamSessionsQuery.data?.items,
+    userSessionsQuery.data?.items,
+  ]);
+
   const handleCreateSession = useCallback((): void => {
     closeDrawer();
+    if (sessionListScope === "user") {
+      router.push(`/w/${handle}/agents/${agent.id}/sessions/new?scope=user`);
+      return;
+    }
     router.push(`/w/${handle}/agents/${agent.id}/sessions/new`);
-  }, [agent.id, handle, router]);
+  }, [agent.id, handle, router, sessionListScope]);
+
+  const handleSessionListScopeChange = useCallback(
+    (scope: AgentSessionListScope): void => {
+      setSessionListScope(scope);
+    },
+    [],
+  );
 
   const handleRenameSession = useCallback(
     async (sessionId: string, title: string | null): Promise<void> => {
@@ -140,7 +217,11 @@ export function AgentFocusedShell({
         sessionId,
         title,
       });
-      void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
+      if (sessionListScope === "user") {
+        void utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id });
+      } else {
+        void utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
+      }
       void utils.chat.getAgentSession.invalidate({
         agentId: agent.id,
         sessionId,
@@ -148,9 +229,11 @@ export function AgentFocusedShell({
     },
     [
       agent.id,
+      sessionListScope,
       updateTitleMutation,
       utils.chat.getAgentSession,
       utils.chat.listAgentSessions,
+      utils.chat.listAgentUserSessions,
     ],
   );
 
@@ -198,6 +281,67 @@ export function AgentFocusedShell({
     [openDrawer],
   );
 
+  const teamSessions = teamSessionsQuery.data?.items ?? [];
+  const userSessions = userSessionsQuery.data?.items ?? [];
+  const sessions = sessionListScope === "user" ? userSessions : teamSessions;
+  const sessionsLoading =
+    sessionListScope === "user"
+      ? userSessionsQuery.isPending
+      : teamSessionsQuery.isPending;
+  const sessionsError =
+    (sessionListScope === "user"
+      ? userSessionsQuery.error?.message
+      : teamSessionsQuery.error?.message) ??
+    updatePinMutation.error?.message ??
+    archiveSessionMutation.error?.message ??
+    null;
+  const showArchivedSection = sessionListScope === "team";
+
+  const sidebarProps = {
+    handle,
+    agent,
+    currentUser,
+    adminAccessUrl: adminAccessQuery.data?.url ?? null,
+    loggingOut: logoutMutation.isPending,
+    onLogout: handleLogout,
+    sessionListScope,
+    onSessionListScopeChange: handleSessionListScopeChange,
+    sessions,
+    sessionsLoading,
+    sessionsError,
+    archivedSessions: showArchivedSection
+      ? (archivedSessionsQuery.data?.items ?? [])
+      : [],
+    archivedSessionsLoading: showArchivedSection
+      ? archivedSessionsQuery.isPending
+      : false,
+    archivedSessionsError: showArchivedSection
+      ? (archivedSessionsQuery.error?.message ??
+        restoreSessionMutation.error?.message ??
+        null)
+      : null,
+    showArchivedSection,
+    activeSessionId,
+    creatingSession: false,
+    renamingSessionId: updateTitleMutation.isPending
+      ? updateTitleMutation.variables.sessionId
+      : null,
+    archivingSessionId: archiveSessionMutation.isPending
+      ? archiveSessionMutation.variables.sessionId
+      : null,
+    pinningSessionId: updatePinMutation.isPending
+      ? updatePinMutation.variables.sessionId
+      : null,
+    restoringSessionId: restoreSessionMutation.isPending
+      ? restoreSessionMutation.variables.sessionId
+      : null,
+    onCreateSession: handleCreateSession,
+    onRenameSession: handleRenameSession,
+    onArchiveSession: handleArchiveSession,
+    onSetSessionPinned: handleSetSessionPinned,
+    onRestoreSession: handleRestoreSession,
+  };
+
   return (
     <AgentFocusedShellMobileNavContext.Provider value={mobileNavContext}>
       <Drawer
@@ -208,57 +352,7 @@ export function AgentFocusedShell({
         padding={0}
         size={`min(85vw, ${rem(352)})`}
       >
-        <AgentFocusedSidebar
-          handle={handle}
-          agent={agent}
-          currentUser={currentUser}
-          adminAccessUrl={adminAccessQuery.data?.url ?? null}
-          loggingOut={logoutMutation.isPending}
-          onLogout={handleLogout}
-          sessions={sessionsQuery.data?.items ?? []}
-          sessionsLoading={sessionsQuery.isPending}
-          sessionsError={
-            sessionsQuery.error?.message ??
-            updatePinMutation.error?.message ??
-            archiveSessionMutation.error?.message ??
-            null
-          }
-          archivedSessions={archivedSessionsQuery.data?.items ?? []}
-          archivedSessionsLoading={archivedSessionsQuery.isPending}
-          archivedSessionsError={
-            archivedSessionsQuery.error?.message ??
-            restoreSessionMutation.error?.message ??
-            null
-          }
-          activeSessionId={activeSessionId}
-          creatingSession={false}
-          renamingSessionId={
-            updateTitleMutation.isPending
-              ? updateTitleMutation.variables.sessionId
-              : null
-          }
-          archivingSessionId={
-            archiveSessionMutation.isPending
-              ? archiveSessionMutation.variables.sessionId
-              : null
-          }
-          pinningSessionId={
-            updatePinMutation.isPending
-              ? updatePinMutation.variables.sessionId
-              : null
-          }
-          restoringSessionId={
-            restoreSessionMutation.isPending
-              ? restoreSessionMutation.variables.sessionId
-              : null
-          }
-          onCreateSession={handleCreateSession}
-          onRenameSession={handleRenameSession}
-          onArchiveSession={handleArchiveSession}
-          onSetSessionPinned={handleSetSessionPinned}
-          onRestoreSession={handleRestoreSession}
-          onNavigate={closeDrawer}
-        />
+        <AgentFocusedSidebar {...sidebarProps} onNavigate={closeDrawer} />
       </Drawer>
       <Group h="100%" mih={0} gap={0} align="stretch" wrap="nowrap">
         <Box
@@ -270,56 +364,7 @@ export function AgentFocusedShell({
             overflow: "hidden",
           }}
         >
-          <AgentFocusedSidebar
-            handle={handle}
-            agent={agent}
-            currentUser={currentUser}
-            adminAccessUrl={adminAccessQuery.data?.url ?? null}
-            loggingOut={logoutMutation.isPending}
-            onLogout={handleLogout}
-            sessions={sessionsQuery.data?.items ?? []}
-            sessionsLoading={sessionsQuery.isPending}
-            sessionsError={
-              sessionsQuery.error?.message ??
-              updatePinMutation.error?.message ??
-              archiveSessionMutation.error?.message ??
-              null
-            }
-            archivedSessions={archivedSessionsQuery.data?.items ?? []}
-            archivedSessionsLoading={archivedSessionsQuery.isPending}
-            archivedSessionsError={
-              archivedSessionsQuery.error?.message ??
-              restoreSessionMutation.error?.message ??
-              null
-            }
-            activeSessionId={activeSessionId}
-            creatingSession={false}
-            renamingSessionId={
-              updateTitleMutation.isPending
-                ? updateTitleMutation.variables.sessionId
-                : null
-            }
-            archivingSessionId={
-              archiveSessionMutation.isPending
-                ? archiveSessionMutation.variables.sessionId
-                : null
-            }
-            pinningSessionId={
-              updatePinMutation.isPending
-                ? updatePinMutation.variables.sessionId
-                : null
-            }
-            restoringSessionId={
-              restoreSessionMutation.isPending
-                ? restoreSessionMutation.variables.sessionId
-                : null
-            }
-            onCreateSession={handleCreateSession}
-            onRenameSession={handleRenameSession}
-            onArchiveSession={handleArchiveSession}
-            onSetSessionPinned={handleSetSessionPinned}
-            onRestoreSession={handleRestoreSession}
-          />
+          <AgentFocusedSidebar {...sidebarProps} />
         </Box>
         <Box
           h="100%"

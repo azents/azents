@@ -880,7 +880,12 @@
           "retentionSnapshotDays": "{days, plural, =0 {0 days} one {# day} other {# days}} retention",
           "purgeScheduled": "Deletes {date}",
           "purgeUnscheduled": "No deletion scheduled",
-          "restore": "Restore"
+          "restore": "Restore",
+          "teamTab": "Team",
+          "myTab": "My",
+          "scopeTabs": "Session lists",
+          "newUser": "New private session",
+          "userEmpty": "No private sessions yet."
         },
         "subagents": {
           "title": "Subagents",

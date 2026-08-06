@@ -22,9 +22,12 @@ import type {
   RequestedInferenceProfile,
 } from "@azents/public-client";
 
+export type AgentDraftSessionScope = "team" | "user";
+
 export interface AgentDraftChatContainerProps {
   handle: string;
   agent: AgentResponse;
+  sessionScope?: AgentDraftSessionScope;
 }
 
 export type ProjectPresetState =
@@ -246,11 +249,13 @@ function setupActionsFromWorkspaceItems(
 export function useAgentDraftChatContainer(
   props: AgentDraftChatContainerProps,
 ): AgentDraftChatContainerOutput {
-  const { handle, agent } = props;
+  const { handle, agent, sessionScope = "team" } = props;
   const router = useRouter();
   const utils = trpc.useUtils();
-  const createMessageMutation =
+  const createTeamMessageMutation =
     trpc.chat.createTeamAgentSessionMessage.useMutation();
+  const createUserMessageMutation =
+    trpc.chat.createUserAgentSessionMessage.useMutation();
   const [writeInFlight, setWriteInFlight] = useState(false);
   const [workspaceItems, setWorkspaceItems] = useState<
     NewSessionWorkspaceItemState[]
@@ -452,19 +457,27 @@ export function useAgentDraftChatContainer(
         return false;
       }
       const attachmentUris = attachments?.map((attachment) => attachment.uri);
+      const payload = {
+        agentId: agent.id,
+        clientRequestId: crypto.randomUUID(),
+        message,
+        inferenceProfile,
+        attachments: attachmentUris,
+        existingProjectPaths: selectedProjectPaths,
+        setupActions: setupActionsFromWorkspaceItems(workspaceItems),
+      };
       setWriteInFlight(true);
       try {
-        const response = await createMessageMutation.mutateAsync({
-          agentId: agent.id,
-          clientRequestId: crypto.randomUUID(),
-          message,
-          inferenceProfile,
-          attachments: attachmentUris,
-          existingProjectPaths: selectedProjectPaths,
-          setupActions: setupActionsFromWorkspaceItems(workspaceItems),
-        });
+        const response =
+          sessionScope === "user"
+            ? await createUserMessageMutation.mutateAsync(payload)
+            : await createTeamMessageMutation.mutateAsync(payload);
+        const listInvalidation =
+          sessionScope === "user"
+            ? utils.chat.listAgentUserSessions.invalidate({ agentId: agent.id })
+            : utils.chat.listAgentSessions.invalidate({ agentId: agent.id });
         await Promise.all([
-          utils.chat.listAgentSessions.invalidate({ agentId: agent.id }),
+          listInvalidation,
           utils.chat.listAgentProjectPresets.invalidate({ agentId: agent.id }),
         ]);
         router.replace(
@@ -480,12 +493,15 @@ export function useAgentDraftChatContainer(
     [
       agent.id,
       canSendMessage,
-      createMessageMutation,
+      createTeamMessageMutation,
+      createUserMessageMutation,
       handle,
       router,
-      utils.chat.listAgentProjectPresets,
       selectedProjectPaths,
+      sessionScope,
+      utils.chat.listAgentProjectPresets,
       utils.chat.listAgentSessions,
+      utils.chat.listAgentUserSessions,
       workspaceItems,
       writeInFlight,
     ],
@@ -543,7 +559,10 @@ export function useAgentDraftChatContainer(
   return {
     handle,
     agent,
-    isWritePending: createMessageMutation.isPending || writeInFlight,
+    isWritePending:
+      createTeamMessageMutation.isPending ||
+      createUserMessageMutation.isPending ||
+      writeInFlight,
     canSendMessage,
     selectedProjectPaths,
     workspaceItems,
