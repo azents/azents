@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 
 import sqlalchemy as sa
 from azcommon.result import Success
+from azcommon.uuid import uuid7
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import (
@@ -16,6 +17,7 @@ from azents.core.enums import (
     RuntimeProviderLifecycleState,
     RuntimeProviderRegistrationMethod,
     RuntimeProviderScope,
+    SessionWorkingFolderCleanupStatus,
 )
 from azents.core.runtime_profile import (
     RuntimeConfigurationResolutionStatus,
@@ -27,6 +29,7 @@ from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.runtime_profile import RDBRuntimeConfigurationRevision
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
+from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
 from azents.repos.agent_runtime import AgentRuntimeRepository
@@ -369,6 +372,59 @@ async def test_resolution_avoids_lifecycle_configuration_fk_deadlock(
             resolution_task.cancel()
             with suppress(asyncio.CancelledError):
                 await resolution_task
+
+
+async def test_runtime_resolution_lock_allows_session_context_fk_reference(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """Runtime binding locks do not block Session context FK references."""
+    del latest_db_schema
+
+    @asynccontextmanager
+    async def independent_session_manager() -> AsyncGenerator[AsyncSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+            try:
+                yield session
+            except Exception:
+                await session.rollback()
+                raise
+            else:
+                await session.commit()
+
+    async with independent_session_manager() as session:
+        agent_id, _ = await _seed_selected_agent(
+            session,
+            handle="runtime-resolution-session-context-fk",
+        )
+
+    service = _service(independent_session_manager)
+    ready = await service.ensure_for_agent(agent_id)
+    runtime_repository = AgentRuntimeRepository()
+
+    async with independent_session_manager() as lock_session:
+        locked = await runtime_repository.get_by_agent_id_for_update(
+            lock_session,
+            agent_id,
+        )
+        assert locked is not None
+
+        async with independent_session_manager() as context_session:
+            context = RDBSessionAgentContext(
+                agent_id=agent_id,
+                workspace_id=ready.runtime.workspace_id,
+                agent_runtime_id=ready.runtime.id,
+                working_folder_path="/workspace/agent/.azents/sessions/test",
+                working_folder_cleanup_status=(
+                    SessionWorkingFolderCleanupStatus.NOT_ATTEMPTED
+                ),
+                working_folder_cleanup_summary=None,
+                working_folder_cleanup_completed_at=None,
+                root_session_agent_id=None,
+            )
+            context.id = uuid7().hex
+            context_session.add(context)
+            await asyncio.wait_for(context_session.flush(), timeout=5)
 
 
 async def test_resolution_records_blocked_revision_without_losing_prior_desired(
