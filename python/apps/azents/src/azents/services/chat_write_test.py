@@ -14,6 +14,7 @@ from azents.core.enums import (
     AgentLifecycleStatus,
     AgentRunStatus,
     AgentSessionKind,
+    AgentSessionProductMode,
     AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
@@ -102,6 +103,8 @@ class _SubagentLockRepository(AgentSessionRepository):
             agent_id="agent-1",
             handle="subagent-session",
             session_kind=AgentSessionKind.SUBAGENT,
+            product_mode=None,
+            associated_user_id=None,
             status=AgentSessionStatus.ACTIVE,
             start_reason=AgentSessionStartReason.INITIAL,
             title=None,
@@ -1220,6 +1223,8 @@ class TestChatWriteService:
                     agent_id=agent_id,
                     title=None,
                     primary_kind=None,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                 ),
             )
 

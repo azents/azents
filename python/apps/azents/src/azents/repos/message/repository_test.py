@@ -3,7 +3,7 @@
 from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import EventKind, LLMProvider
+from azents.core.enums import AgentSessionProductMode, EventKind, LLMProvider
 from azents.engine.events.types import UserMessagePayload
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -63,6 +63,8 @@ async def _create_agent_session(session: AsyncSession) -> str:
         session,
         AgentSessionCreate(
             workspace_id=workspace_id,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
             agent_id=agent.id,
             title=None,
         ),

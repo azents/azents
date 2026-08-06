@@ -4,7 +4,7 @@ import pytest
 from azcommon.result import Success
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from azents.core.enums import AgentRunStatus, LLMProvider
+from azents.core.enums import AgentRunStatus, AgentSessionProductMode, LLMProvider
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_run import RDBAgentRun
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
@@ -72,6 +72,8 @@ async def _create_execution_subject(
         session,
         AgentSessionCreate(
             workspace_id=workspace_id,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
             agent_id=agent.id,
             title=None,
         ),

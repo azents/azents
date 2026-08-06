@@ -18,6 +18,7 @@ from azents.core.enums import (
     AgentSessionEndReason,
     AgentSessionKind,
     AgentSessionPrimaryKind,
+    AgentSessionProductMode,
     AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
@@ -86,6 +87,7 @@ class AgentSessionRepository:
         create: AgentSessionCreate,
     ) -> AgentSession:
         """Create AgentSession."""
+        self._validate_create(create)
         lifecycle_status = await session.scalar(
             sa.select(RDBAgent.lifecycle_status).where(RDBAgent.id == create.agent_id)
         )
@@ -103,6 +105,8 @@ class AgentSessionRepository:
                     status=AgentSessionStatus.ACTIVE,
                     title=create.title,
                     primary_kind=create.primary_kind,
+                    product_mode=create.product_mode,
+                    associated_user_id=create.associated_user_id,
                     start_reason=create.start_reason,
                 )
                 .on_conflict_do_nothing(index_elements=[RDBAgentSession.handle])
@@ -585,12 +589,13 @@ class AgentSessionRepository:
         session: AsyncSession,
         workspace_id: str,
     ) -> list[AgentSession]:
-        """Fetch workspace AgentSession list in latest-first order."""
+        """Fetch workspace Team AgentSession list in latest-first order."""
         result = await session.execute(
             sa.select(RDBAgentSession)
             .where(
                 RDBAgentSession.workspace_id == workspace_id,
                 RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
             )
             .order_by(RDBAgentSession.updated_at.desc())
         )
@@ -601,7 +606,7 @@ class AgentSessionRepository:
         session: AsyncSession,
         agent_id: str,
     ) -> list[AgentSession]:
-        """Fetch active Agent sessions with team primary first.
+        """Fetch active Team Agent sessions with team primary first.
 
         Non-primary sessions are ordered by their most recent user-authored input,
         not by assistant/tool/system activity.
@@ -615,10 +620,35 @@ class AgentSessionRepository:
             .where(
                 RDBAgentSession.agent_id == agent_id,
                 RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             )
             .order_by(
                 primary_order,
+                RDBAgentSession.last_user_input_at.desc(),
+                RDBAgentSession.updated_at.desc(),
+            )
+        )
+        return [self._build(rdb) for rdb in result.scalars()]
+
+    async def list_active_user_by_agent_and_user(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        associated_user_id: str,
+    ) -> list[AgentSession]:
+        """Fetch active User Sessions owned by one User for an Agent."""
+        result = await session.execute(
+            sa.select(RDBAgentSession)
+            .where(
+                RDBAgentSession.agent_id == agent_id,
+                RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.product_mode == AgentSessionProductMode.USER,
+                RDBAgentSession.associated_user_id == associated_user_id,
+                RDBAgentSession.status == AgentSessionStatus.ACTIVE,
+            )
+            .order_by(
                 RDBAgentSession.last_user_input_at.desc(),
                 RDBAgentSession.updated_at.desc(),
             )
@@ -706,6 +736,7 @@ class AgentSessionRepository:
             .where(
                 RDBAgentSession.agent_id == agent_id,
                 RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             )
             .order_by(
@@ -763,13 +794,14 @@ class AgentSessionRepository:
         session: AsyncSession,
         agent_id: str,
     ) -> list[AgentSession]:
-        """Fetch archived root sessions in latest-archive-first order."""
+        """Fetch archived Team root sessions in latest-archive-first order."""
         rows = (
             await session.execute(
                 sa.select(RDBAgentSession)
                 .where(
                     RDBAgentSession.agent_id == agent_id,
                     RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                    RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
                     RDBAgentSession.status == AgentSessionStatus.ARCHIVED,
                 )
                 .order_by(
@@ -786,12 +818,13 @@ class AgentSessionRepository:
         *,
         limit: int,
     ) -> list[AgentSession]:
-        """List oldest active non-primary root Sessions not protected by a pin."""
+        """List oldest active non-primary Team roots not protected by a pin."""
         rows = (
             await session.execute(
                 sa.select(RDBAgentSession)
                 .where(
                     RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                    RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
                     RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                     RDBAgentSession.primary_kind.is_(None),
                     RDBAgentSession.pinned.is_(False),
@@ -808,12 +841,13 @@ class AgentSessionRepository:
         *,
         agent_id: str,
     ) -> AgentSession | None:
-        """Fetch newest active non-primary AgentSession by creation time."""
+        """Fetch newest active non-primary Team AgentSession by creation time."""
         result = await session.execute(
             sa.select(RDBAgentSession)
             .where(
                 RDBAgentSession.agent_id == agent_id,
                 RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
                 RDBAgentSession.primary_kind.is_(None),
             )
@@ -966,6 +1000,7 @@ class AgentSessionRepository:
             sa.select(RDBAgentSession).where(
                 RDBAgentSession.agent_id == agent_id,
                 RDBAgentSession.session_kind == AgentSessionKind.ROOT,
+                RDBAgentSession.product_mode == AgentSessionProductMode.TEAM,
                 RDBAgentSession.primary_kind == AgentSessionPrimaryKind.TEAM_PRIMARY,
                 RDBAgentSession.status == AgentSessionStatus.ACTIVE,
             )
@@ -1022,6 +1057,8 @@ class AgentSessionRepository:
                     status=AgentSessionStatus.ACTIVE,
                     title=None,
                     primary_kind=AgentSessionPrimaryKind.TEAM_PRIMARY,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                     start_reason=start_reason,
                 )
                 .on_conflict_do_nothing()
@@ -1785,6 +1822,8 @@ class AgentSessionRepository:
                     status=AgentSessionStatus.ACTIVE,
                     title=title,
                     primary_kind=None,
+                    product_mode=None,
+                    associated_user_id=None,
                     start_reason=AgentSessionStartReason.INITIAL,
                 )
                 .on_conflict_do_nothing(index_elements=[RDBAgentSession.handle])
@@ -1796,6 +1835,34 @@ class AgentSessionRepository:
                 return rdb
 
         raise RuntimeError("AgentSession handle generation exhausted retry attempts")
+
+    @staticmethod
+    def _validate_create(create: AgentSessionCreate) -> None:
+        """Reject invalid root/subagent product-mode and ownership combinations."""
+        if create.session_kind is AgentSessionKind.SUBAGENT:
+            if (
+                create.product_mode is not None
+                or create.associated_user_id is not None
+                or create.primary_kind is not None
+            ):
+                raise ValueError(
+                    "Subagent sessions cannot set product mode, associated user, "
+                    "or primary kind"
+                )
+            return
+        if create.session_kind is not AgentSessionKind.ROOT:
+            raise ValueError("Unsupported AgentSession kind")
+        if create.product_mode is AgentSessionProductMode.TEAM:
+            if create.associated_user_id is not None:
+                raise ValueError("Team sessions cannot set an associated user")
+            return
+        if create.product_mode is AgentSessionProductMode.USER:
+            if create.associated_user_id is None:
+                raise ValueError("User sessions require an associated user")
+            if create.primary_kind is not None:
+                raise ValueError("User sessions cannot set a primary kind")
+            return
+        raise ValueError("Root sessions require an explicit product mode")
 
     def _build_session_agent(self, rdb: RDBSessionAgent) -> SessionAgent:
         """Convert RDB SessionAgent row to domain model."""
@@ -1868,6 +1935,8 @@ class AgentSessionRepository:
             session_kind=rdb.session_kind,
             status=rdb.status,
             primary_kind=rdb.primary_kind,
+            product_mode=rdb.product_mode,
+            associated_user_id=rdb.associated_user_id,
             start_reason=rdb.start_reason,
             title=rdb.title,
             title_source=rdb.title_source,

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRunStatus,
+    AgentSessionProductMode,
     AgentSessionStartReason,
     LLMProvider,
     ModelFileStatus,
@@ -86,6 +87,8 @@ async def _create_agent_session(session: AsyncSession) -> tuple[str, str, str, s
         session,
         AgentSessionCreate(
             workspace_id=workspace_id,
+            product_mode=AgentSessionProductMode.TEAM,
+            associated_user_id=None,
             agent_id=agent.id,
             title=None,
             start_reason=AgentSessionStartReason.INITIAL,

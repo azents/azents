@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from azents.broker.types import SessionBroker, SessionWakeUp
 from azents.core.enums import (
     AgentSessionKind,
+    AgentSessionProductMode,
     AgentSessionRunState,
     AgentSessionStartReason,
     AgentSessionStatus,
@@ -101,6 +102,8 @@ def _agent_session(
         agent_id=agent_id,
         handle="test-session-handle",
         session_kind=session_kind,
+        product_mode=AgentSessionProductMode.TEAM,
+        associated_user_id=None,
         status=AgentSessionStatus.ACTIVE,
         start_reason=AgentSessionStartReason.INITIAL,
         title=None,

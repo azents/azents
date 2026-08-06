@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from azents.core.enums import (
     AgentRunStatus,
+    AgentSessionProductMode,
     AgentSessionStartReason,
     LLMProvider,
     WorkspaceUserRole,
@@ -266,6 +267,8 @@ class TestSubagentTreeProjection:
                     agent_id=agent_id,
                     title=None,
                     primary_kind=None,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                     start_reason=AgentSessionStartReason.INITIAL,
                 ),
             )
@@ -397,6 +400,8 @@ class TestSubagentTreeProjection:
                     agent_id=agent_id,
                     title=None,
                     primary_kind=None,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                     start_reason=AgentSessionStartReason.INITIAL,
                 ),
             )
@@ -535,6 +540,8 @@ class TestSubagentTreeProjection:
                     agent_id=agent_id,
                     title=None,
                     primary_kind=None,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                     start_reason=AgentSessionStartReason.INITIAL,
                 ),
             )

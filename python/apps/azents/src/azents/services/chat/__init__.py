@@ -16,6 +16,7 @@ from azents.core.enums import (
     AgentRunStatus,
     AgentSessionKind,
     AgentSessionPrimaryKind,
+    AgentSessionProductMode,
     AgentSessionRunState,
     AgentSessionStatus,
     AgentSessionTitleSource,
@@ -786,6 +787,8 @@ class ChatSessionService:
                     agent_id=agent_id,
                     title=None,
                     primary_kind=None,
+                    product_mode=AgentSessionProductMode.TEAM,
+                    associated_user_id=None,
                 ),
                 workspace_intent=ExplicitRootWorkspaceIntent(
                     existing_project_paths=[
