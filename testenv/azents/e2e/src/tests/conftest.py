@@ -1,6 +1,7 @@
 """E2E test fixtures."""
 
 import base64
+import dataclasses
 import datetime
 import json
 import os
@@ -38,8 +39,9 @@ from types_boto3_s3.client import S3Client
 
 from support.consts import REPOSITORY_ROOT
 from support.container_logs import (
-    read_sanitized_container_logs,
-    write_sanitized_container_logs_artifact,
+    ContainerLogs,
+    emit_container_logs,
+    read_container_logs,
 )
 from support.runtime_provider_auth import (
     RuntimeProviderAuthenticationError,
@@ -95,6 +97,16 @@ _JSON_OBJECT_LIST_ADAPTER = TypeAdapter(list[dict[str, object]])
 _BROWSER_CALL_REPORT = pytest.StashKey[pytest.TestReport]()
 
 
+@dataclasses.dataclass(frozen=True)
+class _ServerLogCapture:
+    """One active server container whose logs are available for failure output."""
+
+    container: ContainerLogs
+
+
+_SERVER_LOG_CAPTURES: dict[str, _ServerLogCapture] = {}
+
+
 class _RedactedSecret(str):
     """String secret whose pytest/debug representation never reveals its value."""
 
@@ -111,6 +123,8 @@ def pytest_runtest_makereport(
     report = yield
     if report.when == "call":
         item.stash[_BROWSER_CALL_REPORT] = report
+        if report.failed:
+            _emit_active_server_logs(item.config)
     return report
 
 
@@ -857,32 +871,42 @@ def _wait_for_tcp_ready(
         time.sleep(1)
 
 
-def _read_sanitized_container_logs(
-    container: DockerContainer,
-    *,
-    secret_values: tuple[str, ...],
-) -> str:
-    """Read container logs while guaranteeing supplied secrets remain redacted."""
-    return read_sanitized_container_logs(
-        container,
-        secret_values=secret_values,
-    )
+def _read_container_logs(container: DockerContainer) -> str:
+    """Read complete server logs for E2E diagnostics."""
+    return read_container_logs(container)
 
 
-def _write_sanitized_server_log_artifact(
-    container: DockerContainer,
+def _register_server_log_capture(
     server_name: str,
-    *,
-    secret_values: tuple[str, ...],
+    container: ContainerLogs,
 ) -> None:
-    """Write sanitized server output to the configured E2E artifact directory."""
-    artifact_dir = os.environ.get(_E2E_ARTIFACT_DIR_ENV)
-    write_sanitized_container_logs_artifact(
-        container,
-        server_name=server_name,
-        artifact_root=Path(artifact_dir) if artifact_dir else None,
-        secret_values=secret_values,
-    )
+    """Make a running server's logs available to failure reporting."""
+    _SERVER_LOG_CAPTURES[server_name] = _ServerLogCapture(container=container)
+
+
+def _unregister_server_log_capture(server_name: str) -> None:
+    """Remove a server after its container fixture starts teardown."""
+    _SERVER_LOG_CAPTURES.pop(server_name, None)
+
+
+def _emit_active_server_logs(config: pytest.Config) -> None:
+    """Write all active server logs directly to the pytest terminal."""
+    terminal_reporter = config.pluginmanager.get_plugin("terminalreporter")
+    if terminal_reporter is None:
+        original_stdout = sys.__stdout__
+
+        def write_line(line: str) -> None:
+            if original_stdout is not None:
+                original_stdout.write(f"{line}\n")
+
+    else:
+        write_line = terminal_reporter.write_line
+    for server_name, capture in _SERVER_LOG_CAPTURES.items():
+        emit_container_logs(
+            capture.container,
+            server_name=server_name,
+            write_line=write_line,
+        )
 
 
 def _log_server_output(container: DockerContainer, server_name: str) -> None:
@@ -893,23 +917,6 @@ def _log_server_output(container: DockerContainer, server_name: str) -> None:
         sys.stdout.write(f"\n=== {server_name} stderr ===\n{stderr.decode()}\n")
     except Exception:
         pass  # containert t t t t
-
-
-def _log_sanitized_server_output(
-    container: DockerContainer,
-    server_name: str,
-    *,
-    secret_values: tuple[str, ...],
-) -> None:
-    """Log server output after redacting supplied secret values."""
-    try:
-        logs = _read_sanitized_container_logs(
-            container,
-            secret_values=secret_values,
-        )
-        sys.stdout.write(f"\n\n=== {server_name} logs ===\n{logs}\n")
-    except Exception:
-        pass
 
 
 def _remove_agent_runtime_containers(network_name: str) -> None:
@@ -979,20 +986,14 @@ def azents_public_server_container(
 
     with container:
         wait_for_server_ready(container, 8010, "azents-public-server")
+        _register_server_log_capture(
+            "azents-public-server",
+            container,
+        )
         try:
             yield container
         finally:
-            _write_sanitized_server_log_artifact(
-                container,
-                "azents-public-server",
-                secret_values=(
-                    rustfs_access_key,
-                    rustfs_secret_key,
-                    auth_jwt_secret_key,
-                    credential_encryption_key,
-                    system_bootstrap_setup_token,
-                ),
-            )
+            _unregister_server_log_capture("azents-public-server")
             _log_server_output(container, "azents-public-server")
 
 
@@ -1060,20 +1061,14 @@ def azents_admin_server_container(
 
     with container:
         wait_for_server_ready(container, 8011, "azents-admin-server")
+        _register_server_log_capture(
+            "azents-admin-server",
+            container,
+        )
         try:
             yield container
         finally:
-            _write_sanitized_server_log_artifact(
-                container,
-                "azents-admin-server",
-                secret_values=(
-                    rustfs_access_key,
-                    rustfs_secret_key,
-                    auth_jwt_secret_key,
-                    credential_encryption_key,
-                    system_bootstrap_setup_token,
-                ),
-            )
+            _unregister_server_log_capture("azents-admin-server")
             _log_server_output(container, "azents-admin-server")
 
 
@@ -1155,20 +1150,14 @@ def azents_engine_worker_container(
                 "azents-engine-worker did not start in time\n\n"
                 f"stdout: {stdout.decode()}\n\nstderr: {stderr.decode()}"
             )
+        _register_server_log_capture(
+            "azents-engine-worker",
+            container,
+        )
         try:
             yield container
         finally:
-            _write_sanitized_server_log_artifact(
-                container,
-                "azents-engine-worker",
-                secret_values=(
-                    rustfs_access_key,
-                    rustfs_secret_key,
-                    auth_jwt_secret_key,
-                    credential_encryption_key,
-                    system_bootstrap_setup_token,
-                ),
-            )
+            _unregister_server_log_capture("azents-engine-worker")
             _log_server_output(container, "azents-engine-worker")
             _remove_agent_runtime_containers(container_network.name)
 
@@ -1348,7 +1337,6 @@ def azents_runtime_provider_docker_container(
                 _wait_for_runtime_provider_registered(
                     container,
                     provider_id=_RUNTIME_PROVIDER_ID,
-                    secret_values=(runtime_provider_credential,),
                 )
                 _wait_for_runtime_provider_contract(
                     admin_server_url=azents_admin_server_url,
@@ -1362,11 +1350,7 @@ def azents_runtime_provider_docker_container(
                     network_name=container_network.name,
                 )
                 yield container
-                _log_sanitized_server_output(
-                    container,
-                    "azents-runtime-provider-docker",
-                    secret_values=(runtime_provider_credential,),
-                )
+                _log_server_output(container, "azents-runtime-provider-docker")
         finally:
             _remove_agent_runtime_containers(container_network.name)
             _remove_runtime_provider_data_root(
@@ -1397,24 +1381,15 @@ def _wait_for_runtime_provider_registered(
     container: DockerContainer,
     *,
     provider_id: str,
-    secret_values: tuple[str, ...],
 ) -> None:
     """Runtime Provider register t t t pendingt."""
     deadline = time.monotonic() + 60
     last_logs = ""
     while time.monotonic() < deadline:
         if container.get_wrapped_container().status == "exited":
-            logs = _read_sanitized_container_logs(
-                container,
-                secret_values=secret_values,
-            )
-            pytest.fail(
-                f"azents-runtime-provider-docker exited\n\nsanitized logs:\n{logs}"
-            )
-        last_logs = _read_sanitized_container_logs(
-            container,
-            secret_values=secret_values,
-        )
+            logs = _read_container_logs(container)
+            pytest.fail(f"azents-runtime-provider-docker exited\n\nlogs:\n{logs}")
+        last_logs = _read_container_logs(container)
         if "Runtime Provider registered" in last_logs:
             return
         time.sleep(1)
@@ -1555,19 +1530,16 @@ def system_bootstrap_evidence(
     azents_admin_server_url: str,
     system_bootstrap_setup_token: str,
 ) -> SystemBootstrapEvidence:
-    """Bootstrap the initial administrator and retain only sanitized evidence."""
+    """Bootstrap the initial administrator and retain diagnostic evidence."""
     status_response = requests.get(
         f"{azents_admin_server_url}/system/v1/bootstrap/status",
         timeout=5,
     )
     if status_response.status_code != 200:
-        admin_logs = _read_sanitized_container_logs(
-            azents_admin_server_container,
-            secret_values=(system_bootstrap_setup_token,),
-        )
+        admin_logs = _read_container_logs(azents_admin_server_container)
         pytest.fail(
             f"bootstrap status failed with HTTP {status_response.status_code}\n"
-            f"sanitized Admin API logs:\n{admin_logs[-12000:]}"
+            f"Admin API logs:\n{admin_logs[-12000:]}"
         )
     initial_available = status_response.json().get("available") is True
 
