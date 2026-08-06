@@ -102,7 +102,7 @@ Design documents are accumulated records and are not listed individually in this
 | [ChatGPT OAuth Provider Historical Requirements Reconstruction](requirements/chatgpt-260502-chatgpt-oauth.md) | chatgpt-260502 | 2026-05-02 | 2026-05-02 |
 | [ChatGPT Responses Lite Catalog Integration Historical Requirements Reconstruction](requirements/chatgpt-260712-chatgpt-responses-lite-catalog.md) | chatgpt-260712 | 2026-07-12 | 2026-07-12 |
 | [Include ChatGPT OAuth in the OpenAI-Native HTTP Migration Historical Requirements Reconstruction](requirements/chatgpt-260716-chatgpt-oauth-in-openai-http-migration.md) | chatgpt-260716 | 2026-07-16 | - |
-| [PR CI Wall-Clock Convergence Requirements](requirements/ci-260806-pr-ci-convergence.md) | ci-260806 | 2026-08-06 | - |
+| [PR CI Wall-Clock Convergence Requirements](requirements/ci-260806-pr-ci-convergence.md) | ci-260806 | 2026-08-06 | 2026-08-06 |
 | [Adopt Claude Rules Loader as a Separate Runtime Toolkit Historical Requirements Reconstruction](requirements/claude-260702-claude-rules-loader.md) | claude-260702 | 2026-07-02 | - |
 | [Generalize Client Tool Wire Variant Selection Historical Requirements Reconstruction](requirements/client-260721-client-tool-wire-variants.md) | client-260721 | 2026-07-21 | 2026-07-21 |
 | [Scope OpenAI SDK Clients to Logical Model Operations Historical Requirements Reconstruction](requirements/clients-260716-openai-sdk-clients-to-logical-operations.md) | clients-260716 | 2026-07-16 | - |

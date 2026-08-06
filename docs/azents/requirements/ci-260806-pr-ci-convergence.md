@@ -2,6 +2,7 @@
 title: "PR CI Wall-Clock Convergence Requirements"
 created: 2026-08-06
 updated: 2026-08-06
+implemented: 2026-08-06
 tags: [ci, testing, developer-experience]
 document_role: primary
 document_type: requirements

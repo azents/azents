@@ -1,6 +1,7 @@
 ---
 title: "PR CI Wall-Clock Convergence Design"
 created: 2026-08-06
+implemented: 2026-08-06
 tags: [ci, testing, testenv]
 document_role: primary
 document_type: design
