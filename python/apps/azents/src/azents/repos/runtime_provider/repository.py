@@ -129,7 +129,9 @@ class RuntimeProviderRepository:
             RDBRuntimeProvider.id == provider_id
         )
         if for_update:
-            statement = statement.with_for_update()
+            # Provider identities are immutable. Serialize mutable Provider
+            # state without blocking configuration revision FK references.
+            statement = statement.with_for_update(key_share=True)
         result = await session.execute(statement)
         rdb = result.scalar_one_or_none()
         return self._build_provider(rdb) if rdb is not None else None

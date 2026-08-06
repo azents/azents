@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from azents.core.enums import (
     LLMProvider,
+    RuntimeProviderAuditEventType,
     RuntimeProviderAvailabilityMode,
     RuntimeProviderKind,
     RuntimeProviderLifecycleState,
@@ -29,6 +30,7 @@ from azents.rdb.models.agent_runtime import RDBAgentRuntime
 from azents.rdb.models.llm_provider_integration import RDBLLMProviderIntegration
 from azents.rdb.models.runtime_profile import RDBRuntimeConfigurationRevision
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
+from azents.rdb.models.runtime_provider_bootstrap import RDBRuntimeProviderAuditEvent
 from azents.rdb.models.session_agent_context import RDBSessionAgentContext
 from azents.rdb.session import SessionManager
 from azents.repos.agent import AgentRepository
@@ -39,7 +41,7 @@ from azents.repos.runtime_profile.data import (
     WorkspaceRuntimeProfileCreate,
 )
 from azents.repos.runtime_profile.repository import RuntimeProfileRepository
-from azents.repos.runtime_provider.data import RuntimeProviderCreate
+from azents.repos.runtime_provider.data import RuntimeProvider, RuntimeProviderCreate
 from azents.repos.runtime_provider.repository import RuntimeProviderRepository
 from azents.repos.runtime_provider_control.repository import (
     RuntimeProviderControlRepository,
@@ -71,6 +73,34 @@ class _SignalingAgentRuntimeRepository(AgentRuntimeRepository):
     ) -> AgentRuntime | None:
         self.lock_attempted.set()
         return await super().get_by_agent_id_for_update(session, agent_id)
+
+
+class _SignalingRuntimeProviderRepository(RuntimeProviderRepository):
+    """Signal when resolution reaches the Provider lock."""
+
+    def __init__(
+        self,
+        lock_attempted: asyncio.Event,
+        continue_lock: asyncio.Event,
+    ) -> None:
+        self.lock_attempted = lock_attempted
+        self.continue_lock = continue_lock
+
+    async def get_by_id(
+        self,
+        session: AsyncSession,
+        *,
+        provider_id: str,
+        for_update: bool,
+    ) -> RuntimeProvider | None:
+        if for_update:
+            self.lock_attempted.set()
+            await self.continue_lock.wait()
+        return await super().get_by_id(
+            session,
+            provider_id=provider_id,
+            for_update=for_update,
+        )
 
 
 def _contract_payload() -> dict[str, object]:
@@ -425,6 +455,82 @@ async def test_runtime_resolution_lock_allows_session_context_fk_reference(
             context.id = uuid7().hex
             context_session.add(context)
             await asyncio.wait_for(context_session.flush(), timeout=5)
+
+
+async def test_resolution_provider_lock_allows_lifecycle_provider_fk_reference(
+    rdb_engine: AsyncEngine,
+    latest_db_schema: None,
+) -> None:
+    """Resolution Provider locks allow lifecycle Provider FK references."""
+    del latest_db_schema
+
+    @asynccontextmanager
+    async def independent_session_manager() -> AsyncGenerator[AsyncSession]:
+        async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+            try:
+                yield session
+            except Exception:
+                await session.rollback()
+                raise
+            else:
+                await session.commit()
+
+    async with independent_session_manager() as session:
+        agent_id, _ = await _seed_selected_agent(
+            session,
+            handle="runtime-resolution-provider-fk",
+        )
+
+    service = _service(independent_session_manager)
+    ready = await service.ensure_for_agent(agent_id)
+    provider_lock_attempted = asyncio.Event()
+    continue_provider_lock = asyncio.Event()
+    service.provider_repository = _SignalingRuntimeProviderRepository(
+        provider_lock_attempted,
+        continue_provider_lock,
+    )
+    resolution_task: asyncio.Task[RuntimeProfileResolutionResult] | None = None
+    runtime_lock_task: asyncio.Task[RDBAgentRuntime | None] | None = None
+
+    try:
+        async with independent_session_manager() as lifecycle_session:
+            lifecycle_session.add(
+                RDBRuntimeProviderAuditEvent(
+                    provider_id=ready.desired_revision.provider_id,
+                    event_type=RuntimeProviderAuditEventType.CONNECTION_OPENED,
+                    actor_user_id=None,
+                    metadata_=None,
+                )
+            )
+            await asyncio.wait_for(lifecycle_session.flush(), timeout=5)
+
+            resolution_task = asyncio.create_task(service.ensure_for_agent(agent_id))
+            await asyncio.wait_for(provider_lock_attempted.wait(), timeout=5)
+            runtime_lock_task = asyncio.create_task(
+                lifecycle_session.scalar(
+                    sa.select(RDBAgentRuntime)
+                    .where(RDBAgentRuntime.id == ready.runtime.id)
+                    .with_for_update()
+                )
+            )
+            await asyncio.sleep(0)
+            assert not runtime_lock_task.done()
+
+            continue_provider_lock.set()
+            locked_runtime = await asyncio.wait_for(runtime_lock_task, timeout=5)
+            assert locked_runtime is not None
+
+        repeated = await asyncio.wait_for(resolution_task, timeout=5)
+        assert repeated.runtime.id == ready.runtime.id
+    finally:
+        if runtime_lock_task is not None and not runtime_lock_task.done():
+            runtime_lock_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await runtime_lock_task
+        if resolution_task is not None and not resolution_task.done():
+            resolution_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await resolution_task
 
 
 async def test_resolution_records_blocked_revision_without_losing_prior_desired(
