@@ -310,7 +310,7 @@ export function useAgentDraftChatContainer(
     setWorkspaceItems([]);
     setActiveWorktreeItemId(null);
     setProjectPickerPurpose("existing_project");
-  }, [agent.id]);
+  }, [agent.id, sessionScope]);
 
   useEffect(() => {
     if (defaultsAppliedRef.current || !projectDefaultsQuery.data) {
