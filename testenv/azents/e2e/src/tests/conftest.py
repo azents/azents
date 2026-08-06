@@ -994,7 +994,6 @@ def azents_public_server_container(
             yield container
         finally:
             _unregister_server_log_capture("azents-public-server")
-            _log_server_output(container, "azents-public-server")
 
 
 @pytest.fixture(scope="session")
@@ -1069,7 +1068,6 @@ def azents_admin_server_container(
             yield container
         finally:
             _unregister_server_log_capture("azents-admin-server")
-            _log_server_output(container, "azents-admin-server")
 
 
 @pytest.fixture(scope="session")
@@ -1158,7 +1156,6 @@ def azents_engine_worker_container(
             yield container
         finally:
             _unregister_server_log_capture("azents-engine-worker")
-            _log_server_output(container, "azents-engine-worker")
             _remove_agent_runtime_containers(container_network.name)
 
 
