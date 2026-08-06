@@ -109,8 +109,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-08-03
-spec_version: 140
+last_verified_at: 2026-08-06
+spec_version: 141
 ---
 
 # Conversation & Events
@@ -121,13 +121,15 @@ The `conversation` domain owns `AgentSession`, event transcript events, durable
 Production agent execution now uses the event runtime. OpenAI Agents SDK `RunState` and legacy
 raw `runtime/llm.py` are not production conversation state.
 
-Every currently implemented `AgentSession` has Team Session execution semantics. A current
-authenticated requester is authorized only at public admission, control, read, subscription, and
-download boundaries. A Human `sender_user_id` is immutable provenance for one admitted input; it is
-not an execution identity. The Session, Agent, Workspace, root tree, Run, owner generation, and
-durable work selection are the only authority for internal execution. No execution layer infers a
-User from a sender, requester, broker signal, Agent creator, Workspace owner, viewer, approver,
-uploader, or fallback.
+Root `AgentSession` rows have an explicit product mode of Team or User. Team roots keep shared
+Workspace-member visibility and Team primary behavior. User roots are private to one associated User,
+never carry a primary role, and authorize only that owner while the owner remains a Workspace member.
+Subagent sessions derive product identity from their root and do not store an independent product mode
+or associated User. A Human `sender_user_id` remains immutable provenance for one admitted input and is
+not an execution identity. The Session, Agent, Workspace, root tree, Run, owner generation, and durable
+work selection are the only authority for internal execution. No execution layer infers ownership from
+a sender, requester, broker signal, Agent creator, Workspace owner, viewer, approver, uploader, or
+fallback.
 
 ## 1. Domain Model
 
@@ -186,7 +188,9 @@ creates duplicate Project rows independently.
 | `current_inference_resolved_at`                                                                  | timestamptz \| null   | Resolution time for the complete current inference snapshot.                                                                      |
 | `session_kind`                                                                                   | enum                  | `root` or `subagent`; ordinary session lists include only `root` sessions                                                         |
 | `status`                                                                                         | enum                  | `active` or `archived`                                                                                                            |
-| `primary_kind`                                                                                   | enum \| null          | `team_primary` marks the agent's default team conversation; future non-primary sessions may use `null` or another explicit kind.  |
+| `primary_kind`                                                                                   | enum \| null          | `team_primary` marks the agent's default Team conversation. User Sessions always store `null` and never become Team primary.      |
+| `product_mode`                                                                                   | enum \| null          | Root-only `team` or `user`. Subagent rows store `null` and derive identity from the root. Existing roots were backfilled to Team. |
+| `associated_user_id`                                                                             | FK \| null            | Required for User roots; null for Team roots and all subagents. Not a client-selectable field.                                    |
 | `start_reason`                                                                                   | enum                  | `initial`, `system_recovery`                                                                                                      |
 | `title`                                                                                          | string \| null        | Optional user-facing title. `null` means no title is available and clients should render a contextual fallback.                   |
 | `title_source`                                                                                   | enum \| null          | `manual`, `auto_initial`, or `auto_generated`; null means no title source yet.                                                    |
@@ -200,13 +204,20 @@ creates duplicate Project rows independently.
 | `stop_requested_*`                                                                               | mixed                 | Durable stop intent for this session                                                                                              |
 
 Only one team primary session may exist per agent in the current product state. Additional active
-non-primary team sessions may exist under the same agent with `primary_kind = null`.
-`GET /chat/v1/agents/{agent_id}/sessions` lists active agent sessions with the team primary session
-first and the remaining sessions ordered by persisted `last_user_input_at`, the timestamp of the
-most recent non-reverted `user_message` event or the session creation time when no user input exists.
-This lets newly created sessions appear naturally in the active list before their first message. Each
-session item includes `run_state` so azents-web can mark running sessions in the Agent rail session
-list. `POST /chat/v1/agents/{agent_id}/sessions` creates an active non-primary team session. The
+non-primary Team sessions may exist under the same agent with `primary_kind = null`. User Sessions
+never participate in Team primary uniqueness.
+
+`GET /chat/v1/agents/{agent_id}/sessions` lists active Team root sessions only, with the team primary
+session first and the remaining sessions ordered by persisted `last_user_input_at`, the timestamp of
+the most recent non-reverted `user_message` event or the session creation time when no user input
+exists. User Sessions are excluded at the repository query boundary. Each session item includes
+`run_state` so azents-web can mark running sessions in the Agent rail.
+
+`GET /chat/v1/agents/{agent_id}/user-sessions` lists active User root sessions owned by the current
+requester for that Agent. The list is empty for non-members and never includes another member's User
+Sessions. User list items never expose a primary badge.
+
+`POST /chat/v1/agents/{agent_id}/sessions` creates an active non-primary Team session. The
 current request shape is `existing_project_paths` plus ordered `setup_actions`.
 `existing_project_paths` registers explicit Project paths supplied by the client and does not copy
 Projects from the team primary session. Each `create_git_worktree` setup action is stored as an
@@ -231,17 +242,26 @@ its immutable context snapshot rather than rereading policy. External Channel ro
 creation also uses Agent-default intent. Ordinary Public API/Web non-primary
 creation remains explicit.
 
-`POST /chat/v1/agents/{agent_id}/sessions/messages` creates the same kind of non-primary team session
-and enqueues setup action inputs plus the first user message in one write boundary. Setup action inputs
-remain ahead of the user message in FIFO order. Successful Project-mutating action execution gates the
-first model run until context can be rebuilt from the updated Project registry; failed actions are
-marked failed and FIFO processing continues to the first user message. The first-message create
-response is `ChatWriteResponse`, including the created `session_id` and live snapshot. azents-web Agent detail routes surface the active
-session list in the Agent rail and navigate selected sessions through
-`/w/{handle}/agents/{agent_id}/sessions/{session_id}`. The Agent rail new-session action navigates to
-`/w/{handle}/agents/{agent_id}/sessions/new`, which is a draft route and must not create an
-`AgentSession` row. The draft route renders the Agent top bar plus the chat input surface, but it does
-not render session-scoped Projects or Context tabs. The draft composer shows a compact additive
+`POST /chat/v1/agents/{agent_id}/sessions/messages` creates the same kind of non-primary Team session
+and enqueues setup action inputs plus the first user message in one write boundary.
+`POST /chat/v1/agents/{agent_id}/user-sessions/messages` performs the equivalent atomic admission for a
+User root: it associates the authenticated requester, stores no primary role, and returns
+`ChatWriteResponse` with the created `session_id`. Setup action inputs remain ahead of the user message
+in FIFO order. Successful Project-mutating action execution gates the first model run until context can
+be rebuilt from the updated Project registry; failed actions are marked failed and FIFO processing
+continues to the first user message.
+
+Public Session read, write, control, live/history subscription, archive/restore, tree, and download
+boundaries authorize Team Sessions by Workspace membership and User Sessions by owner match. Denied
+User Session identifiers return not-found-safe responses without revealing private metadata.
+
+azents-web Agent detail routes surface Team and My Sessions tabs in the Agent rail. Team tab mutations
+invalidate the Team list query; My tab mutations invalidate the User list query. Selected sessions
+navigate through `/w/{handle}/agents/{agent_id}/sessions/{session_id}`. Team create navigates to
+`/w/{handle}/agents/{agent_id}/sessions/new`. My create navigates to
+`/w/{handle}/agents/{agent_id}/sessions/new?scope=user`. Both draft routes must not create an
+`AgentSession` row until the first accepted message. The draft route renders the Agent top bar plus the
+chat input surface, but it does not render session-scoped Projects or Context tabs. The draft composer shows a compact additive
 workspace selector where repository folders are added to one list and each selected folder can switch
 between repository and new worktree modes from the row-level type selector. Azents-owned concrete
 worktrees remain registered in the session where they are selected but are excluded from reusable
@@ -350,7 +370,7 @@ cleanup failure is logged and may remain in allocation state, but it does not ro
 change the successful response, or create retention retry work. A crash or cancellation after commit
 may skip the attempt. Restore does not recreate a worktree removed during archive.
 
-`GET /chat/v1/agents/{agent_id}/sessions/archived` returns archived roots separately from the active
+`GET /chat/v1/agents/{agent_id}/sessions/archived` (Team archived roots only) returns archived roots separately from the active
 session list. Each item includes `archived_at`, `purge_after`, and the immutable retention snapshot;
 the list response also includes the current instance retention value as policy metadata. Main Web does
 not expose that value in session-removal confirmation copy.
@@ -1097,6 +1117,7 @@ participant.
 
 ## 12. Changelog
 
+- **2026-08-06** — v141. Added root Team/User product mode, private User Session list/admission surfaces, owner-safe public boundaries, and Agent rail Team/My draft tabs.
 - **2026-08-03** — v140. Normalized session Project inputs against the current Runner-reported Agent Workspace and derived generated worktree allocation and cleanup ownership from that Runtime-specific root.
 - **2026-08-03** — v139. Added saved-capability-directed Structured Output and plain-text automatic
   title envelopes, one bounded unknown-capability compatibility transition, and prompt-only
