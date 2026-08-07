@@ -150,3 +150,11 @@ export const ErrorState = {
     error: "Failed to load sessions",
   },
 } satisfies Story;
+
+export const Paginated = {
+  args: {
+    page: 2,
+    sessions: [activeSession, { ...activeSession, id: "sess_follow_up" }],
+    totalCount: 52,
+  },
+} satisfies Story;

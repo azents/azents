@@ -38,7 +38,6 @@ import {
   IconDots,
   IconExternalLink,
   IconLayoutGrid,
-  IconListDetails,
   IconLogout,
   IconMoon,
   IconPencil,
@@ -233,9 +232,9 @@ export function AgentFocusedSidebar({
   const pathname = usePathname();
   const workspacePath = `/w/${handle}`;
   const basePath = `${workspacePath}/agents/${agent.id}`;
-  const agentHomeHref = `${basePath}/sessions/new`;
+  const sessionsDirectoryHref = `${basePath}/sessions`;
   const settingsHref = `${basePath}/settings`;
-  const isAgentHomeActive = pathname === basePath || pathname === agentHomeHref;
+  const isAgentDirectoryActive = pathname === sessionsDirectoryHref;
   const { mode, preference, setColorMode } = useColorMode();
   const { locale } = useLocale();
   const { setColorScheme } = useMantineColorScheme();
@@ -305,7 +304,6 @@ export function AgentFocusedSidebar({
 
   const renameBusy =
     editingSession !== null && renamingSessionId === editingSession.id;
-  const sessionsDirectoryHref = `${basePath}/sessions`;
   const isSessionsDirectoryActive = pathname === sessionsDirectoryHref;
 
   const renderSession = (session: AgentSessionResponse): React.ReactElement => {
@@ -332,6 +330,7 @@ export function AgentFocusedSidebar({
         component={Link}
         href={href}
         active={activeSessionId === session.id}
+        px="md"
         label={
           <Group gap="xs" wrap="nowrap">
             <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
@@ -458,15 +457,7 @@ export function AgentFocusedSidebar({
     }
     return (
       <Box>
-        <Text
-          px="md"
-          pt="sm"
-          pb="xs"
-          size="xs"
-          fw={700}
-          tt="uppercase"
-          c="dimmed"
-        >
+        <Text px="md" pt="md" pb="xs" size="xs" fw={600} c="dimmed">
           {label}
         </Text>
         {groupSessions.map(renderSession)}
@@ -565,11 +556,11 @@ export function AgentFocusedSidebar({
           <Group gap="xs" wrap="nowrap" align="stretch">
             <UnstyledButton
               component={Link}
-              href={agentHomeHref}
+              href={sessionsDirectoryHref}
               w="100%"
               onClick={onNavigate}
               className={`${styles.agentInfoLink} ${
-                isAgentHomeActive ? styles.agentInfoLinkActive : ""
+                isAgentDirectoryActive ? styles.agentInfoLinkActive : ""
               }`}
             >
               <Group gap="sm" wrap="nowrap" align="center">
@@ -647,7 +638,7 @@ export function AgentFocusedSidebar({
 
         <Stack px="md" pt="sm" pb="xs" gap="xs">
           <Group justify="space-between" wrap="nowrap">
-            <Text size="xs" fw={700} tt="uppercase" c="dimmed">
+            <Text size="sm" fw={700}>
               {t("sessions.title")}
             </Text>
             {onCreateSession && (
@@ -727,7 +718,7 @@ export function AgentFocusedSidebar({
                   href={sessionsDirectoryHref}
                   active={isSessionsDirectoryActive}
                   label={t("sessions.allSessions")}
-                  leftSection={<IconListDetails size={rem(16)} />}
+                  px="md"
                   onClick={onNavigate}
                 />
               </>
@@ -836,12 +827,13 @@ export function AgentFocusedSidebar({
 
         <Box hiddenFrom="lg">
           <Divider />
-          <Stack gap={0} p="xs">
+          <Stack gap={0} px={0} py="xs">
             <NavLink
               component={Link}
               href="/workspaces"
               label={tWorkspaceSidebar("workspaces")}
               leftSection={<IconLayoutGrid size={rem(18)} />}
+              px="md"
               onClick={onNavigate}
             />
             <NavLink
@@ -849,6 +841,7 @@ export function AgentFocusedSidebar({
               href="/account"
               label={tAppBar("account")}
               leftSection={<IconUser size={rem(18)} />}
+              px="md"
               onClick={onNavigate}
             />
             {adminAccessUrl && (
@@ -860,6 +853,7 @@ export function AgentFocusedSidebar({
                 label={tAppBar("admin")}
                 leftSection={<IconShieldLock size={rem(18)} />}
                 rightSection={<IconExternalLink size={rem(16)} />}
+                px="md"
                 onClick={onNavigate}
               />
             )}
@@ -871,6 +865,7 @@ export function AgentFocusedSidebar({
                   justify="flex-start"
                   fullWidth
                   leftSection={getColorModeIcon(preference, mode)}
+                  px="md"
                   styles={{ inner: { justifyContent: "flex-start" } }}
                 >
                   {tCommon("colorMode")}
@@ -888,6 +883,7 @@ export function AgentFocusedSidebar({
               type="button"
               label={tAppBar("logout")}
               leftSection={<IconLogout size={rem(18)} />}
+              px="md"
               disabled={loggingOut}
               onClick={handleLogout}
             />

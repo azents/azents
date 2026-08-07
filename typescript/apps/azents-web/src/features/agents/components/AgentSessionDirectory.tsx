@@ -13,21 +13,18 @@ import {
   Menu,
   Modal,
   NavLink,
-  Paper,
+  Pagination,
   rem,
   ScrollArea,
-  SegmentedControl,
   Stack,
+  Tabs,
   Text,
   TextInput,
-  Title,
   Tooltip,
 } from "@mantine/core";
 import {
   IconAlertCircle,
   IconArchive,
-  IconArrowLeft,
-  IconArrowRight,
   IconDots,
   IconPencil,
   IconPin,
@@ -41,6 +38,7 @@ import { useState } from "react";
 import { formatLocalizedDate } from "@/shared/lib/date-format";
 import { useLocale } from "@/shared/providers/locale";
 import { isAutoArchiveDueSoon } from "../auto-archive-urgency";
+import { AgentSettingsHeader } from "./AgentSettingsHeader";
 import type { AgentSessionDirectoryStatus } from "../containers/useAgentSessionDirectoryContainer";
 import type { SupportedLocale } from "@/shared/lib/locale";
 import type {
@@ -194,6 +192,8 @@ export function AgentSessionDirectory({
         key={session.id}
         component={Link}
         href={href}
+        px={0}
+        py="sm"
         label={
           <Group gap="xs" wrap="nowrap">
             <Text size="sm" truncate style={{ flex: 1, minWidth: 0 }}>
@@ -320,7 +320,7 @@ export function AgentSessionDirectory({
     const restoring = restoringSessionId === session.id;
 
     return (
-      <Group key={session.id} gap="xs" px="md" py="sm" wrap="nowrap">
+      <Group key={session.id} gap="xs" py="sm" wrap="nowrap">
         <NavLink
           component={Link}
           href={href}
@@ -432,58 +432,67 @@ export function AgentSessionDirectory({
         </Stack>
       </Modal>
 
-      <ScrollArea h="100%" type="auto">
-        <Stack gap="lg" p={{ base: "md", sm: "xl" }} maw={rem(1100)} mx="auto">
-          <Group justify="space-between" align="flex-start" wrap="wrap">
-            <Box>
-              <Title order={1} size="h2">
-                {t("sessions.directoryTitle")}
-              </Title>
-              <Text c="dimmed" mt="xs">
-                {t("sessions.directoryDescription")}
-              </Text>
-            </Box>
+      <Box
+        h="100%"
+        mih={0}
+        style={{ display: "flex", flexDirection: "column" }}
+      >
+        <AgentSettingsHeader
+          agent={agent}
+          controls={
             <Button
+              size="compact-sm"
               leftSection={<IconPlus size={rem(16)} />}
               onClick={onCreateSession}
             >
               {t("sessions.new")}
             </Button>
-          </Group>
+          }
+        />
+        <ScrollArea flex={1} mih={0} type="auto">
+          <Stack
+            gap="md"
+            p={{ base: "md", sm: "lg" }}
+            maw={rem(960)}
+            mx="auto"
+            w="100%"
+          >
+            <Text fw={600} size="lg">
+              {t("sessions.title")}
+            </Text>
 
-          <SegmentedControl
-            value={status}
-            fullWidth
-            data={[
-              { value: "active", label: t("sessions.active") },
-              { value: "archived", label: t("sessions.archived") },
-            ]}
-            onChange={(value) => {
-              if (isDirectoryStatus(value)) {
-                onStatusChange(value);
-              }
-            }}
-          />
+            <Tabs
+              value={status}
+              onChange={(value) => {
+                if (value && isDirectoryStatus(value)) {
+                  onStatusChange(value);
+                }
+              }}
+            >
+              <Tabs.List grow>
+                <Tabs.Tab value="active">{t("sessions.active")}</Tabs.Tab>
+                <Tabs.Tab value="archived">{t("sessions.archived")}</Tabs.Tab>
+              </Tabs.List>
+            </Tabs>
 
-          <Group justify="space-between" wrap="wrap" gap="xs">
-            <Group gap="xs">
-              <Text fw={700}>
-                {isArchived ? t("sessions.archived") : t("sessions.active")}
-              </Text>
-              <Badge variant="light">{totalCount}</Badge>
+            <Group justify="space-between" wrap="wrap" gap="xs">
+              <Group gap="xs">
+                <Text fw={600}>
+                  {isArchived ? t("sessions.archived") : t("sessions.active")}
+                </Text>
+                <Badge variant="light">{totalCount}</Badge>
+              </Group>
+              {isArchived && (
+                <Text size="sm" c="dimmed">
+                  {currentArchiveRetentionDays === null
+                    ? t("sessions.currentRetentionUnlimited")
+                    : t("sessions.currentRetentionDays", {
+                        days: currentArchiveRetentionDays,
+                      })}
+                </Text>
+              )}
             </Group>
-            {isArchived && (
-              <Text size="sm" c="dimmed">
-                {currentArchiveRetentionDays === null
-                  ? t("sessions.currentRetentionUnlimited")
-                  : t("sessions.currentRetentionDays", {
-                      days: currentArchiveRetentionDays,
-                    })}
-              </Text>
-            )}
-          </Group>
 
-          <Paper withBorder radius="md" shadow="xs" p={0}>
             {loading && (
               <Center py="xl">
                 <Loader />
@@ -500,7 +509,7 @@ export function AgentSessionDirectory({
               </Alert>
             )}
             {!loading && !error && sessions.length === 0 && (
-              <Stack align="center" gap="xs" py="xl" px="md">
+              <Stack align="center" gap="xs" py="xl">
                 <IconArchive size={rem(28)} opacity={0.45} />
                 <Text c="dimmed">
                   {isArchived
@@ -510,7 +519,12 @@ export function AgentSessionDirectory({
               </Stack>
             )}
             {!loading && !error && sessions.length > 0 && (
-              <Stack gap={0} py="xs">
+              <Box
+                style={{
+                  borderBottom: `${rem(1)} solid var(--mantine-color-default-border)`,
+                  borderTop: `${rem(1)} solid var(--mantine-color-default-border)`,
+                }}
+              >
                 {sessions.map((session, index) => (
                   <Box key={session.id}>
                     {index > 0 && <Divider />}
@@ -519,33 +533,23 @@ export function AgentSessionDirectory({
                       : renderActiveSession(session)}
                   </Box>
                 ))}
-              </Stack>
+              </Box>
             )}
-          </Paper>
 
-          <Group justify="space-between" align="center">
-            <Button
-              variant="subtle"
-              leftSection={<IconArrowLeft size={rem(16)} />}
-              disabled={page <= 1 || loading}
-              onClick={() => onPageChange(page - 1)}
-            >
-              {t("sessions.previous")}
-            </Button>
-            <Text size="sm" c="dimmed" aria-live="polite">
-              {t("sessions.pageStatus", { page, pages: totalPages })}
-            </Text>
-            <Button
-              variant="subtle"
-              rightSection={<IconArrowRight size={rem(16)} />}
-              disabled={page >= totalPages || loading}
-              onClick={() => onPageChange(page + 1)}
-            >
-              {t("sessions.next")}
-            </Button>
-          </Group>
-        </Stack>
-      </ScrollArea>
+            <Stack align="center" gap="xs">
+              <Pagination
+                value={page}
+                total={totalPages}
+                disabled={loading}
+                onChange={onPageChange}
+              />
+              <Text size="sm" c="dimmed" aria-live="polite">
+                {t("sessions.pageStatus", { page, pages: totalPages })}
+              </Text>
+            </Stack>
+          </Stack>
+        </ScrollArea>
+      </Box>
     </>
   );
 }
