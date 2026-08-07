@@ -34,8 +34,8 @@ code_paths:
   - python/apps/azents-runtime-provider-docker/**
   - python/apps/azents-runtime-provider-kubernetes/**
   - infra/charts/azents/**
-last_verified_at: 2026-08-05
-spec_version: 51
+last_verified_at: 2026-08-07
+spec_version: 52
 ---
 
 # Agent Runtime Control
@@ -229,9 +229,10 @@ NetworkPolicy repair is not a periodic durable candidate: only one valid, curren
 `UPDATE_CONFIGURATION`, never `START`. The handoff is discarded after use. A missing completion,
 Provider reconnect, Control restart, stale generation/configuration fence, unsupported evidence, or
 dispatch failure creates no replay or hot loop; the next periodic `OBSERVE` is the only retry.
-The Reconciler locks the Runtime row through current-fence validation, exact configuration lookup,
-and Provider-stream append, so a same-generation desired-revision replacement cannot enqueue the
-replaced configuration. Pending lifecycle dispatch and terminal deletion block the handoff.
+The Reconciler validates current fences and exact configuration from a lock-free Runtime snapshot,
+then performs a fresh lock-free target check before preparing Provider dispatch. A state change that
+is observed by either check discards the handoff; a later periodic observation converges a change
+that races after the last check. Pending lifecycle dispatch and terminal deletion block the handoff.
 Lifecycle and desired-configuration adoption retain their existing precedence and do not compete
 with this one-shot handoff. Eligible handoff and successful dispatch logs carry Runtime/Provider
 identity, Provider and desired generations, configuration revision, reconciliation kind, and reason;
