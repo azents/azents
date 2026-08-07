@@ -1,40 +1,49 @@
 ---
-title: "Do not use `getattr`/`setattr`/`object.__setattr__` to reach or invent attributes the type checker rejects — fix types, stubs, or fakes instead."
+title: "Do not use `getattr`/`setattr`/`object.__setattr__` when type narrowing is missing — narrow, declare, stub, or fake the real type instead."
 ---
 
 # No getattr/setattr Type Bypass
 
-Keep attribute access aligned with declared types. Dynamic attribute tricks hide
-missing fields and make failures harder to review than a real type fix.
+`getattr` / `setattr` usually appear when the value is still too wide (`object`,
+`Any`, an unresolved union) and the code needs a field the checker cannot prove.
+That is a typing problem, not a reason to probe attributes dynamically.
 
-**Banned:** using `getattr` / `setattr` / `object.__setattr__` to read, write, or
-invent an attribute that is undeclared on the type, or that ty correctly rejects.
+**Banned:** using `getattr` / `setattr` / `object.__setattr__` to discover,
+default, or invent attributes because the static type is incomplete.
 
-**Do this instead:** declare the field, add a protocol/wrapper, validate through
-`TypeAdapter`/dict helpers, write a `typings/` stub, or use a typed fake in tests.
-
-**Allowed exceptions**
-
-- `object.__setattr__` in a frozen dataclass initializer for **already declared** fields
-- `monkeypatch.setattr` / `unittest.mock` patching a **real existing** attribute, callable, or module in tests
-- One explicit typed boundary for external dynamic payloads (adapter/helper) — not scattered `getattr` probes standing in for a schema
+**Do this instead:** narrow with `isinstance` / `match`, declare the field,
+add a protocol or typed wrapper, validate at a boundary (`TypeAdapter`, dict
+helper), write a `typings/` stub, or use a typed fake in tests.
 
 ## Bad
 
 ```python
-error = ResponseError.model_construct(code=code, message=message)
-object.__setattr__(error, "status_code", 429)  # field is not on the type
-status = getattr(error, "status_code", None)
+def failure_code(exc: BaseException) -> str | None:
+    # Wide type + getattr instead of narrowing or a typed protocol.
+    code = getattr(exc, "code", None)
+    return code if isinstance(code, str) else None
+
+
+def attach_http_status(exc: Exception, status_code: int) -> None:
+    # Inventing a field the type does not declare.
+    setattr(exc, "status_code", status_code)
 ```
 
 ## Good
 
 ```python
-# Prefer a shape production code already accepts.
-status = extract_provider_http_status_code({"error": {"status_code": 429}})
+class ProviderFailure(Protocol):
+    code: str | None
 
-# Or a typed fake/stub with a real field.
-class FakeProviderError:
-    def __init__(self, status_code: int) -> None:
-        self.status_code = status_code
+
+def failure_code(exc: BaseException) -> str | None:
+    if isinstance(exc, ModelProviderFailure):
+        return exc.provider_code
+    return None
+
+
+@dataclass
+class HttpStatusError(Exception):
+    status_code: int
+    message: str
 ```
