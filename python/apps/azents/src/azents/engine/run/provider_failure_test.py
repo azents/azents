@@ -8,6 +8,7 @@ from azents.engine.run.provider_failure import (
     ModelProviderFailureRetryability,
     UnclassifiedModelProviderError,
     classify_model_provider_failure,
+    extract_provider_http_status_code,
     extract_provider_message_text,
     model_provider_error_log_fields,
     model_provider_failure,
@@ -100,6 +101,27 @@ def test_usage_limit_reached_is_user_visible_quota_failure() -> None:
         "Model provider error: The usage limit has been reached"
     )
     assert isinstance(failure, ModelCallError)
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        (429, 429),
+        ("429", 429),
+        ({"status_code": 429}, 429),
+        ({"status": "failed"}, None),
+        ({"error": {"status_code": 503}}, 503),
+        ({"response": {"error": {"http_status": 401}}}, 401),
+        ({"status": 99}, None),
+        (True, None),
+    ],
+)
+def test_extracts_provider_http_status_code(
+    payload: object,
+    expected: int | None,
+) -> None:
+    """Only concrete HTTP status codes are preserved from terminal payloads."""
+    assert extract_provider_http_status_code(payload) == expected
 
 
 def test_sanitizes_provider_message_and_redacts_credentials() -> None:

@@ -3626,7 +3626,7 @@ class TestLiteLLMResponsesOutputNormalizer:
         assert raised.value.provider_code == "stream_ended_before_completion"
 
     @pytest.mark.parametrize(
-        ("event_type", "item", "message", "category", "provider_code"),
+        ("event_type", "item", "message", "category", "provider_code", "status_code"),
         [
             (
                 "ResponseIncompleteEvent",
@@ -3637,6 +3637,36 @@ class TestLiteLLMResponsesOutputNormalizer:
                 ),
                 ModelProviderFailureCategory.INVALID_REQUEST,
                 "max_output_tokens",
+                None,
+            ),
+            (
+                "ResponseFailedEvent",
+                {
+                    "response": {
+                        "error": {
+                            "message": "The usage limit has been reached",
+                            "code": "usage_limit_reached",
+                            "type": "usage_limit_reached",
+                            "status_code": 429,
+                        }
+                    }
+                },
+                "Model provider error: The usage limit has been reached",
+                ModelProviderFailureCategory.QUOTA_OR_BILLING,
+                "usage_limit_reached",
+                429,
+            ),
+            (
+                "ResponseErrorEvent",
+                {
+                    "message": "The usage limit has been reached",
+                    "code": "usage_limit_reached",
+                    "status_code": 429,
+                },
+                "Model provider error: The usage limit has been reached",
+                ModelProviderFailureCategory.QUOTA_OR_BILLING,
+                "usage_limit_reached",
+                429,
             ),
         ],
     )
@@ -3647,6 +3677,7 @@ class TestLiteLLMResponsesOutputNormalizer:
         message: str,
         category: ModelProviderFailureCategory,
         provider_code: str,
+        status_code: int | None,
     ) -> None:
         """Convert native unsuccessful terminal outcomes to model errors."""
         normalizer = LiteLLMResponsesOutputNormalizer(
@@ -3674,6 +3705,7 @@ class TestLiteLLMResponsesOutputNormalizer:
 
         assert raised.value.category is category
         assert raised.value.provider_code == provider_code
+        assert raised.value.status_code == status_code
 
     @pytest.mark.parametrize(
         ("event_type", "item", "expected_detail"),

@@ -44,6 +44,7 @@ from azents.engine.run.errors import ModelStreamCallKind
 from azents.engine.run.provider_failure import (
     ModelProviderFailure,
     ModelProviderFailureCategory,
+    extract_provider_http_status_code,
     model_provider_failure,
 )
 
@@ -707,7 +708,7 @@ def _incomplete_response_model_error(
             details.get("message")
             or _terminal_failure_fallback_message("incomplete", provider_code)
         ),
-        status_code=None,
+        status_code=extract_provider_http_status_code(details, response),
         provider_code=provider_code,
         provider_error_type="response_incomplete",
         provider_error_param=details.get("param"),
@@ -734,7 +735,7 @@ def _failed_response_model_error(
             error.get("message")
             or _terminal_failure_fallback_message("failed", provider_code)
         ),
-        status_code=None,
+        status_code=extract_provider_http_status_code(error, response),
         provider_code=provider_code,
         provider_error_type=error.get("type") or "response_failed",
         provider_error_param=error.get("param"),
@@ -760,7 +761,7 @@ def _response_error_event_model_error(
             item.get("message")
             or _terminal_failure_fallback_message("error", provider_code)
         ),
-        status_code=None,
+        status_code=extract_provider_http_status_code(item),
         provider_code=provider_code,
         provider_error_type=item.get("type") or "response_error",
         provider_error_param=item.get("param"),
