@@ -18,7 +18,11 @@ from azents.core.enums import (
 from azents.core.runtime_profile import RuntimeConfigurationResolutionStatus
 from azents.rdb.models.agent import RDBAgent
 from azents.rdb.models.agent_runtime import RDBAgentRuntime
-from azents.rdb.models.runtime_profile import RDBRuntimeConfigurationRevision
+from azents.rdb.models.runtime_profile import (
+    RDBRuntimeConfigurationRevision,
+    RDBRuntimeInfrastructureProfile,
+    RDBWorkspaceRuntimeProfile,
+)
 from azents.rdb.models.runtime_provider import RDBRuntimeProvider
 
 from .data import (
@@ -189,26 +193,80 @@ class AgentRuntimeRepository:
         *,
         runtime_id: str,
         expected_revision_id: str | None,
+        expected_desired_generation: int,
+        agent_id: str,
+        workspace_id: str,
+        agent_selection_version: int,
         provider_logical_id: str,
         provider_resource_id: str,
+        provider_admin_version: int,
+        provider_capability_revision_id: str | None,
         binding_origin: RuntimeProviderBindingOrigin,
         binding_evidence: dict[str, object],
         infrastructure_profile_id: str,
+        infrastructure_profile_version: int,
         workspace_runtime_profile_id: str,
+        workspace_runtime_profile_version: int,
         configuration_revision_id: str,
     ) -> AgentRuntime | None:
-        """Attach one desired revision using the prior pointer as a stale fence."""
+        """Attach one desired revision only while its source snapshot is current."""
         prior_matches = (
             RDBAgentRuntime.desired_runtime_configuration_revision_id.is_(None)
             if expected_revision_id is None
             else RDBAgentRuntime.desired_runtime_configuration_revision_id
             == expected_revision_id
         )
+        provider_capability_matches = (
+            RDBRuntimeProvider.current_contract_revision_id.is_(None)
+            if provider_capability_revision_id is None
+            else RDBRuntimeProvider.current_contract_revision_id
+            == provider_capability_revision_id
+        )
+        agent_snapshot_matches = sa.exists(
+            sa.select(1).where(
+                RDBAgent.id == RDBAgentRuntime.agent_id,
+                RDBAgent.id == agent_id,
+                RDBAgent.workspace_id == workspace_id,
+                RDBAgent.runtime_profile_id == workspace_runtime_profile_id,
+                RDBAgent.runtime_profile_selection_version == agent_selection_version,
+            )
+        )
+        profile_snapshot_matches = sa.exists(
+            sa.select(1).where(
+                RDBWorkspaceRuntimeProfile.id == workspace_runtime_profile_id,
+                RDBWorkspaceRuntimeProfile.workspace_id == workspace_id,
+                RDBWorkspaceRuntimeProfile.version == workspace_runtime_profile_version,
+                RDBWorkspaceRuntimeProfile.provider_id == provider_resource_id,
+                RDBWorkspaceRuntimeProfile.infrastructure_profile_id
+                == infrastructure_profile_id,
+            )
+        )
+        infrastructure_snapshot_matches = sa.exists(
+            sa.select(1).where(
+                RDBRuntimeInfrastructureProfile.id == infrastructure_profile_id,
+                RDBRuntimeInfrastructureProfile.version
+                == infrastructure_profile_version,
+                RDBRuntimeInfrastructureProfile.provider_id == provider_resource_id,
+            )
+        )
+        provider_snapshot_matches = sa.exists(
+            sa.select(1).where(
+                RDBRuntimeProvider.id == provider_resource_id,
+                RDBRuntimeProvider.provider_id == provider_logical_id,
+                RDBRuntimeProvider.admin_version == provider_admin_version,
+                provider_capability_matches,
+            )
+        )
         result = await session.execute(
             sa.update(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
                 prior_matches,
+                RDBAgentRuntime.desired_generation == expected_desired_generation,
+                agent_snapshot_matches,
+                profile_snapshot_matches,
+                infrastructure_snapshot_matches,
+                provider_snapshot_matches,
             )
             .values(
                 runtime_provider_id=provider_logical_id,
