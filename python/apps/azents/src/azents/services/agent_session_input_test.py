@@ -981,6 +981,7 @@ class TestAgentSessionInputService:
 
         agent_id: str | None = None
         user_id: str | None = None
+        workspace_id: str | None = None
         try:
             async with independent_session_manager() as session:
                 workspace_id = await _create_workspace(
@@ -1004,6 +1005,7 @@ class TestAgentSessionInputService:
 
             assert agent_id is not None
             assert user_id is not None
+            assert workspace_id is not None
 
             def _service() -> AgentSessionInputService:
                 return AgentSessionInputService(
@@ -1078,8 +1080,8 @@ class TestAgentSessionInputService:
             assert len(sessions) == 2
             assert len(buffers) == 2
         finally:
-            if agent_id is not None:
-                async with independent_session_manager() as session:
+            async with independent_session_manager() as session:
+                if agent_id is not None:
                     await session.execute(
                         sa.text(
                             "DELETE FROM chat_write_requests "
@@ -1096,41 +1098,12 @@ class TestAgentSessionInputService:
                         ),
                         {"agent_id": agent_id},
                     )
-                    await session.execute(
-                        sa.text(
-                            "UPDATE session_agent_contexts "
-                            "SET root_session_agent_id = NULL "
-                            "WHERE agent_id = :agent_id"
-                        ),
-                        {"agent_id": agent_id},
-                    )
-                    await session.execute(
-                        sa.text(
-                            "DELETE FROM session_agents WHERE agent_session_id IN "
-                            "(SELECT id FROM agent_sessions WHERE agent_id = :agent_id)"
-                        ),
-                        {"agent_id": agent_id},
-                    )
-                    await session.execute(
-                        sa.text(
-                            "DELETE FROM session_agent_contexts "
-                            "WHERE agent_id = :agent_id"
-                        ),
-                        {"agent_id": agent_id},
-                    )
-                    await session.execute(
-                        sa.delete(RDBAgentSession).where(
-                            RDBAgentSession.agent_id == agent_id
-                        )
-                    )
-                    await session.execute(
-                        sa.delete(RDBAgentRuntime).where(
-                            RDBAgentRuntime.agent_id == agent_id
-                        )
-                    )
-                    await session.execute(
-                        sa.delete(RDBAgent).where(RDBAgent.id == agent_id)
-                    )
+                await _cleanup_committed_agent_fixture(
+                    session,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    agent_id=agent_id,
+                )
 
     async def test_new_session_retry_rejects_changed_payload(
         self,
