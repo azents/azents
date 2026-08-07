@@ -317,6 +317,70 @@ def sanitize_provider_error_param(value: object) -> str | None:
     return parameter
 
 
+def extract_provider_http_status_code(*values: object) -> int | None:
+    """Return one HTTP status code from provider payload fragments when present.
+
+    Stream and terminal Responses events often omit HTTP status. Preserve it only
+    when a concrete 100-599 code is present on the payload or nested error object.
+    Response lifecycle strings such as ``failed`` are ignored.
+    """
+    for value in values:
+        status = _coerce_http_status_code(value)
+        if status is not None:
+            return status
+        if isinstance(value, dict):
+            for key in (
+                "status_code",
+                "http_status",
+                "http_status_code",
+                "status",
+            ):
+                status = _coerce_http_status_code(value.get(key))
+                if status is not None:
+                    return status
+            nested_error = value.get("error")
+            if nested_error is not None:
+                status = extract_provider_http_status_code(nested_error)
+                if status is not None:
+                    return status
+            nested_response = value.get("response")
+            if nested_response is not None:
+                status = extract_provider_http_status_code(nested_response)
+                if status is not None:
+                    return status
+            continue
+        for attr in ("status_code", "http_status", "http_status_code"):
+            status = _coerce_http_status_code(getattr(value, attr, None))
+            if status is not None:
+                return status
+        nested_error = getattr(value, "error", None)
+        if nested_error is not None and nested_error is not value:
+            status = extract_provider_http_status_code(nested_error)
+            if status is not None:
+                return status
+        nested_response = getattr(value, "response", None)
+        if nested_response is not None and nested_response is not value:
+            status = extract_provider_http_status_code(nested_response)
+            if status is not None:
+                return status
+    return None
+
+
+def _coerce_http_status_code(value: object) -> int | None:
+    """Accept only concrete HTTP status codes in the 100-599 range."""
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value if 100 <= value <= 599 else None
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate.isdigit():
+            return None
+        status = int(candidate)
+        return status if 100 <= status <= 599 else None
+    return None
+
+
 def classify_model_provider_failure(
     *,
     status_code: int | None,
@@ -350,6 +414,11 @@ def classify_model_provider_failure(
         "quota",
         "billing",
         "credit_balance",
+        # ChatGPT OAuth subscription exhaustion is often 429 + usage_limit_reached.
+        # Match before bare 429 so quota is not mislabeled as a transient rate limit.
+        "usage_limit_reached",
+        "usage_limit",
+        "plan_limit",
     ):
         return ModelProviderFailureCategory.QUOTA_OR_BILLING
     if status_code == 429 or _contains_any(

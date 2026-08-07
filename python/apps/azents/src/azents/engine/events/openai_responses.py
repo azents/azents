@@ -118,6 +118,7 @@ from azents.engine.run.provider_failure import (
     ModelProviderFailure,
     ModelProviderFailureCategory,
     classify_model_provider_failure,
+    extract_provider_http_status_code,
     extract_provider_message_text,
     model_provider_failure,
     sanitize_provider_error_param,
@@ -1325,6 +1326,11 @@ class _OpenAIResponsesOutputStream:
                 provider_code=provider_code,
                 provider_error_type="response_incomplete",
                 provider_error_param=None,
+                status_code=extract_provider_http_status_code(
+                    reason,
+                    native_event.response,
+                    native_event,
+                ),
             )
         elif (
             isinstance(native_event, ResponseFailedEvent)
@@ -1345,6 +1351,11 @@ class _OpenAIResponsesOutputStream:
                 provider_code=provider_code,
                 provider_error_type="response_failed",
                 provider_error_param=None,
+                status_code=extract_provider_http_status_code(
+                    response_error,
+                    native_event.response,
+                    native_event,
+                ),
             )
         elif (
             isinstance(native_event, ResponseErrorEvent)
@@ -1360,6 +1371,7 @@ class _OpenAIResponsesOutputStream:
                 provider_code=native_event.code,
                 provider_error_type="response_error",
                 provider_error_param=native_event.param,
+                status_code=extract_provider_http_status_code(native_event),
             )
         elif (
             isinstance(native_event, ResponseCompletedEvent)
@@ -1878,6 +1890,7 @@ def _map_openai_terminal_error(
     provider_code: str | None,
     provider_error_type: str,
     provider_error_param: object,
+    status_code: int | None = None,
 ) -> ModelProviderFailure:
     """Convert one typed terminal event into the common provider contract."""
     return model_provider_failure(
@@ -1889,7 +1902,7 @@ def _map_openai_terminal_error(
             provider_message
             or _openai_terminal_fallback_message(outcome, provider_code)
         ),
-        status_code=None,
+        status_code=status_code,
         provider_code=provider_code,
         provider_error_type=provider_error_type,
         provider_error_param=provider_error_param,
@@ -1912,7 +1925,12 @@ def _openai_terminal_fallback_message(
         return "The model provider rejected the request due to policy."
     if provider_code == "context_length_exceeded":
         return "The model context window was exceeded."
-    if provider_code == "insufficient_quota":
+    if provider_code in {
+        "insufficient_quota",
+        "usage_limit_reached",
+        "usage_limit",
+        "plan_limit",
+    }:
         return "The model provider quota was exceeded."
     if provider_code == "rate_limit_exceeded":
         return "The model provider rate limit was exceeded."

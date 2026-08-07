@@ -214,8 +214,16 @@ def _completed_event(response: Response | None = None) -> ResponseCompletedEvent
     )
 
 
-def _failed_event(*, code: str, message: str) -> ResponseFailedEvent:
+def _failed_event(
+    *,
+    code: str,
+    message: str,
+    status_code: int | None = None,
+) -> ResponseFailedEvent:
     error = ResponseError.model_construct(code=code, message=message)
+    if status_code is not None:
+        # ResponseError has no typed HTTP status field; attach only for extractor tests.
+        object.__setattr__(error, "status_code", status_code)
     response = _response().model_copy(
         update={
             "error": error,
@@ -2602,6 +2610,33 @@ def test_typed_failed_event_classifies_rate_limit() -> None:
     assert raised.value.failure_code == "model_provider_rate_limit"
     assert raised.value.provider_code == "rate_limit_exceeded"
     assert raised.value.provider_message == "retry after provider-private detail"
+    assert raised.value.status_code is None
+
+
+def test_typed_failed_event_preserves_http_status_code() -> None:
+    """Terminal failed events keep a concrete HTTP status when the payload has one."""
+    normalizer = OpenAIResponsesOutputNormalizer(
+        provider="chatgpt_oauth",
+        model="gpt-5.6-terra",
+        operation="sampling",
+        integration=None,
+    )
+    output = normalizer.start("session-1")
+    output.process_event(
+        _failed_event(
+            code="usage_limit_reached",
+            message="The usage limit has been reached",
+            status_code=429,
+        )
+    )
+
+    with pytest.raises(ModelProviderFailure) as raised:
+        output.complete()
+
+    assert raised.value.category is ModelProviderFailureCategory.QUOTA_OR_BILLING
+    assert raised.value.provider_code == "usage_limit_reached"
+    assert raised.value.status_code == 429
+    assert raised.value.provider_message == "The usage limit has been reached"
 
 
 def test_cross_adapter_artifacts_use_canonical_fallback() -> None:
