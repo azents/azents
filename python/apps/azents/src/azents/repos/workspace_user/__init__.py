@@ -167,7 +167,8 @@ class WorkspaceUserRepository:
                 RDBWorkspaceUser.workspace_id == workspace_id,
                 RDBWorkspaceUser.user_id == user_id,
             )
-            .with_for_update()
+            # Membership authorization does not rewrite key columns.
+            .with_for_update(key_share=True)
         )
         rdb_workspace_user = result.scalar_one_or_none()
         if rdb_workspace_user is None:

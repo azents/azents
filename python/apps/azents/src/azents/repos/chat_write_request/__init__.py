@@ -73,26 +73,6 @@ class ChatWriteRequestRepository:
             raise RuntimeError("Idempotent chat write request lookup failed")
         return existing, False
 
-    async def lock_session_creation_request(
-        self,
-        session: AsyncSession,
-        *,
-        agent_id: str,
-        requester_user_id: str,
-        client_request_id: str,
-    ) -> None:
-        """Serialize one Agent-scoped Session creation request."""
-        lock_identity = (
-            f"chat-session-create:{agent_id}:{requester_user_id}:{client_request_id}"
-        )
-        await session.execute(
-            sa.select(
-                sa.func.pg_advisory_xact_lock(
-                    sa.func.hashtextextended(lock_identity, 0)
-                )
-            )
-        )
-
     async def get_by_session_creation_client_request_id(
         self,
         session: AsyncSession,
