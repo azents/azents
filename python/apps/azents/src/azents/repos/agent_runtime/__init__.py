@@ -350,37 +350,48 @@ class AgentRuntimeRepository:
         reset_final_desired_state: RuntimeDesiredState | None = None,
     ) -> AgentRuntimeLifecycleCommand | None:
         """Update Runtime desired state and generation."""
+        repeated_stop = sa.and_(
+            RDBAgentRuntime.desired_state == RuntimeDesiredState.STOPPED,
+            RDBAgentRuntime.last_lifecycle_command == RuntimeLifecycleCommandType.STOP,
+        )
         result = await session.execute(
-            sa.select(RDBAgentRuntime)
+            sa.update(RDBAgentRuntime)
             .where(
                 RDBAgentRuntime.id == runtime_id,
                 RDBAgentRuntime.terminal_delete_requested_generation.is_(None),
             )
-            .with_for_update()
+            .values(
+                desired_state=sa.case(
+                    (repeated_stop, RDBAgentRuntime.desired_state),
+                    else_=desired_state,
+                ),
+                desired_generation=sa.case(
+                    (repeated_stop, RDBAgentRuntime.desired_generation),
+                    else_=RDBAgentRuntime.desired_generation + 1,
+                ),
+                last_lifecycle_command=sa.case(
+                    (repeated_stop, RDBAgentRuntime.last_lifecycle_command),
+                    else_=command_type,
+                ),
+                reset_final_desired_state=sa.case(
+                    (repeated_stop, RDBAgentRuntime.reset_final_desired_state),
+                    else_=reset_final_desired_state,
+                ),
+                workspace_path=sa.case(
+                    (repeated_stop, RDBAgentRuntime.workspace_path),
+                    else_=None,
+                ),
+                last_state_change_at=sa.case(
+                    (repeated_stop, RDBAgentRuntime.last_state_change_at),
+                    else_=sa.func.now(),
+                ),
+            )
+            .returning(RDBAgentRuntime)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:
             return None
-        if (
-            command_type is RuntimeLifecycleCommandType.STOP
-            and desired_state is RuntimeDesiredState.STOPPED
-            and rdb.desired_state is RuntimeDesiredState.STOPPED
-            and rdb.last_lifecycle_command is RuntimeLifecycleCommandType.STOP
-        ):
-            runtime = self._build(rdb)
-            return AgentRuntimeLifecycleCommand(
-                runtime=runtime,
-                command_type=command_type,
-                desired_generation=runtime.desired_generation,
-            )
-        rdb.desired_state = desired_state
-        rdb.desired_generation += 1
-        rdb.last_lifecycle_command = command_type
-        rdb.reset_final_desired_state = reset_final_desired_state
-        rdb.workspace_path = None
-        rdb.last_state_change_at = datetime.datetime.now(datetime.UTC)
         await session.flush()
-        await session.refresh(rdb)
         runtime = self._build(rdb)
         return AgentRuntimeLifecycleCommand(
             runtime=runtime,
@@ -401,7 +412,7 @@ class AgentRuntimeRepository:
                 RDBAgentRuntime.id == runtime_id,
                 RDBAgentRuntime.desired_generation == desired_generation,
             )
-            .with_for_update()
+            .with_for_update(key_share=True, of=RDBAgentRuntime)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None or rdb.runtime_provider_resource_id is None:
@@ -514,7 +525,7 @@ class AgentRuntimeRepository:
                 == RuntimeConfigurationResolutionStatus.READY,
                 RDBRuntimeConfigurationRevision.resolved_configuration.is_not(None),
             )
-            .with_for_update()
+            .with_for_update(key_share=True, of=RDBAgentRuntime)
         )
         row = result.one_or_none()
         if row is None:

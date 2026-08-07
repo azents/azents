@@ -78,21 +78,21 @@ from azents.runtime.coordination.memory import (
 from azents.testing.model_selection import make_test_model_selection_dict
 
 
-class LockTrackingAgentRuntimeRepository(AgentRuntimeRepository):
-    """Record Runtime row locks acquired by OBSERVE drift repair."""
+class ReadTrackingAgentRuntimeRepository(AgentRuntimeRepository):
+    """Record Runtime reads performed by OBSERVE drift repair."""
 
     def __init__(self) -> None:
-        """Initialize lock tracking."""
-        self.locked_runtime_ids: list[str] = []
+        """Initialize Runtime read tracking."""
+        self.read_runtime_ids: list[str] = []
 
-    async def get_by_id_for_update(
+    async def get_by_id(
         self,
         session: AsyncSession,
         runtime_id: str,
     ) -> AgentRuntime | None:
-        """Record and acquire one Runtime row lock."""
-        self.locked_runtime_ids.append(runtime_id)
-        return await super().get_by_id_for_update(session, runtime_id)
+        """Record one lock-free Runtime read."""
+        self.read_runtime_ids.append(runtime_id)
+        return await super().get_by_id(session, runtime_id)
 
 
 async def test_reconciler_refreshes_stale_provider_connection_before_start_timeout(
@@ -302,7 +302,7 @@ async def test_reconciler_repairs_current_network_policy_drift_once(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """One current OBSERVE result dispatches one in-place configuration repair."""
-    runtime_repository = LockTrackingAgentRuntimeRepository()
+    runtime_repository = ReadTrackingAgentRuntimeRepository()
     profile_repository = RuntimeProfileRepository()
     async with rdb_session_manager() as session:
         workspace_id = await _create_workspace(session, "reconciler-drift-ws")
@@ -393,7 +393,7 @@ async def test_reconciler_repairs_current_network_policy_drift_once(
     assert claimed is not None
     assert claimed.payload["command_type"] == "update_configuration"
     assert no_retry == 0
-    assert runtime_repository.locked_runtime_ids == [runtime.id]
+    assert runtime_repository.read_runtime_ids == [runtime.id, runtime.id]
     handoff_log = next(
         record
         for record in caplog.records

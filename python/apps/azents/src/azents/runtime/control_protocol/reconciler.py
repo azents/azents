@@ -278,8 +278,9 @@ class RuntimeLifecycleReconciler:
             or observation.status is not SharedProviderReconciliationStatus.DRIFTED
         ):
             return False
+        repair_target: AgentRuntime | None = None
         async with self._session_manager() as session:
-            runtime = await self._runtime_repository.get_by_id_for_update(
+            runtime = await self._runtime_repository.get_by_id(
                 session,
                 report.runtime_id,
             )
@@ -310,33 +311,30 @@ class RuntimeLifecycleReconciler:
             )
             if not evidence_matches_current:
                 return False
-            _LOGGER.info(
-                "Runtime NetworkPolicy drift repair handed off",
-                extra={
-                    "runtime_id": runtime.id,
-                    "provider_id": report.provider_id,
-                    "provider_generation": report.provider_generation,
-                    "desired_generation": report.observed_desired_generation,
-                    "configuration_revision_id": (
-                        report.runtime_configuration.revision_id
-                    ),
-                    "reconciliation_kind": observation.kind,
-                    "reconciliation_reason": observation.reason,
-                },
-            )
-            return await self._dispatch_runtime_command(
-                runtime,
-                command_type=RuntimeProviderCommandType.UPDATE_CONFIGURATION,
-                claim_lifecycle=False,
-                required_provider_generation=report.provider_generation,
-                required_observed_generation=report.observed_desired_generation,
-                required_configuration_revision_id=(
-                    report.runtime_configuration.revision_id
-                ),
-                reconciliation_kind=observation.kind,
-                reconciliation_reason=observation.reason,
-                locked_session=session,
-            )
+            repair_target = runtime
+        assert repair_target is not None
+        _LOGGER.info(
+            "Runtime NetworkPolicy drift repair handed off",
+            extra={
+                "runtime_id": repair_target.id,
+                "provider_id": report.provider_id,
+                "provider_generation": report.provider_generation,
+                "desired_generation": report.observed_desired_generation,
+                "configuration_revision_id": report.runtime_configuration.revision_id,
+                "reconciliation_kind": observation.kind,
+                "reconciliation_reason": observation.reason,
+            },
+        )
+        return await self._dispatch_runtime_command(
+            repair_target,
+            command_type=RuntimeProviderCommandType.UPDATE_CONFIGURATION,
+            claim_lifecycle=False,
+            required_provider_generation=report.provider_generation,
+            required_observed_generation=report.observed_desired_generation,
+            required_configuration_revision_id=report.runtime_configuration.revision_id,
+            reconciliation_kind=observation.kind,
+            reconciliation_reason=observation.reason,
+        )
 
     async def _dispatch_runtime_command(
         self,
