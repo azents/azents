@@ -778,7 +778,12 @@ def _terminal_failure_fallback_message(
         return "The model provider rejected the request due to policy."
     if provider_code == "context_length_exceeded":
         return "The model context window was exceeded."
-    if provider_code == "insufficient_quota":
+    if provider_code in {
+        "insufficient_quota",
+        "usage_limit_reached",
+        "usage_limit",
+        "plan_limit",
+    }:
         return "The model provider quota was exceeded."
     if provider_code == "rate_limit_exceeded":
         return "The model provider rate limit was exceeded."

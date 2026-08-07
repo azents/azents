@@ -350,6 +350,11 @@ def classify_model_provider_failure(
         "quota",
         "billing",
         "credit_balance",
+        # ChatGPT OAuth subscription exhaustion is often 429 + usage_limit_reached.
+        # Match before bare 429 so quota is not mislabeled as a transient rate limit.
+        "usage_limit_reached",
+        "usage_limit",
+        "plan_limit",
     ):
         return ModelProviderFailureCategory.QUOTA_OR_BILLING
     if status_code == 429 or _contains_any(
