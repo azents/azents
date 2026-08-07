@@ -21,8 +21,8 @@ code_paths:
   - python/apps/azents-runtime-provider-kubernetes/**
   - python/apps/azents-runtime-runner/**
   - infra/charts/azents/**
-last_verified_at: 2026-08-05
-spec_version: 17
+last_verified_at: 2026-08-07
+spec_version: 18
 ---
 
 # Agent Runtime Persistence
@@ -46,6 +46,13 @@ The desired revision records the exact Provider capability revision, infrastruct
 Profile IDs/versions/digests, Agent selection version, resolved full configuration, source trace,
 target desired generation, and canonical digest. A blocked resolution is also durable and keeps its
 bounded reason and missing-capability evidence without discarding the last applied revision.
+
+Resolution reads Agent selection, Workspace Profile, infrastructure Profile, Provider, and
+capability inputs as lock-free versioned snapshots. It attaches a new desired pointer only through
+a Runtime compare-and-set that verifies the prior pointer, desired generation, and every snapshot
+identity/version relationship. A concurrent source change therefore cannot attach a stale revision.
+The resolver retries a stale attachment from a fresh snapshot once; a durable Agent-selection
+reconcile task converges any remaining conflict to the current authoritative selection.
 
 The applied revision pointer is separate physical evidence. It advances only after the exact
 Provider acknowledges the current revision and the ordinary Runner state report returns the same
@@ -210,6 +217,9 @@ Required checks:
 
 ## Changelog
 
+- **2026-08-07 (spec_version=18)** — Made Runtime Profile source reads lock-free and fenced the
+  desired pointer attachment by exact versioned source evidence, Runtime generation, and durable
+  reconcile convergence after a stale attachment.
 - **2026-08-05 (spec_version=17)** — Serialized the bounded repair target with the Runtime row
   through exact configuration lookup and Provider append, and preserved migration history through
   successor schema removal.

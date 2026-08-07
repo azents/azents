@@ -19,6 +19,7 @@ from azents.core.enums import (
 from azents.core.runtime_profile import (
     RuntimeConfigurationResolutionStatus,
     RuntimeProfileLifecycle,
+    RuntimeReconcileSourceKind,
     WorkspaceRuntimeProfilePolicyV1,
     compose_workspace_runtime_profile,
     evaluate_runtime_profile_compatibility,
@@ -96,11 +97,23 @@ class RuntimeProfileResolutionService:
         agent_id: str,
     ) -> RuntimeProfileResolutionResult:
         """Create or reconcile one Runtime from the Agent's exact selection."""
+        for _ in range(2):
+            resolution = await self._ensure_for_agent_once(agent_id)
+            if resolution is not None:
+                return resolution
+        raise RuntimeProfileResolutionUnavailable(
+            code="runtime_configuration_reconciling",
+            provider_id=None,
+            message="Runtime configuration is reconciling a concurrent change.",
+        )
+
+    async def _ensure_for_agent_once(
+        self,
+        agent_id: str,
+    ) -> RuntimeProfileResolutionResult | None:
+        """Resolve one lock-free source snapshot and attach it through final CAS."""
         async with self.session_manager() as session:
-            agent = await self.agent_repository.get_runtime_selection_input_for_update(
-                session,
-                agent_id=agent_id,
-            )
+            agent = await self.agent_repository.get_by_id(session, agent_id)
             if agent is None:
                 raise RuntimeProfileResolutionUnavailable(
                     code="agent_not_found",
@@ -116,19 +129,12 @@ class RuntimeProfileResolutionService:
                     ),
                 )
 
-            # Lifecycle commands lock the Runtime before cloning a configuration
-            # revision whose foreign keys reference the Profile source rows below.
-            # Lock an existing Runtime first so resolution cannot hold those source
-            # rows while waiting for the lifecycle transaction's Runtime lock.
-            existing = await self.runtime_repository.get_by_agent_id_for_update(
-                session,
-                agent.id,
-            )
+            existing = await self.runtime_repository.get_by_agent_id(session, agent.id)
             profile = await self.profile_repository.get_workspace_runtime_profile(
                 session,
                 workspace_id=agent.workspace_id,
                 profile_id=agent.runtime_profile_id,
-                for_update=True,
+                for_update=False,
             )
             if profile is None:
                 raise RuntimeProfileResolutionUnavailable(
@@ -139,7 +145,7 @@ class RuntimeProfileResolutionService:
             infrastructure = await self.profile_repository.get_infrastructure_profile(
                 session,
                 profile_id=profile.infrastructure_profile_id,
-                for_update=True,
+                for_update=False,
             )
             if infrastructure is None:
                 raise RuntimeProfileResolutionUnavailable(
@@ -150,7 +156,7 @@ class RuntimeProfileResolutionService:
             provider = await self.provider_repository.get_by_id(
                 session,
                 provider_id=profile.provider_id,
-                for_update=True,
+                for_update=False,
             )
             if provider is None:
                 raise RuntimeProfileResolutionUnavailable(
@@ -218,41 +224,101 @@ class RuntimeProfileResolutionService:
                     ),
                 )
             )
-            attached = (
-                await self.runtime_repository.attach_desired_configuration_revision(
-                    session,
-                    runtime_id=existing.id,
-                    expected_revision_id=(
-                        existing.desired_runtime_configuration_revision_id
+            attach_desired = (
+                self.runtime_repository.attach_desired_configuration_revision
+            )
+            attached = await attach_desired(
+                session,
+                runtime_id=existing.id,
+                expected_revision_id=(
+                    existing.desired_runtime_configuration_revision_id
+                ),
+                expected_desired_generation=existing.desired_generation,
+                agent_id=agent.id,
+                workspace_id=agent.workspace_id,
+                agent_selection_version=agent.runtime_profile_selection_version,
+                provider_logical_id=provider.provider_id,
+                provider_resource_id=provider.id,
+                provider_admin_version=provider.admin_version,
+                provider_capability_revision_id=provider.current_contract_revision_id,
+                binding_origin=RuntimeProviderBindingOrigin.AGENT_EXPLICIT,
+                binding_evidence={
+                    "workspace_id": agent.workspace_id,
+                    "agent_selection_version": (
+                        agent.runtime_profile_selection_version
                     ),
-                    provider_logical_id=provider.provider_id,
-                    provider_resource_id=provider.id,
-                    binding_origin=RuntimeProviderBindingOrigin.AGENT_EXPLICIT,
-                    binding_evidence={
-                        "workspace_id": agent.workspace_id,
-                        "agent_selection_version": (
-                            agent.runtime_profile_selection_version
-                        ),
-                        "workspace_runtime_profile_id": profile.id,
-                        "workspace_runtime_profile_version": profile.version,
-                        "infrastructure_profile_id": infrastructure.id,
-                        "infrastructure_profile_version": infrastructure.version,
-                        "provider_capability_revision_id": (
-                            prepared.capability_revision.id
-                            if prepared.capability_revision is not None
-                            else None
-                        ),
-                    },
-                    infrastructure_profile_id=infrastructure.id,
-                    workspace_runtime_profile_id=profile.id,
-                    configuration_revision_id=revision.id,
-                )
+                    "workspace_runtime_profile_id": profile.id,
+                    "workspace_runtime_profile_version": profile.version,
+                    "infrastructure_profile_id": infrastructure.id,
+                    "infrastructure_profile_version": infrastructure.version,
+                    "provider_capability_revision_id": (
+                        prepared.capability_revision.id
+                        if prepared.capability_revision is not None
+                        else None
+                    ),
+                },
+                infrastructure_profile_id=infrastructure.id,
+                infrastructure_profile_version=infrastructure.version,
+                workspace_runtime_profile_id=profile.id,
+                workspace_runtime_profile_version=profile.version,
+                configuration_revision_id=revision.id,
             )
             if attached is None:
-                raise RuntimeProfileResolutionUnavailable(
-                    code="runtime_configuration_conflict",
-                    provider_id=provider.provider_id,
-                    message="Runtime configuration changed concurrently.",
+                current_agent = await self.agent_repository.get_by_id(session, agent.id)
+                if current_agent is not None:
+                    await self.profile_repository.enqueue_reconcile_task(
+                        session,
+                        source_type=RuntimeReconcileSourceKind.AGENT_SELECTION,
+                        source_id=current_agent.id,
+                        source_version=str(
+                            current_agent.runtime_profile_selection_version
+                        ),
+                        available_at=tznow(),
+                    )
+                current_runtime = await self.runtime_repository.get_by_agent_id(
+                    session,
+                    agent.id,
+                )
+                if (
+                    current_runtime is None
+                    or current_runtime.desired_runtime_configuration_revision_id is None
+                ):
+                    return None
+                current_revision = (
+                    await self.profile_repository.get_configuration_revision(
+                        session,
+                        revision_id=(
+                            current_runtime.desired_runtime_configuration_revision_id
+                        ),
+                    )
+                )
+                if current_revision is None:
+                    return None
+                if (
+                    current_agent is None
+                    or current_agent.runtime_profile_id
+                    != current_revision.workspace_runtime_profile_id
+                    or current_agent.runtime_profile_selection_version
+                    != current_revision.agent_selection_version
+                ):
+                    return None
+                applied_revision = None
+                if (
+                    current_runtime.applied_runtime_configuration_revision_id
+                    is not None
+                ):
+                    get_revision = self.profile_repository.get_configuration_revision
+                    applied_revision = await get_revision(
+                        session,
+                        revision_id=(
+                            current_runtime.applied_runtime_configuration_revision_id
+                        ),
+                    )
+                return RuntimeProfileResolutionResult(
+                    runtime=current_runtime,
+                    desired_revision=current_revision,
+                    applied_revision=applied_revision,
+                    runtime_created=False,
                 )
             applied_revision = None
             if attached.applied_runtime_configuration_revision_id is not None:
