@@ -80,11 +80,13 @@ class AgentRuntimeRepository:
         session: AsyncSession,
         runtime_id: str,
     ) -> AgentRuntime | None:
-        """Fetch and lock one Agent Runtime."""
+        """Fetch and serialize one Agent Runtime state reconciliation."""
         result = await session.execute(
             sa.select(RDBAgentRuntime)
             .where(RDBAgentRuntime.id == runtime_id)
-            .with_for_update()
+            # Runtime state reconciliation never changes Runtime key columns, so
+            # SessionAgentContext foreign-key references remain compatible.
+            .with_for_update(key_share=True)
         )
         rdb = result.scalar_one_or_none()
         return self._build(rdb) if rdb is not None else None
