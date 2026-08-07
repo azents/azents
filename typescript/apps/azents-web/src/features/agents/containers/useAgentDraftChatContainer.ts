@@ -6,7 +6,7 @@
  * Owns the pre-session first-message write and canonical URL replacement.
  */
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgentWorkspaceDirectoryPickerContainer } from "@/features/agent-workspace/containers/useAgentWorkspaceDirectoryPickerContainer";
 import { trpc } from "@/trpc/client";
@@ -57,6 +57,7 @@ export type GitRefPreviewState =
 export interface AgentDraftChatContainerOutput {
   handle: string;
   agent: AgentResponse;
+  sessionScope: AgentDraftSessionScope;
   isWritePending: boolean;
   canSendMessage: boolean;
   selectedProjectPaths: string[];
@@ -81,6 +82,7 @@ export interface AgentDraftChatContainerOutput {
   onSelectProjectPickerDirectory: (entry: ProjectDirectoryPickerEntry) => void;
   onRefreshProjectPicker: () => void;
   onStartRuntimeForProjectPicker: () => void;
+  onSessionScopeChange: (scope: AgentDraftSessionScope) => void;
   onSendMessage: (
     message: string,
     inferenceProfile: RequestedInferenceProfile,
@@ -249,8 +251,11 @@ function setupActionsFromWorkspaceItems(
 export function useAgentDraftChatContainer(
   props: AgentDraftChatContainerProps,
 ): AgentDraftChatContainerOutput {
-  const { handle, agent, sessionScope = "team" } = props;
+  const { handle, agent, sessionScope: initialSessionScope = "team" } = props;
+  const pathname = usePathname();
   const router = useRouter();
+  const [sessionScope, setSessionScope] =
+    useState<AgentDraftSessionScope>(initialSessionScope);
   const utils = trpc.useUtils();
   const createTeamMessageMutation =
     trpc.chat.createTeamAgentSessionMessage.useMutation();
@@ -266,6 +271,10 @@ export function useAgentDraftChatContainer(
   const [projectPickerPurpose, setProjectPickerPurpose] =
     useState<ProjectPickerPurpose>("existing_project");
   const defaultsAppliedRef = useRef(false);
+
+  useEffect(() => {
+    setSessionScope(initialSessionScope);
+  }, [initialSessionScope]);
 
   const onAddPresetProject = useCallback((path: string): void => {
     defaultsAppliedRef.current = true;
@@ -310,7 +319,18 @@ export function useAgentDraftChatContainer(
     setWorkspaceItems([]);
     setActiveWorktreeItemId(null);
     setProjectPickerPurpose("existing_project");
-  }, [agent.id, sessionScope]);
+  }, [agent.id]);
+
+  const onSessionScopeChange = useCallback(
+    (scope: AgentDraftSessionScope): void => {
+      if (scope === sessionScope) {
+        return;
+      }
+      setSessionScope(scope);
+      router.replace(scope === "team" ? pathname : `${pathname}?scope=user`);
+    },
+    [pathname, router, sessionScope],
+  );
 
   useEffect(() => {
     if (defaultsAppliedRef.current || !projectDefaultsQuery.data) {
@@ -562,6 +582,7 @@ export function useAgentDraftChatContainer(
   return {
     handle,
     agent,
+    sessionScope,
     isWritePending:
       createTeamMessageMutation.isPending ||
       createUserMessageMutation.isPending ||
@@ -589,6 +610,7 @@ export function useAgentDraftChatContainer(
     onSelectProjectPickerDirectory: projectPicker.selectDirectory,
     onRefreshProjectPicker: projectPicker.refresh,
     onStartRuntimeForProjectPicker: projectPicker.startRuntime,
+    onSessionScopeChange,
     onSendMessage,
   };
 }

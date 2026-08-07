@@ -5,6 +5,7 @@ import datetime
 from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
 from azcommon.result import Success
 from pytest import MonkeyPatch
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -34,6 +35,7 @@ from azents.core.enums import (
 from azents.core.inference_profile import SessionInferenceState
 from azents.core.llm_catalog import ModelReasoningEffort
 from azents.rdb.models.agent import RDBAgent
+from azents.rdb.models.agent_session import RDBAgentSession
 from azents.rdb.models.external_channel import (
     RDBExternalChannelAgentRoute,
     RDBExternalChannelBinding,
@@ -1565,6 +1567,119 @@ class TestAgentSessionRepository:
             associated_user_id=other_id,
         )
         assert other_list == []
+
+    async def test_active_team_lists_order_primary_then_pinned_then_recency(
+        self,
+        rdb_session: AsyncSession,
+    ) -> None:
+        """Active Team directory pages retain pinned-first deterministic ordering."""
+        workspace_id = await _create_workspace(rdb_session, "pinned-order-ws")
+        agent_id = await _create_agent(rdb_session, workspace_id, "pinned-order")
+        repo = AgentSessionRepository()
+        primary = (
+            await repo.ensure_team_primary_for_agent(
+                rdb_session,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+            )
+        ).session
+        pinned_older = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title="Pinned older",
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+            ),
+        )
+        pinned_newer = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title="Pinned newer",
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+            ),
+        )
+        unpinned_newer = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title="Unpinned newer",
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+            ),
+        )
+        unpinned_older = await repo.create(
+            rdb_session,
+            AgentSessionCreate(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                title="Unpinned older",
+                product_mode=AgentSessionProductMode.TEAM,
+                associated_user_id=None,
+            ),
+        )
+        ordered_updates = [
+            (pinned_older, True, 2),
+            (pinned_newer, True, 4),
+            (unpinned_newer, False, 5),
+            (unpinned_older, False, 1),
+        ]
+        for session, pinned, day in ordered_updates:
+            changed_at = datetime.datetime(2026, 1, day, tzinfo=datetime.UTC)
+            await rdb_session.execute(
+                sa.update(RDBAgentSession)
+                .where(RDBAgentSession.id == session.id)
+                .values(
+                    pinned=pinned,
+                    last_user_input_at=changed_at,
+                    updated_at=changed_at,
+                )
+            )
+        await rdb_session.flush()
+
+        expected_ids = [
+            primary.id,
+            pinned_newer.id,
+            pinned_older.id,
+            unpinned_newer.id,
+            unpinned_older.id,
+        ]
+        active_sessions = await repo.list_active_by_agent_id(
+            rdb_session,
+            agent_id,
+        )
+        first_page = await repo.list_active_unread_page_by_agent_id(
+            rdb_session,
+            agent_id,
+            auto_archive_ttl_days=30,
+            offset=0,
+            limit=2,
+        )
+        second_page = await repo.list_active_unread_page_by_agent_id(
+            rdb_session,
+            agent_id,
+            auto_archive_ttl_days=30,
+            offset=2,
+            limit=2,
+        )
+        third_page = await repo.list_active_unread_page_by_agent_id(
+            rdb_session,
+            agent_id,
+            auto_archive_ttl_days=30,
+            offset=4,
+            limit=2,
+        )
+
+        assert [session.id for session in active_sessions] == expected_ids
+        assert [item.session.id for item in first_page.items] == expected_ids[:2]
+        assert [item.session.id for item in second_page.items] == expected_ids[2:4]
+        assert [item.session.id for item in third_page.items] == expected_ids[4:]
+        assert first_page.total_count == len(expected_ids)
 
     async def test_create_rejects_invalid_product_mode_combinations(
         self,

@@ -111,8 +111,8 @@ api_routes:
   - /chat/v1/exchange-files/{file_id}/download
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/hibernate
   - /internal/agent-home/v1/runtimes/{agent_runtime_id}/projects
-last_verified_at: 2026-08-06
-spec_version: 143
+last_verified_at: 2026-08-07
+spec_version: 145
 ---
 
 # Conversation & Events
@@ -210,8 +210,9 @@ non-primary team sessions may exist under the same agent with `primary_kind = nu
 `GET /chat/v1/agents/{agent_id}/sessions` is the bounded Team session directory read. Its
 `status=active|archived`, `offset`, and `limit` query parameters select one Team root-session page and
 return `items`, `total_count`, `offset`, `limit`, and current archive-retention policy metadata.
-Active rows place the team primary session first and order remaining sessions by persisted
-`last_user_input_at`, then `updated_at`, with a stable session-id tie breaker. Archived rows order by
+Active rows place the team primary session first, then pinned non-primary Team sessions, then unpinned
+Team sessions. Each non-primary group orders by persisted `last_user_input_at`, then `updated_at`,
+with a stable session-id tie breaker. Archived rows order by
 `archived_at`, then `updated_at`, with the same tie breaker. Active rows retain unread terminal-run
 and automatic-archive projections; archived rows retain archive time, purge deadline, and the
 immutable retention snapshot. `GET /chat/v1/agents/{agent_id}/sessions/sidebar` returns every pinned
@@ -264,7 +265,10 @@ owner-scoped active User Session list. Team mutations invalidate the paginated d
 sidebar summary, while My mutations invalidate the owner-scoped User Session list. Selected sessions
 navigate through `/w/{handle}/agents/{agent_id}/sessions/{session_id}`.
 Team create navigates to `/w/{handle}/agents/{agent_id}/sessions/new`. My create navigates to
-`/w/{handle}/agents/{agent_id}/sessions/new?scope=user`. Both draft routes must not create an
+`/w/{handle}/agents/{agent_id}/sessions/new?scope=user`. The draft route renders a Team/My scope
+selector initialized from that route state, defaults to Team when absent or invalid, and updates the
+route state without creating or mutating a Session. The selected scope chooses the existing Team or
+requester-owned User first-message admission boundary. Both draft routes must not create an
 `AgentSession` row until the first accepted message. The draft route renders the Agent top bar plus the
 chat input surface, but it does not render session-scoped Projects or Context tabs. The draft composer
 shows a compact additive workspace selector where repository folders are added to one list and each
@@ -1126,6 +1130,9 @@ participant.
 
 ## 12. Changelog
 
+- **2026-08-07** — v145. Added explicit Team/My selection to the new-session draft
+  while retaining URL-backed default Team behavior, and ordered active Team directory
+  rows as primary, pinned, then unpinned before the existing deterministic recency keys.
 - **2026-08-06** — v144. Aligned the Agent session directory with the shared Agent detail header and content layout, standardized pagination, and made the Agent profile link open the Team directory.
 - **2026-08-06** — v143. Added root product mode to authorized session detail responses so direct
   session URLs can resolve Team/My navigation scope without broad User Session reads.

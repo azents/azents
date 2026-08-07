@@ -628,8 +628,10 @@ class AgentSessionRepository:
             )
             .order_by(
                 primary_order,
+                RDBAgentSession.pinned.desc(),
                 RDBAgentSession.last_user_input_at.desc(),
                 RDBAgentSession.updated_at.desc(),
+                RDBAgentSession.id.asc(),
             )
         )
         return [self._build(rdb) for rdb in result.scalars()]
@@ -827,6 +829,7 @@ class AgentSessionRepository:
             .where(*filters)
             .order_by(
                 primary_order,
+                RDBAgentSession.pinned.desc(),
                 RDBAgentSession.last_user_input_at.desc(),
                 RDBAgentSession.updated_at.desc(),
                 RDBAgentSession.id.asc(),

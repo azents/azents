@@ -884,6 +884,7 @@
           "teamTab": "팀",
           "myTab": "내 세션",
           "scopeTabs": "세션 목록",
+          "newSessionScope": "새 세션 범위",
           "newUser": "새 개인 세션",
           "userEmpty": "아직 개인 세션이 없습니다.",
           "pinnedTitle": "고정됨",

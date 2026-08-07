@@ -16,7 +16,7 @@ Design documents are accumulated records and are not listed individually in this
 | Title | Domain | Owner | Last Verified At | Spec Version |
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-03 | 63 |
-| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-06 | 143 |
+| [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-07 | 145 |
 | [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-05 | 50 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-06 | 7 |
@@ -355,6 +355,7 @@ Design documents are accumulated records and are not listed individually in this
 | [Session Working Folder Requirements](requirements/session-260803-session-working-folder.md) | session-260803 | 2026-08-03 | 2026-08-04 |
 | [Session Folder Project Browser Prominence Requirements](requirements/session-260804-project-browser-session-folder-prominence.md) | session-260804 | 2026-08-04 | 2026-08-04 |
 | [Private User Sessions Requirements](requirements/session-260806-user-sessions.md) | session-260806 | 2026-08-06 | - |
+| [New Session Scope Selection and Pinned Directory Order Requirements](requirements/session-260807-session-scope-and-pinned-directory.md) | session-260807 | 2026-08-07 | 2026-08-07 |
 | [Agent Settings Pages and Memory UI Historical Requirements Reconstruction](requirements/settings-260702-settings-pages-and-memory-ui.md) | settings-260702 | 2026-07-02 | - |
 | [Model-Scoped Selectable Model Settings Historical Requirements Reconstruction](requirements/settings-260716-selectable-settings.md) | settings-260716 | 2026-07-16 | - |
 | [Model Unread Run Results as Session-Shared State Historical Requirements Reconstruction](requirements/shared-260720-shared-unread-result.md) | shared-260720 | 2026-07-20 | - |
@@ -731,6 +732,7 @@ Design documents are accumulated records and are not listed individually in this
 - [Session Working Folder](adr/session-260803-session-working-folder.md)
 - [Session Folder Project Browser Prominence](adr/session-260804-project-browser-session-folder-prominence.md)
 - [Private User Sessions](adr/session-260806-user-sessions.md)
+- [New Session Scope Selection and Pinned Directory Order Decisions](adr/session-260807-session-scope-and-pinned-directory.md)
 - [Agent Settings Pages and Memory UI](adr/settings-260702-settings-pages-and-memory-ui.md)
 - [Model-Scoped Selectable Model Settings Historical Decision Reconstruction](adr/settings-260716-selectable-settings.md)
 - [Model Unread Run Results as Session-Shared State](adr/shared-260720-shared-unread-result.md)
