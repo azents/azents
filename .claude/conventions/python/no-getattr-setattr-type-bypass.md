@@ -4,8 +4,8 @@ title: "Do not use `getattr`/`setattr`/`object.__setattr__` to reach or invent a
 
 # No getattr/setattr Type Bypass
 
-Same bar as banning `typing.cast(...)` and bare `type: ignore`: do not dodge the
-type checker with dynamic attribute access.
+Keep attribute access aligned with declared types. Dynamic attribute tricks hide
+missing fields and make failures harder to review than a real type fix.
 
 **Banned:** using `getattr` / `setattr` / `object.__setattr__` to read, write, or
 invent an attribute that is undeclared on the type, or that ty correctly rejects.
