@@ -4,7 +4,7 @@
  * Chat-only draft screen shown before the first message creates an AgentSession.
  */
 
-import { Box, Center, rem, Stack, Text } from "@mantine/core";
+import { Box, Center, Group, rem, Stack, Text } from "@mantine/core";
 import { IconMessageCircle } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -16,6 +16,7 @@ import { WorkspaceDirectoryPickerModal } from "@/features/chat/workspace/compone
 import styles from "./AgentChatTab.module.css";
 import { AgentSettingsHeader } from "./AgentSettingsHeader";
 import { NewSessionProjectSelector } from "./NewSessionProjectSelector";
+import { NewSessionScopeSelector } from "./NewSessionScopeSelector";
 import type { AgentDraftChatContainerOutput } from "../containers/useAgentDraftChatContainer";
 import type { UploadedFile } from "@/features/chat/hooks/useFileUpload";
 import type { RequestedInferenceProfile } from "@azents/public-client";
@@ -26,6 +27,7 @@ export function AgentDraftChat(
   const {
     handle,
     agent,
+    sessionScope,
     isWritePending,
     canSendMessage,
     onSendMessage,
@@ -46,6 +48,7 @@ export function AgentDraftChat(
     onSelectProjectPickerDirectory,
     onRefreshProjectPicker,
     onStartRuntimeForProjectPicker,
+    onSessionScopeChange,
   } = props;
   const t = useTranslations("chat");
   const isMobile = useMemo(
@@ -157,14 +160,20 @@ export function AgentDraftChat(
       <AgentSettingsHeader
         agent={agent}
         controls={
-          subscriptionSelection === null ? null : (
-            <ComposerSubscriptionUsagePopoverContainer
-              compact
-              handle={handle}
-              integrationId={subscriptionSelection.integrationId}
-              provider={subscriptionSelection.provider}
+          <Group gap="xs" wrap="nowrap">
+            <NewSessionScopeSelector
+              value={sessionScope}
+              onChange={onSessionScopeChange}
             />
-          )
+            {subscriptionSelection === null ? null : (
+              <ComposerSubscriptionUsagePopoverContainer
+                compact
+                handle={handle}
+                integrationId={subscriptionSelection.integrationId}
+                provider={subscriptionSelection.provider}
+              />
+            )}
+          </Group>
         }
       />
       <Center flex={1} mih={0} px="md">

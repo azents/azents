@@ -884,6 +884,7 @@
           "teamTab": "Équipe",
           "myTab": "Moi",
           "scopeTabs": "Listes de sessions",
+          "newSessionScope": "Portée de la nouvelle session",
           "newUser": "Nouvelle session privée",
           "userEmpty": "Aucune session privée pour le moment.",
           "pinnedTitle": "Épinglées",

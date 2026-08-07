@@ -884,6 +884,7 @@
           "teamTab": "Team",
           "myTab": "My",
           "scopeTabs": "Session lists",
+          "newSessionScope": "New session scope",
           "newUser": "New private session",
           "userEmpty": "No private sessions yet.",
           "pinnedTitle": "Pinned",

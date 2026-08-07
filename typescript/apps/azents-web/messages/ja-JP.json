@@ -884,6 +884,7 @@
           "teamTab": "チーム",
           "myTab": "自分",
           "scopeTabs": "セッション一覧",
+          "newSessionScope": "新しいセッションの範囲",
           "newUser": "新しいプライベートセッション",
           "userEmpty": "プライベートセッションはまだありません。",
           "pinnedTitle": "固定済み",
