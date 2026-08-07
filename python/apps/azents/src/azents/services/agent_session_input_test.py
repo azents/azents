@@ -83,10 +83,12 @@ from azents.services.root_agent_session_creation import (
 from azents.testing.model_selection import make_test_model_selection_dict
 
 from .agent_session_input import (
+    AgentSessionInputError,
     AgentSessionInputIdempotencyConflict,
     AgentSessionInputInactiveSession,
     AgentSessionInputService,
     AgentSessionInputSubagentReadOnly,
+    CreatedAgentSessionInputResult,
 )
 from .mailbox import (
     MailboxAdmissionResult,
@@ -957,6 +959,178 @@ class TestAgentSessionInputService:
         assert setup_buffer.sender_user_id is None
         assert setup_buffer.action == {"type": "create_session_working_folder"}
         assert user_buffer.id == first.value.accepted_mailbox_item_id
+
+    async def test_concurrent_new_session_creation_converges_without_advisory_lock(
+        self,
+        rdb_engine: AsyncEngine,
+        latest_db_schema: None,
+    ) -> None:
+        """Parallel first-message creators share one Agent-scoped idempotency winner."""
+        del latest_db_schema
+
+        @asynccontextmanager
+        async def independent_session_manager() -> AsyncGenerator[AsyncSession]:
+            async with AsyncSession(rdb_engine, expire_on_commit=False) as session:
+                try:
+                    yield session
+                except Exception:
+                    await session.rollback()
+                    raise
+                else:
+                    await session.commit()
+
+        agent_id: str | None = None
+        user_id: str | None = None
+        try:
+            async with independent_session_manager() as session:
+                workspace_id = await _create_workspace(
+                    session,
+                    "draft-session-concurrent",
+                )
+                user_id = await _create_user(
+                    session,
+                    "draft-session-concurrent@example.com",
+                )
+                await _add_workspace_user(
+                    session,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                )
+                agent_id = await _create_agent(
+                    session,
+                    workspace_id,
+                    "draft-session-concurrent",
+                )
+
+            assert agent_id is not None
+            assert user_id is not None
+
+            def _service() -> AgentSessionInputService:
+                return AgentSessionInputService(
+                    agent_repository=AgentRepository(),
+                    agent_project_preset_repository=AgentProjectPresetRepository(),
+                    agent_project_catalog_repository=AgentProjectCatalogRepository(),
+                    agent_project_default_repository=AgentProjectDefaultRepository(),
+                    agent_runtime_repository=AgentRuntimeRepository(),
+                    agent_session_repository=AgentSessionRepository(),
+                    root_agent_session_creation_service=(
+                        _root_agent_session_creation_service()
+                    ),
+                    chat_write_request_repository=ChatWriteRequestRepository(),
+                    session_workspace_project_repository=(
+                        SessionWorkspaceProjectRepository()
+                    ),
+                    workspace_user_repository=WorkspaceUserRepository(),
+                    exchange_file_service=_ExchangeFileService(),
+                    mailbox_item_service=_mailbox_item_service(
+                        independent_session_manager
+                    ),
+                    session_manager=independent_session_manager,
+                )
+
+            message = InputMessage(
+                text="concurrent first message",
+                headers=[],
+                metadata={"source": "chat"},
+                attachments=[],
+            )
+            request_payload: dict[str, object] = {
+                "agent_id": agent_id,
+                "client_request_id": "draft-session-concurrent",
+                "message": message.text,
+            }
+
+            async def _create() -> Result[
+                CreatedAgentSessionInputResult, AgentSessionInputError
+            ]:
+                return await _service().create_team_session_with_buffered_input(
+                    agent_id=agent_id or "",
+                    message=message,
+                    inference_profile=_TEST_INFERENCE_PROFILE,
+                    user_id=user_id or "",
+                    existing_project_paths=[],
+                    setup_actions=[],
+                    request_payload=request_payload,
+                    client_request_id="draft-session-concurrent",
+                )
+
+            first, second = await asyncio.gather(_create(), _create())
+
+            assert isinstance(first, Success), first
+            assert isinstance(second, Success), second
+            first_value = first.value
+            second_value = second.value
+            assert {first_value.created, second_value.created} == {True, False}
+            assert first_value.agent_session.id == second_value.agent_session.id
+            assert (
+                first_value.accepted_mailbox_item_id
+                == second_value.accepted_mailbox_item_id
+            )
+            async with independent_session_manager() as session:
+                sessions = await AgentSessionRepository().list_active_by_agent_id(
+                    session,
+                    agent_id,
+                )
+                buffers = await MailboxRepository().list_by_session_id(
+                    session,
+                    first_value.agent_session.id,
+                )
+            assert len(sessions) == 2
+            assert len(buffers) == 2
+        finally:
+            if agent_id is not None:
+                async with independent_session_manager() as session:
+                    await session.execute(
+                        sa.text(
+                            "DELETE FROM chat_write_requests "
+                            "WHERE creation_agent_id = :agent_id "
+                            "OR session_id IN (SELECT id FROM agent_sessions "
+                            "WHERE agent_id = :agent_id)"
+                        ),
+                        {"agent_id": agent_id},
+                    )
+                    await session.execute(
+                        sa.text(
+                            "DELETE FROM mailbox_items WHERE session_id IN "
+                            "(SELECT id FROM agent_sessions WHERE agent_id = :agent_id)"
+                        ),
+                        {"agent_id": agent_id},
+                    )
+                    await session.execute(
+                        sa.text(
+                            "UPDATE session_agent_contexts "
+                            "SET root_session_agent_id = NULL "
+                            "WHERE agent_id = :agent_id"
+                        ),
+                        {"agent_id": agent_id},
+                    )
+                    await session.execute(
+                        sa.text(
+                            "DELETE FROM session_agents WHERE agent_session_id IN "
+                            "(SELECT id FROM agent_sessions WHERE agent_id = :agent_id)"
+                        ),
+                        {"agent_id": agent_id},
+                    )
+                    await session.execute(
+                        sa.text(
+                            "DELETE FROM session_agent_contexts "
+                            "WHERE agent_id = :agent_id"
+                        ),
+                        {"agent_id": agent_id},
+                    )
+                    await session.execute(
+                        sa.delete(RDBAgentSession).where(
+                            RDBAgentSession.agent_id == agent_id
+                        )
+                    )
+                    await session.execute(
+                        sa.delete(RDBAgentRuntime).where(
+                            RDBAgentRuntime.agent_id == agent_id
+                        )
+                    )
+                    await session.execute(
+                        sa.delete(RDBAgent).where(RDBAgent.id == agent_id)
+                    )
 
     async def test_new_session_retry_rejects_changed_payload(
         self,

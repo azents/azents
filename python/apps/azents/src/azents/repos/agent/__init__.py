@@ -100,8 +100,8 @@ class AgentRepository:
         result = await session.execute(
             sa.select(RDBAgent)
             .where(RDBAgent.id == agent_id)
-            # Session admission validates lifecycle without rewriting key columns.
-            # FOR NO KEY UPDATE keeps Runtime FK KEY SHARE references unblocked.
+            # Admission and write reauthorization only validate lifecycle and
+            # ownership columns, so FOR NO KEY UPDATE is sufficient.
             .with_for_update(key_share=True)
         )
         rdb_agent = result.scalar_one_or_none()

@@ -1046,11 +1046,14 @@ class AgentSessionRepository:
         session: AsyncSession,
         agent_session_id: str,
     ) -> AgentSession | None:
-        """Fetch AgentSession by ID with a row lock."""
+        """Fetch one AgentSession while serializing non-key admission updates."""
         result = await session.execute(
             sa.select(RDBAgentSession)
             .where(RDBAgentSession.id == agent_session_id)
-            .with_for_update()
+            # SQLAlchemy renders key_share=True as PostgreSQL
+            # ``FOR NO KEY UPDATE``. Admission updates only non-key columns
+            # such as run_state while allowing FK KEY SHARE references.
+            .with_for_update(key_share=True)
         )
         rdb = result.scalar_one_or_none()
         if rdb is None:

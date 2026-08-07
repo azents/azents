@@ -422,12 +422,6 @@ class AgentSessionInputService:
                 "sender_user_id": user_id,
             }
             if client_request_id is not None:
-                await self.chat_write_request_repository.lock_session_creation_request(
-                    session,
-                    agent_id=agent_id,
-                    requester_user_id=user_id,
-                    client_request_id=client_request_id,
-                )
                 write_requests = self.chat_write_request_repository
                 existing = await (
                     write_requests.get_by_session_creation_client_request_id(
@@ -606,8 +600,16 @@ class AgentSessionInputService:
                     ),
                 )
                 if not created or record.accepted_id != mailbox_item.id:
-                    raise RuntimeError(
-                        "Agent-scoped Session creation lost idempotency ownership"
+                    # Another creator won the Agent-scoped unique key. Discard the
+                    # losing Session tree and return the durable winner.
+                    await session.rollback()
+                    return await self._resolve_existing_session_creation(
+                        session,
+                        agent_id=agent_id,
+                        user_id=user_id,
+                        client_request_id=client_request_id,
+                        canonical_request_payload=canonical_request_payload,
+                        expected_product_mode=AgentSessionProductMode.TEAM,
                     )
             await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,
@@ -654,12 +656,6 @@ class AgentSessionInputService:
                 "sender_user_id": user_id,
             }
             if client_request_id is not None:
-                await self.chat_write_request_repository.lock_session_creation_request(
-                    session,
-                    agent_id=agent_id,
-                    requester_user_id=user_id,
-                    client_request_id=client_request_id,
-                )
                 write_requests = self.chat_write_request_repository
                 existing = await (
                     write_requests.get_by_session_creation_client_request_id(
@@ -838,8 +834,16 @@ class AgentSessionInputService:
                     ),
                 )
                 if not created or record.accepted_id != mailbox_item.id:
-                    raise RuntimeError(
-                        "Agent-scoped Session creation lost idempotency ownership"
+                    # Another creator won the Agent-scoped unique key. Discard the
+                    # losing Session tree and return the durable winner.
+                    await session.rollback()
+                    return await self._resolve_existing_session_creation(
+                        session,
+                        agent_id=agent_id,
+                        user_id=user_id,
+                        client_request_id=client_request_id,
+                        canonical_request_payload=canonical_request_payload,
+                        expected_product_mode=AgentSessionProductMode.USER,
                     )
             await self.agent_session_repository.mark_running_for_input_wakeup(
                 session,
@@ -1140,6 +1144,102 @@ class AgentSessionInputService:
                 raise ValueError(error.reason)
             case _:
                 assert_never(workspace_result)
+
+    async def _resolve_existing_session_creation(
+        self,
+        session: AsyncSession,
+        *,
+        agent_id: str,
+        user_id: str,
+        client_request_id: str,
+        canonical_request_payload: dict[str, object],
+        expected_product_mode: AgentSessionProductMode,
+    ) -> Result[CreatedAgentSessionInputResult, AgentSessionInputError]:
+        """Return the durable winner of one Agent-scoped Session creation race."""
+        get_existing = (
+            self.chat_write_request_repository.get_by_session_creation_client_request_id
+        )
+        existing = await get_existing(
+            session,
+            agent_id=agent_id,
+            requester_user_id=user_id,
+            client_request_id=client_request_id,
+        )
+        if existing is None:
+            raise RuntimeError(
+                "Agent-scoped Session creation lost idempotency ownership"
+            )
+        if existing.write_type is not ChatWriteRequestType.MESSAGE:
+            return Failure(
+                AgentSessionInputIdempotencyConflict(
+                    "Client request ID already used for another write type"
+                )
+            )
+        if existing.payload != canonical_request_payload:
+            return Failure(
+                AgentSessionInputIdempotencyConflict(
+                    "Client request ID already used for another payload"
+                )
+            )
+        agent_session = await self.agent_session_repository.get_by_id(
+            session,
+            existing.session_id,
+        )
+        if agent_session is None or agent_session.agent_id != agent_id:
+            raise RuntimeError(
+                "Session creation idempotency record resolved outside "
+                "its Agent boundary"
+            )
+        if agent_session.product_mode is not expected_product_mode:
+            return Failure(
+                AgentSessionInputIdempotencyConflict(
+                    "Client request ID already used for another session product mode"
+                )
+            )
+        if (
+            expected_product_mode is AgentSessionProductMode.USER
+            and agent_session.associated_user_id != user_id
+        ):
+            return Failure(
+                AgentSessionInputIdempotencyConflict(
+                    "Client request ID already used for another session product mode"
+                )
+            )
+        if (
+            expected_product_mode is AgentSessionProductMode.TEAM
+            and agent_session.associated_user_id is not None
+        ):
+            return Failure(
+                AgentSessionInputIdempotencyConflict(
+                    "Client request ID already used for another session product mode"
+                )
+            )
+        runtime = await self.agent_runtime_repository.get_by_agent_id(
+            session,
+            agent_id,
+        )
+        if runtime is None:
+            raise RuntimeError(
+                "Session creation idempotency record has no Agent runtime"
+            )
+        mailbox_item = await self.mailbox_item_service.get_by_id(
+            session,
+            buffer_id=existing.accepted_id,
+        )
+        if mailbox_item is not None and mailbox_item.session_id != agent_session.id:
+            raise RuntimeError(
+                "Session creation idempotency record resolved an input "
+                "outside its Session"
+            )
+        return Success(
+            CreatedAgentSessionInputResult(
+                agent_runtime_id=runtime.id,
+                agent_session=agent_session,
+                accepted_mailbox_item_id=existing.accepted_id,
+                mailbox_item=mailbox_item,
+                created=False,
+            )
+        )
 
     async def _lock_workspace_access(
         self,
