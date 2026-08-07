@@ -98,7 +98,11 @@ class AgentRepository:
     async def lock_by_id(self, session: AsyncSession, agent_id: str) -> Agent | None:
         """Lock one Agent for transactional lifecycle validation."""
         result = await session.execute(
-            sa.select(RDBAgent).where(RDBAgent.id == agent_id).with_for_update()
+            sa.select(RDBAgent)
+            .where(RDBAgent.id == agent_id)
+            # Session admission validates lifecycle without rewriting key columns.
+            # FOR NO KEY UPDATE keeps Runtime FK KEY SHARE references unblocked.
+            .with_for_update(key_share=True)
         )
         rdb_agent = result.scalar_one_or_none()
         if rdb_agent is None:
