@@ -6,6 +6,7 @@ import dataclasses
 import json
 import logging
 import os
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,6 +31,12 @@ from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_PROTOCOL_VERSION,
 )
 
+from azents_runtime_runner.containment import (
+    ContainmentBootstrapError,
+    ContainmentQualificationError,
+    ExecutionBackend,
+    execution_backend_from_environment,
+)
 from azents_runtime_runner.operations import RunnerOperations
 from azents_runtime_runner.transfer import RunnerTransferManager
 from azents_runtime_runner.workspace import Workspace
@@ -137,6 +144,9 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
     )
     limit_config = runner_limit_config_from_env()
     workspace = Workspace(workspace_path)
+    execution_backend = await _qualified_execution_backend(
+        workspace_path=workspace_path,
+    )
     registration = RunnerRegistration(
         runtime_id=runtime_id,
         runner_id=runner_id,
@@ -169,98 +179,155 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
             "max_concurrent_control_operations": (
                 limit_config.max_concurrent_control_operations
             ),
+            "execution_backend": execution_backend.kind,
         },
     )
-    while True:
-        client = GrpcRunnerControlClient.from_endpoint(
-            endpoint,
-            runner_auth_token=runner_auth_token,
-            tls=control_tls,
-            allow_insecure=allow_insecure_control,
-        )
-        transfer_client = GrpcRunnerTransferClient.from_endpoint(
-            transfer_endpoint,
-            runner_auth_token=runner_auth_token,
-            tls=control_tls,
-            allow_insecure=allow_insecure_control,
-        )
-        connection_id = _control_connection_id(base_connection_id)
-        operations = RunnerOperations(client=client, workspace=workspace)
-        run_loop = RunnerRunLoop(
-            client=client,
-            operations=operations,
-            registration=registration,
-            connection_id=connection_id,
-            consumer_id=runner_id,
-            max_concurrent_operations_per_session=(
-                limit_config.max_concurrent_operations_per_session
-            ),
-            max_concurrent_system_operations=(
-                limit_config.max_concurrent_system_operations
-            ),
-            max_concurrent_operations=limit_config.max_concurrent_operations,
-            max_pending_operations_per_owner=(
-                limit_config.max_pending_operations_per_owner
-            ),
-            max_pending_operations=limit_config.max_pending_operations,
-            max_concurrent_control_operations=(
-                limit_config.max_concurrent_control_operations
-            ),
-        )
-
-        def accepted_generation(run_loop: RunnerRunLoop = run_loop) -> int | None:
-            accepted = run_loop.accepted
-            return None if accepted is None else accepted.generation
-
-        transfer_manager = RunnerTransferManager(
-            control=client,
-            transfer=transfer_client,
-            accepted_generation=accepted_generation,
-        )
-        client.set_transfer_intent_handler(transfer_manager.handle_intent)
-        client.set_transfer_cancel_handler(transfer_manager.handle_cancel)
-        try:
-            _LOGGER.info(
-                "Runtime Runner connecting to Control",
-                extra={
-                    "runtime_id": runtime_id,
-                    "runner_id": runner_id,
-                    "connection_id": connection_id,
-                },
+    try:
+        while True:
+            client = GrpcRunnerControlClient.from_endpoint(
+                endpoint,
+                runner_auth_token=runner_auth_token,
+                tls=control_tls,
+                allow_insecure=allow_insecure_control,
             )
-            await transfer_manager.start()
-            await run_loop.run_forever()
-        except asyncio.CancelledError:
-            raise
-        except (
-            RuntimeRunnerControlStreamClosed,
-            RunnerConnectionRejected,
-            grpc.aio.AioRpcError,
-        ):
-            _LOGGER.warning(
-                "Runtime Runner Control stream disconnected; reconnecting",
-                exc_info=True,
-                extra={"runtime_id": runtime_id, "runner_id": runner_id},
+            transfer_client = GrpcRunnerTransferClient.from_endpoint(
+                transfer_endpoint,
+                runner_auth_token=runner_auth_token,
+                tls=control_tls,
+                allow_insecure=allow_insecure_control,
             )
-        finally:
-            await transfer_manager.close()
-            await transfer_client.close()
-            await operations.close()
+            connection_id = _control_connection_id(base_connection_id)
+            operations = RunnerOperations(
+                client=client,
+                workspace=workspace,
+                execution_backend=execution_backend,
+            )
+            run_loop = RunnerRunLoop(
+                client=client,
+                operations=operations,
+                registration=registration,
+                connection_id=connection_id,
+                consumer_id=runner_id,
+                max_concurrent_operations_per_session=(
+                    limit_config.max_concurrent_operations_per_session
+                ),
+                max_concurrent_system_operations=(
+                    limit_config.max_concurrent_system_operations
+                ),
+                max_concurrent_operations=limit_config.max_concurrent_operations,
+                max_pending_operations_per_owner=(
+                    limit_config.max_pending_operations_per_owner
+                ),
+                max_pending_operations=limit_config.max_pending_operations,
+                max_concurrent_control_operations=(
+                    limit_config.max_concurrent_control_operations
+                ),
+            )
+
+            def accepted_generation(run_loop: RunnerRunLoop = run_loop) -> int | None:
+                accepted = run_loop.accepted
+                return None if accepted is None else accepted.generation
+
+            transfer_manager = RunnerTransferManager(
+                control=client,
+                transfer=transfer_client,
+                accepted_generation=accepted_generation,
+            )
             try:
-                await asyncio.wait_for(
-                    client.close(),
-                    timeout=_CONTROL_CLIENT_CLOSE_TIMEOUT_SECONDS,
-                )
-            except TimeoutError:
-                _LOGGER.warning(
-                    "Runtime Runner Control client close timed out",
+                client.set_transfer_intent_handler(transfer_manager.handle_intent)
+                client.set_transfer_cancel_handler(transfer_manager.handle_cancel)
+                _LOGGER.info(
+                    "Runtime Runner connecting to Control",
                     extra={
                         "runtime_id": runtime_id,
                         "runner_id": runner_id,
-                        "timeout_seconds": _CONTROL_CLIENT_CLOSE_TIMEOUT_SECONDS,
+                        "connection_id": connection_id,
                     },
                 )
-        await asyncio.sleep(_CONTROL_RECONNECT_DELAY_SECONDS)
+                await transfer_manager.start()
+                await run_loop.run_forever()
+            except asyncio.CancelledError:
+                raise
+            except (
+                RuntimeRunnerControlStreamClosed,
+                RunnerConnectionRejected,
+                grpc.aio.AioRpcError,
+            ):
+                _LOGGER.warning(
+                    "Runtime Runner Control stream disconnected; reconnecting",
+                    exc_info=True,
+                    extra={"runtime_id": runtime_id, "runner_id": runner_id},
+                )
+            finally:
+                await transfer_manager.close()
+                await transfer_client.close()
+                await operations.close()
+                try:
+                    await asyncio.wait_for(
+                        client.close(),
+                        timeout=_CONTROL_CLIENT_CLOSE_TIMEOUT_SECONDS,
+                    )
+                except TimeoutError:
+                    _LOGGER.warning(
+                        "Runtime Runner Control client close timed out",
+                        extra={
+                            "runtime_id": runtime_id,
+                            "runner_id": runner_id,
+                            "timeout_seconds": _CONTROL_CLIENT_CLOSE_TIMEOUT_SECONDS,
+                        },
+                    )
+            await asyncio.sleep(_CONTROL_RECONNECT_DELAY_SECONDS)
+    finally:
+        await execution_backend.close()
+
+
+async def _qualified_execution_backend(
+    *,
+    workspace_path: str,
+) -> ExecutionBackend:
+    """Select and qualify one backend before normal Runner registration."""
+    try:
+        backend = execution_backend_from_environment(workspace_path=workspace_path)
+    except ContainmentBootstrapError as error:
+        _LOGGER.error(
+            "Runtime Runner process containment bootstrap rejected",
+            extra={"failure_category": "bootstrap_invalid"},
+        )
+        raise SystemExit("Runtime process containment bootstrap is invalid") from error
+    started_at = time.monotonic()
+    _LOGGER.info(
+        "Runtime Runner execution backend qualification started",
+        extra={"execution_backend": backend.kind},
+    )
+    try:
+        await backend.qualify()
+    except ContainmentQualificationError as error:
+        await backend.close()
+        _LOGGER.error(
+            "Runtime Runner execution backend qualification failed",
+            extra={
+                "execution_backend": backend.kind,
+                "failure_category": error.category,
+                "duration_ms": round(
+                    (time.monotonic() - started_at) * 1000,
+                    3,
+                ),
+            },
+        )
+        raise SystemExit(
+            f"Runtime process containment qualification failed: {error.category}"
+        ) from error
+    _LOGGER.info(
+        "Runtime Runner execution backend qualification succeeded",
+        extra={
+            "execution_backend": backend.kind,
+            "duration_ms": round(
+                (time.monotonic() - started_at) * 1000,
+                3,
+            ),
+        },
+    )
+    return backend
 
 
 def runner_limit_config_from_env() -> RunnerLimitConfig:

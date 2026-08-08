@@ -41,6 +41,12 @@ from azents_runtime_runner.apply_patch import (
     ApplyPatchResult,
     execute_apply_patch,
 )
+from azents_runtime_runner.containment import (
+    ExecutionBackend,
+    ExecutionProcess,
+    ProcessTerminationResult,
+    shell_execution_spec,
+)
 from azents_runtime_runner.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -173,8 +179,7 @@ class _ManagedProcess:
     process_id: str
     generation: int
     owner_session_id: str
-    process: asyncio.subprocess.Process
-    process_group_id: int
+    process: ExecutionProcess
     stdout: _ProcessOutputBuffer
     stderr: _ProcessOutputBuffer
     created_at: float
@@ -212,6 +217,7 @@ class RunnerOperations:
         *,
         client: RunnerEventSink,
         workspace: Workspace,
+        execution_backend: ExecutionBackend,
         process_max_unread_bytes: int = _DEFAULT_PROCESS_MAX_UNREAD_BYTES,
         process_idle_timeout_seconds: float = _DEFAULT_PROCESS_IDLE_TIMEOUT_SECONDS,
         process_max_lifetime_seconds: float = _DEFAULT_PROCESS_MAX_LIFETIME_SECONDS,
@@ -245,6 +251,7 @@ class RunnerOperations:
         self._apply_patch_lock = asyncio.Lock()
         self._apply_patch_limits = apply_patch_limits or ApplyPatchLimits()
         self._apply_patch_fault_injector = apply_patch_fault_injector
+        self._execution_backend = execution_backend
 
     async def handle(self, operation: RunnerOperationEnvelope) -> None:
         """Run one operation and publish progress/final events."""
@@ -392,12 +399,11 @@ class RunnerOperations:
             )
         except TimeoutError:
             timed_out = True
-            for record in records:
-                self._signal_process_group(record, signal.SIGKILL)
             for task in tasks:
                 if not task.done():
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            await self._force_terminate_processes(records)
             logger.warning(
                 "Runtime Runner process cleanup timed out",
                 extra={
@@ -406,12 +412,11 @@ class RunnerOperations:
                 },
             )
         except asyncio.CancelledError:
-            for record in records:
-                self._signal_process_group(record, signal.SIGKILL)
             for task in tasks:
                 if not task.done():
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            await self._force_terminate_processes(records)
             raise
         finally:
             logger.info(
@@ -510,34 +515,51 @@ class RunnerOperations:
             "timeout_seconds",
             default=_DEFAULT_BASH_TIMEOUT_SECONDS,
         )
-        env = os.environ.copy()
-        env.update(_str_mapping_payload(operation.payload, "env"))
-        process = await asyncio.create_subprocess_shell(
-            command,
-            cwd=self._workspace.root,
-            env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,
-        )
         try:
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=timeout_seconds,
+            process = await self._execution_backend.start(
+                shell_execution_spec(
+                    command=command,
+                    cwd=self._workspace.root,
+                    workspace_path=str(self._workspace.root),
+                    operation_environment=_str_mapping_payload(
+                        operation.payload,
+                        "env",
+                    ),
+                    managed=False,
+                )
+            )
+        except ValueError as exc:
+            await self._final_error(operation, "INVALID_ENVIRONMENT", str(exc))
+            return
+        except (OSError, RuntimeError) as exc:
+            await self._final_error(operation, "COMMAND_START_FAILED", str(exc))
+            return
+        try:
+            stdout, stderr = await self._communicate_process(
+                process,
+                timeout_seconds=timeout_seconds,
             )
         except TimeoutError:
-            await self._terminate_operation_process_group(
+            termination = await process.terminate_descendants(
+                terminate_timeout_seconds=_PROCESS_TERMINATE_TIMEOUT_SECONDS,
+                kill_timeout_seconds=_PROCESS_KILL_TIMEOUT_SECONDS,
+            )
+            self._log_backend_process_termination(
                 operation,
-                process,
                 reason="command_timeout",
+                termination=termination,
             )
             await self._final_error(operation, "COMMAND_TIMEOUT", "Command timed out")
             return
         except asyncio.CancelledError:
-            await self._terminate_operation_process_group(
+            termination = await process.terminate_descendants(
+                terminate_timeout_seconds=_PROCESS_TERMINATE_TIMEOUT_SECONDS,
+                kill_timeout_seconds=_PROCESS_KILL_TIMEOUT_SECONDS,
+            )
+            self._log_backend_process_termination(
                 operation,
-                process,
                 reason="operation_cancelled",
+                termination=termination,
             )
             raise
         if stdout:
@@ -1594,19 +1616,26 @@ class RunnerOperations:
                 f"No such directory: {cwd}",
             )
             return
-        env = os.environ.copy()
-        env.update(_str_mapping_payload(operation.payload, "env"))
         try:
-            process = await asyncio.create_subprocess_shell(
-                command,
-                cwd=cwd,
-                env=env,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                start_new_session=True,
+            process = await self._execution_backend.start(
+                shell_execution_spec(
+                    command=command,
+                    cwd=cwd,
+                    workspace_path=str(self._workspace.root),
+                    operation_environment=_str_mapping_payload(
+                        operation.payload,
+                        "env",
+                    ),
+                    managed=True,
+                )
             )
+        except ValueError as exc:
+            await self._final_error(operation, "INVALID_ENVIRONMENT", str(exc))
+            return
         except OSError as exc:
+            await self._final_error(operation, "PROCESS_START_FAILED", str(exc))
+            return
+        except RuntimeError as exc:
             await self._final_error(operation, "PROCESS_START_FAILED", str(exc))
             return
         record = self._register_process(operation, process, owner_session_id)
@@ -1713,7 +1742,7 @@ class RunnerOperations:
     def _register_process(
         self,
         operation: RunnerOperationEnvelope,
-        process: asyncio.subprocess.Process,
+        process: ExecutionProcess,
         owner_session_id: str,
     ) -> _ManagedProcess:
         process_id = f"proc-{uuid.uuid4().hex}"
@@ -1723,7 +1752,6 @@ class RunnerOperations:
             generation=operation.runner_generation,
             owner_session_id=owner_session_id,
             process=process,
-            process_group_id=process.pid,
             stdout=_ProcessOutputBuffer(
                 max_unread_bytes=self._process_max_unread_bytes
             ),
@@ -1733,8 +1761,6 @@ class RunnerOperations:
             created_at=now,
             last_accessed_at=now,
         )
-        if process.stdout is None or process.stderr is None:
-            raise RuntimeError("process stdout/stderr pipes are required")
         record.wait_task = asyncio.create_task(process.wait())
         record.drain_tasks = (
             asyncio.create_task(
@@ -1764,18 +1790,7 @@ class RunnerOperations:
                 record.stderr.append(data)
 
     async def _write_stdin(self, record: _ManagedProcess, stdin: str) -> None:
-        writer = record.process.stdin
-        if writer is None or writer.is_closing():
-            return
-        try:
-            writer.write(stdin.encode())
-            await writer.drain()
-        except BrokenPipeError:
-            return
-        except ConnectionError:
-            return
-        except RuntimeError:
-            return
+        await record.process.write_stdin(stdin.encode())
 
     async def _wait_for_exit_or_yield(
         self,
@@ -1956,31 +1971,18 @@ class RunnerOperations:
         started_at = time.monotonic()
         self._processes.pop(record.process_id, None)
         already_exited = _process_exited(record)
-        escalated = False
-        timed_out = False
+        termination = None
         if not already_exited:
-            self._signal_process_group(record, signal.SIGTERM)
-            terminated = await self._wait_for_process_tasks(
-                record,
-                timeout_seconds=_PROCESS_TERMINATE_TIMEOUT_SECONDS,
+            termination = await record.process.terminate_descendants(
+                terminate_timeout_seconds=_PROCESS_TERMINATE_TIMEOUT_SECONDS,
+                kill_timeout_seconds=_PROCESS_KILL_TIMEOUT_SECONDS,
             )
-            if not terminated:
-                escalated = True
-                self._signal_process_group(record, signal.SIGKILL)
-                killed = await self._wait_for_process_tasks(
-                    record,
-                    timeout_seconds=_PROCESS_KILL_TIMEOUT_SECONDS,
-                )
-                if not killed:
-                    timed_out = True
-                    logger.warning(
-                        "Runtime Runner process group did not exit after SIGKILL",
-                        extra={
-                            "process_id": record.process_id,
-                            "process_group_id": record.process_group_id,
-                            "timeout_seconds": _PROCESS_KILL_TIMEOUT_SECONDS,
-                        },
-                    )
+            await self._wait_for_process_tasks(
+                record,
+                timeout_seconds=(
+                    _PROCESS_TERMINATE_TIMEOUT_SECONDS + _PROCESS_KILL_TIMEOUT_SECONDS
+                ),
+            )
         tasks = tuple(
             task
             for task in (record.wait_task, *record.drain_tasks)
@@ -1996,12 +1998,11 @@ class RunnerOperations:
             "Runtime Runner managed process cleanup finished",
             extra={
                 "process_id": record.process_id,
-                "process_group_id": record.process_group_id,
                 "status": status,
                 "reason": reason,
                 "already_exited": already_exited,
-                "escalated": escalated,
-                "timed_out": timed_out,
+                "escalated": (False if termination is None else termination.escalated),
+                "timed_out": (False if termination is None else termination.timed_out),
                 "duration_ms": round(
                     (time.monotonic() - started_at) * 1000,
                     3,
@@ -2085,25 +2086,6 @@ class RunnerOperations:
                 },
             )
 
-    def _signal_process_group(
-        self,
-        record: _ManagedProcess,
-        requested_signal: signal.Signals,
-    ) -> None:
-        try:
-            os.killpg(record.process_group_id, requested_signal)
-        except ProcessLookupError:
-            return
-        except PermissionError:
-            logger.exception(
-                "Runtime Runner process group signal denied",
-                extra={
-                    "process_id": record.process_id,
-                    "process_group_id": record.process_group_id,
-                    "signal": requested_signal.name,
-                },
-            )
-
     async def _wait_for_process_tasks(
         self,
         record: _ManagedProcess,
@@ -2120,6 +2102,68 @@ class RunnerOperations:
             return True
         _done, pending = await asyncio.wait(tasks, timeout=timeout_seconds)
         return not pending
+
+    async def _force_terminate_processes(
+        self,
+        records: tuple[_ManagedProcess, ...],
+    ) -> None:
+        del self
+        await asyncio.gather(
+            *(
+                record.process.terminate_descendants(
+                    terminate_timeout_seconds=0,
+                    kill_timeout_seconds=_PROCESS_KILL_TIMEOUT_SECONDS,
+                )
+                for record in records
+            ),
+            return_exceptions=True,
+        )
+
+    async def _communicate_process(
+        self,
+        process: ExecutionProcess,
+        *,
+        timeout_seconds: int,
+    ) -> tuple[bytes, bytes]:
+        del self
+        stdout_task = asyncio.create_task(process.stdout.read())
+        stderr_task = asyncio.create_task(process.stderr.read())
+        wait_task = asyncio.create_task(process.wait())
+        tasks = (stdout_task, stderr_task, wait_task)
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks),
+                timeout=timeout_seconds,
+            )
+        except BaseException:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+        return stdout_task.result(), stderr_task.result()
+
+    def _log_backend_process_termination(
+        self,
+        operation: RunnerOperationEnvelope,
+        *,
+        reason: str,
+        termination: ProcessTerminationResult,
+    ) -> None:
+        del self
+        logger.info(
+            "Runtime Runner backend process cleanup finished",
+            extra={
+                "request_id": operation.request_id,
+                "runtime_id": operation.runtime_id,
+                "runner_generation": operation.runner_generation,
+                "operation_type": operation.operation_type,
+                "owner_session_id": operation.owner_session_id,
+                "reason": reason,
+                "escalated": termination.escalated,
+                "timed_out": termination.timed_out,
+            },
+        )
 
     def _record_missing(
         self,
