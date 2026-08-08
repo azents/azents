@@ -1,0 +1,8 @@
+.composerTextarea {
+  scrollbar-color: var(--mantine-color-gray-5) transparent;
+}
+
+.composerTextarea::-webkit-scrollbar,
+.composerTextarea::-webkit-scrollbar-track {
+  background: transparent;
+}
