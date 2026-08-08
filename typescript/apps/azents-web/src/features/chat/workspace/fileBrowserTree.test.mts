@@ -65,6 +65,11 @@ void test("keeps a nested worktree visible under Session files and as a root Pro
   const rootProject = tree[1];
   assert.equal(rootProject?.path, projectFolder);
   assert.equal(rootProject.children?.[0]?.path, `${projectFolder}/src`);
+  assert.notEqual(nestedProject.nodeId, rootProject.nodeId);
+
+  const expanded = new Set([nestedProject.nodeId]);
+  assert.equal(expanded.has(nestedProject.nodeId), true);
+  assert.equal(expanded.has(rootProject.nodeId), false);
 });
 
 void test("stops recursive traversal when malformed directory data contains a cycle", () => {
