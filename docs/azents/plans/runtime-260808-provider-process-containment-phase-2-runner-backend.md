@@ -93,8 +93,10 @@ tags: [runtime, runner, security, sandbox, implementation]
     authority;
   - keep backend-specific command construction out of operation handlers.
 - Absence verification:
-  - static search finds no `create_subprocess*`, `os.environ.copy()`, `os.killpg`,
-    or bwrap argument construction in `operations.py` after integration;
+  - static search finds no `create_subprocess*`, `os.environ.copy()`, direct
+    PID/PGID signaling, or bwrap argument construction in the `bash` and managed
+    process paths after integration; existing native Git subprocess authority
+    remains explicitly assigned to Phase 3;
   - backend conformance tests prove direct and contained handles satisfy the same
     process lifecycle contract;
   - startup tests prove qualification precedes Control client construction and
@@ -149,7 +151,34 @@ tags: [runtime, runner, security, sandbox, implementation]
   helper containment, Provider resources or capability advertisement, prompt,
   readiness, persisted status, frontend, E2E fixture, or Spec promotion changes.
 - Context checkpoint:
-  Record the bootstrap schema, backend/process interfaces, qualification evidence,
-  environment/reserved-name behavior, image/backend version, process lifecycle
-  parity, completed removals, validation and reviewer results, branch/base/commit/
-  PR, and exact Phase 3 helper inputs.
+  - Bootstrap schema version 1 selects only the trusted `bwrap` adapter; absent
+    bootstrap selects explicit direct v1 execution, while invalid, unavailable,
+    failed, timed-out, or incompletely terminated containment fails closed with a
+    bounded category and no fallback.
+  - `ExecutionSpec`, `ExecutionBackend`, and `ExecutionProcess` own process start,
+    streams, state, complete-descendant termination, and shutdown without exposing
+    PID/PGID authority to shell or managed-process handlers.
+  - Qualification runs before registration and Control client construction, checks
+    parent and descendant authority, and proves complete-descendant termination with
+    a contained grandchild Workspace-lock canary.
+  - Agent children receive only the code-owned safe environment; Runner variables
+    are absent and reserved operation overrides are rejected.
+  - The Runner image contains bubblewrap 0.11.0 and util-linux 2.41. Image digest
+    `sha256:ef4e057c7dbee8d4b80de16dbf52081a830c8d9ae06386b3a8d73927510c25b2`
+    passed binary/option probes and the strengthened adapter diagnostic.
+  - The diagnostic root/privileged execution is not Provider deployment
+    conformance. Docker and Kubernetes capability advertisement remains blocked
+    until Phase 4 and Phase 5 qualify the real Runner with preserved UID/GID 1000;
+    changing to root, privileged, setuid, or another material mechanism requires
+    renewed Design authority.
+  - Runner Ruff format/check, whole-project ty, all 178 tests, focused startup,
+    environment, cancellation, timeout, quota, generation, and shutdown coverage,
+    documentation validation, static removal searches, and `git diff --check`
+    passed.
+  - `/root/runtime-containment-reviewer` completed the full review and two targeted
+    re-reviews; all grounded warnings were corrected and the final result had no
+    remaining Critical or Warning findings.
+  - Branch/base is `azents/runtime-containment-2-runner-backend` on
+    `azents/runtime-containment-1-contracts`. Phase 3 receives the selected backend,
+    safe execution specification, process handle, positive projection, and native
+    Git/file/transfer helper boundaries without Provider activation.

@@ -12,6 +12,7 @@ ENV DOCKER_API_VERSION=1.51
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
+        bubblewrap \
         ca-certificates \
         curl \
         git \
@@ -24,6 +25,7 @@ RUN apt-get update \
         diffutils \
         patch \
         tree \
+        util-linux \
         unzip \
         zip \
         tar \
@@ -112,6 +114,10 @@ RUN playwright install-deps chromium
 RUN docker --version | grep -F "Docker version 28.5.2" \
     && docker buildx version | grep -F "github.com/docker/buildx v0.29.1" \
     && docker compose version | grep -F "Docker Compose version v2.40.3" \
+    && bwrap --version \
+    && bwrap --help | grep -F -- "--disable-userns" \
+    && bwrap --help | grep -F -- "--assert-userns-disabled" \
+    && unshare --version \
     && test ! -e /var/run/azents-engine/docker.sock
 
 WORKDIR /workspace/python/apps/azents-runtime-runner
