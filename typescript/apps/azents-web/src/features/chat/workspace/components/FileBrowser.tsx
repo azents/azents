@@ -47,6 +47,7 @@ import {
   chatChevronTransition,
   chatCollapseTransitionProps,
 } from "../../components/collapsiblePresentation";
+import { buildFileTree, type FileTreeNode } from "../fileBrowserTree";
 import type { WorkspaceBrowserMode, WorkspaceEntry } from "../types";
 
 interface FileBrowserProps {
@@ -57,7 +58,6 @@ interface FileBrowserProps {
   modes: { id: WorkspaceBrowserMode; label: string }[];
   projectEmptyState: { title: string; description: string } | null;
   manifestEntries: WorkspaceEntry[];
-  entries: WorkspaceEntry[];
   directoryEntriesByPath: Record<string, WorkspaceEntry[]>;
   selectedFilePath: string | null;
   selectedPaths: string[];
@@ -80,10 +80,6 @@ interface FileBrowserProps {
   onSetBrowserMode: (mode: WorkspaceBrowserMode) => void;
   onAddProject: () => void;
 }
-
-type FileTreeNode = WorkspaceEntry & {
-  children: FileTreeNode[] | null;
-};
 
 function getParentPaths(path: string, root: string): string[] {
   const parts = path.slice(root.length).split("/").filter(Boolean);
@@ -164,53 +160,6 @@ function getFileIcon(
     return <IconFileSpreadsheet size={size} />;
   }
   return <IconFile size={size} />;
-}
-
-function sortEntries(entries: WorkspaceEntry[]): WorkspaceEntry[] {
-  return [...entries].sort((a, b) => {
-    const aIsSessionFolder = isSessionFolderEntry(a);
-    const bIsSessionFolder = isSessionFolderEntry(b);
-    if (aIsSessionFolder !== bIsSessionFolder) {
-      return aIsSessionFolder ? -1 : 1;
-    }
-    if (a.kind !== b.kind) {
-      return a.kind === "directory" ? -1 : 1;
-    }
-    return a.name.localeCompare(b.name);
-  });
-}
-
-function buildTree(
-  cwd: string,
-  manifestEntries: WorkspaceEntry[],
-  entries: WorkspaceEntry[],
-  directoryEntriesByPath: Record<string, WorkspaceEntry[]>,
-): FileTreeNode[] {
-  const knownEntriesByPath: Record<string, WorkspaceEntry[]> = {
-    ...directoryEntriesByPath,
-    [cwd]: manifestEntries,
-  };
-
-  for (const entry of entries) {
-    const parentPath = entry.path.slice(
-      0,
-      Math.max(0, entry.path.lastIndexOf("/")),
-    );
-    if (!knownEntriesByPath[parentPath]) {
-      knownEntriesByPath[parentPath] = entries;
-    }
-  }
-
-  const buildChildren = (directoryPath: string): FileTreeNode[] =>
-    sortEntries(knownEntriesByPath[directoryPath] ?? []).map((entry) => ({
-      ...entry,
-      children:
-        entry.kind === "directory" && knownEntriesByPath[entry.path]
-          ? buildChildren(entry.path)
-          : null,
-    }));
-
-  return buildChildren(cwd);
 }
 
 function filterTree(
@@ -638,7 +587,6 @@ export function FileBrowser({
   modes,
   projectEmptyState,
   manifestEntries,
-  entries,
   directoryEntriesByPath,
   selectedFilePath,
   selectedPaths,
@@ -664,8 +612,8 @@ export function FileBrowser({
   const t = useTranslations("chat.workspacePanel");
   const [query, setQuery] = useState("");
   const tree = useMemo(
-    () => buildTree(cwd, manifestEntries, entries, directoryEntriesByPath),
-    [cwd, directoryEntriesByPath, entries, manifestEntries],
+    () => buildFileTree(cwd, manifestEntries, directoryEntriesByPath),
+    [cwd, directoryEntriesByPath, manifestEntries],
   );
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([cwd]));
   const selectedPathSet = useMemo(

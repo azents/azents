@@ -611,7 +611,6 @@ export function WorkspacePanel({
                     cwd={state.manifest.cwd}
                     path={state.directory.path}
                     manifestEntries={state.manifest.entries}
-                    entries={state.directory.entries}
                     directoryEntriesByPath={state.directoryEntriesByPath}
                     selectedFilePath={state.selectedFilePath}
                     selectedPaths={state.selectedPaths}

@@ -16,6 +16,7 @@ import {
   type WorkspacePanelState,
   type WorkspaceProjectPanelState,
 } from "../types";
+import { resolveWorkspaceDirectory } from "../workspaceDirectory";
 import { shouldQueryProjectBrowserManifest } from "../workspaceQueryPolicy";
 import type {
   ProjectDirectoryPickerEntry,
@@ -934,13 +935,12 @@ export function useWorkspacePanelContainer({
     const mappedDirectory = directoryQuery.data
       ? mapWorkspacePathResult(directoryQuery.data)
       : null;
-    const directory =
-      browserManifest && mappedDirectory?.type === "DIRECTORY"
-        ? { path: mappedDirectory.path, entries: mappedDirectory.entries }
-        : {
-            path: activeDirectoryPath || browserManifest?.cwd || "",
-            entries: browserManifest?.entries ?? [],
-          };
+    const directory = resolveWorkspaceDirectory({
+      activeDirectoryPath,
+      browserManifest,
+      directoryResult: mappedDirectory,
+      directoryEntriesByPath,
+    });
 
     const fileState = (() => {
       if (
