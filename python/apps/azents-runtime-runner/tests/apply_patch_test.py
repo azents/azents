@@ -26,6 +26,7 @@ from azents_runtime_runner.apply_patch import (
     PatchOperation,
     execute_apply_patch,
 )
+from azents_runtime_runner.containment import DirectExecutionBackend
 from azents_runtime_runner.operations import RunnerOperations
 from azents_runtime_runner.workspace import Workspace
 
@@ -773,6 +774,7 @@ async def test_runner_serializes_patch_operations_per_runtime(tmp_path: Path) ->
 
     client = _FakeClient()
     operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
         apply_patch_fault_injector=block_first_patch,
@@ -815,7 +817,11 @@ async def test_runner_operation_emits_typed_success_and_failure(tmp_path: Path) 
 +new
 *** End Patch"""
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(_operation(tmp_path, success_patch))
 
@@ -871,6 +877,7 @@ async def test_runner_cancellation_before_commit_settles_to_no_change_failure(
 
     client = _FakeClient()
     operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
         apply_patch_fault_injector=block_stage,
@@ -913,6 +920,7 @@ async def test_runner_cancellation_after_commit_starts_waits_for_terminal_result
 
     client = _FakeClient()
     operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
         apply_patch_fault_injector=block_commit,
