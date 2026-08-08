@@ -154,6 +154,7 @@ azentspublicclient/docs/DiscordConnectionConfiguration.md
 azentspublicclient/docs/DiscordConnectionCredentials.md
 azentspublicclient/docs/DiscordConnectionSetupRequest.md
 azentspublicclient/docs/DockerContainerProfileSpecV1.md
+azentspublicclient/docs/DockerContainerProfileSpecV2.md
 azentspublicclient/docs/DockerContainerResources.md
 azentspublicclient/docs/ElevateResponse.md
 azentspublicclient/docs/ElevateWithEmailRequest.md
@@ -230,6 +231,7 @@ azentspublicclient/docs/KimiOAuthV1Api.md
 azentspublicclient/docs/KubernetesContainerResources.md
 azentspublicclient/docs/KubernetesDinDModule.md
 azentspublicclient/docs/KubernetesPodProfileSpecV1.md
+azentspublicclient/docs/KubernetesPodProfileSpecV2.md
 azentspublicclient/docs/KubernetesSchedulingModule.md
 azentspublicclient/docs/KubernetesToleration.md
 azentspublicclient/docs/KubernetesWorkspaceVolume.md
@@ -346,6 +348,7 @@ azentspublicclient/docs/RuntimeDesiredState.md
 azentspublicclient/docs/RuntimeInfrastructureProfileSpec.md
 azentspublicclient/docs/RuntimeLifecycleCommandType.md
 azentspublicclient/docs/RuntimeNetworkPolicyModule.md
+azentspublicclient/docs/RuntimeProcessContainmentModuleV1.md
 azentspublicclient/docs/RuntimeProfileLifecycle.md
 azentspublicclient/docs/RuntimeProfileV1Api.md
 azentspublicclient/docs/RuntimeProviderConnectionState.md
@@ -579,6 +582,7 @@ azentspublicclient/models/discord_connection_configuration.py
 azentspublicclient/models/discord_connection_credentials.py
 azentspublicclient/models/discord_connection_setup_request.py
 azentspublicclient/models/docker_container_profile_spec_v1.py
+azentspublicclient/models/docker_container_profile_spec_v2.py
 azentspublicclient/models/docker_container_resources.py
 azentspublicclient/models/elevate_response.py
 azentspublicclient/models/elevate_with_email_request.py
@@ -650,6 +654,7 @@ azentspublicclient/models/kimi_o_auth_session_status.py
 azentspublicclient/models/kubernetes_container_resources.py
 azentspublicclient/models/kubernetes_din_d_module.py
 azentspublicclient/models/kubernetes_pod_profile_spec_v1.py
+azentspublicclient/models/kubernetes_pod_profile_spec_v2.py
 azentspublicclient/models/kubernetes_scheduling_module.py
 azentspublicclient/models/kubernetes_toleration.py
 azentspublicclient/models/kubernetes_workspace_volume.py
@@ -765,6 +770,7 @@ azentspublicclient/models/runtime_desired_state.py
 azentspublicclient/models/runtime_infrastructure_profile_spec.py
 azentspublicclient/models/runtime_lifecycle_command_type.py
 azentspublicclient/models/runtime_network_policy_module.py
+azentspublicclient/models/runtime_process_containment_module_v1.py
 azentspublicclient/models/runtime_profile_lifecycle.py
 azentspublicclient/models/runtime_provider_connection_state.py
 azentspublicclient/models/runtime_provider_credential_exchange_request.py
@@ -992,6 +998,7 @@ azentspublicclient/test/test_discord_connection_configuration.py
 azentspublicclient/test/test_discord_connection_credentials.py
 azentspublicclient/test/test_discord_connection_setup_request.py
 azentspublicclient/test/test_docker_container_profile_spec_v1.py
+azentspublicclient/test/test_docker_container_profile_spec_v2.py
 azentspublicclient/test/test_docker_container_resources.py
 azentspublicclient/test/test_elevate_response.py
 azentspublicclient/test/test_elevate_with_email_request.py
@@ -1068,6 +1075,7 @@ azentspublicclient/test/test_kimi_o_auth_v1_api.py
 azentspublicclient/test/test_kubernetes_container_resources.py
 azentspublicclient/test/test_kubernetes_din_d_module.py
 azentspublicclient/test/test_kubernetes_pod_profile_spec_v1.py
+azentspublicclient/test/test_kubernetes_pod_profile_spec_v2.py
 azentspublicclient/test/test_kubernetes_scheduling_module.py
 azentspublicclient/test/test_kubernetes_toleration.py
 azentspublicclient/test/test_kubernetes_workspace_volume.py
@@ -1184,6 +1192,7 @@ azentspublicclient/test/test_runtime_desired_state.py
 azentspublicclient/test/test_runtime_infrastructure_profile_spec.py
 azentspublicclient/test/test_runtime_lifecycle_command_type.py
 azentspublicclient/test/test_runtime_network_policy_module.py
+azentspublicclient/test/test_runtime_process_containment_module_v1.py
 azentspublicclient/test/test_runtime_profile_lifecycle.py
 azentspublicclient/test/test_runtime_profile_v1_api.py
 azentspublicclient/test/test_runtime_provider_connection_state.py

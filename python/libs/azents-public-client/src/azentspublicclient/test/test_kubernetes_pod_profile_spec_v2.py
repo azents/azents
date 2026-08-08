@@ -14,10 +14,10 @@
 
 import unittest
 
-from azentspublicclient.models.runtime_infrastructure_profile_spec import RuntimeInfrastructureProfileSpec
+from azentspublicclient.models.kubernetes_pod_profile_spec_v2 import KubernetesPodProfileSpecV2
 
-class TestRuntimeInfrastructureProfileSpec(unittest.TestCase):
-    """RuntimeInfrastructureProfileSpec unit test stubs"""
+class TestKubernetesPodProfileSpecV2(unittest.TestCase):
+    """KubernetesPodProfileSpecV2 unit test stubs"""
 
     def setUp(self):
         pass
@@ -25,18 +25,18 @@ class TestRuntimeInfrastructureProfileSpec(unittest.TestCase):
     def tearDown(self):
         pass
 
-    def make_instance(self, include_optional) -> RuntimeInfrastructureProfileSpec:
-        """Test RuntimeInfrastructureProfileSpec
+    def make_instance(self, include_optional) -> KubernetesPodProfileSpecV2:
+        """Test KubernetesPodProfileSpecV2
             include_optional is a boolean, when False only required
             params are included, when True both required and
             optional params are included """
-        # uncomment below to create an instance of `RuntimeInfrastructureProfileSpec`
+        # uncomment below to create an instance of `KubernetesPodProfileSpecV2`
         """
-        model = RuntimeInfrastructureProfileSpec()
+        model = KubernetesPodProfileSpecV2()
         if include_optional:
-            return RuntimeInfrastructureProfileSpec(
-                profile_kind = 'docker_container',
-                contract_family = 'docker.container-profile',
+            return KubernetesPodProfileSpecV2(
+                profile_kind = 'kubernetes_pod',
+                contract_family = 'kubernetes.pod-profile',
                 schema_version = 2,
                 runner_resources = { },
                 workspace_volume = { },
@@ -44,13 +44,12 @@ class TestRuntimeInfrastructureProfileSpec(unittest.TestCase):
                 service_account_name = '',
                 scheduling = { },
                 dind = { },
-                process_containment = { },
-                network_name = ''
+                process_containment = { }
             )
         else:
-            return RuntimeInfrastructureProfileSpec(
-                profile_kind = 'docker_container',
-                contract_family = 'docker.container-profile',
+            return KubernetesPodProfileSpecV2(
+                profile_kind = 'kubernetes_pod',
+                contract_family = 'kubernetes.pod-profile',
                 schema_version = 2,
                 runner_resources = { },
                 workspace_volume = { },
@@ -59,12 +58,11 @@ class TestRuntimeInfrastructureProfileSpec(unittest.TestCase):
                 scheduling = { },
                 dind = { },
                 process_containment = { },
-                network_name = '',
         )
         """
 
-    def testRuntimeInfrastructureProfileSpec(self):
-        """Test RuntimeInfrastructureProfileSpec"""
+    def testKubernetesPodProfileSpecV2(self):
+        """Test KubernetesPodProfileSpecV2"""
         # inst_req_only = self.make_instance(include_optional=False)
         # inst_req_and_optional = self.make_instance(include_optional=True)
 

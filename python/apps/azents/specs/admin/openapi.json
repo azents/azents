@@ -4268,6 +4268,62 @@
         "title": "DockerContainerProfileSpecV1",
         "description": "Docker Container Profile contract version 1."
       },
+      "DockerContainerProfileSpecV2": {
+        "properties": {
+          "profile_kind": {
+            "type": "string",
+            "const": "docker_container",
+            "title": "Profile Kind"
+          },
+          "contract_family": {
+            "type": "string",
+            "const": "docker.container-profile",
+            "title": "Contract Family"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 2,
+            "title": "Schema Version"
+          },
+          "runner_resources": {
+            "$ref": "#/components/schemas/DockerContainerResources"
+          },
+          "network_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Network Name"
+          },
+          "process_containment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeProcessContainmentModuleV1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "profile_kind",
+          "contract_family",
+          "schema_version",
+          "runner_resources",
+          "network_name",
+          "process_containment"
+        ],
+        "title": "DockerContainerProfileSpecV2",
+        "description": "Docker Container Profile contract version 2."
+      },
       "DockerContainerResources": {
         "properties": {
           "cpu_reservation_millicores": {
@@ -4914,6 +4970,85 @@
         ],
         "title": "KubernetesPodProfileSpecV1",
         "description": "Kubernetes Pod Profile contract version 1."
+      },
+      "KubernetesPodProfileSpecV2": {
+        "properties": {
+          "profile_kind": {
+            "type": "string",
+            "const": "kubernetes_pod",
+            "title": "Profile Kind"
+          },
+          "contract_family": {
+            "type": "string",
+            "const": "kubernetes.pod-profile",
+            "title": "Contract Family"
+          },
+          "schema_version": {
+            "type": "integer",
+            "const": 2,
+            "title": "Schema Version"
+          },
+          "runner_resources": {
+            "$ref": "#/components/schemas/KubernetesContainerResources"
+          },
+          "workspace_volume": {
+            "$ref": "#/components/schemas/KubernetesWorkspaceVolume"
+          },
+          "network_policy": {
+            "$ref": "#/components/schemas/RuntimeNetworkPolicyModule"
+          },
+          "service_account_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 253
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Account Name"
+          },
+          "scheduling": {
+            "$ref": "#/components/schemas/KubernetesSchedulingModule"
+          },
+          "dind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/KubernetesDinDModule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "process_containment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuntimeProcessContainmentModuleV1"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "profile_kind",
+          "contract_family",
+          "schema_version",
+          "runner_resources",
+          "workspace_volume",
+          "network_policy",
+          "service_account_name",
+          "scheduling",
+          "dind",
+          "process_containment"
+        ],
+        "title": "KubernetesPodProfileSpecV2",
+        "description": "Kubernetes Pod Profile contract version 2."
       },
       "KubernetesSchedulingModule": {
         "properties": {
@@ -5785,16 +5920,15 @@
             "$ref": "#/components/schemas/KubernetesPodProfileSpecV1"
           },
           {
+            "$ref": "#/components/schemas/KubernetesPodProfileSpecV2"
+          },
+          {
             "$ref": "#/components/schemas/DockerContainerProfileSpecV1"
+          },
+          {
+            "$ref": "#/components/schemas/DockerContainerProfileSpecV2"
           }
-        ],
-        "discriminator": {
-          "propertyName": "profile_kind",
-          "mapping": {
-            "docker_container": "#/components/schemas/DockerContainerProfileSpecV1",
-            "kubernetes_pod": "#/components/schemas/KubernetesPodProfileSpecV1"
-          }
-        }
+        ]
       },
       "RuntimeNetworkPolicyModule": {
         "properties": {
@@ -5819,6 +5953,22 @@
         "type": "object",
         "title": "RuntimeNetworkPolicyModule",
         "description": "Typed customer-traffic network boundary."
+      },
+      "RuntimeProcessContainmentModuleV1": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "const": 1,
+            "title": "Schema Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "schema_version"
+        ],
+        "title": "RuntimeProcessContainmentModuleV1",
+        "description": "Portable Provider-owned process containment contract version 1."
       },
       "RuntimeProfileLifecycle": {
         "type": "string",
