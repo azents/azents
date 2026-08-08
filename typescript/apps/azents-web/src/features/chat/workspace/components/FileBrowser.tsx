@@ -42,7 +42,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   chatChevronTransition,
   chatCollapseTransitionProps,
@@ -79,15 +79,6 @@ interface FileBrowserProps {
   onRefresh: () => void;
   onSetBrowserMode: (mode: WorkspaceBrowserMode) => void;
   onAddProject: () => void;
-}
-
-function getParentPaths(path: string, root: string): string[] {
-  const parts = path.slice(root.length).split("/").filter(Boolean);
-  const parents: string[] = [];
-  for (let index = 1; index <= parts.length; index += 1) {
-    parents.push(`${root}/${parts.slice(0, index).join("/")}`);
-  }
-  return parents;
 }
 
 function getRelativePath(path: string, root: string): string {
@@ -177,7 +168,7 @@ function filterTree(
     const children = node.children
       ? filterTree(node.children, query, expandedMatches, [
           ...parents,
-          node.path,
+          node.nodeId,
         ])
       : [];
     const matches =
@@ -190,13 +181,13 @@ function filterTree(
       expandedMatches.add(parent);
     }
     if (node.kind === "directory") {
-      expandedMatches.add(node.path);
+      expandedMatches.add(node.nodeId);
     }
     return [{ ...node, children }];
   });
 }
 
-function collectDirectoryPaths(
+function collectDirectoryNodeIds(
   nodes: FileTreeNode[],
   output = new Set<string>(),
 ): Set<string> {
@@ -204,8 +195,8 @@ function collectDirectoryPaths(
     if (node.kind !== "directory") {
       continue;
     }
-    output.add(node.path);
-    collectDirectoryPaths(node.children ?? [], output);
+    output.add(node.nodeId);
+    collectDirectoryNodeIds(node.children ?? [], output);
   }
   return output;
 }
@@ -256,7 +247,7 @@ interface TreeNodeProps {
   activePath: string | null;
   selectedPaths: Set<string>;
   getDownloadHref: (path: string) => string;
-  onToggle: (path: string) => void;
+  onToggle: (nodeId: string) => void;
   onOpenDirectory: (path: string) => void;
   onOpenFile: (path: string) => void;
   onShowInfo: (path: string) => void;
@@ -292,7 +283,7 @@ function TreeNode({
   const t = useTranslations("chat.workspacePanel");
   const theme = useMantineTheme();
   const compact = useMediaQuery(`(min-width: ${theme.breakpoints.lg})`);
-  const open = expanded.has(node.path);
+  const open = expanded.has(node.nodeId);
   const active = activePath === node.path;
   const checked = selectedPaths.has(node.path);
   const displayName = getEntryDisplayName(node, depth);
@@ -321,12 +312,19 @@ function TreeNode({
 
   const handleOpen = useCallback((): void => {
     if (isDirectory) {
-      onToggle(node.path);
+      onToggle(node.nodeId);
       onOpenDirectory(node.path);
       return;
     }
     onOpenFile(node.path);
-  }, [isDirectory, node.path, onOpenDirectory, onOpenFile, onToggle]);
+  }, [
+    isDirectory,
+    node.nodeId,
+    node.path,
+    onOpenDirectory,
+    onOpenFile,
+    onToggle,
+  ]);
 
   const handleSelectionTargetClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>): void => {
@@ -552,7 +550,7 @@ function TreeNode({
         >
           {node.children?.map((child) => (
             <TreeNode
-              key={child.path}
+              key={child.nodeId}
               node={child}
               depth={depth + 1}
               root={root}
@@ -615,22 +613,11 @@ export function FileBrowser({
     () => buildFileTree(cwd, manifestEntries, directoryEntriesByPath),
     [cwd, directoryEntriesByPath, manifestEntries],
   );
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set([cwd]));
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const selectedPathSet = useMemo(
     () => new Set(selectedPaths),
     [selectedPaths],
   );
-
-  useEffect(() => {
-    setExpanded((previous) => {
-      const next = new Set(previous);
-      next.add(cwd);
-      for (const parent of getParentPaths(path, cwd)) {
-        next.add(parent);
-      }
-      return next;
-    });
-  }, [cwd, path]);
 
   const { displayTree, searchExpanded } = useMemo(() => {
     const expandedMatches = new Set<string>();
@@ -641,25 +628,25 @@ export function FileBrowser({
   }, [query, tree]);
   const effectiveExpanded = query.trim() ? searchExpanded : expanded;
 
-  const handleToggle = useCallback((directoryPath: string): void => {
+  const handleToggle = useCallback((nodeId: string): void => {
     setExpanded((previous) => {
       const next = new Set(previous);
-      if (next.has(directoryPath)) {
-        next.delete(directoryPath);
+      if (next.has(nodeId)) {
+        next.delete(nodeId);
       } else {
-        next.add(directoryPath);
+        next.add(nodeId);
       }
       return next;
     });
   }, []);
 
   const handleExpandAll = useCallback((): void => {
-    setExpanded(collectDirectoryPaths(tree));
+    setExpanded(collectDirectoryNodeIds(tree));
   }, [tree]);
 
   const handleCollapseAll = useCallback((): void => {
-    setExpanded(new Set([cwd]));
-  }, [cwd]);
+    setExpanded(new Set());
+  }, []);
 
   const activePath = selectedFilePath ?? path;
   const handleModeChange = useCallback(
@@ -845,7 +832,7 @@ export function FileBrowser({
               ) : null}
               {displayTree.map((node) => (
                 <TreeNode
-                  key={node.path}
+                  key={node.nodeId}
                   node={node}
                   depth={0}
                   root={root}
