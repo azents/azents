@@ -4,14 +4,11 @@ import asyncio
 import contextlib
 import hashlib
 import logging
-import os
-import secrets
-import stat
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import PurePath
-from typing import Protocol
+from pathlib import Path, PurePath
+from typing import Protocol, assert_never
 
 import grpc
 from azents_runtime_control.grpc_runner_transfer_client import (
@@ -35,6 +32,12 @@ from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_CAPABILITY,
     RUNNER_TRANSFER_PROTOCOL_VERSION,
 )
+
+from azents_runtime_runner.contained_client import (
+    ContainedOperationClient,
+    ContainedOperationEvent,
+)
+from azents_runtime_runner.containment import ExecutionBackend
 
 _BUFFER_BYTES = MAX_TRANSFER_CHUNK_BYTES
 _DEFAULT_MAX_ACTIVE_TRANSFERS = 4
@@ -76,15 +79,6 @@ class RunnerTransferClient(Protocol):
         ...
 
 
-@dataclass(frozen=True)
-class _FileIdentity:
-    device: int
-    inode: int
-    size: int
-    mtime_ns: int
-    ctime_ns: int
-
-
 @dataclass
 class _ActiveTransfer:
     intent: RunnerTransferIntent
@@ -98,6 +92,30 @@ class _TransferTombstone:
     result: RunnerTransferResult
 
 
+@dataclass(frozen=True)
+class _ContainedTransferChunk:
+    offset: int
+    data: bytes
+
+
+@dataclass(frozen=True)
+class _ContainedTransferSuccess:
+    actual_size: int
+    sha256: str
+    destination_committed: bool
+
+
+@dataclass(frozen=True)
+class _ContainedTransferError:
+    failure: RunnerTransferFailure
+    reason: str
+
+
+type _ContainedTransferResult = (
+    _ContainedTransferChunk | _ContainedTransferSuccess | _ContainedTransferError
+)
+
+
 class RunnerTransferManager:
     """Isolate bounded transfer tasks from ordinary Runner operation scheduling."""
 
@@ -107,6 +125,8 @@ class RunnerTransferManager:
         control: RunnerTransferResultSink,
         transfer: RunnerTransferClient,
         accepted_generation: Callable[[], int | None],
+        execution_backend: ExecutionBackend,
+        workspace_path: Path,
         max_active_transfers: int = _DEFAULT_MAX_ACTIVE_TRANSFERS,
         max_tombstones: int = _DEFAULT_MAX_TOMBSTONES,
     ) -> None:
@@ -116,6 +136,10 @@ class RunnerTransferManager:
         self._control = control
         self._transfer = transfer
         self._accepted_generation = accepted_generation
+        self._contained_operations = ContainedOperationClient(
+            backend=execution_backend,
+            workspace_path=workspace_path,
+        )
         self._max_active_transfers = max_active_transfers
         self._max_tombstones = max_tombstones
         self._active: dict[_TransferKey, _ActiveTransfer] = {}
@@ -127,7 +151,6 @@ class RunnerTransferManager:
         )
         self._result_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
-        self._commit_lock = asyncio.Lock()
         self._closed = False
 
     async def start(self) -> None:
@@ -295,14 +318,13 @@ class RunnerTransferManager:
                 RunnerTransferFailure.PROTOCOL_VIOLATION,
                 reason="download_manifest_missing",
             )
-        parent_fd, destination_name = _open_parent(intent.runtime_path, create=True)
-        stage_fd: int | None = None
-        stage_name: str | None = None
-        try:
-            stage_fd, stage_name = _open_temporary_file(parent_fd)
-            offset = 0
-            digest = hashlib.sha256()
-            complete: RunnerDownloadComplete | None = None
+        offset = 0
+        digest = hashlib.sha256()
+        complete: RunnerDownloadComplete | None = None
+        terminal: _ContainedTransferSuccess | None = None
+
+        async def chunks() -> AsyncIterator[bytes]:
+            nonlocal offset, complete
             async for frame in self._transfer.download(
                 intent.identity,
                 timeout=_remaining_timeout(intent),
@@ -330,9 +352,9 @@ class RunnerTransferManager:
                         RunnerTransferFailure.INTEGRITY_FAILED,
                         reason="download_chunk_integrity_mismatch",
                     )
-                await asyncio.to_thread(_write_all, stage_fd, frame.data)
                 digest.update(frame.data)
                 offset += len(frame.data)
+                yield frame.data
             if (
                 complete is None
                 or offset != expected_size
@@ -344,49 +366,56 @@ class RunnerTransferManager:
                     RunnerTransferFailure.INTEGRITY_FAILED,
                     reason="download_manifest_mismatch",
                 )
-            await asyncio.to_thread(os.fsync, stage_fd)
-            assert stage_fd is not None
-            async with self._commit_lock:
-                _check_stop(intent, cancelled)
-                if overwrite:
-                    assert stage_name is not None
-                    os.replace(
-                        stage_name,
-                        destination_name,
-                        src_dir_fd=parent_fd,
-                        dst_dir_fd=parent_fd,
-                    )
-                    stage_name = None
-                else:
-                    assert stage_name is not None
-                    _assert_empty_destination(parent_fd, destination_name)
-                    os.link(
-                        stage_name,
-                        destination_name,
-                        src_dir_fd=parent_fd,
-                        dst_dir_fd=parent_fd,
-                        follow_symlinks=False,
-                    )
-                    os.unlink(stage_name, dir_fd=parent_fd)
-                    stage_name = None
-            return RunnerTransferResult(
-                identity=intent.identity,
-                operation_id=intent.operation_id,
-                dispatch_id=intent.dispatch_id,
-                direction=intent.direction,
-                outcome=RunnerTransferOutcome.SUCCEEDED,
-                actual_size=offset,
-                sha256=digest.hexdigest(),
-                destination_committed=True,
-                failure=None,
+
+        async def handle_event(event: ContainedOperationEvent) -> None:
+            nonlocal terminal
+            result = _decode_contained_transfer_result(event)
+            if isinstance(result, _ContainedTransferError):
+                raise _TransferFailure(result.failure, reason=result.reason)
+            if not isinstance(result, _ContainedTransferSuccess):
+                raise _TransferFailure(
+                    RunnerTransferFailure.PROTOCOL_VIOLATION,
+                    reason="download_helper_event_invalid",
+                )
+            terminal = result
+
+        await self._contained_operations.run_streaming_input(
+            operation="transfer.download",
+            payload={
+                "runtime_path": intent.runtime_path,
+                "expected_size": expected_size,
+                "expected_sha256": expected_sha256,
+                "overwrite": overwrite,
+            },
+            input_chunks=chunks(),
+            completion_factory=lambda: {
+                "actual_size": offset,
+                "sha256": digest.hexdigest(),
+            },
+            deadline_at=intent.deadline_at,
+            event_handler=handle_event,
+        )
+        if (
+            terminal is None
+            or terminal.actual_size != offset
+            or terminal.sha256 != digest.hexdigest()
+            or terminal.destination_committed is not True
+        ):
+            raise _TransferFailure(
+                RunnerTransferFailure.INTEGRITY_FAILED,
+                reason="download_helper_manifest_mismatch",
             )
-        finally:
-            if stage_name is not None:
-                with contextlib.suppress(FileNotFoundError):
-                    os.unlink(stage_name, dir_fd=parent_fd)
-            if stage_fd is not None:
-                os.close(stage_fd)
-            os.close(parent_fd)
+        return RunnerTransferResult(
+            identity=intent.identity,
+            operation_id=intent.operation_id,
+            dispatch_id=intent.dispatch_id,
+            direction=intent.direction,
+            outcome=RunnerTransferOutcome.SUCCEEDED,
+            actual_size=offset,
+            sha256=digest.hexdigest(),
+            destination_committed=True,
+            failure=None,
+        )
 
     async def _upload(
         self,
@@ -399,114 +428,106 @@ class RunnerTransferManager:
                 RunnerTransferFailure.PROTOCOL_VIOLATION,
                 reason="upload_expected_size_missing",
             )
-        parent_fd, source_name = _open_parent(intent.runtime_path, create=False)
-        source_fd: int | None = None
-        snapshot_fd: int | None = None
-        snapshot_name: str | None = None
-        try:
-            source_fd = os.open(
-                source_name,
-                os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
-                dir_fd=parent_fd,
+        events: asyncio.Queue[_ContainedTransferResult] = asyncio.Queue(maxsize=2)
+
+        async def handle_event(event: ContainedOperationEvent) -> None:
+            await events.put(_decode_contained_transfer_result(event))
+
+        helper_task = asyncio.create_task(
+            self._contained_operations.run(
+                operation="transfer.upload",
+                payload={
+                    "runtime_path": intent.runtime_path,
+                    "expected_size": expected_size,
+                    "expected_sha256": intent.expected_sha256,
+                },
+                body_chunks=(),
+                deadline_at=intent.deadline_at,
+                event_handler=handle_event,
             )
-            before = _regular_identity(os.fstat(source_fd))
-            if before.size != expected_size:
-                raise _TransferFailure(
-                    RunnerTransferFailure.INTEGRITY_FAILED,
-                    reason="upload_source_size_mismatch",
-                )
-            snapshot_fd, snapshot_name = _open_temporary_file(parent_fd)
-            digest = hashlib.sha256()
-            copied = 0
+        )
+        helper_manifest: _ContainedTransferSuccess | None = None
+
+        async def frames() -> AsyncIterator[RunnerDownloadChunk | RunnerUploadComplete]:
+            nonlocal helper_manifest
+            offset = 0
             while True:
                 _check_stop(intent, cancelled)
-                chunk = await asyncio.to_thread(os.read, source_fd, _BUFFER_BYTES)
-                if not chunk:
-                    break
-                copied += len(chunk)
-                if copied > expected_size:
-                    raise _TransferFailure(
-                        RunnerTransferFailure.INTEGRITY_FAILED,
-                        reason="upload_source_exceeds_expected_size",
-                    )
-                await asyncio.to_thread(_write_all, snapshot_fd, chunk)
-                digest.update(chunk)
-            await asyncio.to_thread(os.fsync, snapshot_fd)
-            after_fd = _regular_identity(os.fstat(source_fd))
-            after_path = _regular_identity(
-                os.stat(source_name, dir_fd=parent_fd, follow_symlinks=False)
-            )
-            if before != after_fd or before != after_path or copied != expected_size:
-                raise _TransferFailure(
-                    RunnerTransferFailure.INTEGRITY_FAILED,
-                    reason="upload_source_changed",
-                )
-            actual_sha256 = digest.hexdigest()
-            if (
-                intent.expected_sha256 is not None
-                and actual_sha256 != intent.expected_sha256
-            ):
-                raise _TransferFailure(
-                    RunnerTransferFailure.INTEGRITY_FAILED,
-                    reason="upload_source_digest_mismatch",
-                )
-            assert snapshot_fd is not None
-
-            async def frames() -> AsyncIterator[
-                RunnerDownloadChunk | RunnerUploadComplete
-            ]:
-                snapshot_read = os.dup(snapshot_fd)
+                event = await events.get()
                 try:
-                    os.lseek(snapshot_read, 0, os.SEEK_SET)
-                    offset = 0
-                    while True:
-                        _check_stop(intent, cancelled)
-                        chunk = await asyncio.to_thread(
-                            os.read,
-                            snapshot_read,
-                            _BUFFER_BYTES,
-                        )
-                        if not chunk:
-                            break
-                        yield RunnerDownloadChunk(offset=offset, data=chunk)
-                        offset += len(chunk)
-                    yield RunnerUploadComplete(actual_size=offset, sha256=actual_sha256)
+                    match event:
+                        case _ContainedTransferChunk():
+                            if (
+                                event.offset != offset
+                                or not event.data
+                                or len(event.data) > _BUFFER_BYTES
+                            ):
+                                raise _TransferFailure(
+                                    RunnerTransferFailure.PROTOCOL_VIOLATION,
+                                    reason="upload_helper_chunk_invalid",
+                                )
+                            yield RunnerDownloadChunk(offset=offset, data=event.data)
+                            offset += len(event.data)
+                            continue
+                        case _ContainedTransferError():
+                            raise _TransferFailure(
+                                event.failure,
+                                reason=event.reason,
+                            )
+                        case _ContainedTransferSuccess():
+                            helper_manifest = event
+                            if (
+                                event.actual_size != offset
+                                or event.actual_size != expected_size
+                                or event.destination_committed
+                            ):
+                                raise _TransferFailure(
+                                    RunnerTransferFailure.INTEGRITY_FAILED,
+                                    reason="upload_helper_manifest_mismatch",
+                                )
+                            yield RunnerUploadComplete(
+                                actual_size=event.actual_size,
+                                sha256=event.sha256,
+                            )
+                            return
+                        case _ as unreachable:
+                            assert_never(unreachable)
                 finally:
-                    os.close(snapshot_read)
+                    events.task_done()
 
+        try:
             authoritative = await self._transfer.upload(
                 intent.identity,
                 frames(),
                 timeout=_remaining_timeout(intent),
             )
-            if (
-                authoritative.actual_size != copied
-                or authoritative.sha256 != actual_sha256
-            ):
-                raise _TransferFailure(
-                    RunnerTransferFailure.INTEGRITY_FAILED,
-                    reason="upload_authoritative_manifest_mismatch",
-                )
-            return RunnerTransferResult(
-                identity=intent.identity,
-                operation_id=intent.operation_id,
-                dispatch_id=intent.dispatch_id,
-                direction=intent.direction,
-                outcome=RunnerTransferOutcome.SUCCEEDED,
-                actual_size=authoritative.actual_size,
-                sha256=authoritative.sha256,
-                destination_committed=False,
-                failure=None,
+            await helper_task
+        except BaseException:
+            if not helper_task.done():
+                helper_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await helper_task
+            raise
+        if (
+            helper_manifest is None
+            or authoritative.actual_size != helper_manifest.actual_size
+            or authoritative.sha256 != helper_manifest.sha256
+        ):
+            raise _TransferFailure(
+                RunnerTransferFailure.INTEGRITY_FAILED,
+                reason="upload_authoritative_manifest_mismatch",
             )
-        finally:
-            if snapshot_name is not None:
-                with contextlib.suppress(FileNotFoundError):
-                    os.unlink(snapshot_name, dir_fd=parent_fd)
-            if source_fd is not None:
-                os.close(source_fd)
-            if snapshot_fd is not None:
-                os.close(snapshot_fd)
-            os.close(parent_fd)
+        return RunnerTransferResult(
+            identity=intent.identity,
+            operation_id=intent.operation_id,
+            dispatch_id=intent.dispatch_id,
+            direction=intent.direction,
+            outcome=RunnerTransferOutcome.SUCCEEDED,
+            actual_size=authoritative.actual_size,
+            sha256=authoritative.sha256,
+            destination_committed=False,
+            failure=None,
+        )
 
     async def _enqueue_result(self, result: RunnerTransferResult) -> None:
         if self._closed:
@@ -594,6 +615,76 @@ class _TransferFailure(Exception):
     def __init__(self, failure: RunnerTransferFailure, *, reason: str) -> None:
         self.failure = failure
         self.reason = reason
+
+
+def _decode_contained_transfer_result(
+    event: ContainedOperationEvent,
+) -> _ContainedTransferResult:
+    payload = event.payload
+    if event.event_type == "file_chunk":
+        offset = payload.get("offset")
+        if (
+            event.final
+            or event.binary is None
+            or set(payload) != {"offset"}
+            or not isinstance(offset, int)
+            or isinstance(offset, bool)
+            or offset < 0
+        ):
+            return _invalid_contained_transfer_result("upload_helper_chunk_invalid")
+        return _ContainedTransferChunk(offset=offset, data=event.binary)
+    if event.event_type == "final_success":
+        actual_size = payload.get("actual_size")
+        sha256 = payload.get("sha256")
+        destination_committed = payload.get("destination_committed")
+        if (
+            not event.final
+            or event.binary is not None
+            or set(payload) != {"actual_size", "sha256", "destination_committed"}
+            or not isinstance(actual_size, int)
+            or isinstance(actual_size, bool)
+            or actual_size < 0
+            or not isinstance(sha256, str)
+            or not isinstance(destination_committed, bool)
+        ):
+            return _invalid_contained_transfer_result(
+                "contained_transfer_success_invalid"
+            )
+        return _ContainedTransferSuccess(
+            actual_size=actual_size,
+            sha256=sha256,
+            destination_committed=destination_committed,
+        )
+    if event.event_type == "final_error":
+        error_code = payload.get("error_code")
+        value = payload.get("transfer_failure")
+        reason = payload.get("error_message")
+        if (
+            not event.final
+            or event.binary is not None
+            or set(payload) != {"error_code", "error_message", "transfer_failure"}
+            or error_code != "TRANSFER_FAILED"
+            or not isinstance(value, str)
+            or not isinstance(reason, str)
+        ):
+            return _invalid_contained_transfer_result(
+                "contained_transfer_failure_invalid"
+            )
+        try:
+            failure = RunnerTransferFailure(value)
+        except ValueError:
+            return _invalid_contained_transfer_result(
+                "contained_transfer_failure_invalid"
+            )
+        return _ContainedTransferError(failure=failure, reason=reason)
+    return _invalid_contained_transfer_result("contained_transfer_event_invalid")
+
+
+def _invalid_contained_transfer_result(reason: str) -> _ContainedTransferError:
+    return _ContainedTransferError(
+        failure=RunnerTransferFailure.PROTOCOL_VIOLATION,
+        reason=reason,
+    )
 
 
 def _key(intent: RunnerTransferIntent) -> _TransferKey:
@@ -726,97 +817,6 @@ def _remaining_timeout(intent: RunnerTransferIntent) -> float:
             reason="deadline_exceeded",
         )
     return remaining
-
-
-def _open_parent(path: str, *, create: bool) -> tuple[int, str]:
-    candidate = PurePath(path)
-    if (
-        not candidate.is_absolute()
-        or not candidate.name
-        or candidate.name in {".", ".."}
-    ):
-        raise _TransferFailure(
-            RunnerTransferFailure.PROTOCOL_VIOLATION,
-            reason="runtime_path_invalid",
-        )
-    parent_fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        components = candidate.parts[1:-1]
-        for component in components:
-            if component in {".", ".."}:
-                raise _TransferFailure(
-                    RunnerTransferFailure.PROTOCOL_VIOLATION,
-                    reason="runtime_path_traversal",
-                )
-            try:
-                next_fd = os.open(
-                    component,
-                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-                    dir_fd=parent_fd,
-                )
-            except FileNotFoundError:
-                if not create:
-                    raise
-                try:
-                    os.mkdir(component, 0o700, dir_fd=parent_fd)
-                except FileExistsError:
-                    pass
-                next_fd = os.open(
-                    component,
-                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-                    dir_fd=parent_fd,
-                )
-            os.close(parent_fd)
-            parent_fd = next_fd
-        return parent_fd, candidate.name
-    except BaseException:
-        os.close(parent_fd)
-        raise
-
-
-def _assert_empty_destination(parent_fd: int, name: str) -> None:
-    try:
-        os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-    except FileNotFoundError:
-        return
-    raise _TransferFailure(
-        RunnerTransferFailure.DESTINATION_FAILED,
-        reason="download_destination_exists",
-    )
-
-
-def _regular_identity(value: os.stat_result) -> _FileIdentity:
-    if not stat.S_ISREG(value.st_mode):
-        raise _TransferFailure(
-            RunnerTransferFailure.PROTOCOL_VIOLATION,
-            reason="upload_source_not_regular",
-        )
-    return _FileIdentity(
-        value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns
-    )
-
-
-def _write_all(fd: int, data: bytes) -> None:
-    view = memoryview(data)
-    while view:
-        written = os.write(fd, view)
-        view = view[written:]
-
-
-def _open_temporary_file(parent_fd: int) -> tuple[int, str]:
-    for _ in range(16):
-        name = f".azents-transfer-{secrets.token_hex(16)}"
-        try:
-            descriptor = os.open(
-                name,
-                os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                0o600,
-                dir_fd=parent_fd,
-            )
-        except FileExistsError:
-            continue
-        return descriptor, name
-    raise OSError("could not allocate a unique Runtime transfer staging file")
 
 
 def _local_io_failure(intent: RunnerTransferIntent) -> RunnerTransferFailure:

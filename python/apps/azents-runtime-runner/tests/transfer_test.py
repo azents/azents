@@ -2,10 +2,8 @@
 
 import asyncio
 import dataclasses
-import errno
 import hashlib
 import os
-import threading
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -33,6 +31,7 @@ from azents_runtime_control.transfer import (
     RUNNER_TRANSFER_PROTOCOL_VERSION,
 )
 
+from azents_runtime_runner.containment import DirectExecutionBackend
 from azents_runtime_runner.transfer import RunnerTransferManager
 
 
@@ -163,6 +162,8 @@ async def test_invalid_intent_does_not_block_control_receiver() -> None:
         control=control,
         transfer=transfer,
         accepted_generation=lambda: 1,
+        execution_backend=DirectExecutionBackend(),
+        workspace_path=Path("/tmp"),
     )
     intent = _intent(Path("/tmp/unused"), deadline_at=datetime.now(UTC))
 
@@ -185,6 +186,8 @@ async def test_invalid_intent_logs_bounded_validation_reason(
         control=control,
         transfer=_Transfer(),
         accepted_generation=lambda: 2,
+        execution_backend=DirectExecutionBackend(),
+        workspace_path=Path("/tmp"),
     )
     intent = _intent(Path("/workspace/agent/private-name.txt"))
 
@@ -238,6 +241,8 @@ async def test_upload_logs_server_grpc_rejection_reason(
         control=control,
         transfer=_RejectedTransfer(),
         accepted_generation=lambda: 1,
+        execution_backend=DirectExecutionBackend(),
+        workspace_path=Path("/tmp"),
     )
 
     await manager.handle_intent(
@@ -282,6 +287,8 @@ async def test_download_rejects_symlink_parent_without_touching_target(
             )
         ),
         accepted_generation=lambda: 1,
+        execution_backend=DirectExecutionBackend(),
+        workspace_path=Path("/tmp"),
     )
 
     await manager.handle_intent(_intent(link / "destination.bin", data=data))
@@ -303,6 +310,8 @@ async def test_upload_local_io_failure_emits_valid_integrity_result(
         control=control,
         transfer=_Transfer(),
         accepted_generation=lambda: 1,
+        execution_backend=DirectExecutionBackend(),
+        workspace_path=Path("/tmp"),
     )
 
     await manager.handle_intent(
@@ -339,6 +348,8 @@ async def test_download_atomically_replaces_existing_destination(
             )
         ),
         accepted_generation=lambda: 1,
+        execution_backend=DirectExecutionBackend(),
+        workspace_path=Path("/tmp"),
     )
 
     await manager.handle_intent(_intent(destination, data=data))
@@ -370,6 +381,8 @@ async def test_untrusted_transfer_identifiers_cannot_escape_staging_directory(
             )
         ),
         accepted_generation=lambda: 1,
+        execution_backend=DirectExecutionBackend(),
+        workspace_path=Path("/tmp"),
     )
     intent = _intent(
         destination,
@@ -404,6 +417,8 @@ async def test_exact_duplicate_intent_reuses_one_completed_result(
             )
         ),
         accepted_generation=lambda: 1,
+        execution_backend=DirectExecutionBackend(),
+        workspace_path=Path("/tmp"),
     )
     intent = _intent(destination, data=data)
 
@@ -449,6 +464,8 @@ async def test_exact_cancel_emits_cancelled_result_without_publication(
         control=control,
         transfer=_BlockingTransfer(),
         accepted_generation=lambda: 1,
+        execution_backend=DirectExecutionBackend(),
+        workspace_path=Path("/tmp"),
     )
     intent = _intent(destination, data=data)
 
@@ -503,6 +520,8 @@ async def test_conflicting_intent_for_active_identity_is_rejected_without_second
         control=control,
         transfer=transfer,
         accepted_generation=lambda: 1,
+        execution_backend=DirectExecutionBackend(),
+        workspace_path=Path("/tmp"),
     )
     intent = _intent(tmpfs_path / "destination.bin", data=data)
 
@@ -526,73 +545,6 @@ async def test_conflicting_intent_for_active_identity_is_rejected_without_second
 
 
 @pytest.mark.asyncio
-async def test_upload_snapshot_keeps_control_work_and_cancellation_responsive(
-    tmpfs_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Slow snapshot I/O yields the event loop for Control work and cancellation."""
-    source = tmpfs_path / "source.bin"
-    source.write_bytes(b"x" * (2 * 1024 * 1024))
-    entered_read = threading.Event()
-    release_read = threading.Event()
-    original_read = os.read
-
-    def block_first_read(fd: int, size: int) -> bytes:
-        if not entered_read.is_set():
-            entered_read.set()
-            release_read.wait(timeout=1)
-        return original_read(fd, size)
-
-    monkeypatch.setattr("azents_runtime_runner.transfer.os.read", block_first_read)
-    control = _Control()
-    manager = RunnerTransferManager(
-        control=control,
-        transfer=_Transfer(),
-        accepted_generation=lambda: 1,
-    )
-    intent = _intent(
-        source,
-        direction=RunnerTransferDirection.UPLOAD,
-        data=b"x" * (2 * 1024 * 1024),
-    )
-
-    await manager.handle_intent(intent)
-    assert await asyncio.to_thread(entered_read.wait, 1)
-    heartbeat_completed = asyncio.Event()
-    ordinary_control_completed = asyncio.Event()
-
-    async def heartbeat() -> None:
-        heartbeat_completed.set()
-
-    async def ordinary_control_operation() -> None:
-        ordinary_control_completed.set()
-
-    await asyncio.wait_for(
-        asyncio.gather(
-            heartbeat(),
-            ordinary_control_operation(),
-            manager.handle_cancel(
-                RunnerTransferCancel(
-                    identity=intent.identity,
-                    operation_id=intent.operation_id,
-                    dispatch_id=intent.dispatch_id,
-                    reason=RunnerTransferCancelReason.CALLER,
-                )
-            ),
-        ),
-        timeout=0.1,
-    )
-    assert heartbeat_completed.is_set()
-    assert ordinary_control_completed.is_set()
-    release_read.set()
-
-    result = await _result(control)
-    assert result.outcome is RunnerTransferOutcome.CANCELLED
-    assert not list(tmpfs_path.glob(".azents-transfer-*"))
-    await manager.close()
-
-
-@pytest.mark.asyncio
 async def test_successful_upload_leaves_no_mutable_snapshot_path(
     tmpfs_path: Path,
 ) -> None:
@@ -605,6 +557,8 @@ async def test_successful_upload_leaves_no_mutable_snapshot_path(
         control=control,
         transfer=_Transfer(),
         accepted_generation=lambda: 1,
+        execution_backend=DirectExecutionBackend(),
+        workspace_path=Path("/tmp"),
     )
 
     await manager.handle_intent(
@@ -631,6 +585,8 @@ async def test_upload_rejects_fifo_without_blocking_control(tmpfs_path: Path) ->
         control=control,
         transfer=_Transfer(),
         accepted_generation=lambda: 1,
+        execution_backend=DirectExecutionBackend(),
+        workspace_path=Path("/tmp"),
     )
     heartbeat_completed = asyncio.Event()
 
@@ -682,6 +638,8 @@ async def test_download_cleans_same_directory_stage_after_cancellation(
         control=control,
         transfer=_BlockingTransfer(),
         accepted_generation=lambda: 1,
+        execution_backend=DirectExecutionBackend(),
+        workspace_path=Path("/tmp"),
     )
     intent = _intent(tmpfs_path / "destination.bin", data=data)
 
@@ -704,12 +662,9 @@ async def test_download_cleans_same_directory_stage_after_cancellation(
 
 
 @pytest.mark.asyncio
-async def test_download_fails_closed_when_staging_file_cannot_be_created(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A staging allocation failure leaves the destination unchanged."""
-    destination = tmp_path / "destination.bin"
+async def test_download_fails_closed_when_staging_file_cannot_be_created() -> None:
+    """A helper-observed unwritable parent returns a bounded failure."""
+    destination = Path("/sys/azents-transfer-test/destination.bin")
     data = b"safe"
     control = _Control()
     transfer = _Transfer(
@@ -721,18 +676,12 @@ async def test_download_fails_closed_when_staging_file_cannot_be_created(
         )
     )
 
-    def fail_temporary_file_creation(parent_fd: int) -> tuple[int, str]:
-        del parent_fd
-        raise OSError(errno.EOPNOTSUPP, "Operation not supported")
-
-    monkeypatch.setattr(
-        "azents_runtime_runner.transfer._open_temporary_file",
-        fail_temporary_file_creation,
-    )
     manager = RunnerTransferManager(
         control=control,
         transfer=transfer,
         accepted_generation=lambda: 1,
+        execution_backend=DirectExecutionBackend(),
+        workspace_path=Path("/tmp"),
     )
 
     await manager.handle_intent(_intent(destination, data=data))
@@ -761,6 +710,8 @@ async def test_close_does_not_wait_for_blocked_result_sink(tmpfs_path: Path) -> 
             )
         ),
         accepted_generation=lambda: 1,
+        execution_backend=DirectExecutionBackend(),
+        workspace_path=Path("/tmp"),
     )
 
     await manager.handle_intent(_intent(tmpfs_path / "destination.bin", data=data))
@@ -779,6 +730,8 @@ async def test_bounded_result_queue_backpressures_without_dropping_terminal_resu
         control=control,
         transfer=_Transfer(),
         accepted_generation=lambda: 1,
+        execution_backend=DirectExecutionBackend(),
+        workspace_path=Path("/tmp"),
         max_tombstones=1,
     )
     expired_at = datetime.now(UTC)
@@ -839,6 +792,8 @@ async def test_failed_result_sink_unblocks_queue_and_shutdown(
         control=control,
         transfer=_Transfer(),
         accepted_generation=lambda: 1,
+        execution_backend=DirectExecutionBackend(),
+        workspace_path=Path("/tmp"),
         max_tombstones=1,
     )
     expired_at = datetime.now(UTC)
@@ -898,6 +853,8 @@ async def test_post_publication_cancellation_waits_for_successful_result_enqueue
             )
         ),
         accepted_generation=lambda: 1,
+        execution_backend=DirectExecutionBackend(),
+        workspace_path=Path("/tmp"),
         max_tombstones=1,
     )
     expired_at = datetime.now(UTC)

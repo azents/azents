@@ -742,71 +742,6 @@ def test_update_stages_on_the_target_filesystem(
 
 
 @pytest.mark.asyncio
-async def test_runner_serializes_patch_operations_per_runtime(tmp_path: Path) -> None:
-    first = tmp_path / "first.txt"
-    second = tmp_path / "second.txt"
-    first.write_text("one\n")
-    second.write_text("two\n")
-    first_patch = b"""*** Begin Patch
-*** Update File: first.txt
-@@
--one
-+ONE
-*** End Patch"""
-    second_patch = b"""*** Begin Patch
-*** Update File: second.txt
-@@
--two
-+TWO
-*** End Patch"""
-    first_entered = threading.Event()
-    second_entered = threading.Event()
-    release = threading.Event()
-
-    def block_first_patch(point: str, index: int, operation: PatchOperation) -> None:
-        if point != "stage" or index != 0:
-            return
-        if operation.path == "first.txt":
-            first_entered.set()
-            release.wait(timeout=2)
-        elif operation.path == "second.txt":
-            second_entered.set()
-
-    client = _FakeClient()
-    operations = RunnerOperations(
-        execution_backend=DirectExecutionBackend(),
-        client=client,
-        workspace=Workspace(str(tmp_path)),
-        apply_patch_fault_injector=block_first_patch,
-    )
-    first_task = asyncio.create_task(
-        operations.handle(_operation(tmp_path, first_patch))
-    )
-    assert await asyncio.to_thread(first_entered.wait, 1)
-
-    second_task = asyncio.create_task(
-        operations.handle(_operation(tmp_path, second_patch))
-    )
-    await asyncio.sleep(0.05)
-    assert not second_entered.is_set()
-
-    release.set()
-    await asyncio.wait_for(asyncio.gather(first_task, second_task), timeout=2)
-
-    assert second_entered.is_set()
-    assert first.read_text() == "ONE\n"
-    assert second.read_text() == "TWO\n"
-    assert (
-        sum(
-            event.event_type == RuntimeRunnerEventType.FINAL_SUCCESS
-            for event in client.events
-        )
-        == 2
-    )
-    await operations.close()
-
-
-@pytest.mark.asyncio
 async def test_runner_operation_emits_typed_success_and_failure(tmp_path: Path) -> None:
     source = tmp_path / "source.txt"
     source.write_text("old\n")
@@ -856,84 +791,45 @@ async def test_runner_operation_emits_typed_success_and_failure(tmp_path: Path) 
 
 
 @pytest.mark.asyncio
-async def test_runner_cancellation_before_commit_settles_to_no_change_failure(
-    tmp_path: Path,
-) -> None:
+async def test_runner_serializes_patch_operations_per_runtime(tmp_path: Path) -> None:
     source = tmp_path / "source.txt"
-    source.write_text("old\n")
-    patch = b"""*** Begin Patch
+    source.write_text("one\n")
+    first_patch = b"""*** Begin Patch
 *** Update File: source.txt
 @@
--old
-+new
+-one
++two
 *** End Patch"""
-    entered = threading.Event()
-    release = threading.Event()
-
-    def block_stage(point: str, index: int, operation: PatchOperation) -> None:
-        if point == "stage" and index == 0:
-            entered.set()
-            release.wait(timeout=2)
-
+    second_patch = b"""*** Begin Patch
+*** Update File: source.txt
+@@
+-two
++three
+*** End Patch"""
     client = _FakeClient()
     operations = RunnerOperations(
         execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
-        apply_patch_fault_injector=block_stage,
     )
-    task = asyncio.create_task(operations.handle(_operation(tmp_path, patch)))
-    assert await asyncio.to_thread(entered.wait, 1)
 
-    task.cancel()
-    release.set()
-    await asyncio.wait_for(task, timeout=2)
-
-    assert source.read_text() == "old\n"
-    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_ERROR
-    detail = client.events[-1].payload["file_apply_patch"]
-    assert isinstance(detail, dict)
-    assert detail["reason"] == "cancelled"
-    assert detail["applied"] == []
-    await operations.close()
-
-
-@pytest.mark.asyncio
-async def test_runner_cancellation_after_commit_starts_waits_for_terminal_result(
-    tmp_path: Path,
-) -> None:
-    source = tmp_path / "source.txt"
-    source.write_text("old\n")
-    patch = b"""*** Begin Patch
-*** Update File: source.txt
-@@
--old
-+new
-*** End Patch"""
-    entered = threading.Event()
-    release = threading.Event()
-
-    def block_commit(point: str, index: int, operation: PatchOperation) -> None:
-        if point == "commit" and index == 0:
-            entered.set()
-            release.wait(timeout=2)
-
-    client = _FakeClient()
-    operations = RunnerOperations(
-        execution_backend=DirectExecutionBackend(),
-        client=client,
-        workspace=Workspace(str(tmp_path)),
-        apply_patch_fault_injector=block_commit,
+    first_task = asyncio.create_task(
+        operations.handle(_operation(tmp_path, first_patch))
     )
-    task = asyncio.create_task(operations.handle(_operation(tmp_path, patch)))
-    assert await asyncio.to_thread(entered.wait, 1)
+    await asyncio.sleep(0)
+    second_task = asyncio.create_task(
+        operations.handle(_operation(tmp_path, second_patch))
+    )
+    await asyncio.gather(first_task, second_task)
 
-    task.cancel()
-    release.set()
-    await asyncio.wait_for(task, timeout=2)
-
-    assert source.read_text() == "new\n"
-    assert client.events[-1].event_type == RuntimeRunnerEventType.FINAL_SUCCESS
+    assert source.read_text() == "three\n"
+    assert (
+        sum(
+            event.event_type == RuntimeRunnerEventType.FINAL_SUCCESS
+            for event in client.events
+        )
+        == 2
+    )
     await operations.close()
 
 

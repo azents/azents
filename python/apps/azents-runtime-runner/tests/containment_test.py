@@ -233,6 +233,9 @@ async def test_bwrap_backend_owns_positive_projection_arguments(tmp_path: Path) 
     )
     assert str(temporary) in wrapped.argv
     assert "/runner/private" not in wrapped.argv
+    assert "contained_helper.py" in " ".join(wrapped.argv)
+    assert "contained_protocol.py" in " ".join(wrapped.argv)
+    assert "apply_patch.py" in " ".join(wrapped.argv)
     assert wrapped.argv[-3:] == ("/bin/bash", "-lc", "id")
 
 
