@@ -379,6 +379,11 @@ jobs:
         run: |
           cd testenv/azents/e2e
           uv sync
+      - name: Load Runtime containment AppArmor profile
+        run: |
+          test "$(cat /sys/module/apparmor/parameters/enabled)" = "Y"
+          sudo apparmor_parser --replace \
+            python/apps/azents-runtime-provider-docker/docker/apparmor/azents-runtime-bwrap
       - name: Run focused runtime-provider E2E
         run: |
           set -o pipefail
@@ -397,6 +402,11 @@ jobs:
             src/tests/azents/public/test_runtime_hooks.py::TestRuntimeHooks::test_tool_search_persists_deferred_probe_across_runs \
             src/tests/azents/public/test_external_channels.py::test_provider_native_channel_work_progress_journey \
             src/tests/azents/public/test_runtime_profiles.py::test_runtime_profile_precedence_applied_evidence_and_recreation
+      - name: Unload Runtime containment AppArmor profile
+        if: always()
+        run: |
+          sudo apparmor_parser --remove \
+            python/apps/azents-runtime-provider-docker/docker/apparmor/azents-runtime-bwrap
       - name: Capture runtime-provider E2E diagnostics
         if: always()
         run: |

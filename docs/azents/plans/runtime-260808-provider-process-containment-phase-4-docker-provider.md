@@ -1,7 +1,7 @@
 ---
 title: "Provider Process Containment Phase 4 Docker Provider Execution Plan"
 created: 2026-08-08
-updated: 2026-08-08
+updated: 2026-08-09
 tags: [runtime, provider, docker, security, containment, implementation]
 ---
 
@@ -17,11 +17,10 @@ tags: [runtime, provider, docker, security, containment, implementation]
   fail-closed contained Runner container with separate Workspace, Agent temporary,
   and Runner-private authority while preserving Docker Profile v1 behavior.
 - Inputs:
-  - Phase 3 commit `d7e603e9a` and PR `#1212`;
+  - Phase 3 commit `48268430b` and PR `#1212`;
   - confirmed `runtime-260808/REQ`;
-  - accepted `runtime-260808/ADR-D1` through `ADR-D10`;
-  - approved `runtime-260808/DESIGN` revision 1 and authority IDs `M1` through
-    `M12`;
+  - accepted `runtime-260808/ADR-D1` through `ADR-D11`;
+  - `runtime-260808/DESIGN` revision 2 and authority IDs `M1` through `M13`;
   - Phase 1 typed `DockerContainerProfileV2` and portable
     `RuntimeProcessContainmentModuleV1` contracts;
   - Phase 2 Runner bootstrap parser, selected direct/bwrap backend, positive
@@ -37,7 +36,8 @@ tags: [runtime, provider, docker, security, containment, implementation]
     containment advertisement or selects the supported bwrap preparation class;
   - Docker capability registration that advertises
     `docker.container-profile` schema version 2 and
-    `runtime.process-containment` only when that deployment setting is valid;
+    `runtime.process-containment` only when that deployment setting is valid
+    and Docker daemon security-option evidence confirms AppArmor support;
   - acceptance of Docker Profile v2 without containment as the v1-equivalent
     physical container contract and acceptance of its containment module only
     when the Provider deployment can prepare the selected backend;
@@ -47,9 +47,9 @@ tags: [runtime, provider, docker, security, containment, implementation]
   - separate Runtime-specific host directories and container mounts for durable
     Workspace, ephemeral Agent temporary backing, and Runner-private temporary
     state, with Agent temporary projected to `/tmp` only by the Runner backend;
-  - explicit Docker create and inspect contracts for capability drop,
-    no-new-privileges, compatible security profile/user-namespace preparation,
-    read/write mount intent, and stable terminal diagnostics;
+  - explicit Docker create and inspect contracts for trusted Runner user,
+    capability add/drop, compatible security profile/user-namespace/system-path
+    preparation, read/write mount intent, and stable terminal diagnostics;
   - fail-closed container reuse/recreation comparison covering Profile version,
     containment bootstrap, mounts, and security settings without mutating or
     downgrading a contained Profile;
@@ -79,17 +79,23 @@ tags: [runtime, provider, docker, security, containment, implementation]
   - Docker Profile v2 without a containment module uses the existing direct
     Runner behavior and remains compatible only with its declared v2 contract;
   - Docker Profile v2 with containment is accepted only when Provider deployment
-    configuration selects the supported preparation class; otherwise Provider
-    compatibility does not advertise it and direct command handling rejects it;
+    configuration selects the supported preparation class and Docker daemon
+    security-option evidence confirms AppArmor support; otherwise Provider
+    startup fails before compatibility advertisement and direct command handling
+    rejects it;
   - Provider bootstrap uses the Runner-owned
     `AZ_RUNTIME_PROCESS_CONTAINMENT_CONFIG` schema and contains no
     Profile-authored backend arguments or Agent/model-visible data;
   - Agent temporary backing is mounted at a fixed Runner-private absolute path;
     contained execution maps that backing path to `/tmp`, while Runner `/tmp`
     and other private paths are not projected;
-  - the container continues to run as UID/GID 1000, receives no Agent-accessible
-    Docker socket, drops all capabilities, prevents privilege escalation, and
-    uses only the security options required by the approved bwrap mechanism;
+  - the trusted Runner container remains UID/GID 1000, receives no
+    Agent-accessible Docker socket, drops all workload capabilities and adds only
+    `CAP_SYS_ADMIN`, `CAP_SYS_CHROOT`, `CAP_NET_ADMIN`, `CAP_SETUID`,
+    `CAP_SETGID`, `CAP_SYS_PTRACE`, and `CAP_SETPCAP` for the root-owned
+    set-user-ID bwrap bootstrap, while every contained Agent child is UID/GID
+    1000 with zero capabilities, `NoNewPrivs=1`, and nested user namespaces
+    denied;
   - Docker create and inspect typed structures carry every security and terminal
     field used for reuse or failure decisions; raw Docker JSON is decoded only at
     the adapter boundary;
@@ -99,13 +105,14 @@ tags: [runtime, provider, docker, security, containment, implementation]
   - physical Profile adoption/removal and rollback use existing Runtime
     recreation, preserve durable Workspace storage, and treat Agent temporary as
     disposable.
-- Approved Design mechanisms: `M2`, `M5`, `M11`, `M12`
+- Target Design mechanisms: `M2`, `M5`, `M11`, `M12`, `M13`
 - Authority references:
   `runtime-260808/REQ-1`, `REQ-2`, `REQ-3`, `REQ-4`, `REQ-5`, `REQ-6`,
   `REQ-7`, `REQ-8`, `REQ-9`, `REQ-10`, `REQ-11`, `REQ-12`, `REQ-13`,
   `REQ-14`; `runtime-260808/ADR-D1`, `ADR-D2`, `ADR-D3`, `ADR-D5`,
-  `ADR-D6`, `ADR-D8`, `ADR-D9`, `ADR-D10`; `runtime-260808/DESIGN`
-  revision 1; current `spec/domain/runtime-configuration.md`,
+  `ADR-D6`, `ADR-D8`, `ADR-D9`, `ADR-D10`, `ADR-D11`;
+  `runtime-260808/DESIGN` revision 2; current
+  `spec/domain/runtime-configuration.md`,
   `spec/flow/agent-runtime-control.md`, `spec/domain/workspace.md`, and
   `spec/flow/test-strategy-e2e-primary.md`.
 - Design delta: `None`
@@ -124,9 +131,11 @@ tags: [runtime, provider, docker, security, containment, implementation]
     `/tmp/agent` container bind;
   - contained bootstrap and positive bwrap projection are the only path from the
     hidden Agent temporary backing directory to Agent `/tmp`;
-  - container create/inspect tests prove all capabilities are dropped,
-    no-new-privileges is set, security preparation is explicit, UID/GID remains
-    1000, and reuse rejects security/bootstrap drift;
+  - container create/inspect tests prove the trusted Runner has only the exact
+    bootstrap capability set, security preparation is explicit, and reuse rejects
+    user/security/bootstrap drift;
+  - real qualification proves every Agent child has UID/GID 1000, all capability
+    sets zero, `NoNewPrivs=1`, and nested user namespaces denied;
   - capability contract snapshots prove schema v2 and
     `runtime.process-containment` are absent when deployment preparation is
     disabled and present only when enabled;
@@ -173,13 +182,15 @@ tags: [runtime, provider, docker, security, containment, implementation]
   - Criteria: conditional and honest capability advertisement; no contained-v1
     fallback; exact trusted bootstrap; no Docker socket/DinD; separate Workspace,
     Agent temporary, and Runner-private authority; explicit secure create/inspect
-    contract; UID/GID 1000; capability/no-new-privileges/user-namespace
-    invariants; Provider-managed network preservation; bounded pre-registration
+    contract; non-root Runner and restricted set-user-ID bwrap bootstrap
+    authority; Agent-child
+    UID/GID 1000 and capability/no-new-privileges/user-namespace invariants;
+    Provider-managed network preservation; bounded pre-registration
     failure; recreation/rollback and Workspace/temporary semantics; no secrets or
     raw sandbox data in diagnostics; no Kubernetes, Worker, API, Web, protobuf,
     Spec-promotion, or new state drift; completed removal obligations; `Design
     delta: None`.
-  - Inputs: Requirements, accepted ADR, approved Design revision 1,
+  - Inputs: Requirements, accepted ADR, Design revision 2,
     multi-phase plan, Phase 1-3 contracts and PRs, this phase plan, current Specs,
     complete diff, capability snapshots, Docker create/inspect evidence, real
     qualification/E2E evidence, static absence output, and validation results.
@@ -197,8 +208,8 @@ tags: [runtime, provider, docker, security, containment, implementation]
   - static removal/absence checks described above
   - documentation validation and `git diff --check`
 - Scope-drift check:
-  Confirm the diff implements only `M2`, `M5`, `M11`, and `M12` for the Docker
-  Provider. Remove Kubernetes resources, Worker readiness/prompt/resolver, API/Web,
+  Confirm the diff implements only `M2`, `M5`, `M11`, `M12`, and `M13` for the
+  Docker Provider. Remove Kubernetes resources, Worker readiness/prompt/resolver, API/Web,
   OpenAPI/generated-client, protobuf, Living Spec promotion, durable qualification
   state, Profile-authored backend arguments, containment defaults, DinD coexistence,
   network-equivalence claims, compatibility fallback, or Runner helper/backend

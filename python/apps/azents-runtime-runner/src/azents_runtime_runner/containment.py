@@ -46,6 +46,7 @@ _CONTAINED_HELPER_PATHS = tuple(
 )
 _SYSTEM_READ_ONLY_PATHS = (
     "/usr",
+    "/usr/local",
     "/etc/alternatives",
     "/etc/fonts",
     "/etc/hosts",

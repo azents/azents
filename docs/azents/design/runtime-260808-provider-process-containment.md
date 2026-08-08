@@ -1,7 +1,7 @@
 ---
 title: "Provider-Owned Runtime Process Containment Design"
 created: 2026-08-08
-updated: 2026-08-08
+updated: 2026-08-09
 tags: [runtime, provider, runner, security, sandbox, architecture, testenv]
 document_role: primary
 document_type: design
@@ -14,7 +14,7 @@ snapshot_id: runtime-260808
 - Document reference: `runtime-260808/DESIGN`
 - Requirements: [Provider-Owned Runtime Process Containment Requirements](../requirements/runtime-260808-provider-process-containment.md) (`runtime-260808/REQ`)
 - ADR: [Provider-Owned Runtime Process Containment](../adr/runtime-260808-provider-process-containment.md) (`runtime-260808/ADR`)
-- Design revision: `1`
+- Design revision: `2`
 - Mode: Collaborative
 - Decision owner: requester
 
@@ -710,10 +710,13 @@ No test captures credential values or raw environment dumps.
   Real Docker qualification proved a UID/GID 1000 Runner can produce a UID/GID 1000
   Agent child with all five capability sets zero, `NoNewPrivs=1`, nested user namespaces
   denied, and ordinary process creation preserved when the Provider supplies the M13
-  bootstrap contract. Historical repository evidence still shows that bwrap is
-  incompatible with a gVisor RuntimeClass. The Kubernetes Provider must prove the same
-  runc/container contract before advertising capability; incompatibility fails
-  qualification rather than weakening the boundary.
+  bootstrap contract. That local Docker daemon did not advertise AppArmor support, so
+  the dedicated enforcing AppArmor boundary requires separate qualification on a
+  compatible daemon. The Docker Provider refuses containment advertisement when Docker
+  daemon security-option evidence lacks AppArmor. Historical repository evidence still
+  shows that bwrap is incompatible with a gVisor RuntimeClass. The Kubernetes Provider
+  must prove the same runc/container contract before advertising capability;
+  incompatibility fails qualification rather than weakening the boundary.
 - Exact positive system path manifests may require iterative additions for bundled tools;
   conformance and E2E evidence, not fallback to the Runner filesystem, resolves gaps.
 - Per-operation contained helper startup adds overhead. It is preferred over a persistent
@@ -768,7 +771,7 @@ blocker found.**
 | M10 derived status | Feasible | `agent_runtimes` already stores selected Profile, desired/applied revision, Provider state, Runner state/generation, and Workspace evidence. Existing server summaries establish the rule that frontends consume server projections rather than recomputing raw state. |
 | M11 rollout/recreation | Feasible | Current application-impact classification already recreates on schema/provider/non-network Profile changes and preserves durable Workspace storage through Runtime recreation. |
 | M12 E2E/conformance | Feasible with new Kubernetes fixture | Docker Runtime product E2E and Runner operation E2E already exist. Helm rendering covers the Kubernetes Provider, but a disposable real Kubernetes Runtime fixture must be added for required backend qualification evidence. |
-| M13 non-root bwrap bootstrap | Feasible | The production image installs root-owned mode-4755 bwrap and a Runner-owned seccomp launcher. Real Docker qualification with a UID/GID 1000 Runner, the bounded seven-capability set, unconfined workload seccomp, unconfined system paths, and the dedicated AppArmor boundary produced a UID/GID 1000 Agent child with all capability sets zero, `NoNewPrivs=1`, nested user namespaces denied, ordinary fork preserved, and the privileged bwrap inode masked from the Agent view. |
+| M13 non-root bwrap bootstrap | Feasible with deployment gate | The production image installs root-owned mode-4755 bwrap and a Runner-owned seccomp launcher. Real Docker qualification with a UID/GID 1000 Runner, the bounded seven-capability set, unconfined workload seccomp, and unconfined system paths produced a UID/GID 1000 Agent child with all capability sets zero, `NoNewPrivs=1`, nested user namespaces denied, ordinary fork preserved, and the privileged bwrap inode masked from the Agent view. The local Docker daemon did not advertise AppArmor support, so Provider registration now gates containment on Docker daemon AppArmor evidence and the CI Docker environment owns qualification of the dedicated enforcing profile. |
 
 ### Feasibility conditions
 
@@ -786,11 +789,12 @@ blocker found.**
 
 - Mode: `Collaborative`
 - Decision owner: requester
-- Status: Pending renewed approval
+- Status: Approved
 - Previous approval: Design revision `1`, authority IDs `M1` through `M12`, approved
   on 2026-08-08
-- Pending Design revision: `2`
-- Pending authority IDs: `M1`, `M2`, `M3`, `M4`, `M5`, `M6`, `M7`, `M8`, `M9`, `M10`, `M11`, `M12`, `M13`
-- Pending scope delta: Both Providers retain a non-root UID/GID 1000 Runner and use
+- Approved Design revision: `2`
+- Approved authority IDs: `M1`, `M2`, `M3`, `M4`, `M5`, `M6`, `M7`, `M8`, `M9`, `M10`, `M11`, `M12`, `M13`
+- Approval date: 2026-08-09
+- Approved scope delta: Both Providers retain a non-root UID/GID 1000 Runner and use
   the bounded set-user-ID bwrap bootstrap in M13 while preserving the previously
   approved capability-free UID/GID 1000 Agent-child contract.
