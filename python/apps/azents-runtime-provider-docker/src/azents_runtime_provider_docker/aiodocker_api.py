@@ -68,26 +68,40 @@ class AioDockerApi(DockerApi):
     async def create_container(self, spec: DockerContainerSpec) -> None:
         """Create a stopped Docker container."""
         docker = await self._get_docker()
+        host_config: dict[str, object] = {
+            "SecurityOpt": list(spec.security_options),
+            "CapAdd": list(spec.cap_add),
+            "CapDrop": list(spec.cap_drop),
+            "UsernsMode": spec.userns_mode,
+            "Privileged": spec.privileged,
+            "NetworkMode": spec.network,
+            "AutoRemove": False,
+            "Memory": spec.memory_bytes,
+            "MemoryReservation": spec.memory_reservation_bytes,
+            "CpuQuota": spec.cpu_quota,
+            "CpuPeriod": spec.cpu_period,
+            "CpuShares": spec.cpu_shares,
+            "Binds": [
+                (
+                    f"{bind.host_path}:{bind.container_path}:ro"
+                    if bind.read_only
+                    else f"{bind.host_path}:{bind.container_path}"
+                )
+                for bind in spec.binds
+            ],
+            "ExtraHosts": list(spec.extra_hosts),
+        }
+        if spec.masked_paths is not None:
+            host_config["MaskedPaths"] = list(spec.masked_paths)
+        if spec.readonly_paths is not None:
+            host_config["ReadonlyPaths"] = list(spec.readonly_paths)
         await docker.containers.create(
             config={
                 "Image": spec.image,
                 "User": spec.user,
                 "WorkingDir": spec.working_dir,
                 "Env": [f"{key}={value}" for key, value in spec.env.items()],
-                "HostConfig": {
-                    "SecurityOpt": ["seccomp=unconfined"],
-                    "NetworkMode": spec.network,
-                    "AutoRemove": False,
-                    "Memory": spec.memory_bytes,
-                    "MemoryReservation": spec.memory_reservation_bytes,
-                    "CpuQuota": spec.cpu_quota,
-                    "CpuPeriod": spec.cpu_period,
-                    "CpuShares": spec.cpu_shares,
-                    "Binds": [
-                        f"{bind.host_path}:{bind.container_path}" for bind in spec.binds
-                    ],
-                    "ExtraHosts": list(spec.extra_hosts),
-                },
+                "HostConfig": host_config,
                 "Labels": dict(spec.labels),
             },
             name=spec.name,
@@ -141,6 +155,7 @@ class AioDockerApi(DockerApi):
 def _container_info(name: str, raw_info: object) -> DockerContainerInfo:
     info = _mapping(raw_info)
     config = _mapping(info.get("Config"))
+    host_config = _mapping(info.get("HostConfig"))
     state = _mapping(info.get("State"))
     labels = _string_mapping(config.get("Labels"))
     env = _env_mapping(config.get("Env"))
@@ -155,11 +170,20 @@ def _container_info(name: str, raw_info: object) -> DockerContainerInfo:
         labels=labels,
         env=env,
         binds=mounts,
+        cap_add=_string_sequence(host_config.get("CapAdd")),
+        cap_drop=_string_sequence(host_config.get("CapDrop")),
+        security_options=_string_sequence(host_config.get("SecurityOpt")),
+        userns_mode=_optional_string(host_config.get("UsernsMode")),
+        masked_paths=_string_sequence(host_config.get("MaskedPaths")),
+        readonly_paths=_string_sequence(host_config.get("ReadonlyPaths")),
+        privileged=_required_bool(host_config.get("Privileged"), "Privileged"),
         state=DockerContainerState(
-            running=bool(state.get("Running")),
-            restarting=bool(state.get("Restarting")),
-            dead=bool(state.get("Dead")),
-            status=status if isinstance(status, str) else None,
+            running=_required_bool(state.get("Running"), "Running"),
+            restarting=_required_bool(state.get("Restarting"), "Restarting"),
+            dead=_required_bool(state.get("Dead"), "Dead"),
+            status=_optional_string(status),
+            exit_code=_optional_int(state.get("ExitCode"), "ExitCode"),
+            oom_killed=_required_bool(state.get("OOMKilled"), "OOMKilled"),
         ),
     )
 
@@ -197,6 +221,36 @@ def _env_mapping(value: object) -> dict[str, str]:
     return result
 
 
+def _string_sequence(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError("Docker string sequence is invalid.")
+    return tuple(item for item in value if isinstance(item, str))
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None or value == "":
+        return None
+    if not isinstance(value, str):
+        raise ValueError("Docker optional string is invalid.")
+    return value
+
+
+def _required_bool(value: object, field: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"Docker {field} is invalid.")
+    return value
+
+
+def _optional_int(value: object, field: str) -> int | None:
+    if value is None:
+        return None
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"Docker {field} is invalid.")
+    return value
+
+
 def _mounts(value: object) -> tuple[DockerBindMount, ...]:
     if not isinstance(value, list):
         return ()
@@ -205,6 +259,17 @@ def _mounts(value: object) -> tuple[DockerBindMount, ...]:
         item = _mapping(entry)
         source = item.get("Source")
         destination = item.get("Destination")
-        if isinstance(source, str) and isinstance(destination, str):
-            mounts.append(DockerBindMount(source, destination))
+        read_write = item.get("RW")
+        if (
+            isinstance(source, str)
+            and isinstance(destination, str)
+            and isinstance(read_write, bool)
+        ):
+            mounts.append(
+                DockerBindMount(
+                    host_path=source,
+                    container_path=destination,
+                    read_only=not read_write,
+                )
+            )
     return tuple(mounts)

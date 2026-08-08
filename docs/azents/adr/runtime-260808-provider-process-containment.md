@@ -43,6 +43,7 @@ execution.
 - [x] `runtime-260808/ADR-D8` — Positive Agent filesystem and temporary-storage projection
 - [x] `runtime-260808/ADR-D9` — Derived containment status projections
 - [x] `runtime-260808/ADR-D10` — Pluggable containment backend interface
+- [x] `runtime-260808/ADR-D11` — Docker trusted Runner bootstrap authority
 
 Local identifiers, module placement, helper boundaries, equivalent fixture composition,
 and exact behaviorally equivalent static prompt wording remain agent-owned implementation
@@ -397,6 +398,49 @@ is absent, unsupported, or fails qualification.
 - Allowing per-operation backend selection or fallback was rejected because one
   physical Runtime must expose one coherent qualified Agent authority.
 
+### runtime-260808/ADR-D11: Grant only the Docker trusted Runner the bootstrap authority required by bwrap
+
+**Affected requirements:** `runtime-260808/REQ-2`, `REQ-3`, `REQ-5`, `REQ-9`,
+`REQ-10`, `REQ-11`, `REQ-14`
+
+For a contained Docker Profile using the initial bwrap backend, the trusted Runner
+container starts as UID/GID 0 with all Linux capabilities dropped and only
+`CAP_SETUID`, `CAP_SETGID`, `CAP_SETFCAP`, and `CAP_SYS_ADMIN` added. Docker's default
+system-path masking is disabled for that container because bwrap must construct a new
+`/proc` and mount view. The deployment applies the dedicated enforcing AppArmor profile,
+uses the unconfined seccomp preparation required by the supported bwrap environment, does
+not run privileged, and exposes no Docker or infrastructure socket.
+
+This authority belongs only to the trusted Runner supervisor while it creates the
+contained namespace. The Runner container itself cannot use Docker
+`no-new-privileges`, because that prevents the required UID/GID mapping. Instead, bwrap
+sets `NoNewPrivs=1` inside the contained authority, maps the Agent child to UID/GID 1000,
+drops every effective, permitted, inheritable, ambient, and bounding capability, and
+disables nested user namespaces before executing Agent-selected code. Qualification
+verifies these child invariants through the same backend entry point used by operations.
+
+The Docker-specific trusted bootstrap authority does not change the portable Profile
+contract and is not inherited by Kubernetes or future Providers. Each Provider remains
+responsible for selecting the least authority that can satisfy the common contained
+child contract in its environment.
+
+**Rejected alternatives:**
+
+- Keeping the Docker Runner at UID/GID 1000 was rejected because a non-root process can
+  create a user namespace on the target host but cannot establish the required
+  UID/GID 1000-to-1000 mapping for the contained child.
+- Setting Docker `no-new-privileges` on the trusted Runner container was rejected because
+  it prevents bwrap from installing the required UID/GID mapping before the Agent child
+  exists.
+- Set-user-ID bwrap, file capabilities, `newuidmap`/`newgidmap`, an unconfined AppArmor
+  profile, and adding only individual mapping capabilities to a non-root Runner were
+  rejected because feasibility probes did not produce the required child identity and
+  authority.
+- A privileged Runner container was rejected because the required preparation succeeds
+  with the explicit capability set and security fields above.
+- Granting the bootstrap capabilities to the Agent child was rejected because it would
+  directly violate the contained privilege contract and permit authority expansion.
+
 ## Consequences
 
 - Model context remains stable across ordinary Runner ready/busy/reconnecting transitions.
@@ -432,3 +476,6 @@ is absent, unsupported, or fails qualification.
   interface, and direct `bwrap` construction is absent from Runner operation handlers.
 - Backend additions require implementation and conformance evidence, not Agent-facing
   protocol or Profile changes.
+- The contained Docker Runner is a trusted root bootstrap supervisor with four explicit
+  capabilities, while every Agent child remains UID/GID 1000, capability-free,
+  no-new-privileges constrained, and unable to create a nested user namespace.
