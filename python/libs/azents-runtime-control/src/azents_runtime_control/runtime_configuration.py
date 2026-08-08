@@ -6,7 +6,7 @@ import ipaddress
 import json
 import re
 from collections.abc import Mapping
-from typing import TypeAlias
+from typing import TypeAlias, assert_never
 
 JsonValue: TypeAlias = (
     None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
@@ -128,6 +128,24 @@ class KubernetesPodProfileV1:
 
 
 @dataclasses.dataclass(frozen=True)
+class RuntimeProcessContainmentModuleV1:
+    """Portable Provider-owned process containment contract version 1."""
+
+
+@dataclasses.dataclass(frozen=True)
+class KubernetesPodProfileV2:
+    """Resolved Kubernetes Pod Profile contract version 2."""
+
+    runner_resources: KubernetesContainerResources
+    workspace_volume: KubernetesWorkspaceVolume
+    network_policy: RuntimeNetworkPolicy
+    service_account_name: str | None
+    scheduling: KubernetesScheduling
+    dind: KubernetesDinD | None
+    process_containment: RuntimeProcessContainmentModuleV1 | None
+
+
+@dataclasses.dataclass(frozen=True)
 class DockerContainerResources:
     """Docker-native enforceable Runner resource choices."""
 
@@ -145,12 +163,26 @@ class DockerContainerProfileV1:
     network_name: str | None
 
 
-RuntimeResolvedProfile: TypeAlias = KubernetesPodProfileV1 | DockerContainerProfileV1
+@dataclasses.dataclass(frozen=True)
+class DockerContainerProfileV2:
+    """Resolved Docker Container Profile contract version 2."""
+
+    runner_resources: DockerContainerResources
+    network_name: str | None
+    process_containment: RuntimeProcessContainmentModuleV1 | None
+
+
+RuntimeResolvedProfile: TypeAlias = (
+    KubernetesPodProfileV1
+    | KubernetesPodProfileV2
+    | DockerContainerProfileV1
+    | DockerContainerProfileV2
+)
 
 
 @dataclasses.dataclass(frozen=True)
 class RuntimeResolvedConfiguration:
-    """Parsed schema-version-1 Runtime configuration."""
+    """Parsed Runtime configuration."""
 
     provider: RuntimeProviderReference
     infrastructure_profile: RuntimeInfrastructureProfileReference
@@ -238,12 +270,17 @@ def parse_runtime_configuration_envelope(
     effective_profile = _effective_profile(
         _required_mapping(document, "effective_profile")
     )
-    if isinstance(effective_profile, KubernetesPodProfileV1):
-        if provider.kind != "kubernetes":
-            raise ValueError("Kubernetes Pod Profile requires a Kubernetes Provider.")
-    else:
-        if provider.kind != "docker":
-            raise ValueError("Docker Container Profile requires a Docker Provider.")
+    match effective_profile:
+        case KubernetesPodProfileV1() | KubernetesPodProfileV2():
+            if provider.kind != "kubernetes":
+                raise ValueError(
+                    "Kubernetes Pod Profile requires a Kubernetes Provider."
+                )
+        case DockerContainerProfileV1() | DockerContainerProfileV2():
+            if provider.kind != "docker":
+                raise ValueError("Docker Container Profile requires a Docker Provider.")
+        case _:
+            assert_never(effective_profile)
     return RuntimeResolvedConfiguration(
         provider=provider,
         infrastructure_profile=infrastructure_profile,
@@ -319,7 +356,20 @@ def _effective_profile(value: Mapping[str, JsonValue]) -> RuntimeResolvedProfile
     raise ValueError("Runtime configuration Profile kind is unsupported.")
 
 
-def _kubernetes_profile(value: Mapping[str, JsonValue]) -> KubernetesPodProfileV1:
+def _kubernetes_profile(
+    value: Mapping[str, JsonValue],
+) -> KubernetesPodProfileV1 | KubernetesPodProfileV2:
+    schema_version = _required_int(value, "schema_version")
+    if schema_version == 1:
+        return _kubernetes_profile_v1(value)
+    if schema_version == 2:
+        return _kubernetes_profile_v2(value)
+    raise ValueError("Kubernetes Pod Profile schema version is unsupported.")
+
+
+def _kubernetes_profile_v1(
+    value: Mapping[str, JsonValue],
+) -> KubernetesPodProfileV1:
     _require_exact_fields(
         value,
         {
@@ -358,7 +408,64 @@ def _kubernetes_profile(value: Mapping[str, JsonValue]) -> KubernetesPodProfileV
     )
 
 
-def _docker_profile(value: Mapping[str, JsonValue]) -> DockerContainerProfileV1:
+def _kubernetes_profile_v2(
+    value: Mapping[str, JsonValue],
+) -> KubernetesPodProfileV2:
+    _require_exact_fields(
+        value,
+        {
+            "profile_kind",
+            "contract_family",
+            "schema_version",
+            "runner_resources",
+            "workspace_volume",
+            "network_policy",
+            "service_account_name",
+            "scheduling",
+            "dind",
+            "process_containment",
+        },
+        "Kubernetes Pod Profile",
+    )
+    if _required_string(value, "profile_kind") != "kubernetes_pod":
+        raise ValueError("Kubernetes Pod Profile kind is invalid.")
+    if _required_string(value, "contract_family") != "kubernetes.pod-profile":
+        raise ValueError("Kubernetes Pod Profile contract family is unsupported.")
+    if _required_int(value, "schema_version") != 2:
+        raise ValueError("Kubernetes Pod Profile schema version is unsupported.")
+    dind_value = value.get("dind")
+    process_containment = _process_containment(value.get("process_containment"))
+    if dind_value is not None and process_containment is not None:
+        raise ValueError("Process containment cannot be combined with nested Docker.")
+    return KubernetesPodProfileV2(
+        runner_resources=_kubernetes_resources(
+            _required_mapping(value, "runner_resources")
+        ),
+        workspace_volume=_workspace_volume(
+            _required_mapping(value, "workspace_volume")
+        ),
+        network_policy=_network_policy(_required_mapping(value, "network_policy")),
+        service_account_name=_optional_string(value, "service_account_name"),
+        scheduling=_scheduling(_required_mapping(value, "scheduling")),
+        dind=None
+        if dind_value is None
+        else _dind(_mapping_value(dind_value, "Kubernetes DinD")),
+        process_containment=process_containment,
+    )
+
+
+def _docker_profile(
+    value: Mapping[str, JsonValue],
+) -> DockerContainerProfileV1 | DockerContainerProfileV2:
+    schema_version = _required_int(value, "schema_version")
+    if schema_version == 1:
+        return _docker_profile_v1(value)
+    if schema_version == 2:
+        return _docker_profile_v2(value)
+    raise ValueError("Docker Container Profile schema version is unsupported.")
+
+
+def _docker_profile_v1(value: Mapping[str, JsonValue]) -> DockerContainerProfileV1:
     _require_exact_fields(
         value,
         {
@@ -411,6 +518,79 @@ def _docker_profile(value: Mapping[str, JsonValue]) -> DockerContainerProfileV1:
         runner_resources=parsed_resources,
         network_name=_optional_string(value, "network_name"),
     )
+
+
+def _docker_profile_v2(value: Mapping[str, JsonValue]) -> DockerContainerProfileV2:
+    _require_exact_fields(
+        value,
+        {
+            "profile_kind",
+            "contract_family",
+            "schema_version",
+            "runner_resources",
+            "network_name",
+            "process_containment",
+        },
+        "Docker Container Profile",
+    )
+    if _required_string(value, "profile_kind") != "docker_container":
+        raise ValueError("Docker Container Profile kind is invalid.")
+    if _required_string(value, "contract_family") != "docker.container-profile":
+        raise ValueError("Docker Container Profile contract family is unsupported.")
+    if _required_int(value, "schema_version") != 2:
+        raise ValueError("Docker Container Profile schema version is unsupported.")
+    resources = _required_mapping(value, "runner_resources")
+    _require_exact_fields(
+        resources,
+        {
+            "cpu_reservation_millicores",
+            "cpu_limit_millicores",
+            "memory_reservation_bytes",
+            "memory_limit_bytes",
+        },
+        "Docker resources",
+    )
+    parsed_resources = DockerContainerResources(
+        cpu_reservation_millicores=_optional_positive_int(
+            resources, "cpu_reservation_millicores"
+        ),
+        cpu_limit_millicores=_optional_positive_int(resources, "cpu_limit_millicores"),
+        memory_reservation_bytes=_optional_positive_int(
+            resources, "memory_reservation_bytes"
+        ),
+        memory_limit_bytes=_optional_positive_int(resources, "memory_limit_bytes"),
+    )
+    _validate_bounds(
+        parsed_resources.cpu_reservation_millicores,
+        parsed_resources.cpu_limit_millicores,
+        "Docker CPU reservation cannot exceed its limit.",
+    )
+    _validate_bounds(
+        parsed_resources.memory_reservation_bytes,
+        parsed_resources.memory_limit_bytes,
+        "Docker memory reservation cannot exceed its limit.",
+    )
+    return DockerContainerProfileV2(
+        runner_resources=parsed_resources,
+        network_name=_optional_string(value, "network_name"),
+        process_containment=_process_containment(value.get("process_containment")),
+    )
+
+
+def _process_containment(
+    value: JsonValue,
+) -> RuntimeProcessContainmentModuleV1 | None:
+    if value is None:
+        return None
+    module = _mapping_value(value, "Runtime process containment")
+    _require_exact_fields(
+        module,
+        {"schema_version"},
+        "Runtime process containment",
+    )
+    if _required_int(module, "schema_version") != 1:
+        raise ValueError("Runtime process containment schema version is unsupported.")
+    return RuntimeProcessContainmentModuleV1()
 
 
 def _kubernetes_resources(

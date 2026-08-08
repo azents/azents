@@ -4,12 +4,14 @@ import enum
 import hashlib
 import ipaddress
 import json
-from typing import Annotated, Literal
+from typing import Annotated, Literal, assert_never
 
 from pydantic import (
     BaseModel,
     ConfigDict,
+    Discriminator,
     Field,
+    Tag,
     TypeAdapter,
     field_validator,
     model_validator,
@@ -239,6 +241,36 @@ class KubernetesPodProfileSpecV1(_FrozenProfileModel):
     dind: KubernetesDinDModule | None
 
 
+class RuntimeProcessContainmentModuleV1(_FrozenProfileModel):
+    """Portable Provider-owned process containment contract version 1."""
+
+    schema_version: Literal[1]
+
+
+class KubernetesPodProfileSpecV2(_FrozenProfileModel):
+    """Kubernetes Pod Profile contract version 2."""
+
+    profile_kind: Literal[RuntimeInfrastructureProfileKind.KUBERNETES_POD]
+    contract_family: Literal["kubernetes.pod-profile"]
+    schema_version: Literal[2]
+    runner_resources: KubernetesContainerResources
+    workspace_volume: KubernetesWorkspaceVolume
+    network_policy: RuntimeNetworkPolicyModule
+    service_account_name: Annotated[str | None, Field(max_length=253)]
+    scheduling: KubernetesSchedulingModule
+    dind: KubernetesDinDModule | None
+    process_containment: RuntimeProcessContainmentModuleV1 | None
+
+    @model_validator(mode="after")
+    def validate_containment(self) -> "KubernetesPodProfileSpecV2":
+        """Reject mutually exclusive containment and nested Docker authority."""
+        if self.process_containment is not None and self.dind is not None:
+            raise ValueError(
+                "Process containment cannot be combined with nested Docker."
+            )
+        return self
+
+
 class DockerContainerResources(_FrozenProfileModel):
     """Docker-native enforceable Runner resource choices."""
 
@@ -275,9 +307,58 @@ class DockerContainerProfileSpecV1(_FrozenProfileModel):
     network_name: Annotated[str | None, Field(max_length=255)]
 
 
+class DockerContainerProfileSpecV2(_FrozenProfileModel):
+    """Docker Container Profile contract version 2."""
+
+    profile_kind: Literal[RuntimeInfrastructureProfileKind.DOCKER_CONTAINER]
+    contract_family: Literal["docker.container-profile"]
+    schema_version: Literal[2]
+    runner_resources: DockerContainerResources
+    network_name: Annotated[str | None, Field(max_length=255)]
+    process_containment: RuntimeProcessContainmentModuleV1 | None
+
+
+def _runtime_profile_discriminator(value: object) -> str | None:
+    """Return one exact Profile kind and schema-version discriminator."""
+    match value:
+        case KubernetesPodProfileSpecV1():
+            return "kubernetes_pod:1"
+        case KubernetesPodProfileSpecV2():
+            return "kubernetes_pod:2"
+        case DockerContainerProfileSpecV1():
+            return "docker_container:1"
+        case DockerContainerProfileSpecV2():
+            return "docker_container:2"
+        case dict():
+            profile_kind = value.get("profile_kind")
+            schema_version = value.get("schema_version")
+        case _:
+            return None
+    if isinstance(profile_kind, enum.Enum):
+        profile_kind = profile_kind.value
+    if not isinstance(profile_kind, str) or not isinstance(schema_version, int):
+        return None
+    return f"{profile_kind}:{schema_version}"
+
+
 type RuntimeInfrastructureProfileSpec = Annotated[
-    KubernetesPodProfileSpecV1 | DockerContainerProfileSpecV1,
-    Field(discriminator="profile_kind"),
+    Annotated[
+        KubernetesPodProfileSpecV1,
+        Tag("kubernetes_pod:1"),
+    ]
+    | Annotated[
+        KubernetesPodProfileSpecV2,
+        Tag("kubernetes_pod:2"),
+    ]
+    | Annotated[
+        DockerContainerProfileSpecV1,
+        Tag("docker_container:1"),
+    ]
+    | Annotated[
+        DockerContainerProfileSpecV2,
+        Tag("docker_container:2"),
+    ],
+    Discriminator(_runtime_profile_discriminator),
 ]
 
 
@@ -361,8 +442,13 @@ def compose_workspace_runtime_profile(
     restriction = workspace_policy.network_restriction
     if restriction is None:
         return canonicalize_runtime_profile_document(spec)
-    if isinstance(spec, DockerContainerProfileSpecV1):
-        raise ValueError("workspace_network_restriction_unsupported")
+    match spec:
+        case DockerContainerProfileSpecV1() | DockerContainerProfileSpecV2():
+            raise ValueError("workspace_network_restriction_unsupported")
+        case KubernetesPodProfileSpecV1() | KubernetesPodProfileSpecV2():
+            pass
+        case _:
+            assert_never(spec)
 
     base = spec.network_policy
     if base.allowed_cidrs and restriction.allowed_cidrs:
@@ -472,27 +558,40 @@ def required_runtime_profile_capabilities(
     spec: RuntimeInfrastructureProfileSpec,
 ) -> frozenset[str]:
     """Derive exact Provider capabilities required by a typed Profile spec."""
-    if isinstance(spec, KubernetesPodProfileSpecV1):
-        required = {
-            "kubernetes.pod-profile",
-            "runtime.resources",
-            "workspace.persistent-volume",
-            "runtime.network-policy",
-        }
-        if spec.service_account_name is not None:
-            required.add("kubernetes.service-account")
-        if spec.scheduling.node_selector or spec.scheduling.tolerations:
-            required.add("kubernetes.scheduling")
-        if spec.dind is not None:
-            required.update({"docker.dind", "docker.storage.ephemeral"})
-        return frozenset(required)
-    return frozenset(
-        {
-            "docker.container-profile",
-            "runtime.resources",
-            "workspace.host-directory",
-        }
-    )
+    match spec:
+        case KubernetesPodProfileSpecV1() | KubernetesPodProfileSpecV2():
+            required = {
+                "kubernetes.pod-profile",
+                "runtime.resources",
+                "workspace.persistent-volume",
+                "runtime.network-policy",
+            }
+            if spec.service_account_name is not None:
+                required.add("kubernetes.service-account")
+            if spec.scheduling.node_selector or spec.scheduling.tolerations:
+                required.add("kubernetes.scheduling")
+            if spec.dind is not None:
+                required.update({"docker.dind", "docker.storage.ephemeral"})
+            if (
+                isinstance(spec, KubernetesPodProfileSpecV2)
+                and spec.process_containment is not None
+            ):
+                required.add("runtime.process-containment")
+            return frozenset(required)
+        case DockerContainerProfileSpecV1() | DockerContainerProfileSpecV2():
+            required = {
+                "docker.container-profile",
+                "runtime.resources",
+                "workspace.host-directory",
+            }
+            if (
+                isinstance(spec, DockerContainerProfileSpecV2)
+                and spec.process_containment is not None
+            ):
+                required.add("runtime.process-containment")
+            return frozenset(required)
+        case _:
+            assert_never(spec)
 
 
 def evaluate_runtime_profile_compatibility(
