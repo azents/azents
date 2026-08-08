@@ -14,7 +14,7 @@ snapshot_id: runtime-260808
 - Document reference: `runtime-260808/DESIGN`
 - Requirements: [Provider-Owned Runtime Process Containment Requirements](../requirements/runtime-260808-provider-process-containment.md) (`runtime-260808/REQ`)
 - ADR: [Provider-Owned Runtime Process Containment](../adr/runtime-260808-provider-process-containment.md) (`runtime-260808/ADR`)
-- Design revision: `1`
+- Design revision: `2`
 - Mode: Collaborative
 - Decision owner: requester
 
@@ -206,12 +206,14 @@ that identifies:
 This bootstrap input is trusted Runner configuration, not Agent environment and not
 model context. It contains no Profile-authored command-line arguments.
 
-Both Providers preserve the existing Runner UID/GID 1000 identity, prohibit privilege
-escalation, avoid Agent-accessible infrastructure sockets, and provide the kernel and
-container security settings required by the selected backend. The initial `bwrap`
-adapter uses unprivileged namespace construction by the trusted Runner and applies the
-contained child restrictions after the namespace is created. The contained child cannot
-create another user namespace or gain synthetic root.
+Both Providers avoid Agent-accessible infrastructure sockets and provide only the
+kernel and workload security settings required by their selected backend preparation.
+The trusted bootstrap identity is Provider-specific: Kubernetes preserves the existing
+Runner UID/GID 1000 identity, while the initial Docker bwrap preparation uses the
+restricted root Runner authority defined by `runtime-260808/ADR-D11`. In both cases the
+backend applies the portable contained-child restrictions before Agent-selected code
+executes. The contained child cannot create another user namespace or gain synthetic
+root.
 
 ### Kubernetes Provider
 
@@ -241,8 +243,15 @@ A contained Docker Profile:
   storage paths;
 - mounts Agent temporary storage at a Runner-private bootstrap path and projects it to
   `/tmp` only inside containment;
-- extends `DockerContainerSpec` and the Docker API adapter with explicit capability
-  drop, no-new-privileges, security profile, and related backend preparation fields;
+- runs the trusted Runner as UID/GID 0, drops all capabilities, then adds exactly
+  `CAP_SETUID`, `CAP_SETGID`, `CAP_SETFCAP`, and `CAP_SYS_ADMIN`;
+- applies the dedicated enforcing AppArmor profile, unconfined seccomp preparation,
+  host user-namespace mode, and unconfined Docker system paths needed for bwrap;
+- does not set Docker `no-new-privileges` on the trusted Runner, but requires bwrap to
+  set it on every contained child before Agent-selected code executes;
+- extends `DockerContainerSpec` and the Docker API adapter with explicit user,
+  capability add/drop, security profile, user-namespace, system-path, and related
+  backend preparation fields;
 - retains the Provider-managed network and existing external connectivity contract; and
 - inspects stable Runner container termination data so pre-registration qualification
   failure becomes a bounded Provider report.
@@ -278,6 +287,11 @@ The qualification probe verifies at minimum:
 - the contained process view exposes only its contained process tree;
 - descendants retain the same authority; and
 - cancellation/termination can remove the complete contained descendant group.
+
+For Docker, qualification additionally proves that the root Runner's bootstrap
+capabilities do not cross the bwrap boundary: the Agent child reports UID/GID 1000,
+zero effective, permitted, inheritable, ambient, and bounding capabilities,
+`NoNewPrivs=1`, and denial of a child-created user namespace.
 
 Qualification uses local deterministic probes and has no dependency on public internet,
 Runtime Control, Redis, or external credentials. A physical Runner process restart or
@@ -543,6 +557,13 @@ The design prevents an Agent process from:
 - bypassing confinement through native file/Git/transfer tools; or
 - causing a contained Profile to fall back to direct execution.
 
+The Docker trusted Runner is intentionally part of the trusted computing base and holds
+the restricted bootstrap authority defined by `runtime-260808/ADR-D11`. The dedicated
+AppArmor profile, explicit Docker capability bounding set, absent infrastructure
+sockets, positive mounts, and contained-child qualification limit that authority. The
+portable security claim applies to Agent descendants, not to the trusted supervisor
+that constructs their boundary.
+
 The design does not claim to protect credentials intentionally granted to Agent commands,
 prevent prompt injection, provide kernel-exploit resistance beyond the selected Provider
 and container boundary, hide authenticated network endpoints at the network layer, or
@@ -679,7 +700,7 @@ No test captures credential values or raw environment dumps.
 
 ## Design Authority
 
-- Design revision: `1`
+- Design revision: `2`
 
 | ID | Material design mechanism | Authority | Classification |
 | --- | --- | --- | --- |
@@ -695,16 +716,20 @@ No test captures credential values or raw environment dumps.
 | M10 | Containment status derived from Profile, desired/applied revision, and Runner authority | `runtime-260808/REQ-13`, `REQ-15`; `runtime-260808/ADR-D9` | `decided` |
 | M11 | Explicit opt-in recreation rollout with Workspace-preserving rollback | `runtime-260808/REQ-13`; `runtime-260808/ADR-D5`, `ADR-D9` | `required` |
 | M12 | Deterministic Docker and Kubernetes E2E plus shared backend conformance | `runtime-260808/REQ-9`, `REQ-10`, `REQ-14`; `runtime-260808/ADR-D3`, `ADR-D6`, `ADR-D10` | `derived` |
+| M13 | Restricted root bootstrap authority for the contained Docker Runner, with capability-free UID/GID 1000 Agent children | `runtime-260808/REQ-2`, `REQ-3`, `REQ-5`, `REQ-9`, `REQ-10`, `REQ-11`, `REQ-14`; `runtime-260808/ADR-D3`, `ADR-D6`, `ADR-D11` | `decided` |
 
 ## Assumptions and Non-Blocking Risks
 
-- The current development host allows unprivileged user namespaces, but the Runner image
-  does not yet include bwrap. Historical repository evidence also shows that earlier
-  bwrap deployments required an unconfined seccomp profile and were incompatible with a
-  gVisor RuntimeClass. The initial adapter must therefore prove its current runc/container
-  security contract in both Provider E2E environments before capability advertisement
-  is enabled. An incompatible RuntimeClass fails compatibility or qualification rather
-  than weakening the boundary.
+- The current development host allows unprivileged user namespaces, and the production
+  Runner image now includes bwrap. Docker feasibility probes established that a
+  non-root Runner cannot create the required UID/GID 1000 mapping. The restricted root
+  preparation in M13 succeeds with the dedicated AppArmor profile, unconfined seccomp,
+  unconfined Docker system paths, host user-namespace mode, and the exact four-capability
+  set. Historical repository evidence still shows that bwrap is incompatible with a
+  gVisor RuntimeClass. The initial adapter must therefore prove its current
+  runc/container security contract in both Provider E2E environments before capability
+  advertisement is enabled. An incompatible RuntimeClass fails compatibility or
+  qualification rather than weakening the boundary.
 - Exact positive system path manifests may require iterative additions for bundled tools;
   conformance and E2E evidence, not fallback to the Runner filesystem, resolves gaps.
 - Per-operation contained helper startup adds overhead. It is preferred over a persistent
@@ -717,11 +742,11 @@ No test captures credential values or raw environment dumps.
 
 ## Authority Audit
 
-Result: **Passed for Design revision 1.**
+Result: **Passed for Design revision 2.**
 
 - Every `runtime-260808/REQ-1` through `REQ-16` has at least one concrete Design
   mechanism in the traceability table.
-- Every material mechanism `M1` through `M12` cites confirmed Requirements, accepted
+- Every material mechanism `M1` through `M13` cites confirmed Requirements, accepted
   ADR decisions, or both.
 - No mechanism introduces a second Profile, application, qualification, prompt, or
   lifecycle authority.
@@ -736,6 +761,8 @@ Result: **Passed for Design revision 1.**
   authority in the Removal and Replacement table.
 - No compatibility fallback, legacy containment mode, or optional weaker execution path
   remains.
+- M13 grants bootstrap authority only to the trusted Docker Runner and retains the
+  capability-free UID/GID 1000 Agent-child contract required by M3, M4, M5, and M7.
 
 ## Feasibility Validation
 
@@ -756,6 +783,7 @@ blocker found.**
 | M10 derived status | Feasible | `agent_runtimes` already stores selected Profile, desired/applied revision, Provider state, Runner state/generation, and Workspace evidence. Existing server summaries establish the rule that frontends consume server projections rather than recomputing raw state. |
 | M11 rollout/recreation | Feasible | Current application-impact classification already recreates on schema/provider/non-network Profile changes and preserves durable Workspace storage through Runtime recreation. |
 | M12 E2E/conformance | Feasible with new Kubernetes fixture | Docker Runtime product E2E and Runner operation E2E already exist. Helm rendering covers the Kubernetes Provider, but a disposable real Kubernetes Runtime fixture must be added for required backend qualification evidence. |
+| M13 Docker trusted bootstrap | Feasible | Real Docker probes showed that non-root, set-user-ID, file-capability, uidmap-helper, AppArmor-only, and Docker `no-new-privileges` variants cannot establish the required UID/GID mapping. A root Runner with all capabilities dropped except `CAP_SETUID`, `CAP_SETGID`, `CAP_SETFCAP`, and `CAP_SYS_ADMIN`, plus the dedicated AppArmor profile, unconfined seccomp, host user namespace, and unconfined system paths, produced an Agent child with UID/GID 1000, all five capability sets zero, `NoNewPrivs=1`, and nested user-namespace denial. |
 
 ### Feasibility conditions
 
@@ -773,8 +801,11 @@ blocker found.**
 
 - Mode: `Collaborative`
 - Decision owner: requester
-- Status: Approved
-- Approved on: 2026-08-08
-- Approved Design revision: `1`
-- Approved authority IDs: `M1`, `M2`, `M3`, `M4`, `M5`, `M6`, `M7`, `M8`, `M9`, `M10`, `M11`, `M12`
-- Approved scope: Provider-owned contained Profiles, pluggable Runner-local containment backends, pre-registration qualification, unified contained Agent operations, positive filesystem and environment boundaries, Runtime-independent prompt construction, bounded explicit-operation readiness, derived status projections, opt-in recreation rollout, and Docker/Kubernetes E2E-first verification.
+- Status: Pending renewed approval
+- Previous approval: Design revision `1`, authority IDs `M1` through `M12`, approved
+  on 2026-08-08
+- Pending Design revision: `2`
+- Pending authority IDs: `M1`, `M2`, `M3`, `M4`, `M5`, `M6`, `M7`, `M8`, `M9`, `M10`, `M11`, `M12`, `M13`
+- Pending scope delta: The contained Docker Profile uses the restricted trusted root
+  Runner bootstrap authority in M13 while preserving the previously approved portable
+  capability-free UID/GID 1000 Agent-child contract.

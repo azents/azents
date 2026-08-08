@@ -8,6 +8,8 @@ COPY python/apps/azents-runtime-provider-docker/pyproject.toml ./
 COPY python/apps/azents-runtime-provider-docker/uv.lock ./
 COPY python/libs/azents-runtime-control /workspace/python/libs/azents-runtime-control
 COPY python/apps/azents-runtime-provider-docker/src ./src
+COPY python/apps/azents-runtime-provider-docker/docker/apparmor/azents-runtime-bwrap \
+    /usr/share/azents-runtime-provider-docker/apparmor/azents-runtime-bwrap
 
 RUN uv sync --frozen --no-dev
 

@@ -24,6 +24,7 @@ from azents_runtime_control.provider import (
 from azents_runtime_provider_docker.aiodocker_api import AioDockerApi
 from azents_runtime_provider_docker.provider import (
     RUNNER_LIMIT_ENV_NAMES,
+    DockerProcessContainmentConfig,
     DockerRuntimeProvider,
     DockerRuntimeProviderConfig,
 )
@@ -33,44 +34,6 @@ _CONFIG_SCHEMA_VERSION = "agent-runtime-provider-docker-v1"
 _DEFAULT_COMMAND_BLOCK_MS = 5_000
 _CONTROL_RECONNECT_DELAY_SECONDS = 1.0
 _LOGGER = logging.getLogger(__name__)
-
-_CAPABILITY_CONTRACT: dict[str, JsonValue] = {
-    "schema_version": 1,
-    "implementation_key": "docker",
-    "implementation_version": "0.1.0",
-    "protocol_version": _PROTOCOL_VERSION,
-    "core_lifecycle_operations": [
-        "start",
-        "stop",
-        "restart",
-        "reset",
-        "observe",
-        "terminal_delete",
-    ],
-    "optional_capabilities": [],
-    "persistence": {
-        "kind": "persistent",
-        "reset_destroys_workspace": True,
-        "terminal_delete_destroys_workspace": True,
-    },
-    "configuration_fields": [],
-    "profile_contracts": [
-        {
-            "profile_kind": "docker_container",
-            "contract_family": "docker.container-profile",
-            "schema_versions": [1],
-            "capabilities": [
-                "docker.container-profile",
-                "runtime.resources",
-                "workspace.host-directory",
-            ],
-            "constraints": {
-                "maximums": {},
-                "allowed_values": {},
-            },
-        }
-    ],
-}
 
 
 def main() -> None:
@@ -118,25 +81,10 @@ async def _run_control_loop(
             runner_env=settings.runner_env,
             workspace_mount_path=settings.workspace_path,
             tmp_mount_path=settings.tmp_path,
+            process_containment=settings.process_containment,
         ),
     )
-    registration = ProviderRegistration(
-        provider_id=settings.provider_id,
-        provider_type="docker",
-        scope="system",
-        workspace_id=None,
-        protocol_version=_PROTOCOL_VERSION,
-        capabilities=(
-            "lifecycle",
-            "observe",
-            "host_directory_persistence",
-        ),
-        config_schema_version=_CONFIG_SCHEMA_VERSION,
-        metadata={
-            "tmp_path": settings.tmp_path,
-        },
-        capability_contract=_CAPABILITY_CONTRACT,
-    )
+    registration = _provider_registration(settings)
     while not stop.is_set():
         control_client = create_provider_control_client(settings)
         connection_id = _control_connection_id(settings.connection_id)
@@ -208,6 +156,7 @@ class ProviderSettings:
         self.workspace_path = _required_env("AZ_RUNTIME_PROVIDER_WORKSPACE_PATH")
         self.tmp_path = os.environ.get("AZ_RUNTIME_PROVIDER_TMP_PATH", "/tmp/agent")
         self.runner_env = _runner_env_from_env()
+        self.process_containment = _process_containment_from_env()
         self.docker_host = os.environ.get("AZ_RUNTIME_PROVIDER_DOCKER_HOST")
         self.connection_id = os.environ.get(
             "AZ_RUNTIME_PROVIDER_CONNECTION_ID",
@@ -225,6 +174,110 @@ def _runner_env_from_env() -> dict[str, str]:
         name: value
         for name in RUNNER_LIMIT_ENV_NAMES
         if (value := os.environ.get(name)) is not None
+    }
+
+
+def _process_containment_from_env() -> DockerProcessContainmentConfig | None:
+    backend = os.environ.get("AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND")
+    security_profile = os.environ.get(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE"
+    )
+    timeout = os.environ.get(
+        "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS"
+    )
+    if backend is None:
+        if security_profile is not None or timeout is not None:
+            raise RuntimeError(
+                "Docker process containment settings require a configured backend."
+            )
+        return None
+    if backend != "bwrap":
+        raise RuntimeError("Docker process containment backend is unsupported.")
+    if security_profile is None or not security_profile:
+        raise RuntimeError("Docker process containment security profile is required.")
+    if timeout is None:
+        raise RuntimeError(
+            "Docker process containment qualification timeout is required."
+        )
+    try:
+        timeout_seconds = int(timeout)
+    except ValueError as error:
+        raise RuntimeError(
+            "Docker process containment qualification timeout is invalid."
+        ) from error
+    return DockerProcessContainmentConfig(
+        backend="bwrap",
+        security_profile=security_profile,
+        qualification_timeout_seconds=timeout_seconds,
+    )
+
+
+def _provider_registration(settings: ProviderSettings) -> ProviderRegistration:
+    containment_enabled = settings.process_containment is not None
+    metadata = {"tmp_path": settings.tmp_path}
+    if settings.process_containment is not None:
+        metadata["process_containment_backend"] = settings.process_containment.backend
+    return ProviderRegistration(
+        provider_id=settings.provider_id,
+        provider_type="docker",
+        scope="system",
+        workspace_id=None,
+        protocol_version=_PROTOCOL_VERSION,
+        capabilities=(
+            "lifecycle",
+            "observe",
+            "host_directory_persistence",
+        ),
+        config_schema_version=_CONFIG_SCHEMA_VERSION,
+        metadata=metadata,
+        capability_contract=_capability_contract(
+            containment_enabled=containment_enabled
+        ),
+    )
+
+
+def _capability_contract(*, containment_enabled: bool) -> dict[str, JsonValue]:
+    capabilities = [
+        "docker.container-profile",
+        "runtime.resources",
+        "workspace.host-directory",
+    ]
+    schema_versions = [1]
+    if containment_enabled:
+        capabilities.append("runtime.process-containment")
+        schema_versions.append(2)
+    return {
+        "schema_version": 1,
+        "implementation_key": "docker",
+        "implementation_version": "0.1.0",
+        "protocol_version": _PROTOCOL_VERSION,
+        "core_lifecycle_operations": [
+            "start",
+            "stop",
+            "restart",
+            "reset",
+            "observe",
+            "terminal_delete",
+        ],
+        "optional_capabilities": [],
+        "persistence": {
+            "kind": "persistent",
+            "reset_destroys_workspace": True,
+            "terminal_delete_destroys_workspace": True,
+        },
+        "configuration_fields": [],
+        "profile_contracts": [
+            {
+                "profile_kind": "docker_container",
+                "contract_family": "docker.container-profile",
+                "schema_versions": schema_versions,
+                "capabilities": capabilities,
+                "constraints": {
+                    "maximums": {},
+                    "allowed_values": {},
+                },
+            }
+        ],
     }
 
 
