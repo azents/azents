@@ -47,6 +47,7 @@ import {
   reasoningEffortLevels,
 } from "@/shared/lib/reasoning-effort";
 import { AttachmentPreviewBar } from "./AttachmentPreviewBar";
+import classes from "./ChatInput.module.css";
 import { TodoPreviewBar } from "./TodoPreviewBar";
 import { TokenUsageDetails, TokenUsageIndicator } from "./TokenUsageIndicator";
 import type { PendingFile, UploadedFile } from "../hooks/useFileUpload";
@@ -2044,6 +2045,7 @@ export const ChatInput = memo(function ChatInput({
               autosize
               minRows={1}
               maxRows={5}
+              classNames={{ input: classes.composerTextarea }}
               styles={{
                 input: {
                   fontSize: rem(16),
