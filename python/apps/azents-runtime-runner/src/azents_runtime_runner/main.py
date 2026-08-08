@@ -232,6 +232,8 @@ async def run_runtime_runner(*, workspace_path: str | None = None) -> None:
                 control=client,
                 transfer=transfer_client,
                 accepted_generation=accepted_generation,
+                execution_backend=execution_backend,
+                workspace_path=Path(workspace_path),
             )
             try:
                 client.set_transfer_intent_handler(transfer_manager.handle_intent)
