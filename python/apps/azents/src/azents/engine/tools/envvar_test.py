@@ -27,7 +27,6 @@ def _make_turn_context() -> TurnContext:
         model="test",
         run_id="run1",
         publish_event=AsyncMock(),
-        external_channel_continuation_binding_ids=frozenset(),
     )
 
 

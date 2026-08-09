@@ -60,8 +60,8 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
-last_verified_at: 2026-08-05
-spec_version: 50
+last_verified_at: 2026-08-09
+spec_version: 51
 ---
 
 # External Channel
@@ -183,14 +183,13 @@ contain multiple independent bindings.
   invocation. Location selection snapshots the Agent default into the participation
   setting. Later configured Bindings copy that setting, while existing Bindings retain
   their own mode. Existing Agents and historical bindings use `all_messages`.
-- An `external_channel_continuation` model turn may invoke binding-scoped
-  `channel_action ignore` for a binding carried by that continuation. `ignore` accepts
-  no publication or Work-update fields and revalidates scope in the service. It
-  rejects before mutation when any current task is `pending` or `in_progress`. Empty
-  and all-`completed`/`failed` task sets may finish silently: desired progress is
-  cleared, current provider projection observation is retained, and no reply, progress
-  update, file, Tracker deletion, or other provider effect is planned. Initial
-  invocation and other turns retain only `finish` and `continue`.
+- Every model input boundary exposes `channel_action ignore` beside `finish` and
+  `continue`. `ignore` accepts no publication or Work-update fields and uses the same
+  active Session, Agent, binding, route, connection, and resource validation as other
+  Channel Actions. It finishes existing active Work regardless of recorded task
+  status: desired progress is cleared, current provider projection observation is
+  retained, and no reply, progress update, file, Tracker deletion, or other provider
+  effect is planned.
 - Connection capabilities expose `download_files` and `upload_files` independently.
   Missing legacy fields are unavailable. A model-visible file key directly contains
   its provider request coordinates. It is valid only for the current Agent, Session,
@@ -433,6 +432,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-09** (spec_version 51) — Made silent Channel Work completion available
+  for ordinary, initial, continuation, and mixed input through normal binding
+  authority, without an unfinished-task veto.
 - **2026-08-05** (spec_version 50) — Added Azents-owned typed Slack and Discord
   projection decoding at durable JSON boundaries while retaining request-local signed
   bodies and public SDK object ownership.

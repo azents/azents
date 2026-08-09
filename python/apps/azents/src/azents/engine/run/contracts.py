@@ -193,7 +193,6 @@ class RunContext:
     tool_admission_barrier: ToolAdmissionBarrier
     model_transport_state: ModelTransportState
     publish_event: PublishEventFn
-    external_channel_continuation_binding_ids: frozenset[str]
     resource_authority: SessionResourceAuthority | None = None
     mailbox_activity_observer: object | None = None
 

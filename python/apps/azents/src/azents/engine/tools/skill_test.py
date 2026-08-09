@@ -464,7 +464,6 @@ class TestSkillToolkit:
             model="test-model",
             run_id="run-1",
             publish_event=_noop_publish_event,
-            external_channel_continuation_binding_ids=frozenset(),
         )
 
         state = await toolkit.update_context(context)

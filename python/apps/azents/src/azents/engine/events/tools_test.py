@@ -170,7 +170,6 @@ async def test_build_tool_catalog_prefixes_and_lowers_native_schema() -> None:
             model="gpt-5.1",
             run_id="run-1",
             publish_event=_noop_publish,
-            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -258,7 +257,6 @@ async def test_build_tool_catalog_classifies_direct_and_deferred_tools() -> None
             model="gpt-5.1",
             run_id="run-1",
             publish_event=_noop_publish,
-            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -292,7 +290,6 @@ async def test_catalog_enriches_registered_tool_call_with_source_snapshot() -> N
             model="gpt-5.1",
             run_id="run-1",
             publish_event=_noop_publish,
-            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -324,7 +321,6 @@ async def test_extend_tool_catalog_marks_runtime_builtin_direct() -> None:
             model="grok-4",
             run_id="run-1",
             publish_event=_noop_publish,
-            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
     catalog = _prepare_json_catalog(catalog)
@@ -361,7 +357,6 @@ async def test_build_tool_catalog_separates_dynamic_prompt_layer() -> None:
             model="gpt-5.1",
             run_id="run-1",
             publish_event=_noop_publish,
-            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -401,7 +396,6 @@ async def test_native_tools_are_sorted_by_function_name() -> None:
             model="gpt-5.1",
             run_id="run-1",
             publish_event=_noop_publish,
-            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
     catalog = _prepare_json_catalog(catalog)
@@ -424,7 +418,6 @@ async def test_client_tool_executor_returns_event_result() -> None:
             model="gpt-5.1",
             run_id="run-1",
             publish_event=_noop_publish,
-            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -479,7 +472,6 @@ async def test_client_tool_executor_binds_exact_call_identity() -> None:
             model="gpt-5.1",
             run_id="run-1",
             publish_event=_noop_publish,
-            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
     result = await ToolCatalogClientToolExecutor(
@@ -530,7 +522,6 @@ async def test_client_tool_executor_preserves_failed_result_metadata() -> None:
             model="gpt-5.1",
             run_id="run-1",
             publish_event=_noop_publish,
-            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -584,7 +575,6 @@ async def test_client_tool_executor_applies_global_text_output_cap() -> None:
             model="gpt-5.1",
             run_id="run-1",
             publish_event=_noop_publish,
-            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -646,7 +636,6 @@ async def test_client_tool_executor_caps_structured_text_output_parts() -> None:
             model="gpt-5.1",
             run_id="run-1",
             publish_event=_noop_publish,
-            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -708,7 +697,6 @@ async def test_client_tool_executor_carries_transient_generated_files() -> None:
             model="grok-4",
             run_id="run-1",
             publish_event=_noop_publish,
-            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -768,7 +756,6 @@ async def test_client_tool_executor_preserves_function_tool_result_metadata() ->
             model="gpt-5.1",
             run_id="run-1",
             publish_event=_noop_publish,
-            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -827,7 +814,6 @@ async def test_client_tool_executor_dispatches_cancel_handler() -> None:
             model="gpt-5.1",
             run_id="run-1",
             publish_event=_noop_publish,
-            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
     catalog = _prepare_json_catalog(catalog)
@@ -867,7 +853,6 @@ async def test_client_tool_executor_migrates_function_tool_result_parts() -> Non
             model="gpt-5.1",
             run_id="run-1",
             publish_event=_noop_publish,
-            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -904,7 +889,6 @@ async def test_client_tool_executor_returns_failed_for_unknown_tool() -> None:
                 model="gpt-5.1",
                 run_id="run-1",
                 publish_event=_noop_publish,
-                external_channel_continuation_binding_ids=frozenset(),
             ),
         )
     ).execute(
@@ -952,7 +936,6 @@ async def test_client_tool_executor_rejects_dialect_mismatch_before_handler() ->
             model="gpt-5.1",
             run_id="run-1",
             publish_event=_noop_publish,
-            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
 
@@ -1015,7 +998,6 @@ async def test_client_tool_executor_rejects_json_for_custom_declaration() -> Non
             model="gpt-5.1",
             run_id="run-1",
             publish_event=_noop_publish,
-            external_channel_continuation_binding_ids=frozenset(),
         ),
     )
     adapter_profile = resolve_client_tool_adapter_profile(

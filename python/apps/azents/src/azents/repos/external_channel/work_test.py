@@ -413,7 +413,6 @@ async def test_channel_action_ignores_connection_health_status() -> None:
             title=None,
             tasks=None,
             files=(),
-            ignore_eligible_binding_ids=frozenset(),
             now=datetime.datetime(2026, 8, 3, tzinfo=datetime.UTC),
         )
 
@@ -423,8 +422,6 @@ async def test_channel_action_ignores_connection_health_status() -> None:
 
 async def _commit_ignore(
     work: ChannelWorkState,
-    *,
-    eligible_binding_ids: frozenset[str],
 ) -> tuple[ChannelActionTransition, ChannelWorkState, AsyncMock]:
     """Execute the canonical ignore mutator through repository authority checks."""
     binding = SimpleNamespace(
@@ -499,7 +496,6 @@ async def _commit_ignore(
         title=None,
         tasks=None,
         files=(),
-        ignore_eligible_binding_ids=eligible_binding_ids,
         now=datetime.datetime(2026, 8, 3, tzinfo=datetime.UTC),
     )
     return transition, current, state_store.update
@@ -509,6 +505,8 @@ async def _commit_ignore(
     "statuses",
     [
         (),
+        (ExternalChannelWorkTaskStatus.PENDING,),
+        (ExternalChannelWorkTaskStatus.IN_PROGRESS,),
         (ExternalChannelWorkTaskStatus.COMPLETED,),
         (
             ExternalChannelWorkTaskStatus.COMPLETED,
@@ -516,10 +514,10 @@ async def _commit_ignore(
         ),
     ],
 )
-async def test_ignore_finishes_terminal_or_empty_work_without_provider_effects(
+async def test_ignore_finishes_active_work_without_provider_effects(
     statuses: tuple[ExternalChannelWorkTaskStatus, ...],
 ) -> None:
-    """Eligible ignore finishes Work while retaining provider observation data."""
+    """Ignore finishes Work regardless of current task status."""
     projection = _part(
         status=ExternalChannelWorkProjectionStatus.PRESENT,
         provider_message_key="provider-key",
@@ -537,10 +535,7 @@ async def test_ignore_finishes_terminal_or_empty_work_without_provider_effects(
         for index, status in enumerate(statuses)
     ]
 
-    transition, updated, update = await _commit_ignore(
-        work,
-        eligible_binding_ids=frozenset({"binding-1"}),
-    )
+    transition, updated, update = await _commit_ignore(work)
 
     assert transition.work_status is ExternalChannelWorkStatus.FINISHED
     assert transition.effects == ()
@@ -556,50 +551,6 @@ async def test_ignore_finishes_terminal_or_empty_work_without_provider_effects(
     )
     assert updated.projection_parts == [projection]
     update.assert_awaited_once()
-
-
-@pytest.mark.parametrize(
-    "status",
-    [
-        ExternalChannelWorkTaskStatus.PENDING,
-        ExternalChannelWorkTaskStatus.IN_PROGRESS,
-    ],
-)
-async def test_ignore_rejects_unfinished_work_before_mutation(
-    status: ExternalChannelWorkTaskStatus,
-) -> None:
-    """Pending or in-progress tasks preserve active Work exactly."""
-    work = _work(desired=True)
-    work.tasks = [
-        ChannelWorkTask(
-            id="unfinished",
-            title="Unfinished task",
-            status=status,
-            details=None,
-            output=None,
-            sources=[],
-        )
-    ]
-
-    with pytest.raises(ValueError, match="completed or failed"):
-        await _commit_ignore(
-            work,
-            eligible_binding_ids=frozenset({"binding-1"}),
-        )
-
-    assert work.status is ExternalChannelWorkStatus.ACTIVE
-    assert work.finished_at is None
-    assert work.desired_progress is not None
-
-
-async def test_ignore_rejects_binding_outside_current_external_input() -> None:
-    """A forced ordinary-turn service call cannot silently finish Work."""
-    work = _work(desired=True)
-
-    with pytest.raises(ValueError, match="current External Channel input"):
-        await _commit_ignore(work, eligible_binding_ids=frozenset())
-
-    assert work.status is ExternalChannelWorkStatus.ACTIVE
 
 
 async def test_direct_effect_revalidation_ignores_connection_health_status() -> None:

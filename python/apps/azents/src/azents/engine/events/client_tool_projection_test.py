@@ -282,7 +282,6 @@ def _turn_context() -> TurnContext:
         model="gpt-5.1",
         run_id="run-1",
         publish_event=_noop_publish,
-        external_channel_continuation_binding_ids=frozenset(),
     )
 
 

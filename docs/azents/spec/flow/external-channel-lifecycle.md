@@ -32,7 +32,7 @@ code_paths:
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
 last_verified_at: 2026-08-09
-spec_version: 33
+spec_version: 34
 ---
 
 # External Channel Lifecycle
@@ -63,11 +63,10 @@ Binding atomically; a thread replacement updates only that Binding. Once
 `disconnected_at` is set, the retained final mode is read-only and the
 same mutation returns the not-found-shaped management result.
 
-An `external_channel_continuation`-scoped `channel_action ignore` is not a binding
-lifecycle transition. It silently finishes only the current Channel Work cycle, leaves
-the binding connected, and creates no leave-presence or Activity Tracker cleanup plan.
-Unfinished tasks reject the operation before Work mutation, so later idle continuation
-and normal lifecycle cleanup still observe the active cycle.
+`channel_action ignore` is not a binding lifecycle transition. It silently finishes
+only the current active Channel Work cycle, leaves the binding connected, and creates
+no leave-presence or Activity Tracker cleanup plan. Recorded task status does not block
+the transition, and the finished cycle no longer participates in idle continuation.
 
 Disconnecting a connection accepts every lifecycle and credential state. It
 terminalizes the connection, terminates owned active resources/bindings/work, commits
@@ -273,6 +272,9 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-08-09** (spec_version 34) — Removed continuation-only and unfinished-task
+  restrictions from silent Work completion while preserving binding lifecycle and
+  provider-cleanup boundaries.
 - **2026-08-09** (spec_version 33) — Corrected automatic Discord Interaction Endpoint
   registration to edit the Bot-authenticated current Application and clarified that
   users do not manually copy opaque callback URLs into Discord Developer Portal.

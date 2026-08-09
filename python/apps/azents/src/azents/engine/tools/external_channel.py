@@ -3,7 +3,7 @@
 import json
 import textwrap
 from dataclasses import dataclass
-from typing import Generic, Literal, TypeVar
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -76,9 +76,7 @@ _COMPACTION_HEADING = "## Channel Work Snapshot"
 _STATIC_PROMPT = textwrap.dedent(
     """\
     Ordinary assistant output is not delivered to the external channel, so use
-    `channel_action` to publish or continue Channel Work. During an
-    `external_channel_continuation`, `ignore` may be available to end the current
-    Channel Work without external publication.
+    `channel_action` to publish, continue, or silently complete Channel Work.
     """
 ).strip()
 _CHANNEL_ACTION_DESCRIPTION = textwrap.dedent(
@@ -88,10 +86,9 @@ _CHANNEL_ACTION_DESCRIPTION = textwrap.dedent(
     external publication. An active binding or prior External Channel history alone
     does not make ordinary input external; otherwise, answer the user normally. Use
     `finish` for the final reply. Use `continue` while work remains; it may send
-    progress and replace the complete ordered Channel Work task list. When `ignore`
-    appears during an External Channel continuation, use it to finish that continuation
-    binding's Work with no message, title, task update, files, or provider effect.
-    Every Channel Work task must already be completed or failed.
+    progress and replace the complete ordered Channel Work task list. Use `ignore` to
+    finish active Work silently with no message, title, task update, files, or provider
+    effect. Ignored Work does not schedule another continuation.
     """
 ).strip()
 _DOWNLOAD_EXTERNAL_FILE_DESCRIPTION = (
@@ -144,15 +141,17 @@ class ChannelActionTaskInput(BaseModel):
     )
 
 
-ChannelActionModeT = TypeVar("ChannelActionModeT")
-
-
-class _ChannelActionInput(BaseModel, Generic[ChannelActionModeT]):
-    """Shared provider-compatible Channel Action object."""
+class ChannelActionInput(BaseModel):
+    """Act on one active External Channel binding."""
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    mode: ChannelActionModeT
+    mode: Literal["finish", "continue", "ignore"] = Field(
+        description=(
+            "`finish`: final reply. `continue`: work remains. `ignore`: finish "
+            "active Work silently with no other fields."
+        )
+    )
     binding: str = Field(
         min_length=1,
         max_length=80,
@@ -192,7 +191,7 @@ class _ChannelActionInput(BaseModel, Generic[ChannelActionModeT]):
     )
 
     @model_validator(mode="after")
-    def validate_action(self) -> "_ChannelActionInput[ChannelActionModeT]":
+    def validate_action(self) -> "ChannelActionInput":
         """Validate the fields that apply to the selected action mode."""
         if self.mode == "ignore":
             if any(
@@ -243,27 +242,6 @@ class _ChannelActionInput(BaseModel, Generic[ChannelActionModeT]):
         return self
 
 
-class ChannelActionInput(_ChannelActionInput[Literal["finish", "continue"]]):
-    """Publish or continue one binding on an ordinary model turn."""
-
-    mode: Literal["finish", "continue"] = Field(
-        description="`finish`: final reply. `continue`: work remains."
-    )
-
-
-class IgnoreEligibleChannelActionInput(
-    _ChannelActionInput[Literal["finish", "continue", "ignore"]]
-):
-    """Act on one binding from the current External Channel-only turn."""
-
-    mode: Literal["finish", "continue", "ignore"] = Field(
-        description=(
-            "`finish`: final reply. `continue`: work remains. `ignore`: finish "
-            "eligible Work silently with no other fields."
-        )
-    )
-
-
 class DownloadExternalFileInput(BaseModel):
     """Materialize one selected External Channel file in the Runtime."""
 
@@ -312,7 +290,6 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
         self._guard_run_id: str | None = None
         self._previous_turn_actions: set[_ChannelActionTurnKey] = set()
         self._current_turn_actions: set[_ChannelActionTurnKey] = set()
-        self.ignore_eligible_binding_ids: frozenset[str] = frozenset()
 
     def set_runtime_context_store(
         self,
@@ -325,9 +302,6 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
         """Expose Channel Action only while an active binding exists."""
         self.run_id = context.run_id
         self.resource_authority = context.resource_authority
-        self.ignore_eligible_binding_ids = (
-            context.external_channel_continuation_binding_ids
-        )
         enabled = await self.service.has_active_binding(
             session_id=self.session_id,
             agent_id=self.agent_id,
@@ -447,15 +421,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
         )
 
     def _make_channel_action_tool(self) -> FunctionTool:
-        input_model = (
-            IgnoreEligibleChannelActionInput
-            if self.ignore_eligible_binding_ids
-            else ChannelActionInput
-        )
-
-        async def channel_action(
-            args: ChannelActionInput | IgnoreEligibleChannelActionInput,
-        ) -> str:
+        async def channel_action(args: ChannelActionInput) -> str:
             """Commit Channel Work and explicitly publish to one external binding."""
             execution = get_client_tool_execution_context()
             value = args
@@ -511,7 +477,6 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
                     title=None if value.mode == "finish" else value.title,
                     tasks=tasks,
                     files=manifests,
-                    ignore_eligible_binding_ids=self.ignore_eligible_binding_ids,
                     file_storage=(
                         None
                         if runtime_context is None
@@ -540,7 +505,7 @@ class ExternalChannelToolkit(Toolkit[ExternalChannelToolkitConfig]):
         return make_tool(
             channel_action,
             description=_CHANNEL_ACTION_DESCRIPTION,
-            input_model=input_model,
+            input_model=ChannelActionInput,
         )
 
     def _make_download_external_file_tool(self) -> FunctionTool:
@@ -690,7 +655,7 @@ def _channel_action_turn_key(
     if context.tool_name != "channel_action":
         return None
     try:
-        action = IgnoreEligibleChannelActionInput.model_validate_json(context.args_json)
+        action = ChannelActionInput.model_validate_json(context.args_json)
     except ValidationError:
         return None
     if action.mode == "ignore":

@@ -114,8 +114,10 @@ def format_external_channel_continuation_reminder(
             "Continue the active External Channel work. Use the active binding "
             "handles and existing conversation or compacted context to choose the "
             "work to advance. Use `channel_action` for any external publication. "
-            "If no unfinished work remains, this continuation is stale and "
-            "requires no external action."
+            "If a binding has no unfinished work, call `channel_action` with "
+            '`mode="ignore"` and that binding handle. Do not include a message, '
+            "title, task update, or files. Successful ignore silently finishes "
+            "the Channel Work so it does not schedule another continuation."
         ),
         data=data,
     )

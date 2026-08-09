@@ -112,7 +112,6 @@ from .mailbox import (
     TurnEffect,
     VfsFileResolver,
     build_external_channel_mailbox_payload,
-    external_channel_continuation_binding_ids_for_buffer,
     fold_turn_eligibility,
 )
 
@@ -1486,9 +1485,6 @@ class TestMailboxService:
         assert result.user_messages[0].payload.metadata["source"] == (
             "external_channel"
         )
-        assert result.external_channel_continuation_binding_ids == frozenset(
-            {"binding-handle"}
-        )
 
     async def test_flush_rejects_stale_preparation_snapshot(
         self,
@@ -2802,13 +2798,6 @@ async def test_external_invocation_projection() -> None:
     )
 
     assert outcome.turn_effect is TurnEffect.ELIGIBLE
-    assert (
-        external_channel_continuation_binding_ids_for_buffer(
-            mailbox_item,
-            turn_effect=outcome.turn_effect,
-        )
-        == frozenset()
-    )
     assert [item.external_id for item in outcome.promoted] == [
         "external-channel:buffer-1:context-omitted",
         "external-channel:binding-1:C123:1.0:1",

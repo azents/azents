@@ -170,7 +170,6 @@ async def test_ignore_transition_completes_without_provider_execution() -> None:
         title=None,
         tasks=None,
         files=(),
-        ignore_eligible_binding_ids=frozenset({"binding-1"}),
         file_storage=None,
         authority=None,
         provider_delivery_service=None,
