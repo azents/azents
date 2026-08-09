@@ -231,6 +231,7 @@ def test_discord_fake_reconciles_guild_commands_without_body_evidence(
     assert message_action.json()["id"] == "500000000000000003"
     for response in (unrelated, settings, message_action):
         assert response.json()["application_id"] == "100000000000000001"
+        assert response.json()["guild_id"] == "200000000000000001"
         assert response.json()["description"] == ""
     command_id = requests.get(
         f"{discord_fake_url}/__testenv/command-id",
@@ -260,6 +261,7 @@ def test_discord_fake_reconciles_guild_commands_without_body_evidence(
     assert updated.json()["id"] == settings.json()["id"]
     assert updated.json()["name"] == "Private updated settings command"
     assert updated.json()["application_id"] == "100000000000000001"
+    assert updated.json()["guild_id"] == "200000000000000001"
     assert updated.json()["description"] == ""
 
     deleted = requests.delete(

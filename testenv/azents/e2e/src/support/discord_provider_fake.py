@@ -316,6 +316,7 @@ class FakeState:
                 _guild_command_response(
                     command,
                     application_id=self.application_id,
+                    guild_id=self.guild_id,
                 )
                 for command in self.guild_commands.values()
             ]
@@ -336,6 +337,7 @@ class FakeState:
             return _guild_command_response(
                 command,
                 application_id=self.application_id,
+                guild_id=self.guild_id,
             )
 
     def update_guild_command(
@@ -356,6 +358,7 @@ class FakeState:
             return _guild_command_response(
                 updated,
                 application_id=self.application_id,
+                guild_id=self.guild_id,
             )
 
     def delete_guild_command(self, command_id: str) -> bool:
@@ -2245,11 +2248,13 @@ def _guild_command_response(
     command: Mapping[str, object],
     *,
     application_id: str,
+    guild_id: str,
 ) -> dict[str, object]:
     """Return the complete provider shape required by discord.py AppCommand."""
     return {
         **command,
         "application_id": application_id,
+        "guild_id": guild_id,
         "description": command.get("description", ""),
     }
 
