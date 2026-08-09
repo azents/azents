@@ -40,7 +40,13 @@ _AGENT_SCRIPT = textwrap.dedent(
         "apparmor_enforced": pathlib.Path(
             "/proc/self/attr/current"
         ).read_text().strip() == "azents-runtime-bwrap (enforce)",
-        "bwrap_hidden": not pathlib.Path("/usr/bin/bwrap").exists(),
+        "bwrap_hidden": not any(
+            pathlib.Path(path).exists()
+            for path in (
+                "/usr/bin/bwrap",
+                "/opt/azents-runtime/bin/bwrap",
+            )
+        ),
         "runner_private_hidden": not pathlib.Path(
             "/run/azents/runner-private"
         ).exists(),
