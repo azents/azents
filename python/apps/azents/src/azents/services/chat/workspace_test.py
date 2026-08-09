@@ -118,6 +118,7 @@ class _FakeRuntimeTargetResolver(RuntimeOperationTargetResolver):
 
     def __init__(self, runtime: AgentRuntime | None) -> None:
         self.runtime = runtime
+        self.resolve_calls: list[tuple[float, bool]] = []
 
     async def resolve_operation_target(
         self,
@@ -129,13 +130,8 @@ class _FakeRuntimeTargetResolver(RuntimeOperationTargetResolver):
         start_if_stopped: bool = True,
     ) -> RuntimeOperationTarget:
         """Return qualified fixture evidence or the normal bounded error."""
-        del (
-            agent_id,
-            wait_timeout_seconds,
-            poll_interval_seconds,
-            expected_authority,
-            start_if_stopped,
-        )
+        del agent_id, poll_interval_seconds, expected_authority
+        self.resolve_calls.append((wait_timeout_seconds, start_if_stopped))
         runtime = self.runtime
         if (
             runtime is None
@@ -437,12 +433,13 @@ async def _session_manager() -> AsyncGenerator[AsyncSession, None]:
 async def test_get_workspace_reads_active_runtime_with_runner() -> None:
     runtime = _make_agent_runtime()
     runner_operations = _FakeRunnerOperations()
+    target_resolver = _FakeRuntimeTargetResolver(runtime)
     service = AgentWorkspaceFileService(
         agent_repository=_FakeAgentRepository(),
         workspace_user_repository=_FakeWorkspaceUserRepository(),
         runner_operations=runner_operations,
         runtime_repository=_FakeRuntimeRepository(runtime),
-        runtime_target_resolver=_FakeRuntimeTargetResolver(runtime),
+        runtime_target_resolver=target_resolver,
         session_manager=_session_manager,
     )
 
@@ -454,6 +451,9 @@ async def test_get_workspace_reads_active_runtime_with_runner() -> None:
     assert state.workspace.type == "READY"
     assert state.actions.stop is not None
     assert state.actions.stop.type == "STOP_RUNTIME"
+    assert state.actions.restart is not None
+    assert state.actions.restart.type == "RESTART_RUNTIME"
+    assert target_resolver.resolve_calls == [(0.0, False)]
     assert runner_operations.list_calls == [
         ("runtime-1", 1, AGENT_WORKSPACE_ROOT.as_posix())
     ]
@@ -461,6 +461,30 @@ async def test_get_workspace_reads_active_runtime_with_runner() -> None:
         (AGENT_WORKSPACE_ROOT / "README.md").as_posix(),
         (AGENT_WORKSPACE_ROOT / "test-file.txt").as_posix(),
     ]
+
+
+@pytest.mark.asyncio
+async def test_get_workspace_exposes_restart_without_waiting_for_runner() -> None:
+    """Provider-observed Runtime exposes recovery before Runner is ready."""
+    runtime = _make_agent_runtime(runner_state=RuntimeRunnerState.DISCONNECTED)
+    target_resolver = _FakeRuntimeTargetResolver(runtime)
+    service = AgentWorkspaceFileService(
+        agent_repository=_FakeAgentRepository(),
+        workspace_user_repository=_FakeWorkspaceUserRepository(),
+        runner_operations=_FakeRunnerOperations(),
+        runtime_repository=_FakeRuntimeRepository(runtime),
+        runtime_target_resolver=target_resolver,
+        session_manager=_session_manager,
+    )
+
+    result = await service.get_workspace("agent-1", "user-1")
+
+    assert isinstance(result, Success)
+    assert result.value.runtime.type == "RUNNING"
+    assert result.value.workspace.type == "CONTROL_UNAVAILABLE"
+    assert result.value.actions.restart is not None
+    assert result.value.actions.restart.type == "RESTART_RUNTIME"
+    assert target_resolver.resolve_calls == [(0.0, False)]
 
 
 @pytest.mark.asyncio
@@ -927,6 +951,7 @@ def _make_agent_runtime(
     provider_observed_state: RuntimeProviderObservedState | None = None,
     desired_state: RuntimeDesiredState | None = None,
     desired_generation: int = 7,
+    runner_state: RuntimeRunnerState = RuntimeRunnerState.READY,
 ) -> AgentRuntime:
     if provider_observed_state is None:
         provider_observed_state = RuntimeProviderObservedState.RUNNING
@@ -943,7 +968,7 @@ def _make_agent_runtime(
         desired_state=desired_state,
         desired_generation=desired_generation,
         provider_observed_state=provider_observed_state,
-        runner_state=RuntimeRunnerState.READY,
+        runner_state=runner_state,
         runner_generation=1,
         workspace_path=workspace_path,
         created_at=_NOW,

@@ -489,6 +489,7 @@ def _actions_for_runtime(
         case "RUNNING":
             return AgentWorkspaceActions(
                 stop=_stop_action(agent_id),
+                restart=_restart_action(agent_id),
                 reset=_reset_action(agent_id),
             )
         case "HIBERNATED":
@@ -828,7 +829,9 @@ class AgentWorkspaceFileService:
             )
         try:
             runtime = await self._runtime_target_resolver.resolve_operation_target(
-                agent.id
+                agent.id,
+                wait_timeout_seconds=0.0,
+                start_if_stopped=False,
             )
         except RuntimeStorageError as error:
             return AgentWorkspaceControlUnavailable(
