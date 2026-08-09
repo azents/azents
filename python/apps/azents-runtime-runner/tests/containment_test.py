@@ -28,6 +28,7 @@ class _FakeProcess:
         returncode: int = 0,
         wait_forever: bool = False,
         stdout: bytes = b"",
+        stderr: bytes = b"",
         termination_error: bool = False,
     ) -> None:
         self._returncode = None if wait_forever else returncode
@@ -37,6 +38,7 @@ class _FakeProcess:
         self._stdout.feed_data(stdout)
         self._stdout.feed_eof()
         self._stderr = asyncio.StreamReader()
+        self._stderr.feed_data(stderr)
         self._stderr.feed_eof()
         self.writes: list[bytes] = []
         self.termination_calls = 0
@@ -255,6 +257,42 @@ async def test_bwrap_qualification_failure_has_bounded_category(tmp_path: Path) 
         await backend.qualify()
 
     assert raised.value.category == "probe_failed"
+
+
+@pytest.mark.asyncio
+async def test_bwrap_qualification_failure_logs_bounded_probe_evidence(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    temporary = tmp_path.parent / f"{tmp_path.name}-temporary"
+    config = parse_containment_bootstrap(
+        _bootstrap(tmp_path, temporary),
+        workspace_path=str(tmp_path),
+    )
+
+    async def launcher(spec: ExecutionSpec) -> ExecutionProcess:
+        del spec
+        return _FakeProcess(
+            returncode=1,
+            stdout=b'{"failed":["workspace","capabilities"]}\n',
+            stderr=b"bwrap: setup failed\n",
+        )
+
+    backend = BwrapExecutionBackend(config, launcher=launcher)
+
+    with (
+        caplog.at_level("ERROR"),
+        pytest.raises(ContainmentQualificationError),
+    ):
+        await backend.qualify()
+
+    record = next(
+        record
+        for record in caplog.records
+        if record.message == "Runtime Runner process containment authority probe failed"
+    )
+    assert record.__dict__["probe_failures"] == "capabilities,workspace"
+    assert record.__dict__["backend_stderr"] == "bwrap: setup failed"
 
 
 @pytest.mark.asyncio

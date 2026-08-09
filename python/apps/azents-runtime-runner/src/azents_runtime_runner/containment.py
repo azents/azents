@@ -28,6 +28,7 @@ _MAX_QUALIFICATION_TIMEOUT_SECONDS = 60
 _DIRECT_TEMPORARY_PATH = "/tmp"
 _TERMINATE_TIMEOUT_SECONDS = 2.0
 _KILL_TIMEOUT_SECONDS = 2.0
+_QUALIFICATION_DIAGNOSTIC_LIMIT = 1000
 _QUALIFICATION_LOCK_FILENAME = "descendant.lock"
 _QUALIFICATION_READY_FILENAME = "descendant.ready"
 _CONTAINED_HELPER_PATHS = tuple(
@@ -396,6 +397,18 @@ class BwrapExecutionBackend:
                 )
             raise ContainmentQualificationError("timeout") from error
         if returncode != 0:
+            stdout, stderr = await asyncio.gather(
+                process.stdout.read(),
+                process.stderr.read(),
+            )
+            logger.error(
+                "Runtime Runner process containment authority probe failed",
+                extra={
+                    "failure_category": "probe_failed",
+                    "probe_failures": _qualification_probe_failures(stdout),
+                    "backend_stderr": _bounded_diagnostic_text(stderr),
+                },
+            )
             raise ContainmentQualificationError("probe_failed")
         with tempfile.TemporaryDirectory(
             dir=self._config.agent_workspace_path,
@@ -833,6 +846,28 @@ def _remaining_timeout(deadline: float) -> float:
     if remaining <= 0:
         raise TimeoutError
     return remaining
+
+
+def _qualification_probe_failures(stdout: bytes) -> str:
+    try:
+        payload = json.loads(stdout)
+    except UnicodeDecodeError, json.JSONDecodeError:
+        return "unavailable"
+    if not isinstance(payload, dict):
+        return "unavailable"
+    failures = payload.get("failed")
+    if not isinstance(failures, list) or not all(
+        isinstance(item, str) for item in failures
+    ):
+        return "unavailable"
+    return ",".join(sorted(failures)) or "none"
+
+
+def _bounded_diagnostic_text(value: bytes) -> str:
+    text = value.decode(errors="replace").strip().replace("\n", " ")
+    if not text:
+        return "unavailable"
+    return text[:_QUALIFICATION_DIAGNOSTIC_LIMIT]
 
 
 async def _terminate_qualification_process(

@@ -24,7 +24,7 @@ import boto3
 import docker as docker_py
 import pytest
 import requests
-from docker.errors import APIError, NotFound
+from docker.errors import APIError, DockerException, NotFound
 from docker.models.containers import Container
 from pydantic import TypeAdapter
 from python_on_whales import docker as pow_docker
@@ -907,6 +907,67 @@ def _emit_active_server_logs(config: pytest.Config) -> None:
             server_name=server_name,
             write_line=write_line,
         )
+    for line in _runtime_container_diagnostics():
+        write_line(line)
+
+
+def _runtime_container_diagnostics() -> tuple[str, ...]:
+    """Return bounded managed Runtime container evidence for E2E failures."""
+    client = None
+    lines: list[str] = []
+    try:
+        client = docker_py.from_env()
+        containers: list[Container] = client.containers.list(
+            all=True,
+            filters={"label": "azents/managed-by=azents-runtime-provider-docker"},
+        )
+        for container in containers:
+            container.reload()
+            attributes = container.attrs
+            config = attributes.get("Config", {})
+            host_config = attributes.get("HostConfig", {})
+            state = attributes.get("State", {})
+            if not all(
+                isinstance(value, dict) for value in (config, host_config, state)
+            ):
+                continue
+            evidence = {
+                "name": container.name,
+                "image": config.get("Image"),
+                "user": config.get("User"),
+                "state": {
+                    "status": state.get("Status"),
+                    "running": state.get("Running"),
+                    "exit_code": state.get("ExitCode"),
+                    "oom_killed": state.get("OOMKilled"),
+                    "error": state.get("Error"),
+                },
+                "security": {
+                    "cap_add": host_config.get("CapAdd"),
+                    "cap_drop": host_config.get("CapDrop"),
+                    "security_opt": host_config.get("SecurityOpt"),
+                    "userns_mode": host_config.get("UsernsMode"),
+                    "masked_paths": host_config.get("MaskedPaths"),
+                    "readonly_paths": host_config.get("ReadonlyPaths"),
+                    "privileged": host_config.get("Privileged"),
+                },
+            }
+            lines.append(f"=== Runtime container {container.name} evidence ===")
+            lines.append(json.dumps(evidence, sort_keys=True, default=str))
+            logs = container.logs(stdout=True, stderr=True, tail=200)
+            if isinstance(logs, bytes):
+                lines.extend(logs.decode(errors="replace").splitlines())
+        artifact_dir = os.environ.get(_E2E_ARTIFACT_DIR_ENV)
+        if artifact_dir is not None and lines:
+            path = Path(artifact_dir) / "runtime-containers.txt"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("\n".join(lines) + "\n")
+    except DockerException, OSError:
+        return ()
+    finally:
+        if client is not None:
+            client.close()
+    return tuple(lines)
 
 
 def _log_server_output(container: DockerContainer, server_name: str) -> None:
