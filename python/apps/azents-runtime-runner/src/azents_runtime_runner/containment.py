@@ -21,7 +21,7 @@ _BOOTSTRAP_ENV_NAME = "AZ_RUNTIME_PROCESS_CONTAINMENT_CONFIG"
 _BWRAP_PATH = "/usr/bin/bwrap"
 _BWRAP_LAUNCHER_PATH = Path(__file__).with_name("bwrap_launcher.py").resolve()
 _BASH_PATH = "/bin/bash"
-_QUALIFICATION_PYTHON_PATH = "/usr/local/bin/python"
+_CONTAINED_PYTHON_PATH = "/usr/local/bin/python"
 _QUALIFICATION_SCHEMA_VERSION = 1
 _MIN_QUALIFICATION_TIMEOUT_SECONDS = 1
 _MAX_QUALIFICATION_TIMEOUT_SECONDS = 60
@@ -278,6 +278,11 @@ class ExecutionBackend(Protocol):
         """Return the safe backend family identifier."""
         ...
 
+    @property
+    def helper_python_path(self) -> str:
+        """Return the Python interpreter visible inside the execution boundary."""
+        ...
+
     async def qualify(self) -> None:
         """Qualify the backend before normal Runner registration."""
         ...
@@ -318,6 +323,10 @@ class DirectExecutionBackend:
     def kind(self) -> str:
         return "direct"
 
+    @property
+    def helper_python_path(self) -> str:
+        return sys.executable
+
     async def qualify(self) -> None:
         return
 
@@ -344,12 +353,16 @@ class BwrapExecutionBackend:
     def kind(self) -> str:
         return "bwrap"
 
+    @property
+    def helper_python_path(self) -> str:
+        return _CONTAINED_PYTHON_PATH
+
     async def qualify(self) -> None:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._config.qualification_timeout_seconds
         qualification = ExecutionSpec(
             argv=(
-                _QUALIFICATION_PYTHON_PATH,
+                _CONTAINED_PYTHON_PATH,
                 "-c",
                 _QUALIFICATION_SCRIPT,
                 str(self._config.agent_workspace_path),
@@ -391,7 +404,7 @@ class BwrapExecutionBackend:
             ready_path = probe_path / _QUALIFICATION_READY_FILENAME
             termination_canary = ExecutionSpec(
                 argv=(
-                    _QUALIFICATION_PYTHON_PATH,
+                    _CONTAINED_PYTHON_PATH,
                     "-c",
                     _TERMINATION_CANARY_SCRIPT,
                     str(lock_path),

@@ -86,16 +86,21 @@ class _FakeBackend:
         self._processes = processes
         self.started = asyncio.Event()
         self.start_count = 0
+        self.specs: list[ExecutionSpec] = []
 
     @property
     def kind(self) -> str:
         return "fake"
 
+    @property
+    def helper_python_path(self) -> str:
+        return "/fake/python"
+
     async def qualify(self) -> None:
         return
 
     async def start(self, spec: ExecutionSpec) -> ExecutionProcess:
-        del spec
+        self.specs.append(spec)
         process = self._processes.pop(0)
         self.start_count += 1
         self.started.set()
@@ -184,6 +189,7 @@ async def test_cancelled_operation_sends_cancel_and_terminates_helper(
         await task
 
     assert process.terminated is True
+    assert backend.specs[0].argv[0] == "/fake/python"
     assert len(process.writes) == 2
     cancel = read_sync_frame(io.BytesIO(process.writes[1]))
     assert cancel.control == {"kind": "cancel"}

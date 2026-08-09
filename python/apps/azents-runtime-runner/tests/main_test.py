@@ -116,6 +116,10 @@ class _FakeExecutionBackend:
     def kind(self) -> str:
         return "fake"
 
+    @property
+    def helper_python_path(self) -> str:
+        return "/fake/python"
+
     async def qualify(self) -> None:
         self.qualified += 1
         if self.qualification_error is not None:

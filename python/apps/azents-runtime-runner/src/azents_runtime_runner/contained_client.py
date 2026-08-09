@@ -21,7 +21,6 @@ from azents_runtime_runner.containment import (
 )
 from azents_runtime_runner.environment import build_agent_environment
 
-_PYTHON_PATH = "/usr/local/bin/python"
 _HELPER_PATH = Path(__file__).with_name("contained_helper.py").resolve()
 _PACKAGE_ROOT = _HELPER_PATH.parents[1]
 _TERMINATE_TIMEOUT_SECONDS = 2.0
@@ -264,7 +263,7 @@ class ContainedHelperSession:
         process = await backend.start(
             ExecutionSpec(
                 argv=(
-                    _PYTHON_PATH,
+                    backend.helper_python_path,
                     "-m",
                     "azents_runtime_runner.contained_helper",
                 ),
