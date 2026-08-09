@@ -127,6 +127,18 @@ def _sdk_call(
     )
 
 
+def _configure_interaction_endpoint(
+    base_url: str,
+    endpoint_url: str,
+) -> requests.Response:
+    """Invoke the approved direct callback configuration gap."""
+    return requests.patch(
+        f"{base_url}/api/v10/applications/@me",
+        json={"interactions_endpoint_url": endpoint_url},
+        timeout=5,
+    )
+
+
 def test_discord_fake_serves_sdk_login_identity(
     discord_fake_urls: tuple[str, str],
 ) -> None:
@@ -144,10 +156,9 @@ def test_discord_fake_redacts_rest_secrets_and_visible_provider_bodies(
 ) -> None:
     """Capture only provider operation identifiers and outcomes."""
     discord_fake_url, _ = discord_fake_urls
-    _sdk_call(
+    _configure_interaction_endpoint(
         discord_fake_url,
-        "configure_interactions_endpoint",
-        endpoint_url="https://private.example/opaque-selector",
+        "https://private.example/opaque-selector",
     ).raise_for_status()
     created = _sdk_call(
         discord_fake_url,
@@ -406,10 +417,9 @@ def test_discord_fake_keeps_component_ids_outside_persistent_evidence(
     try:
         callback_host = callback.server_address[0]
         callback_port = callback.server_address[1]
-        _sdk_call(
+        _configure_interaction_endpoint(
             discord_fake_url,
-            "configure_interactions_endpoint",
-            endpoint_url=f"http://{callback_host}:{callback_port}/interaction",
+            f"http://{callback_host}:{callback_port}/interaction",
         ).raise_for_status()
         delivered = requests.post(
             f"{discord_fake_url}/__testenv/interactions",
@@ -869,10 +879,9 @@ def test_discord_fake_relays_a_real_signed_interaction_without_body_evidence(
     try:
         host = callback_server.server_address[0]
         port = callback_server.server_address[1]
-        _sdk_call(
+        _configure_interaction_endpoint(
             discord_fake_url,
-            "configure_interactions_endpoint",
-            endpoint_url=f"http://{host}:{port}/callback",
+            f"http://{host}:{port}/callback",
         ).raise_for_status()
         response = requests.post(
             f"{discord_fake_url}/__testenv/interactions",
@@ -922,10 +931,9 @@ def test_discord_fake_keeps_selector_ids_transient_and_redacted(
     try:
         host = callback_server.server_address[0]
         port = callback_server.server_address[1]
-        _sdk_call(
+        _configure_interaction_endpoint(
             discord_fake_url,
-            "configure_interactions_endpoint",
-            endpoint_url=f"http://{host}:{port}/callback",
+            f"http://{host}:{port}/callback",
         ).raise_for_status()
         response = requests.post(
             f"{discord_fake_url}/__testenv/interactions",

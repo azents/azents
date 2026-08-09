@@ -90,12 +90,6 @@ class _DiscordTestenvSDKSession:
             raise DiscordSDKUnavailable("Discord SDK Bot identity is unavailable.")
         return self._bot_user_id
 
-    async def configure_interactions_endpoint(self, endpoint_url: str) -> None:
-        await self._call(
-            "configure_interactions_endpoint",
-            {"endpoint_url": endpoint_url},
-        )
-
     async def list_guild_commands(
         self,
         *,

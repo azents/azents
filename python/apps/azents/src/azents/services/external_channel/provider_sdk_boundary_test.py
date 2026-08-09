@@ -6,7 +6,7 @@ from pathlib import Path
 
 _EXTERNAL_CHANNEL_ROOT = Path(__file__).parent
 _ALLOWED_PROVIDER_HTTP_FILES = {
-    "discord_api.py",  # G1 individual Guild command create
+    "discord_api.py",  # callback configuration and individual command create gaps
     "discord_delivery.py",  # G2 bounded multipart file message create
     "discord_files.py",  # G3 Discord CDN attachment bytes
     "slack_events.py",  # G4 private download and G5 external upload bytes

@@ -61,7 +61,7 @@ api_routes:
   - /external-channel/v1/workspaces/{handle}/agents/{agent_id}/sessions/{session_id}/external-channels/{binding_id}/response-mode
   - /external-channel/v1/approval-requests/{access_request_id}
 last_verified_at: 2026-08-09
-spec_version: 51
+spec_version: 52
 ---
 
 # External Channel
@@ -98,11 +98,13 @@ contain multiple independent bindings.
   bodies, SDK private state, and Gateway frames remain process-local and are never
   reconstructed or persisted for replay.
 - Public `slack-sdk` and `discord.py` APIs own every supported provider operation.
-  Direct provider transport is closed to five gaps only: Discord individual Guild
-  command create, Discord multipart file-message create, Discord CDN attachment bytes,
-  Slack private-file bytes, and Slack external-upload bytes. Static repository checks
-  reject private Discord SDK imports, second Discord SDKs, SDK-global endpoint
-  mutation, and provider HTTP outside that allowlist.
+  Direct provider transport is closed to six gaps only: Discord current-Application
+  Interaction Endpoint configuration, Discord individual Guild command create,
+  Discord multipart file-message create, Discord CDN attachment bytes, Slack
+  private-file bytes, and Slack external-upload bytes. The callback gap is removed
+  when the adopted public `discord.py` API can transmit the endpoint field correctly.
+  Static repository checks reject private Discord SDK imports, second Discord SDKs,
+  SDK-global endpoint mutation, and provider HTTP outside that allowlist.
 - Slack and Discord model input preserves provider-native user and channel reference
   tokens in the source body. Resolved display names appear separately after the message
   batch in one XML provider-reference mapping block, so readability enrichment does not
@@ -438,6 +440,9 @@ Connection responses expose provider identity, capabilities, health, route relat
 
 ## Changelog
 
+- **2026-08-09** (spec_version 52) — Classified Discord current-Application
+  Interaction Endpoint configuration as a narrow direct-transport gap until the
+  adopted public SDK can transmit the endpoint field correctly.
 - **2026-08-09** (spec_version 51) — Made silent Channel Work completion available
   for ordinary, initial, continuation, and mixed input through normal binding
   authority, without an unfinished-task veto.

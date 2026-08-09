@@ -834,6 +834,28 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             return
         self._json_response(404, {"message": "Unknown fake endpoint."})
 
+    def do_PATCH(self) -> None:
+        """Serve the approved current-Application callback mutation gap."""
+        parsed = urlparse(self.path)
+        if parsed.path != f"{_API_PREFIX}/applications/@me":
+            self._json_response(404, {"message": "Unknown fake endpoint."})
+            return
+        scenario = self._operation(
+            "configure_interactions_endpoint",
+            metadata={"application_id": self.state.application_id},
+        )
+        if self._controlled_response(scenario):
+            return
+        endpoint_url = self._json_body_or_empty().get("interactions_endpoint_url")
+        if not isinstance(endpoint_url, str) or not endpoint_url:
+            self._json_response(400, {"message": "Missing callback URL."})
+            return
+        self.state.configure_interaction_endpoint(
+            self.state.application_id,
+            endpoint_url,
+        )
+        self._json_response(200, {})
+
     def do_POST(self) -> None:
         """Serve fake control, command, thread, and message mutations."""
         parsed = urlparse(self.path)
@@ -1086,20 +1108,6 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                     "verify_key": self.state.verify_key,
                 },
             )
-            return
-        if operation == "configure_interactions_endpoint":
-            endpoint_url = _sdk_string(arguments, "endpoint_url")
-            scenario = self._operation(
-                operation,
-                metadata={"application_id": self.state.application_id},
-            )
-            if self._controlled_response(scenario):
-                return
-            self.state.configure_interaction_endpoint(
-                self.state.application_id,
-                endpoint_url,
-            )
-            self._json_response(200, {})
             return
         if operation == "list_guild_commands":
             _sdk_identity(arguments, "application_id", self.state.application_id)

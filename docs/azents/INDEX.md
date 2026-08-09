@@ -17,7 +17,7 @@ Design documents are accumulated records and are not listed individually in this
 |---|---|---|---|---|
 | [Agent Domain Spec](spec/domain/agent.md) | agent | @Hardtack | 2026-08-03 | 63 |
 | [Conversation & Events](spec/domain/conversation.md) | conversation | @Hardtack | 2026-08-07 | 145 |
-| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-09 | 51 |
+| [External Channel](spec/domain/external-channel.md) | external-channel | @Hardtack | 2026-08-09 | 52 |
 | [Goal Domain Spec](spec/domain/goal.md) | goal | - | 2026-07-31 | 14 |
 | [Memory](spec/domain/memory.md) | memory | @Hardtack | 2026-08-06 | 7 |
 | [Model Catalog Domain Spec](spec/domain/model-catalog.md) | model-catalog | - | 2026-08-01 | 18 |
