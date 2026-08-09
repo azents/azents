@@ -4388,12 +4388,14 @@ def test_discord_single_activation_and_interaction_journey(
         ),
         _headers=headers,
     )
-    assert setup.connection.status is ExternalChannelConnectionStatus.ACTIVE
+    activation_state = _discord_provider_state(discord_provider_fake_url)
+    assert setup.connection.status is ExternalChannelConnectionStatus.ACTIVE, (
+        activation_state
+    )
     assert setup.connection.credentials_configured is True
     assert setup.connection.provider_tenant_id == _DISCORD_GUILD_ID
     assert _DISCORD_BOT_TOKEN not in setup.model_dump_json(by_alias=True)
 
-    activation_state = _discord_provider_state(discord_provider_fake_url)
     assert activation_state["interaction_configurations"] == [
         {"application_id": _DISCORD_APPLICATION_ID}
     ]

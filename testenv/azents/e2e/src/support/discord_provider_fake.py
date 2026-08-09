@@ -1434,6 +1434,26 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
     def do_PATCH(self) -> None:
         """Configure callback authority or update a message without retaining bodies."""
         parsed = urlparse(self.path)
+        if parsed.path == f"{_API_PREFIX}/applications/@me":
+            application_id = self.state.application_id
+            scenario = self._operation(
+                "configure_interactions_endpoint",
+                metadata={"application_id": application_id},
+            )
+            if self._controlled_response(scenario):
+                return
+            if scenario == "ok":
+                body = self._json_body_or_empty()
+                endpoint_url = body.get("interactions_endpoint_url")
+                if not isinstance(endpoint_url, str) or not endpoint_url:
+                    self._json_response(400, {"message": "Missing callback URL."})
+                    return
+                self.state.configure_interaction_endpoint(
+                    application_id,
+                    endpoint_url,
+                )
+            self._json_response(200, {})
+            return
         channel_id = _channel_item_id(parsed.path)
         if channel_id is not None:
             body = self._json_body()
@@ -1519,26 +1539,6 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 self._json_response(404, {"message": "Not found."})
                 return
             self._json_response(200, command)
-            return
-        if parsed.path == f"{_API_PREFIX}/applications/@me":
-            application_id = self.state.application_id
-            scenario = self._operation(
-                "configure_interactions_endpoint",
-                metadata={"application_id": application_id},
-            )
-            if self._controlled_response(scenario):
-                return
-            if scenario == "ok":
-                body = self._json_body_or_empty()
-                endpoint_url = body.get("interactions_endpoint_url")
-                if not isinstance(endpoint_url, str) or not endpoint_url:
-                    self._json_response(400, {"message": "Missing callback URL."})
-                    return
-                self.state.configure_interaction_endpoint(
-                    application_id,
-                    endpoint_url,
-                )
-            self._json_response(200, {})
             return
         channel_id, message_id = _channel_message_ids(parsed.path)
         if channel_id is not None and message_id is not None:
