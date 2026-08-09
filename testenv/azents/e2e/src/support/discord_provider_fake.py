@@ -1318,7 +1318,6 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
             )
             safe_category = _safe_category(scenario)
             if scenario in _CONFIRMED_CREATE_FAILURE_SCENARIOS:
-                self._controlled_response(scenario)
                 self.state.record_delivery(
                     operation="create_message",
                     channel_id=channel_id,
@@ -1335,6 +1334,7 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                     safe_category=safe_category,
                     metadata={"channel_id": channel_id},
                 )
+                self._controlled_response(scenario)
                 return
             message_id, nonce_outcome = self.state.create_message(
                 channel_id=channel_id,
