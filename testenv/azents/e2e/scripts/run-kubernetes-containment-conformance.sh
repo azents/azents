@@ -77,9 +77,9 @@ featureGates:
 nodes:
   - role: control-plane
     extraMounts:
+      # containerd loads its generated RuntimeDefault profile through securityfs.
       - hostPath: /sys/kernel/security
         containerPath: /sys/kernel/security
-        readOnly: true
 EOF
 
 kind create cluster \
