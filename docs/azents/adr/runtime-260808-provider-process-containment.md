@@ -397,6 +397,56 @@ is absent, unsupported, or fails qualification.
 - Allowing per-operation backend selection or fallback was rejected because one
   physical Runtime must expose one coherent qualified Agent authority.
 
+### runtime-260808/ADR-D11: Use a non-root Runner with a narrowly privileged set-user-ID bwrap bootstrap
+
+**Affected requirements:** `runtime-260808/REQ-2`, `REQ-3`, `REQ-5`, `REQ-9`,
+`REQ-10`, `REQ-11`, `REQ-14`
+
+Contained Docker and Kubernetes workloads keep the existing Runner UID/GID 1000
+identity. The production Runner image installs the root-owned bwrap executable with
+its supported set-user-ID mode. Each Provider drops the workload capability set and
+adds only `CAP_SYS_ADMIN`, `CAP_SYS_CHROOT`, `CAP_NET_ADMIN`, `CAP_SETUID`,
+`CAP_SETGID`, `CAP_SYS_PTRACE`, and `CAP_SETPCAP`, which bwrap requires to construct
+and then discard its namespace bootstrap authority.
+
+The workload permits the trusted set-user-ID transition and supplies the Provider-
+specific seccomp, process-mount, and security-profile preparation required by bwrap.
+The Runner process itself remains UID/GID 1000 with no effective, permitted,
+inheritable, or ambient capability. Only the trusted bwrap executable temporarily
+enters effective UID 0 while preparing the contained mount, PID, IPC, UTS, and user
+namespaces.
+
+Before Agent-selected code executes, bwrap returns to UID/GID 1000, drops every
+effective, permitted, inheritable, ambient, and bounding capability, and sets
+`NoNewPrivs=1`. A Runner-owned seccomp program denies additional user-namespace
+creation and user-namespace entry without blocking ordinary process creation. The
+positive filesystem projection masks the capability-bearing bwrap inode from the
+Agent view. Pre-registration qualification verifies the final identity, capability,
+no-new-privileges, nested-user-namespace, filesystem, process, and environment
+invariants through the same backend entry point used by Agent operations.
+
+**Rejected alternatives:**
+
+- A UID/GID 0 Runner was rejected because bwrap supports a non-root caller through
+  its set-user-ID installation mode and the trusted Runner does not otherwise need
+  root identity.
+- Explicit `--uid` or `--gid` arguments were rejected because bwrap already preserves
+  the non-root caller identity by default; forcing the values created an unnecessary
+  mapping problem.
+- Pure unprivileged bwrap was rejected as the common Provider mechanism because a
+  Docker-created mount namespace prevents its child user namespace from changing the
+  inherited root mount propagation.
+- File capabilities were rejected because current bwrap explicitly refuses that
+  installation mode.
+- `newuidmap`, `newgidmap`, subordinate-ID allocation, and Provider-specific external
+  map helpers were rejected because the supported set-user-ID bwrap mode satisfies the
+  same child contract without another identity authority.
+- bwrap `--disable-userns` was rejected because it requires writing a namespaced
+  `user.max_user_namespaces` sysctl that Docker does not expose. The Runner-owned
+  seccomp filter enforces and qualification verifies the same Agent-child restriction.
+- A privileged workload or an unrestricted capability set was rejected because the
+  bounded bootstrap capability set is sufficient.
+
 ## Consequences
 
 - Model context remains stable across ordinary Runner ready/busy/reconnecting transitions.
@@ -432,3 +482,6 @@ is absent, unsupported, or fails qualification.
   interface, and direct `bwrap` construction is absent from Runner operation handlers.
 - Backend additions require implementation and conformance evidence, not Agent-facing
   protocol or Profile changes.
+- Both Providers retain a UID/GID 1000 Runner and grant the same bounded set-user-ID
+  bwrap bootstrap contract; every Agent child remains UID/GID 1000, capability-free,
+  no-new-privileges, and unable to create another user namespace.

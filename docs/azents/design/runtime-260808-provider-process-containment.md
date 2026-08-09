@@ -206,12 +206,14 @@ that identifies:
 This bootstrap input is trusted Runner configuration, not Agent environment and not
 model context. It contains no Profile-authored command-line arguments.
 
-Both Providers preserve the existing Runner UID/GID 1000 identity, prohibit privilege
-escalation, avoid Agent-accessible infrastructure sockets, and provide the kernel and
-container security settings required by the selected backend. The initial `bwrap`
-adapter uses unprivileged namespace construction by the trusted Runner and applies the
-contained child restrictions after the namespace is created. The contained child cannot
-create another user namespace or gain synthetic root.
+Both Providers preserve the existing Runner UID/GID 1000 identity and avoid
+Agent-accessible infrastructure sockets. Under `runtime-260808/ADR-D11`, the production
+Runner image contains a root-owned set-user-ID bwrap executable, while the Provider
+workload grants only the bounded bootstrap capability set required by bwrap. The Runner
+process remains non-root; bwrap temporarily uses effective UID 0 only for namespace
+construction. Before Agent code starts, bwrap returns to UID/GID 1000, drops every
+capability, sets no-new-privileges, loads the Runner-owned user-namespace-denial seccomp
+program, and masks its own privileged inode from the Agent filesystem view.
 
 ### Kubernetes Provider
 
@@ -224,8 +226,9 @@ A contained Kubernetes Profile:
   own `/tmp`;
 - keeps the Agent Workspace PVC mounted at the Runner-reported absolute path;
 - retains the Profile NetworkPolicy and ordinary allowed egress;
-- supplies the pod/container security settings needed by the backend while continuing
-  to drop Agent-visible capabilities; and
+- runs the Runner as UID/GID 1000 with `runAsNonRoot=true`, permits only the trusted
+  set-user-ID bwrap transition, grants the bounded bootstrap capability set, uses an
+  unconfined workload seccomp profile, and exposes an unmasked process mount; and
 - reports Pod/container termination as a bounded qualification/startup failure when the
   Runner exits before registration.
 
@@ -241,8 +244,12 @@ A contained Docker Profile:
   storage paths;
 - mounts Agent temporary storage at a Runner-private bootstrap path and projects it to
   `/tmp` only inside containment;
-- extends `DockerContainerSpec` and the Docker API adapter with explicit capability
-  drop, no-new-privileges, security profile, and related backend preparation fields;
+- runs the Runner as UID/GID 1000, drops all workload capabilities, adds only the
+  bounded bwrap bootstrap set, and applies unconfined seccomp and system-path
+  preparation plus the dedicated enforcing AppArmor profile;
+- does not set Docker no-new-privileges on the trusted Runner because that would disable
+  the supported set-user-ID bwrap bootstrap; bwrap sets `NoNewPrivs=1` before the Agent
+  child starts;
 - retains the Provider-managed network and existing external connectivity contract; and
 - inspects stable Runner container termination data so pre-registration qualification
   failure becomes a bounded Provider report.
@@ -679,7 +686,7 @@ No test captures credential values or raw environment dumps.
 
 ## Design Authority
 
-- Design revision: `1`
+- Design revision: `2`
 
 | ID | Material design mechanism | Authority | Classification |
 | --- | --- | --- | --- |
@@ -695,16 +702,18 @@ No test captures credential values or raw environment dumps.
 | M10 | Containment status derived from Profile, desired/applied revision, and Runner authority | `runtime-260808/REQ-13`, `REQ-15`; `runtime-260808/ADR-D9` | `decided` |
 | M11 | Explicit opt-in recreation rollout with Workspace-preserving rollback | `runtime-260808/REQ-13`; `runtime-260808/ADR-D5`, `ADR-D9` | `required` |
 | M12 | Deterministic Docker and Kubernetes E2E plus shared backend conformance | `runtime-260808/REQ-9`, `REQ-10`, `REQ-14`; `runtime-260808/ADR-D3`, `ADR-D6`, `ADR-D10` | `derived` |
+| M13 | Non-root UID/GID 1000 Runner with bounded set-user-ID bwrap bootstrap and capability-free UID/GID 1000 Agent children across both Providers | `runtime-260808/REQ-2`, `REQ-3`, `REQ-5`, `REQ-9`, `REQ-10`, `REQ-11`, `REQ-14`; `runtime-260808/ADR-D3`, `ADR-D6`, `ADR-D11` | `decided` |
 
 ## Assumptions and Non-Blocking Risks
 
-- The current development host allows unprivileged user namespaces, but the Runner image
-  does not yet include bwrap. Historical repository evidence also shows that earlier
-  bwrap deployments required an unconfined seccomp profile and were incompatible with a
-  gVisor RuntimeClass. The initial adapter must therefore prove its current runc/container
-  security contract in both Provider E2E environments before capability advertisement
-  is enabled. An incompatible RuntimeClass fails compatibility or qualification rather
-  than weakening the boundary.
+- The production Runner image contains bwrap 0.11.0 in its supported set-user-ID mode.
+  Real Docker qualification proved a UID/GID 1000 Runner can produce a UID/GID 1000
+  Agent child with all five capability sets zero, `NoNewPrivs=1`, nested user namespaces
+  denied, and ordinary process creation preserved when the Provider supplies the M13
+  bootstrap contract. Historical repository evidence still shows that bwrap is
+  incompatible with a gVisor RuntimeClass. The Kubernetes Provider must prove the same
+  runc/container contract before advertising capability; incompatibility fails
+  qualification rather than weakening the boundary.
 - Exact positive system path manifests may require iterative additions for bundled tools;
   conformance and E2E evidence, not fallback to the Runner filesystem, resolves gaps.
 - Per-operation contained helper startup adds overhead. It is preferred over a persistent
@@ -717,11 +726,11 @@ No test captures credential values or raw environment dumps.
 
 ## Authority Audit
 
-Result: **Passed for Design revision 1.**
+Result: **Passed for Design revision 2.**
 
 - Every `runtime-260808/REQ-1` through `REQ-16` has at least one concrete Design
   mechanism in the traceability table.
-- Every material mechanism `M1` through `M12` cites confirmed Requirements, accepted
+- Every material mechanism `M1` through `M13` cites confirmed Requirements, accepted
   ADR decisions, or both.
 - No mechanism introduces a second Profile, application, qualification, prompt, or
   lifecycle authority.
@@ -736,6 +745,9 @@ Result: **Passed for Design revision 1.**
   authority in the Removal and Replacement table.
 - No compatibility fallback, legacy containment mode, or optional weaker execution path
   remains.
+- M13 grants bootstrap authority only to the trusted set-user-ID bwrap executable while
+  preserving non-root Runner identity and the capability-free UID/GID 1000 Agent-child
+  contract required by M3, M4, M5, and M7.
 
 ## Feasibility Validation
 
@@ -756,6 +768,7 @@ blocker found.**
 | M10 derived status | Feasible | `agent_runtimes` already stores selected Profile, desired/applied revision, Provider state, Runner state/generation, and Workspace evidence. Existing server summaries establish the rule that frontends consume server projections rather than recomputing raw state. |
 | M11 rollout/recreation | Feasible | Current application-impact classification already recreates on schema/provider/non-network Profile changes and preserves durable Workspace storage through Runtime recreation. |
 | M12 E2E/conformance | Feasible with new Kubernetes fixture | Docker Runtime product E2E and Runner operation E2E already exist. Helm rendering covers the Kubernetes Provider, but a disposable real Kubernetes Runtime fixture must be added for required backend qualification evidence. |
+| M13 non-root bwrap bootstrap | Feasible | The production image installs root-owned mode-4755 bwrap and a Runner-owned seccomp launcher. Real Docker qualification with a UID/GID 1000 Runner, the bounded seven-capability set, unconfined workload seccomp, unconfined system paths, and the dedicated AppArmor boundary produced a UID/GID 1000 Agent child with all capability sets zero, `NoNewPrivs=1`, nested user namespaces denied, ordinary fork preserved, and the privileged bwrap inode masked from the Agent view. |
 
 ### Feasibility conditions
 
@@ -773,8 +786,11 @@ blocker found.**
 
 - Mode: `Collaborative`
 - Decision owner: requester
-- Status: Approved
-- Approved on: 2026-08-08
-- Approved Design revision: `1`
-- Approved authority IDs: `M1`, `M2`, `M3`, `M4`, `M5`, `M6`, `M7`, `M8`, `M9`, `M10`, `M11`, `M12`
-- Approved scope: Provider-owned contained Profiles, pluggable Runner-local containment backends, pre-registration qualification, unified contained Agent operations, positive filesystem and environment boundaries, Runtime-independent prompt construction, bounded explicit-operation readiness, derived status projections, opt-in recreation rollout, and Docker/Kubernetes E2E-first verification.
+- Status: Pending renewed approval
+- Previous approval: Design revision `1`, authority IDs `M1` through `M12`, approved
+  on 2026-08-08
+- Pending Design revision: `2`
+- Pending authority IDs: `M1`, `M2`, `M3`, `M4`, `M5`, `M6`, `M7`, `M8`, `M9`, `M10`, `M11`, `M12`, `M13`
+- Pending scope delta: Both Providers retain a non-root UID/GID 1000 Runner and use
+  the bounded set-user-ID bwrap bootstrap in M13 while preserving the previously
+  approved capability-free UID/GID 1000 Agent-child contract.

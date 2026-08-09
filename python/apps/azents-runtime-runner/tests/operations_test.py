@@ -22,6 +22,7 @@ from azents_runtime_control.runner import (
     RuntimeRunnerEventType,
 )
 
+from azents_runtime_runner.containment import DirectExecutionBackend
 from azents_runtime_runner.operations import (
     RunnerOperations,
     # Validate root-prefix parsing without traversing the host root.
@@ -53,7 +54,11 @@ async def test_stream_closed_event_is_not_retried_as_final_error(
     tmp_path: Path,
 ) -> None:
     client = _ClosedClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     with pytest.raises(RuntimeRunnerControlStreamClosed, match="stream closed"):
         await operations.handle(
@@ -69,7 +74,11 @@ async def test_stream_closed_event_is_not_retried_as_final_error(
 @pytest.mark.asyncio
 async def test_bash_operation_emits_stdout_and_final_success(tmp_path: Path) -> None:
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -88,12 +97,78 @@ async def test_bash_operation_emits_stdout_and_final_success(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
+async def test_bash_environment_excludes_runner_secrets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AZ_RUNTIME_RUNNER_AUTH_TOKEN", "runner-secret")
+    monkeypatch.setenv("UNRELATED_RUNNER_SECRET", "runner-secret")
+    client = _FakeClient()
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
+
+    await operations.handle(
+        _operation(
+            operation_type="bash",
+            payload={
+                "command": (
+                    "printf '%s|%s|%s|%s' "
+                    '"${AZ_RUNTIME_RUNNER_AUTH_TOKEN-unset}" '
+                    '"${UNRELATED_RUNNER_SECRET-unset}" '
+                    '"$TOOL_TOKEN" '
+                    '"$HOME"'
+                ),
+                "env": {"TOOL_TOKEN": "tool-token"},
+            },
+        )
+    )
+
+    assert client.events[1].payload == {"text": f"unset|unset|tool-token|{tmp_path}"}
+    assert client.events[-1].event_type is RuntimeRunnerEventType.FINAL_SUCCESS
+
+
+@pytest.mark.asyncio
+async def test_bash_environment_rejects_reserved_override(tmp_path: Path) -> None:
+    client = _FakeClient()
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
+
+    await operations.handle(
+        _operation(
+            operation_type="bash",
+            payload={
+                "command": "printf unreachable",
+                "env": {"AZ_RUNTIME_RUNNER_AUTH_TOKEN": "override"},
+            },
+        )
+    )
+
+    assert client.events[-1].event_type is RuntimeRunnerEventType.FINAL_ERROR
+    assert client.events[-1].payload == {
+        "error_code": "INVALID_ENVIRONMENT",
+        "error_message": (
+            "Agent environment name is reserved: AZ_RUNTIME_RUNNER_AUTH_TOKEN"
+        ),
+    }
+
+
+@pytest.mark.asyncio
 async def test_bash_cancellation_terminates_process_group(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
     original_killpg = os.killpg
     signals: list[signal.Signals] = []
 
@@ -133,7 +208,9 @@ async def test_bash_cancellation_terminates_process_group(
 async def test_file_write_read_and_list_stay_in_workspace(tmp_path: Path) -> None:
     client = _FakeClient()
     workspace = Workspace(str(tmp_path))
-    operations = RunnerOperations(client=client, workspace=workspace)
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(), client=client, workspace=workspace
+    )
 
     await operations.handle(
         _operation(
@@ -186,7 +263,11 @@ async def test_file_read_text_uses_requested_encoding_without_base64(
     path = tmp_path / "latin.txt"
     path.write_bytes("café".encode("latin-1"))
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -218,7 +299,11 @@ async def test_file_read_text_reports_binary_decode_error(tmp_path: Path) -> Non
     path = tmp_path / "binary.dat"
     path.write_bytes(b"\xff\xfe\x00")
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -240,7 +325,11 @@ async def test_file_edit_replaces_text_in_one_native_operation(tmp_path: Path) -
     path = tmp_path / "note.txt"
     path.write_text("before\nbefore\n")
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -268,7 +357,11 @@ async def test_file_edit_rejects_ambiguous_match_without_changing_file(
     path = tmp_path / "note.txt"
     path.write_text("before\nbefore\n")
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -299,7 +392,11 @@ async def test_file_edit_rejects_symlink_paths(tmp_path: Path) -> None:
     link = tmp_path / "link.txt"
     link.symlink_to(target)
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -325,7 +422,11 @@ async def test_file_list_supports_file_path(tmp_path: Path) -> None:
     file_path.parent.mkdir()
     file_path.write_text("hello")
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -360,7 +461,11 @@ async def test_file_list_recursive_with_excludes(tmp_path: Path) -> None:
     (tmp_path / "node_modules" / "pkg").mkdir(parents=True)
     (tmp_path / "node_modules" / "pkg" / "index.js").write_text("hello")
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -400,7 +505,11 @@ async def test_file_glob_matches_runtime_entries_with_braces_and_excludes(
     (tmp_path / "node_modules" / "pkg").mkdir(parents=True)
     (tmp_path / "node_modules" / "pkg" / "ignored.py").write_text("ignored")
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -431,7 +540,11 @@ async def test_file_glob_supports_question_mark_and_character_classes(
     (tmp_path / "src" / "appA.py").write_text("alpha")
     (tmp_path / "src" / "app-long.py").write_text("long")
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -452,7 +565,11 @@ async def test_file_glob_supports_question_mark_and_character_classes(
 async def test_file_glob_rejects_excessive_brace_expansion(tmp_path: Path) -> None:
     """Runner-native glob rejects brace expansions above the bounded limit."""
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -474,7 +591,11 @@ async def test_file_glob_returns_matching_directories(tmp_path: Path) -> None:
     (tmp_path / "skills" / "search").mkdir(parents=True)
     (tmp_path / "skills" / "search" / "SKILL.md").write_text("search")
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -499,7 +620,11 @@ async def test_file_glob_rejects_tilde_expansion(
 ) -> None:
     """Runner-native glob rejects process-dependent home expansion."""
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(operation_type="file.glob", payload={"pattern": pattern})
@@ -552,6 +677,7 @@ async def test_blocked_file_list_does_not_block_unrelated_read(
     )
     client = _FakeClient()
     operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
         max_file_operation_workers=2,
@@ -630,6 +756,7 @@ async def test_file_operation_executor_never_exceeds_worker_bound(
     )
     client = _FakeClient()
     operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
         max_file_operation_workers=2,
@@ -688,7 +815,11 @@ async def test_cancelled_file_list_signals_blocking_traversal(
         blocking_iter,
     )
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
     task = asyncio.create_task(
         operations.handle(
             _operation(
@@ -714,7 +845,11 @@ async def test_file_stat_reports_regular_file(tmp_path: Path) -> None:
     file_path = tmp_path / "AGENTS.md"
     file_path.write_text("hello")
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -743,7 +878,11 @@ async def test_file_stat_reports_symlink_without_following_it(tmp_path: Path) ->
     link_path = tmp_path / "link.txt"
     link_path.symlink_to(target_path)
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -770,7 +909,11 @@ async def test_file_stat_reports_symlink_without_following_it(tmp_path: Path) ->
 @pytest.mark.asyncio
 async def test_file_stat_missing_path_returns_final_error(tmp_path: Path) -> None:
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -792,7 +935,11 @@ async def test_file_grep_searches_workspace_files(tmp_path: Path) -> None:
     (tmp_path / "node_modules" / "pkg" / "index.js").write_text("needle")
     (tmp_path / "bin.dat").write_bytes(b"\xff\xfe\x00\x01")
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -827,7 +974,11 @@ async def test_file_grep_searches_workspace_files(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_file_grep_invalid_regex_returns_final_error(tmp_path: Path) -> None:
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -844,7 +995,11 @@ async def test_file_grep_invalid_regex_returns_final_error(tmp_path: Path) -> No
 async def test_relative_paths_stay_under_workspace(tmp_path: Path) -> None:
     (tmp_path / "inside.txt").write_text("hello")
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -861,7 +1016,11 @@ async def test_absolute_paths_outside_workspace_are_allowed(tmp_path: Path) -> N
     outside = tmp_path.parent / "outside.txt"
     outside.write_text("hello")
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -880,7 +1039,11 @@ async def test_file_grep_skips_symlink_escape(tmp_path: Path) -> None:
     (tmp_path / ".venv" / "bin").mkdir(parents=True)
     (tmp_path / ".venv" / "bin" / "python").symlink_to("/usr/local/bin/python3.14")
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -911,7 +1074,11 @@ async def test_file_grep_stops_at_searched_file_limit(tmp_path: Path) -> None:
     for index in range(3):
         (tmp_path / f"file-{index}.txt").write_text("nothing")
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -937,7 +1104,11 @@ async def test_file_grep_stops_at_scanned_byte_limit(tmp_path: Path) -> None:
     """file.grep stops at the scanned byte limit."""
     (tmp_path / "large.txt").write_text("a" * 20)
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -963,7 +1134,11 @@ async def test_process_start_quick_command_returns_exit_snapshot(
     tmp_path: Path,
 ) -> None:
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -993,7 +1168,11 @@ async def test_process_start_quick_command_returns_exit_snapshot(
 @pytest.mark.asyncio
 async def test_process_write_empty_stdin_polls_running_process(tmp_path: Path) -> None:
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -1056,6 +1235,7 @@ async def test_process_write_empty_stdin_polls_running_process(tmp_path: Path) -
 async def test_process_output_is_bounded_and_reports_truncation(tmp_path: Path) -> None:
     client = _FakeClient()
     operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
         process_max_unread_bytes=10,
@@ -1084,6 +1264,7 @@ async def test_process_output_is_bounded_and_reports_truncation(tmp_path: Path) 
 async def test_process_quota_prunes_oldest_process(tmp_path: Path) -> None:
     client = _FakeClient()
     operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
         client=client,
         workspace=Workspace(str(tmp_path)),
         max_runtime_process_count=1,
@@ -1136,7 +1317,11 @@ async def test_close_does_not_signal_exited_process_group(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -1153,7 +1338,7 @@ async def test_close_does_not_signal_exited_process_group(
     def fail_on_signal(*_args: object) -> None:
         pytest.fail("exited process groups must not be signaled")
 
-    monkeypatch.setattr(operations, "_signal_process_group", fail_on_signal)
+    monkeypatch.setattr(os, "killpg", fail_on_signal)
 
     await operations.close()
 
@@ -1163,7 +1348,11 @@ async def test_close_terminates_process_group_without_blocking_on_child_pipes(
     tmp_path: Path,
 ) -> None:
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -1201,7 +1390,11 @@ async def test_process_terminate_session_terminates_only_owned_processes(
     tmp_path: Path,
 ) -> None:
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     long_running = "exec python -c 'import time; time.sleep(30)'"
     await operations.handle(
@@ -1273,7 +1466,11 @@ async def test_file_bulk_delete_removes_multiple_files(tmp_path: Path) -> None:
     (tmp_path / "a.txt").write_text("a")
     (tmp_path / "b.txt").write_text("b")
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -1302,7 +1499,11 @@ async def test_file_delete_unlinks_root_symlink_without_following_target(
     root_link = tmp_path / "session-folder"
     root_link.symlink_to(external, target_is_directory=True)
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -1333,7 +1534,11 @@ async def test_file_delete_does_not_follow_descendant_symlink(
         target_is_directory=True,
     )
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -1355,7 +1560,11 @@ async def test_file_bulk_move_moves_multiple_files_into_directory(
     (tmp_path / "b.txt").write_text("b")
     (tmp_path / "archive").mkdir()
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -1393,7 +1602,11 @@ async def test_git_cancellation_terminates_process_group(
 ) -> None:
     repo = _init_git_repo(tmp_path / "repo")
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
     original_killpg = os.killpg
     signals: list[signal.Signals] = []
 
@@ -1443,7 +1656,11 @@ async def test_git_list_refs_returns_branches_tags_and_head(tmp_path: Path) -> N
     repo = _init_git_repo(tmp_path / "repo")
     _git(repo, "tag", "v1")
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -1468,7 +1685,11 @@ async def test_git_create_remove_worktree_and_delete_branch(tmp_path: Path) -> N
     repo = _init_git_repo(tmp_path / "repo")
     worktree_path = tmp_path / ".azents" / "worktrees" / "session" / "repo"
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -1598,7 +1819,11 @@ async def test_git_discover_managed_worktrees_ignores_worktree_children(
     (legacy_worktree / "child-file").write_text("ignored\n")
 
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -1636,7 +1861,11 @@ async def test_git_remove_worktree_treats_missing_target_as_terminal(
     )
     shutil.rmtree(worktree_path)
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -1690,7 +1919,11 @@ async def test_git_remove_worktree_rejects_existing_unregistered_target(
     marker = worktree_path / "keep.txt"
     marker.write_text("keep\n")
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -1716,7 +1949,11 @@ async def test_git_remove_worktree_accepts_unregistered_missing_target(
     repo = _init_git_repo(tmp_path / "repo")
     worktree_path = tmp_path / "missing"
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -1752,7 +1989,11 @@ async def test_git_remove_worktree_rejects_registered_branch_mismatch(
         "main",
     )
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -1789,7 +2030,11 @@ async def test_git_remove_worktree_rejects_missing_registered_branch_mismatch(
     )
     shutil.rmtree(worktree_path)
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
@@ -1865,7 +2110,11 @@ async def test_git_create_worktree_semantic_failures(
         else:
             normalized_payload[key] = value
     client = _FakeClient()
-    operations = RunnerOperations(client=client, workspace=Workspace(str(tmp_path)))
+    operations = RunnerOperations(
+        execution_backend=DirectExecutionBackend(),
+        client=client,
+        workspace=Workspace(str(tmp_path)),
+    )
 
     await operations.handle(
         _operation(
