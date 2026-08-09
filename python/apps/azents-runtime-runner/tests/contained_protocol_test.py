@@ -2,6 +2,8 @@
 
 import asyncio
 import io
+import subprocess
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -133,6 +135,33 @@ def test_sync_protocol_round_trips_control_and_binary_frames() -> None:
     assert control.control == {"kind": "request", "value": 3}
     assert binary.kind is FrameKind.BINARY
     assert binary.binary == b"binary"
+
+
+def test_helper_import_defers_async_and_specialized_operation_modules() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; "
+                "import azents_runtime_runner.contained_helper; "
+                "unexpected = sorted("
+                "set(sys.modules) & "
+                "{'asyncio', "
+                "'azents_runtime_runner.contained_apply_patch', "
+                "'azents_runtime_runner.contained_git', "
+                "'azents_runtime_runner.contained_transfer'}"
+                "); "
+                "print('\\n'.join(unexpected)); "
+                "raise SystemExit(bool(unexpected))"
+            ),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stdout
 
 
 @pytest.mark.asyncio

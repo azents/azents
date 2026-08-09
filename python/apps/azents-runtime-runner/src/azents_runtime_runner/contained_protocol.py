@@ -1,12 +1,16 @@
 """Bounded framed protocol shared with the contained operation helper."""
 
-import asyncio
+from __future__ import annotations
+
 import enum
 import json
 import struct
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import BinaryIO, TypeAlias
+from typing import TYPE_CHECKING, BinaryIO, TypeAlias
+
+if TYPE_CHECKING:
+    import asyncio
 
 JsonValue: TypeAlias = (
     None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
@@ -92,7 +96,7 @@ def write_sync_binary(writer: BinaryIO, data: bytes) -> None:
 async def _read_async_exact(reader: asyncio.StreamReader, size: int) -> bytes:
     try:
         return await reader.readexactly(size)
-    except asyncio.IncompleteReadError as error:
+    except EOFError as error:
         raise ContainedProtocolError("contained frame ended unexpectedly") from error
 
 

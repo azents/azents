@@ -7,14 +7,8 @@ import sys
 import threading
 from collections.abc import Mapping
 from datetime import datetime
-from typing import assert_never
+from typing import TYPE_CHECKING, assert_never
 
-from azents_runtime_runner.contained_apply_patch import (
-    ApplyPatchFailure,
-    ApplyPatchLimits,
-    execute_apply_patch,
-)
-from azents_runtime_runner.contained_git import run_git_operation
 from azents_runtime_runner.contained_kernels import (
     _delete_path,
     _delete_paths,
@@ -60,12 +54,11 @@ from azents_runtime_runner.contained_requests import (
     TransferUploadRequest,
     decode_contained_request,
 )
-from azents_runtime_runner.contained_transfer import (
-    ContainedTransferError,
-    run_download_transfer,
-    run_upload_transfer,
-)
 from azents_runtime_runner.workspace import Workspace
+
+if TYPE_CHECKING:
+    from azents_runtime_runner.contained_apply_patch import ApplyPatchFailure
+    from azents_runtime_runner.contained_transfer import ContainedTransferError
 
 _MAX_FILE_READ_BYTES = 8 * 1024 * 1024
 _MAX_TEXT_READ_BYTES = 64 * 1024
@@ -124,8 +117,6 @@ def _run_dispatch(
     """Run one operation and translate its bounded terminal failure."""
     try:
         _dispatch(operation, workspace_path, metadata, bodies, cancellation)
-    except ContainedTransferError as error:
-        _emit_transfer_error(error)
     except _FileOperationSemanticError as error:
         _emit_error(error.code, error.message)
     except ValueError as error:
@@ -150,6 +141,11 @@ def _dispatch(
     workspace = Workspace(workspace_path)
 
     if isinstance(request, GitRequest):
+        # Keep one-shot helper startup bounded for non-Git native operations.
+        from azents_runtime_runner.contained_git import (  # noqa: PLC0415
+            run_git_operation,
+        )
+
         run_git_operation(
             request=request,
             workspace=workspace,
@@ -167,16 +163,10 @@ def _dispatch(
         case TransferUploadRequest():
             if deadline_at is None:
                 raise RuntimeError("contained transfer deadline is required")
-            run_upload_transfer(
-                request=request,
+            _run_upload_transfer(
+                request,
                 cancellation=cancellation,
                 deadline_at=deadline_at,
-                emit=lambda event_type, event_payload, binary, final: _emit_event(
-                    event_type,
-                    event_payload,
-                    binary=binary,
-                    final=final,
-                ),
             )
         case TransferDownloadRequest():
             raise RuntimeError("download transfer must use streaming dispatch")
@@ -377,6 +367,13 @@ def _apply_patch(
     cancellation: threading.Event,
     deadline_at: datetime | None,
 ) -> None:
+    # Apply-patch validation is substantial and only needed by this operation.
+    from azents_runtime_runner.contained_apply_patch import (  # noqa: PLC0415
+        ApplyPatchFailure,
+        ApplyPatchLimits,
+        execute_apply_patch,
+    )
+
     if not request.base_path:
         _emit_patch_failure(
             ApplyPatchFailure(
@@ -406,8 +403,41 @@ def _apply_patch(
     _emit_success(result.payload())
 
 
+def _run_upload_transfer(
+    request: TransferUploadRequest,
+    *,
+    cancellation: threading.Event,
+    deadline_at: datetime,
+) -> None:
+    # Transfer hashing and I/O support stays off the common file-operation path.
+    from azents_runtime_runner.contained_transfer import (  # noqa: PLC0415
+        ContainedTransferError,
+        run_upload_transfer,
+    )
+
+    try:
+        run_upload_transfer(
+            request=request,
+            cancellation=cancellation,
+            deadline_at=deadline_at,
+            emit=lambda event_type, event_payload, binary, final: _emit_event(
+                event_type,
+                event_payload,
+                binary=binary,
+                final=final,
+            ),
+        )
+    except ContainedTransferError as error:
+        _emit_transfer_error(error)
+
+
 def _run_download_transfer(metadata: Mapping[str, JsonValue]) -> None:
     """Run input streaming on the sole protocol reader thread."""
+    from azents_runtime_runner.contained_transfer import (  # noqa: PLC0415
+        ContainedTransferError,
+        run_download_transfer,
+    )
+
     try:
         payload = _mapping(metadata.get("payload"), "payload")
         request = decode_contained_request("transfer.download", dict(payload))
