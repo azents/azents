@@ -85,8 +85,8 @@ async def test_reads_current_bot_user_identity() -> None:
 
 
 @pytest.mark.asyncio
-async def test_configures_interaction_endpoint_without_persisting_selector() -> None:
-    """The provider call receives the opaque selector only in its endpoint URL."""
+async def test_configures_current_application_interaction_endpoint() -> None:
+    """The provider call edits the Bot-owned App without persisting its selector."""
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -98,14 +98,13 @@ async def test_configures_interaction_endpoint_without_persisting_selector() -> 
 
     await client.configure_interactions_endpoint(
         bot_token="redacted-token",
-        application_id="app-1",
         endpoint_url=endpoint_url,
     )
 
     assert len(requests) == 1
     request = requests[0]
     assert request.method == "PATCH"
-    assert request.url.path == "/api/v10/applications/app-1"
+    assert request.url.path == "/api/v10/applications/@me"
     assert request.headers["authorization"] == "Bot redacted-token"
     assert (
         request.json()

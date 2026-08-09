@@ -1077,7 +1077,7 @@
         "discordAppId": "Discord Application ID",
         "discordGuildId": "Discord Guild ID",
         "discordBotToken": "Discord Bot Token",
-        "discordGuide": "Complete these steps in Discord Developer Portal, then enter the three values below. Azents validates the Bot Token and configures the interaction callback and commands automatically.",
+        "discordGuide": "Complete these steps in Discord Developer Portal, then enter the three values below. Azents validates the Bot Token and configures the Interaction Endpoint and commands automatically; do not enter an endpoint manually.",
         "discordGuideTitle": "Create and configure your Discord App",
         "identityUnavailable": "Provider identity not validated",
         "credentialsConfigured": "Credentials configured",
@@ -1095,8 +1095,8 @@
             "action": "Replace the Bot Token, then save and validate this connection."
           },
           "discord_callback_configuration_invalid": {
-            "message": "Discord rejected the interaction endpoint.",
-            "action": "Check the Application settings and public callback URL, then validate again."
+            "message": "Discord rejected the Interaction Endpoint that Azents tried to configure automatically.",
+            "action": "Validate again. If it still fails, ask an administrator to check the public callback URL; no manual Discord endpoint setup is required."
           },
           "discord_api_unavailable": {
             "message": "Discord is temporarily unavailable.",

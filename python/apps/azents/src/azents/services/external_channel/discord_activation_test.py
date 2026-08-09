@@ -169,11 +169,9 @@ class _DiscordClientDouble:
         self,
         *,
         bot_token: str,
-        application_id: str,
         endpoint_url: str,
     ) -> None:
         assert bot_token == "discord-bot-token"
-        assert application_id == "app-1"
         self.events.append("endpoint")
         self.endpoint_url = endpoint_url
         if self.fail_endpoint:

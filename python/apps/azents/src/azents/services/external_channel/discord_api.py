@@ -248,13 +248,12 @@ class DiscordAPIClient:
         self,
         *,
         bot_token: str,
-        application_id: str,
         endpoint_url: str,
     ) -> None:
-        """Configure one Application's outgoing interaction endpoint."""
+        """Configure the requesting Bot's outgoing interaction endpoint."""
         try:
             response = await self.http_client.patch(
-                f"{discord_api_base_url()}/applications/{application_id}",
+                f"{discord_api_base_url()}/applications/@me",
                 headers={"Authorization": f"Bot {bot_token}"},
                 json={"interactions_endpoint_url": endpoint_url},
             )

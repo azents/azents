@@ -1537,10 +1537,12 @@ def _discord_activation_error(
     elif isinstance(error, DiscordAPIConfigurationInvalid):
         detail = {
             "code": "discord_callback_configuration_invalid",
-            "message": "Discord rejected the interaction endpoint.",
+            "message": (
+                "Discord rejected the automatically configured interaction endpoint."
+            ),
             "action_hint": (
-                "Check the Application configuration and public callback URL, "
-                "then try again."
+                "Validate again. If it still fails, ask an administrator to check "
+                "the public callback URL; no manual Discord endpoint setup is required."
             ),
         }
     elif isinstance(error, DiscordAPIUnavailable):

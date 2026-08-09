@@ -1077,7 +1077,7 @@
         "discordAppId": "Discord Application ID",
         "discordGuildId": "Discord Guild ID",
         "discordBotToken": "Discord Bot Token",
-        "discordGuide": "Discord Developer Portal에서 아래 순서대로 설정한 뒤 세 값을 입력하세요. Azents가 Bot Token을 검증하고 interaction callback과 명령을 자동으로 구성합니다.",
+        "discordGuide": "Discord Developer Portal에서 아래 순서대로 설정한 뒤 세 값을 입력하세요. Azents가 Bot Token을 검증하고 Interaction Endpoint와 명령을 자동으로 구성하므로 endpoint를 직접 입력하지 않아도 됩니다.",
         "discordGuideTitle": "Discord App 만들기 및 설정",
         "identityUnavailable": "Provider identity를 아직 검증하지 않았습니다",
         "credentialsConfigured": "Credential 설정됨",
@@ -1095,8 +1095,8 @@
             "action": "Bot Token을 교체한 뒤 이 연결을 저장하고 검증하세요."
           },
           "discord_callback_configuration_invalid": {
-            "message": "Discord가 interaction endpoint를 거부했습니다.",
-            "action": "Application 설정과 공개 callback URL을 확인한 뒤 다시 검증하세요."
+            "message": "Discord가 Azents에서 자동으로 설정하려던 Interaction Endpoint를 거부했습니다.",
+            "action": "다시 검증해 보세요. 계속 실패하면 관리자에게 공개 callback URL 확인을 요청하세요. Discord에 endpoint를 직접 설정할 필요는 없습니다."
           },
           "discord_api_unavailable": {
             "message": "Discord를 일시적으로 사용할 수 없습니다.",

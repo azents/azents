@@ -1077,7 +1077,7 @@
         "discordAppId": "ID de l’application Discord",
         "discordGuildId": "ID du serveur Discord",
         "discordBotToken": "Jeton de bot Discord",
-        "discordGuide": "Suivez ces étapes dans le portail développeur Discord, puis saisissez les trois valeurs ci-dessous. Azents valide le jeton du bot et configure automatiquement le callback d’interaction et les commandes.",
+        "discordGuide": "Suivez ces étapes dans le portail développeur Discord, puis saisissez les trois valeurs ci-dessous. Azents valide le jeton du bot et configure automatiquement l’Interaction Endpoint et les commandes ; ne saisissez pas manuellement de point de terminaison.",
         "discordGuideTitle": "Créer et configurer votre application Discord",
         "identityUnavailable": "Identité du fournisseur non vérifiée",
         "credentialsConfigured": "Identifiants configurés",
@@ -1095,8 +1095,8 @@
             "action": "Remplacez le jeton du bot, puis enregistrez et validez cette connexion."
           },
           "discord_callback_configuration_invalid": {
-            "message": "Discord a refusé le point de terminaison des interactions.",
-            "action": "Vérifiez les paramètres de l’application et l’URL publique de rappel, puis validez à nouveau."
+            "message": "Discord a refusé l’Interaction Endpoint qu’Azents a tenté de configurer automatiquement.",
+            "action": "Validez à nouveau. Si l’échec persiste, demandez à un administrateur de vérifier l’URL publique de rappel ; aucune configuration manuelle du point de terminaison Discord n’est nécessaire."
           },
           "discord_api_unavailable": {
             "message": "Discord est temporairement indisponible.",

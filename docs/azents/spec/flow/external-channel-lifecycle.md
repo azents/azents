@@ -31,8 +31,8 @@ code_paths:
   - python/apps/azents/src/azents/repos/session_lifecycle_finalizer/**
   - typescript/apps/azents-web/src/features/external-channel-management/**
   - typescript/apps/azents-web/src/features/session-channels/**
-last_verified_at: 2026-08-05
-spec_version: 32
+last_verified_at: 2026-08-09
+spec_version: 33
 ---
 
 # External Channel Lifecycle
@@ -116,7 +116,9 @@ Command clears that provisional authority and moves the connection to
 `reconnect_required`; normal interactions are rejected until the final activation
 commit. The External Channel Gateway's Discord manager can claim only the newly
 activated configuration; a stale manager cannot continue mutation after replacement
-or disconnect.
+or disconnect. Endpoint registration edits the Bot-authenticated current Discord
+Application through Discord's current-Application API; it does not require the user to
+copy the opaque per-connection callback into Discord Developer Portal.
 Retrying a `reconnect_required` Discord connection restores `configuring` while it
 persists a new provisional selector and public key, so endpoint-verification PING can
 authenticate without admitting normal interactions.
@@ -271,6 +273,9 @@ dialog. Restore controls do not imply provider reactivation.
 
 ## Changelog
 
+- **2026-08-09** (spec_version 33) — Corrected automatic Discord Interaction Endpoint
+  registration to edit the Bot-authenticated current Application and clarified that
+  users do not manually copy opaque callback URLs into Discord Developer Portal.
 - **2026-08-05** (spec_version 32) — Kept Session archive binding termination and
   Activity Tracker cleanup while suppressing the provider leave-presence control.
 - **2026-08-03** (spec_version 31) — Clarified that eligible silent Work completion

@@ -139,7 +139,7 @@ def test_discord_fake_redacts_rest_secrets_and_visible_provider_bodies(
     """Capture only provider operation identifiers and outcomes."""
     discord_fake_url, _ = discord_fake_urls
     requests.patch(
-        f"{discord_fake_url}/api/v10/applications/100000000000000001",
+        f"{discord_fake_url}/api/v10/applications/@me",
         headers={"Authorization": "Bot discord-private-token"},
         json={"interactions_endpoint_url": "https://private.example/opaque-selector"},
         timeout=5,
@@ -374,7 +374,7 @@ def test_discord_fake_keeps_component_ids_outside_persistent_evidence(
         callback_host = callback.server_address[0]
         callback_port = callback.server_address[1]
         requests.patch(
-            f"{discord_fake_url}/api/v10/applications/100000000000000001",
+            f"{discord_fake_url}/api/v10/applications/@me",
             json={
                 "interactions_endpoint_url": (
                     f"http://{callback_host}:{callback_port}/interaction"
@@ -1154,7 +1154,7 @@ def test_discord_fake_relays_a_real_signed_interaction_without_body_evidence(
         host = callback_server.server_address[0]
         port = callback_server.server_address[1]
         requests.patch(
-            f"{discord_fake_url}/api/v10/applications/100000000000000001",
+            f"{discord_fake_url}/api/v10/applications/@me",
             json={"interactions_endpoint_url": f"http://{host}:{port}/callback"},
             timeout=5,
         ).raise_for_status()
@@ -1207,7 +1207,7 @@ def test_discord_fake_keeps_selector_ids_transient_and_redacted(
         host = callback_server.server_address[0]
         port = callback_server.server_address[1]
         requests.patch(
-            f"{discord_fake_url}/api/v10/applications/100000000000000001",
+            f"{discord_fake_url}/api/v10/applications/@me",
             json={"interactions_endpoint_url": f"http://{host}:{port}/callback"},
             timeout=5,
         ).raise_for_status()
