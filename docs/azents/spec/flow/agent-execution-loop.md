@@ -78,8 +78,8 @@ code_paths:
   - typescript/apps/azents-web/src/features/chat/continuationPresentation.ts
   - typescript/apps/azents-web/src/features/chat/containers/useChatSessionContainer.ts
   - typescript/apps/azents-web/src/features/chat/toolActivityPresentation.ts
-last_verified_at: 2026-08-04
-spec_version: 147
+last_verified_at: 2026-08-09
+spec_version: 148
 ---
 
 # Agent Execution Loop
@@ -726,6 +726,21 @@ non-null deadline and pass that deadline through the reply-stream wait path. If 
 operation times out into a failed/cancelled tool result path instead of leaving a durable
 `client_tool_call` without a corresponding `client_tool_result` forever.
 
+Runtime Toolkit prompt construction is database-only and independent from Runner readiness. It
+renders bounded behavior from the immutable desired Profile and freezes that revision ID,
+configuration digest, and desired generation as the model step's Runtime authority. Each
+Runtime-backed Tool resolves one bounded target that must also match that prompt-selected authority,
+the applied revision, Provider/Runner generations and readiness, and current Workspace evidence.
+Operation TurnActions, including those executed before prompt construction, use the same exact
+resolver without a prompt fence. In both paths, a configuration or generation change during wait or
+execution fails closed rather than dispatching against a substituted Runtime.
+
+When the selected Profile enables process containment, every Agent-selected process and native
+file/edit/patch/search/Git/import/presentation/image/transfer operation reaches the same contained
+Runner authority. The execution loop retains the existing tool call/result, deadline, cancellation,
+metadata, and model-visible path contracts; containment failure never creates an automatic direct
+retry.
+
 An active root External Channel binding may additionally expose
 `download_external_file` and file-bearing `channel_action`. The download Tool accepts one
 provider-neutral opaque locator, the exact visible attachment byte size, and one Runtime
@@ -1223,6 +1238,9 @@ icon.
 
 ## Changelog
 
+- **2026-08-09** (spec_version 148) — Separated desired-Profile prompt construction from physical
+  Runtime readiness, fenced explicit operations to the prompt-selected exact authority, and routed
+  contained Profiles through one process/native Runner boundary without changing Tool contracts.
 - **2026-08-04** (spec_version 147) — Carried External Channel continuation binding
   scope through polling and tool-result follow-up and used it to expose authorized
   zero-effect `channel_action ignore` only during continuation.

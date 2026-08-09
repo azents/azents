@@ -2,6 +2,7 @@
 title: "Provider-Owned Runtime Process Containment Design"
 created: 2026-08-08
 updated: 2026-08-09
+implemented: 2026-08-09
 tags: [runtime, provider, runner, security, sandbox, architecture, testenv]
 document_role: primary
 document_type: design

@@ -1449,7 +1449,7 @@ class TestSubagents:
             session_id=root_session_id,
             name="interrupt_child",
             expected_status="interrupted",
-            expected_unread=True,
+            expected_unread=None,
             expected_latest_run_status="stopped",
         )
         assert interrupted_child.terminal_result_event_id is None

@@ -2,6 +2,7 @@
 title: "Provider-Owned Runtime Process Containment Requirements"
 created: 2026-08-08
 updated: 2026-08-08
+implemented: 2026-08-09
 tags: [runtime, provider, security, sandbox, containers]
 document_role: primary
 document_type: requirements
