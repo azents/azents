@@ -239,7 +239,7 @@ class _DiscordClient:
         self.info_error = info_error
         self.download_error = download_error
         self.stream_error = stream_error
-        self.fetch_calls: list[tuple[str, str, str]] = []
+        self.fetch_calls: list[tuple[str, str, str, str]] = []
         self.download_urls: list[str] = []
         self.stream_limits: list[tuple[int, int]] = []
         self.stream_opened = 0
@@ -249,12 +249,13 @@ class _DiscordClient:
         self,
         *,
         bot_token: str,
+        guild_id: str,
         channel_id: str,
         message_id: str,
         attachment_id: str,
     ) -> DiscordAttachmentDownloadInfo:
         assert bot_token == "xoxb-secret"
-        self.fetch_calls.append((channel_id, message_id, attachment_id))
+        self.fetch_calls.append((guild_id, channel_id, message_id, attachment_id))
         if self.info_error is not None:
             raise self.info_error
         return self.info
@@ -1133,7 +1134,7 @@ async def test_discord_download_materializes_only_current_binding_attachment() -
     assert result.filename == "report.csv"
     assert result.media_type == "text/csv"
     assert result.bytes_written == 7
-    assert discord_client.fetch_calls == [("333", "444", "555")]
+    assert discord_client.fetch_calls == [("111", "333", "444", "555")]
     assert discord_client.stream_opened == 0
     assert storage.put_calls == []
     request = transfer.requests[0]

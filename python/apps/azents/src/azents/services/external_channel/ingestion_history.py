@@ -44,7 +44,9 @@ from azents.services.external_channel.ingestion import (
 from azents.services.external_channel.slack_events import (
     SlackConversationClient,
     SlackConversationHistoryTrigger,
+    SlackExternalUploadTransport,
     SlackNormalizedMessage,
+    SlackPrivateFileTransport,
     SlackProviderError,
     slack_message_reference_ids,
 )
@@ -69,7 +71,8 @@ def get_ingestion_slack_conversation_client(
     """Provide the shared bounded Slack history client."""
     return SlackConversationClient(
         web_client=create_slack_web_client(),
-        http_client=http_client,
+        private_file_transport=SlackPrivateFileTransport(http_client),
+        external_upload_transport=SlackExternalUploadTransport(http_client),
     )
 
 

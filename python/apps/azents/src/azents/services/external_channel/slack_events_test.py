@@ -29,10 +29,12 @@ from azents.services.external_channel.slack_events import (
     SlackConversationClient,
     SlackConversationHistoryTrigger,
     SlackEventExcluded,
+    SlackExternalUploadTransport,
     SlackInteractionView,
     SlackNormalizedMessage,
     SlackOutboundFile,
     SlackOutboundFileContentError,
+    SlackPrivateFileTransport,
     SlackProviderCredentialsInvalid,
     SlackProviderFileNotFound,
     SlackProviderFileTooLarge,
@@ -130,7 +132,8 @@ class _MockSlackWebClient(AsyncWebClient):
 def _client(http_client: httpx.AsyncClient) -> SlackConversationClient:
     return SlackConversationClient(
         web_client=_MockSlackWebClient(http_client),
-        http_client=http_client,
+        private_file_transport=SlackPrivateFileTransport(http_client),
+        external_upload_transport=SlackExternalUploadTransport(http_client),
     )
 
 
@@ -1695,7 +1698,7 @@ async def test_file_reply_streams_in_order_and_completes_once() -> None:
 
 @pytest.mark.asyncio
 async def test_file_reply_stops_without_completion_when_runtime_stream_fails() -> None:
-    """A changed Runtime source never reaches Slack's publication boundary."""
+    """A midstream source failure is ambiguous and never reaches completion."""
     paths: list[str] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -1732,8 +1735,8 @@ async def test_file_reply_stops_without_completion_when_runtime_stream_fails() -
             ],
         )
 
-    assert result.status == "failed"
-    assert result.error_kind == "runtime_file_unavailable"
+    assert result.status == "unknown"
+    assert result.error_kind == "provider_ambiguous"
     assert paths == ["/api/files.getUploadURLExternal"]
     assert "/api/files.completeUploadExternal" not in paths
 
