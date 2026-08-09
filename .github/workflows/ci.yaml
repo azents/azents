@@ -317,6 +317,11 @@ jobs:
           uv run ty check --error-on-warning
       - name: Verify Runtime Docker workflows
         run: python testenv/azents/scripts/verify-runtime-docker.py
+      - name: Load Runtime containment AppArmor profile
+        run: |
+          test "$(cat /sys/module/apparmor/parameters/enabled)" = "Y"
+          sudo apparmor_parser --replace \
+            python/apps/azents-runtime-provider-docker/docker/apparmor/azents-runtime-bwrap
       - name: Run deterministic E2E
         run: |
           set -o pipefail
@@ -333,6 +338,11 @@ jobs:
             --durations-min=0.25 \
             -m "not live_external and not runtime_provider and not web_surface" \
             ./src/tests
+      - name: Unload Runtime containment AppArmor profile
+        if: always()
+        run: |
+          sudo apparmor_parser --remove \
+            python/apps/azents-runtime-provider-docker/docker/apparmor/azents-runtime-bwrap
       - name: Capture deterministic E2E diagnostics
         if: always()
         run: |
