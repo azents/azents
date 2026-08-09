@@ -4,15 +4,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import discord
 import pytest
-from discord.gateway import DiscordWebSocket
-from discord.http import Route
 
+from azents.services.external_channel.discord_events import DiscordGatewayMessageEvent
 from azents.services.external_channel.discord_gateway import (
     DISCORD_GATEWAY_INTENTS,
     DiscordGatewayClient,
     DiscordGatewayCredentialError,
     DiscordGatewayError,
-    DiscordGatewayMessageEvent,
     DiscordGatewayTerminalError,
     _DiscordLibraryClient,
 )
@@ -42,6 +40,18 @@ def _message(
     message.id = 100
     message.guild = resolved_channel.guild
     message.channel = resolved_channel
+    message.content = "hello"
+    message.created_at = discord.utils.utcnow()
+    message.author = MagicMock(spec=discord.User)
+    message.author.id = 400
+    message.author.name = "participant"
+    message.author.global_name = None
+    message.author.bot = False
+    message.author.system = False
+    message.mentions = []
+    message.role_mentions = []
+    message.attachments = []
+    message.embeds = []
     return message
 
 
@@ -52,6 +62,7 @@ def _library_client(
 ) -> _DiscordLibraryClient:
     return _DiscordLibraryClient(
         target_guild_id=300,
+        connected_bot_user_id="900",
         handle_event=handle_event or AsyncMock(),
         handle_lifecycle=handle_lifecycle or AsyncMock(),
     )
@@ -83,8 +94,10 @@ async def test_message_callback_emits_typed_sdk_event() -> None:
     event = await_args.args[0]
     assert isinstance(event, DiscordGatewayMessageEvent)
     assert event.event_type == "message_create"
-    assert event.message is message
-    assert event.channel is channel
+    assert event.guild_id == "300"
+    assert event.channel_id == "200"
+    assert event.message["id"] == "100"
+    assert event.message["content"] == "hello"
 
 
 @pytest.mark.asyncio
@@ -171,94 +184,6 @@ async def test_runner_uses_public_start_with_sdk_reconnect(
         )
 
     assert started == [("redacted-token", True)]
-
-
-@pytest.mark.asyncio
-async def test_runner_uses_and_restores_explicit_testenv_endpoints(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Keep deterministic I/O isolated and restore private SDK globals afterward."""
-    observed_endpoints: list[tuple[str, str]] = []
-
-    async def start(
-        self: _DiscordLibraryClient,
-        token: str,
-        *,
-        reconnect: bool = True,
-    ) -> None:
-        del self, token, reconnect
-        observed_endpoints.append((Route.BASE, str(DiscordWebSocket.DEFAULT_GATEWAY)))
-
-    async def close(self: _DiscordLibraryClient) -> None:
-        del self
-
-    monkeypatch.setenv(
-        "AZ_TESTENV_DISCORD_API_BASE_URL",
-        "http://discord-fake:8085/api/v10",
-    )
-    monkeypatch.setenv(
-        "AZ_TESTENV_DISCORD_GATEWAY_URL",
-        "ws://discord-fake:8086",
-    )
-    monkeypatch.setattr(Route, "BASE", "https://original.example/api/v10")
-    original_gateway = type(DiscordWebSocket.DEFAULT_GATEWAY)("wss://original.example")
-    monkeypatch.setattr(DiscordWebSocket, "DEFAULT_GATEWAY", original_gateway)
-    monkeypatch.setattr(_DiscordLibraryClient, "start", start)
-    monkeypatch.setattr(_DiscordLibraryClient, "close", close)
-
-    with pytest.raises(DiscordGatewayError, match="stopped unexpectedly"):
-        await DiscordGatewayClient().run_connection(
-            bot_token="redacted-token",
-            target_guild_id="300",
-            handle_event=AsyncMock(),
-            handle_lifecycle=AsyncMock(),
-        )
-
-    assert observed_endpoints == [
-        ("http://discord-fake:8085/api/v10", "ws://discord-fake:8086")
-    ]
-    assert Route.BASE == "https://original.example/api/v10"
-    assert DiscordWebSocket.DEFAULT_GATEWAY is original_gateway
-
-
-@pytest.mark.asyncio
-async def test_runner_does_not_mutate_production_sdk_endpoints(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Without test overrides, production endpoint selection remains SDK-owned."""
-    observed_endpoints: list[tuple[str, object]] = []
-
-    async def start(
-        self: _DiscordLibraryClient,
-        token: str,
-        *,
-        reconnect: bool = True,
-    ) -> None:
-        del self, token, reconnect
-        observed_endpoints.append((Route.BASE, DiscordWebSocket.DEFAULT_GATEWAY))
-
-    async def close(self: _DiscordLibraryClient) -> None:
-        del self
-
-    monkeypatch.delenv("AZ_TESTENV_DISCORD_API_BASE_URL", raising=False)
-    monkeypatch.delenv("AZ_TESTENV_DISCORD_GATEWAY_URL", raising=False)
-    monkeypatch.setattr(Route, "BASE", "https://sdk-owned.example/api/v10")
-    sdk_gateway = type(DiscordWebSocket.DEFAULT_GATEWAY)("wss://sdk-owned.example")
-    monkeypatch.setattr(DiscordWebSocket, "DEFAULT_GATEWAY", sdk_gateway)
-    monkeypatch.setattr(_DiscordLibraryClient, "start", start)
-    monkeypatch.setattr(_DiscordLibraryClient, "close", close)
-
-    with pytest.raises(DiscordGatewayError, match="stopped unexpectedly"):
-        await DiscordGatewayClient().run_connection(
-            bot_token="redacted-token",
-            target_guild_id="300",
-            handle_event=AsyncMock(),
-            handle_lifecycle=AsyncMock(),
-        )
-
-    assert observed_endpoints == [("https://sdk-owned.example/api/v10", sdk_gateway)]
-    assert Route.BASE == "https://sdk-owned.example/api/v10"
-    assert DiscordWebSocket.DEFAULT_GATEWAY is sdk_gateway
 
 
 @pytest.mark.asyncio

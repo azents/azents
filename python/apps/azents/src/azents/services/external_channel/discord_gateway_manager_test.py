@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
 
-import discord
 import pytest
 from azcommon.di import Container
 from cryptography.fernet import InvalidToken
@@ -25,12 +24,15 @@ from azents.services.external_channel.connection import (
     get_external_channel_credentials_codec,
 )
 from azents.services.external_channel.data import DiscordConnectionCredentials
+from azents.services.external_channel.discord_events import (
+    DiscordGatewayMessageEvent,
+    project_discord_message,
+)
 from azents.services.external_channel.discord_gateway import (
     DiscordGatewayError,
     DiscordGatewayEventHandler,
     DiscordGatewayIntentsError,
     DiscordGatewayLifecycleHandler,
-    DiscordGatewayMessageEvent,
     DiscordGatewayTerminalError,
 )
 from azents.services.external_channel.discord_gateway_manager import (
@@ -238,9 +240,11 @@ class _EventRunner:
         *,
         bot_token: str,
         target_guild_id: str,
+        connected_bot_user_id: str | None,
         handle_event: DiscordGatewayEventHandler,
         handle_lifecycle: DiscordGatewayLifecycleHandler,
     ) -> None:
+        del connected_bot_user_id
         self.bot_token = bot_token
         self.target_guild_id = target_guild_id
         await handle_lifecycle("ready")
@@ -277,33 +281,24 @@ def _lease() -> ExternalChannelIngressLease:
 
 
 def _event(*, guild_id: int = 300) -> DiscordGatewayMessageEvent:
-    guild = MagicMock(spec=discord.Guild)
-    guild.id = guild_id
-    channel = MagicMock(spec=discord.TextChannel)
-    channel.id = 200
-    channel.guild = guild
-    channel.name = "general"
-    author = MagicMock(spec=discord.User)
-    author.id = 400
-    author.name = "participant"
-    author.global_name = None
-    author.bot = False
-    author.system = False
-    message = MagicMock(spec=discord.Message)
-    message.id = 100
-    message.guild = guild
-    message.channel = channel
-    message.content = "Hello"
-    message.created_at = datetime.datetime(2026, 7, 28, tzinfo=datetime.UTC)
-    message.edited_at = None
-    message.author = author
-    message.mentions = []
-    message.role_mentions = []
-    message.attachments = []
+    guild = str(guild_id)
     return DiscordGatewayMessageEvent(
         event_type="message_create",
-        channel=channel,
-        message=message,
+        guild_id=guild,
+        channel_id="200",
+        message=project_discord_message(
+            guild_id=guild,
+            message={
+                "id": "100",
+                "channel_id": "200",
+                "channel_name": "general",
+                "content": "Hello",
+                "timestamp": "2026-07-28T00:00:00+00:00",
+                "author": {"id": "400", "username": "participant"},
+                "mentions": [],
+                "attachments": [],
+            },
+        ),
     )
 
 

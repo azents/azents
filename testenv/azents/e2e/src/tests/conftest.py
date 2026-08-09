@@ -69,7 +69,6 @@ _DISCORD_PROVIDER_FAKE = (
     REPOSITORY_ROOT / "testenv/azents/e2e/src/support/discord_provider_fake.py"
 )
 _DISCORD_PROVIDER_INTERNAL_API_URL = "http://discord-fake:8085/api/v10"
-_DISCORD_PROVIDER_INTERNAL_GATEWAY_URL = "ws://discord-fake:8086"
 _DOCKER_CLIENT_TIMEOUT_SECONDS = 300
 _RUNTIME_PROVIDER_ID = "system-docker"
 _RUNTIME_WORKSPACE_PATH = "/workspace/agent"
@@ -450,7 +449,7 @@ def discord_provider_fake_container(
         )
         .with_volume_mapping(str(_DISCORD_PROVIDER_FAKE), "/app/discord_fake.py", "ro")
         .with_command(["python", "/app/discord_fake.py"])
-        .with_exposed_ports(8085, 8086)
+        .with_exposed_ports(8085)
         .with_network(container_network)
         .with_network_aliases("discord-fake") as container
     ):
@@ -817,10 +816,6 @@ def _configure_azents_server_container(
         .with_env(
             "AZ_TESTENV_DISCORD_API_BASE_URL",
             _DISCORD_PROVIDER_INTERNAL_API_URL,
-        )
-        .with_env(
-            "AZ_TESTENV_DISCORD_GATEWAY_URL",
-            _DISCORD_PROVIDER_INTERNAL_GATEWAY_URL,
         )
         .with_env("AZ_TESTENV_RUNTIME_HOOK_QA_ENABLED", "true")
         .with_env("AZ_TOOL_INTERNAL_ERROR_DETAILS", "true")

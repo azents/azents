@@ -51,8 +51,8 @@ code_paths:
 api_routes:
   - /external-channel/v1/slack/events
   - /external-channel/v1/discord/interactions/{selector}
-last_verified_at: 2026-08-04
-spec_version: 33
+last_verified_at: 2026-08-09
+spec_version: 34
 ---
 
 # External Channel Provider Ingress
@@ -82,6 +82,13 @@ manually created roles, and other Bots' managed roles do not invoke the Agent. T
 typed Gateway projection filters against the validated connection Bot identity before
 retaining only the bounded matching role and owning-Bot identities; unresolved role
 state fails closed without a provider REST lookup or durable role configuration.
+
+Discord Gateway discovery, heartbeat, reconnect, Resume, and typed callbacks are owned
+by the public high-level `discord.Client`. Each callback is immediately converted to a
+bounded Azents projection before lease-fenced admission. Deterministic testenv
+composition injects an SDK-facing factory and Gateway runner through credential-free
+operation fixtures; it does not mutate SDK globals, emulate private SDK HTTP state, or
+run a duplicate Discord Gateway protocol server.
 
 ## HTTP Admission
 

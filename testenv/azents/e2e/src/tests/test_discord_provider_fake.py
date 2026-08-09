@@ -1,6 +1,5 @@
 """Deterministic Discord provider fake contract tests."""
 
-import json
 import threading
 from collections.abc import Generator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -9,14 +8,10 @@ import pytest
 import requests
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from testcontainers.core.container import DockerContainer
-from websockets.exceptions import ConnectionClosed
-from websockets.sync.client import connect as websocket_connect
 
 from support.discord_provider_fake import (
     STATE,
     DiscordHTTPHandler,
-    DiscordWebSocketHandler,
-    ThreadingSocketServer,
 )
 
 _DISCORD_VERIFY_KEY = "233988c4fcf6ffd4dcf0590950d79671de856cfa36f65c16a2be13b1613875f0"
@@ -101,36 +96,35 @@ class _SettingsInteractionHandler(_SignedInteractionHandler):
 
 @pytest.fixture
 def discord_fake_urls() -> Generator[tuple[str, str], None, None]:
-    """Run isolated fake HTTP and Gateway endpoints with fresh global state."""
+    """Run one isolated SDK-facing/provider-gap fake with fresh global state."""
     STATE.reset()
     http_server = ThreadingHTTPServer(("127.0.0.1", 0), DiscordHTTPHandler)
-    websocket_server = ThreadingSocketServer(
-        ("127.0.0.1", 0),
-        DiscordWebSocketHandler,
-    )
     http_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
-    websocket_thread = threading.Thread(
-        target=websocket_server.serve_forever,
-        daemon=True,
-    )
     http_thread.start()
-    websocket_thread.start()
     try:
         http_host = http_server.server_address[0]
         http_port = http_server.server_address[1]
-        websocket_host = websocket_server.server_address[0]
-        websocket_port = websocket_server.server_address[1]
         yield (
             f"http://{http_host}:{http_port}",
-            f"ws://{websocket_host}:{websocket_port}",
+            "",
         )
     finally:
         http_server.shutdown()
         http_server.server_close()
-        websocket_server.shutdown()
-        websocket_server.server_close()
         http_thread.join(timeout=5)
-        websocket_thread.join(timeout=5)
+
+
+def _sdk_call(
+    base_url: str,
+    operation: str,
+    **arguments: object,
+) -> requests.Response:
+    """Invoke one credential-free SDK-facing fixture operation."""
+    return requests.post(
+        f"{base_url}/__testenv/sdk",
+        json={"operation": operation, "arguments": arguments},
+        timeout=5,
+    )
 
 
 def test_discord_fake_redacts_rest_secrets_and_visible_provider_bodies(
@@ -138,30 +132,30 @@ def test_discord_fake_redacts_rest_secrets_and_visible_provider_bodies(
 ) -> None:
     """Capture only provider operation identifiers and outcomes."""
     discord_fake_url, _ = discord_fake_urls
-    requests.patch(
-        f"{discord_fake_url}/api/v10/applications/@me",
-        headers={"Authorization": "Bot discord-private-token"},
-        json={"interactions_endpoint_url": "https://private.example/opaque-selector"},
-        timeout=5,
+    _sdk_call(
+        discord_fake_url,
+        "configure_interactions_endpoint",
+        endpoint_url="https://private.example/opaque-selector",
     ).raise_for_status()
-    created = requests.post(
-        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages",
-        headers={"Authorization": "Bot discord-private-token"},
-        json={
-            "content": "Private Discord message body",
-            "nonce": "nonce-private",
-            "enforce_nonce": True,
-        },
-        timeout=5,
+    created = _sdk_call(
+        discord_fake_url,
+        "create_message",
+        guild_id=STATE.guild_id,
+        channel_id="400000000000000001",
+        content="Private Discord message body",
+        nonce="nonce-private",
+        components=None,
+        embeds=None,
     ).json()
-    duplicate = requests.post(
-        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages",
-        json={
-            "content": "Different private body",
-            "nonce": "nonce-private",
-            "enforce_nonce": True,
-        },
-        timeout=5,
+    duplicate = _sdk_call(
+        discord_fake_url,
+        "create_message",
+        guild_id=STATE.guild_id,
+        channel_id="400000000000000001",
+        content="Different private body",
+        nonce="nonce-private",
+        components=None,
+        embeds=None,
     ).json()
 
     evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
@@ -244,21 +238,26 @@ def test_discord_fake_reconciles_guild_commands_without_body_evidence(
     command_id.raise_for_status()
     assert command_id.json() == {"command_id": message_action.json()["id"]}
 
-    listed = requests.get(commands_url, timeout=5)
+    listed = _sdk_call(
+        discord_fake_url,
+        "list_guild_commands",
+        application_id=STATE.application_id,
+        guild_id=STATE.guild_id,
+    )
     listed.raise_for_status()
-    assert listed.json() == [
+    assert listed.json()["commands"] == [
         unrelated.json(),
         settings.json(),
         message_action.json(),
     ]
 
-    updated = requests.patch(
-        f"{commands_url}/{settings.json()['id']}",
-        json={
-            "name": "Private updated settings command",
-            "description": "Current description.",
-        },
-        timeout=5,
+    updated = _sdk_call(
+        discord_fake_url,
+        "update_guild_command",
+        command_id=settings.json()["id"],
+        name="Private updated settings command",
+        command_type=1,
+        description="Current description.",
     )
     updated.raise_for_status()
     assert updated.json()["id"] == settings.json()["id"]
@@ -268,14 +267,20 @@ def test_discord_fake_reconciles_guild_commands_without_body_evidence(
     assert updated.json()["guild_id"] == "200000000000000001"
     assert updated.json()["description"] == "Current description."
 
-    deleted = requests.delete(
-        f"{commands_url}/{settings.json()['id']}",
-        timeout=5,
+    deleted = _sdk_call(
+        discord_fake_url,
+        "delete_guild_command",
+        command_id=settings.json()["id"],
     )
-    assert deleted.status_code == 204
-    remaining = requests.get(commands_url, timeout=5)
+    assert deleted.status_code == 200
+    remaining = _sdk_call(
+        discord_fake_url,
+        "list_guild_commands",
+        application_id=STATE.application_id,
+        guild_id=STATE.guild_id,
+    )
     remaining.raise_for_status()
-    assert remaining.json() == [unrelated.json(), message_action.json()]
+    assert remaining.json()["commands"] == [unrelated.json(), message_action.json()]
 
     evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
     assert [
@@ -284,10 +289,10 @@ def test_discord_fake_reconciles_guild_commands_without_body_evidence(
         ("POST", "create_guild_command"),
         ("POST", "create_guild_command"),
         ("POST", "create_guild_command"),
-        ("GET", "list_guild_commands"),
-        ("PATCH", "update_guild_command"),
-        ("DELETE", "delete_guild_command"),
-        ("GET", "list_guild_commands"),
+        ("POST", "list_guild_commands"),
+        ("POST", "update_guild_command"),
+        ("POST", "delete_guild_command"),
+        ("POST", "list_guild_commands"),
     ]
     rendered = str(evidence)
     assert "Private unrelated command" not in rendered
@@ -299,9 +304,14 @@ def test_discord_fake_reconciles_guild_commands_without_body_evidence(
     ]
 
     requests.post(f"{discord_fake_url}/__testenv/reset", timeout=5).raise_for_status()
-    reset_commands = requests.get(commands_url, timeout=5)
+    reset_commands = _sdk_call(
+        discord_fake_url,
+        "list_guild_commands",
+        application_id=STATE.application_id,
+        guild_id=STATE.guild_id,
+    )
     reset_commands.raise_for_status()
-    assert reset_commands.json() == []
+    assert reset_commands.json() == {"commands": []}
 
 
 def test_discord_fake_configures_bounded_command_reconciliation_state(
@@ -384,14 +394,10 @@ def test_discord_fake_keeps_component_ids_outside_persistent_evidence(
     try:
         callback_host = callback.server_address[0]
         callback_port = callback.server_address[1]
-        requests.patch(
-            f"{discord_fake_url}/api/v10/applications/@me",
-            json={
-                "interactions_endpoint_url": (
-                    f"http://{callback_host}:{callback_port}/interaction"
-                )
-            },
-            timeout=5,
+        _sdk_call(
+            discord_fake_url,
+            "configure_interactions_endpoint",
+            endpoint_url=f"http://{callback_host}:{callback_port}/interaction",
         ).raise_for_status()
         delivered = requests.post(
             f"{discord_fake_url}/__testenv/interactions",
@@ -424,24 +430,26 @@ def test_discord_fake_hands_off_delivered_message_components_transiently(
     """Expose a delivered settings control once without retaining its signed ID."""
     discord_fake_url, _ = discord_fake_urls
     custom_id = "a:st:interaction:claim:1:1:signature"
-    response = requests.post(
-        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages",
-        json={
-            "content": "Private setup guidance.",
-            "components": [
-                {
-                    "type": 1,
-                    "components": [
-                        {
-                            "type": 2,
-                            "label": "Answer in threads",
-                            "custom_id": custom_id,
-                        }
-                    ],
-                }
-            ],
-        },
-        timeout=5,
+    response = _sdk_call(
+        discord_fake_url,
+        "create_message",
+        guild_id=STATE.guild_id,
+        channel_id="400000000000000001",
+        content="Private setup guidance.",
+        nonce="component-handoff",
+        components=[
+            {
+                "type": 1,
+                "components": [
+                    {
+                        "type": 2,
+                        "label": "Answer in threads",
+                        "custom_id": custom_id,
+                    }
+                ],
+            }
+        ],
+        embeds=None,
     )
     response.raise_for_status()
 
@@ -464,142 +472,6 @@ def test_discord_fake_hands_off_delivered_message_components_transiently(
     assert "Private setup guidance." not in str(evidence)
 
 
-def test_discord_fake_serves_bounded_history_and_thread_ordering_evidence(
-    discord_fake_urls: tuple[str, str],
-) -> None:
-    """Expose history pages and one root-thread boundary without content evidence."""
-    discord_fake_url, _ = discord_fake_urls
-    requests.post(
-        f"{discord_fake_url}/__testenv/configure",
-        json={
-            "root_messages": [
-                {
-                    "id": "500000000000000001",
-                    "channel_id": "400000000000000001",
-                    "content": "Private root source",
-                    "author": {"id": "600000000000000001"},
-                    "timestamp": "2026-07-28T00:00:00.000000+00:00",
-                }
-            ],
-            "history_pages": [
-                [
-                    {"id": "300", "channel_id": "700", "content": "Private later"},
-                    {"id": "200", "channel_id": "700", "content": "Private earlier"},
-                ],
-                [{"id": "100", "channel_id": "700", "content": "Private oldest"}],
-            ],
-        },
-        timeout=5,
-    ).raise_for_status()
-    source_channel = requests.get(
-        f"{discord_fake_url}/api/v10/channels/400000000000000001",
-        timeout=5,
-    )
-    source_channel.raise_for_status()
-    assert source_channel.json() == {
-        "id": "400000000000000001",
-        "guild_id": "200000000000000001",
-        "type": 0,
-        "name": "discord-source",
-        "position": 0,
-        "permission_overwrites": [],
-    }
-    root = requests.get(
-        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/500000000000000001",
-        timeout=5,
-    )
-    root.raise_for_status()
-    assert root.json()["id"] == "500000000000000001"
-    first_page = requests.get(
-        f"{discord_fake_url}/api/v10/channels/700/messages",
-        params={"limit": 2},
-        timeout=5,
-    )
-    first_page.raise_for_status()
-    assert [item["id"] for item in first_page.json()] == ["300", "200"]
-    second_page = requests.get(
-        f"{discord_fake_url}/api/v10/channels/700/messages",
-        params={"limit": 2, "before": "200"},
-        timeout=5,
-    )
-    second_page.raise_for_status()
-    assert [item["id"] for item in second_page.json()] == ["100"]
-    thread = requests.post(
-        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/500000000000000001/threads",
-        json={"name": "Azents"},
-        timeout=5,
-    )
-    thread.raise_for_status()
-    assert thread.json()["parent_id"] == "400000000000000001"
-    reused_root = requests.get(
-        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/500000000000000001",
-        timeout=5,
-    )
-    reused_root.raise_for_status()
-    assert reused_root.json()["thread"]["id"] == thread.json()["id"]
-
-    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
-    events = evidence["operations"]
-    assert [event["event"] for event in events] == [
-        "channel_read",
-        "thread_read",
-        "history_page",
-        "history_page",
-        "thread_create",
-        "thread_read",
-    ]
-    assert events[1]["outcome"] == "missing"
-    assert events[4]["thread_channel_id"] == thread.json()["id"]
-    assert events[5]["outcome"] == "reused"
-    rendered = str(evidence)
-    assert "Private root source" not in rendered
-    assert "Private later" not in rendered
-    assert "Private earlier" not in rendered
-    assert "Private oldest" not in rendered
-
-
-def test_discord_fake_reads_and_updates_thread_titles_without_name_evidence(
-    discord_fake_urls: tuple[str, str],
-) -> None:
-    """Serve thread title GET/PATCH while keeping both names out of evidence."""
-    discord_fake_url, _ = discord_fake_urls
-    thread = requests.post(
-        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/"
-        "500000000000000001/threads",
-        json={"name": "Private provisional title"},
-        timeout=5,
-    )
-    thread.raise_for_status()
-    channel_url = f"{discord_fake_url}/api/v10/channels/{thread.json()['id']}"
-    initial = requests.get(channel_url, timeout=5)
-    initial.raise_for_status()
-    assert initial.json()["name"] == "Private provisional title"
-
-    updated = requests.patch(
-        channel_url,
-        json={"name": "Private final title"},
-        timeout=5,
-    )
-    updated.raise_for_status()
-    assert updated.json()["name"] == "Private final title"
-    current = requests.get(channel_url, timeout=5)
-    current.raise_for_status()
-    assert current.json()["name"] == "Private final title"
-
-    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
-    assert [event["operation"] for event in evidence["operations"]] == [
-        "create_thread",
-        "get_channel",
-        "update_channel",
-        "get_channel",
-    ]
-    assert evidence["request_counts"]["get_channel"] == 2
-    assert evidence["request_counts"]["update_channel"] == 1
-    rendered = str(evidence)
-    assert "Private provisional title" not in rendered
-    assert "Private final title" not in rendered
-
-
 def test_discord_fake_preserves_state_for_one_shot_scenarios(
     discord_fake_urls: tuple[str, str],
 ) -> None:
@@ -612,11 +484,23 @@ def test_discord_fake_preserves_state_for_one_shot_scenarios(
         },
         timeout=5,
     ).raise_for_status()
-    message_url = f"{discord_fake_url}/api/v10/channels/700/messages"
-    first = requests.post(message_url, json={"nonce": "nonce-once"}, timeout=5)
+
+    def create() -> requests.Response:
+        return _sdk_call(
+            discord_fake_url,
+            "create_message",
+            guild_id=STATE.guild_id,
+            channel_id="700",
+            content="private",
+            nonce="nonce-once",
+            components=None,
+            embeds=None,
+        )
+
+    first = create()
     assert first.status_code == 200
     assert first.content == b"{malformed"
-    second = requests.post(message_url, json={"nonce": "nonce-once"}, timeout=5)
+    second = create()
     second.raise_for_status()
     assert second.json()["id"].isdigit()
     requests.post(
@@ -624,7 +508,7 @@ def test_discord_fake_preserves_state_for_one_shot_scenarios(
         json={"api_scenarios": {"create_message": "response_shape_invalid"}},
         timeout=5,
     ).raise_for_status()
-    third = requests.post(message_url, json={"nonce": "nonce-once"}, timeout=5)
+    third = create()
     assert third.status_code == 200
     assert third.json() == {"channel_id": "700"}
 
@@ -639,92 +523,11 @@ def test_discord_fake_preserves_state_for_one_shot_scenarios(
     assert "nonce-once" not in str(evidence)
 
 
-def test_discord_fake_controls_thread_response_mismatch_and_transport_unknown(
+def test_discord_fake_serves_injected_gateway_dispatches(
     discord_fake_urls: tuple[str, str],
 ) -> None:
-    """Expose malformed thread success and transport ambiguity as safe evidence."""
+    """Return bounded dispatches and sanitized evidence through fixture control I/O."""
     discord_fake_url, _ = discord_fake_urls
-    requests.post(
-        f"{discord_fake_url}/__testenv/configure",
-        json={
-            "api_scenario_sequences": {
-                "create_thread": ["thread_response_invalid", "transport_unknown"]
-            }
-        },
-        timeout=5,
-    ).raise_for_status()
-    thread_url = (
-        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/"
-        "500000000000000001/threads"
-    )
-    invalid = requests.post(thread_url, json={"name": "Azents"}, timeout=5)
-    assert invalid.status_code == 201
-    assert invalid.json() == {"id": "bad", "parent_id": "0"}
-    with pytest.raises(requests.exceptions.ConnectionError):
-        requests.post(thread_url, json={"name": "Azents"}, timeout=5)
-    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
-    assert [item["safe_category"] for item in evidence["operations"]] == [
-        "thread_response_invalid",
-        "transport_unknown",
-    ]
-    assert "Azents" not in str(evidence)
-
-
-def test_discord_fake_reconciles_committed_unknown_thread_creation(
-    discord_fake_urls: tuple[str, str],
-) -> None:
-    """Reconcile a committed thread after the create response is lost."""
-    discord_fake_url, _ = discord_fake_urls
-    requests.post(
-        f"{discord_fake_url}/__testenv/configure",
-        json={
-            "api_scenario_sequences": {
-                "create_thread": ["thread_create_committed_unknown"]
-            },
-            "allow_synthetic_roots": True,
-        },
-        timeout=5,
-    ).raise_for_status()
-    thread_url = (
-        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/"
-        "500000000000000001/threads"
-    )
-    with pytest.raises(requests.exceptions.ConnectionError):
-        requests.post(thread_url, json={"name": "Private thread name"}, timeout=5)
-
-    reconciled = requests.get(
-        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/"
-        "500000000000000001",
-        timeout=5,
-    )
-    reconciled.raise_for_status()
-    thread_id = reconciled.json()["thread"]["id"]
-
-    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
-    assert [event["event"] for event in evidence["operations"]] == [
-        "thread_create",
-        "thread_reconcile",
-    ]
-    assert evidence["operations"][0] == {
-        "sequence": 1,
-        "event": "thread_create",
-        "operation": "create_thread",
-        "outcome": "unknown",
-        "safe_category": "transport_unknown",
-        "parent_channel_id": "400000000000000001",
-        "root_message_id": "500000000000000001",
-        "thread_channel_id": thread_id,
-    }
-    assert evidence["operations"][1]["outcome"] == "reused"
-    rendered = str(evidence)
-    assert "Private thread name" not in rendered
-
-
-def test_discord_fake_serves_gateway_identify_ready_dispatch_and_heartbeat(
-    discord_fake_urls: tuple[str, str],
-) -> None:
-    """Exercise the fake's minimal real Gateway protocol boundary."""
-    discord_fake_url, websocket_url = discord_fake_urls
     requests.post(
         f"{discord_fake_url}/__testenv/configure",
         json={
@@ -733,7 +536,8 @@ def test_discord_fake_serves_gateway_identify_ready_dispatch_and_heartbeat(
                     "sequence": 2,
                     "event_type": "MESSAGE_CREATE",
                     "payload": {
-                        "id": "500000000000000001",
+                        "id": "message-1",
+                        "channel_id": "channel-1",
                         "content": "Private gateway content",
                     },
                 }
@@ -741,127 +545,59 @@ def test_discord_fake_serves_gateway_identify_ready_dispatch_and_heartbeat(
         },
         timeout=5,
     ).raise_for_status()
-    with websocket_connect(websocket_url, open_timeout=5) as connection:
-        hello = json.loads(connection.recv())
-        assert hello == {"op": 10, "d": {"heartbeat_interval": 500}}
-        connection.send(
-            json.dumps(
-                {
-                    "op": 2,
-                    "d": {
-                        "token": "discord-private-token",
-                        "intents": 0,
-                        "properties": {},
-                    },
-                }
-            )
-        )
-        ready = json.loads(connection.recv())
-        dispatch = json.loads(connection.recv())
-        connection.send(json.dumps({"op": 1, "d": 2}))
-        acknowledgement = json.loads(connection.recv())
+    response = requests.post(
+        f"{discord_fake_url}/__testenv/gateway",
+        json={"target_guild_id": STATE.guild_id, "resumed": False},
+        timeout=5,
+    )
+    response.raise_for_status()
 
+    assert response.json()["scenario"] == "open"
+    assert response.json()["dispatches"][0]["event_type"] == "MESSAGE_CREATE"
     evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
-    rendered = str(evidence)
-    assert ready["t"] == "READY"
-    assert dispatch["t"] == "MESSAGE_CREATE"
-    assert acknowledgement == {"op": 11, "d": None}
     assert evidence["gateway"] == {
         "connections": 1,
         "initial_opcodes": [2],
-        "heartbeats": [2],
+        "heartbeats": [],
         "dispatches": [{"event_type": "MESSAGE_CREATE", "sequence": 2}],
         "terminal_events": [],
     }
-    assert "discord-private-token" not in rendered
-    assert "Private gateway content" not in rendered
+    assert "Private gateway content" not in str(evidence)
 
 
-def test_discord_fake_controls_gateway_reconnect_and_resume(
+def test_discord_fake_controls_injected_gateway_reconnect_and_resume(
     discord_fake_urls: tuple[str, str],
 ) -> None:
-    """Request reconnect, then accept a Resume on the next Gateway connection."""
-    discord_fake_url, websocket_url = discord_fake_urls
+    """Request reconnect, then accept a Resume through the injected runner API."""
+    discord_fake_url, _ = discord_fake_urls
     requests.post(
         f"{discord_fake_url}/__testenv/configure",
         json={"gateway_scenarios": ["reconnect", "open"]},
         timeout=5,
     ).raise_for_status()
+    first = requests.post(
+        f"{discord_fake_url}/__testenv/gateway",
+        json={"target_guild_id": STATE.guild_id, "resumed": False},
+        timeout=5,
+    )
+    second = requests.post(
+        f"{discord_fake_url}/__testenv/gateway",
+        json={"target_guild_id": STATE.guild_id, "resumed": True},
+        timeout=5,
+    )
+    first.raise_for_status()
+    second.raise_for_status()
 
-    with websocket_connect(websocket_url, open_timeout=5) as connection:
-        assert json.loads(connection.recv())["op"] == 10
-        connection.send(json.dumps({"op": 2, "d": {"token": "private"}}))
-        assert json.loads(connection.recv())["t"] == "READY"
-        assert json.loads(connection.recv()) == {"op": 7, "d": None}
-
-    with websocket_connect(websocket_url, open_timeout=5) as connection:
-        assert json.loads(connection.recv())["op"] == 10
-        connection.send(
-            json.dumps(
-                {
-                    "op": 6,
-                    "d": {
-                        "token": "private",
-                        "session_id": "discord-e2e-session",
-                        "seq": 1,
-                    },
-                }
-            )
-        )
-        assert json.loads(connection.recv())["t"] == "RESUMED"
-        connection.send(json.dumps({"op": 1, "d": 1}))
-        assert json.loads(connection.recv()) == {"op": 11, "d": None}
-
+    assert first.json() == {"scenario": "reconnect", "dispatches": []}
+    assert second.json()["scenario"] == "open"
     evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
     assert evidence["gateway"] == {
         "connections": 2,
         "initial_opcodes": [2, 6],
-        "heartbeats": [1],
+        "heartbeats": [],
         "dispatches": [],
         "terminal_events": ["reconnect"],
     }
-
-
-def test_discord_fake_controls_invalid_sessions_and_intents_close(
-    discord_fake_urls: tuple[str, str],
-) -> None:
-    """Expose invalid-session and intents-disallowed outcomes without payload leaks."""
-    discord_fake_url, websocket_url = discord_fake_urls
-    requests.post(
-        f"{discord_fake_url}/__testenv/configure",
-        json={
-            "gateway_scenarios": [
-                "invalid_session_resumable",
-                "invalid_session_fresh",
-                "close_4014",
-            ]
-        },
-        timeout=5,
-    ).raise_for_status()
-
-    for expected_resumable in (True, False):
-        with websocket_connect(websocket_url, open_timeout=5) as connection:
-            assert json.loads(connection.recv())["op"] == 10
-            connection.send(json.dumps({"op": 2, "d": {"token": "private"}}))
-            assert json.loads(connection.recv())["t"] == "READY"
-            assert json.loads(connection.recv()) == {"op": 9, "d": expected_resumable}
-
-    with websocket_connect(websocket_url, open_timeout=5) as connection:
-        assert json.loads(connection.recv())["op"] == 10
-        connection.send(json.dumps({"op": 2, "d": {"token": "private"}}))
-        assert json.loads(connection.recv())["t"] == "READY"
-        with pytest.raises(ConnectionClosed) as error:
-            connection.recv()
-
-    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
-    assert error.value.rcvd is not None
-    assert error.value.rcvd.code == 4014
-    assert evidence["gateway"]["terminal_events"] == [
-        "invalid_session_resumable",
-        "invalid_session_fresh",
-        "close_4014",
-    ]
-    assert "private" not in str(evidence)
 
 
 @pytest.mark.parametrize(
@@ -887,10 +623,15 @@ def test_discord_fake_controls_confirmed_and_unknown_http_categories(
         json={"api_scenario_sequences": {"create_message": [scenario]}},
         timeout=5,
     ).raise_for_status()
-    response = requests.post(
-        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages",
-        json={"nonce": f"nonce-{scenario}"},
-        timeout=5,
+    response = _sdk_call(
+        discord_fake_url,
+        "create_message",
+        guild_id=STATE.guild_id,
+        channel_id="400000000000000001",
+        content="controlled",
+        nonce=f"nonce-{scenario}",
+        components=None,
+        embeds=None,
     )
     assert response.status_code == expected_status
     evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
@@ -916,8 +657,16 @@ def test_discord_fake_confirmed_create_failure_does_not_consume_nonce_identity(
         json={"api_scenario_sequences": {"create_message": ["rejected", "ok"]}},
         timeout=5,
     ).raise_for_status()
-    message_url = f"{discord_fake_url}/api/v10/channels/400000000000000001/messages"
-    first = requests.post(message_url, json={"nonce": "retry-nonce"}, timeout=5)
+    first = _sdk_call(
+        discord_fake_url,
+        "create_message",
+        guild_id=STATE.guild_id,
+        channel_id="400000000000000001",
+        content="first",
+        nonce="retry-nonce",
+        components=None,
+        embeds=None,
+    )
     assert first.status_code == 400
     failed_evidence = requests.get(
         f"{discord_fake_url}/__testenv/state", timeout=5
@@ -930,7 +679,16 @@ def test_discord_fake_confirmed_create_failure_does_not_consume_nonce_identity(
             "safe_category": "provider_rejected",
         }
     ]
-    second = requests.post(message_url, json={"nonce": "retry-nonce"}, timeout=5)
+    second = _sdk_call(
+        discord_fake_url,
+        "create_message",
+        guild_id=STATE.guild_id,
+        channel_id="400000000000000001",
+        content="second",
+        nonce="retry-nonce",
+        components=None,
+        embeds=None,
+    )
     second.raise_for_status()
 
     evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
@@ -938,74 +696,6 @@ def test_discord_fake_confirmed_create_failure_does_not_consume_nonce_identity(
     assert evidence["deliveries"][1]["outcome"] == "created"
     assert evidence["deliveries"][1]["message_id"] == second.json()["id"]
     assert "retry-nonce" not in str(evidence)
-
-
-def test_discord_fake_history_is_channel_scoped_and_cursor_bounded(
-    discord_fake_urls: tuple[str, str],
-) -> None:
-    """History pages enforce target channel, requested limit, and cursor evidence."""
-    discord_fake_url, _ = discord_fake_urls
-    requests.post(
-        f"{discord_fake_url}/__testenv/configure",
-        json={
-            "history_pages": [
-                [
-                    {"id": "300", "channel_id": "channel-a"},
-                    {"id": "200", "channel_id": "channel-a"},
-                ]
-            ]
-        },
-        timeout=5,
-    ).raise_for_status()
-    wrong_channel = requests.get(
-        f"{discord_fake_url}/api/v10/channels/channel-b/messages",
-        params={"limit": 100},
-        timeout=5,
-    )
-    wrong_channel.raise_for_status()
-    assert wrong_channel.json() == []
-    first = requests.get(
-        f"{discord_fake_url}/api/v10/channels/channel-a/messages",
-        params={"limit": 1},
-        timeout=5,
-    )
-    first.raise_for_status()
-    assert [item["id"] for item in first.json()] == ["300"]
-    second = requests.get(
-        f"{discord_fake_url}/api/v10/channels/channel-a/messages",
-        params={"limit": 1, "before": "300"},
-        timeout=5,
-    )
-    second.raise_for_status()
-    assert [item["id"] for item in second.json()] == ["200"]
-
-    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
-    history_events = [
-        item for item in evidence["operations"] if item["event"] == "history_page"
-    ]
-    assert history_events[0]["channel_id"] == "channel-b"
-    assert history_events[0]["limit"] == 100
-    assert history_events[1]["channel_id"] == "channel-a"
-    assert history_events[1]["limit"] == 1
-    assert history_events[2]["cursor"] == "300"
-
-
-def test_discord_fake_root_reads_require_configured_or_explicit_synthetic_mode(
-    discord_fake_urls: tuple[str, str],
-) -> None:
-    """Absent roots are 404 unless the bounded synthetic fixture mode is enabled."""
-    discord_fake_url, _ = discord_fake_urls
-    root_url = f"{discord_fake_url}/api/v10/channels/channel-a/messages/root-a"
-    missing = requests.get(root_url, timeout=5)
-    assert missing.status_code == 404
-    requests.post(
-        f"{discord_fake_url}/__testenv/configure",
-        json={"allow_synthetic_roots": True},
-        timeout=5,
-    ).raise_for_status()
-    synthetic = requests.get(root_url, timeout=5)
-    synthetic.raise_for_status()
-    assert synthetic.json()["id"] == "root-a"
 
 
 def test_discord_fake_rejects_unbounded_history_root_and_command_fixtures(
@@ -1108,34 +798,11 @@ def test_discord_fake_rejects_unbounded_history_root_and_command_fixtures(
     assert overflow_create.status_code == 400
 
 
-def test_discord_fake_update_delete_track_missing_and_deleted_messages(
-    discord_fake_urls: tuple[str, str],
-) -> None:
-    """Update/delete paths expose real missing and deleted identity behavior."""
-    discord_fake_url, _ = discord_fake_urls
-    message_url = f"{discord_fake_url}/api/v10/channels/channel-a/messages"
-    created = requests.post(message_url, json={"nonce": "lifecycle"}, timeout=5)
-    created.raise_for_status()
-    message_id = created.json()["id"]
-    update_url = f"{message_url}/{message_id}"
-    updated = requests.patch(update_url, json={"content": "new"}, timeout=5)
-    updated.raise_for_status()
-    deleted = requests.delete(update_url, timeout=5)
-    assert deleted.status_code == 204
-    assert (
-        requests.patch(update_url, json={"content": "again"}, timeout=5).status_code
-        == 404
-    )
-    assert requests.delete(update_url, timeout=5).status_code == 404
-
-
 def test_discord_fake_controls_rest_rate_limit_rejection_and_ambiguous_write(
     discord_fake_urls: tuple[str, str],
 ) -> None:
     """Return controlled provider outcomes while retaining only safe evidence."""
     discord_fake_url, _ = discord_fake_urls
-    message_url = f"{discord_fake_url}/api/v10/channels/400000000000000001/messages"
-
     for scenario, expected_status in (
         ("rate_limited", 429),
         ("rejected", 400),
@@ -1146,14 +813,15 @@ def test_discord_fake_controls_rest_rate_limit_rejection_and_ambiguous_write(
             json={"api_scenarios": {"create_message": scenario}},
             timeout=5,
         ).raise_for_status()
-        response = requests.post(
-            message_url,
-            json={
-                "content": "Private controlled outcome body",
-                "nonce": f"nonce-{scenario}",
-                "enforce_nonce": True,
-            },
-            timeout=5,
+        response = _sdk_call(
+            discord_fake_url,
+            "create_message",
+            guild_id=STATE.guild_id,
+            channel_id="400000000000000001",
+            content="Private controlled outcome body",
+            nonce=f"nonce-{scenario}",
+            components=None,
+            embeds=None,
         )
         assert response.status_code == expected_status
         if scenario == "rate_limited":
@@ -1189,10 +857,10 @@ def test_discord_fake_relays_a_real_signed_interaction_without_body_evidence(
     try:
         host = callback_server.server_address[0]
         port = callback_server.server_address[1]
-        requests.patch(
-            f"{discord_fake_url}/api/v10/applications/@me",
-            json={"interactions_endpoint_url": f"http://{host}:{port}/callback"},
-            timeout=5,
+        _sdk_call(
+            discord_fake_url,
+            "configure_interactions_endpoint",
+            endpoint_url=f"http://{host}:{port}/callback",
         ).raise_for_status()
         response = requests.post(
             f"{discord_fake_url}/__testenv/interactions",
@@ -1242,10 +910,10 @@ def test_discord_fake_keeps_selector_ids_transient_and_redacted(
     try:
         host = callback_server.server_address[0]
         port = callback_server.server_address[1]
-        requests.patch(
-            f"{discord_fake_url}/api/v10/applications/@me",
-            json={"interactions_endpoint_url": f"http://{host}:{port}/callback"},
-            timeout=5,
+        _sdk_call(
+            discord_fake_url,
+            "configure_interactions_endpoint",
+            endpoint_url=f"http://{host}:{port}/callback",
         ).raise_for_status()
         response = requests.post(
             f"{discord_fake_url}/__testenv/interactions",
@@ -1319,86 +987,6 @@ def test_discord_fake_records_multipart_file_sizes_without_file_bodies(
     assert "private-discord-file-content" not in rendered
 
 
-def test_discord_fake_preserves_canonical_thread_progress_and_file_order(
-    discord_fake_urls: tuple[str, str],
-) -> None:
-    """Cover one thread's progress page mutations, confirmed delete, and file output."""
-    discord_fake_url, _ = discord_fake_urls
-    thread = requests.post(
-        f"{discord_fake_url}/api/v10/channels/400000000000000001/messages/500000000000000003/threads",
-        json={"name": "Private thread title"},
-        timeout=5,
-    )
-    thread.raise_for_status()
-    thread_id = thread.json()["id"]
-    first = requests.post(
-        f"{discord_fake_url}/api/v10/channels/{thread_id}/messages",
-        json={"content": "Private checking page", "nonce": "progress-page-1"},
-        timeout=5,
-    )
-    first.raise_for_status()
-    second = requests.post(
-        f"{discord_fake_url}/api/v10/channels/{thread_id}/messages",
-        json={"content": "Private progress page 2", "nonce": "progress-page-2"},
-        timeout=5,
-    )
-    second.raise_for_status()
-    update = requests.patch(
-        f"{discord_fake_url}/api/v10/channels/{thread_id}/messages/{first.json()['id']}",
-        json={"content": "Private updated progress page"},
-        timeout=5,
-    )
-    update.raise_for_status()
-    deleted = requests.delete(
-        f"{discord_fake_url}/api/v10/channels/{thread_id}/messages/{second.json()['id']}",
-        timeout=5,
-    )
-    assert deleted.status_code == 204
-    file_delivery = requests.post(
-        f"{discord_fake_url}/api/v10/channels/{thread_id}/messages",
-        data={"payload_json": '{"content":"Private file output"}'},
-        files={
-            "files[0]": (
-                "private.txt",
-                b"private-file-bytes",
-                "text/plain",
-            )
-        },
-        timeout=5,
-    )
-    file_delivery.raise_for_status()
-
-    evidence = requests.get(f"{discord_fake_url}/__testenv/state", timeout=5).json()
-    operations = [
-        item
-        for item in evidence["operations"]
-        if item["event"] in {"thread_create", "message"}
-    ]
-    assert [item["operation"] for item in operations] == [
-        "create_thread",
-        "create_message",
-        "create_message",
-        "update_message",
-        "delete_message",
-        "create_message",
-    ]
-    assert [item["outcome"] for item in operations] == [
-        "delivered",
-        "created",
-        "created",
-        "delivered",
-        "delivered",
-        "created",
-    ]
-    assert evidence["deliveries"][-1]["file_count"] == 1
-    rendered = str(evidence)
-    assert "Private checking page" not in rendered
-    assert "Private progress page 2" not in rendered
-    assert "Private updated progress page" not in rendered
-    assert "private-file-bytes" not in rendered
-    assert "private.txt" not in rendered
-
-
 def test_discord_fake_container_uses_the_azents_server_image(
     discord_provider_fake_container: DockerContainer,
     discord_provider_fake_url: str,
@@ -1406,11 +994,11 @@ def test_discord_fake_container_uses_the_azents_server_image(
     """Start the fake in the same Python image used by Azents E2E processes."""
     del discord_provider_fake_container
     response = requests.get(f"{discord_provider_fake_url}/health", timeout=5)
-    application = requests.get(
-        f"{discord_provider_fake_url}/api/v10/oauth2/applications/@me",
-        timeout=5,
+    application = _sdk_call(
+        discord_provider_fake_url,
+        "fetch_application",
     )
 
     assert response.json() == {"status": "ok"}
     assert application.json()["verify_key"] == _DISCORD_VERIFY_KEY
-    assert application.json()["owner"]["id"].isdigit()
+    assert application.json()["bot_user_id"].isdigit()

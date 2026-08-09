@@ -29,6 +29,7 @@ from azents.services.external_channel.connection import (
 from azents.services.external_channel.credentials import ExternalChannelCredentialsCodec
 from azents.services.external_channel.data import DiscordConnectionCredentials
 from azents.services.external_channel.discord_events import (
+    DiscordGatewayMessageEvent,
     project_discord_gateway_event,
 )
 from azents.services.external_channel.discord_gateway import (
@@ -37,7 +38,6 @@ from azents.services.external_channel.discord_gateway import (
     DiscordGatewayError,
     DiscordGatewayIntentsError,
     DiscordGatewayLifecycleState,
-    DiscordGatewayMessageEvent,
     DiscordGatewayRunner,
     DiscordGatewayTerminalError,
 )
@@ -69,7 +69,17 @@ class DiscordGatewayLeaseLost(DiscordGatewayError):
 
 
 def get_discord_gateway_client() -> DiscordGatewayRunner:
-    """Provide the discord.py-backed Gateway runner."""
+    """Provide the public SDK runner or the injected deterministic testenv runner."""
+    from azents.services.external_channel.discord_endpoint import (  # noqa: PLC0415
+        discord_test_api_base_url,
+    )
+    from azents.services.external_channel.discord_testenv import (  # noqa: PLC0415
+        DiscordTestenvGatewayRunner,
+    )
+
+    test_api_base_url = discord_test_api_base_url()
+    if test_api_base_url is not None:
+        return DiscordTestenvGatewayRunner(test_api_base_url.removesuffix("/api/v10"))
     return DiscordGatewayClient()
 
 
@@ -240,6 +250,7 @@ class DiscordGatewayManagerService:
             self.gateway_client.run_connection(
                 bot_token=bot_token,
                 target_guild_id=target_guild_id,
+                connected_bot_user_id=connected_bot_user_id,
                 handle_event=lambda event: self._admit_gateway_event(
                     connection_id=connection_id,
                     lease=lease,

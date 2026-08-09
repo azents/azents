@@ -121,6 +121,13 @@ customization is unavailable.
 
 ## Canonical Commit and Immediate Provider Effects
 
+Slack Web API mutations and Discord text/thread/message mutations execute through the
+providers' public SDK clients. Azents invokes each operation once inside the existing
+deadline and adds no direct fallback or post-ambiguity replay. Direct transport remains
+only for Discord multipart file-message create, Discord CDN attachment bytes, Slack
+private-file bytes, and Slack external-upload bytes; each retains its exact origin,
+length, chunk, authority, and one-attempt contract.
+
 `ExternalChannelActionService.execute` commits the canonical Channel Work transition
 before provider I/O and returns an ordered tuple of process-local effect plans. It then
 revalidates the current Agent, Session, binding, resource, route, connection,

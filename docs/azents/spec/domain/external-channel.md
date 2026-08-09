@@ -97,6 +97,12 @@ contain multiple independent bindings.
   Azents-owned typed contracts at the durable JSON boundary. SDK objects, signed raw
   bodies, SDK private state, and Gateway frames remain process-local and are never
   reconstructed or persisted for replay.
+- Public `slack-sdk` and `discord.py` APIs own every supported provider operation.
+  Direct provider transport is closed to five gaps only: Discord individual Guild
+  command create, Discord multipart file-message create, Discord CDN attachment bytes,
+  Slack private-file bytes, and Slack external-upload bytes. Static repository checks
+  reject private Discord SDK imports, second Discord SDKs, SDK-global endpoint
+  mutation, and provider HTTP outside that allowlist.
 - Slack and Discord model input preserves provider-native user and channel reference
   tokens in the source body. Resolved display names appear separately after the message
   batch in one XML provider-reference mapping block, so readability enrichment does not
