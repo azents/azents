@@ -14,6 +14,7 @@ profile azents-runtime-bwrap flags=(attach_disconnected,mediate_deleted) {
   file,
   mount,
   umount,
+  pivot_root,
   userns,
 
   signal (receive) peer=unconfined,
