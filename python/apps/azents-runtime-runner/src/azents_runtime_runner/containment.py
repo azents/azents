@@ -570,7 +570,6 @@ class BwrapExecutionBackend:
         ]
         for path in _SYSTEM_READ_ONLY_PATHS:
             argv.extend(("--ro-bind-try", path, path))
-        argv.extend(("--ro-bind", "/dev/null", _BWRAP_PATH))
         argv.extend(_parent_directory_arguments(self._config.agent_workspace_path))
         argv.extend(
             (

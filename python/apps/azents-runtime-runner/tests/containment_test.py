@@ -245,6 +245,7 @@ async def test_bwrap_backend_owns_positive_projection_arguments(
     assert "--uid" not in wrapped.argv
     assert "--gid" not in wrapped.argv
     assert "/usr/bin/bwrap" not in wrapped.argv
+    assert wrapped.argv.count("/opt/azents-runtime/bin/bwrap") == 1
     assert ("--bind", str(tmp_path), str(tmp_path)) == tuple(
         wrapped.argv[
             wrapped.argv.index(str(tmp_path)) - 1 : wrapped.argv.index(str(tmp_path))
