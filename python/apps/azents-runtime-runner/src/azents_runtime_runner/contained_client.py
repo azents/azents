@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from azents_runtime_runner.contained_async_protocol import read_async_frame
 from azents_runtime_runner.contained_protocol import (
     JsonValue,
     ProtocolFrame,
     encode_binary_frame,
     encode_control_frame,
-    read_async_frame,
 )
 from azents_runtime_runner.containment import (
     ExecutionBackend,
@@ -20,8 +20,22 @@ from azents_runtime_runner.containment import (
     ProcessTerminationResult,
 )
 
-_HELPER_PATH = Path(__file__).with_name("contained_helper.py").resolve()
-_PACKAGE_ROOT = _HELPER_PATH.parents[1]
+_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+_COMMON_HELPER_MODULE = "azents_runtime_runner.contained_helper"
+_GIT_HELPER_MODULE = "azents_runtime_runner.contained_git_helper"
+_APPLY_PATCH_HELPER_MODULE = "azents_runtime_runner.contained_apply_patch_helper"
+_TRANSFER_HELPER_MODULE = "azents_runtime_runner.contained_transfer_helper"
+_GIT_OPERATIONS = frozenset(
+    {
+        "list_git_refs",
+        "create_git_worktree",
+        "inspect_git_worktree",
+        "discover_managed_git_worktrees",
+        "remove_discovered_git_worktree",
+        "remove_git_worktree",
+        "delete_git_branch",
+    }
+)
 _TERMINATE_TIMEOUT_SECONDS = 2.0
 _KILL_TIMEOUT_SECONDS = 2.0
 _MAX_DIAGNOSTIC_BYTES = 4096
@@ -265,7 +279,7 @@ class ContainedHelperSession:
                 argv=(
                     backend.helper_python_path,
                     "-m",
-                    "azents_runtime_runner.contained_helper",
+                    _helper_module(operation),
                 ),
                 cwd=workspace_path,
                 environment=environment,
@@ -323,6 +337,16 @@ class ContainedHelperSession:
             terminate_timeout_seconds=_TERMINATE_TIMEOUT_SECONDS,
             kill_timeout_seconds=_KILL_TIMEOUT_SECONDS,
         )
+
+
+def _helper_module(operation: str) -> str:
+    if operation in _GIT_OPERATIONS:
+        return _GIT_HELPER_MODULE
+    if operation == "file.apply_patch":
+        return _APPLY_PATCH_HELPER_MODULE
+    if operation.startswith("transfer."):
+        return _TRANSFER_HELPER_MODULE
+    return _COMMON_HELPER_MODULE
 
 
 async def _read_diagnostic(process: ExecutionProcess) -> ContainedHelperDiagnostic:

@@ -7,10 +7,7 @@ import json
 import struct
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, BinaryIO, TypeAlias
-
-if TYPE_CHECKING:
-    import asyncio
+from typing import BinaryIO, NamedTuple, TypeAlias
 
 JsonValue: TypeAlias = (
     None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
@@ -20,6 +17,7 @@ PROTOCOL_VERSION = 1
 MAX_CONTROL_FRAME_BYTES = 1024 * 1024
 MAX_BINARY_FRAME_BYTES = 8 * 1024 * 1024
 _HEADER = struct.Struct("!BI")
+FRAME_HEADER_BYTES = _HEADER.size
 
 
 class FrameKind(enum.IntEnum):
@@ -36,6 +34,13 @@ class ProtocolFrame:
     kind: FrameKind
     control: Mapping[str, JsonValue] | None
     binary: bytes | None
+
+
+class FrameHeader(NamedTuple):
+    """One validated contained helper frame header."""
+
+    kind: FrameKind
+    size: int
 
 
 class ContainedProtocolError(RuntimeError):
@@ -61,24 +66,12 @@ def encode_binary_frame(data: bytes) -> bytes:
     return _HEADER.pack(FrameKind.BINARY, len(data)) + data
 
 
-async def read_async_frame(reader: asyncio.StreamReader) -> ProtocolFrame:
-    """Read one validated frame from an asyncio stream."""
-    header = await _read_async_exact(reader, _HEADER.size)
-    kind_value, size = _HEADER.unpack(header)
-    kind = _frame_kind(kind_value)
-    _validate_frame_size(kind, size)
-    data = await _read_async_exact(reader, size)
-    return _decode_frame(kind, data)
-
-
 def read_sync_frame(reader: BinaryIO) -> ProtocolFrame:
     """Read one validated frame from a blocking binary stream."""
-    header = _read_sync_exact(reader, _HEADER.size)
-    kind_value, size = _HEADER.unpack(header)
-    kind = _frame_kind(kind_value)
-    _validate_frame_size(kind, size)
-    data = _read_sync_exact(reader, size)
-    return _decode_frame(kind, data)
+    header = _read_sync_exact(reader, FRAME_HEADER_BYTES)
+    frame_header = decode_frame_header(header)
+    data = _read_sync_exact(reader, frame_header.size)
+    return decode_frame(frame_header.kind, data)
 
 
 def write_sync_control(writer: BinaryIO, payload: Mapping[str, JsonValue]) -> None:
@@ -93,18 +86,19 @@ def write_sync_binary(writer: BinaryIO, data: bytes) -> None:
     writer.flush()
 
 
-async def _read_async_exact(reader: asyncio.StreamReader, size: int) -> bytes:
-    try:
-        return await reader.readexactly(size)
-    except EOFError as error:
-        raise ContainedProtocolError("contained frame ended unexpectedly") from error
-
-
 def _read_sync_exact(reader: BinaryIO, size: int) -> bytes:
     data = reader.read(size)
     if data is None or len(data) != size:
         raise ContainedProtocolError("contained frame ended unexpectedly")
     return data
+
+
+def decode_frame_header(header: bytes) -> FrameHeader:
+    """Decode and validate one complete frame header."""
+    kind_value, size = _HEADER.unpack(header)
+    kind = _frame_kind(kind_value)
+    _validate_frame_size(kind, size)
+    return FrameHeader(kind=kind, size=size)
 
 
 def _frame_kind(value: int) -> FrameKind:
@@ -122,7 +116,8 @@ def _validate_frame_size(kind: FrameKind, size: int) -> None:
         raise ContainedProtocolError("contained frame is too large")
 
 
-def _decode_frame(kind: FrameKind, data: bytes) -> ProtocolFrame:
+def decode_frame(kind: FrameKind, data: bytes) -> ProtocolFrame:
+    """Decode one validated frame body."""
     if kind is FrameKind.BINARY:
         return ProtocolFrame(kind=kind, control=None, binary=data)
     try:

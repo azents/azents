@@ -1,14 +1,17 @@
 """Contained helper framed protocol and client tests."""
 
 import asyncio
+import hashlib
 import io
 import subprocess
 import sys
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+from azents_runtime_runner.contained_async_protocol import read_async_frame
 from azents_runtime_runner.contained_client import (
     ContainedHelperSession,
     ContainedOperationClient,
@@ -19,7 +22,6 @@ from azents_runtime_runner.contained_protocol import (
     FrameKind,
     encode_binary_frame,
     encode_control_frame,
-    read_async_frame,
     read_sync_frame,
 )
 from azents_runtime_runner.containment import (
@@ -137,7 +139,7 @@ def test_sync_protocol_round_trips_control_and_binary_frames() -> None:
     assert binary.binary == b"binary"
 
 
-def test_helper_import_defers_async_and_specialized_operation_modules() -> None:
+def test_common_helper_import_excludes_async_and_specialized_modules() -> None:
     result = subprocess.run(
         [
             sys.executable,
@@ -148,6 +150,7 @@ def test_helper_import_defers_async_and_specialized_operation_modules() -> None:
                 "unexpected = sorted("
                 "set(sys.modules) & "
                 "{'asyncio', "
+                "'azents_runtime_runner.contained_async_protocol', "
                 "'azents_runtime_runner.contained_apply_patch', "
                 "'azents_runtime_runner.contained_git', "
                 "'azents_runtime_runner.contained_transfer'}"
@@ -162,6 +165,35 @@ def test_helper_import_defers_async_and_specialized_operation_modules() -> None:
     )
 
     assert result.returncode == 0, result.stdout
+
+
+@pytest.mark.parametrize(
+    ("operation", "helper_module"),
+    [
+        ("file.list", "azents_runtime_runner.contained_helper"),
+        ("list_git_refs", "azents_runtime_runner.contained_git_helper"),
+        ("file.apply_patch", "azents_runtime_runner.contained_apply_patch_helper"),
+        ("transfer.upload", "azents_runtime_runner.contained_transfer_helper"),
+        ("transfer.download", "azents_runtime_runner.contained_transfer_helper"),
+    ],
+)
+async def test_client_selects_operation_specific_helper_entrypoint(
+    tmp_path: Path,
+    operation: str,
+    helper_module: str,
+) -> None:
+    process = _FakeProcess(terminal=None)
+    backend = _FakeBackend([process])
+
+    session = await ContainedHelperSession.start(
+        backend=backend,
+        workspace_path=tmp_path,
+        operation=operation,
+        metadata={"body_count": 0},
+    )
+    await session.terminate()
+
+    assert backend.specs[0].argv == ("/fake/python", "-m", helper_module)
 
 
 @pytest.mark.asyncio
@@ -195,6 +227,139 @@ async def test_direct_backend_runs_bundled_helper_ping(tmp_path: Path) -> None:
     }
     assert diagnostic.text == ""
     assert diagnostic.truncated is False
+
+
+@pytest.mark.asyncio
+async def test_direct_backend_runs_git_helper_entrypoint(tmp_path: Path) -> None:
+    events: list[ContainedOperationEvent] = []
+    client = ContainedOperationClient(
+        backend=DirectExecutionBackend(),
+        workspace_path=tmp_path,
+    )
+
+    async def handle_event(event: ContainedOperationEvent) -> None:
+        events.append(event)
+
+    await client.run(
+        operation="discover_managed_git_worktrees",
+        payload={},
+        body_chunks=(),
+        deadline_at=None,
+        event_handler=handle_event,
+    )
+
+    assert events == [
+        ContainedOperationEvent(
+            event_type="final_success",
+            payload={"discovered_worktrees": []},
+            binary=None,
+            final=True,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_direct_backend_runs_apply_patch_helper_entrypoint(
+    tmp_path: Path,
+) -> None:
+    events: list[ContainedOperationEvent] = []
+    client = ContainedOperationClient(
+        backend=DirectExecutionBackend(),
+        workspace_path=tmp_path,
+    )
+    patch = (
+        b"*** Begin Patch\n*** Add File: added.txt\n+helper boundary\n*** End Patch\n"
+    )
+
+    async def handle_event(event: ContainedOperationEvent) -> None:
+        events.append(event)
+
+    await client.run(
+        operation="file.apply_patch",
+        payload={
+            "base_path": str(tmp_path),
+            "total_bytes": len(patch),
+            "schema_version": 1,
+        },
+        body_chunks=(patch,),
+        deadline_at=datetime.now(UTC) + timedelta(seconds=5),
+        event_handler=handle_event,
+    )
+
+    assert events[-1].event_type == "final_success"
+    assert (tmp_path / "added.txt").read_text() == "helper boundary\n"
+
+
+@pytest.mark.asyncio
+async def test_direct_backend_runs_transfer_upload_helper_entrypoint(
+    tmp_path: Path,
+) -> None:
+    events: list[ContainedOperationEvent] = []
+    client = ContainedOperationClient(
+        backend=DirectExecutionBackend(),
+        workspace_path=tmp_path,
+    )
+    data = b"upload through specialized helper"
+    source = tmp_path / "source.bin"
+    source.write_bytes(data)
+
+    async def handle_event(event: ContainedOperationEvent) -> None:
+        events.append(event)
+
+    await client.run(
+        operation="transfer.upload",
+        payload={
+            "runtime_path": str(source),
+            "expected_size": len(data),
+            "expected_sha256": hashlib.sha256(data).hexdigest(),
+        },
+        body_chunks=(),
+        deadline_at=datetime.now(UTC) + timedelta(seconds=5),
+        event_handler=handle_event,
+    )
+
+    assert b"".join(event.binary or b"" for event in events) == data
+    assert events[-1].event_type == "final_success"
+
+
+@pytest.mark.asyncio
+async def test_direct_backend_runs_transfer_download_helper_entrypoint(
+    tmp_path: Path,
+) -> None:
+    events: list[ContainedOperationEvent] = []
+    client = ContainedOperationClient(
+        backend=DirectExecutionBackend(),
+        workspace_path=tmp_path,
+    )
+    data = b"download through specialized helper"
+    digest = hashlib.sha256(data).hexdigest()
+    destination = tmp_path / "destination.bin"
+
+    async def input_chunks() -> AsyncIterator[bytes]:
+        yield data
+
+    async def handle_event(event: ContainedOperationEvent) -> None:
+        events.append(event)
+
+    await client.run_streaming_input(
+        operation="transfer.download",
+        payload={
+            "runtime_path": str(destination),
+            "expected_size": len(data),
+            "expected_sha256": digest,
+            "overwrite": False,
+        },
+        input_chunks=input_chunks(),
+        completion_factory=lambda: {
+            "actual_size": len(data),
+            "sha256": digest,
+        },
+        deadline_at=datetime.now(UTC) + timedelta(seconds=5),
+        event_handler=handle_event,
+    )
+
+    assert destination.read_bytes() == data
+    assert events[-1].event_type == "final_success"
 
 
 @pytest.mark.asyncio

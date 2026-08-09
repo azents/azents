@@ -36,12 +36,16 @@ _CONTAINED_HELPER_PATHS = tuple(
     for name in (
         "__init__.py",
         "contained_apply_patch.py",
+        "contained_apply_patch_helper.py",
+        "contained_git_helper.py",
         "contained_git.py",
         "contained_helper.py",
+        "contained_helper_runtime.py",
         "contained_kernels.py",
         "contained_protocol.py",
         "contained_requests.py",
         "contained_transfer.py",
+        "contained_transfer_helper.py",
         "workspace.py",
     )
 )
