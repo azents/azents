@@ -7,6 +7,7 @@ NAMESPACE="azents-runtime"
 REGISTRY_NAME="${CLUSTER_NAME}-registry"
 REGISTRY_PORT="5001"
 KIND_NODE_IMAGE="kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5"
+APPARMOR_PARSER="$(command -v apparmor_parser)"
 TMP_DIR="$(mktemp -d)"
 
 cleanup() {
@@ -75,6 +76,13 @@ featureGates:
   UserNamespacesSupport: true
 nodes:
   - role: control-plane
+    extraMounts:
+      - hostPath: /sys/kernel/security
+        containerPath: /sys/kernel/security
+        readOnly: true
+      - hostPath: ${APPARMOR_PARSER}
+        containerPath: /usr/sbin/apparmor_parser
+        readOnly: true
 EOF
 
 kind create cluster \
@@ -88,6 +96,18 @@ for node in $(kind get nodes --name "${CLUSTER_NAME}"); do
       test "$(cat /sys/module/apparmor/parameters/enabled)" = "Y"
       test -r /sys/kernel/security/apparmor/profiles
       grep -Fq "azents-runtime-bwrap" /sys/kernel/security/apparmor/profiles
+      test -x /sbin/apparmor_parser
+      install -d /etc/systemd/system/containerd.service.d
+      cat > /etc/systemd/system/containerd.service.d/azents-apparmor.conf <<EOF
+[Service]
+Environment=container=
+EOF
+      systemctl daemon-reload
+      systemctl restart containerd
+      containerd_pid="$(systemctl show --property=MainPID --value containerd)"
+      test "${containerd_pid}" -gt 0
+      ! tr "\0" "\n" <"/proc/${containerd_pid}/environ" |
+        grep -Eq "^container=.+$"
       mkdir -p /unmasked-sys
       mountpoint -q /unmasked-sys || mount -t sysfs none /unmasked-sys
     '
