@@ -1497,7 +1497,14 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 metadata={"channel_id": channel_id, "message_id": message_id},
             )
             self._json_response(
-                200, {"id": message_id, "channel_id": response_channel_id}
+                200,
+                _discord_mutation_message_response(
+                    message_id=message_id,
+                    channel_id=response_channel_id,
+                    guild_id=self.state.guild_id,
+                    bot_user_id=self.state.bot_user_id,
+                    body=body,
+                ),
             )
             return
         self._json_response(404, {"message": "Unknown fake endpoint."})
@@ -1571,11 +1578,15 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 )
                 self._json_response(404, {"message": "Not found."})
                 return
-            payload: dict[str, object] = {
-                "id": channel_id,
-                "guild_id": self.state.guild_id,
-                "name": name,
-            }
+            parent_id = self.state.thread_parent_id(channel_id)
+            assert parent_id is not None
+            payload = _discord_thread_channel_response(
+                channel_id=channel_id,
+                parent_id=parent_id,
+                guild_id=self.state.guild_id,
+                owner_id=self.state.bot_user_id,
+                name=name,
+            )
             if scenario == "response_shape_invalid":
                 payload.pop("name")
             elif scenario == "response_channel_mismatch":
@@ -1697,7 +1708,14 @@ class DiscordHTTPHandler(BaseHTTPRequestHandler):
                 metadata={"channel_id": channel_id, "message_id": message_id},
             )
             self._json_response(
-                200, {"id": message_id, "channel_id": response_channel_id}
+                200,
+                _discord_mutation_message_response(
+                    message_id=message_id,
+                    channel_id=response_channel_id,
+                    guild_id=self.state.guild_id,
+                    bot_user_id=self.state.bot_user_id,
+                    body=body,
+                ),
             )
             return
         self._json_response(404, {"message": "Unknown fake endpoint."})
@@ -2120,6 +2138,35 @@ def _discord_user_response(user: Mapping[str, object]) -> dict[str, object]:
         "avatar": None,
         **user,
     }
+
+
+def _discord_mutation_message_response(
+    *,
+    message_id: str,
+    channel_id: str,
+    guild_id: str,
+    bot_user_id: str,
+    body: Mapping[str, object],
+) -> dict[str, object]:
+    """Return a complete Bot-authored message mutation response."""
+    content = body.get("content")
+    embeds = body.get("embeds")
+    components = body.get("components")
+    return _discord_message_response(
+        {
+            "id": message_id,
+            "channel_id": channel_id,
+            "content": content if isinstance(content, str) else "",
+            "author": {
+                "id": bot_user_id,
+                "username": "Azents",
+                "bot": True,
+            },
+            "embeds": embeds if isinstance(embeds, list) else [],
+            "components": components if isinstance(components, list) else [],
+        },
+        guild_id=guild_id,
+    )
 
 
 def _discord_thread_channel_response(
