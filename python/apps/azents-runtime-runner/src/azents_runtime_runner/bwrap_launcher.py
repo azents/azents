@@ -10,6 +10,7 @@ _SCMP_ACT_ALLOW = 0x7FFF0000
 _SCMP_ACT_ERRNO = 0x00050000
 _SCMP_CMP_MASKED_EQ = 7
 _CLONE_NEWUSER = 0x10000000
+_BWRAP_PATH = "/opt/azents-runtime/bin/bwrap"
 
 
 class _ScmpArgCompare(ctypes.Structure):
@@ -136,7 +137,7 @@ def main() -> NoReturn:
     if os.getuid() == 0 or os.getgid() == 0:
         raise RuntimeError("bubblewrap launcher requires a non-root Runner")
     arguments = sys.argv[1:]
-    if not arguments or arguments[0] != "/usr/bin/bwrap":
+    if not arguments or arguments[0] != _BWRAP_PATH:
         raise RuntimeError("bubblewrap launcher received an invalid executable")
     descriptor = _seccomp_program_fd()
     os.set_inheritable(descriptor, True)

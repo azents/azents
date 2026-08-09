@@ -11,6 +11,7 @@ class DockerBindMount:
 
     host_path: str
     container_path: str
+    read_only: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -21,6 +22,8 @@ class DockerContainerState:
     restarting: bool
     dead: bool
     status: str | None
+    exit_code: int | None
+    oom_killed: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -33,6 +36,13 @@ class DockerContainerInfo:
     labels: Mapping[str, str]
     env: Mapping[str, str]
     binds: Sequence[DockerBindMount]
+    cap_add: Sequence[str]
+    cap_drop: Sequence[str]
+    security_options: Sequence[str]
+    userns_mode: str | None
+    masked_paths: Sequence[str]
+    readonly_paths: Sequence[str]
+    privileged: bool
     state: DockerContainerState
 
 
@@ -54,10 +64,21 @@ class DockerContainerSpec:
     cpu_period: int
     cpu_shares: int | None
     extra_hosts: Sequence[str]
+    cap_add: Sequence[str]
+    cap_drop: Sequence[str]
+    security_options: Sequence[str]
+    userns_mode: str | None
+    masked_paths: Sequence[str] | None
+    readonly_paths: Sequence[str] | None
+    privileged: bool
 
 
 class DockerApi(Protocol):
     """Docker operations required by the Provider lifecycle."""
+
+    async def security_options(self) -> Sequence[str]:
+        """Return Docker daemon security-option evidence."""
+        ...
 
     async def ensure_network(self, name: str) -> None:
         """Create the Docker network when missing."""

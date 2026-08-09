@@ -18,7 +18,7 @@ from azents_runtime_runner.environment import build_agent_environment
 logger = logging.getLogger(__name__)
 
 _BOOTSTRAP_ENV_NAME = "AZ_RUNTIME_PROCESS_CONTAINMENT_CONFIG"
-_BWRAP_PATH = "/usr/bin/bwrap"
+_BWRAP_PATH = "/opt/azents-runtime/bin/bwrap"
 _BWRAP_LAUNCHER_PATH = Path(__file__).with_name("bwrap_launcher.py").resolve()
 _BASH_PATH = "/bin/bash"
 _CONTAINED_PYTHON_PATH = "/usr/local/bin/python"
@@ -46,6 +46,7 @@ _CONTAINED_HELPER_PATHS = tuple(
 )
 _SYSTEM_READ_ONLY_PATHS = (
     "/usr",
+    "/usr/local",
     "/etc/alternatives",
     "/etc/fonts",
     "/etc/hosts",
@@ -366,6 +367,7 @@ class BwrapExecutionBackend:
                 "-c",
                 _QUALIFICATION_SCRIPT,
                 str(self._config.agent_workspace_path),
+                _BWRAP_PATH,
                 *(str(path) for path in self._config.runner_private_paths),
             ),
             cwd=self._config.agent_workspace_path,
@@ -526,7 +528,6 @@ class BwrapExecutionBackend:
         ]
         for path in _SYSTEM_READ_ONLY_PATHS:
             argv.extend(("--ro-bind-try", path, path))
-        argv.extend(("--ro-bind", "/dev/null", _BWRAP_PATH))
         argv.extend(
             _directory_arguments(
                 (self._config.agent_workspace_path, *_CONTAINED_HELPER_PATHS)

@@ -1323,6 +1323,18 @@ def azents_runtime_provider_docker_container(
                 "unix:///var/run/docker.sock",
             )
             .with_env(
+                "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_BACKEND",
+                "bwrap",
+            )
+            .with_env(
+                "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_SECURITY_PROFILE",
+                "azents-runtime-bwrap",
+            )
+            .with_env(
+                "AZ_RUNTIME_PROVIDER_PROCESS_CONTAINMENT_QUALIFICATION_TIMEOUT_SECONDS",
+                "20",
+            )
+            .with_env(
                 "AZ_RUNTIME_PROVIDER_CREDENTIAL",
                 runtime_provider_credential,
             )
@@ -1459,7 +1471,7 @@ def _create_e2e_docker_infrastructure_profile(
             "spec": {
                 "profile_kind": "docker_container",
                 "contract_family": "docker.container-profile",
-                "schema_version": 1,
+                "schema_version": 2,
                 "runner_resources": {
                     "cpu_reservation_millicores": None,
                     "cpu_limit_millicores": None,
@@ -1467,6 +1479,7 @@ def _create_e2e_docker_infrastructure_profile(
                     "memory_limit_bytes": None,
                 },
                 "network_name": network_name,
+                "process_containment": {"schema_version": 1},
             },
         },
         timeout=10,

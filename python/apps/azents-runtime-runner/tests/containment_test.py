@@ -216,17 +216,13 @@ async def test_bwrap_backend_owns_positive_projection_arguments(tmp_path: Path) 
     wrapped = launched[0]
     assert wrapped.argv[0] == sys.executable
     assert wrapped.argv[1].endswith("/azents_runtime_runner/bwrap_launcher.py")
-    assert wrapped.argv[2] == "/usr/bin/bwrap"
+    assert wrapped.argv[2] == "/opt/azents-runtime/bin/bwrap"
     assert "--unshare-pid" in wrapped.argv
     assert "--disable-userns" not in wrapped.argv
     assert "--assert-userns-disabled" not in wrapped.argv
     assert "--uid" not in wrapped.argv
     assert "--gid" not in wrapped.argv
-    assert ("--ro-bind", "/dev/null", "/usr/bin/bwrap") == tuple(
-        wrapped.argv[
-            wrapped.argv.index("/dev/null") - 1 : wrapped.argv.index("/dev/null") + 2
-        ]
-    )
+    assert "/usr/bin/bwrap" not in wrapped.argv
     assert ("--bind", str(tmp_path), str(tmp_path)) == tuple(
         wrapped.argv[
             wrapped.argv.index(str(tmp_path)) - 1 : wrapped.argv.index(str(tmp_path))
@@ -309,6 +305,10 @@ async def test_bwrap_qualification_verifies_descendant_termination(
 
     assert len(launched) == 2
     assert any("descendant_authority" in argument for argument in launched[0].argv)
+    assert (
+        "/opt/azents-runtime/bin/bwrap"
+        in launched[0].argv[launched[0].argv.index("--") + 1 :]
+    )
     assert canary_process.termination_calls == 1
 
 
