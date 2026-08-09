@@ -19,7 +19,6 @@ from azents_runtime_runner.containment import (
     ExecutionSpec,
     ProcessTerminationResult,
 )
-from azents_runtime_runner.environment import build_agent_environment
 
 _HELPER_PATH = Path(__file__).with_name("contained_helper.py").resolve()
 _PACKAGE_ROOT = _HELPER_PATH.parents[1]
@@ -255,11 +254,12 @@ class ContainedHelperSession:
         metadata: Mapping[str, JsonValue],
     ) -> "ContainedHelperSession":
         """Start one helper and send its exact opening request."""
-        environment = build_agent_environment(
-            workspace_path=str(workspace_path),
-            operation_environment={},
+        environment = dict(
+            backend.agent_environment(
+                workspace_path=str(workspace_path),
+                operation_environment={"PYTHONPATH": str(_PACKAGE_ROOT)},
+            )
         )
-        environment["PYTHONPATH"] = str(_PACKAGE_ROOT)
         process = await backend.start(
             ExecutionSpec(
                 argv=(

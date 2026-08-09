@@ -92,12 +92,13 @@ async def test_bash_operation_emits_stdout_and_final_success(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
-async def test_bash_environment_excludes_runner_secrets(
+async def test_direct_bash_environment_inherits_runner_values(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("AZ_RUNTIME_RUNNER_AUTH_TOKEN", "runner-secret")
-    monkeypatch.setenv("UNRELATED_RUNNER_SECRET", "runner-secret")
+    monkeypatch.setenv("DOCKER_HOST", "unix:///var/run/azents-engine/docker.sock")
+    monkeypatch.setenv("UNRELATED_RUNNER_VALUE", "runner-value")
+    monkeypatch.setenv("HOME", str(tmp_path))
     client = _FakeClient()
     operations = RunnerOperations(
         execution_backend=DirectExecutionBackend(),
@@ -111,8 +112,8 @@ async def test_bash_environment_excludes_runner_secrets(
             payload={
                 "command": (
                     "printf '%s|%s|%s|%s' "
-                    '"${AZ_RUNTIME_RUNNER_AUTH_TOKEN-unset}" '
-                    '"${UNRELATED_RUNNER_SECRET-unset}" '
+                    '"$DOCKER_HOST" '
+                    '"$UNRELATED_RUNNER_VALUE" '
                     '"$TOOL_TOKEN" '
                     '"$HOME"'
                 ),
@@ -121,12 +122,21 @@ async def test_bash_environment_excludes_runner_secrets(
         )
     )
 
-    assert client.events[1].payload == {"text": f"unset|unset|tool-token|{tmp_path}"}
+    assert client.events[1].payload == {
+        "text": (
+            "unix:///var/run/azents-engine/docker.sock"
+            f"|runner-value|tool-token|{tmp_path}"
+        )
+    }
     assert client.events[-1].event_type is RuntimeRunnerEventType.FINAL_SUCCESS
 
 
 @pytest.mark.asyncio
-async def test_bash_environment_rejects_reserved_override(tmp_path: Path) -> None:
+async def test_direct_bash_environment_allows_operation_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DOCKER_HOST", "unix:///runner/docker.sock")
     client = _FakeClient()
     operations = RunnerOperations(
         execution_backend=DirectExecutionBackend(),
@@ -138,19 +148,14 @@ async def test_bash_environment_rejects_reserved_override(tmp_path: Path) -> Non
         _operation(
             operation_type="bash",
             payload={
-                "command": "printf unreachable",
-                "env": {"AZ_RUNTIME_RUNNER_AUTH_TOKEN": "override"},
+                "command": "printf '%s' \"$DOCKER_HOST\"",
+                "env": {"DOCKER_HOST": "unix:///operation/docker.sock"},
             },
         )
     )
 
-    assert client.events[-1].event_type is RuntimeRunnerEventType.FINAL_ERROR
-    assert client.events[-1].payload == {
-        "error_code": "INVALID_ENVIRONMENT",
-        "error_message": (
-            "Agent environment name is reserved: AZ_RUNTIME_RUNNER_AUTH_TOKEN"
-        ),
-    }
+    assert client.events[1].payload == {"text": "unix:///operation/docker.sock"}
+    assert client.events[-1].event_type is RuntimeRunnerEventType.FINAL_SUCCESS
 
 
 @pytest.mark.asyncio
