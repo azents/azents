@@ -14,6 +14,8 @@ cleanup() {
   trap - EXIT
   set +e
   kubectl get pods,pvc,networkpolicy -A -o wide >"${TMP_DIR}/resources.txt" 2>&1
+  kubectl get events -A --sort-by=.lastTimestamp \
+    >"${TMP_DIR}/events.txt" 2>&1
   kubectl describe pods -n "${NAMESPACE}" >"${TMP_DIR}/pod-descriptions.txt" 2>&1
   sed -i -E \
     '/AZ_RUNTIME_RUNNER_AUTH_(TOKEN|CREDENTIAL_ID):/s/: .*/: <redacted>/' \
@@ -21,6 +23,13 @@ cleanup() {
   for pod in $(kubectl get pods -n "${NAMESPACE}" -o name 2>/dev/null); do
     kubectl logs -n "${NAMESPACE}" "${pod}" --all-containers \
       >"${TMP_DIR}/$(basename "${pod}").log" 2>&1 || true
+  done
+  for node in $(kind get nodes --name "${CLUSTER_NAME}" 2>/dev/null); do
+    docker logs "${node}" >"${TMP_DIR}/${node}.log" 2>&1 || true
+    docker exec "${node}" journalctl -u kubelet --no-pager \
+      >"${TMP_DIR}/${node}-kubelet.log" 2>&1 || true
+    docker exec "${node}" journalctl -u containerd --no-pager \
+      >"${TMP_DIR}/${node}-containerd.log" 2>&1 || true
   done
   if [[ "${status}" -eq 0 ]]; then
     cat >"${TMP_DIR}/junit.xml" <<'EOF'
@@ -74,6 +83,14 @@ kind create cluster \
   --config "${TMP_DIR}/kind.yaml"
 docker network connect kind "${REGISTRY_NAME}" 2>/dev/null || true
 for node in $(kind get nodes --name "${CLUSTER_NAME}"); do
+  docker exec "${node}" \
+    sh -ec '
+      test "$(cat /sys/module/apparmor/parameters/enabled)" = "Y"
+      test -r /sys/kernel/security/apparmor/profiles
+      grep -Fq "azents-runtime-bwrap" /sys/kernel/security/apparmor/profiles
+      mkdir -p /unmasked-sys
+      mountpoint -q /unmasked-sys || mount -t sysfs none /unmasked-sys
+    '
   registry_dir="/etc/containerd/certs.d/localhost:${REGISTRY_PORT}"
   docker exec "${node}" mkdir -p "${registry_dir}"
   cat <<EOF | docker exec -i "${node}" \
